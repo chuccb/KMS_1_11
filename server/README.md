@@ -420,7 +420,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 
 `scripts/whisper_probe.mjs` 是這幾節（密語／死亡與復活／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
-「跨圖密語／找人／找不到／氣球不回應／被打掉血／復活／**買卷軸並用掉**」**32 個檢查** —— 其中兩條連線**真的在不同地圖上**：
+「跨圖密語／找人／找不到／氣球不回應／被打掉血／復活／**買卷軸並用掉**」**31 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
 報的是**對方**的地圖 id、密語也照樣送達（第二次跑同一份存檔會跳過那一步：角色的紀錄已經記得 `1010000`）；
 在復活之前它先送兩次 c2s `0x1C`（`sub_55B870(-damage, 0, 0)` 的位元組：`-30` 兩次），驗證第一次回來的
@@ -434,7 +434,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 ```bash
 node server/src/cli.ts serve --port 8495 --game-port 8496 \
      --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（32 個檢查）
+node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（31 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

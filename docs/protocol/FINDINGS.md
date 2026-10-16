@@ -3011,7 +3011,7 @@ LONG *sub_4E9E70()                                    // 0x4E9E70
 沒動不送、NaN）；`serve.test.ts`「a monster's damage lands because the client reports it」用真 socket 走
 `-30 → hp 20`、再一次 `-30 → hp 0`、死後 `+10 hp／+3 mp → 只回 mp`、以及復活接回來（50/50、MP 不變）；
 `whisper_probe.mjs` 在真 `Data.wz` 上多兩項（`-30` 回 `hp 20`、`-30` 回 `hp 0`）與復活那項的 HP 斷言
-（24 個檢查）。
+（加上 §4.34 新增的 8 項之後，這支探針共 **31** 項檢查）。
 
 ### 4.34 ✅ 使用道具：c2s `0x18`（藥水）／`0x19`（地圖道具），效果表是 client 自己的 `spec`（ADR-022）
 
@@ -3146,7 +3146,7 @@ LONG *sub_4E9E70()                                    // 0x4E9E70
   `0x16` → 1010000）→ 欄位已空（拒絕，沒有第二個 `0x16`）**。
 - `test/shops.test.ts`：「三間店的每一列都有 `info/price`」之外多一條**「每一列用起來都有事做」**
   （每個 id 的 `spec` 非空、而且不是回血就是命名一張圖）。
-- `server/scripts/whisper_probe.mjs`（**32** 項，新增 8 項）：在真 `Data.wz` 上從 마이（池 id 從 `0x39`
+- `server/scripts/whisper_probe.mjs`（**31** 項，新增 8 項）：在真 `Data.wz` 上從 마이（池 id 從 `0x39`
   的模板欄位認出來）開窗、確認 헤네시스 귀환 주문서 標的是**存檔裡的 90**、買下去看 `0x4B silent` ＋
   `0x0B put` ＋ 錢包 `200 → 110`、用掉看 `0x0B clear` ＋ `0x16` 真的進 `100000000`。這一段需要
   `--start-mesos 200`（否則只印一行提示跳過）。

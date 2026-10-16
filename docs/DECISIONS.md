@@ -880,5 +880,5 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
 - `game/items.ts` 是新的模組（`spec` 的讀取與換算）；`net/loginserver.ts` 多 `handleUseItem`／
   `useMapItem` 與一條 dispatch 分支；`cli.ts` 多 `--start-mesos`；`game/shops.ts` 的 `SHOPS` 變成三間店。
 - 測試 +9（`items.test.ts` 6、`field.test.ts` 1、`serve.test.ts` 1＋商店列、`shops.test.ts` 1）→
-  **384**；`whisper_probe.mjs` 多 8 項 → **32**。
+  **384**；`whisper_probe.mjs` 多 8 項 → 共 **31** 項檢查。
 - 剩下的兩個小缺口都在 §6（loader 與 buff 家族），都不擋「買 → 喝 → 換圖」這條鏈。
