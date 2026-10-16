@@ -21,6 +21,10 @@ import { mapImagePath } from "../wz/paths.ts";
 import { footholdSegments, mapSummary } from "../wz/archive.ts";
 import type { FootholdSegments, MapObject, MapSummary, WzArchive } from "../wz/archive.ts";
 
+// The types this module's API is written in come from the archive layer; re-exporting them keeps the
+// import list of a caller that only talks maps down to one module.
+export type { MapObject, MapSummary, FootholdSegments, WzArchive } from "../wz/archive.ts";
+
 /** A monster or NPC spawn point from the WZ `life` list. */
 export interface LifeSpawn {
   /** WZ `id` string parsed: `"0120100"` -> `1210100` (`Mob/0120100.img`). */

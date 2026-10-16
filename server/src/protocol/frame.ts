@@ -52,9 +52,12 @@ export class U16LengthFramer {
       );
     }
     if (total > 0xffff) throw new FramingError("frame too large for u16 length prefix");
+    // The declared length follows the same option the deframer reads it with, so the two halves of
+    // the legacy framing cannot disagree about whether the 2 header bytes are counted.
+    const declared = this.lengthIncludesHeader ? total : payload.length;
     const out = new Uint8Array(total);
-    out[0] = total & 0xff;
-    out[1] = (total >>> 8) & 0xff;
+    out[0] = declared & 0xff;
+    out[1] = (declared >>> 8) & 0xff;
     out.set(payload, 2);
     return out;
   }

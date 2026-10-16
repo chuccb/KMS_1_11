@@ -50,12 +50,15 @@
  *
  * ## Type byte
  *
- * The client only puts the byte on the wire where the caller passes 0 (`sub_45E560` / `sub_45E6A0`):
- * in `CharacterData` every inventory passes 0 on the write side, so *no* inventory there carries it,
- * and the reader is told the kind out of band (1 = equip for the two worn inventories and equip tab,
- * 2/3/4 = non-equip for the other three). Only `0x0B` op 0 passes 0 and therefore has the byte. Its
- * value is the item category `itemId / 1000000` (1 = equip, 2 = consume, 3 = install, 4 = etc,
- * 5 = cash) - `sub_45E560` writes exactly that, `sub_45E6A0` compares it against 1 to pick the class.
+ * The byte only goes on the wire where the caller passes 0 as the kind (`sub_45E560` /
+ * `sub_45E6A0`). No packet this server sends does that: `CharacterData`'s writer (`sub_45FCC0`)
+ * passes the *inventory tab* for each of the four tabs and `1` for the two worn groups, and `0x0B`
+ * op 0 (`sub_55BAB0`) passes the tab it just read. So the kind is always out of band - tab 1 = equip,
+ * 2/3/4 = non-equip - and the reader's `typeHint` is that number. The byte's value, for the one
+ * caller that does let the stream decide it (`sub_4D3950`, a subsystem this server does not send
+ * yet), is the item category `itemId / 1000000` (1 = equip, 2 = consume, 3 = install, 4 = etc,
+ * 5 = cash): `sub_45E560` writes exactly that and `sub_45E6A0` compares it against 1 to pick the
+ * class. `ITEM_TYPE_FROM_STREAM` (0) keeps that mode reachable for a tool that decodes such a trace.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 

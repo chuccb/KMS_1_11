@@ -22,3 +22,6 @@ generated/
 
 # capture traces (regenerate with server/src/cli.ts capture)
 traces/
+
+# --- TypeScript dev tooling (typecheck only; runtime stays dependency-free) ---
+node_modules/

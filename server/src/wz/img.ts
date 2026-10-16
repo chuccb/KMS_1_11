@@ -59,16 +59,23 @@ export interface WzEntry {
   value: WzValue;
 }
 
-export type WzNodeKind = "props" | "vector" | "convex" | "uol" | "raw";
+/**
+ * The kinds a `WzNode` can have. `canvas` is the one that carries a `WzCanvas` instead of the usual
+ * value union, which is why the constructor's value type is the union of both.
+ */
+export type WzNodeKind = "props" | "vector" | "convex" | "uol" | "raw" | "canvas";
+
+/** What a `WzNode` may hold: every scalar, a canvas, or a nested list of nodes. */
+export type WzNodeValue = WzEntry[] | [number, number] | WzNode[] | string | Uint8Array | WzCanvas;
 
 export type WzValue = null | number | bigint | string | Uint8Array | WzCanvas | WzNode;
 
 /** A size-carrying object of the image stream (everything except a top-level object). */
 export class WzNode {
   readonly kind: WzNodeKind;
-  readonly value: WzEntry[] | [number, number] | WzNode[] | string | Uint8Array;
+  readonly value: WzNodeValue;
 
-  constructor(kind: WzNodeKind, value: WzEntry[] | [number, number] | WzNode[] | string | Uint8Array) {
+  constructor(kind: WzNodeKind, value: WzNodeValue) {
     this.kind = kind;
     this.value = value;
   }
@@ -76,6 +83,11 @@ export class WzNode {
   /** The entries of a `props` node (`[]` for every other kind). */
   get props(): WzEntry[] {
     return this.kind === "props" ? (this.value as WzEntry[]) : [];
+  }
+
+  /** The canvas of a `canvas` node (`undefined` for every other kind). */
+  get canvas(): WzCanvas | undefined {
+    return this.kind === "canvas" ? (this.value as WzCanvas) : undefined;
   }
 
   /** The value of a property inside a `props` node, or `undefined`. */
@@ -542,8 +554,11 @@ export function parseImage(bytes: Uint8Array, base = 0): WzObject[] {
   return new ImageStream(bytes, base).objects();
 }
 
+/** Everything the image parser can put in a tree: a node's value, or a value itself. */
+export type WzTree = WzValue | WzNodeValue;
+
 /** Every `Canvas` inside an object tree, depth first (property order preserved). */
-export function walkCanvases(value: WzValue | WzEntry[], out: WzCanvas[] = []): WzCanvas[] {
+export function walkCanvases(value: WzTree, out: WzCanvas[] = []): WzCanvas[] {
   if (value instanceof WzCanvas) {
     out.push(value);
   } else if (value instanceof WzNode) {
@@ -558,7 +573,7 @@ export function walkCanvases(value: WzValue | WzEntry[], out: WzCanvas[] = []): 
 }
 
 /** Duck-type test for `WzEntry` (a plain `{name, type, value}` record). */
-function isEntry(value: unknown): boolean {
+function isEntry(value: unknown): value is WzEntry {
   return typeof value === "object" && value !== null && "type" in value && "name" in value;
 }
 

@@ -31,7 +31,11 @@ import { readFileSync } from "node:fs";
 import {
   ImageStream, WzCanvas, WzNode, getProperty, parseImage, walkCanvases,
 } from "./img.ts";
-import type { WzEntry, WzObject, WzValue } from "./img.ts";
+import type { WzEntry, WzObject, WzTree, WzValue } from "./img.ts";
+
+// Callers of this module work with `WzObject` (a parsed image) as much as with an archive, so the
+// type is re-exported instead of making every caller import from `img.ts` as well.
+export type { WzEntry, WzObject, WzNode, WzCanvas, WzValue, WzTree, WzEntry as WzProperty } from "./img.ts";
 
 export const TYPE_NAME_REFERENCE = 2;
 export const TYPE_DIRECTORY = 3;
@@ -359,7 +363,7 @@ function resolveImages(bytes: Buffer, tree: TreeNode[], treeEnd: number): WzImag
 // turning values into the shapes callers want
 // ---------------------------------------------------------------------------
 /** The JSON-safe shape of a decoded value (mirrors `tools/wzdata.py` `plain`). */
-export function plain(value: WzValue): unknown {
+export function plain(value: WzTree): unknown {
   if (value instanceof WzCanvas) {
     return {
       __canvas__: true,
@@ -374,9 +378,7 @@ export function plain(value: WzValue): unknown {
   if (value instanceof WzNode) return plain(value.value);
   if (value instanceof Uint8Array) return { __bytes__: value.length };
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      isEntry(item) ? [item.name, item.type, plain(item.value)] : plain(item as WzValue),
-    );
+    return value.map((item) => (isEntry(item) ? [item.name, item.type, plain(item.value)] : plain(item)));
   }
   if (typeof value === "bigint") return Number(value);
   return value;
@@ -399,7 +401,10 @@ function asRecord(node: WzValue | undefined): Record<string, WzValue> {
     return out;
   }
   if (typeof node !== "object" || node === null || Array.isArray(node) || node instanceof Uint8Array) return {};
-  return node as Record<string, WzValue>;
+  // A canvas is an object too, but its fields are not properties of a WZ node; the parser returns
+  // `[]` for everything that is not a property list, so this does the same.
+  if (node instanceof WzCanvas) return {};
+  return node as unknown as Record<string, WzValue>;
 }
 
 /** A property list (`portal`, `life`, ...) as plain records, from a `WzNode` or a plain array. */

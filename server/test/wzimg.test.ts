@@ -376,7 +376,7 @@ test("every name-table key in the archive hits", needsArchive, () => {
   let hits = 0;
   let misses = 0;
   class Counting extends ImageStream {
-    atKey(key: number): string {
+    override atKey(key: number): string {
       if (this.names.has(key)) hits += 1;
       else misses += 1;
       return super.atKey(key);
@@ -509,7 +509,7 @@ test("the orange mushroom renders as an opaque orange cap over nothing", needsAr
   let redder = 0;
   let bluer = 0;
   for (let i = 0; i < image.data.length; i += 4) {
-    const [r, g, b, a] = [image.data[i], image.data[i + 1], image.data[i + 2], image.data[i + 3]];
+    const [r, b, a] = [image.data[i]!, image.data[i + 2]!, image.data[i + 3]!];
     if (a !== 0xff) continue;
     opaque += 1;
     if (r > b + 8) redder += 1;

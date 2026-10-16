@@ -12,9 +12,24 @@ import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
 import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/protocol/session.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
-import { decodeClientPacket, encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
+import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
-import { CLIENT_FIELD_OPCODE, FIELD_OPCODE, encodeClientAttack, readSetField } from "../src/protocol/field.ts";
+import {
+  CLIENT_FIELD_OPCODE,
+  FIELD_OPCODE,
+  encodeClientAttack,
+  encodeClientUserMove,
+  readSetField,
+} from "../src/protocol/field.ts";
+import {
+  DROP_OPCODE,
+  DROP_REMOVE_KIND,
+  LOOT_OPCODE,
+  readDropAppear,
+  readDropRemove,
+  readLootNotice,
+} from "../src/protocol/drop.ts";
+import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
 import {
   MOB_OPCODE,
   readMobEnterField,
@@ -24,14 +39,13 @@ import {
   readMobStat,
 } from "../src/protocol/mob.ts";
 import type { MapData } from "../src/game/map.ts";
-import type { MobTemplate } from "../src/game/mobs.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 
 /** A fake 2003 client: reads the handshake, then speaks the session protocol. */
 class FakeClient {
   private readonly socket: net.Socket;
-  private readonly sendState: CipherState;
+  private sendState: CipherState;
   private readonly deframer: SessionDeframer;
   private readonly serverSendSeed: number;
   private readonly queue: Extract<SessionEvent, { kind: "packet" }>[] = [];
@@ -47,7 +61,7 @@ class FakeClient {
       for (const event of this.deframer.push(new Uint8Array(chunk))) {
         if (event.kind === "handshake") {
           // The client adopts the seeds the server chose; its send state is seeded from them.
-          (this as { sendState: CipherState }).sendState = new CipherState(event.handshake.sendSeed);
+          this.sendState = new CipherState(event.handshake.sendSeed);
           continue;
         }
         this.queue.push(event);
@@ -121,6 +135,11 @@ class FakeClient {
 
   get magic(): number {
     return this.serverSendSeed || CLIENT_SEND_MAGIC;
+  }
+
+  /** How many packets are waiting - used to assert that nothing (more) arrived. */
+  get queueLength(): number {
+    return this.queue.length;
   }
 }
 
@@ -467,6 +486,8 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
     mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
     mobTickMs: 20,
     mobRespawnMs: 5000,
+    // One guaranteed drop per kill, so the packet after the death is always the same one.
+    dropPolicy: () => [{ money: 25 }],
     handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
     log: (line) => log.push(line),
   });
@@ -510,6 +531,16 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
   assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
   assert.equal(killer.headersOk, true, "both survive the cipher/header check");
 
+  // The kill also leaves loot: one 0x43 per drop, and the monster's id is in it, which is what makes
+  // the client fly the item out of the corpse (FINDINGS 4.18).
+  const drop = await killer.take(1);
+  assert.equal(drop[0]![0], DROP_OPCODE.appear);
+  const loot = readDropAppear(new PacketReader(drop[0]!, 1));
+  assert.equal(loot.money, true);
+  assert.equal(loot.value, 25);
+  assert.equal(loot.mobId, 1, "the drop knows the monster it came out of");
+  assert.equal(loot.kind, 0);
+
   // ... and 40 ms of die animation later the corpse goes. The walking timer is what sends it.
   const corpse = await killer.take(1);
   assert.equal(corpse[0]![0], MOB_OPCODE.presence);
@@ -519,6 +550,143 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
     log.some((line) => line.includes("mob 1 (template 120100) killed by 10")),
     log.join("\n"),
   );
+});
+
+/**
+ * The whole reward loop over a real socket, which is the only place it can be checked end to end:
+ * a kill drops mesos and an item, the player walks onto them, and the server takes them the way
+ * FINDINGS 4.18 says - `0x44` kind 2 (the drop is gone and *this* character took it, which is what
+ * plays the pickup sound and the flight animation), then the gain itself: `0x11` for the mesos and,
+ * for the item, `0x0B` (the item is in this slot now) plus its own `0x11`.
+ *
+ * The drop's landing spot is read out of the `0x43` the server sent - exactly what a client would
+ * have to do - instead of being predicted, because the spread is drawn from the field's generator.
+ */
+test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    mobTickMs: 20,
+    mobRespawnMs: 60_000,
+    dropPolicy: () => [{ money: 25 }, { itemId: 2000000, count: 3 }],
+    dropSpreadPx: 0,
+    handshake: { clientSendSeed: 0x12345678, clientRecvSeed: 0x87654321 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(3); // 0x16 + the mob spawns
+  t.after(() => client.close());
+
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+  // 0x34, 0x30, then the two drops.
+  const burst = await client.take(4);
+  assert.equal(burst[0]![0], MOB_OPCODE.stat);
+  assert.equal(burst[1]![0], MOB_OPCODE.leaveDelayed);
+  const mesos = readDropAppear(new PacketReader(burst[2]!, 1));
+  const item = readDropAppear(new PacketReader(burst[3]!, 1));
+  assert.equal(mesos.money, true);
+  assert.equal(mesos.value, 25);
+
+  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+  const walkTo = (x: number, y: number): void => {
+    const move = encodeClientUserMove({
+      stageByte: 0,
+      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+    });
+    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+  };
+
+  // The field keeps talking while the player walks (the mob's corpse still has to go), so the pickup
+  // is found by opcode instead of by counting packets.
+  const takeUntil = async (opcode: number): Promise<Uint8Array[]> => {
+    const seen: Uint8Array[] = [];
+    for (let index = 0; index < 20; index++) {
+      try {
+        const [packet] = await client.take(1);
+        seen.push(packet!);
+        if (packet![0] === opcode) return seen;
+      } catch {
+        throw new Error(
+          `no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]\n` +
+            log.join("\n"),
+        );
+      }
+    }
+    throw new Error(`no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]`);
+  };
+
+  // Standing on the mesos: the server takes them on the next field tick, without being asked.
+  walkTo(mesos.x, mesos.y);
+
+  const mesoPickup = await takeUntil(DROP_OPCODE.remove);
+  const takenPacket = mesoPickup[mesoPickup.length - 1]!;
+  assert.deepEqual(readDropRemove(new PacketReader(takenPacket, 1)), {
+    dropId: mesos.dropId,
+    kind: DROP_REMOVE_KIND.taken,
+    characterId,
+  });
+  const mesoNotice = await takeUntil(LOOT_OPCODE);
+  assert.deepEqual(readLootNotice(new PacketReader(mesoNotice[mesoNotice.length - 1]!, 1)), {
+    kind: "mesos",
+    amount: 25,
+  });
+  assert.ok(
+    log.some((line) => line.includes("took 25 mesos")),
+    log.join("\n"),
+  );
+
+  // Standing on the item: 0x44, then 0x0B (the item is in a slot now), then the item's notice.
+  walkTo(item.x, item.y);
+  const itemPickup = await takeUntil(INVENTORY_OPCODE);
+  const changePacket = itemPickup[itemPickup.length - 1]!;
+  const change = readInventoryChange(new PacketReader(changePacket, 1));
+  assert.equal(change.result, 1);
+  assert.deepEqual(change.changes, [
+    {
+      op: INVENTORY_OP.put,
+      inventory: 2,
+      slot: 1,
+      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 3 },
+    },
+  ]);
+  const itemNotice = await takeUntil(LOOT_OPCODE);
+  assert.deepEqual(readLootNotice(new PacketReader(itemNotice[itemNotice.length - 1]!, 1)), {
+    kind: "item",
+    itemId: 2000000,
+    count: 3,
+  });
+  const removal = itemPickup.find((packet) => packet[0] === DROP_OPCODE.remove);
+  assert.ok(removal, "the item's 0x44 came before its 0x0B");
+  assert.equal(readDropRemove(new PacketReader(removal!, 1)).dropId, item.dropId);
+
+  // The field is empty afterwards: standing there again must not send a second pickup.
+  walkTo(item.x, item.y);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(client.queueLength, 0, "nothing is taken twice");
 });
 
 /**

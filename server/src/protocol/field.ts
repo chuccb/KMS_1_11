@@ -29,6 +29,19 @@
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
+// The reward pool (`0x43`/`0x44`) and the two app-level packets that belong to a pickup (`0x0B`,
+// `0x11`): they are dispatched outside `CField`, but they are what a field session actually carries.
+import {
+  DROP_OPCODE,
+  LOOT_OPCODE,
+  describeDropAppear,
+  describeDropRemove,
+  describeLootNotice,
+  readDropAppear,
+  readDropRemove,
+  readLootNotice,
+} from "./drop.ts";
+import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
 import {
   MOB_OPCODE,
   describeMobEnterField,
@@ -321,8 +334,39 @@ function hexOpcode(opcode: number): string {
 export function describeFieldPacket(plain: Uint8Array): string | undefined {
   if (plain.length === 0) return undefined;
   const opcode = plain[0]!;
+  // `0x0B` and `0x11` belong to `CWvsApp` (`sub_55A900`), i.e. they are below the field dispatcher's
+  // range but a field session is where they arrive, so they are described here.
+  if (opcode === INVENTORY_OPCODE) {
+    try {
+      const { result, changes } = readInventoryChange(new PacketReader(plain, 1));
+      return `0x0b inventory: ${describeInventoryChange(result, changes)}`;
+    } catch (error) {
+      return `0x0b inventory: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === LOOT_OPCODE) {
+    try {
+      return `0x11 notice: ${describeLootNotice(readLootNotice(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `0x11 notice: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode < 0x15 || opcode > 0x52) return undefined;
   const name = describeFieldOpcode(opcode);
+  if (opcode === DROP_OPCODE.appear) {
+    try {
+      return `${name}: ${describeDropAppear(readDropAppear(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === DROP_OPCODE.remove) {
+    try {
+      return `${name}: ${describeDropRemove(readDropRemove(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === FIELD_OPCODE.userMove && plain.length >= 5) {
     try {
       const move = readUserMove(new PacketReader(plain, 1));
@@ -394,7 +438,9 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
   if (opcode >= 0x38 && opcode <= 0x41) return `0x${opcode.toString(16)} CNpcPool`;
-  if (opcode >= 0x42 && opcode <= 0x45) return `0x${opcode.toString(16)} CRewardPool`;
+  if (opcode === DROP_OPCODE.appear) return "0x43 CRewardPool(drop appear)";
+  if (opcode === DROP_OPCODE.remove) return "0x44 CRewardPool(drop gone)";
+  if (opcode === 0x42 || opcode === 0x45) return `0x${opcode.toString(16)} CRewardPool(no handler)`;
   if (opcode >= 0x46 && opcode <= 0x48) return `0x${opcode.toString(16)} CQuestMan`;
   if (opcode >= 0x49 && opcode <= 0x4c) return `0x${opcode.toString(16)} field dialogs`;
   if (opcode >= 0x4d && opcode <= 0x4f) return `0x${opcode.toString(16)} CUIMessenger`;

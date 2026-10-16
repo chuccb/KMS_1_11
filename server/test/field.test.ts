@@ -178,7 +178,9 @@ test("describeFieldPacket names the opcodes it can read and stays quiet about th
   assert.match(describeFieldPacket(encodeUserEnterField(sampleUser)) ?? "", /name="Bob" avatar=2 items at \(10,-20\)/);
   assert.equal(describeFieldPacket(encodeUserLeaveField(1000)), "0x1d CUserPool: characterId=1000");
   assert.equal(describeFieldPacket(Uint8Array.from([0x2e, 1, 2])), "0x2e CMobPool (fields not decoded yet)");
+  // `0x01` is not a field opcode at all; the two app-level ones below the range are.
   assert.equal(describeFieldPacket(Uint8Array.from([0x01])), undefined);
+  assert.equal(describeFieldPacket(Uint8Array.from([0x0c])), undefined);
 });
 
 test("every opcode range of the CField router maps to its subsystem", () => {
@@ -187,7 +189,10 @@ test("every opcode range of the CField router maps to its subsystem", () => {
   assert.equal(describeFieldOpcode(0x2d), "0x2d CUserPool");
   assert.equal(describeFieldOpcode(0x2e), "0x2e CMobPool");
   assert.equal(describeFieldOpcode(0x38), "0x38 CNpcPool");
-  assert.equal(describeFieldOpcode(0x42), "0x42 CRewardPool");
+  assert.equal(describeFieldOpcode(0x42), "0x42 CRewardPool(no handler)");
+  assert.equal(describeFieldOpcode(0x43), "0x43 CRewardPool(drop appear)");
+  assert.equal(describeFieldOpcode(0x44), "0x44 CRewardPool(drop gone)");
+  assert.equal(describeFieldOpcode(0x45), "0x45 CRewardPool(no handler)");
   assert.equal(describeFieldOpcode(0x46), "0x46 CQuestMan");
   assert.equal(describeFieldOpcode(0x49), "0x49 field dialogs");
   assert.equal(describeFieldOpcode(0x4d), "0x4d CUIMessenger");

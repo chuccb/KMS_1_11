@@ -14,7 +14,9 @@
  * whose fields are not located gets `status: "skeleton"` and a `fields: []`, never invented names.
  */
 import * as chardata from "./chardata.ts";
+import * as drop from "./drop.ts";
 import * as field from "./field.ts";
+import * as inventory from "./inventory.ts";
 import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
@@ -577,10 +579,119 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: [],
     fields: [],
   },
+  {
+    opcode: drop.DROP_OPCODE.appear,
+    direction: "s2c",
+    stage: "field",
+    name: "dropAppear",
+    status: "partial",
+    evidence: "FINDINGS 4.18 (CRewardPool 0x43, sub_4A88A0; only 0x43/0x44 reach sub_4A8870)",
+    codecs: ["encodeDropAppear", "readDropAppear", "describeDropAppear"],
+    fields: [
+      {
+        name: "kind",
+        type: "u8",
+        note: "DROP_KIND; 0 and 1 also carry the monster below, 2 is a placed drop (a v1.11 client has no request for one)",
+      },
+      { name: "dropId", type: "u32", note: "the pool key; a repeat of a live id only refreshes the entry" },
+      {
+        name: "money",
+        type: "u8",
+        note: "a branch, not a flag: != 0 makes value mesos (Item/Special/0900.img, pile size by sub_4A9C10), 0 makes it an item id (Item/<cat>/<id>.img/info/iconRaw)",
+      },
+      { name: "value", type: "u32", note: "meso amount or item id, see money" },
+      { name: "x", type: "s16" },
+      { name: "y", type: "s16", note: "the ground line - the client draws the icon 16 px above it" },
+      {
+        name: "mobId",
+        type: "u32",
+        note: "kind <= 1 only; looked up in CMobPool and, when the monster is still there, the icon's current position is taken from mob+360/+364",
+      },
+      { name: "mobX", type: "s16", note: "kind <= 1 only; the fallback for that position" },
+      { name: "mobY", type: "s16", note: "kind <= 1 only" },
+      {
+        name: "unknown",
+        type: "s16",
+        note: "kind <= 1 only; read unconditionally (.lst 004A8C4A) and never used as a coordinate, so this server writes 0",
+      },
+    ],
+  },
+  {
+    opcode: drop.DROP_OPCODE.remove,
+    direction: "s2c",
+    stage: "field",
+    name: "dropRemove",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.18 (CRewardPool 0x44, sub_4A95B0)",
+    codecs: ["encodeDropRemove", "readDropRemove", "describeDropRemove"],
+    fields: [
+      { name: "kind", type: "u8", note: "DROP_REMOVE_KIND: 0 gone, 1 vanished with an effect, 2 taken" },
+      { name: "dropId", type: "u32", note: "an unknown id ends the handler with no reply and no error" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "kind 2 only; the taker's client plays PickUpItem (100 ms) and every client flies the icon to them",
+      },
+    ],
+  },
+  {
+    opcode: inventory.INVENTORY_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "inventoryChange",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.18 (CWvsApp sub_55A900 case 0x0B -> sub_55BAB0, items via sub_45E6A0)",
+    codecs: ["encodeInventoryChange", "readInventoryChange", "describeInventoryChange"],
+    fields: [
+      {
+        name: "result",
+        type: "u8",
+        note: "!= 0 clears the client's field-request throttle (app+6/app+7); the value itself is not compared",
+      },
+      { name: "count", type: "u8", note: "entries that follow" },
+      { name: "op", type: "u8", note: "INVENTORY_OP: 0 put, 1 key, 2 swap, 3 clear" },
+      {
+        name: "inventory",
+        type: "u8",
+        note: "1 equip, 2 consume, 3 etc, 4 cash; a worn equip is addressed by its negative slot instead",
+      },
+      { name: "slot", type: "s16", note: "op 0/1/3; op 2 carries a second one, op 1 a u16 key instead" },
+      {
+        name: "item",
+        type: "ItemSlot",
+        note: "op 0 only, with no category byte: the tab above is the constructor hint the client passes to sub_45E6A0",
+      },
+    ],
+  },
+  {
+    opcode: drop.LOOT_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "lootNotice",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.18 (CWvsApp sub_55A900 case 0x11 -> sub_55C130; three message shapes)",
+    codecs: ["encodeLootNotice", "readLootNotice", "describeLootNotice"],
+    fields: [
+      { name: "kind", type: "u8", note: "1 mesos, 0 item; any other byte is the 'no more items' line" },
+      { name: "amount", type: "u32", note: "kind 1 only" },
+      { name: "itemId", type: "u32", note: "kind 0 only" },
+      { name: "count", type: "u32", note: "kind 0 only; a count of 1 prints without the number" },
+    ],
+  },
 ];
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
-const CODEC_MODULES: readonly Record<string, unknown>[] = [chardata, field, login, mob, movepath, packet, replies];
+const CODEC_MODULES: readonly Record<string, unknown>[] = [
+  chardata,
+  drop,
+  field,
+  inventory,
+  login,
+  mob,
+  movepath,
+  packet,
+  replies,
+];
 
 /**
  * Looks a catalogue `codecs` entry up by name across the protocol modules. Returns `undefined` for

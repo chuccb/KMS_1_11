@@ -129,3 +129,41 @@ client 必須能與該 server 完整互動。
   在那裡用 `ClientRandom` 重抽一次並比對，就變成「一次改動、一個測試」。
 - 怪物 HP 是伺服器的權威資料：即使傷害值不檢查，**誰能被打、還剩多少 HP、什麼時候重生**
   都由伺服器決定（client 報的 `mobId` 必須存在於自己的場地，否則只寫 log）。
+
+---
+
+## ADR-007：掉落與金錢的「伺服器自訂參數」先集中成常數，並記下它們不是證據
+
+**日期**：2026-10-16 ｜ **狀態**：已定案（可再評估）
+
+**決策**：掉落與拾取的行為（`0x43`／`0x44`／`0x0B`／`0x11` 的收送時機，FINDINGS §4.18）已實作成
+`server/src/game/drops.ts` 與 `server/src/game/rewards.ts`，其中**binary 沒有、由本專案選擇**的數字
+全部集中在這兩個檔案的常數，並在註解裡明說「這是伺服器的選擇」：
+
+| 常數 | 值 | 為什麼是選擇 |
+|---|---|---|
+| `MESO_DROP_CHANCE_PER_MILLE` / `MOB_JUNK_CHANCE_PER_MILLE` / `MOB_POTION_CHANCE_PER_MILLE` | 600 / 300 / 50 | 原伺服器的掉寶率在 client 裡不存在（掉落是 `0x43` 單向宣告）|
+| `MESO_PER_LEVEL` | 3 | 金額公式 `1 + range(0, level * 3)` 的上界 |
+| `POTION_BY_LEVEL` | 4 個等級帶 | 四個藥水id 有 WZ 名字與價格，**哪個等級帶給哪一瓶**是選擇（`test/drop.test.ts` 釘住）|
+| `DROP_LIFETIME_MS` | 300000 | 掉落物多久消失（`0x44 kind 0`）|
+| `DROP_SPREAD_PX` | 24 | 掉落物離怪物的水平擴散 |
+| `PICKUP_RANGE_PX` / `PICKUP_RANGE_Y_PX` | 40 / 60 | 「站在上面」的判定範圍 |
+| `MOB_RESPAWN_MS`（§4.17）| 5000 | 怪物重生時間 |
+
+**理由**：
+1. **原值不可得，但行為必须可玩**：完整 MMO（ADR-001）需要掉落與經濟迴圈才能玩下去；把這些
+   參數散在程式各處，之後就算量到真值也不知道要改哪裡、改完對不對。
+2. **每一項都能被單獨量測**：ADR-004 的實機 run 只要抓一份真實流量，就能對照「掉落率／壽命／
+   擴散距離／可撿範圍」四個常數，改成量到的值、跑同一組測試（`drop.test.ts` 的機率斷言用注入的
+   亂數源，不依賴真隨機）。
+3. **`DropPolicy` 是注入的**：`DropField` 接受 `policy`／`random`／`lifetimeMs`／`spreadPx`／
+   `pickupRangePx`，所以「換一份掉落表」不需要動 `DropField` 或網路層，測試也不必碰真隨機。
+
+**後果**：
+- 任何時候看到這些數字，都應該假設「這是我們選的，不是解出來的」；`FINDINGS §4.18.8` 與
+  `server/README.md` 都這樣寫。
+- client 的 메소 顯示**不會**跟著變（`MesoWallet` 是伺服器端帳）：能力值區塊裡沒有已證實的錢欄位，
+  而唯一能送差異的能力值封包 `0x0D` 還沒實作（§4.18.8 第 2 項）。這是已知缺口，不是 bug。
+- 掉落物目前是**每個連線一份**（跟 `MobField` 一樣，ADR-001 的共享世界還沒做）：
+  兩個玩家會各看到自己的掉落物。共享世界的 Phase 2 要把 `DropField` 跟 `MobField` 一起搬到
+   per-field registry。

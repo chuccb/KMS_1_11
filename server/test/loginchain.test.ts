@@ -121,8 +121,10 @@ test("an item block with nothing in it is a legal, empty block", () => {
   reader.readByte();
   reader.readByte();
   const back = readCharacterData(reader);
-  assert.equal(back.items.worn.size, 0);
-  assert.equal(back.items.inventories[0].capacity, 0);
+  const items = back.items;
+  assert.ok(items, "flags 0x02 makes the decoder produce an item block");
+  assert.equal(items.worn.size, 0);
+  assert.equal(items.inventories[0]!.capacity, 0);
   assert.deepEqual(back.stats, sampleStats());
   assert.equal(reader.exhausted, true);
 

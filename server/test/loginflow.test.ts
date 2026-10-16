@@ -30,7 +30,12 @@ import {
   encodeWorldSelectResult,
   ipv4WireValue,
 } from "../src/protocol/replies.ts";
-import { decodeClientPacket, encodeClientPacket, describeClientPacket } from "../src/protocol/login.ts";
+import {
+  decodeClientPacket,
+  describeClientPacket,
+  encodeClientPacket,
+  type ClientPacket,
+} from "../src/protocol/login.ts";
 
 const CLIENT_SEND_SEED = 0x1234abcd;
 const CLIENT_RECV_SEED = 0x0badc0de;
@@ -156,12 +161,12 @@ test("the login chain works end to end over a real encrypted session", () => {
 });
 
 test("every login-chain opcode is labelled in a trace, none are silently dropped", () => {
-  const packets = [
+  const packets: ClientPacket[] = [
     { kind: "select-character", opcode: 0x03, characterId: 1 },
     { kind: "create-character", opcode: 0x05, name: "Newbie" },
     { kind: "check-name", opcode: 0x06, name: "Newbie", appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
     { kind: "delete-character", opcode: 0x07, characterId: 1 },
-  ] as const;
+  ];
   for (const packet of packets) {
     const text = describeClientPacket(encodeClientPacket(packet));
     assert.ok(text && text.length > 0, `${packet.kind} has no description`);

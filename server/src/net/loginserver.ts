@@ -24,16 +24,21 @@ import {
   type SessionEvent,
 } from "../protocol/session.ts";
 import { MobField, type MobTemplate } from "../game/mobs.ts";
+import { DropField, type DropPolicy } from "../game/drops.ts";
+import { MesoWallet, pickUpDrop } from "../game/rewards.ts";
 import type { MapData } from "../game/map.ts";
-import { decodeClientPacket, describeClientPacket, CLIENT_OPCODE } from "../protocol/login.ts";
+import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
   encodeSetField,
   readClientAttack,
+  readClientUserMove,
   type ClientAttack,
   type SetField,
 } from "../protocol/field.ts";
+import { DROP_REMOVE_KIND, encodeDropRemove, encodeLootNotice } from "../protocol/drop.ts";
+import { encodeInventoryChange } from "../protocol/inventory.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
   LOGIN_RESULT,
@@ -48,6 +53,8 @@ import {
 } from "../protocol/replies.ts";
 import {
   characterDataOf,
+  emptyCharacterItems,
+  startingCharacterItems,
   zeroStats,
   type CharacterData,
   type CharacterItems,
@@ -190,6 +197,9 @@ export class LoginServer {
     items?: CharacterItems,
   ): CharacterData {
     void appearance; // the 10 words of 0x06 are logged; their stat mapping is not proven yet
+    // A character without slots could never be handed anything: the capacity byte is what makes the
+    // client allocate an inventory at all (see `startingCharacterItems`), so bags are the default.
+    const block = items ?? startingCharacterItems();
     if (template) {
       const stats: CharacterStats = {
         ...template,
@@ -198,7 +208,7 @@ export class LoginServer {
         hp: template.maxHp,
         mp: template.maxMp,
       };
-      return characterDataOf(stats, items);
+      return characterDataOf(stats, block);
     }
     const stats = zeroStats();
     stats.id = id;
@@ -213,7 +223,7 @@ export class LoginServer {
     stats.maxHp = 50;
     stats.mp = 50;
     stats.maxMp = 50;
-    return characterDataOf(stats, items);
+    return characterDataOf(stats, block);
   }
 
   private onConnection(socket: net.Socket): void {
@@ -465,7 +475,38 @@ export interface GameEntryServerOptions {
   mobTickMs?: number;
   /** How long a killed mob stays away before it is spawned again, in ms. Defaults to `MOB_RESPAWN_MS`. */
   mobRespawnMs?: number;
+  /**
+   * What a killed monster leaves behind. `defaultDropPolicy` (the shipped table: mesos, the mob's
+   * own junk item, a potion) is the default; a test passes a fixed one.
+   */
+  dropPolicy?: DropPolicy;
+  /** How long a drop lies on the ground, in ms. Defaults to `DROP_LIFETIME_MS`. */
+  dropLifetimeMs?: number;
+  /** Horizontal/vertical reach of a pickup, in px. Server choices (`game/drops.ts`). */
+  pickupRangeX?: number;
+  pickupRangeY?: number;
+  /** How far from the monster a drop may land, in px. Defaults to `DROP_SPREAD_PX`. */
+  dropSpreadPx?: number;
   log?(line: string): void;
+}
+
+/**
+ * What one connection owns once it is inside a map: its monsters, its drops, its money, and where the
+ * player is.
+ *
+ * One per connection for now (`spawnMobs` explains why): the mobs and the drops both belong to this
+ * object, so a second player would still get their own copies. ADR-001's shared world is what turns
+ * this into a per-map object, and this type is the seam.
+ */
+interface FieldSession {
+  mobs: MobField;
+  drops: DropField;
+  wallet: MesoWallet;
+  /** The record the client was sent (`0x16`); the inventories here are what a pickup fills. */
+  character: CharacterData;
+  characterId: number;
+  /** Where the player is, from the last move packet read (`0x0E`). Unknown until they move. */
+  at?: { x: number; y: number };
 }
 
 export class GameEntryServer {
@@ -518,7 +559,7 @@ export class GameEntryServer {
    * that carries the map id; the seeds are the server's choice, and they decide every "random"
    * number the client will roll afterwards (FINDINGS 4.11.2).
    */
-  private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): MobField | undefined {
+  private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): FieldSession | undefined {
     const character = withMapId(entry, this.mapId);
     const field: SetField = {
       mode: 0,
@@ -533,7 +574,26 @@ export class GameEntryServer {
       `game: sent 0x16 - "${entry.characterName}" enters map ${this.mapId} ` +
         `(seeds 0x${hex(field.randomSeedA)} 0x${hex(field.randomSeedB)} 0x${hex(field.randomSeedC)})`,
     );
-    return this.spawnMobs(socket, sendState);
+    const mobs = this.spawnMobs(socket, sendState);
+    if (mobs === undefined) return undefined;
+    const map = this.options.mapProvider?.(this.mapId);
+    const drops = new DropField({
+      // The drop table and the droppable-item ids come from the archive's own names and items
+      // (`game/drops.ts`); the *geometry* comes from the map, so a drop lands on the mob's own ground.
+      ...(map?.footholdSegments !== undefined ? { footholds: map.footholdSegments } : {}),
+      ...(this.options.dropPolicy !== undefined ? { policy: this.options.dropPolicy } : {}),
+      ...(this.options.dropLifetimeMs !== undefined ? { lifetimeMs: this.options.dropLifetimeMs } : {}),
+      ...(this.options.pickupRangeX !== undefined ? { pickupRangeX: this.options.pickupRangeX } : {}),
+      ...(this.options.pickupRangeY !== undefined ? { pickupRangeY: this.options.pickupRangeY } : {}),
+      ...(this.options.dropSpreadPx !== undefined ? { spreadPx: this.options.dropSpreadPx } : {}),
+    });
+    return {
+      mobs,
+      drops,
+      wallet: new MesoWallet(),
+      character,
+      characterId: entry.characterId,
+    };
   }
 
   /**
@@ -554,12 +614,8 @@ export class GameEntryServer {
    * set of monsters and would not see each other's. A per-field registry that owns the ids (and the
    * hit points) is the Phase 2 step that turns this into one world.
    *
-   * The mobs then walk (`src/game/mobs.ts`): a timer asks the field for the legs that are due and
-   * writes the `0x33`s on the same socket. The timer stops with the socket.
-   *
-   * The same timer drives the other two halves of a mob's life: a corpse is dropped (`0x31 flag=0`)
-   * once its die animation is over, and the mob comes back (`0x31 flag=1`) after `mobRespawnMs`.
-   * That is why the timer runs whenever the field has mobs, not only when they can walk.
+   * The mobs then walk: `enterField` starts the field's timer (see `tickField`), which asks for the
+   * legs that are due and writes the `0x33`s on the same socket.
    */
   private spawnMobs(socket: net.Socket, sendState: CipherState): MobField | undefined {
     const map = this.options.mapProvider?.(this.mapId);
@@ -585,21 +641,87 @@ export class GameEntryServer {
       `game: spawned ${field.mobs.length} mobs (${map.name || map.imagePath}), ` +
         `${field.walking} of them walking; ${map.npcs.length} NPCs are known but not spawned yet`,
     );
-    if (field.mobs.length === 0) return field;
-    const tickMs = this.options.mobTickMs ?? 250;
-    const timer = setInterval(() => {
-      const now = Date.now();
-      for (const packet of field.movePackets(now)) {
-        socket.write(encodeSessionPacket(packet, sendState, "s2c"));
-      }
-      for (const packet of field.lifecyclePackets(now)) {
-        socket.write(encodeSessionPacket(packet, sendState, "s2c"));
-      }
-    }, tickMs);
-    const stop = (): void => clearInterval(timer);
-    socket.once("close", stop);
-    socket.once("error", stop);
     return field;
+  }
+
+  /**
+   * The field's clock: everything a connection sends without being asked, once per tick.
+   *
+   *   the mobs    the `0x33` legs that are due (`MobField.movePackets`), then the two halves of a
+   *               mob's death - the corpse going (`0x31 flag=0`) and the respawn (`0x31 flag=1`).
+   *   the drops   a drop whose `DROP_LIFETIME_MS` is up disappears silently (`0x44` kind 0), and the
+   *               drop the player is standing on is taken (`0x44` kind 2 with their character id,
+   *               which is what animates the item flying to them) - see `pickUp`.
+   *
+   * A pickup is one drop per tick: the client plays one flight animation per `0x44`, and a player who
+   * walks over a pile should see the items come one at a time. The order inside the tick is drops
+   * last, so an item that appears this tick cannot be taken in the same one.
+   */
+  private tickField(session: FieldSession, socket: net.Socket, sendState: CipherState, now: number): void {
+    const write = (packet: Uint8Array): void => void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+    for (const packet of session.mobs.movePackets(now)) write(packet);
+    for (const packet of session.mobs.lifecyclePackets(now)) write(packet);
+    for (const drop of session.drops.expired(now)) {
+      write(encodeDropRemove({ dropId: drop.dropId, kind: DROP_REMOVE_KIND.gone }));
+      this.options.log?.(`game: drop ${drop.dropId} expired and was removed`);
+    }
+    this.pickUp(session, write);
+  }
+
+  /**
+   * Hand the player the drop under them, if there is one and it fits.
+   *
+   * The client cannot ask for this: a v1.11 client has no pickup request at all (every send site in
+   * the binary passes a literal opcode, the largest is `0x33` - FINDINGS 4.13.2), so "standing on it"
+   * is the whole trigger. No key, no request, and the server decides - the player's position comes
+   * from their own move packets (`0x0E`), so nothing is taken before they move once, and a drop is not
+   * takeable for `DROP_PICKUP_DELAY_MS` after it appears, which is what lets the client show it
+   * flying out of the monster first.
+   *
+   * The three packets a pickup owes are exactly the three the client has for it:
+   *
+   *   `0x44` kind 2   the drop is gone and *this* character took it. That id is what makes the
+   *                   taker's own client play "PickUpItem" and every client fly the icon to them.
+   *   `0x0B` op 0     the item is now in slot N of tab T - the only packet that changes an inventory.
+   *   `0x11`          the chat line: "You got <item>" / "You got mesos (+N)".
+   *
+   * A meso drop goes to the wallet, an item to the character record the connection was built from -
+   * the same object the login server keeps, so the item is still there on the next login. A drop that
+   * does not fit (a full tab) stays on the ground, silently: the client's third `0x11` shape ("no more
+   * items") exists, but printing it every tick for a player who is standing on a drop with a full bag
+   * would be noise, and a refused pickup has no request to answer yet.
+   */
+  private pickUp(session: FieldSession, write: (packet: Uint8Array) => void): void {
+    const at = session.at;
+    if (at === undefined) return;
+    const drop = session.drops.reachable(at.x, at.y);
+    if (drop === undefined) return;
+    const items = session.character.items ?? emptyCharacterItems();
+    const outcome = pickUpDrop(drop, session.characterId, items, session.wallet);
+    if (outcome.kind === "no-room") {
+      this.options.log?.(
+        `game: drop ${drop.dropId} (item ${drop.itemId}) is under ${session.characterId} but the ` +
+          `inventory has no room - it stays on the ground`,
+      );
+      return;
+    }
+    session.drops.take(drop);
+    write(
+      encodeDropRemove({ dropId: drop.dropId, kind: DROP_REMOVE_KIND.taken, characterId: session.characterId }),
+    );
+    if (outcome.kind === "item") {
+      write(encodeInventoryChange([outcome.change]));
+      write(encodeLootNotice(outcome.notice));
+      this.options.log?.(
+        `game: ${session.characterId} took item ${outcome.itemId} x${outcome.count} ` +
+          `(drop ${drop.dropId}, tab ${outcome.inventory} slot ${outcome.slot})`,
+      );
+      return;
+    }
+    write(encodeLootNotice(outcome.notice));
+    this.options.log?.(
+      `game: ${session.characterId} took ${outcome.amount} mesos (drop ${drop.dropId}, wallet ${outcome.total})`,
+    );
   }
 
   /**
@@ -615,7 +737,7 @@ export class GameEntryServer {
    * The packets a hit owes are written straight back on the same socket. There is one field per
    * connection for now (see `spawnMobs`), so "everyone in the map sees it" is still the same socket.
    */
-  private applyAttack(field: MobField, socket: net.Socket, sendState: CipherState, plain: Uint8Array): void {
+  private applyAttack(session: FieldSession, socket: net.Socket, sendState: CipherState, plain: Uint8Array): void {
     const opcode = plain[0] ?? 0;
     let attack: ClientAttack;
     try {
@@ -628,7 +750,7 @@ export class GameEntryServer {
     for (const target of attack.targets) {
       // One target record carries `hits` numbers; the mob loses their sum, as the client drew it.
       const damage = target.damages.reduce((total, value) => total + value, 0);
-      const hit = field.applyDamage(target.mobId, damage, now);
+      const hit = session.mobs.applyDamage(target.mobId, damage, now);
       if (hit === undefined) {
         this.options.log?.(
           `game: 0x${hex(opcode)} hit mob ${target.mobId} for ${damage}, but this field has no such ` +
@@ -643,7 +765,50 @@ export class GameEntryServer {
               `- die animation ${hit.dieMs}ms, corpse goes at +${hit.dieMs}ms, respawn at +${hit.dieMs + hit.respawnMs}ms`
           : `game: mob ${hit.mobId} hit for ${damage} - hp ${hit.hp}/${hit.maxHp}`,
       );
+      if (hit.killed) this.spawnDrops(session, socket, sendState, hit.mobId, now);
     }
+  }
+
+  /**
+   * A monster died: roll its loot and put it on the ground (`0x43`).
+   *
+   * The drop's position is the monster's own, so it falls out of the corpse the client is already
+   * animating; the packet carries the monster's id, which is what makes the client fly the item from
+   * the monster to where it lands (FINDINGS 4.18). The loot itself is the policy's decision - see
+   * `game/drops.ts` for what is evidence and what is a named, tunable choice.
+   *
+   * A monster whose template is unknown (no `Mob/<id>.img`, so no level and no name) drops nothing:
+   * the policy has nothing to work with, and inventing a table entry would be a guess.
+   */
+  private spawnDrops(
+    session: FieldSession,
+    socket: net.Socket,
+    sendState: CipherState,
+    mobId: number,
+    now: number,
+  ): void {
+    const mob = session.mobs.mob(mobId);
+    if (mob === undefined || mob.template === undefined) return;
+    const spawned = session.drops.spawnFromDeath(
+      {
+        mobId,
+        templateId: mob.templateId,
+        name: mob.template.name,
+        level: mob.template.level,
+        x: mob.x,
+        y: mob.y,
+        foothold: mob.foothold,
+      },
+      now,
+    );
+    for (const drop of spawned) {
+      socket.write(encodeSessionPacket(session.drops.appearPacket(drop), sendState, "s2c"));
+      this.options.log?.(
+        `game: mob ${mobId} (${mob.template.name}) left drop ${drop.dropId}: ` +
+          `${drop.money ? `${drop.amount} mesos` : `item ${drop.itemId} x${drop.count}`} at (${drop.x},${drop.y})`,
+      );
+    }
+    if (spawned.length === 0) this.options.log?.(`game: mob ${mobId} died and left nothing`);
   }
 
   private onConnection(socket: net.Socket): void {
@@ -661,7 +826,12 @@ export class GameEntryServer {
 
     const sendState = new CipherState(clientRecvSeed);
     let entered = false;
-    let field: MobField | undefined;
+    let session: FieldSession | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    const stop = (): void => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+    };
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
         if (event.kind !== "packet") continue;
@@ -678,12 +848,24 @@ export class GameEntryServer {
             return;
           }
           entered = true;
-          field = this.enterField(socket, sendState, entry);
+          session = this.enterField(socket, sendState, entry);
+          if (session !== undefined) {
+            const field = session;
+            timer = setInterval(() => {
+              this.tickField(field, socket, sendState, Date.now());
+            }, this.options.mobTickMs ?? 250);
+          }
           continue;
         }
-        // A swing is the one client packet this server acts on: it is what moves a mob's HP here.
-        if (field !== undefined && ATTACK_OPCODES.includes(event.plain[0] ?? -1)) {
-          this.applyAttack(field, socket, sendState, event.plain);
+        const opcode = event.plain[0] ?? -1;
+        // A walk is how the server learns where the player is, which is what a pickup needs.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userMove) {
+          this.notePlayerPosition(session, event.plain);
+          continue;
+        }
+        // A swing is the other packet this server acts on: it is what moves a mob's HP here.
+        if (session !== undefined && ATTACK_OPCODES.includes(opcode)) {
+          this.applyAttack(session, socket, sendState, event.plain);
           continue;
         }
         this.options.log?.(
@@ -691,8 +873,32 @@ export class GameEntryServer {
         );
       }
     });
-    socket.on("error", () => this.sockets.delete(socket));
-    socket.on("close", () => this.sockets.delete(socket));
+    socket.on("error", () => {
+      stop();
+      this.sockets.delete(socket);
+    });
+    socket.on("close", () => {
+      stop();
+      this.sockets.delete(socket);
+    });
+  }
+
+  /**
+   * Where the player is, from their own `0x0E` (`CVecCtrlUser::SendMove`).
+   *
+   * Only the *first* path element is read: the client's move path is a whole walk (`CMovePath`), and
+   * its first element is the position the vecctrl was moved to - the one place in that packet the
+   * server can trust (FINDINGS 4.11.5). Everything the pickup needs is a position, so the rest of the
+   * path is left for the day the server has to validate movement.
+   */
+  private notePlayerPosition(session: FieldSession, plain: Uint8Array): void {
+    try {
+      const move = readClientUserMove(new PacketReader(plain, 1));
+      const first = move.path.elements[0];
+      if (first !== undefined) session.at = { x: first.x, y: first.y };
+    } catch (error) {
+      this.options.log?.(`game: 0x0E move unreadable: ${(error as Error).message}`);
+    }
   }
 }
 
@@ -711,7 +917,10 @@ function withMapId(entry: HandoffEntry, mapId: number): CharacterData {
   stats.mp = 50;
   stats.maxMp = 50;
   stats.mapId = mapId;
-  return characterDataOf(stats);
+  // A hand-built handoff has no login server behind it, so it gets the bags `createCharacter` would
+  // have given it: the capacity byte is what makes the client allocate an inventory at all, and a
+  // character with no slots could never be handed a drop (`startingCharacterItems`).
+  return characterDataOf(stats, startingCharacterItems());
 }
 
 /** A non-zero u32 for the handshake seeds. */

@@ -177,6 +177,23 @@ export function emptyCharacterItems(): CharacterItems {
   return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
 }
 
+/**
+ * Slots a freshly created character's four tabs start with.
+ *
+ * A *server* number, like the drop odds: the `u8 capacity` in `CharacterData` is the client's array
+ * size minus one (`sub_4605A0` resizes to capacity + 1), so a tab that is never announced has *no*
+ * slots at all and nothing can ever be put in it. 24 is what every MapleStory generation handed a
+ * new character; a shop or a quest would raise it with the `0x0C` packet (`sub_55BDC0`), which this
+ * server does not send yet.
+ */
+export const START_INVENTORY_SLOTS = 24;
+
+/** The item block of a new character: four announced tabs of `START_INVENTORY_SLOTS`, all empty. */
+export function startingCharacterItems(slots = START_INVENTORY_SLOTS): CharacterItems {
+  const empty = (): Inventory => ({ capacity: slots, items: new Map(), records: [] });
+  return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
+}
+
 /** Pads/validates the 13-byte name field. Names are byte strings in this client (`sub_45DD00`). */
 export function nameFieldBytes(name: string): Uint8Array {
   const out = new Uint8Array(CHARACTER_NAME_BYTES);
@@ -441,17 +458,24 @@ export function characterDataOf(
   items?: CharacterItems,
 ): CharacterData {
   const block = items ?? emptyCharacterItems();
+  // A tab is worth announcing when it holds something *or* when it has slots: the capacity byte is
+  // what makes the client allocate the array at all (`sub_4605A0` resizes to capacity + 1), so a
+  // character with 24 empty slots still needs its flag, or nothing could ever be put in it.
+  const tells = (inventory: Inventory): boolean => inventory.items.size > 0 || inventory.records.length > 0 || inventory.capacity > 0;
   const hasItems =
     block.worn.size + block.wornCash.size > 0 ||
-    block.inventories.some((inventory) => inventory.items.size > 0 || inventory.records.length > 0) ||
+    block.inventories.some(tells) ||
     block.map32.length > 0 ||
     block.mapString.length > 0;
   let flags = CHAR_FLAG_STATS;
   if (hasItems) {
-    flags |= CHAR_FLAG_ITEMS;
+    // `CHAR_FLAG_ITEMS` announces the two worn groups *and* the equip tab, so anything in any of
+    // them has to raise it - otherwise the client would never be told about the item at all.
+    const equip = block.inventories[0];
+    if (block.worn.size + block.wornCash.size > 0 || (equip !== undefined && tells(equip))) flags |= CHAR_FLAG_ITEMS;
     for (let i = 1; i < block.inventories.length; i++) {
       const inventory = block.inventories[i]!;
-      if (inventory.items.size > 0 || inventory.records.length > 0) {
+      if (tells(inventory)) {
         flags |= [CHAR_FLAG_INVENTORY_2, CHAR_FLAG_INVENTORY_3, CHAR_FLAG_INVENTORY_4][i - 1]!;
       }
     }

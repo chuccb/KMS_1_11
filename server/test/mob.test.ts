@@ -33,7 +33,6 @@ import { FIELD_OPCODE, describeFieldPacket } from "../src/protocol/field.ts";
 const AT = { opcode: 0, mobId: 1, templateId: 5, x: 9, y: 11, facing: 13, unknownA: 14, unknownB: 16, animFlags: 18, channels: 22 };
 
 const NO_CHANNELS = AT.channels;
-const WITH_ONE_CHANNEL = AT.channels + 4;
 
 function u16(bytes: Uint8Array, offset: number): number {
   return bytes[offset]! | (bytes[offset + 1]! << 8);
@@ -148,7 +147,7 @@ test("a truncated 0x2F throws instead of decoding a mob somewhere it is not", ()
 
 test("the field dispatcher describes 0x2F instead of calling it undecoded", () => {
   const bytes = encodeMobEnterField({ ...MUSHROOM, channels: [{ index: 1, delay: 2 }] });
-  const text = describeFieldPacket(bytes);
+  const text = describeFieldPacket(bytes) ?? "";
   assert.match(text, /mobId=1/);
   assert.match(text, /template=120100/);
   assert.match(text, /facing=0/);
@@ -156,7 +155,7 @@ test("the field dispatcher describes 0x2F instead of calling it undecoded", () =
   assert.equal(text.includes("not decoded"), false, "0x2F is decoded now");
   assert.equal(FIELD_OPCODE.setField, 0x16, "0x2F is a CMobPool opcode inside the 0x2E-0x37 range");
 
-  const truncated = describeFieldPacket(new Uint8Array([MOB_OPCODE.enterField, 1, 0, 0]));
+  const truncated = describeFieldPacket(new Uint8Array([MOB_OPCODE.enterField, 1, 0, 0])) ?? "";
   assert.match(truncated, /truncated/, "a bad packet is reported, not thrown at the caller");
 });
 
@@ -242,7 +241,7 @@ test("the field dispatcher reads the three death packets back as text", () => {
   const appear = encodeMobAppear(4, 120100, { x: 1, y: 2, facing: 0 });
   assert.equal(describeFieldPacket(appear), "0x31 CMobPool: mobId=4 presence=kept (created if unknown)");
   assert.equal(describeFieldPacket(encodeMobStat({ mobId: 4, mp: 200 })), "0x34 CMobPool: mobId=4 mp=200");
-  assert.match(describeFieldPacket(new Uint8Array([MOB_OPCODE.stat, 1])), /truncated/);
+  assert.match(describeFieldPacket(new Uint8Array([MOB_OPCODE.stat, 1])) ?? "", /truncated/);
 });
 
 test("the 0x31 tail is only read for an id the pool does not have", () => {

@@ -42,7 +42,6 @@ import {
   readMobLeaveDelayed,
   readMobMove,
   readMobPresence,
-  readMobEnterField,
   readMobStat,
 } from "../src/protocol/mob.ts";
 import { describeFieldPacket } from "../src/protocol/field.ts";
@@ -213,7 +212,7 @@ test("a spawn with no foothold, or a mob that cannot walk, sends nothing", () =>
   const frozen = new MobField({
     map: onGround,
     footholds: onGround.footholdSegments!,
-    template: () => ({ templateId: 120100, name: "frozen", level: 1, maxHP: 1, exp: 1, speedPercent: 0 }),
+    template: () => ({ templateId: 120100, name: "frozen", level: 1, maxHP: 1, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 0 }),
   });
   assert.equal(frozen.walking, 0, "speedPercent 0 means the mob never moves");
   assert.equal(frozen.movePackets(999_999).length, 0);
@@ -297,8 +296,8 @@ test("a truncated 0x33 throws instead of inventing a path", () => {
     const short = packet.slice(0, packet.length - cut);
     assert.throws(() => readMobMove(new PacketReader(short, 1)), PacketUnderflowError, `${short.length} bytes`);
   }
-  assert.match(describeFieldPacket(packet), /action=move/);
-  assert.match(describeFieldPacket(packet.slice(0, 10)), /truncated/);
+  assert.match(describeFieldPacket(packet) ?? "", /action=move/);
+  assert.match(describeFieldPacket(packet.slice(0, 10)) ?? "", /truncated/);
 });
 
 test("the mob action table is the client's own list, 16 entries wide", () => {
