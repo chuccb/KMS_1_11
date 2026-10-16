@@ -15,8 +15,11 @@
  * ```
  *
  * `sub_4C7190(n)` is the accessor: `n > 200` returns `0x7FFFFFFF`, `n < 1` is clamped to 1. The
- * client's own level-up routine `sub_4C71C0` compares the record's exp with `f(level)`, subtracts it
- * and adds one level - i.e. `f(n)` is "exp needed to go from level `n` to `n + 1`".
+ * client's own level-up routine `sub_4C71C0` is what says `f(n)` is "exp needed to go from level `n`
+ * to `n + 1`": it clamps at 200, subtracts `f(level)`, adds one level, clamps exp to just under the
+ * *next* threshold, recomputes the damage range (`sub_4C7450`, weapon atk tables) and refills HP/MP
+ * when alive. It has **no call site anywhere in the binary**, so this build never levels itself up -
+ * the level comes in `0x0D` from the server, and this module is the server's copy of that rule.
  *
  * THE NUMBERS ARE THE REAL ONES: `f(1..20)` = 15, 34, 57, 92, 135, 372, 560, 840, 1242, 1716, 2360,
  * 3216, 4200, 5460, 7050, 8840, 11040, 13716, 16680, 20216 - the published 2003 EXP table. All 200
