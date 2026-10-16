@@ -145,7 +145,8 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 `--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms）、
 `--npc-walk <none|all|id,id,...>` 決定**哪些 NPC 由 client 自己走**（`0x3B`，FINDINGS §4.28；預設 `none`，
 裸的 `--npc-walk` 等於 `all`），角色建立後外觀取自**帳號第一個角色**
-或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
+或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們的**順序**對應到哪些欄位尚未證實；
+client 自己那 12 個部位格已經解出來了，見 FINDINGS §4.11.3b 與 §6 第 16 項）。
 `--save <path|off>` 決定**角色存到哪裡**（ADR-017；預設 `./kms111-save.json`，`off` ＝只活在記憶體，也就是這個
 伺服器以前的樣子）：整張帳號表在建立角色、刪除角色與 session 結束時重寫一次，寫入是 `tmp` ＋ rename（崩潰
 不會留半個檔），而**讀不懂的檔案會讓伺服器起不來**（版本不合、不是 JSON、缺 `id`／`name`、兩個角色同一個 id、
@@ -220,7 +221,8 @@ client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）�
 （怪物會出現、會巡邏、會被打死、會重生、也會掉東西，但不會追人、不會攻擊；只有 `Mob/9999997.img`／
 `Mob/9999999.img` 兩張測試圖帶攻擊資料，見 FINDINGS §4.17.6 與 §6 第 5 項）、
 建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受；`chardata.ts` 已經能寫完整道具區塊，
-缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，見 FINDINGS §4.8 的註記）、
+缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的**順序**對應（client 的 12 個部位格已解，
+見 FINDINGS §4.11.3b；缺的是那 10 個 u32 的順序，§6 第 16 項））、
 NPC 會出現、**有商店的可以交易**（點下去開窗，買賣送 `0x4B`＋`0x0B`＋`0x0D`）、
 **沒有商店的會講話**（`0x47` 一句一句，台詞是 `info/speak`，`0x15` 走下一句），
 而且**可以走動**（`0x3B`：被點名的 NPC 由 client 自己走 —— `--npc-walk`，預設沒人走，§4.28），
