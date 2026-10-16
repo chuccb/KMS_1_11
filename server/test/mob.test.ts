@@ -13,9 +13,18 @@ import { PacketReader, PacketUnderflowError } from "../src/protocol/packet.ts";
 import {
   MOB_CHANNEL_COUNT,
   MOB_OPCODE,
+  MOB_PRESENCE_KEEP,
+  MOB_PRESENCE_REMOVE,
   describeMobEnterField,
+  encodeMobAppear,
   encodeMobEnterField,
+  encodeMobLeaveDelayed,
+  encodeMobRemove,
+  encodeMobStat,
   readMobEnterField,
+  readMobLeaveDelayed,
+  readMobPresence,
+  readMobStat,
   type MobEnterField,
 } from "../src/protocol/mob.ts";
 import { FIELD_OPCODE, describeFieldPacket } from "../src/protocol/field.ts";
@@ -157,4 +166,91 @@ test("describeMobEnterField says what a log line needs", () => {
     "mobId=1 template=120100 at (509,300) facing=1 animChannels=1",
   );
   assert.equal(describeMobEnterField(MUSHROOM), "mobId=1 template=120100 at (509,300) facing=0 animChannels=0");
+});
+
+// ---------------------------------------------------------------------------
+// 0x30 / 0x31 / 0x34 - the packets that take a mob's HP away (FINDINGS 4.17)
+// ---------------------------------------------------------------------------
+
+/** Offset of each field inside an encoded `0x30`/`0x31`/`0x34`, opcode byte included. */
+const AT_LEAVE = { opcode: 0, mobId: 1, delayMs: 5 };
+const AT_PRESENCE = { opcode: 0, flag: 1, mobId: 2 };
+const AT_STAT = { opcode: 0, mobId: 1, mp: 5 };
+
+test("0x30 is mobId + a signed delay, and a negative delay survives the wire", () => {
+  const bytes = encodeMobLeaveDelayed({ mobId: 0xfeedface, delayMs: -1 });
+  assert.equal(MOB_OPCODE.leaveDelayed, 0x30);
+  assert.equal(bytes.length, 7);
+  assert.equal(bytes[AT_LEAVE.opcode], MOB_OPCODE.leaveDelayed);
+  assert.equal(u32(bytes, AT_LEAVE.mobId), 0xfeedface);
+  assert.equal(s16(bytes, AT_LEAVE.delayMs), -1, "negative = remove at once, not a u16");
+  assert.deepEqual(readMobLeaveDelayed(new PacketReader(bytes, 1)), { mobId: 0xfeedface, delayMs: -1 });
+
+  const zero = encodeMobLeaveDelayed({ mobId: 1, delayMs: 0 });
+  assert.equal(s16(zero, AT_LEAVE.delayMs), 0, "0 = the die animation starts now");
+  assert.deepEqual(readMobLeaveDelayed(new PacketReader(zero, 1)), { mobId: 1, delayMs: 0 });
+});
+
+test("0x31 flag=0 is the removal, flag=1 keeps the mob: same header, different tail", () => {
+  const remove = encodeMobRemove(7);
+  assert.equal(MOB_OPCODE.presence, 0x31);
+  assert.equal(remove.length, 6, "a removal carries nothing but the id");
+  assert.equal(remove[AT_PRESENCE.opcode], MOB_OPCODE.presence);
+  assert.equal(remove[AT_PRESENCE.flag], MOB_PRESENCE_REMOVE);
+  assert.equal(u32(remove, AT_PRESENCE.mobId), 7);
+  assert.deepEqual(readMobPresence(new PacketReader(remove, 1)), { flag: 0, mobId: 7 });
+
+  const appear = encodeMobAppear(9, 1210102, { x: -289, y: 1441, facing: 1 });
+  assert.equal(appear[AT_PRESENCE.flag], MOB_PRESENCE_KEEP);
+  assert.equal(u32(appear, AT_PRESENCE.mobId), 9);
+  assert.equal(u32(appear, 6), 1210102, "the template id follows the id");
+  assert.deepEqual(readMobPresence(new PacketReader(appear, 1)), { flag: 1, mobId: 9 });
+});
+
+test("0x31 flag=1 reuses the 0x2F body byte for byte after templateId", () => {
+  // `sub_491630` reads a templateId and then calls the same `CMob::Init`, so the tails have to be
+  // identical - this is the test that keeps the two encoders from drifting apart.
+  const tail = { x: -289, y: 1441, facing: 1, unknownA: 5, unknownB: 6, channels: [{ index: 3, delay: 7 }] };
+  const appear = encodeMobAppear(9, 1210102, tail);
+  const enterWidth = encodeMobEnterField({ mobId: 9, templateId: 1210102, ...tail });
+  assert.deepEqual(
+    [...appear.slice(10)],
+    [...enterWidth.slice(9)],
+    "after the template id the bytes are the same 0x2F body",
+  );
+  const decoded = readMobEnterField(new PacketReader(enterWidth, 1));
+  assert.equal(decoded.x, -289);
+  assert.equal(decoded.y, 1441);
+  assert.equal(decoded.channels?.[0]?.index, 3);
+});
+
+test("0x34 is mobId + the mob's MP, 7 bytes", () => {
+  const bytes = encodeMobStat({ mobId: 0x01020304, mp: 2500 });
+  assert.equal(MOB_OPCODE.stat, 0x34);
+  assert.equal(bytes.length, 7);
+  assert.equal(bytes[AT_STAT.opcode], MOB_OPCODE.stat);
+  assert.equal(u32(bytes, AT_STAT.mobId), 0x01020304);
+  assert.equal(u16(bytes, AT_STAT.mp), 2500);
+  assert.deepEqual(readMobStat(new PacketReader(bytes, 1)), { mobId: 0x01020304, mp: 2500 });
+  assert.equal(u16(encodeMobStat({ mobId: 1, mp: 0x1ffff }), AT_STAT.mp), 0xffff, "the wire is a u16");
+});
+
+test("the field dispatcher reads the three death packets back as text", () => {
+  assert.equal(describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: 0 })), "0x30 CMobPool: mobId=4 leave: the die animation starts in 0ms");
+  assert.equal(describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: -1 })), "0x30 CMobPool: mobId=4 leave: removed at once");
+  assert.equal(describeFieldPacket(encodeMobRemove(4)), "0x31 CMobPool: mobId=4 presence=removed");
+  const appear = encodeMobAppear(4, 120100, { x: 1, y: 2, facing: 0 });
+  assert.equal(describeFieldPacket(appear), "0x31 CMobPool: mobId=4 presence=kept (created if unknown)");
+  assert.equal(describeFieldPacket(encodeMobStat({ mobId: 4, mp: 200 })), "0x34 CMobPool: mobId=4 mp=200");
+  assert.match(describeFieldPacket(new Uint8Array([MOB_OPCODE.stat, 1])), /truncated/);
+});
+
+test("the 0x31 tail is only read for an id the pool does not have", () => {
+  // The client returns before `CMob::Init` when it knows the id, which is why a plain `0x31 flag=1`
+  // needs no body at all: only a respawn (whose corpse was already removed) carries the tail.
+  const appear = encodeMobAppear(9, 0, { x: 0, y: 0, facing: 0 });
+  assert.equal(appear.length, 23, "flag + id + templateId + the 13-byte Init body");
+  const reader = new PacketReader(appear, 1);
+  assert.deepEqual(readMobPresence(reader), { flag: 1, mobId: 9 });
+  assert.equal(reader.remaining, 17, "templateId (4) + the Init body (13) are left for CMob::Init");
 });

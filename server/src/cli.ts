@@ -43,7 +43,8 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
-        [--data <Data.wz|off>] [--mob-speed <px/s>] [--seed <n>] [--handshake-body <hex>]
+        [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>] [--seed <n>]
+        [--handshake-body <hex>]
         [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
@@ -73,6 +74,13 @@ notes:
   elsewhere, --data off to skip), one 0x2F is sent per "life" entry of type "m" (FINDINGS 4.15), and
   each mob that has a foothold gets one 0x33 per leg of its patrol (FINDINGS 4.16). --mob-speed sets
   the walking speed at 100% (default 60 px/s; the WZ's own info.speed scales it per mob).
+
+  A swing (0x0F/0x10/0x11) is applied to those mobs: the damage is the client's own number, the mob
+  loses it, and the answer is 0x34 (its MP, which is also what puts the mob into the flash state its
+  hit animation needs) or, when the HP runs out, 0x30 - the die animation starts now - followed by
+  0x31 flag=0 once that animation is over and 0x31 flag=1 when it respawns (FINDINGS 4.17).
+  --mob-respawn sets the respawn delay (default 5000 ms); the die animation's length is read from
+  Mob/<id>.img (the sum of its die frames' delay, the client's own sub_486180).
 
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
@@ -253,6 +261,11 @@ async function runServe(rest: string[]): Promise<number> {
     process.stderr.write(`invalid --mob-speed: ${String(args["mob-speed"])} (px/s at 100%)\n`);
     return 1;
   }
+  const mobRespawn = args["mob-respawn"] === undefined ? undefined : Number(args["mob-respawn"]);
+  if (mobRespawn !== undefined && (!Number.isFinite(mobRespawn) || mobRespawn < 0)) {
+    process.stderr.write(`invalid --mob-respawn: ${String(args["mob-respawn"])} (ms)\n`);
+    return 1;
+  }
 
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
@@ -275,6 +288,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
+      ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
       ...(handshake ? { handshake } : {}),
       ...(log ? { log } : {}),
     });

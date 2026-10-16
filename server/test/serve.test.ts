@@ -14,8 +14,15 @@ import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/
 import { PacketReader } from "../src/protocol/packet.ts";
 import { decodeClientPacket, encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
-import { FIELD_OPCODE, readSetField } from "../src/protocol/field.ts";
-import { MOB_OPCODE, readMobEnterField, readMobMove } from "../src/protocol/mob.ts";
+import { CLIENT_FIELD_OPCODE, FIELD_OPCODE, encodeClientAttack, readSetField } from "../src/protocol/field.ts";
+import {
+  MOB_OPCODE,
+  readMobEnterField,
+  readMobLeaveDelayed,
+  readMobMove,
+  readMobPresence,
+  readMobStat,
+} from "../src/protocol/mob.ts";
 import type { MapData } from "../src/game/map.ts";
 import type { MobTemplate } from "../src/game/mobs.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
@@ -356,7 +363,7 @@ test("the game server spawns the map's monsters right after 0x16", { timeout: 20
     handoffs,
     mapId: 1000000,
     mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, exp: 1, speedPercent: 100 }),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
     mobTickMs: 20,
     handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
     log: (line) => log.push(line),
@@ -442,4 +449,119 @@ test("a map the provider does not know still enters, it just has nothing to spaw
   );
   assert.ok(log.some((line) => line.includes("has no Map/Map/*.img")), log.join("\n"));
   client.close();
+});
+
+/**
+ * The whole mob loop over a real socket: a swing kills a monster, and the death comes back as the
+ * three packets of FINDINGS 4.17 - `0x34` (the mob's stat/flash), `0x30` (the die animation starts
+ * now) and, once that animation is over, `0x31 flag=0` (the corpse goes). A stub template is used so
+ * the die animation is 40 ms instead of the real 720: the timing logic is the same code.
+ */
+test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse is over", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    mobTickMs: 20,
+    mobRespawnMs: 5000,
+    handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  const spawn = await client.take(3);
+  client.close(); // the spawn burst is all this test needs from 0x16/0x2F
+
+  const killer = await FakeClient.connect(gameInfo.port);
+  t.after(() => killer.close());
+  const otherId = handoffs.issue({ username: "admin", characterId: 12, characterName: "Fighter2" });
+  killer.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
+  await killer.take(3);
+  assert.equal(spawn[1]![0], MOB_OPCODE.enterField);
+
+  // One swing, one target, 10 damage - exactly the mob's HP, so it dies.
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  killer.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+  const hit = await killer.take(2);
+  assert.equal(hit[0]![0], MOB_OPCODE.stat, "0x34 first: the mob's stat, which is its flash state");
+  assert.deepEqual(readMobStat(new PacketReader(hit[0]!, 1)), { mobId: 1, mp: 0 });
+  assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed, "then 0x30: the die animation starts now");
+  assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
+  assert.equal(killer.headersOk, true, "both survive the cipher/header check");
+
+  // ... and 40 ms of die animation later the corpse goes. The walking timer is what sends it.
+  const corpse = await killer.take(1);
+  assert.equal(corpse[0]![0], MOB_OPCODE.presence);
+  assert.deepEqual(readMobPresence(new PacketReader(corpse[0]!, 1)), { flag: 0, mobId: 1 });
+
+  assert.ok(
+    log.some((line) => line.includes("mob 1 (template 120100) killed by 10")),
+    log.join("\n"),
+  );
+});
+
+/**
+ * A swing at a mob this field does not have is logged, not invented: the server answers nothing and
+ * the mob it does have stays up. (A 2003 client only sends ids it got from the server, so this is the
+ * malformed case - and it must not desync the HP of a different mob.)
+ */
+test("a swing at an unknown mob id answers nothing and leaves the field alone", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    mobTickMs: 20,
+    handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 13, characterName: "Sloppy" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(3);
+
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 99,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 99, hitAnimation: 7, x: 0, y: 0, sequence: 1, damages: [9999] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(await client.take(0), [], "no reply at all: there is no mob 99 to answer for");
+  assert.ok(log.some((line) => line.includes("no such mob")), log.join("\n"));
 });

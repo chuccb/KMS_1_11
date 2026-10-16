@@ -941,7 +941,7 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
   `describeClientPacket` 不能回 `undefined`）。
 
 查詢方式：`node server/src/cli.ts schema`（人看的表格）或 `schema --json`（工具用）。
-目前共 **38 列**：login c2s 8、login s2c 6、field c2s 11、field s2c 13。
+目前共 **38 列**：login c2s 8、login s2c 6、field c2s 11、field s2c 13；狀態分佈`byte-exact` **19**／`partial` **15**／`skeleton` 4（§4.17 把 `0x30`／`0x31`／`0x34` 從 `partial` 推到 byte-exact）。
 
 ### 4.15 ✅ 怪物進場到產品：地圖 `life` → `0x2F`
 
@@ -1063,17 +1063,18 @@ mob+116 = byte1 ? -3 : -2
 
 | opcode | 函式 | 內容 | 語意（有證據的部分）|
 |---|---|---|---|
-| `0x30` | `sub_4926B0` | `u32 mobId` + `s16 delayMs` | `delayMs >= 0` → 把 (mobId, now+delayMs) 塞進**池的定時佇列**；`delayMs < 0` → 立刻 `sub_491AB0(pool, mobId, 0)` |
-| `0x31` | `sub_4927B0` | `u8 flag` + `u32 mobId`（**沒有 CMovePath**）| `flag != 0` → `sub_491630`：池裡沒有這個 id 時才讀 `u32 templateId` + `CMob::Init` 的欄位並建立、有指標在跑就什麼都不做、否則 `sub_485330(mob, 1)` 推進一步；`flag == 0` → `sub_491830`（移除）|
+| `0x30` | `sub_4926B0` | `u32 mobId` + `s16 delayMs` | `delayMs >= 0` → 把 (mobId, now+delayMs) 塞進**池的定時佇列**，到期就開始死亡動畫（§4.17.2）；`delayMs < 0` → 立刻 `sub_491AB0(pool, mobId, 0)`（sprite 還在播就放棄）|
+| `0x31` | `sub_4927B0` | `u8 flag` + `u32 mobId`（**沒有 CMovePath**）| `flag != 0` → `sub_491630`：池裡沒有這個 id 時才讀 `u32 templateId` + `CMob::Init` 的欄位並建立、最後 `sub_485330(mob, 1)` 打開**閃光**；`flag == 0` → `sub_491830`（收屍，§4.17.3）|
 
 - 定時佇列的消費者是**池自己的更新函式** `sub_492100`：`endTime - now <= 0` 就
   `sub_491AB0(pool, mobId, 1)`。`a3 != 0` 的分支會 `sub_485530(mob)`（拆掉並重建怪物的元件清單，
   然後挑一個 die 動作），兩條分支最後都會把怪物從池的雜湊鏈上移除。
 - `0x2F` 會把 **`mob+112` 設 1**，而 `sub_491AB0(a3 == 0)`（移除）遇到 `mob+112 != 0` 就直接放棄。
-  這個「留在池裡」的旗標語意仍未完全確定（§4.15 的第 1 項），但欄位與流向是清楚的。
+  這個「留在池裡」的旗標語意仍未完全確定（§4.15 的第 1 項、§4.17.6 第 3 項），但欄位與流向是清楚的。
 - `0x32`／`0x36`：`sub_492380` 對它們**沒有分支**（只讀了 `u32 mobId`），等於空包。
 - `0x34`：`u16 → mob+132`，然後跑 `mob+116` 的狀態機（1→5、2→4、3→5，其餘 `sub_485330(mob, 1)`）。
-  欄位語意仍未知，所以**目錄裡只記形狀，不編碼**。
+  `mob+132` 的唯一讀者把它拿去比攻擊的 `conMP`，所以**它是怪物的 MP**；狀態機則讓 client 進
+  「可以被重設成受擊動作」的 4／5（§4.17.1）——這一條是打怪有沒有「打到彈一下」的關鍵。
 - `0x35`：`sub_488E10` → `sub_4C6CE0`，就是 `0x2F` 尾巴那個**動畫狀態區塊**（`u32` 旗標 + 每個
   設定的 bit 各 2 個 `u16`），差別是這裡的物件是 `mob+136`（同一組通道位移）。
 
@@ -1127,13 +1128,129 @@ foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
 #### 還不能宣稱的部分
 
 1. `0x33` 的 `value`（`u32`）語意未解；走路送 0（沒有讀者）。
-2. `mob+116` 的狀態機（`0x34` 的 1/2/3 → 4/5）與 `0x31` flag != 0 的 `mob+112`「留在池裡」語意未解。
-3. 怪物**還不會受傷／死亡**：`0x30`／`0x31`（離場）沒有編碼器，因為還沒有任何東西會殺死怪物。
+2. `0x31` flag != 0 路徑上的 `mob+112`「留在池裡」語意未解（§4.17.6 第 3 項）；
+   `0x34` 的 1/2/3 → 4/5 狀態機語意已解（§4.17.1：那 4／5 就是受擊動作的前提）。
+3. 怪物**已經會受傷／死亡／重生**（§4.17）：`0x30`／`0x31`／`0x34` 三個封包都有編碼器與測試。
 4. 元素 `attr` 沒有任何讀者（client 播放路徑時不讀，`sub_485330` 只讀 x/y/vx/vy/action/foothold/duration），
    所以走路送 0；client 自己在「路徑過期」時補的元素用 1。
 5. 巡邏的 **60 px/s 基準**是伺服器的選擇（`--mob-speed` 可調）：原伺服器的值無從得知，
    要靠原 client 實測（ADR-004）才會知道「看起來對」的速度。
 6. 還是**每個連線各自一份怪物**（§4.15 第 5 項），所以兩個玩家看到的怪物位置不會一致。
+
+### 4.17 ✅ 打怪的閉環：傷害是 client 算的，伺服器只送三個封包
+
+§4.13.1 解出「client 怎麼報告一刀」，§4.15／§4.16 解出「怪物怎麼出現、怎麼走」；這一節補上中間那一段：
+**怪物怎麼掉血、怎麼死、怎麼重生**。整個迴圈的形狀與後期楓之谷不同：2003 年的 client **自己算傷害、
+自己畫數字**，伺服器只記帳，並在關鍵時刻送三個「這隻怪的狀態變了」的封包。
+
+| 角色 | 做什麼 | 證據 |
+|---|---|---|
+| 攻擊者的 client | 算出每個目標的傷害 → `sub_4882F0`（143029-143151）把 `CMob::DAMAGEINFO` 排進**怪物自己**的佇列 → 怪物更新時由 `sub_487A30`（142584-142731）畫出數字 → 整刀寫成 `0x0F` | `sub_512F90`（278611-279361；§4.13.1）|
+| 伺服器 | 記帳（HP）、`0x34`（怪的 MP，兼「讓 client 進受擊狀態」）、`0x30`（開始死亡動畫）、`0x31`（收屍／重生）| `src/game/mobs.ts`、`src/protocol/mob.ts` |
+
+#### 4.17.1 `0x34`：`u16` 是**怪物的 MP**，而且它是「怪物會被打到彈一下」的前提
+
+`sub_488D90`（143664-143694）把 `u16` 存進 **`mob+132`**，而 `mob+132` 全 client 只有一個讀者：怪物的
+攻擊挑選器 `sub_487D10`（142738-142932）裡的 `if (v9[4] > *(this + 33)) skip`（`.text:0x487D81`）。
+被比較的 `v9` 是 `*(mob+124)` 這顆**怪物模板**攻擊清單裡的一筆，清單的來源也解出來了：`sub_48E360`
+（149342-150064）用 `L"attack"` ＋ `itow(n2 + 1)`（`n2 == 2` 時是 `L"F"`）拼出 `Mob/<id>.img` 的
+`attack1`／`attack2`／`attackF`，再把 `info` 的欄位依序寫進那筆記錄 —— 其中 `[3] = type`（149654）、
+**`[4] = conMP`**（149678）。所以 `mob+132` 是**怪物的 MP**，`0x34` 就是「這隻怪還有多少 MP」的通知。
+
+同一支處理器還會動 `mob+116`（怪物狀態）：
+
+| 進 `0x34` 前的 `mob+116` | 之後 | 誰設的（§4.16.1）|
+|---|---|---|
+| 1（非攻擊動作做完）| 5 | `sub_4885D0` 的尾巴 |
+| 2（攻擊動作，`n30a == 0`）| 4 | 同上 |
+| 3（攻擊動作，`n30a == 1`）| 5 | 同上 |
+| 其它（-1／-2／-3，例如剛被 `0x33` 設過）| `sub_485330(mob, 1)` → 4，並打開**閃光** | `CMob::Init` 設 -1、`0x33` 一律設 -3 |
+
+為什麼這件事重要：傷害數字顯示器 `sub_487A30` 只有在 `mob+116 ∈ {-2, 4, 5}` 時才會把動作重設成
+**受擊動作**：
+
+```
+if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
+    && mob+280 == 0 && a2 == now)                  // 沒有受擊動畫在跑、且是「現在」要顯示的
+  if (mob+116 ∈ {-2, 4, 5}) sub_4885D0(mob, hitAnim, facing, 0, …)      // 播 hit1
+```
+
+而 `mob+116` 的其他來源都不會停在 4／5：`CMob::Init` 設 -1、`0x33` 的尾巴一律設 -3、動作設定器
+`sub_4885D0` 只設 1／2／3。**所以不送 `0x34` 的話，怪物只會跳數字、不會被打到彈一下。**
+
+> `sub_485330(mob, 1)` 就是把模板的 `+250/+252/+254/+256`（`s16 ×4`）與 `+258`（`u8`）交給 sprite 的
+> `vtbl+184`，也就是「閃光／受擊覆蓋層」；`0x31 flag != 0`（新怪出現）走的是同一支函式。
+
+#### 4.17.2 `0x30`：開始死亡動畫（屍體不會自己消失）
+
+形狀見 §4.16.3。`delayMs >= 0` → 排進 `sub_492100`（153646-153793）的定時佇列；到期時呼叫
+`sub_491AB0(pool, mobId, 1)`（153127-153366），也就是 **`sub_485530`**（140481-140687）：
+
+1. 先把怪物身上還沒顯示的傷害記錄清單（`mob+340`，`sub_4882F0` 排的、上限 15 筆）全部送進 `sub_487A30`；
+2. `if (*(template + 116) > 0) mob+276 = 13 + rand() % *(template + 116)` → 挑一個 die 動作（13=die1／14=die2／15=dieF）；
+3. `sub_485DA0`（140931-141075）播它；die 動作是**不循環**的（`sub_485DA0` 對 13..15 在影格用完時 `break`）。
+
+`template+116` 是「這張圖有幾個 die 動作」。本 `Data.wz` 的 **28 張 `Mob/*.img` 全部只有 `die1`**（實測），
+所以動作一定是 13。`delayMs < 0` 走 `sub_491AB0(..., 0)`：立刻移除，但**只要 sprite 還有影格在跑
+（`sub_485520`）就放棄**，所以死亡動畫不會被切掉。
+
+**`0x30` 不會把怪物從池裡移除**（那要 `0x31`）：屍體留在 client 上，直到 `0x31 flag = 0`。
+死亡動畫長度＝Σ 每個影格的 `delay`；沒有 `delay` 的影格用 **180 ms**（`sub_40B530` 19949 的
+`lVal = 180`），`UOL` 影格也算一格（`Mob/5130100.img/die1` 的最後一格就是 `UOL`）：
+
+| 怪物 | `info.maxHP` | `info.maxMP` | `info.pushed` | `die1` 影格 | 死亡動畫 |
+|---|---|---|---|---|---|
+| 0100100 파란달팽이 | 8 | 0 | 1 | 9 × 180 | 1620 ms |
+| 0120100 스포아 | 20 | 0 | 1 | 4 × 180 | 720 ms |
+| 1210102 주황버섯 | 80 | 0 | 1 | 3 × 180 | 540 ms |
+| 5130100 와일드보어 | 2500 | 200 | 1 | 8 × 180 | 1440 ms |
+
+#### 4.17.3 `0x31`：收屍（flag = 0）與重生（flag != 0）
+
+- `flag == 0` → `sub_491830`（152889-153124）：池裡查不到這個 id 就**直接返回**（所以對已經消失的怪再送
+  一次是安全的）；查到的話，sprite 還在動就先 `sub_485330(mob, 0)` 關掉閃光，`mob+112 == 0` 才把池項
+  從侵入式鏈結串列上拆掉。
+- `flag != 0` → `sub_491630`（152770-152885）：池裡**已知**這個 id → 只刷新一下（封包後面沒有欄位）；
+  池裡**沒有** → 讀 `u32 templateId`，其餘**就是 `0x2F` 的身體**（兩條路都經過 `CMob::Init`），
+  建好之後 `sub_485330(mob, 1)`（**閃光**）。
+
+所以「重生」用 `0x31 flag != 0` 比 `0x2F` 更貼：client 會把新出現的怪物閃一下，也就是「怪物在你面前冒出來」。
+（`0x2F` 保留給「進地圖時本來就在的怪物」，那批不該全部閃。）
+
+#### 4.17.4 產品化：`src/game/mobs.ts` 與 `GameEntryServer.applyAttack`
+
+1. **扣血**：`MobField.applyDamage(mobId, damage, now)`。攻擊包裡每個目標記錄的傷害是 `hits` 個 `u16`
+   加起來（§4.13.1），直接從 `hp` 扣、夾在 0。**伺服器不重算傷害**（理由與之後要補的驗證見 **ADR-006**）：
+   2003 的 client 自己算、自己畫，伺服器重算只會與 client 不一致；它管的是「哪幾隻怪存在、各有多少 HP」。
+2. **命中**（HP > 0）：送 **`0x34`**，值是 `info.maxMP`（§4.17.1：這是讓 client 進 4／5 狀態、也就是
+   讓怪物彈一下的唯一方法）。傷害數字不用送 —— client 已經畫完了。
+3. **殺死**（HP == 0）：先送 `0x34`（讓閃光進狀態），再送 **`0x30`（`delayMs = 0`）**：死亡動畫立刻開始，
+   屍體留在畫面上。`dieMs` 來自 `Mob/<id>.img` 的 die 影格（§4.17.2 的表）。
+4. **收屍與重生**：`dieMs` 之後送 `0x31 flag = 0`；再過 `MOB_RESPAWN_MS`（**5000 ms，伺服器自己的選擇**，
+   `--mob-respawn` 可調）送 `0x31 flag != 0`（`templateId` + `0x2F` 身體），怪物回到地圖檔給的出生點、
+   HP 回滿。死掉的怪**不再收到 `0x33`**（不然 client 會把屍體搬走）。
+5. `MobField.tickPackets(now)` 是同一個 timer 的出口：先巡邏的 `0x33`，再收屍／重生，順序固定。
+
+#### 4.17.5 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/mob.test.ts` | `0x30`（含負延遲）、`0x31` 的兩個 flag、`0x34`、`0x31 flag != 0` 的尾巴與 `0x2F` **逐 byte 相同**、`decode` 的解讀器 |
+| `server/test/mobs.test.ts` | 扣血／`0x34` 的值／殺死時送 `0x34`＋`0x30`、死掉後不再有 `0x33`、`dieMs` 之後收屍、`respawnMs` 之後重生（回到出生點、HP 回滿）、`tickPackets` 的順序、沒有 image 的怪不能被打、真 `Data.wz` 的 `dieMs`／`maxMP` |
+| `server/test/serve.test.ts` | 真 socket：一刀 10 點 → `0x34` → `0x30` →（40 ms 的假 `dieMs` 之後）`0x31 flag = 0`；打不存在的 id → 完全不回封包，只寫 log |
+
+#### 4.17.6 還不能宣稱的部分
+
+1. **`0x34` 是「命中通知」還是單純「MP 更新」**：`mob+132` 的讀者只證明它被當 MP 用（拿來比 `conMP`），
+   不能排除原伺服器在怪物攻擊時扣 MP 後再送一次。本伺服器**每次命中都送 `info.maxMP`**（怪物不消耗 MP），
+   並在這裡註明「進 4／5 狀態」是實作目的之一。
+2. **屍體是 client 自己收還是等 `0x31`**：`sub_485530` 只設死亡動作，沒有把怪物拆出池子；`sub_492100`
+   到期時也只呼叫 `sub_491AB0(..., 1)`（=開始死亡）。本伺服器假設**要送 `0x31`**；若原 client 會自己收屍，
+   多送一個 `0x31 flag = 0` 也只是查不到 id 的空操作（`sub_491830` 的 early return）。
+3. **`mob+112`（§4.15 第 1 項）**：`0x31 flag = 0` 遇到 `mob+112 != 0` 就放棄，語意仍未解，本伺服器不設它。
+4. **重生 5000 ms 與巡邏 60 px/s 一樣是伺服器自己的選擇**：binary 裡沒有這兩個值。
+5. **沒有實機驗證**：`0x34`／`0x30`／`0x31` 送出去之後畫面長什麼樣（閃光、彈一下、倒下、重生）目前只由
+   反編譯碼推導；ADR-004 的實機 run 才能確認。
 
 ## 5. 字元編碼
 
@@ -1149,17 +1266,18 @@ foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
    `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，地圖 id 已解＝`CharacterData.mapId`，§4.11.2／
    §4.11.2b）；`0x1C` 的 `unknown64`／`avatarKey`／`unknownA/B`；`0x0D` 的 `kind` 其他取值。
-3. **攻擊家族已全部解出**（`0x0F`／`0x10`／`0x11`，§4.13.1＋§4.13.1b），三支共用一個 codec。
+3. **攻擊家族已全部解出**（`0x0F`／`0x10`／`0x11`，§4.13.1＋§4.13.1b），三支共用一個 codec，並且已經接上
+   怪物的 HP（§4.17：`0x34`／`0x30`／`0x31`，伺服器把 client 報的傷害記在帳上）。
    還缺的是**真實流量驗證**（§6 第 2 項）與 `0x10` 的 `u16 v138`。
-   另一邊 `CMob::Init`（§4.12.1）已解到 x／y／面向＋動畫區塊；補完它就與攻擊包合起來是完整的打怪迴圈。
 4. **CField 其餘區間**（分派已拆到函式，見 §4.12）：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、
-   CUserPool 的 `0x1E–0x29` 分支、`0x30`／`0x31`／`0x34`–`0x36` 的欄位（離場、`mob+132`、
-   動畫區塊的用途；`0x2F` 進場與 `0x33` 移動已完成，§4.15／§4.16）、
+   CUserPool 的 `0x1E–0x29` 分支、`0x35`（動畫區塊）的用途（`0x2F` 進場、`0x33` 移動、`0x30`／`0x31`／
+   `0x34` 的離場／收屍／受擊都已完成，§4.15／§4.16／§4.17）、
    `0x39`–`0x40`（CNpcPool）、`0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、
    `0x4D–0x52`（messenger／miniroom）。怪物進場（`sub_484ED0`）與第 3 項是同一條迴圈的兩半。
-5. **進地圖之後還缺的東西** ✅ 進場與移動都已完成：`0x16` → `0x2F`（§4.15）→ 每段一個 `0x33`
-   （§4.16，含腳踏點幾何）。剩下的是**打怪的閉環**：怪物受傷／死亡（`0x30`／`0x31` 離場、
-   `0x34` 的 `mob+132`）、掉落物（CRewardPool 0x42–0x45）與 AI／重生。
+5. **進地圖之後還缺的東西** ✅ 進場、移動與打怪的閉環都已完成：`0x16` → `0x2F`（§4.15）→
+   每段一個 `0x33`（§4.16，含腳踏點幾何）→ 命中／死亡／重生（§4.17：`0x34`／`0x30`／`0x31`，
+   含 `dieMs` 與重生計時）。剩下的是**掉落物**（CRewardPool `0x42`–`0x45`）、
+   怪物的 AI／攻擊（只有 `attack1` 的兩張測試圖有攻擊資料）與 NPC（`0x39`–`0x40`）。
    `0x2F` 那兩個只被查表的 `u16`（§4.12.1）仍是 OPEN，但目前送 0 走的是 client 自己會處理的
    「查表失敗」路徑，所以不擋這條路。
 6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
@@ -1217,8 +1335,7 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 | `tools/wzimg.py` | `.img` 值層編解碼器：物件語法、名稱表、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、zlib 像素解碼。全檔 1,052 張 image 逐 byte 驗證（規格見 `docs/WZ1_FORMAT.md` §4） |
 | `tools/wzdata.py <Data.wz> [--census\|--manifest STEM\|--maps OUT\|--dump PATH]` | 讀 `Data.wz` 的**唯一支援入口**：解析樹、驗證／掃描定位每張 image、統計 canvas 與像素、輸出 manifest／地圖 metadata／單張屬性樹 |
 | `node server/src/cli.ts wz <images|census|maps|dump|png>` | WZ 的產品端入口（ADR-005）：目錄樹、值層、canvas 普查、地圖 metadata、單張 dump、像素→PNG；與上面兩個 Python 工具對同一組黃金值 |
-| `server/src/protocol/mob.ts` | `0x2F` 怪物進場 codec（`encodeMobEnterField`／`readMobEnterField`／`describeMobEnterField`）：`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`＋動畫旗標區塊（§4.12.1）；golden 測試在 `server/test/mob.test.ts`，`decode` 與 `cli.ts schema` 共用同一份（§4.15）|
-| `server/src/game/mobs.ts` | 一場地的怪物：出生點從 `life`、腳踏點折線決定巡邏範圍、每段一個 `0x33`；`Mob/<id>.img` 的 `info`（`speed`／`maxHP`／`level`／`exp`）由 `mobTemplateProvider` 快取。**怪物是伺服器驅動的**（§4.16；golden 測試在 `server/test/mobs.test.ts`）|
-| `server/src/game/mobs.ts` | 一場地的怪物：出生點從 `life`、腳踏點折線決定巡邏範圍、每段一個 `0x33`；`Mob/<id>.img` 的 `info`（`speed`／`maxHP`／`level`／`exp`）由 `mobTemplateProvider` 快取。**怪物是伺服器驅動的**（§4.16；golden 測試在 `server/test/mobs.test.ts`）|
+| `server/src/protocol/mob.ts` | 怪物封包 codec：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`＋動畫旗標區塊，§4.12.1）、`0x33` 移動（§4.16.1）、`0x30` 死亡計時／`0x31` 收屍與重生／`0x34` 怪物 MP（§4.17）；`encode`／`read`／`describe` 三件套，golden 測試在 `server/test/mob.test.ts`，`decode` 與 `cli.ts schema` 共用同一份 |
+| `server/src/game/mobs.ts` | 一場地的怪物：出生點從 `life`、腳踏點折線決定巡邏範圍、每段一個 `0x33`；`Mob/<id>.img` 的 `info`（`speed`／`maxHP`／`maxMP`／`level`／`exp`）與 die 動畫長度（`dieMs`）由 `mobTemplateProvider` 快取。**怪物是伺服器驅動的**，並且有 HP：`applyDamage` → `0x34`／`0x30`，`tickPackets` 收屍與重生（§4.16／§4.17；golden 測試在 `server/test/mobs.test.ts`）|
 | `server/src/game/map.ts` | 伺服器端的地圖視圖：`WzArchive.mapMetadata()` → `life`（怪物／NPC 出生點）、`portal`、`info`、腳踏點（`footholdSegments`）；`mapDataProvider(archive)` 做快取，`GameEntryServer` 用它送 `0x2F` 並驅動巡邏（§4.15／§4.16）|
 | `server/src/wz/paths.ts` | 客戶端自己的 WZ 路徑（`Map/Map/%09d.img` ＝ `mapImagePath`、`foothold`／`ladderRope`／`portal`、`MapHelper.img`）；地圖載入器的函式表在 §4.11.2b，golden 測試在 `server/test/paths.test.ts` |

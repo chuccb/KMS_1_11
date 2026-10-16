@@ -26,7 +26,15 @@ import {
 import { MobField, type MobTemplate } from "../game/mobs.ts";
 import type { MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket, CLIENT_OPCODE } from "../protocol/login.ts";
-import { describeClientFieldPacket, encodeSetField, type SetField } from "../protocol/field.ts";
+import {
+  CLIENT_FIELD_OPCODE,
+  describeClientFieldPacket,
+  encodeSetField,
+  readClientAttack,
+  type ClientAttack,
+  type SetField,
+} from "../protocol/field.ts";
+import { PacketReader } from "../protocol/packet.ts";
 import {
   LOGIN_RESULT,
   NAME_CHECK_RESULT,
@@ -429,6 +437,16 @@ export const DEFAULT_MAP_ID = 1000000;
  *
  * Mobs, skills and drops are still unknown (FINDINGS 6), so the connection says nothing else.
  */
+/**
+ * The client -> server opcodes that carry a swing. All three share one target record (`field.ts`),
+ * so one handler covers them: what the server does with a swing does not depend on how it was made.
+ */
+export const ATTACK_OPCODES: readonly number[] = [
+  CLIENT_FIELD_OPCODE.attack,
+  CLIENT_FIELD_OPCODE.magicAttack,
+  CLIENT_FIELD_OPCODE.skillAttack,
+];
+
 export interface GameEntryServerOptions {
   handoffs: HandoffRegistry;
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
@@ -445,6 +463,8 @@ export interface GameEntryServerOptions {
   mobSpeedPxPerSecond?: number;
   /** How often the field hands out mob movement legs, in ms. Defaults to 250. */
   mobTickMs?: number;
+  /** How long a killed mob stays away before it is spawned again, in ms. Defaults to `MOB_RESPAWN_MS`. */
+  mobRespawnMs?: number;
   log?(line: string): void;
 }
 
@@ -498,7 +518,7 @@ export class GameEntryServer {
    * that carries the map id; the seeds are the server's choice, and they decide every "random"
    * number the client will roll afterwards (FINDINGS 4.11.2).
    */
-  private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): void {
+  private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): MobField | undefined {
     const character = withMapId(entry, this.mapId);
     const field: SetField = {
       mode: 0,
@@ -513,7 +533,7 @@ export class GameEntryServer {
       `game: sent 0x16 - "${entry.characterName}" enters map ${this.mapId} ` +
         `(seeds 0x${hex(field.randomSeedA)} 0x${hex(field.randomSeedB)} 0x${hex(field.randomSeedC)})`,
     );
-    this.spawnMobs(socket, sendState);
+    return this.spawnMobs(socket, sendState);
   }
 
   /**
@@ -536,14 +556,18 @@ export class GameEntryServer {
    *
    * The mobs then walk (`src/game/mobs.ts`): a timer asks the field for the legs that are due and
    * writes the `0x33`s on the same socket. The timer stops with the socket.
+   *
+   * The same timer drives the other two halves of a mob's life: a corpse is dropped (`0x31 flag=0`)
+   * once its die animation is over, and the mob comes back (`0x31 flag=1`) after `mobRespawnMs`.
+   * That is why the timer runs whenever the field has mobs, not only when they can walk.
    */
-  private spawnMobs(socket: net.Socket, sendState: CipherState): void {
+  private spawnMobs(socket: net.Socket, sendState: CipherState): MobField | undefined {
     const map = this.options.mapProvider?.(this.mapId);
     if (map === undefined) {
       if (this.options.mapProvider !== undefined) {
         this.options.log?.(`game: map ${this.mapId} has no Map/Map/*.img in Data.wz, nothing to spawn`);
       }
-      return;
+      return undefined;
     }
     const field = new MobField({
       map,
@@ -552,6 +576,7 @@ export class GameEntryServer {
       ...(this.options.mobSpeedPxPerSecond !== undefined
         ? { speedPxPerSecond: this.options.mobSpeedPxPerSecond }
         : {}),
+      ...(this.options.mobRespawnMs !== undefined ? { respawnMs: this.options.mobRespawnMs } : {}),
     });
     for (const packet of field.spawnPackets()) {
       socket.write(encodeSessionPacket(packet, sendState, "s2c"));
@@ -560,16 +585,65 @@ export class GameEntryServer {
       `game: spawned ${field.mobs.length} mobs (${map.name || map.imagePath}), ` +
         `${field.walking} of them walking; ${map.npcs.length} NPCs are known but not spawned yet`,
     );
-    if (field.walking === 0) return;
+    if (field.mobs.length === 0) return field;
     const tickMs = this.options.mobTickMs ?? 250;
     const timer = setInterval(() => {
-      for (const packet of field.movePackets(Date.now())) {
+      const now = Date.now();
+      for (const packet of field.movePackets(now)) {
+        socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+      }
+      for (const packet of field.lifecyclePackets(now)) {
         socket.write(encodeSessionPacket(packet, sendState, "s2c"));
       }
     }, tickMs);
     const stop = (): void => clearInterval(timer);
     socket.once("close", stop);
     socket.once("error", stop);
+    return field;
+  }
+
+  /**
+   * One swing from the client (`0x0F`/`0x10`/`0x11`): the mobs it says it hit and the damage it
+   * rolled. Each target record is applied to the field (`MobField.applyDamage`), and the field
+   * answers with what that did - the damage numbers themselves need no packet, the attacker's own
+   * client already drew them (FINDINGS 4.13.1).
+   *
+   * The damage is the client's number: this server does not re-roll it (it has no evidence for the
+   * formula, and the client would disagree). What the server does own is which mobs exist and how
+   * much HP they have, so a hit on a mob this field does not have is logged, not invented.
+   *
+   * The packets a hit owes are written straight back on the same socket. There is one field per
+   * connection for now (see `spawnMobs`), so "everyone in the map sees it" is still the same socket.
+   */
+  private applyAttack(field: MobField, socket: net.Socket, sendState: CipherState, plain: Uint8Array): void {
+    const opcode = plain[0] ?? 0;
+    let attack: ClientAttack;
+    try {
+      attack = readClientAttack(new PacketReader(plain, 1), opcode);
+    } catch (error) {
+      this.options.log?.(`game: 0x${hex(opcode)} attack unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const now = Date.now();
+    for (const target of attack.targets) {
+      // One target record carries `hits` numbers; the mob loses their sum, as the client drew it.
+      const damage = target.damages.reduce((total, value) => total + value, 0);
+      const hit = field.applyDamage(target.mobId, damage, now);
+      if (hit === undefined) {
+        this.options.log?.(
+          `game: 0x${hex(opcode)} hit mob ${target.mobId} for ${damage}, but this field has no such ` +
+            `mob - or it is dying, or its Mob/<id>.img is missing and it has no HP to take`,
+        );
+        continue;
+      }
+      for (const packet of hit.packets) socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+      this.options.log?.(
+        hit.killed
+          ? `game: mob ${hit.mobId} (template ${hit.templateId}) killed by ${damage} ` +
+              `- die animation ${hit.dieMs}ms, corpse goes at +${hit.dieMs}ms, respawn at +${hit.dieMs + hit.respawnMs}ms`
+          : `game: mob ${hit.mobId} hit for ${damage} - hp ${hit.hp}/${hit.maxHp}`,
+      );
+    }
   }
 
   private onConnection(socket: net.Socket): void {
@@ -587,6 +661,7 @@ export class GameEntryServer {
 
     const sendState = new CipherState(clientRecvSeed);
     let entered = false;
+    let field: MobField | undefined;
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
         if (event.kind !== "packet") continue;
@@ -603,7 +678,12 @@ export class GameEntryServer {
             return;
           }
           entered = true;
-          this.enterField(socket, sendState, entry);
+          field = this.enterField(socket, sendState, entry);
+          continue;
+        }
+        // A swing is the one client packet this server acts on: it is what moves a mob's HP here.
+        if (field !== undefined && ATTACK_OPCODES.includes(event.plain[0] ?? -1)) {
+          this.applyAttack(field, socket, sendState, event.plain);
           continue;
         }
         this.options.log?.(

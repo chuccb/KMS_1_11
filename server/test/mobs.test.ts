@@ -21,7 +21,13 @@ import {
   type WzObject,
 } from "../src/wz/archive.ts";
 import { loadMapData, mapDataFrom, type MapData, type MapSummary } from "../src/game/map.ts";
-import { MobField, mobTemplateProvider, PATROL_SPEED_PX_PER_SEC, type MobTemplate } from "../src/game/mobs.ts";
+import {
+  MOB_RESPAWN_MS,
+  MobField,
+  mobTemplateProvider,
+  PATROL_SPEED_PX_PER_SEC,
+  type MobTemplate,
+} from "../src/game/mobs.ts";
 import { PacketReader, PacketUnderflowError } from "../src/protocol/packet.ts";
 import {
   MOB_ACTION,
@@ -29,10 +35,15 @@ import {
   MOB_ACTION_NAMES,
   MOB_OPCODE,
   describeMobMove,
+  encodeMobEnterField,
   encodeMobMove,
   mobActionByte,
   mobActionName,
+  readMobLeaveDelayed,
   readMobMove,
+  readMobPresence,
+  readMobEnterField,
+  readMobStat,
 } from "../src/protocol/mob.ts";
 import { describeFieldPacket } from "../src/protocol/field.ts";
 
@@ -123,7 +134,10 @@ function flatMap(spawns: { x: number; y: number; foothold: number; rx0: number; 
 }
 
 const TEMPLATES = new Map<number, MobTemplate>([
-  [120100, { templateId: 120100, name: "스포아", level: 2, maxHP: 20, exp: 5, speedPercent: 100 }],
+  // The stub is deliberately not a real mob: HP 20 and a 720 ms die animation are easy to reason
+  // about, and 0 MP is what most 2003 mobs actually have.
+  [120100, { templateId: 120100, name: "스포아", level: 2, maxHP: 20, maxMP: 0, exp: 5, speedPercent: 100, dieMs: 720 }],
+  [1210100, { templateId: 1210100, name: "주황버섯", level: 8, maxHP: 75, maxMP: 200, exp: 15, speedPercent: 100, dieMs: 540 }],
 ]);
 const provider = (id: number): MobTemplate | undefined => TEMPLATES.get(id);
 
@@ -342,4 +356,154 @@ test("the patrol speed scales with the mob's own info.speed", needsArchive, () =
   assert.equal(templates(2230100)?.speedPercent, 90, "이블아이: -10");
   assert.equal(templates(99999999), undefined, "an id Data.wz does not have is undefined, not a guess");
   assert.equal(PATROL_SPEED_PX_PER_SEC, 60, "the default walking speed this server picks");
+});
+
+// ---------------------------------------------------------------------------
+// damage, death, corpse and respawn (FINDINGS 4.17)
+// ---------------------------------------------------------------------------
+/** One mob of the snapshot tests: 20 HP, 720 ms of die animation, walking a 300 px foothold. */
+function hitField(): MobField {
+  const map = flatMap([{ x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 }]);
+  return new MobField({ map, footholds: map.footholdSegments!, template: provider, respawnMs: 1000 });
+}
+
+test("a hit takes the client's damage off the mob's HP and answers with 0x34", () => {
+  const field = hitField();
+  const first = field.applyDamage(1, 7, 0);
+  assert.equal(first?.hp, 13, "20 - 7");
+  assert.equal(first?.maxHp, 20);
+  assert.equal(first?.killed, false);
+  assert.equal(first?.mp, 0);
+  assert.deepEqual(first?.packets.map((p) => p[0]), [MOB_OPCODE.stat], "a hit only reports the mob's stat");
+  const stat = readMobStat(new PacketReader(first!.packets[0]!, 1));
+  assert.deepEqual(stat, { mobId: 1, mp: 0 });
+  // The damage numbers are not part of this: the attacking client drew its own (FINDINGS 4.13.1).
+  assert.equal(field.mob(1)?.alive, true);
+  assert.equal(field.movePackets(999).length, 1, "a hurt mob keeps walking");
+});
+
+test("0x34 carries the mob's maxMP - the value the attack picker spends", () => {
+  const map = flatMap([{ x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 }]);
+  const field = new MobField({
+    map,
+    footholds: map.footholdSegments!,
+    template: () => TEMPLATES.get(1210100),
+  });
+  const hit = field.applyDamage(1, 1, 0);
+  assert.equal(hit?.maxMp, 200);
+  assert.deepEqual(readMobStat(new PacketReader(hit!.packets[0]!, 1)), { mobId: 1, mp: 200 });
+});
+
+test("the killing blow sends 0x30, stops the walking and takes no further damage", () => {
+  const field = hitField();
+  const hit = field.applyDamage(1, 20, 1000);
+  assert.equal(hit?.killed, true);
+  assert.equal(hit?.hp, 0);
+  assert.equal(hit?.dieMs, 720, "the mob's die animation, from its image");
+  assert.equal(hit?.respawnMs, 1000, "the field's respawn time");
+  assert.deepEqual(
+    hit?.packets.map((p) => p[0]),
+    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed],
+    "0x34 first (the flash state the hit animation needs), then 0x30",
+  );
+  assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit!.packets[1]!, 1)), { mobId: 1, delayMs: 0 });
+  assert.equal(field.mob(1)?.alive, false);
+  assert.equal(field.mobs[0]?.deaths, 1);
+  assert.equal(field.applyDamage(1, 5, 1100), undefined, "a dying mob cannot be hit again");
+  assert.equal(field.movePackets(9999).length, 0, "and it stops walking (its 0x33s would desync it)");
+});
+
+test("overkill clamps at 0 and a damage of 0 kills nothing", () => {
+  const field = hitField();
+  assert.deepEqual(
+    [field.applyDamage(1, 0, 0)?.hp, field.applyDamage(1, -5, 0)?.hp],
+    [20, 20],
+    "a 0 or negative number is not a hit",
+  );
+  assert.equal(field.applyDamage(1, 9999, 0)?.hp, 0, "HP never goes below 0");
+  assert.equal(field.applyDamage(1, 1, 0), undefined, "the mob is already dead");
+});
+
+test("the corpse goes when the die animation is over, and the mob comes back after it", () => {
+  const field = hitField();
+  const hit = field.applyDamage(1, 20, 1000)!;
+  assert.equal(field.lifecyclePackets(1000).length, 0, "the animation has not run yet");
+  assert.equal(field.lifecyclePackets(1000 + hit.dieMs - 1).length, 0, "not even one ms early");
+
+  const removal = field.lifecyclePackets(1000 + hit.dieMs);
+  assert.equal(removal.length, 1, "one packet: the corpse");
+  assert.deepEqual(readMobPresence(new PacketReader(removal[0]!, 1)), { flag: 0, mobId: 1 });
+  assert.equal(field.lifecyclePackets(1000 + hit.dieMs + 1).length, 0, "and only once");
+
+  const respawn = field.lifecyclePackets(1000 + hit.dieMs + 1000);
+  assert.equal(respawn.length, 1, "one packet: the mob is back");
+  const reader = new PacketReader(respawn[0]!, 1);
+  assert.equal(respawn[0]![0], MOB_OPCODE.presence, "0x31 flag=1, the form that flashes a new mob");
+  assert.deepEqual(readMobPresence(reader), { flag: 1, mobId: 1 });
+  assert.equal(reader.readU32(), 120100, "templateId follows the id");
+  // `sub_491630` hands the rest of the packet straight to `CMob::Init`, so it *is* the 0x2F body.
+  const tail = encodeMobEnterField({ mobId: 1, templateId: 120100, x: 150, y: 100, facing: 0 }).slice(9);
+  assert.deepEqual([...respawn[0]!.slice(10)], [...tail], "the 0x2F body, byte for byte");
+  assert.deepEqual([field.mob(1)?.hp, field.mob(1)?.alive], [20, true]);
+  assert.equal(field.movePackets(1000 + hit.dieMs + 1001).length, 1, "and walks again");
+});
+
+test("tickPackets is the walking and the life cycle in one call, in that order", () => {
+  const map = flatMap([
+    { x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 },
+    { x: 60, y: 100, foothold: 2, rx0: 0, rx1: 300 },
+  ]);
+  const field = new MobField({ map, footholds: map.footholdSegments!, template: provider, respawnMs: 1000 });
+  assert.deepEqual(field.tickPackets(0).map((p) => p[0]), [MOB_OPCODE.move], "one leg is due");
+  field.applyDamage(2, 20, 300);
+  // The survivor's leg lasts 2500 ms (150 px of the stub map at 100%), so by 2600 it wants another
+  // one - and the other mob's corpse (killed at 300, 720 ms of die animation) is due as well.
+  const at2600 = field.tickPackets(2600);
+  assert.equal(at2600[0]![0], MOB_OPCODE.move, "the legs come first");
+  assert.deepEqual(
+    at2600.slice(1).map((packet) => readMobPresence(new PacketReader(packet, 1))),
+    [{ flag: 0, mobId: 2 }, { flag: 1, mobId: 2 }],
+    "then the corpse and, in the same tick, its respawn",
+  );
+});
+
+test("a mob whose Mob/<id>.img is missing cannot be hurt and does not die", () => {
+  const map = flatMap([{ x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 }]);
+  const field = new MobField({ map, footholds: map.footholdSegments!, template: () => undefined });
+  assert.equal(field.mob(1)?.maxHp, undefined);
+  assert.equal(field.applyDamage(1, 9999, 0), undefined, "no image means no HP to take");
+  assert.equal(field.lifecyclePackets(1e9).length, 0, "and nothing to remove");
+  assert.equal(field.mob(1)?.alive, true);
+});
+
+test("a hit on an id the field does not have is not a mob", () => {
+  const field = hitField();
+  assert.equal(field.applyDamage(2, 5, 0), undefined);
+  assert.equal(field.mob(2), undefined);
+});
+
+test("the die animation and 0x34's value come out of the mob's own image", needsArchive, () => {
+  const templates = mobTemplateProvider(archive!);
+  assert.equal(templates(120100)?.dieMs, 720, "스포아: die1 is 4 frames of 180 ms (no delay property)");
+  assert.equal(templates(100100)?.dieMs, 1620, "파란달팽이: 9 frames");
+  assert.equal(templates(5130100)?.dieMs, 1440, "와일드보어: 8 frames");
+  assert.equal(templates(5130100)?.maxMP, 200, "info.maxMP is what 0x34 reports");
+  assert.equal(templates(120100)?.maxMP, 0, "most 2003 mobs have no MP at all");
+  assert.equal(MOB_RESPAWN_MS, 5000, "the default respawn this server picks");
+
+  // The whole loop on the real map: kill the first mushroom and follow it through.
+  const map = loadMapData(archive!, 1000000) as MapData;
+  const field = new MobField({ map, footholds: map.footholdSegments!, template: templates });
+  const target = field.mobs[0]!;
+  const hit = field.applyDamage(target.mobId, target.maxHp!, 0)!;
+  assert.equal(hit.killed, true);
+  assert.equal(hit.dieMs, 720);
+  assert.deepEqual(
+    field.lifecyclePackets(720).map((p) => p[0]),
+    [MOB_OPCODE.presence],
+    "0x31 flag=0 once the 720 ms of die1 are over",
+  );
+  const back = field.lifecyclePackets(720 + MOB_RESPAWN_MS);
+  assert.deepEqual(back.map((p) => p[0]), [MOB_OPCODE.presence], "and the same mob appears 5 s later");
+  assert.equal(back[0]![1], 1, "flag=1: `sub_491630` creates it and flashes it");
 });

@@ -32,9 +32,15 @@ import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
 import {
   MOB_OPCODE,
   describeMobEnterField,
+  describeMobLeaveDelayed,
   describeMobMove,
+  describeMobPresence,
+  describeMobStat,
   readMobEnterField,
+  readMobLeaveDelayed,
   readMobMove,
+  readMobPresence,
+  readMobStat,
 } from "./mob.ts";
 import { readCharacterData, writeCharacterData, type CharacterData } from "./chardata.ts";
 
@@ -342,6 +348,28 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
     try {
       const { mobId, body } = readMobMove(new PacketReader(plain, 1));
       return `${name}: ${describeMobMove(mobId, body)}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === MOB_OPCODE.leaveDelayed) {
+    try {
+      return `${name}: ${describeMobLeaveDelayed(readMobLeaveDelayed(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === MOB_OPCODE.presence) {
+    try {
+      const { flag, mobId } = readMobPresence(new PacketReader(plain, 1));
+      return `${name}: ${describeMobPresence(flag, mobId)}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === MOB_OPCODE.stat) {
+    try {
+      return `${name}: ${describeMobStat(readMobStat(new PacketReader(plain, 1)))}`;
     } catch (error) {
       return `${name}: (truncated: ${(error as Error).message})`;
     }

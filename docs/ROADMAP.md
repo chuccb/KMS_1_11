@@ -16,14 +16,15 @@
 | **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
 | 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
 | client → server 遊戲內目錄 | 🟡 | 39 個 sender 全部列出、其中聊天／密語／組隊／交易／商城／GM 指令有語意證據（FINDINGS §4.13）；**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 全部 byte-exact 解出、共用一個 codec 並各有 golden 測試**（§4.13.1／§4.13.1b）；缺的是真實流量驗證 |
-| 遊戲內階段（0x16 進地圖）| 🟡 | 遊戲伺服器領到 `0x04` 後送 `0x16`（地圖由 `--map` 決定，預設 `1000000`），接著**依地圖自己的 `life` 清單送 `0x2F` 怪物進場**、再讓怪物**沿腳踏點折線巡邏（每段一個 `0x33`）**（`--data` 指定 `Data.wz`，預設自動取用工作目錄的 `./Data.wz`；`--mob-speed` 調巡邏速度；FINDINGS §4.11.2b／§4.15／§4.16），假 client 逐欄驗證；**尚未實機驗證**，且怪物不會被打死（沒有 AI／受傷／掉落）|
+| 遊戲內階段（0x16 進地圖）| 🟡 | 遊戲伺服器領到 `0x04` 後送 `0x16`（地圖由 `--map` 決定，預設 `1000000`），接著**依地圖自己的 `life` 清單送 `0x2F` 怪物進場**、讓怪物**沿腳踏點折線巡邏（每段一個 `0x33`）**，再把 client 報的**傷害**記在怪物的 HP 上：命中回 `0x34`、殺死送 `0x30`、死亡動畫結束後 `0x31` 收屍、`--mob-respawn` 之後重生（`--data` 指定 `Data.wz`，預設自動取用工作目錄的 `./Data.wz`；`--mob-speed` 調巡邏速度；FINDINGS §4.11.2b／§4.15／§4.16／§4.17），假 client 逐欄驗證；**尚未實機驗證**，且還沒有掉落物與怪物 AI |
 | 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）＋角色 id 交接；**待原 client 實機驗證**（含 `0x16` 進地圖）|
 | 腳踏點幾何 | ✅ 完成 | `foothold/<page>/<group>/<item = life.fh>` 的 item key 就是出生點指的腳踏點，`prev/next` 串成折線；**全部 100 張地圖 30,338 個線段無重複 key、2,322 筆 `life` 全數落在自己的線段上且 y 等於 `cy`**（誤差 ≤ 1；FINDINGS §4.16.4），怪物的巡邏範圍由它決定 |
-| 怪物移動 | 🟡 | `0x33` 逐 byte codec（`sub_488BC0` 的指令級證據）＋ `src/game/mobs.ts` 的巡邏（每段一個 `0x33`、`info.speed` 百分比、`PATROL_SPEED_PX_PER_SEC` 基準值可調）；**尚未實機驗證**，且沒有受傷／AI／重生（§4.16）|
+| 怪物移動 | 🟡 | `0x33` 逐 byte codec（`sub_488BC0` 的指令級證據）＋ `src/game/mobs.ts` 的巡邏（每段一個 `0x33`、`info.speed` 百分比、`PATROL_SPEED_PX_PER_SEC` 基準值可調）；**尚未實機驗證**，且沒有 AI（只有兩張測試圖有攻擊資料）（§4.16）|
 | 地圖 id 與載入器 | ✅ 完成 | `CharacterData.mapId`（第 23 欄）就是地圖 id：`0x16` → `sub_468E00` → `sub_4694F0` 載入 `Map/Map/%09d.img`（FINDINGS §4.11.2b）；地圖載入器的全部 WZ 路徑已列表，`server/src/wz/paths.ts` 收錄伺服器要用的三個 |
 | 場地亂數種子 | ✅ 完成（含移植）| `0x16` 的三個 u32 是客戶端自訂亂數產生器的種子（FINDINGS §4.11.2：`sub_4C7930`→`sub_48A900`，反函式 `sub_4619F0` 就是 `Random()`）；伺服器可重算客戶端回報的傷害；`src/protocol/random.ts` 已逐位元移植並有 golden 測試 |
-| 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts`／`mob.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊**／**0x2F 怪物進場**／**0x33 怪物移動** 的逐 byte codec（`test/field.test.ts`／`test/mob.test.ts`／`test/mobs.test.ts` golden 覆蓋）；`src/game/{map,mobs}.ts` 已能把 `life` 變成出生點並沿腳踏點巡邏（§4.15／§4.16），仍未實作受傷／死亡 |
+| 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts`／`mob.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊**／**0x2F 怪物進場**／**0x33 怪物移動**／**0x30 死亡**／**0x31 收屍與重生**／**0x34 怪物 MP** 的逐 byte codec（`test/field.test.ts`／`test/mob.test.ts`／`test/mobs.test.ts` golden 覆蓋）；`src/game/{map,mobs}.ts` 已能把 `life` 變成出生點、沿腳踏點巡邏、並把 client 報的傷害記在怪物 HP 上（§4.15／§4.16／§4.17）|
 | 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：38 列的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
+| 打怪的閉環 | 🟡 | 傷害照 client 的數字記帳（ADR-006）、`0x34`／`0x30`／`0x31` 三個封包與收屍／重生計時（`--mob-respawn`），`Mob/<id>.img` 的 `maxHP`／`maxMP`／die 動畫長度都從 WZ 讀（FINDINGS §4.17）；假 client 逐欄驗證、真 `Data.wz` 實跑 45 隻怪（§4.17.5）；**尚未實機驗證**，且沒有掉落物與怪物 AI |
 | oracle 重現 | ⬜ | 原 client 能連上我們的 listener 並完成握手（不 crash） |
 
 **出口條件**：能回答「這個封包是什麼意思」，且每個答案都有 binary 或擷取證據。

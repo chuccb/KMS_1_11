@@ -56,11 +56,59 @@
  * (`MapleStory.exe.lst` line 773757, entries 0x5B20FC..0x5B2138). The hit/attack/die ranges in
  * `sub_488BC0`/`sub_485530` (13 + rand() % template+116) line up with that table.
  *
- * Opcodes without an implementation here: 0x30 (`u32 mobId` + `s16 delayMs`: the pool's timed queue
- * in `sub_492100` calls `sub_491AB0(pool, mobId, 1)` when it expires, which plays the die animation
- * and unlinks the mob; a negative delay removes it at once) and 0x31 (`u8 flag` + `u32 mobId`:
- * flag != 0 keeps/creates the mob, flag == 0 removes it - see FINDINGS 4.12). Both are described but
- * not encoded: nothing in this server kills a mob yet. 0x32/0x36 read a `u32 mobId` and do nothing.
+ * 0x32/0x36 read a `u32 mobId` and do nothing.
+ *
+ * DAMAGE AND DEATH (0x30 / 0x31 / 0x34)
+ * -------------------------------------
+ * A 2003 mob is hurt on the client's word: the *attacker's* client computes the damage, draws the
+ * numbers (it queues one `CMob::DAMAGEINFO` per target in the attack sender `sub_512F90` and prints
+ * them from the mob's own update) and reports the whole swing in 0x0F (`field.ts`, FINDINGS 4.13.1).
+ * The server's half of the loop is three packets, and all three say "the state of this mob changed":
+ *
+ *  0x34 `u32 mobId` + `u16`   (`sub_488D90`) The value lands in `mob+132`, whose only reader is the
+ *                            mob's attack picker (`sub_487D10`): it is compared against every attack's
+ *                            MP cost - `Mob/<id>.img/attack<i>/info/conMP`, parsed into the entry's
+ *                            `+16` by `sub_48E360` (149654/149678, `p_yBottom_4[3]`/`[4]`) - and the
+ *                            attacks the mob cannot afford are skipped. `mob+132` is therefore the
+ *                            mob's **MP**, and this is the packet that tells a client what a mob may
+ *                            use. The handler also moves `mob+116` (the mob's state): 1 -> 5,
+ *                            2 -> 4, 3 -> 5, and every other value calls `sub_485330(mob, 1)`, which
+ *                            switches the mob's flash on and sets the state to 4. Both 4 and 5 are
+ *                            the states the damage display wants - `sub_487A30` replays the hit
+ *                            animation only while `mob+116` is -2, 4 or 5 - so **0x34 is what makes a
+ *                            mob flinch**: without it a hit shows a number but never plays hit1.
+ *
+ *  0x30 `u32 mobId` + `s16 delay` (`sub_4926B0`) A non-negative delay queues `(mobId, now + delay)`
+ *                            in the pool's timed queue; when that expires (`sub_492100`) the pool
+ *                            calls `sub_491AB0(pool, mobId, 1)` -> `sub_485530`, which flushes the
+ *                            mob's pending damage numbers and then plays a die action:
+ *                            `mob+276 = 13 + rand() % template+116`, `template+116` being the number
+ *                            of die actions the mob's image has (see the counters note below). Every
+ *                            mob in this `Data.wz` has exactly one (`die1`), so the action is always
+ *                            13. A *negative* delay removes the mob at once (`sub_491AB0(..., 0)`)
+ *                            but refuses while the sprite is busy (`sub_485520` = frames left), so a
+ *                            die animation in flight is never cut short. **0x30 alone does not unlink
+ *                            the mob** - the corpse stays in the pool until 0x31 says otherwise, which
+ *                            is why dying is two packets.
+ *
+ *  0x31 `u8 flag` + `u32 mobId` (`sub_4927B0`) `flag == 0` -> `sub_491830`: the mob is removed (the
+ *                            flash is switched off first if the sprite is busy, then the pool entry
+ *                            is unlinked once `mob+112` is clear). `flag != 0` -> `sub_491630`: a
+ *                            known mob is merely refreshed, an unknown one is created from the rest
+ *                            of the packet - a `u32 templateId` followed by *exactly* the body of
+ *                            0x2F, since both go through `CMob::Init` - and the new mob gets
+ *                            `sub_485330(mob, 1)`, i.e. the flash. That is the "a monster appears in
+ *                            front of you" packet (and it leaves the mob flinch-ready).
+ *
+ * The counters the two handlers use are per-mob-image, not per-action: `template+108` = the number of
+ * `attack<i>` infos, `template+112` = the number of hit actions (`hit1`/`hit2`/`hitF`, which is where
+ * the attack packet's `hitAnimation` comes from: `7 + rand() % that`), `template+116` = the number of
+ * die actions. All three are read off `Mob/<id>.img`'s own children by `game/mobs.ts`.
+ *
+ * So one kill looks like: 0x30 (the die animation starts now) -> wait out `dieMs` (the sum of the die
+ * action's frame delays, the client's own `sub_486180`) -> 0x31 flag=0 (the corpse disappears). Both
+ * timers live in `game/mobs.ts`; the lengths come from the mob's image, and the frame delay the
+ * client assumes when a frame has no `delay` property is 180 ms (`sub_40B530`, 19949: `lVal = 180`).
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
@@ -73,20 +121,27 @@ export const MOB_OPCODE = {
   enterField: 0x2f,
   /**
    * `CMobPool` 0x30 (`sub_4926B0`): `u32 mobId` + `s16 delayMs`. `delayMs >= 0` puts the mob in the
-   * pool's timed queue (`sub_492100`) so it leaves - with its die animation - when the timer runs
-   * out; a negative `delayMs` removes it immediately. Not encoded yet: nothing kills a mob here.
+   * pool's timed queue (`sub_492100`) so it starts dying - i.e. plays a die action - when the timer
+   * runs out; a negative `delayMs` removes it at once (unless its die animation is still running).
+   * The mob is *not* unlinked by this packet: `presence` does that.
    */
   leaveDelayed: 0x30,
   /**
-   * `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`. `flag != 0` keeps the mob (creating it
-   * from a template id + `CMob::Init` body when the pool does not have the id yet), `flag == 0`
-   * removes it. Not encoded yet: see `leaveDelayed`.
+   * `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`. `flag == 0` removes the mob;
+   * `flag != 0` refreshes a known mob, or creates an unknown one from a `u32 templateId` plus the
+   * body of 0x2F (and flashes it, `sub_485330(mob, 1)`).
    */
   presence: 0x31,
   /**
    * `CMobPool` 0x33 (`sub_492380` -> `sub_488BC0`): the mob moves - `u32 mobId` + `MobMove`.
    */
   move: 0x33,
+  /**
+   * `CMobPool` 0x34 (`sub_492380` -> `sub_488D90`): `u32 mobId` + `u16 mp`. The value is the mob's
+   * MP (its only reader compares it against the attacks' `conMP`); it also pushes the mob into the
+   * flash state that lets the client replay its hit animation.
+   */
+  stat: 0x34,
   /** `CMobPool` 0x32/0x36 (`sub_492380` default): `u32 mobId`, then nothing. Effectively unused. */
   unusedLookup: 0x32,
 } as const;
@@ -163,6 +218,15 @@ export interface MobEnterField {
 /** Number of animation channels the client's flag word has room for (`sub_4C6CE0`). */
 export const MOB_CHANNEL_COUNT = 7;
 
+/** `0x31` flag: the mob is (still) there. An unknown id is created from the rest of the packet. */
+export const MOB_PRESENCE_KEEP = 1;
+
+/** `0x31` flag: the mob is gone (`sub_491830`). */
+export const MOB_PRESENCE_REMOVE = 0;
+
+/** The tail both spawn forms share: everything after `mobId` and (for 0x31) `templateId`. */
+export type MobSpawnTail = Omit<MobEnterField, "mobId" | "templateId">;
+
 function writeS16(writer: PacketWriter, value: number): void {
   writer.writeU16(value & 0xffff);
 }
@@ -171,12 +235,8 @@ function readS16(reader: PacketReader): number {
   return (reader.readU16() << 16) >> 16;
 }
 
-/** Encode one `0x2F` packet, opcode byte included (the convention `encodeSetField` uses). */
-export function encodeMobEnterField(body: MobEnterField): Uint8Array {
-  const writer = new PacketWriter(32);
-  writer.writeByte(MOB_OPCODE.enterField);
-  writer.writeU32(body.mobId >>> 0);
-  writer.writeU32(body.templateId >>> 0);
+/** The `CMob::Init` body of `0x2F` and of `0x31 flag != 0` - the same bytes, read by one function. */
+function writeMobSpawnTail(writer: PacketWriter, body: MobSpawnTail): void {
   writeS16(writer, body.x);
   writeS16(writer, body.y);
   writer.writeByte(body.facing & 0xff);
@@ -194,7 +254,102 @@ export function encodeMobEnterField(body: MobEnterField): Uint8Array {
     writeS16(writer, channel.index);
     writeS16(writer, channel.delay);
   }
+}
+
+/** Encode one `0x2F` packet, opcode byte included (the convention `encodeSetField` uses). */
+export function encodeMobEnterField(body: MobEnterField): Uint8Array {
+  const writer = new PacketWriter(32);
+  writer.writeByte(MOB_OPCODE.enterField);
+  writer.writeU32(body.mobId >>> 0);
+  writer.writeU32(body.templateId >>> 0);
+  writeMobSpawnTail(writer, body);
   return writer.toBytes();
+}
+
+/**
+ * Encode one `0x31 flag != 0` packet: a monster appears.
+ *
+ * The tail is byte-for-byte the body of `0x2F`: `sub_491630` reads `u32 templateId` and then calls
+ * `CMob::Init` on the rest of the packet. It ends with `sub_485330(mob, 1)` (the flash) and sets the
+ * mob's state to 4, so a mob that arrives this way is already in the state its hit animation needs
+ * (see the header). Use it for respawns; `0x2F` is the form for the batch a field entry sends.
+ */
+export function encodeMobAppear(mobId: number, templateId: number, tail: MobSpawnTail): Uint8Array {
+  const writer = new PacketWriter(40);
+  writer.writeByte(MOB_OPCODE.presence);
+  writer.writeByte(MOB_PRESENCE_KEEP);
+  writer.writeU32(mobId >>> 0);
+  writer.writeU32(templateId >>> 0);
+  writeMobSpawnTail(writer, tail);
+  return writer.toBytes();
+}
+
+/** Encode one `0x31 flag == 0` packet: this mob is gone (the corpse of a dead one included). */
+export function encodeMobRemove(mobId: number): Uint8Array {
+  const writer = new PacketWriter(8);
+  writer.writeByte(MOB_OPCODE.presence);
+  writer.writeByte(MOB_PRESENCE_REMOVE);
+  writer.writeU32(mobId >>> 0);
+  return writer.toBytes();
+}
+
+/** Encode one `0x30` packet: the mob starts dying `delayMs` from now. */
+export function encodeMobLeaveDelayed(body: MobLeaveDelayed): Uint8Array {
+  const writer = new PacketWriter(8);
+  writer.writeByte(MOB_OPCODE.leaveDelayed);
+  writer.writeU32(body.mobId >>> 0);
+  writeS16(writer, body.delayMs);
+  return writer.toBytes();
+}
+
+/** Encode one `0x34` packet: the mob's MP (and, with it, "this mob is in its flash state"). */
+export function encodeMobStat(body: MobStat): Uint8Array {
+  const writer = new PacketWriter(8);
+  writer.writeByte(MOB_OPCODE.stat);
+  writer.writeU32(body.mobId >>> 0);
+  writer.writeU16(body.mp & 0xffff);
+  return writer.toBytes();
+}
+
+/** The body of one `0x30` (mob leave, delayed) packet. */
+export interface MobLeaveDelayed {
+  /** Pool key, the same id `0x2F` handed out. */
+  mobId: number;
+  /**
+   * ms until the die animation starts. `0` = now, which is what a kill wants; a negative value means
+   * "remove it at once" instead (`sub_491AB0(..., 0)`), which the client skips while the mob is still
+   * animating.
+   */
+  delayMs: number;
+}
+
+/** The body of one `0x34` (mob stat) packet. */
+export interface MobStat {
+  mobId: number;
+  /**
+   * The mob's MP, `u16` - `sub_488D90` stores it in `mob+132`, the value the attack picker compares
+   * against each attack's `conMP`. Nothing in the client reads it as HP.
+   */
+  mp: number;
+}
+
+/** Read the `0x31` header: the flag and the mob id. The tail is only there for an unknown id. */
+export function readMobPresence(reader: PacketReader): { flag: number; mobId: number } {
+  const flag = reader.readByte();
+  const mobId = reader.readU32();
+  return { flag, mobId };
+}
+
+/** Read the fields of a `0x30` body (no opcode byte; the reader must sit at `mobId`). */
+export function readMobLeaveDelayed(reader: PacketReader): MobLeaveDelayed {
+  const mobId = reader.readU32();
+  return { mobId, delayMs: readS16(reader) };
+}
+
+/** Read the fields of a `0x34` body (no opcode byte; the reader must sit at `mobId`). */
+export function readMobStat(reader: PacketReader): MobStat {
+  const mobId = reader.readU32();
+  return { mobId, mp: reader.readU16() };
 }
 
 /** Read the fields of a `0x2F` body (no opcode byte; `PacketReader` must sit at `mobId`). */
@@ -277,4 +432,20 @@ export function describeMobEnterField(body: MobEnterField): string {
     `mobId=${body.mobId} template=${body.templateId} at (${body.x},${body.y}) ` +
     `facing=${body.facing & 1} animChannels=${channels}`
   );
+}
+
+/** One line describing a `0x30` packet body, for logs and `decode`. */
+export function describeMobLeaveDelayed(body: MobLeaveDelayed): string {
+  const when = body.delayMs < 0 ? "removed at once" : `the die animation starts in ${body.delayMs}ms`;
+  return `mobId=${body.mobId} leave: ${when}`;
+}
+
+/** One line describing a `0x31` header, for logs and `decode`. */
+export function describeMobPresence(flag: number, mobId: number): string {
+  return `mobId=${mobId} presence=${flag === MOB_PRESENCE_REMOVE ? "removed" : "kept (created if unknown)"}`;
+}
+
+/** One line describing a `0x34` packet body, for logs and `decode`. */
+export function describeMobStat(body: MobStat): string {
+  return `mobId=${body.mobId} mp=${body.mp}`;
 }
