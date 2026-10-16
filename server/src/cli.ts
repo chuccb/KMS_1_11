@@ -12,6 +12,7 @@
  * so a client can log in, pick a world and see the character-select screen.
  */
 import { schemaJson, schemaText } from "./protocol/schema.ts";
+import { runWzCommand } from "./wz/cli.ts";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -40,6 +41,8 @@ usage:
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
         [--seed <n>] [--handshake-body <hex>] [--quiet]
+  wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
+                                  maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
 notes:
   capture --mode session (default) is the real client model: a 211-byte handshake opens the
@@ -60,6 +63,10 @@ notes:
   adopted automatically; otherwise pass --c2s-seed/--s2c-seed (the client's send/receive states).
   Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
+
+  wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
+  canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
+  showing up as a failing assertion (docs/WZ1_FORMAT.md 4.6).
 
   serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9: it opens with the
   211-byte handshake, answers 0x01 with the world list, 0x02 with up to three character slots and
@@ -264,6 +271,7 @@ async function main(argv: string[]): Promise<number> {
     return command ? 0 : 1;
   }
   if (command === "decode") return runDecode(rest);
+  if (command === "wz") return runWzCommand(rest);
   if (command === "serve") return runServe(rest);
   if (command === "schema") {
     process.stdout.write(rest.includes("--json") ? schemaJson() : schemaText());

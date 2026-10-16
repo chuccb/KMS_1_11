@@ -9,7 +9,7 @@
 |---|---|---|
 | WZ 容器/樹/字串解碼 | ✅ 完成 | `tools/wz1.py` 解析 1,052 張 `.img` |
 | `.img` 屬性樹 | ✅ 結構完成 | 186 個屬性完整還原（`analysis/sample_Cap_01000000_properties.txt`）|
-| `.img` 像素（canvas + ZLZ） | ⬜ | 能輸出 `UI/Basic.img` 的 `Cursor` 為正確 PNG |
+| `.img` 像素（canvas + ZLZ） | ✅ 完成 | `node server/src/cli.ts wz png <image> --out assets/` 把每張 canvas 寫成 PNG；三個像素格式（ARGB4444／A8R8G8B8／RGB565）都有 binary 證據（`docs/WZ1_FORMAT.md` §4.6），並已用眼睛驗過 `Mob/1210102.img`（주황버섯）與 `UI/Basic.img`（97 張 canvas）|
 | 協定：framing / cipher | ✅ 完成 | 握手、雙方向標頭、LCG 金鑰全部有 binary 證據（FINDINGS §2–§3）|
 | 協定：dispatch/opcode 表 | 🟢 | 分派鏈已完整定位（FINDINGS §4.1／§4.7：階段 → opcode → 子系統）；client 送出的 39 個 opcode 已建目錄，**登入鏈四個階段（§4.8／§4.9）與遊戲內第一條垂直切片（§4.11：進地圖 0x16、別人進場 0x1C、離場 0x1D、移動 0x22／0x0E、傳送門 0x0D）都已解到欄位層**。剩下的：CField 其餘區間（§6 第 3 項）與 §4.11 的三個 UNKNOWN |
 | 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
@@ -28,7 +28,8 @@
 
 ## Phase 1 — 資源管線與協定 schema（~3 週）
 
-- `tools/wz2assets.py`：`Data.wz` → `assets/`（PNG + 動畫 JSON + OGG + bitmap font + manifest）
+- `server/src/wz/`（ADR-005）：`Data.wz` → `assets/`（PNG + 動畫 JSON + OGG + bitmap font + manifest）；
+  目錄樹／值層／定位／PNG 已完成，剩下的動畫 JSON 與 OGG 是包裝層
 - `protocol/schema/`：從 Phase 0 的 opcode 表建立 schema；產生 TypeScript codec 與 **golden 測試向量**
 - 出口條件：`node --test` 通過 schema 產生的所有 golden bytes 測試；`assets/` 可用工具重建且雜湊一致
 
@@ -60,7 +61,7 @@
 | 風險 | 對策 |
 |---|---|
 | 協定 dispatch 未定位 | 先做 capture（不依賴反編譯）；兩條路並行 |
-| canvas/ZLZ 未解 | 有明確清單（`docs/WZ1_FORMAT.md` §4.6），難度低 |
+| 2 張背景 canvas 的 stream 被截斷、`pad` 語意未解 | 只影響 `Map/Back/dryRock.img`／`midForest.img`，已標記 `partial`（其餘像素為 0），列在 `docs/WZ1_FORMAT.md` §4.8 |
 | 「現代 MapleStory 規則」污染 2003 行為 | 每系統一頁 evidence（結論/證據/confidence），查不到就標 UNKNOWN 並不做 |
 | 範圍爆炸 | 嚴守 Phase 出口條件；先垂直切片（登入→進圖→走跳→打怪） |
 | 版權 | 僅研究/私人用途；`assets/` 與衍生資料不進 git、不公開發布 |

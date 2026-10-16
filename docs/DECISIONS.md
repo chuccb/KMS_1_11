@@ -77,3 +77,28 @@ client 必須能與該 server 完整互動。
 **後果**：
 - 第一個「可對外展示」的成果不是遊戲畫面，而是**原 client 的握手封包被正確解析**。
 - 任何未被上述兩者證實的協定欄位，一律標記 `HYPOTHESIS`，不得寫成既定規格。
+
+---
+
+## ADR-005：WZ／資產管線只實作一次，用 TypeScript（`server/src/wz/`）
+
+**日期**：2026-10-16 ｜ **狀態**：已定案
+
+**決策**：`Data.wz` 的讀取與資產輸出（目錄樹、值層、像素、PNG）以 **TypeScript 實作於
+`server/src/wz/`**，作為產品端唯一一份；Python 的 `tools/wz1.py`／`wzimg.py`／`wzdata.py`
+**降級為反編譯與驗證用的參考實作**（兩邊的黃金值必須一致，見 `server/test/wzimg.test.ts`
+與 `tools/tests/test_wzimg.py`），不再新增 Python 端資產工具，原路線圖的
+`tools/wz2assets.py` 取消。
+
+**理由**：
+1. 遊戲程式是 TypeScript（ADR-002）：伺服器要地圖／怪物資料，Godot 客戶端要 PNG／動畫。
+   若資產管線另寫一份 Python，同一份 WZ 語意就會有**兩份會各自漂移的實作**。
+2. 反編譯 dump 是 CP949 的 C，Python 在「快速試錯、和 binary 對照」上更順手，所以探索階段
+   留在 `tools/`；一旦語意確定（`docs/WZ1_FORMAT.md` §4 全部 ✅）就只留一份產品實作。
+3. 兩份實作對同一組黃金值（1,052 張 image、922 declared + 130 scanned、55,379 張 canvas、
+   696,774 次名稱表查詢、第一張 canvas 像素的 sha256）互相驗證，比任何註解都可靠。
+
+**後果**：
+- 資產輸出（PNG）由 `server/src/wz/png.ts` 產生，指令是 `node server/src/cli.ts wz png`。
+- `tools/` 只做「讀 .c／驗 WZ 語意」；新增 WZ 功能一律加到 `server/src/wz/`。
+- 兩邊不一致時以 `docs/WZ1_FORMAT.md` 的證據為準，並同時修正兩份實作與測試。

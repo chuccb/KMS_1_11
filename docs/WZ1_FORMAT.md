@@ -182,11 +182,21 @@ pixelLen bytes     ← 像素區
 
 **證據**：`Canvas.dll.c` L28980–29100（讀取端：`sub_1001E740` 讀 flag、`sub_1001F340` 連續讀 4 個 compact、四連零檢查、`u32` 長度、`if (len) sub_1001DE50(...)`）；L28820–28920 為寫入端。表面建立參數是 `(width, height, fmt, pad)`（L29084 的 vtable+60）。
 
-- **bpp**：`fmt & 0xFF == 2` → 4 bytes/pixel；其餘（1、513）→ 2 bytes/pixel。513 = `0x201`，低位 1（16bpp），`0x200` 是額外旗標。
+- **像素格式與 bpp**（三種，`Canvas.dll.c` L14101–14150 依「來源格式 × 目的格式」挑 blitter，證明每個格式的 layout）：
+
+| fmt | bpp | 像素 layout | 證據 |
+|---|---|---|---|
+| `1` | 2 | **ARGB4444**：word 低位元組在前，bits 15-12 = A、11-8 = R、7-4 = G、3-0 = B | L14505 `sub_1000DBD0`（16→32bpp 展開器）把 4 個 nibble 分別寫到 dword 的 B、G、R、A 位元組；資料面：`Mob/1210102.img`（주황버섯）解出來是橘色 |
+| `2` | 4 | **A8R8G8B8**，記憶體順序 B、G、R、A | 同一個展開器的**輸出**就是 fmt 2 的緩衝區；本檔 0 張，屬 🟡 |
+| `513` | 2 | **RGB565、無 alpha**：bits 15-11 = R5、10-5 = G6、4-0 = B5 | L15664 `sub_1000F370`（16→16bpp blitter）對全部 65,536 個輸入值等價於標準 4444→565（`R5=R4<<1|R3`、`G6=G4<<2|G2`、`B5=B4<<1|B3`），逐值驗證 0 個不符 |
+
+  `pixel_bpp()` 的 `fmt & 0xFF == 2` 因此有了正確的解讀：低位元組是「深度」（1 = 16bpp、2 = 32bpp），**bit 8 是「有無 alpha」**（0x201 = 16bpp 但改成 565、顏色不走 alpha）。
 - **像素區**：`u8 flag`（非 0 → ZException(1392)，`Canvas.dll.c` L29190）+ zlib stream；解壓目標大小 = `width * height * bpp`。
 - **本版寫入器省略 zlib 的 4-byte adler32 trailer**：一次性 `zlib.decompress()` 會拒絕（`.eof` 永遠不為真），必須用 `decompressobj().decompress(body, width*height*bpp)`——客戶端就是這樣 inflate 進預先清零的緩衝區。
 - 全檔統計（`--census`）：**55,379 個 canvas**（fmt 1 = 55,314、fmt 513 = 65），**55,377 個完整解碼、2 個「短流」**：`Map/Back/dryRock.img`（256×256，只寫了 512 B）與 `Map/Back/midForest.img`（128×128，只寫了 128 B），兩者 `pad = 4`，其餘 55,377 個 `pad = 0`。短流以「其餘像素為 0」處理並以 `Canvas.partial` 標記。
-- **仍未解**：fmt 513 的 `0x200` 與 `pad` 的語意（`Gr2D_DX8.dll.c` L8762 `case 1/2/513` 會挑不同 DDPIXELFORMAT；上列 2 張是 `pad = 4`）。
+- **`pad` 欄位**（`compact`，緊接在 `fmt` 之後）：全檔 55,377 個 canvas 是 0，**只有那 2 張短流是 4**。除了「都是 fmt 513 的背景圖」之外沒有其他相關性，語意**仍未解**（不猜）。
+- **那 2 張短流是「被截斷的 zlib stream」**：`decompressobj().eof` 為 False、`unconsumed_tail` 為空，只吐出一個重複的 16-bit 值（`dryRock` 512 B、`midForest` 128 B）——寫入端那一塊資料本身就不完整。客戶端是 inflate 進**預先清零**的 `width*height*bpp` 緩衝區，所以它畫出來的其餘部分是 0（透明／黑），重寫版照做，並用 `Canvas.partial` 標記。
+- **看得到的效果**：`node server/src/cli.ts wz png <image> --out <dir>` 把每張 canvas 寫成 PNG（`server/src/wz/png.ts`，零依賴、filter 0）；`Mob/1210102.img` 與 `UI/Basic.img` 都已用眼睛驗過是正常 sprite。
 
 ### 4.7 image 在 `Data.wz` 裡的位置 ✅（取代舊版「標頭變體」清單）
 
@@ -201,21 +211,27 @@ pixelLen bytes     ← 像素區
 
 | # | 項目 | 下一步 |
 |---|---|---|
-| 1 | fmt 513 的 `0x200` 位與 `pad` 欄位語意 | `Gr2D_DX8.dll` 的 DDPIXELFORMAT 表；`Canvas.dll.c` L29084 的 surface 建立參數 |
-| 2 | 2 張「短流」canvas 的繪圖語意（是否 tile 填滿整個表面） | 追 `Gr2D_DX8` 的 blit；重寫時先用「其餘為 0」近似 |
+| 1 | `pad` 欄位的語意（見 §4.6；只有 2 張 `pad = 4`） | 找一個 `pad != 0` 且像素完整的樣本，或追寫入端 |
+| 2 | 2 張「短流」canvas 的繪圖語意（截斷的 stream；客戶端是否只畫到拿到的部分） | 追 `Gr2D_DX8` 的 blit；重寫時先用「其餘為 0」近似 |
 | 3 | type 6/7/11/13/16/17/18/19 未在 `Data.wz` 出現 | 只依 `PCOM` switch 支援，遇到再驗 |
 | 4 | `Sound_DX8` body 的音訊格式 | `Sound_DX8.dll.c` |
 
 ## 5. 對重寫專案的意義
 
 1. **`.img` 值層已經沒有未知項**：屬性樹、字串、名稱表、Canvas 像素全部可程式化取得；重寫版可以直接以「WZ 樹 → 遊戲資料」的方式載入，不需要任何自製壓縮或猜測。
-2. 伺服器端（`server/src/wz/`）只需要三件事：**目錄樹**（§2）、**值層編解碼**（§4.1–§4.6）、**定位**（§4.7）。Python 端的 `tools/wz1.py` / `tools/wzimg.py` / `tools/wzdata.py` 是唯一的參考實作與驗收基準（`server/test/*.test.ts` 對同一份 manifest 做等價比對）。
-3. 仍需注意的三個近似：`fmt 513` 的 `pad`（§4.8 #1）、2 張短流 canvas（#2）、`Sound_DX8` 音訊（#4）。三個都只影響繪圖/播放，不影響資料模型。
+2. 伺服器／工具端（`server/src/wz/`）有四件事：**目錄樹**（§2）、**值層編解碼**（§4.1–§4.6）、**定位**（§4.7）、**像素 → PNG**（§4.6）。Python 端的 `tools/wz1.py` / `tools/wzimg.py` / `tools/wzdata.py` 是參考實作與驗收基準；TypeScript 端（`server/src/wz/`）是**產品實作**，`server/test/wzimg.test.ts` 對同一組黃金值（1,052 / 922+130 / 55,379 / 696,774 refs / 29×30 第一張 canvas 的 sha256）比對，兩邊必須一致。
+   資產管線因此只有一份實作：不放 `tools/wz2assets.py`，PNG 由 `server/src/wz/png.ts` 產生（見 `DECISIONS.md` ADR-005）。
+3. 仍需注意的三個近似：`pad` 欄位（§4.8 #1）、2 張短流 canvas（#2）、`Sound_DX8` 音訊（#4）。三個都只影響繪圖/播放，不影響資料模型。
 4. 本規格的所有邊界條件（長度前綴上限 0x2000、compact int 的 `0x80` 逃逸、`0x41` 結束、四個零、`fmt` 白名單）都應寫成單元測試。
 
 ## 附錄：驗證用指令
 
 ```bash
+node --test "server/**/*.test.ts"                   # TypeScript：149 個測試（含 WZ 值層/像素/PNG）
+node server/src/cli.ts wz census                    # canvas 普查（與 --census 同數字）
+node server/src/cli.ts wz maps                      # 100 張地圖的 info/foothold/portal/life
+node server/src/cli.ts wz dump <image path>         # 單張 image 的屬性樹（--json 為 plain() 視圖）
+node server/src/cli.ts wz png <image path> --out assets/   # 每張 canvas → PNG（用眼睛驗）
 python3 -m unittest discover -s tools/tests -v      # 47 個測試：合成 fixture + 對真檔的黃金值
 python3 tools/wz1.py Data.wz                       # 目錄樹、image 數、資料區大小
 python3 tools/wzdata.py Data.wz --census           # 值層普查（canvas/像素/定位統計）
