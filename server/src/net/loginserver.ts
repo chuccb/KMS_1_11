@@ -537,6 +537,12 @@ export interface GameEntryServerOptions {
    * alone, which is what an NPC with nothing to say deserves.
    */
   npcDialogue?: (templateId: number) => NpcDialogue | undefined;
+  /**
+   * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
+   * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
+   * the client's, but *which* NPCs the 2003 server walked is not located.
+   */
+  npcWalk?: (templateId: number) => boolean;
   /** Walking speed of a mob at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
   mobSpeedPxPerSecond?: number;
   /** How often the field hands out mob movement legs, in ms. Defaults to 250. */
@@ -618,6 +624,7 @@ export class GameEntryServer {
       ...(options.mapProvider !== undefined ? { mapProvider: options.mapProvider } : {}),
       ...(options.mobTemplate !== undefined ? { mobTemplate: options.mobTemplate } : {}),
       ...(options.npcTemplate !== undefined ? { npcTemplate: options.npcTemplate } : {}),
+      ...(options.npcWalk !== undefined ? { npcWalk: options.npcWalk } : {}),
       ...(options.mobSpeedPxPerSecond !== undefined
         ? { mobSpeedPxPerSecond: options.mobSpeedPxPerSecond }
         : {}),

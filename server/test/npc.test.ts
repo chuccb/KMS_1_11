@@ -20,7 +20,7 @@ import {
   readNpcState,
 } from "../src/protocol/npc.ts";
 import { describeFieldPacket } from "../src/protocol/field.ts";
-import { NpcField } from "../src/game/npcs.ts";
+import { NpcField, npcWalkPolicy } from "../src/game/npcs.ts";
 import { npcImagePath } from "../src/wz/paths.ts";
 import type { LifeSpawn } from "../src/game/map.ts";
 
@@ -91,7 +91,7 @@ test("the field dispatcher describes the NPC packet instead of calling it undeco
   assert.match(refresh ?? "", /npcId=4 \(known id: refresh only, or a truncated body\)/);
   assert.match(describeFieldPacket(new Uint8Array([NPC_OPCODE.enterField, 1])) ?? "", /truncated/);
   assert.match(describeFieldPacket(encodeNpcLeaveField(2)) ?? "", /npcId=2 leave/);
-  assert.match(describeFieldPacket(encodeNpcState(2, false)) ?? "", /npcId=2 secondState=off/);
+  assert.match(describeFieldPacket(encodeNpcState(2, false)) ?? "", /npcId=2 walk=off/);
 });
 
 test("spawning a map's life list gives one 0x39 per NPC, with ids from 1", () => {
@@ -135,10 +135,11 @@ test("removing and toggling follow the client's own rules", () => {
   field.spawnPackets();
   const id = field.npcs[0]!.npcId;
 
-  assert.equal(field.setSecondState(999, true), undefined, "an unknown id has nothing to toggle");
-  assert.notEqual(field.setSecondState(id, true), undefined);
-  assert.equal(field.setSecondState(id, true), undefined, "already on: the client clears nothing");
-  assert.notEqual(field.setSecondState(id, false), undefined);
+  assert.equal(field.setWalking(999, true), undefined, "an unknown id has nothing to toggle");
+  assert.deepEqual([...field.setWalking(id, true)!], [NPC_OPCODE.stateToggle, 1, id, 0, 0, 0]);
+  assert.equal(field.setWalking(id, true), undefined, "already walking: the client does nothing");
+  assert.notEqual(field.setWalking(id, false), undefined);
+  assert.equal(field.walking, 0);
 
   assert.equal(field.remove(999), undefined);
   const leave = field.remove(id);
@@ -146,8 +147,51 @@ test("removing and toggling follow the client's own rules", () => {
   assert.deepEqual([...leave!], [NPC_OPCODE.leaveField, id, 0, 0, 0]);
   assert.equal(field.present, 0);
   assert.equal(field.remove(id), undefined, "a second remove has no packet");
-  assert.equal(field.setSecondState(id, true), undefined, "and an absent NPC cannot be toggled");
+  assert.equal(field.setWalking(id, true), undefined, "and an absent NPC cannot be toggled");
   assert.equal(field.npcs.length, 1, "the entry stays, so the id is never handed out again");
+});
+
+test("--npc-walk is a policy: nobody, everybody, or a list of template ids", () => {
+  assert.equal(npcWalkPolicy(undefined)(1012000), false, "absent means nobody walks");
+  assert.equal(npcWalkPolicy("none")(1012000), false);
+  assert.equal(npcWalkPolicy(" ALL ")(1012000), true, "case and spaces are not a policy");
+  const some = npcWalkPolicy("2003, 1012000");
+  assert.equal(some(2003), true);
+  assert.equal(some(1012000), true);
+  assert.equal(some(1010100), false);
+  assert.throws(() => npcWalkPolicy("everyone"), /neither none, all, nor a template id/);
+  assert.throws(() => npcWalkPolicy("2003,-1"), /neither none, all, nor a template id/);
+});
+
+test("an NPC the policy names walks from the moment the client hears about it", () => {
+  const field = new NpcField({
+    spawns: [heena, { ...heena, templateId: 1010100, x: 100, y: 200 }],
+    walk: npcWalkPolicy("1012000"),
+  });
+  const packets = field.spawnPackets();
+  // The flag is a bit on a pool entry, so the walk packet follows the create that fills it in - and
+  // the NPC the policy does not name gets no packet at all.
+  assert.deepEqual(
+    packets.map((packet) => packet[0]),
+    [NPC_OPCODE.enterField, NPC_OPCODE.stateToggle, NPC_OPCODE.enterField],
+  );
+  assert.deepEqual(
+    readNpcState(new PacketReader(packets[1]!, 1)),
+    { npcId: 1, on: true },
+    "the pool id the field handed out, not the template id the policy was written with",
+  );
+  assert.equal(field.walking, 1);
+  assert.equal(field.npcs[0]!.walking, true);
+  assert.equal(field.npcs[1]!.walking, false);
+
+  // A player who joins later is told the same thing: the state is part of the field's snapshot, so
+  // the server keeps no walking NPC in its own timer.
+  assert.deepEqual(
+    field.enterPackets().map((packet) => packet[0]),
+    [NPC_OPCODE.enterField, NPC_OPCODE.stateToggle, NPC_OPCODE.enterField],
+  );
+  field.remove(1);
+  assert.equal(field.walking, 0, "a removed NPC is not walking");
 });
 
 test("the NPC image path is the client's own format, padded to seven digits", () => {

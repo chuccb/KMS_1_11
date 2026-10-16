@@ -86,6 +86,12 @@ export interface FieldInstanceOptions {
   mobTemplate?: (templateId: number) => MobTemplate | undefined;
   /** `Npc/<id>.img`; without it every NPC of the map is spawned unnamed. */
   npcTemplate?: (templateId: number) => NpcTemplate | undefined;
+  /**
+   * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). Absent means nobody, which is the
+   * honest default: which NPCs the 2003 server walked is not located. `npcWalkPolicy` builds this from
+   * `--npc-walk`.
+   */
+  npcWalk?: (templateId: number) => boolean;
   /** Mob walking speed at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
   mobSpeedPxPerSecond?: number;
   /** How long a killed mob stays away, in ms. Defaults to `MOB_RESPAWN_MS`. */
@@ -142,6 +148,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     this.npcs = new NpcField({
       spawns: options.map.npcs,
       ...(options.npcTemplate !== undefined ? { template: options.npcTemplate } : {}),
+      ...(options.npcWalk !== undefined ? { walk: options.npcWalk } : {}),
       log: (line) => this.log?.(line),
     });
     // The map's NPCs exist as soon as the field does (their ids are the field's, not a session's).
@@ -157,7 +164,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     this.log?.(
       `world: map ${options.map.id} (${options.map.name || options.map.imagePath}) is up - ` +
         `spawned ${this.mobs.mobs.length} mobs ` +
-        `(${this.mobs.walking} walking), ${this.npcs.present} NPCs`,
+        `(${this.mobs.walking} walking), ${this.npcs.present} NPCs ` +
+        `(${this.npcs.walking} walking)`,
     );
   }
 
@@ -340,6 +348,8 @@ export interface FieldRegistryOptions {
   mapProvider?: (mapId: number) => MapData | undefined;
   mobTemplate?: (templateId: number) => MobTemplate | undefined;
   npcTemplate?: (templateId: number) => NpcTemplate | undefined;
+  /** Which NPCs the client walks (`0x3B`; see `FieldInstanceOptions.npcWalk`). */
+  npcWalk?: (templateId: number) => boolean;
   mobSpeedPxPerSecond?: number;
   mobRespawnMs?: number;
   dropPolicy?: DropPolicy;
@@ -381,6 +391,7 @@ export class FieldRegistry<M extends FieldMember = FieldMember> {
       map,
       ...(this.options.mobTemplate !== undefined ? { mobTemplate: this.options.mobTemplate } : {}),
       ...(this.options.npcTemplate !== undefined ? { npcTemplate: this.options.npcTemplate } : {}),
+      ...(this.options.npcWalk !== undefined ? { npcWalk: this.options.npcWalk } : {}),
       ...(this.options.mobSpeedPxPerSecond !== undefined
         ? { mobSpeedPxPerSecond: this.options.mobSpeedPxPerSecond }
         : {}),

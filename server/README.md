@@ -25,10 +25,12 @@
 | `src/protocol/inventory.ts` | ✅ **道具欄異動 `0x0B`**：`result`／`count`／每筆 `{op, inventory, slot, …}`，`op 0` 接一個 `GW_ItemSlot`（**沒有種類位元組**）；`op 1`（換金鑰）在裝備欄會被 client 丟 `CTerminateException`，encoder 直接拒絕（§4.18.4）。 |
 | `src/game/drops.ts` | ✅ **一場地的掉落物**（`DropField`，屬於場地：`dropId` 是那張圖的 key，`0x44 kind 2` 說出是誰撿走的）：掉落表（`MOB_JUNK_DROP`／`POTION_BY_LEVEL`／三個機率常數）、落點吸附腳踏點、壽命與「玩家站在上面」的判定；機率與壽命都是**伺服器的選擇**（ADR-007）。 |
 | `src/game/rewards.ts` | ✅ **獎勵與錢包**（`grantItem`／`MesoWallet`／`pickUpDrop`）：同 id 堆疊到 200、否則第一個空格、**裝備與現金道具永不堆疊**、背包滿就留在原地；`pickUpDrop` 回傳「該送哪幾個封包」的資料；`takeItem` 是商店收購那一半。**`MesoWallet` 是角色紀錄第 22 欄（`stats.mesos`）的視圖**，不是第二本帳 —— 撿到錢時 `0x0D` 的旗標 `0x40000` 會讓 client 的錢包跟著動（§4.22.5）。 |
-| `src/protocol/npc.ts` | ✅ **NPC 封包**：`0x39` 進場（`u32 npcId`；**已知 id 只有 5 bytes**，新 id 才接 `u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16`＋`s16 ×2`，共 20 bytes）、`0x3A` 離場（只有 `u32 npcId`）、`0x3B` 第二狀態（**`u8 flag` 在前**＋`u32 npcId`）；`0x3C`–`0x40` 只讀 id，只有 `0x3D` 再讀兩顆動作索引＋`CMovePath`（FINDINGS §4.19）。**沒有**怪物 `0x2F` 那個動畫旗標區塊。 |
+| `src/protocol/npc.ts` | ✅ **NPC 封包**：`0x39` 進場（`u32 npcId`；**已知 id 只有 5 bytes**，新 id 才接 `u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16`＋`s16 ×2`，共 20 bytes）、`0x3A` 離場（只有 `u32 npcId`）、`0x3B` **走動**（**`u8 flag` 在前**＋`u32 npcId`；flag 1 ＝「你自己走」，FINDINGS §4.28）；`0x3C`–`0x40` 只讀 id，只有 `0x3D` 再讀兩顆**動畫**索引＋（模板旗標非 0 時才有的）`CMovePath`（FINDINGS §4.19）。**沒有**怪物 `0x2F` 那個動畫旗標區塊。 |
 | `src/protocol/stat.ts` | ✅ **能力值差異包 `0x0D`（s2c）**：`u8 ack` ＋ `u32 flags`（19 個 bit，`0x01`…`0x40000`，**依旗標順序**）＋ `u32 panelFlags`（0 = 後面沒有東西）。`diffStats(舊, 新)` 只回報有變的欄位；`encodeStatUpdate`／`readStatUpdate`／`describeStatUpdate`。⚠️ 三個欄位的**線上寬度與 `CharacterData` 不同**（`str`/`dex`/`int`/`luk` **1 byte**、`unknown26`／`fame` **4 bytes**），超界值直接**拒絕**而不是靜默截斷（FINDINGS §4.21）。 |
 | `src/game/exp.ts` | ✅ **經驗值與升級**：`expToNextLevel` 是 client 自己的公式（`sub_4C7110`：1–5 `n(n²/2+15)`、6–50 `q(q+19)`／`q=n²/3`、51–200 ×1.0548、>200 封頂），與公開的 2003 表 196/200 相同（四個差異是複本打字錯誤）；`awardExp` 加經驗值、必要時連續升級、**升級且還活著就補滿 HP／MP**（client 就地升級 routine 的行為）。 |
-| `src/game/npcs.ts` | ✅ **一場地的 NPC**（`NpcField`）：地圖 `life` 的 NPC 出生點 → 每個一個 `0x39`（id 從 1 起算，**永不重用**；`spawnAll()` 只在場地建立時跑一次 —— 每位玩家一次會給同一個出生點第二個 id）；`enterPackets()` 是給**剛進場的人**的完整 body（5-byte 的 `refreshPacket` 只有 client 已經有那個 id 時才有意義）；`setSecondState`／`remove` 是 `0x3B`／`0x3A` 的合法形狀，`npcs` 是唯讀視圖。模板來自 `npcTemplateProvider`（`Npc/<id>.img` 的 `info/name`）；模板查不到就**不生成**並記一行 log。 |
+| `src/game/npcs.ts` | ✅ **一場地的 NPC**（`NpcField`）：地圖 `life` 的 NPC 出生點 → 每個一個 `0x39`（id 從 1 起算，**永不重用**；`spawnAll()` 只在場地建立時跑一次 —— 每位玩家一次會給同一個出生點第二個 id）；`enterPackets()` 是給**剛進場的人**的完整 body（5-byte 的 `refreshPacket` 只有 client 已經有那個 id 時才有意義）；`setWalking`／`remove` 是 `0x3B`／`0x3A` 的合法形狀（`0x3B` flag 1 ＝
+**「你自己走這個 NPC」**，§4.28 —— client 自己走、自己在 4–12 秒後重挑目標，所以伺服器不記 timer），
+`npcWalkPolicy("none"|"all"|"id,id,...")` 把 `--npc-walk` 變成一個「這個模板要走嗎」的函式，`npcs` 是唯讀視圖。模板來自 `npcTemplateProvider`（`Npc/<id>.img` 的 `info/name`）；模板查不到就**不生成**並記一行 log。 |
 | `src/protocol/quest.ts` | ✅ **NPC 對話封包**：`0x47`（`u8 unknownA`＋`u32 npcId`＋`u8 subOp`＋body；sub-op 0 `say`／1 `confirm`／2 `askText`／3 `askNumber`／4 kind 4）與 client 的 `0x15`（`u8 subOp`＋`u8 answer`，`answer == 1` 時附帶字串或數字）。台詞是 `Npc/<id>.img -> info/speak` 的原文，牆上沒有我們編的句子（FINDINGS §4.23、ADR-011）。 |
 | `src/protocol/cp949.ts` | ✅ **CP949 編碼**：封包裡的文字是 `u16 長度` + CP949 bytes（client 直接當系統 ANSI 字碼頁用）。Node 只有解碼器，所以編碼是「反轉表」在第一次用到時建出來；編不出來的字元丟例外而不是送亂碼。 |
 | `src/protocol/shop.ts` | ✅ **NPC 商店封包**：`0x4A` 開窗（`u32 shopId`＋`u16 count`＋每列 `u32 itemId`／`u32 price`／（`itemId/10000 == 207` 時 8 bytes）／`u16 maxCount`）、`0x4B` 結果（`u8`；0 沉默／1・4 東西不夠／2 錢不夠／3 格子不夠／>4 錯誤）、client 的 `0x33`（點擊的物件 id）與 `0x16`（0 買／1 賣／2 充電／3 關窗），以及空的一 byte `0x19`（在 `field.ts`）。207 那 8 bytes **原封不動攜帶、拒絕自行組裝**（FINDINGS §4.22）。 |
@@ -136,7 +138,9 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 **一個 port 就是一個世界**：同一個 `mapId` 的角色走同一份怪物、同一份掉落物，並互相看見（ADR-012）；角色進哪張圖由**他自己的紀錄**決定（換過圖就留在那裡），`--map` 是新角色的起始圖與沒有 mapId 的紀錄的後備（ADR-013）；走進傳送門就會換圖（見下一節）。
 `--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔）、
 `--mob-speed <px/s>` 調巡邏速度（預設 60 px/s，再乘上怪物自己的 `info.speed` 百分比）、
-`--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms），角色建立後外觀取自**帳號第一個角色**
+`--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms）、
+`--npc-walk <none|all|id,id,...>` 決定**哪些 NPC 由 client 自己走**（`0x3B`，FINDINGS §4.28；預設 `none`，
+裸的 `--npc-walk` 等於 `all`），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
 client 的**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 都已完整解出**（FINDINGS §4.13.1／§4.13.1b）：`field.ts` 的
@@ -161,7 +165,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 `Npc/<id>.img -> info/speak`，§4.23／ADR-011）；**世界已經是多玩家的**（§4.24／ADR-012：一張地圖一份 `FieldInstance`），
 而且**走過傳送門就會換地圖**（`0x0D` → `0x19` ＋ `0x16`，§4.25／ADR-013，兩節都在下面），所以
 **下一個最有價值的目標**是 oracle run（ADR-004：讓原 client 連上這台 server —— 它一次就能回答
-§4.11／§4.24 的所有 UNKNOWN），其次是 NPC 的走動（`0x3D`）與
+§4.11／§4.24／§4.28 的所有 UNKNOWN），其次是 `0x3D`（伺服器指定 NPC 動作：索引已解、長度還缺一個
+模板旗標的來源）與
 「被怪物打 → 扣玩家的血」這條還沒接上的路（§4.20.7 先修正了它的前提：`0x2C` 的尾段是**移動路徑**，
 不是傷害，所以連傷害數字都還沒有來源）。
 
@@ -193,9 +198,13 @@ client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）�
 （`u32 npcId`＋`u32 templateId`＋座標＋面向），**緊接在怪物的 `0x2F` 之後、同一個 TCP 串流**；
 `src/game/npcs.ts` 的 id 從 1 起算且**永不重用**（`remove()` 只把項目標成不在場），因為 client 的池裡
 也留著那個 id。NPC 的圖由 client 自己從 `Npc/%07d.img` 播 `stand`，所以**進場包裡沒有動畫區塊**
-（這是與怪物 `0x2F` 最大的差別）。目前只有「進場」：`0x3B`（第二狀態）與 `0x3D`（會走動的 NPC，
-兩個動作索引＋`CMovePath`）的 codec 已在 `protocol/npc.ts`，但沒有證據說明 client 看到它們會做什麼，
-所以 `serve` 不送 —— NPC 站在那裡是對的，走動要等 oracle run（ADR-004）。
+（這是與怪物 `0x2F` 最大的差別）。**走動則是 `0x3B`**（FINDINGS §4.28）：`flag = 1` 的意思是「**你自己走**」
+—— client 的 vecctrl 在 NPC 自己的範圍裡移動、每 4–12 秒自己重挑一個目標（`sub_499760`），所以伺服器送
+**一個**封包、之後不記任何 timer；`flag = 0` 停下來。`game/npcs.ts` 的 `walk` 政策決定哪些 NPC 這樣走
+（`--npc-walk`），預設 **沒人走**：機制（client 自己走）有證據，**哪些** NPC 該走沒有 —— 那是原伺服器的
+選擇，等 oracle run（ADR-004）。`0x3D`（伺服器指定動作）讀的兩個 `s8` 現在已知是**動畫索引**
+（`sub_499C00` ＝ 播一個動畫），但尾巴的 `CMovePath` 只在**模板的一個旗標非 0** 時才讀，而那個旗標來自
+哪個 WZ 標籤未定位 —— 長度猜錯會讓 client 把後面的位元組當路徑解，所以還是不送。
 **對話則已經接上**：點一個沒有商店的 NPC 會送 `0x47`（台詞是它自己的 `info/speak`，§4.23／ADR-011）。
 
 `serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘；角色只活在記憶體裡，換圖也只是改紀錄的 `mapId`）、**沒有頻道／分流**（一個 port 一個世界；世界現在有多張圖，但都在同一個 process 裡）、**傳送門沒有條件**（不分等級／道具／任務，`pt` 的種類也沒有語意證據）、**沒有密語／找人／GM 指令**（`0x1A` 家族只實作了聊天那一個 sub-op）、**沒有怪物 AI／技能**
@@ -204,8 +213,9 @@ client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）�
 建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受；`chardata.ts` 已經能寫完整道具區塊，
 缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，見 FINDINGS §4.8 的註記）、
 NPC 會出現、**有商店的可以交易**（點下去開窗，買賣送 `0x4B`＋`0x0B`＋`0x0D`）、
-**沒有商店的會講話**（`0x47` 一句一句，台詞是 `info/speak`，`0x15` 走下一句），但**不會走動**
-（`0x3D` 還沒有實作），也**沒有真正的任務流程**（`info/quest` 的腳本名讀得到，但這個 client 沒有任務 UI），
+**沒有商店的會講話**（`0x47` 一句一句，台詞是 `info/speak`，`0x15` 走下一句），
+而且**可以走動**（`0x3B`：被點名的 NPC 由 client 自己走 —— `--npc-walk`，預設沒人走，§4.28），
+但**沒有真正的任務流程**（`info/quest` 的腳本名讀得到，但這個 client 沒有任務 UI），
 還有道具的「使用」與裝備欄操作。
 怪物會巡邏、被打、掉東西，但**不會主動攻擊**：原 client 的 AI 會自己做（那是它自己的行為，
 伺服器不需要送任何東西就會發生），而且**被怪物打不會讓玩家的 HP 下降**——`0x0D` 雖然已解出並用於
@@ -232,6 +242,7 @@ socket 關掉等於 `leave()`，不是「這場遊戲結束」。
 | 殺怪的經驗值 | `0x0D` 差異包 | **只有攻擊的人** |
 | 有人升級 | `0x29`（`u32 characterId` ＋ `u8 0` ＝ LevelUp 特效；FINDINGS §4.27）| **其他所有人**（升級的人自己的 `0x0D` 就會讓他的 client 播同一個特效，見下）|
 | 有人說話 | `0x1A` ＋ sub-op `0x12`（`u8 sub-op`、`string 名字`、`string 內容`；FINDINGS §4.26）| **全場，包含說話的人**（client 只會顯示它收到的，見下）|
+| 一個 NPC 要走動 | `0x3B`（`u8 flag` ＋ `u32 npcId`，flag 1；FINDINGS §4.28）| 全場，而且**之後進場的人也拿到**（它在場地快照裡，跟著那個 NPC 的 `0x39` 走）|
 | 有人用了傳送門 | `0x19`（解鎖）＋ `0x16`（新地圖）＋ 新場地的整份快照 | **只有他**（他離開的那張圖收到他的 `0x1D`）|
 
 界線不是猜的：上表「全場」那一組的封包在 client 裡都掛在**場地自己的池子**上（`CUserPool`／`CMobPool`／

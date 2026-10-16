@@ -16,7 +16,7 @@ import { runWzCommand } from "./wz/cli.ts";
 import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
-import { npcTemplateProvider } from "./game/npcs.ts";
+import { npcTemplateProvider, npcWalkPolicy } from "./game/npcs.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -46,7 +46,8 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
-        [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>] [--seed <n>]
+        [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
+        [--npc-walk <none|all|id,id,...>] [--seed <n>]
         [--handshake-body <hex>]
         [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
@@ -84,6 +85,13 @@ notes:
   0x31 flag=0 once that animation is over and 0x31 flag=1 when it respawns (FINDINGS 4.17).
   --mob-respawn sets the respawn delay (default 5000 ms); the die animation's length is read from
   Mob/<id>.img (the sum of its die frames' delay, the client's own sub_486180).
+
+  --npc-walk names the NPCs the *client* should walk (FINDINGS 4.28): 0x3B flag 1 makes the client's
+  own vecctrl move that NPC inside bounds it already has, so the server sends one packet per NPC and
+  keeps no timer (0x3B flag 0, or setWalking, stops one again). "none" - the default, and what an
+  absent --npc-walk means - walks nobody; "all" walks every NPC; anything else is a comma-separated
+  list of Npc/<id>.img template ids. Which NPCs the 2003 server walked is not located, which is why
+  the default is the quiet one. A bare --npc-walk means "all".
 
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
@@ -285,6 +293,17 @@ async function runServe(rest: string[]): Promise<number> {
     return 1;
   }
 
+  let npcWalk: ((templateId: number) => boolean) | undefined;
+  if (args["npc-walk"] !== undefined) {
+    const spec = typeof args["npc-walk"] === "string" ? args["npc-walk"] : "all";
+    try {
+      npcWalk = npcWalkPolicy(spec);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
   for (const warning of shopWarnings) log?.(warning);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
@@ -309,6 +328,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
       ...(npcTemplate !== undefined ? { npcTemplate } : {}),
       ...(npcDialogue !== undefined ? { npcDialogue } : {}),
+      ...(npcWalk !== undefined ? { npcWalk } : {}),
       ...(shops !== undefined ? { shops } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
@@ -332,7 +352,8 @@ async function runServe(rest: string[]): Promise<number> {
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
         : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
-      `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
+      `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
+      `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n`,
   );
   await new Promise<void>((resolve) => {
     const stop = () => resolve();

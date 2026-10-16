@@ -50,17 +50,25 @@
  *
  * `0x3B` (`sub_49F970`): `u8 flag` + `u32 npcId`, **both read unconditionally**:
  *
- *   flag != 0 -> `sub_49F260` (168057-168116): bit 1 set + `sub_499760(npc+16, 1)`. For an unknown id
- *                it creates the NPC exactly like `0x39` but with `+24 = 2` and then calls the same
+ *   flag != 0 -> `sub_49F260` (168057-168116): bit 1 set + `sub_499760(vecctrl, 1)`. For an unknown
+ *                id it creates the NPC exactly like `0x39` but with `+24 = 2` and then calls the same
  *                `sub_499760(..., 1)`.
- *   flag == 0 -> `sub_49F380` (168119-168228): bit 1 cleared + `sub_499760(npc+16, 0)`.
+ *   flag == 0 -> `sub_49F380` (168119-168228): bit 1 cleared + `sub_499760(vecctrl, 0)`.
  *
- * So the flag is the NPC's **second state** - bit 1 next to `0x39`'s bit 0 - and `sub_499760` is the
- * vecctrl call the mob side also uses. Wire: **6 bytes** for an id the pool already has; for an
- * unknown id the `flag != 0` branch reads the *same* tail `0x39` does (templateId + the six fields),
- * so that form is 20 bytes too. This server always creates with `0x39` and only toggles known ids,
- * which is why `encodeNpcState` has no "create" form - inventing one without a caller would be dead
- * code with a guessed field meaning.
+ * So the flag is a bit of the NPC's **state byte** - bit 1 next to `0x39`'s bit 0 - and for an id the
+ * pool already has, `sub_499760` is what it *does*: `true` starts the NPC walking and `false` stops it
+ * (FINDINGS 4.28). `sub_499760` (161997-162034) calls the vecctrl's vtable slot 184 with
+ * `(1, x1, y1, x2, y2, facing, foothold)` - four `s16` the client already has, then the foothold the
+ * last one names resolved with `sub_485400` (calling the four a rectangle is shape, not evidence: no
+ * located WZ tag fills them, see §4.28) - and then arms a `rand() % 8000 + 4000` ms timer, i.e. the
+ * **client** walks the NPC inside those bounds and re-picks a destination 4..12 s at a time. The
+ * `false` side passes seven zeros (stop). Setting the bit again when it is already set does nothing,
+ * so repeating the packet is harmless; the client's pool never needs the server to keep a timer.
+ *
+ * Wire: **6 bytes** for an id the pool already has; for an unknown id the `flag != 0` branch reads the
+ * *same* tail `0x39` does (templateId + the six fields), so that form is 20 bytes too. This server
+ * always creates with `0x39` and only toggles known ids, which is why `encodeNpcState` has no "create"
+ * form - inventing one without a caller would be dead code with a guessed field meaning.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 
@@ -159,7 +167,8 @@ export function readNpcId(reader: PacketReader): number {
 }
 
 /**
- * Encode one `0x3B` (the NPC's second state), opcode byte included.
+ * Encode one `0x3B`, opcode byte included. `on` = "you walk this NPC" (FINDINGS 4.28); the flag
+ * comes before the id, and the id has to be in the client's pool already (`0x39` first).
  *
  * The known-id form only: the client's create branch is the same tail `0x39` carries, and a server
  * that wants an NPC should say so with `0x39` (`sub_49F260` sets `+24 = 2` directly, i.e. the NPC

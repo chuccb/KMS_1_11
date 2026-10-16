@@ -16,7 +16,8 @@ import assert from "node:assert/strict";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { FIELD_OPCODE, readUserEnterField, readUserMove } from "../src/protocol/field.ts";
 import { MOB_OPCODE, readMobEnterField, readMobPresence } from "../src/protocol/mob.ts";
-import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
+import { NPC_OPCODE, readNpcEnterField, readNpcState } from "../src/protocol/npc.ts";
+import { npcWalkPolicy } from "../src/game/npcs.ts";
 import { DROP_OPCODE, readDropAppear, readDropRemove } from "../src/protocol/drop.ts";
 import { FieldInstance, FieldRegistry, type FieldMember, type FieldPosition } from "../src/game/world.ts";
 import type { MapData } from "../src/game/map.ts";
@@ -122,6 +123,34 @@ test("the first player is sent the world: every mob, every NPC, and nobody's 0x1
     { npcId: 1, templateId: 2003, x: 69, y: 275, facing: 0 },
     "the joining player needs the *full* 0x39: their client has never seen the id",
   );
+});
+
+test("0x3B: the client walks the NPCs the policy names, and a later player is told the same", () => {
+  const field = new FieldInstance<FakeMember>({
+    map: stubMap(),
+    mobTemplate: () => STUB_TEMPLATE,
+    npcWalk: npcWalkPolicy("2003"),
+  });
+  const hero = new FakeMember(1, "Hero");
+  field.join(hero);
+  assert.deepEqual(hero.opcodes, [
+    MOB_OPCODE.enterField,
+    MOB_OPCODE.enterField,
+    NPC_OPCODE.enterField,
+    NPC_OPCODE.stateToggle,
+  ]);
+  assert.deepEqual(readNpcState(new PacketReader(hero.packets[3]!, 1)), { npcId: 1, on: true });
+  assert.equal(field.npcs.walking, 1);
+
+  // The second player gets the same four packets: the walk is field state, not a one-off at spawn.
+  const alt = new FakeMember(2, "Alt");
+  field.join(alt);
+  assert.deepEqual(alt.packets.slice(0, 4).map((packet) => packet[0]!), [
+    MOB_OPCODE.enterField,
+    MOB_OPCODE.enterField,
+    NPC_OPCODE.enterField,
+    NPC_OPCODE.stateToggle,
+  ]);
 });
 
 test("a second player and the first learn about each other with one 0x1C each - and never their own", () => {

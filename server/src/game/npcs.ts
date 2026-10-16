@@ -8,6 +8,13 @@
  * exactly what `0x39` says (FINDINGS 4.19): `life` entries of type `n` become one packet each, and
  * the client does the rest. So this module is small on purpose.
  *
+ * The one thing that *can* be said about an NPC after it exists is `0x3B` (FINDINGS 4.28): `flag = 1`
+ * tells the client to **walk that NPC itself** (`sub_499760(vecctrl, 1)` moves it inside bounds the
+ * client already has and re-picks a destination every 4-12 s of its own), `flag = 0` stops it. There
+ * is no timer on this side and nothing to keep in step - which is why the walk here is a *policy*
+ * (`walk`, turned on and off with `setWalking`) instead of a simulation. Which NPCs the 2003 server
+ * walked is not located, so the default is nobody: the mechanism is the client's, the choice is ours.
+ *
  * The template check is the one thing worth doing carefully: `Npc/<7-digit id>.img` has to exist,
  * because the client builds the NPC from it (`sub_49CB30` -> `sub_498A20`). A `life` entry whose id
  * has no image is skipped and reported, instead of being sent as a packet that would make the client
@@ -47,8 +54,11 @@ export interface NpcEntry {
   facing: number;
   /** `true` while the NPC is in the client's pool (i.e. between `0x39` and `0x3A`). */
   present: boolean;
-  /** The `0x3B` flag: the NPC's second state (FINDINGS 4.19.3). */
-  secondState: boolean;
+  /**
+   * The `0x3B` flag as the client reads it: `true` means "you walk this one" (FINDINGS 4.28). The
+   * wire field is a bit of the NPC's state byte, so what this field is *named* is the meaning.
+   */
+  walking: boolean;
 }
 
 /**
@@ -74,11 +84,44 @@ export function npcTemplateProvider(archive: WzArchive): (templateId: number) =>
   };
 }
 
+/**
+ * `--npc-walk` -> the `walk` predicate of one field: `none` (the default, and what an absent
+ * argument means) walks nobody, `all` walks every NPC of every map, and anything else is a
+ * comma-separated list of `Npc/<id>.img` template ids (`1012000,2003`).
+ *
+ * A word that is neither is a `RangeError`, not a silent "nobody walks": a typo in a policy should be
+ * seen while the server is starting, the way a bad `--mob-speed` is. This is a server choice either
+ * way (§4.28): the client only implements "walk" and "stop".
+ */
+export function npcWalkPolicy(spec: string | undefined): (templateId: number) => boolean {
+  const text = (spec ?? "none").trim().toLowerCase();
+  if (text === "" || text === "none") return () => false;
+  if (text === "all") return () => true;
+  const ids = new Set<number>();
+  for (const token of text.split(",")) {
+    const id = Number(token.trim());
+    if (!Number.isInteger(id) || id < 0) {
+      throw new RangeError(`--npc-walk: "${token.trim()}" is neither none, all, nor a template id`);
+    }
+    ids.add(id);
+  }
+  return (templateId) => ids.has(templateId);
+}
+
 export interface NpcFieldOptions {
   /** The `life` entries of type `n` of one map (`MapData.npcs`), in map order. */
   spawns: readonly LifeSpawn[];
   /** Template lookup; a miss drops that spawn (the client has no image for it). */
   template?: (templateId: number) => NpcTemplate | undefined;
+  /**
+   * Which of the map's NPCs the **client** should walk (`0x3B` flag 1; FINDINGS 4.28). Called once
+   * per NPC, at spawn.
+   *
+   * The predicate takes the `life` template id, not the pool id, because that is what a map or a
+   * command line names (`Npc/<id>.img`); the pool ids this field hands out are internal.
+   * `npcWalkPolicy` builds it from `--npc-walk`. Absent means nobody walks.
+   */
+  walk?: (templateId: number) => boolean;
   /** One line per event; defaults to nothing. */
   log?(line: string): void;
 }
@@ -86,9 +129,10 @@ export interface NpcFieldOptions {
 /**
  * The NPCs of one field.
  *
- * Nothing here moves them: an NPC stands where the map put it. The three packets are the whole
- * vocabulary the client has (`0x39` create/refresh, `0x3A` remove, `0x3B` second state), so the API
- * is those three plus the bookkeeping that keeps `npcs` in step with what the client was told.
+ * Nothing here *simulates* an NPC: it stands where the map put it, and once `0x3B` said so the
+ * client walks it. The three packets are the whole vocabulary the client has (`0x39` create/refresh,
+ * `0x3A` remove, `0x3B` walk on/off), so the API is those three plus the bookkeeping that keeps
+ * `npcs` in step with what the client was told.
  */
 export class NpcField {
   /** Every spawned NPC, in the order the map's `life` list gives them. */
@@ -127,6 +171,14 @@ export class NpcField {
   }
 
   /**
+   * How many NPCs the client has been told to walk (`0x3B` flag 1). One line for the field log, the
+   * same shape `MobField.walking` has.
+   */
+  get walking(): number {
+    return this.npcs.filter((entry) => entry.present && entry.walking).length;
+  }
+
+  /**
    * The **full** `0x39` for every NPC that is present - what a player who has just entered the map
    * needs, and the same bodies `spawnPackets` produced for the first one.
    *
@@ -135,7 +187,17 @@ export class NpcField {
    * the packet as soon as the id is known).
    */
   enterPackets(): Uint8Array[] {
-    return this.npcs.filter((entry) => entry.present).map((entry) => this.enterPacket(entry));
+    const packets: Uint8Array[] = [];
+    for (const entry of this.npcs) {
+      if (!entry.present) continue;
+      packets.push(this.enterPacket(entry));
+      // The walk state rides behind the create, in that order: the flag is a bit on a pool entry, so
+      // the client has to have the id first (`sub_49F260` would *create* an unknown one in that
+      // state, which is not what a spawn means). Repeating it is harmless - the client leaves an id
+      // that is already walking alone.
+      if (entry.walking) packets.push(encodeNpcState(entry.npcId, true));
+    }
+    return packets;
   }
 
   /** Adds one NPC to the field (no packet - see `enterPacket`). */
@@ -155,7 +217,7 @@ export class NpcField {
       y: spawn.y,
       facing: spawn.facing & 1,
       present: true,
-      secondState: false,
+      walking: this.options.walk?.(spawn.templateId) === true,
     };
     this.npcs.push(entry);
     return entry;
@@ -197,15 +259,19 @@ export class NpcField {
   }
 
   /**
-   * Turns the NPC's second state on/off (`0x3B`) and returns the packet, or `undefined` when the id
-   * is unknown (there is nothing to toggle, and creating through `0x3B` would build the NPC in its
-   * second state - `0x39` is the honest way to create one).
+   * Tells the client to walk this NPC, or to stop walking it (`0x3B`), and returns the packet - or
+   * `undefined` when the id is unknown or already in that state (the client does nothing either
+   * time, so a packet would only be noise), or when the NPC is not in the field.
+   *
+   * Creating through `0x3B` is possible (`sub_49F260` builds an unknown id in that state) and not
+   * offered here: an NPC is created by `0x39`, which is the packet that carries its template and
+   * position.
    */
-  setSecondState(npcId: number, on: boolean): Uint8Array | undefined {
+  setWalking(npcId: number, on: boolean): Uint8Array | undefined {
     const entry = this.byId(npcId);
     if (entry === undefined || !entry.present) return undefined;
-    if (entry.secondState === on) return undefined; // already in that state: no packet, like the client
-    entry.secondState = on;
+    if (entry.walking === on) return undefined; // already in that state: no packet, like the client
+    entry.walking = on;
     return encodeNpcState(npcId, on);
   }
 
@@ -219,7 +285,7 @@ export class NpcField {
     const entry = this.byId(npcId);
     if (entry === undefined || !entry.present) return undefined;
     entry.present = false;
-    entry.secondState = false;
+    entry.walking = false;
     return encodeNpcLeaveField(npcId);
   }
 }

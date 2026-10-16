@@ -603,7 +603,7 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   if (opcode === NPC_OPCODE.stateToggle) {
     try {
       const { npcId, on } = readNpcState(new PacketReader(plain, 1));
-      return `${name}: npcId=${npcId} secondState=${on ? "on" : "off"}`;
+      return `${name}: npcId=${npcId} walk=${on ? "on" : "off"}`;
     } catch (error) {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
@@ -634,7 +634,7 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
   if (opcode === NPC_OPCODE.enterField) return "0x39 CNpcPool(npc appear)";
   if (opcode === NPC_OPCODE.leaveField) return "0x3a CNpcPool(npc leave)";
-  if (opcode === NPC_OPCODE.stateToggle) return "0x3b CNpcPool(npc second state)";
+  if (opcode === NPC_OPCODE.stateToggle) return "0x3b CNpcPool(npc walk)";
   if (opcode === 0x38 || opcode === 0x41) return `0x${opcode.toString(16)} CNpcPool(no handler)`;
   if (opcode >= 0x3c && opcode <= 0x40) {
     // 0x3C..0x40 all read a u32 id and stop, except 0x3D, which reads more (`sub_49A280`).
