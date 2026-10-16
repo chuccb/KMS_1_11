@@ -118,6 +118,9 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 client 接受；`chardata.ts` 已經能寫完整道具區塊，缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，
 見 FINDINGS §4.8 的註記）。
 
+`schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`
+（`byte-exact`／`partial`／`skeleton`）、證據出處與對應的 codec 函式名稱。
+
 `capture` 的模式：
 
 | 模式 | 用途 |

@@ -11,6 +11,7 @@
  * `serve` is the login server: it answers the decoded login chain (0x01/0x02/0x03/0x05/0x06),
  * so a client can log in, pick a world and see the character-select screen.
  */
+import { schemaJson, schemaText } from "./protocol/schema.ts";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -28,6 +29,8 @@ usage:
   capture --port <n> [--mode session|framed|raw] [--handshake auto|off|<sendSeed>:<recvSeed>]
           [--handshake-body <hex>] [--host <addr>] [--out <file>] [--quiet]
   decode <trace.jsonl> [--c2s-seed <n>] [--s2c-seed <n>] [--json]
+  schema [--json]                 the protocol catalogue: every packet we can decode, with the
+                                  function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>]
         [--seed <n>] [--handshake-body <hex>] [--quiet]
@@ -244,6 +247,10 @@ async function main(argv: string[]): Promise<number> {
   }
   if (command === "decode") return runDecode(rest);
   if (command === "serve") return runServe(rest);
+  if (command === "schema") {
+    process.stdout.write(rest.includes("--json") ? schemaJson() : schemaText());
+    return 0;
+  }
   if (command !== "capture") {
     process.stderr.write(`unknown command: ${command}\n\n${USAGE}`);
     return 1;

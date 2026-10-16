@@ -693,11 +693,26 @@ count × {
 | 5 | `u16` | 同上（`n2 = 1`）| 查到的 `+32` 欄位與 `*(template + 24)` 一起傳進 `sub_53D310`（音效／特效解析）；語意待續 |
 | 6 | — | `mob + 136` | `sub_4C6CE0`：**動畫狀態區塊**（見下）|
 
-`sub_4C6CE0(obj, packet, time)` 被 CMob 借用來讀「動畫狀態」：一個 `u8 flags`，之後每個被設定的
-bit 各讀 2 個 `u16`，並把值換成指向 25-byte／20-byte 記錄表的指標
-（`bit 0 → *(obj+9)/(obj+11) = base + 4*25*idx`、`bit 1 → *(obj+13)/(obj+14) = base + 20*5*idx`、
-`bit 2 → *(obj+16)/(obj+17)` …）——**bit 0/1/2 各自對應一組動畫表**，所以怪物進場包在此之後
-還有一段可變長度的資料；這一段（連同第 4/5 欄）是 `0x2F` 剩下的空白。
+`sub_4C6CE0(obj, packet, time)` 是共用的**動畫狀態解碼器**（只有兩個呼叫端，都在 CMob 的
+`Init`／重生路徑：`sub_484ED0`、`sub_4885D0`）。它的完整形狀已經讀出來：
+
+| 步驟 | 寬度 | 內容 |
+|---|---|---|
+| 旗標 | **`u32`** | `v8 = *(u32 *)&packet[pos]`（長度不足 4 → `ZException 38`）|
+| 每個被設定的 bit | `u16` × 2 | `(動畫索引, 時間索引)`；第二個乘 100 加上 `timeGetTime()` 寫進「結束時間」 |
+
+七個通道（bit `1`／`2`／`4`／`8`／`0x10`／`0x20`／`0x40`）分別寫進物件 `+10`、`+13`、`+16`、`+19`、
+`+22`、`+25`、`+28`（每個通道 2 個 dword：索引與結束時間；bit `1` 是 `4 * (25 * idx)`、
+bit `2` 是 `20 * (5 * idx)`，兩者都是 **100 ms 的倍數**，即「動畫延遲」）。沒設定的 bit 會把該通道歸零。
+以 `CMob::Init` 傳進來的 `obj = mob + 136` 換算，索引欄落在 mob `+176`、`+188`、`+200`、`+212`、
+`+224`、`+236`、`+248`。
+
+所以 `0x2F` 在兩個 `u16` 之後是：**`u32 動畫旗標` ＋ 每個設定的 bit 各 2 個 `u16`**，
+之後是 `CMob::Init` 尾端的本地初始化（`sub_4861F0`、`sub_485DA0`）——**封包到這裡結束**。
+`0x2F` 唯一還沒命名的是第 4/5 欄那兩個 `u16`：它們只被拿去查 `this_7 + 25` 這個雜湊表
+（`sub_489800` ＝ `ZMap`-style find：`__ROR4__(key,5) % size` 再走鏈），第二個查到的 `+32` 欄位
+與 `*(template + 24)` 一起傳進 `sub_53D310`，值本身**不會**存進怪物（所以不是 foothold／座標這類狀態），
+語意待續。
 
 `CMob::Init` 尾端還有 `sub_4861F0(this)`、`sub_485DA0(this)`（＝建立怪物狀態／站上 foothold），
 最後把 `mob + 116`（dword 29）設 `-1`、`+128`／`+132`／`+52`／`+280` 歸零。
@@ -837,6 +852,34 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 | `0x24` | `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`×2 ｜ `0x26` `sub_471CD0`／`sub_471E90`／`sub_472050`／`sub_4722E0`／`sub_55C5E0` |
 | `0x2C` | `sub_4885D0` ｜ `0x2F` `sub_49A3C0` ｜ `0x33` `sub_55AF20`（`sub_55AF20` 帶一個 `u32`，且有 `this+6/+7` 的一次性節流）|
 
+### 4.14 ✅ 協定目錄：`server/src/protocol/schema.ts`（可查詢的單一來源）
+
+§4.1–§4.13 的知識散在三個 module 的註解與本文件裡，要回答「這個封包我們到底解到什麼程度」
+本來得同時讀三支檔案。`schema.ts` 把這些收成一張**機器可讀的目錄**，而且**不重複定義任何數字**：
+`opcode` 一律引用 `login.CLIENT_OPCODE`／`replies.LOGIN_OPCODE`／`field.FIELD_OPCODE`／
+`field.CLIENT_FIELD_OPCODE`。
+
+每一列有：`direction`／`stage`／`name`／`status`／`evidence`／`codecs`／`fields`，
+其中 `status` 只有三種值：
+
+| status | 意思 |
+|---|---|
+| `byte-exact` | codec 與 client 自己的讀／寫逐欄一致，且 `test/` 有 golden bytes |
+| `partial` | 列出的欄位有證據，但後面還有尚未定位的東西 |
+| `skeleton` | 只知道 opcode 與 handler；**`fields` 必須是空的**（不准發明欄位）|
+
+反漂移由 `test/schema.test.ts` 保證（6 個測試）：
+
+- 每個 `codecs` 名稱都必須在 `src/protocol/**` 找到真的 export（`resolveCodec`），改名不會漏掉目錄；
+- 同一個 `(direction, stage, opcode)` 只能有一列（`0x05`／`0x22` 這種**兩個方向都用到**是合法的，
+  測試特別釘住這兩對）；
+- `skeleton` 列的 `fields` 必須是空的；
+- 有 codec 的列必須真的被 `decode` 的解讀器認得（`describeClientFieldPacket`／`describeFieldPacket`／
+  `describeClientPacket` 不能回 `undefined`）。
+
+查詢方式：`node server/src/cli.ts schema`（人看的表格）或 `schema --json`（工具用）。
+目前共 **31 列**：login c2s 8、login s2c 6、field c2s 11、field s2c 6。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -862,7 +905,9 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
    以及 `0x0F` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板的第二種更新格式）。
 6. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
    在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
-7. 由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`，並用 `capture` 對照真實流量驗證。
+7. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
+   `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
+   剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
 8. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown97`／
    `unknown101`（能力值區塊）：傳輸上已完整，語意待找讀取端。
 9. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
