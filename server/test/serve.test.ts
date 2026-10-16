@@ -46,6 +46,7 @@ import {
   readUserFindAnswer,
   readUserWhisperAnswer,
   readUserEffect,
+  readUserAttack,
   readUserEnterField,
   readUserMove,
 } from "../src/protocol/field.ts";
@@ -1056,7 +1057,7 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -1155,7 +1156,7 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -1220,7 +1221,7 @@ test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice"
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -1354,7 +1355,7 @@ test("a swing at an unknown mob id answers nothing and leaves the field alone", 
       clickedMobId: 99,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 99, hitAnimation: 7, x: 0, y: 0, sequence: 1, damages: [9999] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -1693,7 +1694,7 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -1703,16 +1704,28 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
   const altSawKill = await alt.takeOpcode(DROP_OPCODE.appear);
   assert.deepEqual(
     altSawKill.map((bytes) => bytes[0]),
-    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
-    "the other player sees the hit, the death and the loot, and nothing of the reward",
+    [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
+    "the other player sees the swing first, then the hit, the death and the loot - and nothing of the reward",
   );
-  assert.equal(readDropAppear(new PacketReader(altSawKill[2]!, 1)).mobId, 1, "the loot flies out of the monster that died");
+  // The swing itself: the attacker's own numbers and action, and only the mobs this field accepted.
+  const swing = readUserAttack(new PacketReader(altSawKill[0]!, 1));
+  assert.deepEqual(
+    [swing.characterId, swing.facingLeft, swing.action, swing.hits, swing.speed, swing.targets],
+    [7, false, 0, 1, 1, [{ mobId: 1, hitAnimation: 7, damages: [10] }]],
+    "0x23 carries the swing the attacker reported, under the attacker's own character id",
+  );
+  assert.deepEqual(
+    [swing.afterimage, swing.skillLevel, swing.skillId, swing.unknownU32],
+    [0, 0, 0, 0],
+    "the three fields with no source here go out as their neutral values, not as a guess (FINDINGS 4.11.7b)",
+  );
+  assert.equal(readDropAppear(new PacketReader(altSawKill[3]!, 1)).mobId, 1, "the loot flies out of the monster that died");
 
   const heroSawKill = await hero.takeOpcode(DROP_OPCODE.appear);
   assert.deepEqual(
     heroSawKill.map((bytes) => bytes[0]),
     [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, STAT_OPCODE, DROP_OPCODE.appear],
-    "the attacker gets the same world packets plus their own exp",
+    "the attacker gets the same world packets plus their own exp - no 0x23 for the swing it just played",
   );
   assert.deepEqual(readStatUpdate(new PacketReader(heroSawKill[2]!, 1)).diff, { exp: 1 });
 
@@ -2321,7 +2334,7 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,
@@ -2331,10 +2344,11 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
   const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEffect);
   assert.deepEqual(
     altSaw.map((bytes) => bytes[0]),
-    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
-    "the field sees the hit, the death, and then the level-up effect",
+    [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
+    "the field sees the swing, the hit, the death, and then the level-up effect",
   );
-  assert.deepEqual(readUserEffect(new PacketReader(altSaw[2]!, 1)), {
+  assert.equal(readUserAttack(new PacketReader(altSaw[0]!, 1)).targets[0]!.mobId, 1);
+  assert.deepEqual(readUserEffect(new PacketReader(altSaw[3]!, 1)), {
     characterId: 7,
     effect: USER_EFFECT_LEVEL_UP,
   });
@@ -2495,7 +2509,7 @@ test("a session that ends leaves the character's progress in the save", { timeou
       clickedMobId: 1,
       facingLeft: false,
       action: 0,
-      targetCap: 1,
+      speed: 1,
       targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
     },
     CLIENT_FIELD_OPCODE.attack,

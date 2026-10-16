@@ -305,7 +305,13 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "clickedMobId", type: "u32" },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)", note: "index into dword_5B2144" },
-      { name: "targetCap", type: "u8", note: "sub_4BE8B0, clamped to 0..6" },
+      {
+        name: "speed",
+        type: "u8",
+        note:
+          "sub_4BE8B0(weapon block field, clicked id, state), clamped to 0..6; the swing's " +
+          "animation-speed step, the value the sender hands its own sub_508690 (FINDINGS 4.13.1c)",
+      },
       {
         name: "targets",
         type: "u32 mobId, s8 hitAnimation, u16 x, u16 y, u16 sequence, u16 damage[hits]",
@@ -326,7 +332,7 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "clickedMobId", type: "u32" },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)" },
-      { name: "targetCap", type: "u8" },
+      { name: "speed", type: "u8", note: "same byte as 0x0F" },
       { name: "unknownU16", type: "u16", note: "read off the local user before the packet is built" },
       { name: "targets", type: "same 11-byte record + hits damages" },
     ],
@@ -345,7 +351,7 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "clickedMobId", type: "u32" },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)" },
-      { name: "targetCap", type: "u8" },
+      { name: "speed", type: "u8", note: "same byte as 0x0F" },
       { name: "targets", type: "same 11-byte record + hits damages" },
     ],
   },
@@ -459,6 +465,40 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
       { name: "emotion", type: "u32", note: "0..8; the client's own face table is EMOTION_NAMES" },
+    ],
+  },
+  {
+    opcode: field.FIELD_OPCODE.userAttack,
+    direction: "s2c",
+    stage: "field",
+    name: "userAttack",
+    status: "partial",
+    evidence:
+      "FINDINGS 4.11.7b (CUserPool 0x23, read in full: the range dispatcher reads the u32 id and resolves " +
+      "it with sub_51CD30, then sub_5209C0 reads the body and sub_520F20 plays it as that user's swing - " +
+      "the same routine the attacker's own client runs while it builds its 0x0F). 0x24/0x25 are the same " +
+      "record with sub_521400/sub_521AD0; the trailing u32 reaches the 0x24 handler only.",
+    codecs: ["readUserAttack", "encodeUserAttack", "describeUserAttack"],
+    fields: [
+      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      { name: "hits", type: "u8 (nibble)", note: "damage numbers per mob - 0x0F's own packing" },
+      { name: "targetCount", type: "u8 (nibble)", note: "0x0F's packing; the reader drops records whose mob it cannot resolve" },
+      {
+        name: "skillLevel",
+        type: "u8",
+        note: "read as a skill level - it is clamped to the looked-up node's child count; 0 = no skill node",
+      },
+      { name: "skillId", type: "u32", note: "only when skillLevel is non-zero; read, never watched on a wire" },
+      { name: "facingLeft", type: "bool (bit 7)" },
+      { name: "action", type: "u8 (bits 0..6)", note: "sub_508690 resolves it in the user's own action table" },
+      { name: "speed", type: "u8", note: "byte 4 of the attacker's own 0x0F; sub_508700 turns it into frame delays" },
+      {
+        name: "afterimage",
+        type: "u8",
+        note: "child number of Character/Afterimage/<the weapon's info/afterImage>; sub_4BE270 picks it client-side",
+      },
+      { name: "unknownU32", type: "u32", note: "read for all three opcodes, handed only to the 0x24 handler" },
+      { name: "targets", type: "u32 mobId, s8 hitAnimation, u16 damage[hits]" },
     ],
   },
   {

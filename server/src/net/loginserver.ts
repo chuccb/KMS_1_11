@@ -47,6 +47,7 @@ import {
   INTERACT_KIND_REVIVE,
   encodeFieldRequestRelease,
   encodeSetField,
+  encodeUserAttack,
   encodeUserEffect,
   encodeUserEmotion,
   readClientEmotion,
@@ -64,6 +65,7 @@ import {
   USER_REQUEST_KIND,
   type ClientAttack,
   type ClientInteract,
+  type UserAttackTarget,
   type ClientUseItem,
   type ClientUserRequest,
   type SetField,
@@ -1527,9 +1529,11 @@ export class GameEntryServer {
    * formula, and the client would disagree). What the server does own is which mobs exist and how
    * much HP they have, so a hit on a mob this field does not have is logged, not invented.
    *
-   * The packets a hit owes go to the whole field: another player standing next to the attacker sees
-   * the same mob flash and die (`game/world.ts`). What is *not* shared is the reward - the exp goes to
-   * the connection that reported the hit (see `awardKillExp`).
+   * What goes out, and in which order, is the world's answer to the swing: the swing itself as
+   * `0x23` for the others (see `relaySwing`), then the mob packets the hits owe - another player
+   * standing next to the attacker sees the same mob flash and die (`game/world.ts`) - and then the
+   * reward, which is the attacker's alone (the exp goes to the connection that reported the hit,
+   * see `awardKillExp`).
    */
   private applyAttack(session: FieldSession, plain: Uint8Array): void {
     const opcode = plain[0] ?? 0;
@@ -1541,6 +1545,10 @@ export class GameEntryServer {
       return;
     }
     const now = Date.now();
+    // The swing has to arrive before the mobs react, so the mob packets wait here for it.
+    const mobPackets: Uint8Array[] = [];
+    const kills: { mobId: number; templateId: number }[] = [];
+    const relayed: UserAttackTarget[] = [];
     for (const target of attack.targets) {
       // One target record carries `hits` numbers; the mob loses their sum, as the client drew it.
       const damage = target.damages.reduce((total, value) => total + value, 0);
@@ -1552,22 +1560,74 @@ export class GameEntryServer {
         );
         continue;
       }
-      // Whoever is in the map sees the mob take the hit and, on a kill, start dying: both packets are
-      // facts about the mob, not about the attacker (`game/world.ts`).
-      session.instance.broadcastAll(hit.packets);
+      mobPackets.push(...hit.packets);
+      // Only a mob this field accepted is worth drawing numbers over: the receiver's client drops
+      // records it cannot resolve in its own mob pool anyway (FINDINGS 4.11.7b).
+      relayed.push({ mobId: hit.mobId, hitAnimation: target.hitAnimation, damages: target.damages });
       this.options.log?.(
         hit.killed
           ? `game: mob ${hit.mobId} (template ${hit.templateId}) killed by ${damage} ` +
               `- die animation ${hit.dieMs}ms, corpse goes at +${hit.dieMs}ms, respawn at +${hit.dieMs + hit.respawnMs}ms`
           : `game: mob ${hit.mobId} hit for ${damage} - hp ${hit.hp}/${hit.maxHp}`,
       );
-      // The reward first, the loot after: the exp is the kill's own payout (a stat diff plus, on a
-      // level-up, the client's own effect), while a drop has to fly out of the corpse.
-      if (hit.killed) {
-        this.awardKillExp(session, hit.templateId);
-        this.spawnDrops(session, hit.mobId, now);
-      }
+      if (hit.killed) kills.push({ mobId: hit.mobId, templateId: hit.templateId });
     }
+    this.relaySwing(session, opcode, attack, relayed);
+    session.instance.broadcastAll(mobPackets);
+    // The reward first, the loot after: the exp is the kill's own payout (a stat diff plus, on a
+    // level-up, the client's own effect), while a drop has to fly out of the corpse.
+    for (const kill of kills) {
+      this.awardKillExp(session, kill.templateId);
+      this.spawnDrops(session, kill.mobId, now);
+    }
+  }
+
+  /**
+   * Everybody else's half of a swing: `0x23` (FINDINGS 4.11.7b).
+   *
+   * The attacker does not need it back - its own client ran the same effect routine while it built
+   * the `0x0F` (`sub_50DAA0`, `sub_50D7F0`, `sub_4882F0` all run *before* the packet is written) -
+   * so the copy goes to the others, exactly like `0x27` and `0x29`.
+   *
+   * Three of the receiver's fields have no source on this side, and they are sent as the value that
+   * is not a guess:
+   *
+   *   `skillLevel`/`skillId`  0 - "no skill node". The pair is read, never watched on a wire, and a
+   *                           plain melee swing has no skill behind it.
+   *   `afterimage`            0 - the first child of `Character/Afterimage/<the weapon's
+   *                           info/afterImage>`, which every one of those images has. Which child the
+   *                           attacker used comes from `sub_4BE270` on its own client.
+   *   the trailing `u32`      0 - only the `0x24` handler receives it.
+   *
+   * Only `0x0F` is relayed: a magic or skill swing would have to go out as `0x24`/`0x25`, whose
+   * handlers (`sub_521400`/`sub_521AD0`) are not read yet.
+   */
+  private relaySwing(
+    session: FieldSession,
+    opcode: number,
+    attack: ClientAttack,
+    targets: UserAttackTarget[],
+  ): void {
+    if (opcode !== CLIENT_FIELD_OPCODE.attack) return;
+    if (session.instance.memberCount <= 1) return;
+    const packet = encodeUserAttack({
+      characterId: session.characterId,
+      hits: attack.hits,
+      skillLevel: 0,
+      skillId: 0,
+      facingLeft: attack.facingLeft,
+      action: attack.action,
+      speed: attack.speed,
+      afterimage: 0,
+      unknownU32: 0,
+      targets,
+    });
+    session.instance.broadcast(packet, session.characterId);
+    this.options.log?.(
+      `game: 0x23 swing of "${session.name}" (${attack.facingLeft ? "left" : "right"} ` +
+        `action=${attack.action} hits=${attack.hits} speed=${attack.speed} ${targets.length} target(s)) ` +
+        `sent to ${session.instance.memberCount - 1} other player(s)`,
+    );
   }
 
   /**

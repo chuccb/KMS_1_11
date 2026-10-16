@@ -73,6 +73,10 @@ import {
   encodeUserEmotion,
   readUserEmotion,
   describeUserEmotion,
+  encodeUserAttack,
+  readUserAttack,
+  describeUserAttack,
+  type UserAttack,
   describeClientStatReport,
   type UserEnterField,
 } from "../src/protocol/field.ts";
@@ -274,9 +278,10 @@ test("the portal/object click request is kind plus name (0x0D)", () => {
 
 /**
  * The `0x0F` swing. Its bytes come straight from the writer in `sub_512F90` (FINDINGS 4.13.1):
- * header `u8 hits|count<<4`, `u32 clicked id`, `u8 facing<<7|action`, `u8 target cap`, then one
- * 11-byte record per target plus `hits` damage words. If this test fails, the codec and the
- * document disagree about the client's own byte order.
+ * header `u8 hits|count<<4`, `u32 clicked id`, `u8 facing<<7|action`, `u8 speed` (the step the
+ * sender hands its own `sub_508690` - FINDINGS 4.13.1c), then one 11-byte record per target plus
+ * `hits` damage words. If this test fails, the codec and the document disagree about the client's
+ * own byte order.
  */
 test("attack (0x0F) is byte exact, header and per-target records", () => {
   const attack: ClientAttack = {
@@ -285,7 +290,7 @@ test("attack (0x0F) is byte exact, header and per-target records", () => {
     clickedMobId: 0x30,
     facingLeft: true,
     action: 0x11,
-    targetCap: 6,
+    speed: 6,
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12, 13] }],
   };
   const bytes = encodeClientAttack(attack);
@@ -309,7 +314,7 @@ test("attack round trips several targets and keeps the signed hit animation", ()
     clickedMobId: 0,
     facingLeft: false,
     action: 0x20,
-    targetCap: 6,
+    speed: 6,
     targets,
   };
   const read = readClientAttack(new PacketReader(encodeClientAttack(attack), 1));
@@ -325,7 +330,7 @@ test("an attack without a target is still a legal packet", () => {
     clickedMobId: 0,
     facingLeft: false,
     action: 0x20,
-    targetCap: 6,
+    speed: 6,
     targets: [],
   });
   assert.equal(toHex(bytes), "0f01000000002006");
@@ -339,7 +344,7 @@ test("a target must carry exactly hits damage values, and 15 targets is the cap"
     clickedMobId: 0,
     facingLeft: false,
     action: 0x20,
-    targetCap: 6,
+    speed: 6,
   };
   assert.throws(
     () =>
@@ -367,11 +372,11 @@ test("describeClientFieldPacket names the three client field packets and stays q
     clickedMobId: 0x30,
     facingLeft: true,
     action: 0x11,
-    targetCap: 6,
+    speed: 6,
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
   });
   const text = describeClientFieldPacket(attack)!;
-  assert.match(text, /^0x0f attack: left action=17 hits=2 cap=6 clicked=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
+  assert.match(text, /^0x0f attack: left action=17 hits=2 speed=6 clicked=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
   assert.equal(describeClientFieldPacket(new Uint8Array([0x7f, 1, 2, 3])), undefined);
   assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0x0f \(truncated: packet underflow/);
 });
@@ -390,7 +395,7 @@ test("magic attack (0x10) is the same record plus one extra u16", () => {
     clickedMobId: 0x30,
     facingLeft: true,
     action: 0x11,
-    targetCap: 6,
+    speed: 6,
     unknownU16: 0x1234,
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
   };
@@ -407,7 +412,7 @@ test("skill attack (0x11) is the same record with no extra u16", () => {
     clickedMobId: 0x30,
     facingLeft: false,
     action: 0x20,
-    targetCap: 6,
+    speed: 6,
     targets: [{ mobId: 0x10, hitAnimation: 3, x: 100, y: 200, sequence: 5, damages: [9] }],
   };
   const bytes = encodeClientAttack(attack, 0x11);
@@ -742,4 +747,98 @@ test("an emotion is one u32 in both directions, and the nine faces are the clien
     () => readClientEmotion(new PacketReader(Uint8Array.from([0x13, 0x09, 0, 0, 0]), 1)),
     /not a face/,
   );
+});
+
+/**
+ * `0x23`: one user's swing, as everybody else sees it (FINDINGS 4.11.7b). The body is
+ * `sub_5209C0`'s read order, and it is the same packing the attacker's own `0x0F` uses - so the
+ * golden bytes below describe exactly the swing the `0x0F` test sends, minus the three things only
+ * the attacker knows (the clicked object, and each mob's x/y and sequence). If this fails, the
+ * codec and the reader in the document disagree.
+ */
+test("user attack (0x23) is byte exact: the swing, for everyone but the attacker", () => {
+  const swing: UserAttack = {
+    characterId: 0x30,
+    hits: 2,
+    skillLevel: 0,
+    skillId: 0,
+    facingLeft: true,
+    action: 0x11,
+    speed: 2,
+    afterimage: 0,
+    unknownU32: 0,
+    targets: [{ mobId: 0x10, hitAnimation: -1, damages: [11, 12] }],
+  };
+  const bytes = encodeUserAttack(swing);
+  assert.equal(
+    toHex(bytes),
+    // 23 | 30 00 00 00 | 02|1<<4 | 00 | 80|11 | 02 | 00 | 00 00 00 00 | 10 00 00 00 | ff | 0b 00 0c 00
+    "2330000000120091020000000000" + "10000000ff" + "0b000c00",
+  );
+  assert.deepEqual(readUserAttack(new PacketReader(bytes, 1)), swing);
+  assert.equal(FIELD_OPCODE.userAttack, 0x23);
+  assert.equal(
+    describeUserAttack(swing),
+    "characterId=48 left action=17 hits=2 speed=2 afterimage=0 skill=0/0 targets=1 16[11+12] anim=-1",
+  );
+  assert.equal(
+    describeFieldPacket(bytes),
+    "0x23 CUserPool(user attack): characterId=48 left action=17 hits=2 speed=2 afterimage=0 " +
+      "skill=0/0 targets=1 16[11+12] anim=-1",
+  );
+  // A whiff is a swing too: no target records, but the header is still there.
+  const whiffBytes = encodeUserAttack({ ...swing, hits: 1, targets: [] });
+  assert.equal(toHex(whiffBytes), "23" + "30000000" + "01" + "00" + "91" + "02" + "00" + "00000000");
+  assert.deepEqual(readUserAttack(new PacketReader(whiffBytes, 1)).targets, []);
+});
+
+test("a 0x23 skill level adds the skill id, and level 0 leaves it out", () => {
+  const base: UserAttack = {
+    characterId: 7,
+    hits: 1,
+    skillLevel: 0,
+    skillId: 0,
+    facingLeft: false,
+    action: 0x20,
+    speed: 3,
+    afterimage: 1,
+    unknownU32: 0,
+    targets: [{ mobId: 5, hitAnimation: 0, damages: [9] }],
+  };
+  const plain = encodeUserAttack(base);
+  const skilled = encodeUserAttack({ ...base, skillLevel: 3, skillId: 1001003 });
+  assert.equal(skilled.length, plain.length + 4, "only the id is extra");
+  const read = readUserAttack(new PacketReader(skilled, 1));
+  assert.equal(read.skillLevel, 3);
+  assert.equal(read.skillId, 1001003);
+  assert.equal(readUserAttack(new PacketReader(plain, 1)).skillId, 0);
+  // Field 7 is read whatever the opcode is: only 0x24's handler receives it, but it is on the wire.
+  assert.equal(read.unknownU32, 0);
+});
+
+test("a 0x23 target record with mobId 0 is refused, and hits must match the header", () => {
+  const base: UserAttack = {
+    characterId: 1,
+    hits: 2,
+    skillLevel: 0,
+    skillId: 0,
+    facingLeft: false,
+    action: 1,
+    speed: 2,
+    afterimage: 0,
+    unknownU32: 0,
+    targets: [],
+  };
+  // A zero id means "empty slot" to the reader, which then reads no animation and no damages - so
+  // a record like that would silently shift every following record.
+  assert.throws(
+    () => encodeUserAttack({ ...base, targets: [{ mobId: 0, hitAnimation: 0, damages: [1, 2] }] }),
+    /mobId 0 has no tail/,
+  );
+  assert.throws(
+    () => encodeUserAttack({ ...base, targets: [{ mobId: 9, hitAnimation: 0, damages: [1] }] }),
+    /exactly 2 damage/,
+  );
+  const many = Array.from({ length: 16 }, (_, i) => ({ mobId: i + 1, hitAnimation: 0, damages: [1, 2] }));
+  assert.throws(() => encodeUserAttack({ ...base, targets: many }), /at most 15 targets/);
 });

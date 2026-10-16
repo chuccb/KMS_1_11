@@ -40,8 +40,10 @@ import { encodeCp949 } from "../src/protocol/cp949.ts";
 import { readStatUpdate } from "../src/protocol/stat.ts";
 import {
   CLIENT_FIELD_OPCODE,
+  encodeClientAttack,
   encodeClientUseItem,
   encodeClientEmotion,
+  readUserAttack,
   readUserEmotion,
   readUserEnterField,
 } from "../src/protocol/field.ts";
@@ -233,6 +235,88 @@ const heroMap = mapIdOfSetField(await hero.game.take(0x16)); // the field we wer
 const alt = await enterGame("alt", "alt", "Alt");
 let altMap = mapIdOfSetField(await alt.game.take(0x16));
 console.log(`  ..   Hero is in map ${heroMap}, Alt in map ${altMap}`);
+
+// --- a swing: 0x0F out, 0x23 to the rest of the map, nothing back (FINDINGS 4.11.9b) --------------
+// Both are still in 1000000 here, which is what this section needs: the swing goes to the *others*
+// in the map, and there has to be a monster for it to land on. Hero's own client already played the
+// attack while it built the packet (`sub_512F90` runs the effect functions before it writes), so the
+// server's copy must not come back to him - the same rule as the emotion above.
+if (altMap === heroMap && heroMap === 1000000) {
+  // The mobs this field spawned arrive in `0x2F`, which starts with the mob's object id - the key
+  // every later packet uses. They enter on the field's first tick, not necessarily before this line,
+  // so this waits for one; the scan keeps every packet it does not use.
+  let mobId;
+  const deadline = Date.now() + 4000;
+  while (mobId === undefined && Date.now() < deadline) {
+    const kept = [];
+    while (hero.game.queue.length > 0) {
+      const packet = hero.game.queue.shift();
+      if (packet[0] === 0x2f && mobId === undefined) mobId = new PacketReader(packet, 1).readU32();
+      else kept.push(packet);
+    }
+    hero.game.queue.unshift(...kept);
+    if (mobId === undefined) await new Promise((r) => setTimeout(r, 50));
+  }
+  expect(mobId !== undefined, `the field spawned monsters to swing at (mob ${mobId})`);
+
+  if (mobId !== undefined) {
+    const swing = encodeClientAttack({
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: mobId,
+      facingLeft: true,
+      action: 0x11,
+      speed: 2,
+      targets: [{ mobId, hitAnimation: -1, x: 0, y: 0, sequence: 3, damages: [1] }],
+    });
+    hero.game.send(swing); // the probe's send takes the whole packet, opcode first
+    const burst = await alt.game.drain(400);
+    const sawSwing = burst.findIndex((packet) => packet[0] === FIELD_OPCODE.userAttack);
+    const sawMob = burst.findIndex((packet) => packet[0] === 0x34);
+    expect(sawSwing >= 0, `the other player sees the swing (0x23) at all`);
+
+    if (sawSwing >= 0) {
+      const relayed = readUserAttack(new PacketReader(burst[sawSwing], 1));
+      expect(
+        relayed.characterId === hero.characterId,
+        `the swing is Hero's (id ${relayed.characterId})`,
+      );
+      expect(
+        relayed.facingLeft && relayed.action === 0x11 && relayed.hits === 1 && relayed.speed === 2,
+        `carrying what he sent: left, action 0x11, 1 hit, speed 2 (got ` +
+          `${relayed.facingLeft ? "left" : "right"} action=${relayed.action} hits=${relayed.hits} speed=${relayed.speed})`,
+      );
+      const hit = relayed.targets[0];
+      expect(
+        relayed.targets.length === 1 && hit.mobId === mobId && hit.damages[0] === 1,
+        `and the monster it landed on (${hit?.mobId} for ${hit?.damages.join("+")})`,
+      );
+      expect(
+        relayed.afterimage === 0 && relayed.skillLevel === 0,
+        "the three fields with no source here are the neutral values, not a guess",
+      );
+      expect(
+        sawMob < 0 || sawSwing < sawMob,
+        "the swing is drawn before the mob reacts, which is the order the server sends them in",
+      );
+    }
+
+    // Nothing comes back to the attacker: his own client played the swing from the same numbers.
+    let echoed = 0;
+    const until = Date.now() + 400;
+    while (Date.now() < until) {
+      const held = [];
+      while (hero.game.queue.length > 0) {
+        const packet = hero.game.queue.shift();
+        if (packet[0] === FIELD_OPCODE.userAttack) echoed += 1;
+        else held.push(packet);
+      }
+      hero.game.queue.unshift(...held);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(echoed === 0, `the attacker is not echoed his own 0x23 (saw ${echoed})`);
+  }
+}
 
 // --- cross a real map boundary: Alt walks through the 1000000 "east00" portal (-> 1010000) --------
 // A second run of the same save skips this: the character records already remember 1010000.
