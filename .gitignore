@@ -1,0 +1,21 @@
+# --- build / tooling artifacts ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+bin/
+obj/
+
+# Godot
+.godot/
+*.import
+export_presets.cfg
+
+# Rebuilt game assets (regenerate from Data.wz with tools/ ; never commit)
+assets/
+generated/
+*.wz.json
+
+# local scratch
+*.tmp
+.DS_Store

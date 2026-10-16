@@ -132,11 +132,15 @@ PE 內保留了 MSVC RTTI 名稱，共 **651 個型別描述子**（exe 618 個�
 | 目錄區塊 | `compact-int 子節點數` + N 筆 entry | `NameSpace.dll:sub_10028F90`（`PKG1` 開檔）、`sub_10029350`/`sub_10029650`（遞迴）|
 | entry | `u8 tag` + name + `compact-int size` + `compact-int checksum` + `u32 key` | 由 1,052 筆 parse 一致性驗證 |
 | `compact-int` | 單 byte（signed）；若該 byte == `0x80` → 後接 `int32` | `sub_10029350`（`< -127 \|\| > 127` 分支寫 `0x80` + 4 bytes）|
-| tag | `3` = 目錄、`4` = image、**`2` = 名稱去重引用** + `u32`（= 先前同名 entry 的 `tag` 檔內位移 − 60）| 實測 `/Map/Tile/darkCave.img`、`darkWood.img` 引用 `/Map/Back` 的同名 entry |
-| image 內層 | property list，**字串用同一套 cipher**；canvas 資料經 **ZLZ LZ 壓縮** | `Character/Cap/01000000.img` 於 offset 5 解出 `"icon"`；`Canvas.dll` import `ZLZCreateInflator` |
+| tag | `3` = 目錄、`4` = image、**`2` = 名稱去重引用** + `u32`（= 被引用 entry 的 tag 位移 − 0x3C）| 實測 4 處：`/Map/Tile/{darkCave,darkWood,dryRock,grassySoil}.img` 引用 `/Map/Back` 的同名 entry（`0x585E + 0x3C = 0x589A` ✅）|
+| image 檔頭 | `0x73`（或 `0x1B`）+ 字串 `"Property"` + `u16 0` + count；另一變體為 `00 00 00` + count | `Mob/0100100.img` 開頭解出 `"Property"`；`Character/Cap/01000000.img` 為 `00 00 00 0F` |
+| property 項 | `u8 0x00` + string name + `u8 type` + value（共 15 種 type）| `Cap/01000000.img` 逐 byte 驗證 `icon`(699B)、`iconRaw`(610B) 兩張 canvas 偏移完全自洽 |
+| 型別表 | 15 種（0/2/3/4/5/6/7/8/9/11/13/16/17/18/19）| `PCOM.dll.c` `sub_10018800`（read）/`sub_10012920`（write）|
+| canvas 像素 | 以 check byte `0x73`/`0x1B` 開頭，經 **ZLZ LZ 壓縮** | `Canvas.dll` 為唯一 import `ZLZ.dll` 者（`?ZLZCreateInflator@@…`）|
 
-尚未完成（**這是唯一還需要 RE 的資源環節**）：property 值型別表、canvas 標頭 → BGRA 像素、ZLZ 解壓實作。
-難度評估：**低–中**（`ZLZ.dll` 只有 134 個函式且只匯出 3 個 inflate/deflate API；`Canvas.dll` 是唯一使用者，可直接對照；而且原 client 真的能解這些檔案，代表一定解得出來）。
+仍未完成（**唯一剩下的資源環節**）：canvas 標頭 → BGRA 像素、ZLZ inflate 實作、部分型別的精確 C 型別。
+難度評估：**低–中**（`ZLZ.dll` 只有 134 個函式且只匯出 3 個 inflate/deflate API，inflate 主體疑為 `sub_100028E0`；`Canvas.dll` 是唯一使用者，可直接對照）。
+完整規格與證據位址見 **`docs/WZ1_FORMAT.md`**。
 
 ### 3.4 其他已確認事實
 
@@ -357,7 +361,7 @@ login/world/channel/game loop、角色持久化、地圖實例管理。
 
 | 風險 | 等級 | 緩解 |
 |---|---|---|
-| `.img`/canvas/ZLZ 未完全解出 | 中 | 已有樹狀 reader；`ZLZ.dll` 只 134 函式、匯出 3 個 API；用 `Canvas.dll` 反編譯對照；先做「一張圖→PNG」的 spike |
+| `.img`/canvas/ZLZ 未完全解出 | **中→低**（樹/字串/屬性項已解，只剩 canvas 像素 + ZLZ） | 依 `docs/WZ1_FORMAT.md` §4.4 的三步 spike（先解 `UI/Basic.img` 的 `Cursor` canvas）|
 | 協定/加密未知 | 中 | 由 exe 的 dispatch 跳表 + `CClientSocket`/`ZSocket` 反推；oracle 錄包驗證 |
 | 沒有原始 server 可對照 | 高 | 自建 localhost server 當第一里程碑；用差異測試取代「參考實作」 |
 | 2003 行為細節被現代規則污染 | 中 | 每個系統寫 `docs/evidence/*`：結論 + 證據位址 + confidence；查不到就標 UNKNOWN |
@@ -390,7 +394,7 @@ login/world/channel/game loop、角色持久化、地圖實例管理。
 | `analysis/data_wz_manifest.json` | 同上，機器可讀（供後續工具/C# 讀取） |
 | `analysis/rtti_raw.txt` | 651 個原始 RTTI type descriptor（依 binary 分類） |
 | `analysis/rtti_classes.txt` | 去重複後的類別名清單（領域模型命名的依據） |
-| `analysis/class_inventory.txt` | （空 — 產生腳本失敗，待重跑） |
+| `docs/WZ1_FORMAT.md` | WZ v1 完整規格（容器/樹/字串/屬性項/型別表/canvas）＋每項的證據位址與驗證方式 |
 
 ## 附錄 B：關鍵證據位址（重寫時直接查這裡，不要重新摸索）
 
