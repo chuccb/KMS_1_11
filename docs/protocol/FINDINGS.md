@@ -173,9 +173,13 @@ switch (opcode) {
 
 | 型別 | 線上格式 | 寫入端 | 讀取端 |
 |---|---|---|---|
-| byte | 1 byte 原樣 | `sub_4A1EA0(&buf, byte, 0)`（開包並塞入 opcode）或 `sub_431DE0(&buf, 1)` + 直接寫 | `sub_45DC40(&dst, ptr, avail)`（見下）|
-| u16 / u32 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, n)` 先保留 n bytes，呼叫端再直接寫入並自己把長度 +n | handler 內直接 `*(_DWORD*)(ptr + cursor)`（有邊界檢查，不足就丟 `ZException` code 38）|
+| byte | 1 byte 原樣 | `sub_4A1EA0(&buf, byte, 0)`（開包並塞入 opcode）或 `sub_431DE0(&buf, 1)` + 直接寫 | `sub_45DC40(&dst, ptr, avail)`：讀 1 byte，回傳 1；不足丟 `ZException(38)` |
+| u16 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, 2)` + 直接寫 | `sub_45DC80(&dst, ptr, avail)`：讀 2 bytes，回傳 2；不足丟 `ZException(38)` |
+| u32 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, 4)` + 直接寫 | handler 內直接 `*(_DWORD*)(ptr + cursor)`（自己做邊界檢查）|
 | 字串 | **`u16 長度` + 原始 bytes（無 NUL、無長度逃逸）** | `sub_430230(&buf, zstr)` → `sub_4303C0(dst, zstr)`：`*dst = len; memcpy(dst+1, data, len); return len + 2` | `sub_418610(&zstr, ptr, len)`（`len == -1` 時用 `strlen`）|
+
+> 讀取端一律是「先檢查剩餘長度、不足就丟 `ZException` code 38」。`server/src/protocol/packet.ts`
+> 以 `PacketUnderflowError(code = 38)` 對應這個行為：**寧可爆掉也不要回 undefined**，否則欄位解析錯了會靜默產生垃圾。
 
 傳送端 API（`sub_43AD50(buf)` 才是真正的送出）：
 
@@ -184,7 +188,8 @@ sub_4A1EA0(&buf, OPCODE, 0);   // 建立送包緩衝，第一個 byte 就是 opc
 sub_430230(&buf, zstr);        // 附加字串（u16 長度 + bytes）
 sub_431DE0(&buf, 4);           // 保留 4 bytes（u32），呼叫端自行寫入後把長度 +4
 sub_43AD50(this, &buf);        // 加標頭（0xD3 ^ HIWORD(sendState)）→ 加密 → 排入送出佇列
-sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；剩 0 bytes 時丟 ZException(38)；回傳消耗的 byte 數
+sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；回傳消耗的 byte 數
+sub_45DC80(&dst, ptr, avail);  // 讀 2 bytes（u16）
 ```
 
 > 讀取端的常見樣式是 `cursor += sub_45DC40(...)`（每次 1 byte），多 byte 欄位則直接記憶體存取；
@@ -203,6 +208,43 @@ sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；剩 0 bytes 時丟 ZException(38)
 | 0x09 | `u32`（`*(this+300)`）| `sub_5545F0` | 世界伺服器相關請求 |
 | 0x0A | `u16 len str` + `u32`，送出後 `Sleep(300)×2` 並丟 `CTerminateException` | `sub_5545F0` | **要求遷移**：等伺服器切換連線（配合 §4.2 的 0x07）|
 | 0x0E | `u8 *(CStage+156)` | `sub_542C40`（`CVecCtrlUser`）| 意義未定（單 byte）|
+
+### 4.6 server → client：登入階段（0x0B–0x13）的一個已解封包
+
+`0x0B`（`sub_55BAB0`，`this = CWvsApp`）：
+
+```
+u8  result                       // 未定語意（0 與非 0 走不同分支：非 0 時重設 *(this+6)=0 並記時間 *(this+7)）
+u8  count                        // 後續條目數（0 表示沒有；下面的迴圈每跑一次就 --count）
+count × {
+  u8  type                       // 0..3；handler 會 +1 當索引（見下），非法值直接丟棄該條目
+  u8  value
+  u16 value
+}
+```
+
+- 每個條目會被放進 **CWvsApp 的四個清單之一**：`*(u32*)(this + 4*(type+1) + 362)`（`sub_55E8F0` 內，
+  `type+1` 必須在 1..4，否則整條丟掉）。條目元素大小 8 bytes（ZRef 指標對）。
+- ✅ 具體事實：`type = 1` 且 `value = 1` 的條目會讓 client 直接丟 `CTerminateException`（自己斷線）；
+  `type = 1` 的其他值走 `sub_55E780((this, v27 + 34))`。
+- 🟡 未定：`result` 各值、`type` 0..3 各代表什麼清單（可能與世界/分流清單有關），以及三個 value 欄位的語意。
+  **這是最值得優先解的一個 server→client 封包**：client 在登入畫面等的就是它。
+
+### 4.7 登入階段的 opcode 對照（觀察，非規格）
+
+| client 送出 | 來源 | client 處理（回應）|
+|---|---|---|
+| 0x01 登入請求 | `sub_4D0B20`（`CTitle`）| 0x0B |
+| 0x02 選世界 | `sub_54DFC0`（`CWorldSelect`）| 0x0C |
+| 0x03 / 0x06 / 0x07 角色相關 | `sub_431620`（`CUINewChar`）| 0x0D / 0x10 / 0x11 |
+| 0x04 握手回覆 | `sub_43A410` | — |
+| 0x05 | `sub_42FD30`（`CUINewChar`）| 0x0F |
+| 0x08 echo 回覆 | `sub_43B280` | 0x12 |
+| 0x09 / 0x0A 遷移世界 | `sub_5545F0` | 0x13 |
+
+🟡 **這張表的「配對」是觀察到的數字位移（+0x0A），不是證實的規則**：0x0E 同時出現在
+client 送出清單（`CVecCtrlUser`）與 client 接收處理清單（`sub_55B6A0`）中，所以「同號碼成對」
+不可能是全域規則。必須靠真實伺服器或補丁過的 client 才能確定，**不可當規格使用**。
 
 其餘 32 個（僅列 opcode 與 builder，欄位待解）：
 
@@ -232,16 +274,19 @@ sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；剩 0 bytes 時丟 ZException(38)
 
 ## 6. 待辦（依重要性）
 
-1. **211-byte 握手的 `body`（199 bytes）要放什麼**：client 端只把它交給 `sub_418610` 存成物件，語意未定。
-   已知的是「長度必須是 199、總長必須是 211」，而**我們（伺服器）先送**，所以可以用 `capture --handshake-body`
-   餵不同內容、觀察原 client 的反應——這是目前最快的解法。
-2. 逐區間解出欄位：先做 **0x0B–0x13（登入/選角）**——這是客戶端一連線就會走的路徑，且只有九個函式；
-   再依 §4.1 的區間表往下做。每個 handler 讀取的欄位順序 = 該 opcode 的欄位定義。
-3. 由 §4.1／§4.2 的對照表產生 `protocol/schema/`（opcode 常數＋欄位），並用 `capture` 對照真實流量驗證。
-4. 補測試向量：把 §4.4 的欄位編碼（byte / u16 / u32 / 字串）做成 `server/src/protocol/` 的
-   reader/writer 並加上單元測試——這是 schema 產生的前置工作。
-5. 逐 opcode 解欄位（§4.5 目錄 + §4.1 區間表）；每個 opcode 都以「handler 讀了哪些欄位」為準。
-5. `sub_43AFA0` 的 `-212` 檢查已解（= §3.1 的接收端標頭檢查），不再列為未知。
+1. **`0x0B` 的語意**（§4.6）：結構已解、值未解。這是 client 在登入畫面等的那個封包，也是唯一
+   「不確定就完全進不了遊戲」的封包。解法優先序：
+   (a) 反推 `sub_55E8F0` 寫入的四個清單（`CWvsApp + 362 + 4*(type+1)`）被誰讀取、畫在哪個 UI；
+   (b) 反推 `result` 各值分支（`result != 0` 時 `*(this+6) = 0; *(this+7) = timeGetTime();`）；
+   (c) 找 `CTerminateException` 的訊息來源（`type=1,value=1` 那條）。
+2. **211-byte 握手的 `body`（199 bytes）要放什麼**：client 端只把它交給 `sub_418610` 存成 ZString，
+   語意未定。已知「長度必須是 199、總長必須是 211」，而且**伺服器先送**，所以可用
+   `capture --handshake-body` 餵不同內容、觀察原 client 的反應——目前最快的解法。
+3. 逐區間解欄位（§4.1 區間表 + §4.5 目錄）：0x0B–0x13 之後接 0x15–0x1A（CField）、
+   再依區間往下。每個 handler 讀取的欄位順序 = 該 opcode 的欄位定義。
+4. 由 §4.1／§4.5 的對照表 + `server/src/protocol/packet.ts` 的 codec 產生 `protocol/schema/`，
+   並用 `capture` 對照真實流量驗證。
+5. 抓到真實流量後回頭驗證 §4.7 的「+0x0A 配對」是否成立（目前只是觀察）。
 
 ## 7. 擷取工作流（ADR-004）
 
