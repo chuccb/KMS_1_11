@@ -54,10 +54,10 @@ notes:
 
   serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9: it opens with the
   211-byte handshake, answers 0x01 with the world list, 0x02 with up to three character slots and
-  0x03 with the game server address plus a token; 0x06/0x04 handle name checks, 0x05 creates a
+  0x03 with the game server address plus the character id; 0x06/0x04 handle name checks, 0x05 creates a
   character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
   them) and created characters are stat-only, because the CharacterData item block is not decoded
-  yet. With --game-port it also opens the game-server listener, which claims the token and then
+  yet. With --game-port it also opens the game-server listener, which claims the handoff and then
   holds the connection: the in-game packets (0x15-0x52) are not decoded yet, so nothing is invented.
 `;
 
@@ -223,7 +223,7 @@ async function runServe(rest: string[]): Promise<number> {
       `  worlds:   ${worlds.map((world) => world.name).join(", ")}\n` +
       (gamePort === undefined
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
-        : `  game:     ${gameIp}:${gamePort} (token handoff only; in-game packets are not decoded yet)\n`) +
+        : `  game:     ${gameIp}:${gamePort} (handoff only so far; in-game packets are decoded but not served)\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
   );
   await new Promise<void>((resolve) => {

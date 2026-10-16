@@ -17,6 +17,7 @@ import { CipherState, headerMagicOf, magicFor, type Direction } from "../protoco
 import { HANDSHAKE_BODY_BYTES, HANDSHAKE_TOTAL_BYTES, decodeHandshake } from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
+import { describeFieldPacket } from "../protocol/field.ts";
 
 /** The subset of a capture record this module needs; `CaptureRecord` satisfies it. */
 export interface TraceRecord {
@@ -156,7 +157,11 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
     // The magic is direction-tied: the client writes 0xD3 and verifies 0xFF2C (cipher.ts).
     const expectedHeader = state.headerMagic(magicFor(record.dir));
     const plain = state.decrypt(raw.slice(4));
-    const decoded = record.dir === "c2s" ? describeClientPacket(plain) : undefined;
+    // Server -> client packets are answered by the *stage* dispatcher, so they can only be named
+    // when the opcode is in the field range (0x15-0x52). Login replies (0x01-0x06) belong to
+    // CTitle/CWorldSelect/CCharSelect, which is exactly why `describeFieldPacket` returns undefined
+    // for them instead of mislabelling them as a CField subsystem.
+    const decoded = record.dir === "c2s" ? describeClientPacket(plain) : describeFieldPacket(plain);
     packets.push({
       ...base,
       expectedHeader,

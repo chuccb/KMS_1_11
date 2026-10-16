@@ -3,7 +3,7 @@
  *
  * This is the closest we can get to the oracle run (ADR-004) without the 2003 binary: the test
  * opens a socket, reads the 211-byte handshake, sends the client packets of FINDINGS 4.8 in order
- * and checks every reply field. It also covers the handoff: the token from the 0x03 reply has to
+ * and checks every reply field. It also covers the handoff: the id from the 0x03 reply has to
  * come back out of the game server's registry with the right character attached.
  */
 import { test } from "node:test";
@@ -153,7 +153,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
     await server.close();
   });
 
-  // 1. The client's first packet is always [0x04][token], which is 0 on the login connection.
+  // 1. The client's first packet is always [0x04][id], which is 0 on the login connection.
   client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
 
   // 2. A wrong password is refused and does not advance the stage.
@@ -201,7 +201,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   takenReader.readAsciiString();
   assert.equal(takenReader.readByte(), 1, "the name is taken");
 
-  // 7. Select the character: the reply must carry the game server address and a token.
+  // 7. Select the character: the reply must carry the game server address and the character id.
   client.send({ kind: "select-character", opcode: 0x03, characterId: created.stats.id });
   const selectReply = (await client.take(1))[0]!;
   const selectReader = new PacketReader(selectReply);
@@ -209,17 +209,17 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(selectReader.readByte(), LOGIN_RESULT.ok);
   assert.equal(selectReader.readU32(), 0x0100007f, "127.0.0.1 in network order");
   assert.equal(selectReader.readU16(), 8585);
-  const token = selectReader.readU32();
-  assert.ok(token !== 0);
+  const handedId = selectReader.readU32();
+  assert.equal(handedId, created.stats.id, "the 0x03 reply carries the client's own character id");
   assert.equal(selectReader.exhausted, true);
 
-  // 8. The token resolves to exactly this character, once.
+  // 8. That id resolves to exactly this character, once.
   assert.deepEqual(
-    handoffs.claim(token),
+    handoffs.claim(handedId),
     { username: "admin", characterId: created.stats.id, characterName: "Hero" },
-    `token=0x${token.toString(16)} pending=${handoffs.pending}\n${log.join("\n")}`,
+    `id=0x${handedId.toString(16)} pending=${handoffs.pending}\n${log.join("\n")}`,
   );
-  assert.equal(handoffs.claim(token), undefined, "a token is single use");
+  assert.equal(handoffs.claim(handedId), undefined, "a handoff is single use");
 
   // 9. Delete the character: the answer is 0x06 with the id echoed and a non-zero flag.
   client.send({ kind: "delete-character", opcode: 0x07, characterId: created.stats.id });
@@ -234,7 +234,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.ok(log.some((line) => line.includes("handshake sent")));
 });
 
-test("the game server claims the token the login server issued", { timeout: 20000 }, async (t) => {
+test("the game server claims the character id the login server issued", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
   const handoffs = new HandoffRegistry();
   const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
@@ -270,24 +270,24 @@ test("the game server claims the token the login server issued", { timeout: 2000
   const character = readCharacterData(createReader);
   client.send({ kind: "select-character", opcode: 0x03, characterId: character.stats.id });
   const selectReply = (await client.take(1))[0]!;
-  const tokenReader = new PacketReader(selectReply);
-  tokenReader.readByte();
-  tokenReader.readByte();
-  tokenReader.readU32();
-  tokenReader.readU16();
-  const issuedToken = tokenReader.readU32();
-  assert.ok(issuedToken !== 0);
+  const selectReader2 = new PacketReader(selectReply);
+  selectReader2.readByte();
+  selectReader2.readByte();
+  selectReader2.readU32();
+  selectReader2.readU16();
+  const issuedId = selectReader2.readU32();
+  assert.equal(issuedId, character.stats.id, "the handoff value is the character's own id");
   client.close();
 
-  // The second connection: the client is the one that speaks now, with the token.
+  // The second connection: the client is the one that speaks now, with its character id.
   const gameClient = await FakeClient.connect(gameInfo.port);
-  gameClient.send({ kind: "handshake-reply", opcode: 0x04, value: issuedToken });
+  gameClient.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
   const deadline = Date.now() + 2000;
   while (!log.some((line) => line.includes("claimed")) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   assert.ok(
-    log.some((line) => line.includes(`token 0x${(issuedToken >>> 0).toString(16).padStart(8, "0")} claimed -> "Hero"`)),
+    log.some((line) => line.includes(`character 0x${(issuedId >>> 0).toString(16).padStart(8, "0")} claimed -> "Hero"`)),
     log.join("\n"),
   );
   gameClient.close();

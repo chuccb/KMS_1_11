@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { PacketReader, PacketWriter } from "../src/protocol/packet.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import {
+  CHAR_FLAG_ITEMS,
   CHAR_FLAG_STATS,
   CHARACTER_NAME_BYTES,
   CHARACTER_NAME_MAX,
@@ -57,15 +58,13 @@ function sampleStats(): CharacterStats {
     sp: 0x0b13,
     exp: 0x0c141516,
     fame: 0x0d17,
-    unknown81: 0x0e18191a,
-    unknown87: 0x0f1b,
     unknown93: 0x101c1d1e,
     unknown97: 0x111f2021,
     unknown101: 0x12,
   };
 }
 
-test("the stat block is 75 bytes and reads back field for field", () => {
+test("the stat block is 69 bytes and reads back field for field", () => {
   const stats = sampleStats();
   const writer = new PacketWriter();
   writeCharacterStats(writer, stats);
@@ -88,11 +87,8 @@ test("the stat block layout is byte-exact against sub_45D840's read order", () =
     hex.slice(2 * 32, 2 * 54),
     "0901" + "0a02" + "0b03" + "0c04" + "0d05" + "0e06" + "0f07" + "1008" + "1109" + "120a" + "130b",
   );
-  // exp(u32) fame(u16) unknown81(u32) unknown87(u16) unknown93(u32) unknown97(u32) unknown101(u8)
-  assert.equal(
-    hex.slice(2 * 54),
-    "1615140c" + "170d" + "1a19180e" + "1b0f" + "1e1d1c10" + "21201f11" + "12",
-  );
+  // exp(u32) fame(u16) unknown93(u32) unknown97(u32) unknown101(u8)
+  assert.equal(hex.slice(2 * 54), "1615140c" + "170d" + "1e1d1c10" + "21201f11" + "12");
 });
 
 test("the name field is 13 raw bytes, NUL padded, and rejects what the client cannot hold", () => {
@@ -101,9 +97,9 @@ test("the name field is 13 raw bytes, NUL padded, and rejects what the client ca
   assert.throws(() => nameFieldBytes("н"), RangeError);
 });
 
-test("a stat-only CharacterData is one flags byte plus one 75-byte stat block (CHAR_FLAG_STATS)", () => {
+test("a stat-only CharacterData is one flags byte plus one 69-byte stat block (CHAR_FLAG_STATS)", () => {
   const bytes = encodeWorldSelectResult(LOGIN_RESULT.ok, [characterDataOf(sampleStats())]);
-  // opcode(1) result(1) count(1) flags(1) stats(102)
+  // opcode(1) result(1) count(1) flags(1) stats(69)
   assert.equal(bytes.length, 3 + 1 + CHARACTER_STATS_BYTES);
   const reader = new PacketReader(bytes);
   assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
@@ -115,10 +111,24 @@ test("a stat-only CharacterData is one flags byte plus one 75-byte stat block (C
   assert.equal(reader.exhausted, true);
 });
 
-test("the item block is refused instead of being written half-decoded", () => {
+test("an item block with nothing in it is a legal, empty block", () => {
+  const data = characterDataOf(sampleStats());
+  const bytes = encodeWorldSelectResult(LOGIN_RESULT.ok, [{ ...data, flags: CHAR_FLAG_STATS | CHAR_FLAG_ITEMS }]);
+  // flags + stats + (two empty worn groups) + (empty equip tab: capacity, terminator, 0 records)
+  assert.equal(bytes.length, 3 + 1 + CHARACTER_STATS_BYTES + 1 + 1 + 1 + 1 + 1);
+  const reader = new PacketReader(bytes);
+  reader.readByte();
+  reader.readByte();
+  reader.readByte();
+  const back = readCharacterData(reader);
+  assert.equal(back.items.worn.size, 0);
+  assert.equal(back.items.inventories[0].capacity, 0);
+  assert.deepEqual(back.stats, sampleStats());
+  assert.equal(reader.exhausted, true);
+
   assert.throws(
-    () => encodeWorldSelectResult(LOGIN_RESULT.ok, [{ flags: 0x02, stats: sampleStats() }]),
-    /not decoded yet/,
+    () => encodeWorldSelectResult(LOGIN_RESULT.ok, [{ flags: 0x80, stats: sampleStats() }]),
+    /at most 0x7f/,
   );
 });
 
@@ -168,7 +178,7 @@ test("the IPv4 field goes out in network order, the port as a little-endian u16"
   assert.throws(() => ipv4WireValue("1.2.3"), RangeError);
   assert.throws(() => ipv4WireValue("1.2.3.400"), RangeError);
 
-  const bytes = encodeSelectCharacterResult(LOGIN_RESULT.ok, { ip: "127.0.0.1", port: 0x8484, token: 0xdeadbeef });
+  const bytes = encodeSelectCharacterResult(LOGIN_RESULT.ok, { ip: "127.0.0.1", port: 0x8484, characterId: 0xdeadbeef });
   assert.equal(toHex(bytes), "0300" + "7f000001" + "8484" + "efbeadde");
 });
 

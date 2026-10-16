@@ -11,11 +11,12 @@
 | `.img` 屬性樹 | ✅ 結構完成 | 186 個屬性完整還原（`analysis/sample_Cap_01000000_properties.txt`）|
 | `.img` 像素（canvas + ZLZ） | ⬜ | 能輸出 `UI/Basic.img` 的 `Cursor` 為正確 PNG |
 | 協定：framing / cipher | ✅ 完成 | 握手、雙方向標頭、LCG 金鑰全部有 binary 證據（FINDINGS §2–§3）|
-| 協定：dispatch/opcode 表 | 🟡 | 分派鏈已完整定位（FINDINGS §4.1／§4.7：階段 → opcode）；client 送出的 39 個 opcode 已建目錄，**登入鏈四個階段已解到欄位層**（§4.8／§4.9）。剩下的：`CharacterData` 道具區塊與 CField 各區間 |
+| 協定：dispatch/opcode 表 | 🟢 | 分派鏈已完整定位（FINDINGS §4.1／§4.7：階段 → opcode → 子系統）；client 送出的 39 個 opcode 已建目錄，**登入鏈四個階段（§4.8／§4.9）與遊戲內第一條垂直切片（§4.11：進地圖 0x16、別人進場 0x1C、離場 0x1D、移動 0x22／0x0E、傳送門 0x0D）都已解到欄位層**。剩下的：CField 其餘區間（§6 第 3 項）與 §4.11 的三個 UNKNOWN |
 | 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
 | **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
 | 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
-| 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）；**待原 client 實機驗證** |
+| 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）＋角色 id 交接；**待原 client 實機驗證** |
+| 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D 的逐 byte codec（`test/field.test.ts` golden 覆蓋）；尚未有遊戲伺服器的地圖邏輯 |
 | oracle 重現 | ⬜ | 原 client 能連上我們的 listener 並完成握手（不 crash） |
 
 **出口條件**：能回答「這個封包是什麼意思」，且每個答案都有 binary 或擷取證據。

@@ -71,6 +71,18 @@ export class PacketWriter {
     return this;
   }
 
+  /**
+   * Eight raw bytes, little-endian. Used by the item slot's cash block and by the 8-byte records
+   * that follow each inventory in `CharacterData` (both are memcpy'd as 8 bytes on the client,
+   * `sub_45DD00(..., 8, ...)`), so they stay `bigint` instead of being split into two `u32` here.
+   */
+  writeU64(value: bigint): this {
+    const masked = BigInt.asUintN(64, value);
+    this.ensure(8);
+    for (let i = 0n; i < 8n; i++) this.buf[this.len++] = Number((masked >> (8n * i)) & 0xffn);
+    return this;
+  }
+
   writeBytes(bytes: Uint8Array): this {
     this.ensure(bytes.length);
     this.buf.set(bytes, this.len);
@@ -147,6 +159,14 @@ export class PacketReader {
       this.buf[this.pos + 3]! * 0x1000000;
     this.pos += 4;
     return value >>> 0;
+  }
+
+  readU64(): bigint {
+    this.need(8);
+    let value = 0n;
+    for (let i = 7; i >= 0; i--) value = (value << 8n) | BigInt(this.buf[this.pos + i]!);
+    this.pos += 8;
+    return value;
   }
 
   readBytes(n: number): Uint8Array {

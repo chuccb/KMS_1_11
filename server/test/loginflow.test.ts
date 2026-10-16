@@ -13,8 +13,8 @@
  *   client -> 0x02 world index
  *   server -> 0x02 result + 3 slots     - client switches to CCharSelect
  *   client -> 0x03 characterId
- *   server -> 0x03 ip, port, token      - client connects to the game server
- *   client -> 0x04 token                - on the new connection, right after the handshake
+ *   server -> 0x03 ip, port, charId     - client connects to the game server
+ *   client -> 0x04 charId               - on the new connection, right after the handshake
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -116,13 +116,16 @@ test("the login chain works end to end over a real encrypted session", () => {
   assert.deepEqual(received.stats, hero.stats);
   assert.equal(worldReader.exhausted, true);
 
-  // --- 0x03: select the character -> the client is handed the game server address plus a token.
+  // --- 0x03: select the character -> the client is handed the game server address plus its id.
   const select = encodeClientPacket({ kind: "select-character", opcode: 0x03, characterId: 0x1000 });
   assert.deepEqual(decodeClientPacket(select), { kind: "select-character", opcode: 0x03, characterId: 0x1000 });
 
-  const token = 0xcafebabe;
+  const characterId = 0x1000;
   client.receive(
-    encodeSessionPacket(encodeSelectCharacterResult(LOGIN_RESULT.ok, { ip: "127.0.0.1", port: 0x8484, token }), serverSendState),
+    encodeSessionPacket(
+      encodeSelectCharacterResult(LOGIN_RESULT.ok, { ip: "127.0.0.1", port: 0x8484, characterId }),
+      serverSendState,
+    ),
   );
   client.assertHeadersOk();
 
@@ -134,22 +137,22 @@ test("the login chain works end to end over a real encrypted session", () => {
   // The client copies those four bytes straight into sockaddr_in.sin_addr, so they are 7F 00 00 01.
   assert.equal(selectReader.readU32(), ipv4WireValue("127.0.0.1"));
   assert.equal(selectReader.readU16(), 0x8484);
-  const receivedToken = selectReader.readU32();
-  assert.equal(receivedToken, token);
+  const receivedId = selectReader.readU32();
+  assert.equal(receivedId, characterId);
   assert.equal(selectReader.exhausted, true);
 
-  // --- The new connection: handshake again, then the client identifies itself with the token.
+  // --- The new connection: handshake again, then the client identifies itself with its id.
   const gameServerHandshake = encodeHandshake(new Uint8Array(199), CLIENT_SEND_SEED, CLIENT_RECV_SEED);
   const gameServerRecvState = new CipherState(CLIENT_SEND_SEED);
   const gameServer = new SessionDeframer({ recvState: gameServerRecvState, expectHandshake: false, expectedMagic: CLIENT_SEND_MAGIC });
-  const tokenEcho = encodeClientPacket({ kind: "handshake-reply", opcode: 0x04, value: receivedToken });
-  const echoed = gameServer.push(encodeSessionPacket(tokenEcho, new CipherState(CLIENT_SEND_SEED), "c2s"));
+  const idEcho = encodeClientPacket({ kind: "handshake-reply", opcode: 0x04, value: receivedId });
+  const echoed = gameServer.push(encodeSessionPacket(idEcho, new CipherState(CLIENT_SEND_SEED), "c2s"));
   assert.equal(gameServerHandshake.length, 211);
   const firstPacket = echoed.find((event) => event.kind === "packet");
-  if (!firstPacket || firstPacket.kind !== "packet") throw new Error("the token echo did not arrive");
+  if (!firstPacket || firstPacket.kind !== "packet") throw new Error("the id echo did not arrive");
   assert.equal(firstPacket.headerOk, true);
-  assert.deepEqual(decodeClientPacket(firstPacket.plain), { kind: "handshake-reply", opcode: 0x04, value: token });
-  assert.equal(describeClientPacket(firstPacket.plain), `handshake-reply value=0x${token.toString(16)}`);
+  assert.deepEqual(decodeClientPacket(firstPacket.plain), { kind: "handshake-reply", opcode: 0x04, value: characterId });
+  assert.equal(describeClientPacket(firstPacket.plain), `handshake-reply value=0x${characterId.toString(16)}`);
 });
 
 test("every login-chain opcode is labelled in a trace, none are silently dropped", () => {

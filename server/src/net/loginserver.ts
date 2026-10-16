@@ -35,7 +35,13 @@ import {
   encodeWorldSelectResult,
   type WorldEntry,
 } from "../protocol/replies.ts";
-import { characterDataOf, zeroStats, type CharacterData, type CharacterStats } from "../protocol/chardata.ts";
+import {
+  characterDataOf,
+  zeroStats,
+  type CharacterData,
+  type CharacterItems,
+  type CharacterStats,
+} from "../protocol/chardata.ts";
 
 export interface AccountRecord {
   password: string;
@@ -50,41 +56,34 @@ export interface HandoffEntry {
 }
 
 /**
- * Tokens handed out by the 0x03 reply.
+ * The handoff the 0x03 reply performs.
  *
- * The token is the only thing that ties the second connection to the first: the client stores it
- * in `CWvsApp+0x14` and sends it as `[0x04][token]` right after the game server's handshake
- * (FINDINGS 4.8/§2), so the game server can look up which character just arrived.
+ * The client stores the u32 in `CWvsApp+0x14` and sends it as `[0x04][value]` right after the game
+ * server's handshake (FINDINGS 4.8/§2), so the game server learns which character just arrived.
+ * That value is the **character id**: the client compares it against the id of every user that
+ * enters the field to recognise itself (`sub_51CFE0`, FINDINGS 4.11.3), so a random value here
+ * would make the client deny its own character. The registry is therefore keyed by character id,
+ * and the game server must keep using that id for the session.
  */
 export class HandoffRegistry {
-  private readonly byToken = new Map<number, HandoffEntry>();
+  private readonly byCharacterId = new Map<number, HandoffEntry>();
 
-  /**
-   * Issues a fresh non-zero token. Called once per successful character select.
-   *
-   * The token is unsigned everywhere (`>>> 0`, never `| 1`, which would make it a *signed* int32):
-   * the wire carries the low 32 bits and the client sends them straight back, so a negative key
-   * here would never be found by `claim`.
-   */
+  /** Registers a character that may arrive on the game port, and returns the id to send back. */
   issue(entry: HandoffEntry): number {
-    if (this.byToken.size > 4096) this.byToken.clear(); // a stub, not a session store
-    for (;;) {
-      const token = ((Math.random() * 0x100000000) >>> 0) || 1;
-      if (this.byToken.has(token)) continue;
-      this.byToken.set(token, entry);
-      return token;
-    }
+    if (this.byCharacterId.size > 4096) this.byCharacterId.clear(); // a stub, not a session store
+    this.byCharacterId.set(entry.characterId, entry);
+    return entry.characterId >>> 0;
   }
 
-  /** Consumes a token (single use) and returns what it stood for. */
-  claim(token: number): HandoffEntry | undefined {
-    const entry = this.byToken.get(token);
-    if (entry) this.byToken.delete(token);
+  /** Consumes a handoff (single use) and returns what it stood for. */
+  claim(characterId: number): HandoffEntry | undefined {
+    const entry = this.byCharacterId.get(characterId);
+    if (entry) this.byCharacterId.delete(characterId);
     return entry;
   }
 
   get pending(): number {
-    return this.byToken.size;
+    return this.byCharacterId.size;
   }
 }
 
@@ -153,8 +152,20 @@ export class LoginServer {
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
-  /** Builds a character. Only the fields this server can honestly fill are set. */
-  createCharacter(id: number, name: string, appearance: number[], template?: CharacterStats): CharacterData {
+  /**
+   * Builds a character. Only the fields this server can honestly fill are set.
+   *
+   * `items` is what makes the character look dressed: the client draws the avatar from the worn
+   * equips in `CharacterData` (`flags & 0x02`), so a caller that has an item model should pass one.
+   * With no items the record stays a flags byte + the 69-byte stat block, which the client accepts.
+   */
+  createCharacter(
+    id: number,
+    name: string,
+    appearance: number[],
+    template?: CharacterStats,
+    items?: CharacterItems,
+  ): CharacterData {
     void appearance; // the 10 words of 0x06 are logged; their stat mapping is not proven yet
     if (template) {
       const stats: CharacterStats = {
@@ -164,7 +175,7 @@ export class LoginServer {
         hp: template.maxHp,
         mp: template.maxMp,
       };
-      return { flags: 1, stats };
+      return characterDataOf(stats, items);
     }
     const stats = zeroStats();
     stats.id = id;
@@ -178,7 +189,7 @@ export class LoginServer {
     stats.maxHp = 50;
     stats.mp = 50;
     stats.maxMp = 50;
-    return { flags: 1, stats };
+    return characterDataOf(stats, items);
   }
 
   private onConnection(socket: net.Socket): void {
@@ -242,7 +253,7 @@ export class LoginServer {
       case "handshake-reply":
         // The client sends this on every new connection; on the login server it is always 0
         // because only the 0x03 reply sets CWvsApp+0x14.
-        this.log(`  note: handshake reply, token=0x${hex(packet.value)} (the game server is the one that claims it)`);
+        this.log(`  note: handshake reply, characterId=0x${hex(packet.value)} (the game server claims it)`);
         return;
 
       case "login-request": {
@@ -290,7 +301,7 @@ export class LoginServer {
           this.reply(socket, sendState, encodeSelectCharacterResult(LOGIN_RESULT.systemError));
           return;
         }
-        const token = this.handoffs.issue({
+        const characterId = this.handoffs.issue({
           username: state.username,
           characterId: packet.characterId,
           characterName: character.stats.name,
@@ -301,12 +312,12 @@ export class LoginServer {
           encodeSelectCharacterResult(LOGIN_RESULT.ok, {
             ip: this.options.gameServer.ip,
             port: this.options.gameServer.port,
-            token,
+            characterId,
           }),
         );
         this.log(
           `  "${character.stats.name}" handed to ${this.options.gameServer.ip}:${this.options.gameServer.port} ` +
-            `with token 0x${hex(token)}`,
+            `as character 0x${hex(characterId)}`,
         );
         return;
       }
@@ -382,9 +393,9 @@ export class LoginServer {
 }
 
 /**
- * The game-server side of the handoff: handshake, then `[0x04][token]`.
+ * The game-server side of the handoff: handshake, then `[0x04][characterId]`.
  *
- * This exists so the loop can be *demonstrated*: the token issued by the login server arrives here
+ * This exists so the loop can be *demonstrated*: the id issued by the login server arrives here
  * and is claimed by name. Nothing else is implemented, because the in-game packets (0x15-0x52)
  * have not been decoded yet - the connection is left open and silent rather than fed invented data.
  */
@@ -443,7 +454,7 @@ export class GameEntryServer {
       expectedMagic: CLIENT_SEND_MAGIC,
     });
     socket.write(encodeHandshake(body, clientSendSeed, clientRecvSeed));
-    this.options.log?.("game: handshake sent, waiting for the 0x04 token");
+    this.options.log?.("game: handshake sent, waiting for the 0x04 character id");
 
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
@@ -456,8 +467,8 @@ export class GameEntryServer {
         const entry = this.options.handoffs.claim(packet.value);
         this.options.log?.(
           entry
-            ? `game: token 0x${hex(packet.value)} claimed -> "${entry.characterName}" (id ${entry.characterId}, ${entry.username})`
-            : `game: token 0x${hex(packet.value)} is unknown or already claimed`,
+            ? `game: character 0x${hex(packet.value)} claimed -> "${entry.characterName}" (${entry.username})`
+            : `game: character 0x${hex(packet.value)} is unknown or already claimed`,
         );
         if (!entry) {
           socket.destroy();

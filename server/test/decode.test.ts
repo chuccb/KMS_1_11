@@ -4,6 +4,7 @@ import { CipherState } from "../src/protocol/cipher.ts";
 import { encodeHandshake, encodeSessionPacket, HANDSHAKE_BODY_BYTES } from "../src/protocol/session.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import { decodeTrace, type TraceRecord } from "../src/net/decode.ts";
+import { encodeUserMove } from "../src/protocol/field.ts";
 
 const SEND_SEED = 0xaabbccdd;
 const RECV_SEED = 0x11223344;
@@ -104,4 +105,22 @@ test("decode reports packets it cannot key rather than guessing", () => {
   const packet = result.packets[0]!;
   assert.equal(packet.bodyHex, "");
   assert.match(packet.note ?? "", /no seed/);
+});
+
+test("decode names a server -> client field packet instead of leaving it anonymous", () => {
+  // CField packets are only meaningful in the field stage, so `describeFieldPacket` answers for the
+  // 0x15-0x52 range and stays silent elsewhere; this pins both halves of that rule.
+  const move = encodeUserMove({
+    characterId: 1000,
+    path: {
+      originX: 0,
+      originY: 0,
+      elements: [{ attr: 0, x: 12, y: 34, vx: 0, vy: 0, action: 1, foothold: 5, duration: 100 }],
+    },
+  });
+  const records: TraceRecord[] = traceOf(RECV_SEED, [move, Uint8Array.from([0x01, 0x00])], "s2c");
+  const result = decodeTrace(records, { s2cSeed: RECV_SEED, c2sSeed: SEND_SEED });
+  assert.equal(result.packets[0]!.decoded, "0x22 CUserPool: characterId=1000 elements=1 first=(12,34) action=1 fh=5");
+  assert.equal(result.packets[1]!.decoded, undefined, "a login-stage reply must not be labelled a CField packet");
+  assert.equal(result.packets[1]!.opcode, 0x01);
 });

@@ -3,44 +3,79 @@
  *
  * EVIDENCE (MapleStory.exe.c / .lst, see docs/protocol/FINDINGS.md 4.9)
  * --------------------------------------------------------------------
- * Reader: `sub_45FCC0` (called with the packet; it is the function `CCharSelect` and
- * `CWorldSelect` both use for a character slot)
- *   u8 flags
- *   if (flags & 1) sub_45D840    - the 102-byte stat block below
- *   if (flags & 2) <30 equips + 4 inventories; NOT decoded yet, see FINDINGS 6>
+ * Reader: `sub_45FCC0` = `CharacterData::Decode` (called by the char-select `0x02` reply
+ * `sub_4329A0`, by `CStage` `0x16` `sub_4C2780` and by `sub_54E250`).
+ * Writer: `sub_45F610` = `CharacterData::Encode` (vtable-only; it calls `sub_45D2E0` for the stat
+ * block and `sub_45E560` per item). The two mirror each other field for field, which is what makes
+ * the block sizes below certain:
  *
- * `sub_45D840` reads the stat block field by field, in exactly this order. Fields from `level`
- * to `unknown93` are *obfuscated in client memory* (the client stores `rand()` and `value ^
- * rand()` side by side, `sub_4618B0`), but **the wire value is the plain value**: the client's own
- * encoder (`sub_45D740`/`sub_45D640` call sites around MapleStory.exe.c:101309) XORs the two
- * halves back before writing them out. No random number is needed on either side.
+ * ```
+ * u8 flags
+ * if (flags & 0x01) <stat block>
+ * if (flags & 0x02) { worn equips, cash equips, equip tab, that tab's 8-byte records }
+ * if (flags & 0x04) { inventory 2 }
+ * if (flags & 0x08) { inventory 3 }
+ * if (flags & 0x10) { inventory 4 }
+ * if (flags & 0x20) { u16 count, count x {u32, u32} }
+ * if (flags & 0x40) { u16 count, count x {string, string} }
+ * ```
  *
- * The client's `CharacterData::Decode` (`sub_45FCC0`) can also skip the block entirely
- * (`flags & 1 == 0`), in which case the client zeroes it.
+ * Each inventory is `u8 capacity` (= the client's ZArray size - 1), then
+ * `{ u8 slot, GW_ItemSlot }*` terminated by a `u8 0`, then `u8 n` + `n * 8 bytes`. The two worn
+ * groups are 15-slot arrays indexed 1..14, so they start straight at the `{u8 slot, item}` loop -
+ * there is no capacity byte for them. No inventory carries the item category byte: the client
+ * passes the "I know the kind" hint (`1` for the two worn groups and the equip tab, `2/3/4` for the
+ * other three) everywhere in this block (`sub_45F610` calls `sub_45E560(item, packet, 0)`), and
+ * `0x0B` op 0 is the only place that does not.
  *
- * Names: `id`, the 13-byte name, `level`, `job` and the eleven `u16` stats are certain - the
- * widths and the order leave no other candidate. Five fields have no located reader yet; they
- * keep their offset in the name (`unknown81`, `unknown87`, `unknown93`, `unknown97`,
- * `unknown101`) instead of a guess. `unknown26` is a genuine `u8` between `face` and `hair`.
+ * The stat block: `sub_45D840` (read) and `sub_45D2E0` (write) agree on 24 fields, 69 bytes total:
+ *
+ * ```
+ * u32 id
+ * 13 bytes name            // fixed width, NUL padded, NOT length-prefixed (sub_45DD00 memcpy)
+ * u8  gender
+ * u32 appearanceA          // @+18 in the client object
+ * u32 appearanceB          // @+22
+ * u8  unknown26            // @+26 - a genuine u8 between the second appearance word and hair
+ * u32 hair                 // @+27
+ * u8  level                // @+31/+32; level..unknown93 are XOR-obfuscated in CLIENT MEMORY only
+ * u16 job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp     // 11 u16
+ * u32 exp                  // @+77/+81 - the 0x0D handler calls this pair "exp" (level-up message)
+ * u16 fame                 // @+85/+87
+ * u32 unknown93            // @+89/+93
+ * u32 unknown97            // @+97, not obfuscated
+ * u8  unknown101           // @+101, not obfuscated
+ * ```
+ *
+ * The memory struct is 102 bytes (`sub_55BEB0` copies 100 bytes + a word; `sub_45F5C0` memcpy's 102
+ * of them verbatim for party members) while the *wire* block is 69: the difference is the pad half
+ * of every obfuscated pair, plus the alignment tails. Writing 102 (or the 75 the first pass
+ * guessed) desynchronises everything that follows.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
+import { ITEM_CATEGORY_EQUIP, readItemSlot, writeItemSlot, type ItemSlot } from "./itemslot.ts";
 
 /** Fixed width of the character name field on the wire (12 visible bytes + NUL). */
 export const CHARACTER_NAME_BYTES = 13;
 export const CHARACTER_NAME_MAX = 12;
 
-/**
- * Bytes a stat block occupies on the wire: `sub_45D840` reads exactly this much.
- *
- * Do not confuse it with the 102-byte copy the character-select UI keeps per slot (`sub_42E2C0`
- * copies `CharacterData[0..101]`): the extra 27 bytes are client-only state that never appears in a
- * packet, and writing them would desynchronise the record that follows.
- */
-export const CHARACTER_STATS_BYTES = 75;
+/** Bytes a stat block occupies on the wire; `sub_45D840` and `sub_45D2E0` both come to 69. */
+export const CHARACTER_STATS_BYTES = 69;
 
-/** `u8 flags` bits of `sub_45FCC0`. */
+/** Slots the two worn item groups can hold: the client loops `1..14`, index 0 is unused. */
+export const WORN_SLOT_LIMIT = 14;
+
+/** `u8 flags` bits of `sub_45FCC0` / `sub_45F610`. */
 export const CHAR_FLAG_STATS = 0x01;
+/** Worn equips + worn cash equips + the equip tab (+ that tab's 8-byte records). */
 export const CHAR_FLAG_ITEMS = 0x02;
+export const CHAR_FLAG_INVENTORY_2 = 0x04;
+export const CHAR_FLAG_INVENTORY_3 = 0x08;
+export const CHAR_FLAG_INVENTORY_4 = 0x10;
+/** `u16 count` + `count * {u32, u32}` (the client keeps them in a `ZMap<long,long>`, `0x0E`). */
+export const CHAR_FLAG_MAP32 = 0x20;
+/** `u16 count` + `count * {string, string}` (`ZMap<ZXString,ZXString>`). */
+export const CHAR_FLAG_MAPSTR = 0x40;
 
 export interface CharacterStats {
   /** u32 @+0; the client keys the character slot by this (`sub_432890` matches it). */
@@ -49,16 +84,15 @@ export interface CharacterStats {
   name: string;
   /** u8 @+17. */
   gender: number;
-  /** u32 @+22 is copied into the avatar's body-part slot 0, u32 @+18 is fed to `sub_424590`
-   *  (a two-value setter) - which of the two is "skin" and which is "face" is not proven, so
-   *  they keep neutral names. Both are cosmetic ids from `Character.wz`. */
+  /** u32 @+18. Cosmetic ids from `Character.wz`, fed to `sub_424590`. */
   appearanceA: number;
+  /** u32 @+22; `sub_42E2C0` copies it into avatar body-part slot 0. */
   appearanceB: number;
   /** u8 @+26; role unlocated. Must still be present - the client throws on underflow. */
   unknown26: number;
   /** u32 @+27. */
   hair: number;
-  /** u8 @+31. Everything from here to `unknown93` is obfuscated in client memory only. */
+  /** u8 @+31. Level-up detection in the `0x0D` handler reads the pair at +31/+32. */
   level: number;
   job: number;
   str: number;
@@ -71,10 +105,11 @@ export interface CharacterStats {
   maxMp: number;
   ap: number;
   sp: number;
+  /** u32 @+77/+81. */
   exp: number;
+  /** u16 @+85/+87. */
   fame: number;
-  unknown81: number;
-  unknown87: number;
+  /** u32 @+89/+93. */
   unknown93: number;
   /** u32 @+97; stored plainly (no obfuscation), like the byte below. */
   unknown97: number;
@@ -82,18 +117,59 @@ export interface CharacterStats {
   unknown101: number;
 }
 
-/** A character as it travels in the character-select / world-select packets. */
+/** One 8-byte record the client keeps per inventory (`this + 4 * inv + 102`). */
+export interface InventoryRecord {
+  key: number;
+  value: number;
+}
+
+/** One of the four non-worn inventories, or the equip tab (`CharacterData.inventories[0]`). */
+export interface Inventory {
+  /**
+   * `u8`: the number of usable slots, wire-visible because it *is* the client's array size - 1.
+   * The client resizes to `capacity + 1` before filling (`sub_4605A0`), so 0 is legal and means
+   * "no slots yet"; the field can be raised later by the `0x0C` packet (`sub_55BDC0`).
+   */
+  capacity: number;
+  /** Slot number (1-based, must be <= capacity) to item. */
+  items: Map<number, ItemSlot>;
+  /** 8-byte records that follow the items; no client reader located, must still round-trip. */
+  records: InventoryRecord[];
+}
+
+export interface CharacterItems {
+  /** Slots 1..14 of the worn equipment (the client array at +134, `sub_45F610`). */
+  worn: Map<number, ItemSlot>;
+  /** Slots 1..14 of the worn cash equipment (client array at +254). */
+  wornCash: Map<number, ItemSlot>;
+  /** [equip tab (category 1 items), consume, install, etc] - client arrays at +366/+370/+374/+378. */
+  inventories: [Inventory, Inventory, Inventory, Inventory];
+  /** The `flags & 0x20` map: `u16 count` + `{u32, u32}` each. */
+  map32: InventoryRecord[];
+  /** The `flags & 0x40` map: `u16 count` + `{string, string}` each. */
+  mapString: Array<{ key: string; value: string }>;
+}
+
+/** A character as it travels in the character-select / world-select / stage packets. */
 export interface CharacterData {
   stats: CharacterStats;
+  /** Omitted means "empty": a flags bit that announces an absent block writes that block empty. */
+  items?: CharacterItems;
   /**
-   * Which optional blocks follow the stat block. The client's own reader only consumes what the
-   * flags announce, so a server may legally send stats only (`CHAR_FLAG_STATS`) - that is what
-   * this implementation does until the equip/inventory block is decoded (FINDINGS 6).
+   * Which optional blocks to write. The client only consumes what the flags announce; the low two
+   * bits are the ones a login server needs (`stats` even for a bare character list, `items` for a
+   * character that should look dressed).
    */
   flags: number;
 }
 
-/** Pads/validates the 13-byte name field. Names are ASCII in this client (`sub_45DD00` copies raw). */
+/** Empty item block: legal, and what a server sends before it has an item model. */
+export function emptyCharacterItems(): CharacterItems {
+  const empty = (): Inventory => ({ capacity: 0, items: new Map(), records: [] });
+  return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
+}
+
+/** Pads/validates the 13-byte name field. Names are byte strings in this client (`sub_45DD00`). */
 export function nameFieldBytes(name: string): Uint8Array {
   const out = new Uint8Array(CHARACTER_NAME_BYTES);
   if (name.length > CHARACTER_NAME_MAX) {
@@ -137,11 +213,79 @@ export function writeCharacterStats(writer: PacketWriter, s: CharacterStats): vo
   writer.writeU16(s.sp);
   writer.writeU32(s.exp);
   writer.writeU16(s.fame);
-  writer.writeU32(s.unknown81);
-  writer.writeU16(s.unknown87);
   writer.writeU32(s.unknown93);
   writer.writeU32(s.unknown97);
   writer.writeByte(s.unknown101);
+}
+
+/**
+ * Appends one inventory: `u8 capacity`, `{u8 slot, item}` per filled slot, `u8 0`, then the
+ * 8-byte records. `typeHint` is the client's kind hint (`1` for the equip tab, `2..4` otherwise).
+ */
+function writeInventory(writer: PacketWriter, inventory: Inventory, typeHint: number): void {
+  const slots = [...inventory.items.keys()].sort((a, b) => a - b);
+  const highest = slots.length === 0 ? 0 : slots[slots.length - 1]!;
+  // The capacity byte *is* the client's array size - 1: the client resizes to capacity + 1 and then
+  // writes items by slot index, so an item above the capacity has to be a caller error, not a
+  // silent resize. `capacity` 0 means "not stated", and is derived from the items.
+  const capacity = inventory.capacity > 0 ? inventory.capacity : highest;
+  writer.writeByte(capacity);
+  for (const slot of slots) {
+    if (slot < 1 || slot > 0xff) throw new RangeError(`slot ${slot} does not fit the wire's u8 slot number`);
+    if (slot > capacity) {
+      throw new RangeError(`slot ${slot} is above the declared inventory capacity ${capacity}`);
+    }
+    writer.writeByte(slot);
+    writeItemSlot(writer, inventory.items.get(slot)!, typeHint);
+  }
+  writer.writeByte(0);
+  if (inventory.records.length > 0xff) throw new RangeError(`${inventory.records.length} records cannot fit a u8 count`);
+  writer.writeByte(inventory.records.length);
+  for (const record of inventory.records) writer.writeU32(record.key).writeU32(record.value);
+}
+
+/** Appends one worn group: `{u8 slot, item}` for slots 1..14, then a `u8 0` terminator. */
+function writeWorn(writer: PacketWriter, worn: Map<number, ItemSlot>): void {
+  const slots = [...worn.keys()].sort((a, b) => a - b);
+  for (const slot of slots) {
+    if (slot < 1 || slot > WORN_SLOT_LIMIT) {
+      throw new RangeError(`worn slot ${slot} is outside the client's 1..${WORN_SLOT_LIMIT} loop (sub_45F610)`);
+    }
+    writer.writeByte(slot);
+    // The worn groups are always equips, so the client passes "1" as the kind hint (sub_45E6A0).
+    writeItemSlot(writer, worn.get(slot)!, ITEM_CATEGORY_EQUIP);
+  }
+  writer.writeByte(0);
+}
+
+/** Appends `u8 flags` followed by whichever blocks the flags announce. */
+export function writeCharacterData(writer: PacketWriter, data: CharacterData): void {
+  const allowed =
+    CHAR_FLAG_STATS | CHAR_FLAG_ITEMS | CHAR_FLAG_INVENTORY_2 | CHAR_FLAG_INVENTORY_3 | CHAR_FLAG_INVENTORY_4;
+  if ((data.flags & ~(allowed | CHAR_FLAG_MAP32 | CHAR_FLAG_MAPSTR)) !== 0) {
+    throw new RangeError(`CharacterData flags 0x${data.flags.toString(16)}: the client reads at most 0x7f`);
+  }
+  const flags = data.flags;
+  const items = data.items ?? emptyCharacterItems();
+  writer.writeByte(flags);
+  if (flags & CHAR_FLAG_STATS) writeCharacterStats(writer, data.stats);
+  if (flags & CHAR_FLAG_ITEMS) {
+    writeWorn(writer, items.worn);
+    writeWorn(writer, items.wornCash);
+    writeInventory(writer, items.inventories[0], 1);
+  }
+  const tabFlags = [CHAR_FLAG_INVENTORY_2, CHAR_FLAG_INVENTORY_3, CHAR_FLAG_INVENTORY_4];
+  for (let i = 0; i < tabFlags.length; i++) {
+    if (flags & tabFlags[i]!) writeInventory(writer, items.inventories[i + 1]!, i + 2);
+  }
+  if (flags & CHAR_FLAG_MAP32) {
+    writer.writeU16(items.map32.length);
+    for (const record of items.map32) writer.writeU32(record.key).writeU32(record.value);
+  }
+  if (flags & CHAR_FLAG_MAPSTR) {
+    writer.writeU16(items.mapString.length);
+    for (const entry of items.mapString) writer.writeAsciiString(entry.key).writeAsciiString(entry.value);
+  }
 }
 
 /** Reads one stat block. Used by tests and by any tool that consumes our own output. */
@@ -167,8 +311,6 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
   const sp = reader.readU16();
   const exp = reader.readU32();
   const fame = reader.readU16();
-  const unknown81 = reader.readU32();
-  const unknown87 = reader.readU16();
   const unknown93 = reader.readU32();
   const unknown97 = reader.readU32();
   const unknown101 = reader.readByte();
@@ -194,37 +336,60 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
     sp,
     exp,
     fame,
-    unknown81,
-    unknown87,
     unknown93,
     unknown97,
     unknown101,
   };
 }
 
-/** Appends `u8 flags` followed by whichever blocks the flags announce. */
-export function writeCharacterData(writer: PacketWriter, data: CharacterData): void {
-  if ((data.flags & ~(CHAR_FLAG_STATS | CHAR_FLAG_ITEMS)) !== 0) {
-    throw new RangeError(`CharacterData flags 0x${data.flags.toString(16)}: the client only reads 0x01 and 0x02`);
+function readInventory(reader: PacketReader, typeHint: number): Inventory {
+  const capacity = reader.readByte();
+  const items = new Map<number, ItemSlot>();
+  for (;;) {
+    const slot = reader.readByte();
+    if (slot === 0) break;
+    items.set(slot, readItemSlot(reader, typeHint));
   }
-  if (data.flags & CHAR_FLAG_ITEMS) {
-    throw new Error(
-      "the CharacterData item block (30 equip slots + 4 inventories) is not decoded yet - see docs/protocol/FINDINGS.md 6",
-    );
-  }
-  writer.writeByte(data.flags);
-  if (data.flags & CHAR_FLAG_STATS) writeCharacterStats(writer, data.stats);
+  const recordCount = reader.readByte();
+  const records: InventoryRecord[] = [];
+  for (let i = 0; i < recordCount; i++) records.push({ key: reader.readU32(), value: reader.readU32() });
+  return { capacity, items, records };
 }
 
-/** Reads one `CharacterData`. Throws on the item block, which is deliberately unimplemented. */
+function readWorn(reader: PacketReader): Map<number, ItemSlot> {
+  const worn = new Map<number, ItemSlot>();
+  for (;;) {
+    const slot = reader.readByte();
+    if (slot === 0) break;
+    worn.set(slot, readItemSlot(reader, 1));
+  }
+  return worn;
+}
+
+/** Reads one `CharacterData`. A flags byte without `0x01` reads as a zeroed stat block. */
 export function readCharacterData(reader: PacketReader): CharacterData {
   const flags = reader.readByte();
-  if (flags & ~(CHAR_FLAG_STATS | CHAR_FLAG_ITEMS)) {
-    throw new RangeError(`CharacterData flags 0x${flags.toString(16)} is not a known flag mask`);
-  }
-  if (flags & CHAR_FLAG_ITEMS) throw new Error("CharacterData item block is not decoded yet (FINDINGS 6)");
+  if (flags & ~0x7f) throw new RangeError(`CharacterData flags 0x${flags.toString(16)} is not a known flag mask`);
   const stats = flags & CHAR_FLAG_STATS ? readCharacterStats(reader) : zeroStats();
-  return { flags, stats };
+  const items = emptyCharacterItems();
+  if (flags & CHAR_FLAG_ITEMS) {
+    items.worn = readWorn(reader);
+    items.wornCash = readWorn(reader);
+    items.inventories[0] = readInventory(reader, 1);
+  }
+  const tabFlags = [CHAR_FLAG_INVENTORY_2, CHAR_FLAG_INVENTORY_3, CHAR_FLAG_INVENTORY_4];
+  for (let i = 0; i < tabFlags.length; i++) {
+    if (flags & tabFlags[i]!) items.inventories[i + 1] = readInventory(reader, i + 2);
+  }
+  if (flags & CHAR_FLAG_MAP32) {
+    const count = reader.readU16();
+    for (let i = 0; i < count; i++) items.map32.push({ key: reader.readU32(), value: reader.readU32() });
+  }
+  if (flags & CHAR_FLAG_MAPSTR) {
+    const count = reader.readU16();
+    for (let i = 0; i < count; i++) items.mapString.push({ key: reader.readAsciiString(), value: reader.readAsciiString() });
+  }
+  return { stats, items, flags };
 }
 
 /** A stat block of all zeroes with an empty name; the client does the same for unused slots. */
@@ -251,15 +416,39 @@ export function zeroStats(): CharacterStats {
     sp: 0,
     exp: 0,
     fame: 0,
-    unknown81: 0,
-    unknown87: 0,
     unknown93: 0,
     unknown97: 0,
     unknown101: 0,
   };
 }
 
-/** Convenience for the common case: a stat-only character record. */
-export function characterDataOf(stats: Partial<CharacterStats> & { id: number; name: string }): CharacterData {
-  return { flags: CHAR_FLAG_STATS, stats: { ...zeroStats(), ...stats } };
+/**
+ * Wraps a stat block in a `CharacterData` that advertises exactly the blocks it contains.
+ * With no `items` the record is a flags byte plus the 69-byte stat block, which is what a bare
+ * character list needs; give it items (at least the worn equips) and the client can draw the
+ * character dressed instead of naked.
+ */
+export function characterDataOf(
+  stats: Partial<CharacterStats> & { id: number; name: string },
+  items?: CharacterItems,
+): CharacterData {
+  const block = items ?? emptyCharacterItems();
+  const hasItems =
+    block.worn.size + block.wornCash.size > 0 ||
+    block.inventories.some((inventory) => inventory.items.size > 0 || inventory.records.length > 0) ||
+    block.map32.length > 0 ||
+    block.mapString.length > 0;
+  let flags = CHAR_FLAG_STATS;
+  if (hasItems) {
+    flags |= CHAR_FLAG_ITEMS;
+    for (let i = 1; i < block.inventories.length; i++) {
+      const inventory = block.inventories[i]!;
+      if (inventory.items.size > 0 || inventory.records.length > 0) {
+        flags |= [CHAR_FLAG_INVENTORY_2, CHAR_FLAG_INVENTORY_3, CHAR_FLAG_INVENTORY_4][i - 1]!;
+      }
+    }
+    if (block.map32.length > 0) flags |= CHAR_FLAG_MAP32;
+    if (block.mapString.length > 0) flags |= CHAR_FLAG_MAPSTR;
+  }
+  return { stats: { ...zeroStats(), ...stats }, items: block, flags };
 }

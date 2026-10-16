@@ -163,17 +163,21 @@ export interface GameServerRedirect {
   port: number;
   /**
    * Becomes `CWvsApp+0x14` (`.lst` store at `.text:00433196`) and comes back as the body of the
-   * client's `0x04` packet on the new connection, right after the 211-byte handshake. That is what
-   * makes the redirect useful: the game server learns which character just arrived.
+   * client's `0x04` packet on the new connection, right after the 211-byte handshake.
+   *
+   * It is not an opaque ticket: `CUserPool`'s enter-field handler (`sub_51CFE0`, FINDINGS 4.11.3)
+   * compares the id of the user that just entered the field against `CWvsApp+0x14` to recognise
+   * itself, so this value *is* the client's own character id. Send the same id the game server
+   * will use for that character.
    */
-  token: number;
+  characterId: number;
 }
 
 /**
  * 0x03 reply (CCharSelect): "this character enters the game at this address".
  *
  * `sub_432FB0` builds a sockaddr from ip/port and calls `sub_558BD0` - the same connect path the
- * 0x07 migration packet uses - stores the token in CWvsApp+0x14 and plays "GameIn".
+ * 0x07 migration packet uses - stores the id in CWvsApp+0x14 and plays "GameIn".
  */
 export function encodeSelectCharacterResult(result: number, redirect?: GameServerRedirect): Uint8Array {
   const writer = new PacketWriter(32);
@@ -186,7 +190,7 @@ export function encodeSelectCharacterResult(result: number, redirect?: GameServe
   }
   writer.writeU32(ipv4WireValue(redirect.ip));
   writer.writeU16(redirect.port);
-  writer.writeU32(redirect.token >>> 0);
+  writer.writeU32(redirect.characterId >>> 0);
   return writer.toBytes();
 }
 

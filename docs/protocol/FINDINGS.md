@@ -4,10 +4,14 @@
 > 證據優先序：原始 binary > IDA LST > Hex-Rays C > 實機擷取 > 外部資料。
 
 **狀態（2026-10-16 更新）**：協定主幹（傳輸 → 框架 → 加密 → 分派）已全數定位，**登入鏈
-（login → world → char → game）也已解到欄位層**，實作於
-`server/src/protocol/{frame,cipher,session,packet,login,chardata,replies}.ts`，並由 `node --test` 覆蓋
-（含 `test/loginflow.test.ts` 的完整鏈重播）。
-剩下的未知：`CharacterData` 的道具區塊、211-byte 握手的 199 bytes `body`、CField 各區間欄位（§6）。
+（login → world → char → game）已解到欄位層**，`CharacterData`（含**能力值 69 bytes ＋ 道具區塊
+＋ `GW_ItemSlot`**）與 `CWvsApp` 層級的 `0x0B–0x13` 也已解出，實作於
+`server/src/protocol/{frame,cipher,session,packet,login,chardata,itemslot,replies}.ts`，並由
+`node --test` 覆蓋（含 `test/loginflow.test.ts` 的完整鏈重播、`test/itemslot.test.ts` 的逐 byte 佈局）。
+**遊戲內第一條垂直切片也已解到欄位層**（§4.11：進地圖 `0x16`、別人進場 `0x1C`、離場 `0x1D`、
+移動 `0x22`／`0x0E`、傳送門請求 `0x0D`），實作於 `server/src/protocol/{field,movepath}.ts`。
+剩下的未知：211-byte 握手的 199 bytes `body`、CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／
+CRewardPool／對話框／messenger／miniroom）欄位（§6）。
 
 ---
 
@@ -68,7 +72,8 @@ u32 clientRecvSeed               // @ 8 + bodyLen = 207  → CClientSocket+124�
 > 也就是說：**握手之後 client 送的第一個封包是 `[0x04][u32 app+0x14]`**。
 >
 > ✅ **寫入點已找到（2026-10-16）**：`sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196`
-> 執行 `mov [ebx+14h], esi`（`ebx = n3000`），值來自伺服器在 0x03 回包裡給的 **token**
+> 執行 `mov [ebx+14h], esi`（`ebx = n3000`），值來自伺服器在 0x03 回包裡給的 **角色 id**
+> （§4.11.3 證明它是 id，不是不透明的 ticket）
 > （見 §4.8）。所以 `[0x04][u32]` 的意義 = **「我是剛剛被導向過來的那個角色/連線」**：
 > 登入伺服器在選角成功時發一組 token，client 帶著它連上遊戲伺服器、握手後立刻回報，
 > 遊戲伺服器才知道這條新連線屬於哪一個角色。
@@ -242,8 +247,10 @@ count × {
 
 - 容器：`*(u32*)(charData + 4*inventory + 362)`（寫入端 `sub_55E8F0`，要求 `inventory ∈ 1..4`）。
   裝備欄另有兩組 inline 格：`charData+122` 與 `charData+242`（各 15 格，8 bytes/ZRef）。
-- `op = 0`：接一個 `GW_ItemSlot`（`sub_45E6A0`）：先 `u8 flag`（1 → `GW_ItemSlotEquip`，0x62 bytes；
-  否則 `GW_ItemSlotNonEquip`，0x26 bytes），再叫該物件的 `Decode`（vtable slot 1）讀它的欄位（🟡 未解）。
+- `op = 0`：接一個 `GW_ItemSlot`（`sub_45E6A0`）：先 `u8 種類`（= `itemId / 1000000`：`1` →
+  `GW_ItemSlotEquip`，物件 0x62 bytes；其餘 → `GW_ItemSlotNonEquip`，0x26 bytes），再叫該物件的
+  `Decode`（vtable slot 1）讀欄位——**欄位已全部解出，見 §4.9**。這是全協定唯一會寫種類位元組的地方
+  （`CharacterData` 的道具區塊都不寫）。
 - `op = 1`：再讀 `u16 key`，用 `sub_55E780` 把那把金鑰寫進「道具 + 34」的隨機加密區；
   **`inventory == 1`（裝備欄）會被 client 直接丟 `CTerminateException`**，伺服器不可對裝備欄送這個 op。
 - `op = 2`：再讀 `u16 slot2`，兩格互換。`op = 3`：清空該格。
@@ -288,7 +295,7 @@ count × {
 | `CCharSelect` | `0x06`：`string 名字` + `u32 ×10`（外觀）| `0x04`：`string 名字` + `s8 result`（0 = 可用）|
 | `CCharSelect` | `0x05`：`string 名字`（建立）| `0x05`：`u8 result`，成功時 = 新角色的 `CharacterData` |
 | `CCharSelect` | `0x07`：`u32 characterId`（刪除）| `0x06`：`u32 characterId` + `u8 flag`（0 → client 丟 `CTerminateException 570425350`）|
-| （連上遊戲伺服器後）| `0x04`：`u32 token` | — |
+| （連上遊戲伺服器後）| `0x04`：`u32 characterId` | — |
 
 **`0x01` 成功 payload**（`sub_4D0DB0`）：
 
@@ -314,12 +321,13 @@ charCount × CharacterData          // 見 §4.9；client 固定填 3 格，超�
 ```
 u32 ip        // 網路位元組序！讀出後「原封不動」存進 sockaddr_in.sin_addr（沒有 htonl）
 u16 port      // host order，client 自己 htons
-u32 token     // → CWvsApp+0x14
+u32 characterId  // → CWvsApp+0x14；**這就是本機角色的 id**（§4.11.3：別人的進場封包會拿角色的
+                 // id 和它比對來判斷「那是不是我自己」），不是不透明的通行證。伺服器必須一直用同一個 id
 ```
 
-→ client 用 `sub_558BD0`（與 `0x07` 遷移同一條連線函式）連到 `ip:port`，把 token 存進
+→ client 用 `sub_558BD0`（與 `0x07` 遷移同一條連線函式）連到 `ip:port`，把 id 存進
 `CWvsApp+0x14`，播放 "GameIn" 音效；抵達遊戲伺服器、收完 211-byte 握手後，就用
-`[0x04][token]` 表明身分（§2）。**這條線現在完全閉合。**
+`[0x04][characterId]` 表明身分（§2）。**這條線現在完全閉合。**
 
 **`result` 值表**（`sub_4D0DB0`／`sub_54E250`／`sub_432FB0` 三個 handler 的 switch 完全相同）：
 
@@ -340,44 +348,280 @@ u32 token     // → CWvsApp+0x14
 > `u32`，其中 6 個來自被選取角色的部位、4 個來自新角色對話框自己的選擇）。所以伺服器必須把
 > `0x06` 收到的那組外觀記在這條連線的狀態裡，等 `0x05` 來時才建角色。
 
-### 4.9 ✅ `CharacterData`（角色紀錄）在網路上的樣子
+### 4.9 ✅ `CharacterData`（角色紀錄）在網路上的樣子（含道具區塊，已全部解出）
 
-`sub_45FCC0` = `CharacterData::Decode`（選角畫面與世界清單都用它）：
+讀：`sub_45FCC0` = `CharacterData::Decode`（`CCharSelect` 的 `0x02` 回包、`CStage` 的 `0x16`、
+`sub_54E250` 都用它）。
+寫：`sub_45F610` = `CharacterData::Encode`（只從 vtable 呼叫；能力值區塊交給 `sub_45D2E0`，
+每個道具交給 `sub_45E560`）。**兩支逐欄位互相對應**，這也是下面每個長度都能確定的原因。
 
 ```
 u8 flags
-if (flags & 1) <75-byte 能力值區塊，見下>      // sub_45D840
-if (flags & 2) <30 個裝備格 + 4 個道具欄 …>    // 🟡 尚未逐欄解出（見 §6）
+if (flags & 0x01) <能力值區塊 69 bytes>
+if (flags & 0x02) { 穿戴裝備、穿戴現金裝備、裝備欄、該欄的 8-byte 記錄 }
+if (flags & 0x04) { 道具欄 2 }
+if (flags & 0x08) { 道具欄 3 }
+if (flags & 0x10) { 道具欄 4 }
+if (flags & 0x20) { u16 count, count × {u32, u32} }
+if (flags & 0x40) { u16 count, count × {string, string} }
 ```
 
-75-byte 能力值區塊（`sub_45D840` 的讀取順序，就是欄位順序）：
+**每個道具欄**（含裝備欄）的形狀是：
 
-| 位移 | 型別 | 名稱 | 備註 |
+```
+u8 capacity                     // = 客戶端 ZArray 的元素數 − 1（見下）
+{ u8 slot, GW_ItemSlot }*       // slot 0 結束
+u8 0
+u8 n
+n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（this + 4*inv + 102）
+```
+
+- 兩組**穿戴格**（`this+122`、`this+242`，各 15 格、索引 1..14）沒有 capacity 欄，直接進
+  `{u8 slot, item}` 迴圈（`sub_45F610`：`n14 = 1; do {...} while (n14 <= 14)`）。
+- `capacity` 就是客戶端的陣列大小 − 1：解碼端 `u8 n` → `sub_4605A0(v, n+1, ...)` 調整大小，
+  編碼端寫 `ZArray 元素數 − 1`。**0 是合法的**（只有 index 0 的 dummy 格），之後可以用 `0x0C`
+  （§4.10）放大。
+- ⚠️ **整塊道具區塊裡沒有任何「種類位元組」**：編碼端每個道具欄都呼叫
+  `sub_45E560(item, packet, 0)`（= 不寫種類），種類由「哪一欄」決定——穿戴格與裝備欄是
+  Equip，2/3/4 欄是 NonEquip。只有 `0x0B` op 0（§4.6）會把種類位元組寫上線。
+
+**能力值區塊：69 bytes**（`sub_45D840` 讀、`sub_45D2E0` 寫，兩邊都是 24 個欄位）
+
+| # | 型別 | 名稱 | 備註 |
 |---|---|---|---|
-| +0 | u32 | `id` | 選角 UI 用它比對要刪除／選擇的角色（`sub_432890`）|
-| +4 | 13 bytes | `name` | **固定 13 bytes、NUL 補齊、沒有長度前綴**（`sub_45DD00` 直接 memcpy）|
-| +17 | u8 | `gender` | |
-| +18 | u32 | 外觀 A | `sub_42E2C0` 把它交給 `sub_424590`（兩值 setter）|
-| +22 | u32 | 外觀 B | `sub_42E2C0` 把它放進 avatar 的第 0 個部位格 |
-| +26 | u8 | 🟡 未定 | 真的是 u8，夾在 `face`/`hair` 之間（結構有 `#pragma pack`）|
-| +27 | u32 | `hair` | |
-| +31 | u8 | `level` | 以下到 `unknown93` 在**客戶端記憶體**裡是混淆的 |
-| +33 | u16 ×11 | `job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp` | 寬度與順序完全吻合 |
-| +55 | u32 | `exp` | |
-| +59 | u16 | `fame` | |
-| +61 | u32 | 🟡 未定 | |
-| +65 | u16 | 🟡 未定 | |
-| +67 | u32 | 🟡 未定 | |
-| +71 | u32 | 🟡 未定 | 這兩欄（+71、+75）在客戶端裡**沒有**被混淆 |
-| +75 | u8 | 🟡 未定 | |
+| 1 | u32 | `id` | 選角 UI 用它比對要刪除／選擇的角色（`sub_432890`）|
+| 2 | 13 bytes | `name` | **固定 13 bytes、NUL 補齊、沒有長度前綴**（`sub_45DD00` 直接 memcpy）|
+| 3 | u8 | `gender` | |
+| 4 | u32 | `appearanceA` | `sub_42E2C0` 把它交給 `sub_424590`（兩值 setter）|
+| 5 | u32 | `appearanceB` | `sub_42E2C0` 把它放進 avatar 的第 0 個部位格 |
+| 6 | u8 | `unknown26` | 真的是 u8，夾在第二個外觀字與頭髮之間（結構有 `#pragma pack`）|
+| 7 | u32 | `hair` | |
+| 8 | u8 | `level` | 以下到 `unknown93` 在**客戶端記憶體**裡是混淆的 |
+| 9–19 | u16 ×11 | `job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp` | 寬度與順序完全吻合 |
+| 20 | u32 | `exp` | 記憶體 +77/+81；`0x0D` 升級訊息讀這一對 |
+| 21 | u16 | `fame` | 記憶體 +85/+87 |
+| 22 | u32 | `unknown93` | 記憶體 +89/+93 |
+| 23 | u32 | `unknown97` | 記憶體 +97，**不混淆** |
+| 24 | u8 | `unknown101` | 記憶體 +101，**不混淆** |
 
-- **混淆只在記憶體裡**：client 把 `rand()` 與 `value ^ rand()` 並排存（`sub_4618B0`），但**送到線上的
-  是純值**——client 自己的編碼器（`sub_45D740`/`sub_45D640` 呼叫點附近，約 `.c:101309`）在寫出前
-  把兩半 XOR 回來。兩邊都不需要 RNG。
-- ⚠️ **線上是 75 bytes，不是 102**：選角 UI 每個格子複製 `CharacterData[0..101]`（`sub_42E2C0`：
-  `qmemcpy(..., 0x64)` + 尾端 word），多出來的 27 bytes 是客戶端自己的狀態、不在封包裡。
-  寫錯長度會讓下一筆紀錄整串錯位。
-- 讀寫兩端都**逐欄位**讀取且越界就丟 `ZException(38)`，所以伺服器必須把 75 bytes 全部寫滿。
+- ⚠️ **本節前一版寫的「75 bytes、尾巴多 u32/u16 各一」是錯的**：那版把 `sub_45D840` 的
+  *記憶體* 位移（+65/+67/+71/+75…）當成線上位移。實際上線上尾巴只有 5 個欄位
+  （u32 + u16 + u32 + u32 + u8 = 15 bytes），總長 32 + 22 + 15 = **69**。讀寫兩端各自加總都
+  得到 69，寫錯長度會讓後面整串錯位。
+- **混淆只在記憶體裡**：client 把 `rand()` 與 `value ^ rand()` 並排存（`sub_4618B0`），線上送的是純值
+  （`sub_45D2E0` 在寫出前把兩半 XOR 回來）。兩邊都不需要 RNG。
+- 客戶端的**記憶體**結構是 102 bytes（`sub_55BEB0` 複製 100 bytes + 一個 word；`sub_45F5C0`
+  對隊友直接 memcpy 0x66 = 102 bytes）：差額就是每個混淆配對的填充半 + 對齊尾巴。
+- 讀寫兩端都逐欄位讀取且越界就丟 `ZException(38)`，所以伺服器必須把 69 bytes 全部寫滿。
+
+**`GW_ItemSlot`（單一道具）** — 這是前一版缺的那一塊，完整落在 `server/src/protocol/itemslot.ts`：
+
+```
+u32 itemId
+u8  hasCash      // 讀到的旗標；寫出時由「8 bytes 是否為 0」推導（sub_45E860 用 *(u64*)(obj+0x10)）
+if (hasCash) {
+    u64 cashSn        // 記憶體 +0x10
+    u16 unknown18     // 記憶體 +0x18
+    u64 unknown1A     // 記憶體 +0x1A
+}
+
+GW_ItemSlotEquip（種類 = 1）         GW_ItemSlotNonEquip（其他種類）
+u8  ruc    남은 업그레이드 횟수       u16 quantity
+u8  cuc    업그레이드에 사용한 횟수
+u16 ×15    str dex int luk maxHp maxMp pad mad pdd mdd acc eva craft speed jump
+```
+
+證據：
+
+| 事實 | 位址 |
+|---|---|
+| 建物件＋讀種類位元組（0 → 讀 1 byte，1 → Equip，其餘 → NonEquip）| `sub_45E6A0` |
+| 物件大小：Equip `0x62`、NonEquip `0x26` bytes | `sub_45E6A0`（`sub_403350(&dword_5C25F0, 0x62u)`）|
+| 基底讀／寫（itemId、旗標、8/2/8 bytes）| `sub_45E9F0` / `sub_45E860` |
+| Equip 讀／寫（ruc、cuc、15 × u16，順序即此）| `sub_45ED50` / `sub_45EB50` |
+| NonEquip 讀／寫（quantity）| `sub_45F1B0` / `sub_45F130` |
+| 15 個 u16 的**語意與順序**（每個欄位一行 tooltip）| `sub_5014C0`：STR、DEX、INT、LUK、HP、MP、공격력(PAD)、마력(MAD)、물리방어력(PDD)、마법방어력(MDD)、명중률(ACC)、회피율(EVA)、손재주(CRAFT)、이동속도(SPEED)、점프력(JUMP)、以及 `ruc` = "업그레이드 가능 횟수"、`cuc` = 名字後的 "(+n)" |
+| 15 個 u16 的來源（WZ `info` +46..+74 → 物件 +38..+96，順序相同）| `sub_47A740`（+44 = ruc，cuc 寫 0）|
+| 種類位元組的值 = `itemId / 1000000` | `sub_45E560`（`*(this+3) / 1000000`）|
+| `cashSn != 0` ⇒ **不能丟棄**（與 WZ `info/cash` 同一個判斷式）| `sub_463BE0`（"이 아이템은 버릴 수 없습니다."）、`sub_47A420`（讀 `cash`）|
+
+> 語意未定但不影響傳輸的欄位：`unknown18`、`unknown1A` 沒有任何讀取端（全 binary 只有編碼／解碼
+> 碰它們），先保留結構名；`quantity` 在 `sub_47A740` 建新道具時寫 1。
+
+### 4.10 ✅ `CWvsApp` 層級的 `0x0B`–`0x13`（與階段無關）
+
+`sub_43B170` 把 `0x0A–0x14` 全部交給 `sub_55A900`，它是一個 9-way switch（`0x0A`／`0x14` 沒有 case，
+直接丟棄）。以下每一個都讀「本機角色的 `CharacterData`」，也就是 `*(CWvsApp+0x24)`：`sub_463050`
+取得它、`sub_465710` 取得某一格道具。
+
+| op | 處理函式 | 內容 | 讀到的欄位 |
+|---|---|---|---|
+| `0x0B` | `sub_55BAB0` | 道具欄操作（**已解，見 §4.6**）| `u8 result, u8 count, count × {...}` |
+| `0x0C` | `sub_55BDC0` | **道具欄格數變更** | `u8 inventory(1..4), u8 slots` → `sub_55E7C0(charData + 4*inv + 362, slots + 1, …)`（對 `sub_4605A0` 的包裝）|
+| `0x0D` | `sub_55BEB0` | **能力值差異更新**（升級／配點後）| `u8 flag`（非 0 → `CWvsApp+0x18/0x1C` 重設：`= 0`、`= timeGetTime()`）、`u8 level?` + 差異欄位（`sub_45E0D0`），接著 `sub_4C5DC0(CWvsApp+0x70, packet, …)` 更新能力面板；等級變大時顯示 "레벨이 올랐습니다 (+%d)" |
+| `0x0E` | `sub_55B6A0` | **`charData+382` 的 `ZMap<u32,u32>` 更新** | `u8 flag`（同上重設）、`u16 n`、`n × {u32 key, s32 value}`：`value > 0` → insert，`value <= 0` → 移除該 key（`sub_460630`）|
+| `0x0F` | `sub_55C090` | **能力面板更新** | 無條件重設 `CWvsApp+0x18/0x1C`；`u8 flag`；若 flag ≠ 0 再讀 `u8 mode`，`mode == 0` → `sub_4C5DC0(CWvsApp+0x70, packet, …, 0)` |
+| `0x10` | `sub_55C5E0` | **組隊（파티）系統**：見下表 | `u8 type` + 依 type 的 payload |
+| `0x11` | `sub_55C130` | **獲得提示** | `u8 type`：`1` → `u32` → "메소를 획득했습니다 (+%d)"；其他非 0 → `u32 itemId`(`sub_479D30` 查名) → "아이템을 획득했습니다 (%s)" / "(%s %d개)" |
+| `0x12` | `sub_55C390` | **인기도（人氣）系統** | `u8 type` + `string name`（`sub_432680`）：`0` → `u8 ok`（"'%s'님은 인기도를 …"，成功／失敗兩種訊息）、`2` = "초보자는 인기도를 올리거나 내리지 못합니다."、`3` = 等級不足、`4` … |
+| `0x13` | `sub_55CDE0` | **系統訊息／公告** | `u8 type` + `string text`：`0` → "[시스템] %s"（聊天視窗）、`1` → `sub_52BBE0(text)`（畫面中央公告）|
+
+`0x10` 的 type 對照（`sub_55C5E0` 的 switch，訊息字串就是語意）：
+
+| type | 意義 | payload |
+|---|---|---|
+| `3` | 收到組隊邀請，跳 dialog；按「是」時 **client 送出 `0x26`**：`u8 2` + `u32`（邀請者的角色 id）| `u32`（`CWvsApp+0xC8+36` 非 0 才會出現）+ `string` 邀請者名 |
+| `5` | 新組隊建立 | `u32` + **102-byte 角色區塊**（`sub_45F5C0` 直接 memcpy）|
+| `6` | （把暫存的隊友資料歸零）| `u32`；本機 id 相同時顯示 "새로운 파티를 만들었습니다" |
+| `7`, `14` | "이미 가입된 파티가 있습니다" | — |
+| `8` | "초보자는 파티를 만들 수 없습니다" | — |
+| `10` | 加入／退出結果 | `u32 角色id` + `u32 隊長id` + `u8`（0/1）+ `string 名字`："파티장을 그만둡니다…"、"…를 탈퇴…"、"…에서 강퇴당…" |
+| `11` | "가입한 파티가 없습니다" | — |
+| `13` | 新成員加入 | `u32 角色id` + `string 名字` + **102-byte 角色區塊** |
+
+> 註：`0x0D` 讀的那組「差異欄位」就是 `GW_CharacterStat::Decode`（`sub_45E0D0`）：先 `u32 flags`，
+> 再依 bit 讀（`0x01` → u32@+18、`0x02` → u32@+22、`0x04` → u8@+26、`0x08` → u32@+27、
+> `0x10` → u8 level、`0x20` → u16 job、`0x40`… 依 §4.9 的記憶體位移）。這是「只更新有變的欄位」的
+> 版本，長度可變，所以升級／配點後伺服器只需要送變動的那幾欄。
+
+### 4.11 ✅ CField 子系統：進地圖、角色進場／離場、移動、互動（`0x16`／`0x19`／`0x1C`／`0x1D`／`0x22`／`0x0D`／`0x0E`）
+
+§4.7 只解到「哪個 opcode 屬於哪個子系統」。這一節把**第一個垂直切片**（進地圖 → 看見別人 →
+別人移動 → 用傳送門換地圖）解到欄位層，這也是「兩個 client 走進同一張圖並互相看見」所必需的最小集合。
+
+實作：`server/src/protocol/field.ts`（封包）、`server/src/protocol/movepath.ts`（`CMovePath`），
+測試：`server/test/field.test.ts`（逐 byte golden）。
+
+#### 4.11.1 子系統的全域名稱（證據：建構子裡的 vftable）
+
+| 全域 | 類別 | 建構子 | 收包入口 |
+|---|---|---|---|
+| `dword_5C1CEC` | **CUserPool** | `sub_51CA30` | `sub_51CF70`（0x1B–0x2D）|
+| `dword_5C2054` | **CMobPool** | `sub_4913E0` | `sub_492330`（0x2E–0x37）|
+| `dword_5C2050` | **CNpcPool** | `sub_49F020` | `sub_49F560`（0x38–0x41）|
+| `dword_5C204C` | **CRewardPool** | `sub_4A73A0` | `sub_4A8870`（0x42–0x45，只有 0x43／0x44 有分支）|
+| `dword_5C2048` | **CQuestMan** | `sub_4A5830` | `sub_4A58F0`（0x46–0x48）|
+| `this_8` | **CUIMessenger** | `sub_4DDAF0` | `sub_4E18D0`（0x4D–0x4F）|
+| `this_15` = `dword_5C2040` | **CUniqueModeless**（開著的商店／交易視窗）| `sub_4B7640`、`sub_4812D0` | `sub_4B73A0`（0x49–0x4C；0x4A 開 `CShopDlg`）|
+| — | **CMiniRoomBaseDlg** | —（`_RTDynamicCast`）| `sub_4815E0`（0x50–0x52）|
+
+`CUserPool` 的第二層（`sub_51CF70`）：0x1C→`sub_51CFE0`、0x1D→`sub_51D280`、0x1E–0x20→`sub_51D530`、
+0x21–0x2A→`sub_51D590`、0x2B–0x2C→`sub_51D6A0`；**0x1B 與 0x2D 在這一層沒有分支**。
+
+#### 4.11.2 `0x16` = 進地圖（由 CStage 基底 `sub_4C2760` → `sub_4C2780`）
+
+```
+u8  mode                      // 用途未證實
+u8  hasData
+hasData != 0:
+    u32 ×3                    // sub_4C7930(CWvsApp+632, …)，三個都還沒找到語意
+    CharacterData             // 與 §4.9 同一個讀取器（sub_45FCC0）
+hasData == 0:
+    u32 → obj+97              // obj 由 sub_463050 取得；decompiler 掉了查表用的來源
+    u8  → obj+101
+    u16 → obj+53              // 以 sub_4618B0 的隨機遮罩寫入（同 §4.9 的記憶體格式）
+```
+
+之後 `sub_4C2780` 會：建立 `CField` 物件 → `sub_4C3460`（= `SetStage`）→ `sub_51CBF0(CUserPool, charData, mode)`
+（配置 0x1C4 bytes = 本機角色 `CUserLocal`）。
+
+> ⚠️ `hasData != 0` 分支裡的三個 u32 目前只能照抄；`mode` 的用途、以及 `hasData == 0` 分支怎麼找到角色
+> 都還是 UNKNOWN。這是 CField 區間裡**最該先用真實流量驗證**的一格。
+
+#### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
+
+```
+u32  characterId        // 等於 CWvsApp+0x14（＝自己的角色 id）時整個封包被忽略
+string name             // → CUser+60
+u8   unknown64          // → CUser+64
+u32  avatarKey          // → CUser+68（sub_508260 = CUser::SetAvatar 的「外觀有變嗎」比較鍵）
+u32  unknownA           // 讀了就丟
+u32  unknownB           // 讀了就丟
+u32  itemId…            // 外觀清單，**以 u32 0 結尾**（sub_45F340）
+s16  x
+s16  y
+u8   action             // → CUser+180，也是 vecctrl 初始化的第 6 個參數
+u16  foothold           // → sub_485400(場地, id) 的 foothold 查表
+```
+
+- 外觀清單**不是** `GW_ItemSlot`：`sub_45F340` 只讀 u32 道具 id，並依 `itemId / 1000 / 10`
+  （100→1、101→2 … 3xxxx→0）自己歸類到外觀格，所以「只給 id 就能畫出角色」。
+- 清單之後 `sub_507A20` 只做 UI（名牌／血條），不再讀封包。
+- 讀完 `x/y/action/foothold` 後，客戶端用 vtable slot 46（`+184`）呼叫
+  `(vecctrl, 0, x, y, 0, 0, action, foothold)` 來建立 `CVecCtrlUser` —— 這條呼叫順序是下面
+  §4.11.5 判讀移動元素欄位的關鍵證據。
+
+#### 4.11.4 `0x1D` = 別人離場（`sub_51D280`）
+
+```
+u32 characterId
+```
+
+只讀一個 id：查 `CUserPool` 的 `ZMap` → 取得 `USERREMOTE_ENTRY` → 用 `sub_51EE80` 兩次把前後節點接起來
+（雙向鏈結串列的移除）。沒有任何其他欄位。
+
+#### 4.11.5 `0x22` = 別人的移動：`u32 characterId` + `CMovePath`
+
+`CMovePath` 的線路格式（**每個元素 14 bytes**）：
+
+```
+u16 originX
+u16 originY
+u8  count                     // 元素數（≤ 255）
+count × {
+  u8  attr                    // 元素種類；本 build 沒有表，只有「路徑過期時補的那個元素」用 1
+  s16 x
+  s16 y
+  s16 vx
+  s16 vy
+  u8  action                  // 動作／姿勢位元組，直接餵給 vecctrl
+  u16 foothold
+  u16 duration                // 毫秒；客戶端會加總成 CMovePath+68
+}
+```
+
+| 角色 | 函式 | 證據 |
+|---|---|---|
+| 解碼（收 0x22）| `sub_4953A0` | 讀 2×u16 → `CMovePath+4/+6`、u8 count，再逐元素配置 16-byte 結構 |
+| 編碼（送 0x0E）| `sub_495620` | `CVecCtrlUser::SendMove` = `sub_542C40` 呼叫；逐元素 append `1+2+2+2+2+1+2+2` = **14 bytes**（沒有記憶體裡的兩個洞）|
+| 記憶體結構 | 16 bytes／元素 | 解碼器的位移是**結構**位移：`+0 attr`、`+2 x`、`+4 y`、`+6 vx`、`+8 vy`、`+10 action`、`+12 foothold`、`+14 duration`，洞在 +1／+11 |
+| 播放 | `sub_485330`、`sub_499760` | 讀 `vecctrl+250/252/254/256/258/260`（= `CMovePath+32` 的當前元素 `+2/+4/+6/+8/+10/+12`）丟進 vtable slot 46 |
+| 值不值得送 | `sub_495880` | 比對「當前元素」與活體狀態：`+2`↔x、`+4`↔y、`+6`／`+8` 必須為 0、`+10`↔action、`+12`↔foothold |
+| 時間上限 | `sub_4967C0` | 把每個元素的 `+14` 加進 `CMovePath+68`，再和 1000／1100 ms 比較 |
+
+> `originX/originY` 會在送出路徑後被覆寫成「當前元素的 x／y」（`sub_495880` 尾端），所以它們是路徑的
+> 起點，不是角色的即時座標；真正的位置由第一個元素的 `x/y` 決定。
+
+#### 4.11.6 client → server 的兩個 field 封包
+
+| opcode | 內容 | 送出的函式 | 說明 |
+|---|---|---|---|
+| `0x0E` | `u8 *(CStage+0x9C)` + `CMovePath` | `sub_542C40`（`CVecCtrlUser::SendMove`）| **本機角色自己的移動**。`§4.5` 舊註記只寫了那個 u8，因為那時還沒定位 `sub_495620`：路徑是接在後面的 |
+| `0x0D` | `s32 kind` + `string name` | `sub_472590`（`CField::SendInteract`）| 點擊場地物件；`sub_5124C0`／`sub_512510` 在滑鼠下是傳送門時送 `kind = -1` 並播 `Portal` 音效 → **換地圖的請求**（伺服器以 `0x16` 回應）|
+
+- `sub_472590` 內建節流：`n3000[6] != 0` 或距上次 `< 500 ms` 就拒送；送出後設 `n3000[6] = 1`。
+- **`0x19` 是這個節流的解除鈕**：`sub_4728B0`（0x19 的處理函式）只做 `n3000[6] = 0; n3000[7] = timeGetTime();`
+  →「客戶端送 `0x0D` 後，伺服器必須回一個空封包 `0x19`」，否則客戶端再也送不出互動封包。
+- 順帶解答 §6 第 6 項：`0x0E` 在**兩個方向是兩件不同的事** —— client 送的是自己的移動，
+  server 送的（`sub_55B6A0`，§4.10）是 `u16 n, n×{u32 key, s32 value}` 的 key/value 表。同號不同義。
+- `0x1A`（server → client）是**密語／找人結果**家族：`sub_472910` 先讀 u8 再 `switch (值 - 9)`，
+  目前看到的 case 有 9／10／18／34；字串已解出：`'%s'님을 찾지 못했습니다`（找不到人）、
+  `'%s'님의 현재 위치는 '%s'입니다`（回報位置）、`'%s'님께 귓속말을 전달했습니다.`（密語已送達）、
+  `'%s'님은 현재 귓속말이 거부되어 있습니다.`（對方拒收密語）、`/헉맵 %d`。
+
+#### 4.11.7 `CUserPool` 其餘分支的現況（尚未解完）
+
+| opcode | 分支 | 目前已知 |
+|---|---|---|
+| 0x1E／0x20 | `sub_51D530` | 只讀 u32 查表，**沒有** payload 處理（0x1F 才有：`sub_50B320`）|
+| 0x21／0x2A | `sub_51D590` | 讀 u32 查表後 `default` → 沒有分支 |
+| 0x23／0x24／0x25 | `sub_5209C0` → `sub_520F20`／`sub_521400`／`sub_521AD0` | 技能／效果家族（夾帶 76-byte 的 buff／怪物查表），欄位未讀 |
+| 0x26 | `nullsub_13` | 空函式 |
+| 0x27 | `sub_509790` | u32 → 動作／姿勢切換（內部依 `user+180 >> 1` 選 weapon 動作）|
+| 0x28 | `sub_5221A0` | 旗標式：u32 flags，bit 0／bit 4 之後各再讀欄位 |
+| 0x29 | `sub_522300` | u8；0 = 播放 `Effect/BasicEff.img/LevelUp` + `LevelUp` 音效（升級）|
+
+> `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
 
 ## 5. 字元編碼
 
@@ -387,29 +631,31 @@ if (flags & 2) <30 個裝備格 + 4 個道具欄 …>    // 🟡 尚未逐欄解
 
 ## 6. 待辦（依重要性）
 
-1. **`CharacterData` 的道具區塊（`flags & 2`）**：`sub_45FCC0` 的形狀已大致看得出來——
-   `15 × {u8 格子, GW_ItemSlot}`（第一組穿戴格）、同樣再一組、四個道具欄各一段
-   `u8 格子數`（`sub_4605A0` 調整 ZArray 大小）+ `{u8 格子, GW_ItemSlot}*`，最後還有一小段
-   `u8 n` + `n × 8 bytes`。真正缺的是 **`GW_ItemSlotEquip`/`NonEquip` 的欄位**（`sub_45E6A0` 建立物件後
-   呼叫 vtable slot 1 = `Decode`）。這同時是 §4.6 的道具欄 opcode 缺的那一塊。
-2. **211-byte 握手的 `body`（199 bytes）**：長度規則已知（§2），內容語意仍未知；最快的解法是用
-   `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應。
-3. **各 stage 的剩餘 opcode**：`0x07`／`0x08` 已解（§4.2），`0x0A–0x14` 是 `CWvsApp` 層級
-   （`sub_55A900`）——`0x0B` 已解（§4.6），其餘 `0x0C–0x13` 是同一族的角色/道具狀態封包，
-   值得一次讀完（`sub_55BDC0` 已看出是「道具欄格子數調整」）。`0x15–0x52` 依 §4.1 區間表往下解。
-4. **`0x04` 的請求方**：`0x04` 只出現在 client 的握手回覆（`sub_43A410`）與伺服器的名檢查回覆
-   （`sub_432430`）；本版 client 沒有任何地方送出「名檢查請求」（0x06 才是）。真實流量要確認
-   伺服器是不是在收到 `0x06` 時回 `0x04`。
-5. 由 §4.1／§4.5／§4.7–§4.9 的對照表產生 `protocol/schema/`，並用 `capture` 對照真實流量驗證。
-6. 抓到真實流量後回頭確認：`0x0E` 在兩個方向都出現（`CVecCtrlUser` 送出、`sub_55B6A0` 接收），
-   確認它是同一件事還是兩個不同階段的同號封包。
+1. **211-byte 握手的 `body`（199 bytes）**：長度規則已知（§2），內容語意仍未知；最快的解法是用
+   `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應（同一支 client 對不同 body
+   的反應就是唯一的量測工具）。
+2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
+   `0x16` 的 `mode` 與三個 u32；`0x1C` 的 `unknown64`／`avatarKey`／`unknownA/B`；
+   `0x0D` 的 `kind` 其他取值。
+3. **CField 其餘區間**：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、CUserPool 的
+   `0x1E–0x29` 分支、`0x2E–0x37`（CMobPool：怪物進場／移動／受傷）、`0x38–0x41`（CNpcPool）、
+   `0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、`0x4D–0x52`（messenger／miniroom）。
+4. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
+   以及 `0x0F` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板的第二種更新格式）。
+5. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
+   在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
+6. 由 §4.1／§4.5／§4.7–§4.11 的對照表產生 `protocol/schema/`，並用 `capture` 對照真實流量驗證。
+7. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown97`／
+   `unknown101`（能力值區塊）：傳輸上已完整，語意待找讀取端。
+8. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
+   格式：兩者都帶角色資料但長度不同，值得並排比一次。
 
 ## 7. 擷取工作流（ADR-004）
 
 > ✅ 除了被動擷取，現在也可以**主動走完登入鏈**：
 > `node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin`
 > （實作 §4.8；原 client 導向該 port 即可走到選角畫面。遊戲內階段尚未實作，因此進地圖後會停在
-> `GameEntryServer` 的 token 記錄上。）
+> `GameEntryServer` 的角色記錄上。）
 
 ```bash
 # 1. 接住原 client。session 模式會「先送」211-byte 握手（種子由我們選、寫進 trace），

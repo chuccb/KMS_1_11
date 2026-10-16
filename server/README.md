@@ -9,13 +9,16 @@
 | `src/protocol/session.ts` | ✅ 211-byte 握手 codec + 串流解碼器 `SessionDeframer`：吃握手取種子、逐包解密並**自檢標頭**；握手可由任一方送出（`expectHandshake`）。 |
 | `src/protocol/packet.ts` | ✅ 欄位編碼：`u8`/`u16`/`u32` LE、字串 = `u16 長度` + 原始 bytes；越界丟 `PacketUnderflowError(38)`（client 丟 `ZException(38)`）。 |
 | `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 建角、0x06 名檢查+外觀、0x07 刪角、0x08 echo。 |
-| `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **75-byte** 能力值區塊（`id`/13-byte 名字/等級/職業/11 個能力值/…）。⚠️ 道具區塊（`flags & 2`）尚未解，因此只送 `flags = 1`。 |
-| `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址+token、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
+| `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **69-byte** 能力值區塊 + 完整道具區塊（穿戴格 ×2、四個道具欄、每欄 8-byte 記錄、`0x20`/`0x40` 兩個 map）。 |
+| `src/protocol/itemslot.ts` | ✅ `GW_ItemSlot`：`itemId` + 現金區塊 + `GW_ItemSlotEquip`（ruc/cuc/15 個能力值）／`NonEquip`（quantity），含種類位元組規則。 |
+| `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端的 token 交接（只驗 token，遊戲內封包未解）。 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端的交接（只驗角色 id，還不會送遊戲內封包）。 |
+| `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
+| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。 |
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` 子命令 |
-| 遊戲邏輯（CField、移動、戰鬥…）| ❌ **尚未實作**；登入鏈以外的封包一律不猜（`decode` 仍會原封不動記錄它們） |
+| 遊戲邏輯（地圖／怪物／戰鬥／道具欄伺服器端）| ❌ **尚未實作**；已解出的封包有 codec（`field.ts`／`movepath.ts`），沒解的一律不猜（`decode` 仍會原封不動記錄它們） |
 
 ## 登入鏈（已解，`docs/protocol/FINDINGS.md` §4.7–§4.9）
 
@@ -29,11 +32,13 @@ server ──0x01 u8 result [+世界清單]─▶ client  → CWorldSelect（清
 client ──0x02 世界 index───────────▶ server
 server ──0x02 u8 result [+角色×3]──▶ client  → CCharSelect
 client ──0x03 u32 characterId──────▶ server
-server ──0x03 u32 ip u16 port u32 token ▶ client → 連到遊戲伺服器，token 存進 CWvsApp+0x14
-client ──0x04 u32 token────────────▶ server   （新連線、握手之後的第一個封包）
+server ──0x03 u32 ip u16 port u32 id ▶ client → 連到遊戲伺服器，id 存進 CWvsApp+0x14
+client ──0x04 u32 characterId──────▶ server   （新連線、握手之後的第一個封包）
 ```
 
 `u32 ip` 是**網路位元組序**（client 原封不動塞進 `sockaddr_in.sin_addr`），其餘整數都是 little-endian。
+最後那個 `u32` **就是角色 id**：client 之後會拿每個進場玩家的 id 和它比對來分辨「這是我自己」
+（`sub_51CFE0`，§4.11.3），所以伺服器不能送亂數 ticket。
 失敗訊息表在三個 handler 共用，只有 `result = 0` 會繼續解析 payload。
 
 `server/test/loginflow.test.ts` 會用假 client 走完整條鏈（含真實加密與框架），所以「編碼器」與
@@ -101,8 +106,10 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 （只領取 token 並記錄「哪個角色到了」，因為遊戲內封包還沒解），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段、
-建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受）。
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段（只到「角色被交給遊戲伺服器」，
+遊戲伺服器只記錄誰到了，不會送 0x16 進地圖）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
+client 接受；`chardata.ts` 已經能寫完整道具區塊，缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，
+見 FINDINGS §4.8 的註記）。
 
 `capture` 的模式：
 
