@@ -62,6 +62,17 @@ import {
   readClientUseItem,
   describeClientUseItem,
   USE_ITEM_OPCODES,
+  EMOTION_NAMES,
+  EMOTION_MAX,
+  EMOTION_NEUTRAL,
+  EMOTION_HIT,
+  emotionName,
+  encodeClientEmotion,
+  readClientEmotion,
+  describeClientEmotion,
+  encodeUserEmotion,
+  readUserEmotion,
+  describeUserEmotion,
   describeClientStatReport,
   type UserEnterField,
 } from "../src/protocol/field.ts";
@@ -685,4 +696,50 @@ test("using an item out of the USE tab (0x18/0x19) is a slot and an item id, not
   assert.throws(() => encodeClientUseItem(potion, 0x1a), /not one of the use-item opcodes/);
   assert.throws(() => readClientUseItem(new PacketReader(Uint8Array.from([0x1a, 0x00, 0x00]), 1), 0x1a), /0x18, 0x19/);
   assert.throws(() => encodeClientUseItem({ slot: 1, itemId: 0x1_0000_0000 }), /does not fit the u32/);
+});
+
+test("an emotion is one u32 in both directions, and the nine faces are the client's own table", () => {
+  // Where the table comes from: `sub_408400` indexes the wide-string array at .data:0x5B20D8 with
+  // `n8 > 8 ? 0 : n8` and looks the result up in the face image, and `Character/Face/00020000.img`
+  // really does carry a node of each of those names next to `default`.
+  assert.deepEqual(
+    [...EMOTION_NAMES],
+    ["blink", "hit", "smile", "troubled", "cry", "angry", "bewildered", "stunned", "vomit"],
+  );
+  assert.equal(EMOTION_MAX, 8);
+  assert.equal(EMOTION_NEUTRAL, 0);
+  // The sentinel that ties the table to the binary: the client shows `1` on itself when it is hit
+  // (`sub_5114A0`: `sub_509790(this, 1, 1500)`), and entry 1 is "hit".
+  assert.equal(EMOTION_HIT, 1);
+  assert.equal(emotionName(EMOTION_HIT), "hit");
+  assert.equal(emotionName(0), "blink");
+  assert.equal(emotionName(-1), undefined, "the constructor's -1 is \"no face\", not a name");
+  assert.equal(emotionName(9), undefined, "and the drawer clamps anything above 8 to 0");
+
+  // c2s `0x13`: what the F-keys send, `[0x13][u32 emotion]`.
+  assert.equal(CLIENT_FIELD_OPCODE.emotion, 0x13);
+  const smile = { emotion: 2 };
+  const bytes = encodeClientEmotion(smile);
+  assert.equal(toHex(bytes), "13" + "02000000");
+  assert.deepEqual(readClientEmotion(new PacketReader(bytes, 1)), smile);
+  assert.equal(describeClientEmotion(smile), "emotion 2 (smile)");
+  assert.equal(describeClientFieldPacket(bytes), "0x13 emotion: emotion 2 (smile)");
+
+  // s2c `0x27`: the same face, but on somebody: `[0x27][u32 characterId][u32 emotion]`.
+  assert.equal(FIELD_OPCODE.userEmotion, 0x27);
+  const over = { characterId: 44, emotion: 5 };
+  const out = encodeUserEmotion(over);
+  assert.equal(toHex(out), "27" + "2c000000" + "05000000");
+  assert.deepEqual(readUserEmotion(new PacketReader(out, 1)), over);
+  assert.equal(describeUserEmotion(over), "characterId=44 emotion=5 (angry)");
+  assert.equal(describeFieldPacket(out), "0x27 CUserPool(user emotion): characterId=44 emotion=5 (angry)");
+
+  // The range is the client's own (`sub_509790` tests `n8 <= 8`): nothing outside 0..8 is a face, so
+  // neither direction will carry one.
+  assert.throws(() => encodeClientEmotion({ emotion: 9 }), /not a face/);
+  assert.throws(() => encodeUserEmotion({ characterId: 1, emotion: 0xffffffff }), /not a face/);
+  assert.throws(
+    () => readClientEmotion(new PacketReader(Uint8Array.from([0x13, 0x09, 0, 0, 0]), 1)),
+    /not a face/,
+  );
 });

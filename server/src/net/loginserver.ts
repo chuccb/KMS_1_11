@@ -48,6 +48,10 @@ import {
   encodeFieldRequestRelease,
   encodeSetField,
   encodeUserEffect,
+  encodeUserEmotion,
+  readClientEmotion,
+  describeClientEmotion,
+  type ClientEmotion,
   readClientAttack,
   readClientChat,
   readClientInteract,
@@ -1719,6 +1723,12 @@ export class GameEntryServer {
           this.handleQuestReply(session, event.plain);
           continue;
         }
+        // An emotion: `0x13` names a face the client already put on itself, so this is a broadcast
+        // to the rest of the field with no answer to the sender.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.emotion) {
+          this.handleEmotion(session, event.plain);
+          continue;
+        }
         // Chat: the one field packet whose meaning is entirely social, and the only one that goes
         // back to the player who sent it (see `handleChat`).
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.chat) {
@@ -1787,6 +1797,38 @@ export class GameEntryServer {
       `game: ${describeUserChat({ name: session.name, text })} in map ${session.instance.mapId}`,
     );
     session.instance.broadcast(encodeUserChat({ name: session.name, text }));
+  }
+
+  /**
+   * The player's own emotion - `0x13` (`sub_511E20` case 10, FINDINGS 4.35): the face they are
+   * making, as `u32` in `0..8` (`EMOTION_NAMES`), coming from the F-keys (`F1`..`F7` send `1`..`7`).
+   *
+   * There is nothing to answer: unlike a click or an item use, the client arms no pending-request
+   * gate here, and it has **already applied the face to itself** - `CUser::SetFace` runs one
+   * instruction before the packet is built (`.text:00511FD8` vs `00511FDF`) - so the whole job is to
+   * tell the rest of the field. The `0x27` broadcast therefore excludes the sender, the same rule
+   * `0x22` (their own move path) and `0x29` (their own level-up) already follow.
+   *
+   * A value outside `0..8` is refused by the codec rather than forwarded: the client's own setter
+   * tests `n8 <= 8` and its drawer clamps to 0, so nothing in the client can ever send one - a
+   * packet that does is not a client this server understands.
+   */
+  private handleEmotion(session: FieldSession, plain: Uint8Array): void {
+    let emotion: ClientEmotion;
+    try {
+      emotion = readClientEmotion(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x13 emotion unreadable: ${(error as Error).message}`);
+      return;
+    }
+    session.instance.broadcast(
+      encodeUserEmotion({ characterId: session.characterId, emotion: emotion.emotion }),
+      session.characterId,
+    );
+    this.options.log?.(
+      `game: 0x27 ${describeClientEmotion(emotion)} by "${session.name}" sent to ` +
+        `${session.instance.memberCount - 1} other player(s)`,
+    );
   }
 
   /**

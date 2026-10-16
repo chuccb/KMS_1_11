@@ -163,6 +163,16 @@ export const FIELD_OPCODE = {
    * hands the packet to `CVecCtrlUser::OnMove` (`sub_4967C0`).
    */
   userMove: 0x22,
+  /**
+   * `CUserPool` 0x27 (`sub_51D590` case `'\''`): the emotion the user is wearing **now**, as two
+   * `u32`s - the character id the range dispatcher resolves in the pool, then the face index. The
+   * handler hands both to `CUser::SetFace`, i.e. the very call the acting player's own client makes
+   * before it sends its `0x13` (FINDINGS 4.35).
+   *
+   * What the index means is the client's own table (`EMOTION_NAMES`): 0 is the neutral, blinking
+   * face, 1 is the hurt face the client itself shows when hit, and the F-keys send 1..7.
+   */
+  userEmotion: 0x27,
   /** `CUserPool` 0x23-0x25: the skill/effect family (`sub_520F20`/`sub_521400`/`sub_521AD0`). */
   userSkillEffectFirst: 0x23,
   userSkillEffectLast: 0x25,
@@ -392,6 +402,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const move = readClientUserMove(new PacketReader(plain, 1));
       return `0x0e move: stageByte=${move.stageByte} elements=${move.path.elements.length}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.emotion) {
+      return `0x13 emotion: ${describeClientEmotion(readClientEmotion(new PacketReader(plain, 1)))}`;
+    }
     if (opcode === CLIENT_FIELD_OPCODE.statReport) {
       return `0x1c stat report: ${describeClientStatReport(readClientStatReport(new PacketReader(plain, 1)))}`;
     }
@@ -540,6 +553,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  if (opcode === FIELD_OPCODE.userEmotion && plain.length >= 9) {
+    try {
+      return `${name}: ${describeUserEmotion(readUserEmotion(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === FIELD_OPCODE.userMove && plain.length >= 5) {
     try {
       const move = readUserMove(new PacketReader(plain, 1));
@@ -655,6 +675,7 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === 0x19) return "0x19 CField(cached-character reset)";
   if (opcode === FIELD_OPCODE.userMessage) return "0x1a CField(user message)";
   if (opcode === FIELD_OPCODE.userEffect) return "0x29 CUserPool(user effect)";
+  if (opcode === FIELD_OPCODE.userEmotion) return "0x27 CUserPool(user emotion)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode === MOB_OPCODE.anim) return "0x35 CMobPool(mob animation)";
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
@@ -698,6 +719,24 @@ export const CLIENT_FIELD_OPCODE = {
    * therefore what makes a player see their own words - by sending them back (FINDINGS 4.26).
    */
   chat: 0x12,
+  /**
+   * The player's own emotion (the face they are making): `[0x13][u32 emotion]`.
+   *
+   * The only writer is the key dispatcher `sub_511E20` (`push $0x13` at `.text:00511FDF`, one
+   * `call 0x4a1ea0`), and it is reached from the F-keys: the switch on the key's *category*
+   * (`.data` table `byte_512260[key - 16]`) sends every `F1`..`F12` into case 10, whose test
+   * `(unsigned)(key - 111) <= 8` and the `key == 119` guard leave `F1`..`F7` sending `1`..`7`
+   * (`key - 111`) and every other F-key sending nothing.
+   *
+   * Two things about it are what a server has to respect:
+   *
+   *   1. **the client has already applied it** - `CUser::SetFace(user, key - 111, -1)` runs
+   *      *before* the packet is built (`.text:00511FD8` vs `00511FDF`), so the sender's own screen
+   *      never waits for the server (which is why the answer is a broadcast to *others*).
+   *   2. **nothing is owed back**: unlike a click or an item use there is no pending-request gate
+   *      here, so a packet the server refuses can simply be dropped.
+   */
+  emotion: 0x13,
   /**
    * `CVecCtrlUser::SendMove` (`sub_542C40`): `[0x0E][u8 *(CStage+156)][CMovePath]`. The path comes
    * from `vecctrl + 216` (the embedded `CMovePath`), the byte from the current stage object - role
@@ -1561,4 +1600,101 @@ export function describeUserEffect(effect: UserEffect): string {
   return effect.effect === USER_EFFECT_LEVEL_UP
     ? `level-up effect for characterId=${effect.characterId}`
     : `effect ${effect.effect} for characterId=${effect.characterId}`;
+}
+
+/**
+ * The nine faces a character can wear, in the client's own order.
+ *
+ * The index lives in `CUser + 172` (the constructor writes `-1`, "no face"), and the *names* are the
+ * drawing code's own table: `sub_408400` indexes the wide-string array at `.data:0x5B20D8` with
+ * `n8 > 8 ? 0 : n8` and looks the result up as a child of the face image (`Character/Face/%07d.img`,
+ * the nodes `wz dump` prints: `default`, then these nine). Both halves were read out of the shipped
+ * executable - the pointer table and the strings it points at (FINDINGS 4.35) - and the sentinel
+ * cross-checks: index 1 is the one the client gives itself when it is hit (`sub_5114A0`:
+ * `sub_509790(this, 1, 1500)`).
+ */
+export const EMOTION_NAMES = [
+  "blink",
+  "hit",
+  "smile",
+  "troubled",
+  "cry",
+  "angry",
+  "bewildered",
+  "stunned",
+  "vomit",
+] as const;
+
+/** The face that means "nothing": the neutral, blinking one. Also what an out-of-range index draws. */
+export const EMOTION_NEUTRAL = 0;
+
+/** The hurt face, which the client shows on its own when the character is hit (`sub_5114A0`). */
+export const EMOTION_HIT = 1;
+
+/** The largest index the client accepts (`sub_509790` tests `n8 <= 8` and the drawer clamps to 0). */
+export const EMOTION_MAX = EMOTION_NAMES.length - 1;
+
+/** The name of an index, or `undefined` for one that is not a face at all (`-1`, `> 8`). */
+export function emotionName(emotion: number): string | undefined {
+  return Number.isInteger(emotion) && emotion >= 0 && emotion <= EMOTION_MAX
+    ? EMOTION_NAMES[emotion]
+    : undefined;
+}
+
+function checkEmotion(emotion: number): void {
+  if (!Number.isInteger(emotion) || emotion < 0 || emotion > EMOTION_MAX) {
+    throw new RangeError(
+      `emotion ${emotion} is not a face (the client's own range is 0..${EMOTION_MAX})`,
+    );
+  }
+}
+
+/** The player's own emotion, as the key dispatcher sends it. */
+export interface ClientEmotion {
+  /** `0..8` - the F-keys send `1..7`, and the range is the client's own (`n8 <= 8`). */
+  emotion: number;
+}
+
+export function readClientEmotion(reader: PacketReader): ClientEmotion {
+  const emotion = reader.readU32();
+  checkEmotion(emotion);
+  return { emotion };
+}
+
+export function encodeClientEmotion(emotion: ClientEmotion): Uint8Array {
+  checkEmotion(emotion.emotion);
+  const writer = new PacketWriter(8);
+  writer.writeByte(CLIENT_FIELD_OPCODE.emotion);
+  writer.writeU32(emotion.emotion);
+  return writer.toBytes();
+}
+
+export function describeClientEmotion(emotion: ClientEmotion): string {
+  return `emotion ${emotion.emotion} (${emotionName(emotion.emotion)})`;
+}
+
+/** `0x27` as it goes out: which user is making the face, and which face. */
+export interface UserEmotion {
+  characterId: number;
+  emotion: number;
+}
+
+export function readUserEmotion(reader: PacketReader): UserEmotion {
+  const characterId = reader.readU32();
+  const emotion = reader.readU32();
+  checkEmotion(emotion);
+  return { characterId, emotion };
+}
+
+export function encodeUserEmotion(emotion: UserEmotion): Uint8Array {
+  checkEmotion(emotion.emotion);
+  const writer = new PacketWriter(12);
+  writer.writeByte(FIELD_OPCODE.userEmotion);
+  writer.writeU32(emotion.characterId >>> 0);
+  writer.writeU32(emotion.emotion);
+  return writer.toBytes();
+}
+
+export function describeUserEmotion(emotion: UserEmotion): string {
+  return `characterId=${emotion.characterId} emotion=${emotion.emotion} (${emotionName(emotion.emotion)})`;
 }

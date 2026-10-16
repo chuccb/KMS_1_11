@@ -31,6 +31,8 @@ import {
   encodeClientChat,
   encodeClientStatReport,
   encodeClientUseItem,
+  encodeClientEmotion,
+  readUserEmotion,
   encodeClientInteract,
   encodeClientUserMove,
   encodeClientUserRequest,
@@ -2301,6 +2303,80 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
     log.some((line) => line.includes('0x29 level-up effect for "Hero" sent to 1 other player(s)')),
     log.join("\n"),
   );
+});
+
+test("an emotion (0x13) reaches the rest of the field as 0x27 and is not echoed", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    // Nothing else may arrive: the claim is about the emotion and the quiet that follows it.
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x1a1a1a1a, clientRecvSeed: 0x2b2b2b2b },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  const heroStats = { ...zeroStats(), id: 61, name: "Hero", level: 1, hp: 50, maxHp: 50 };
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 61,
+      characterName: "Hero",
+      character: characterDataOf(heroStats, startingCharacterItems()),
+    }),
+  });
+  await hero.drain();
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 62, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // What `F3` sends: `[0x13][u32 3]` - and nothing else, because the client has already put the
+  // face on itself (`CUser::SetFace` runs before the packet is built).
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.emotion,
+    body: encodeClientEmotion({ emotion: 3 }).slice(1),
+  });
+
+  const seen = await alt.takeOpcode(FIELD_OPCODE.userEmotion);
+  assert.equal(seen[seen.length - 1]![0], FIELD_OPCODE.userEmotion);
+  assert.deepEqual(readUserEmotion(new PacketReader(seen[seen.length - 1]!, 1)), {
+    characterId: 61,
+    emotion: 3,
+  });
+  assert.deepEqual(await hero.drain(), [], "the sender gets nothing back: the face is already on");
+  assert.ok(
+    log.some((line) => line.includes("0x27 emotion 3 (troubled)") && line.includes("1 other player(s)")),
+    log.join("\n"),
+  );
+
+  // Something that is not a face: the client's own setter refuses `n8 > 8` and the drawer clamps to
+  // 0, so this cannot come from the client - it is dropped, and nobody hears about it.
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.emotion,
+    body: Uint8Array.from([0x09, 0x00, 0x00, 0x00]),
+  });
+  assert.deepEqual(await alt.drainOpcodes(200), []);
+  assert.deepEqual(await hero.drainOpcodes(200), []);
+  assert.ok(log.some((line) => line.includes("0x13 emotion unreadable") && line.includes("not a face")), log.join("\n"));
 });
 
 /**

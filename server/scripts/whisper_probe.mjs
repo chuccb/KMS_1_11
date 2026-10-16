@@ -25,6 +25,11 @@
  * That half needs a wallet: run the server with `--start-mesos 200` and a fresh `--save` file, and
  * the section checks the purchase, the price and the map; without the mesos it prints a note and
  * skips it.
+ *
+ * The emotion section runs while both are still in the town the revive landed in: Hero sends the
+ * `0x13` an F-key sends (`[0x13][u32 face]`), and Alt - who is standing in the same map - is the one
+ * who gets the `0x27` that puts the face on Hero. Hero gets nothing back, because his own client
+ * already applied it before it sent the packet (FINDINGS 4.35).
  */
 import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
@@ -33,7 +38,8 @@ import { PacketReader, PacketWriter } from "../src/protocol/packet.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
 import { readStatUpdate } from "../src/protocol/stat.ts";
-import { CLIENT_FIELD_OPCODE, encodeClientUseItem } from "../src/protocol/field.ts";
+import { CLIENT_FIELD_OPCODE, encodeClientUseItem, encodeClientEmotion, readUserEmotion } from "../src/protocol/field.ts";
+import { FIELD_OPCODE } from "../src/protocol/field.ts";
 import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import {
@@ -311,6 +317,34 @@ expect(revived.stats.hp === revived.stats.maxHp, `and refilled the HP the report
 // a packet to the one person who died.
 const arrived = new PacketReader(await alt.game.take(0x1c), 1).readU32();
 expect(arrived === hero.characterId, `the others see Hero arrive (0x1C id ${arrived})`);
+
+// --- an emotion: 0x13 out, 0x27 to the rest of the field, nothing back (FINDINGS 4.35) ------------
+// Hero and Alt are both in the town 1010000 here (the revive above moved Hero in). The F-keys are the
+// only sender: `F1`..`F7` send `1`..`7` and the client has already put the face on itself before the
+// packet is built, so the server's job is the broadcast - and the sender must not get an echo.
+hero.game.send(encodeClientEmotion({ emotion: 6 })); // F6 -> "bewildered"
+const emotionPacket = await alt.game.take(0x27);
+const emotionReader = new PacketReader(emotionPacket, 1);
+const emotionOf = emotionReader.readU32();
+const faceIndex = emotionReader.readU32();
+expect(emotionOf === hero.characterId, `the face is Hero's (id ${emotionOf})`);
+expect(faceIndex === 6, `and it is face 6, the one the packet named (got ${faceIndex})`);
+// Hero's queue still holds the town's NPC packets (`0x39`s the shop section below needs), so this
+// looks for an echo without throwing anything away: the 0x27s are counted, everything else is put
+// back in order.
+let echoes = 0;
+const until = Date.now() + 400;
+while (Date.now() < until) {
+  const kept = [];
+  while (hero.game.queue.length > 0) {
+    const packet = hero.game.queue.shift();
+    if (packet[0] === 0x27) echoes += 1;
+    else kept.push(packet);
+  }
+  hero.game.queue.unshift(...kept);
+  await new Promise((r) => setTimeout(r, 20));
+}
+expect(echoes === 0, `the sender is not echoed the 0x27 (saw ${echoes})`);
 
 // --- using what a shop sold: 0x18 restores, 0x19 changes the map (FINDINGS 4.34) -------------------
 // The client never applies an item by itself. `sub_462DC0` (inventory double-click) and `sub_512570`

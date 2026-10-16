@@ -448,6 +448,33 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.FIELD_OPCODE.userEmotion,
+    direction: "s2c",
+    stage: "field",
+    name: "userEmotion",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.35 (CUserPool 0x27 -> sub_51D590's third case from the end; the id is read by the range dispatcher and resolved with sub_51CD30, then sub_509790(user, emotion, -1))",
+    codecs: ["readUserEmotion", "encodeUserEmotion", "describeUserEmotion"],
+    fields: [
+      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      { name: "emotion", type: "u32", note: "0..8; the client's own face table is EMOTION_NAMES" },
+    ],
+  },
+  {
+    opcode: field.CLIENT_FIELD_OPCODE.emotion,
+    direction: "c2s",
+    stage: "field",
+    name: "emotion",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.35 (sub_511E20 case 10: `push $0x13` at .text:00511FDF, the u32 is CUser+172 right after sub_509790 set it; F1..F7 send 1..7)",
+    codecs: ["readClientEmotion", "encodeClientEmotion", "describeClientEmotion"],
+    fields: [
+      { name: "emotion", type: "u32", note: "0..8 (EMOTION_NAMES); the sender has applied it to itself already" },
+    ],
+  },
+  {
     opcode: field.FIELD_OPCODE.userEffect,
     direction: "s2c",
     stage: "field",
