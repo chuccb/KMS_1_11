@@ -55,5 +55,5 @@
 
 `.github/workflows/ci.yml`
 - job `tools`：`python3 -m unittest discover -s tools/tests`（`Data.wz` 不存在時自動 skip）
-- job `server`：`node --test server/test`
+- job `server`：`node --test "**/*.test.ts"`（Node 22 strip-only，不可用 parameter property / `enum` / `namespace`）
 - job `protocol`：驗證 `protocol/schema/*` 與其產生的 golden 測試向量一致（Phase 1 起）
