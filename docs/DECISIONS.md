@@ -305,5 +305,53 @@ client 用 `0x2C` 回報的怪物動作（FINDINGS §4.20）。`0x0D` 解出之�
 - 撿到錢、買東西、賣東西三條路徑現在都會送 `0x0D` 的 `0x40000`，畫面上的錢包會跟著動。
 - 裝備還不能賣（這一版 `Item/` 底下沒有裝備圖，`Character/<type>/<id>.img` 的價格外加規則
   沒有證據）；`0x16` 的充電（op 2）沒有實作，一律回「東西不夠」。
-- NPC 的對話／任務（`0x46`–`0x48` 與 client 的 `0x15`）仍然 OPEN：商店是第一個可互動的 NPC
-  行為，不是全部。
+- NPC 的對話與任務：`0x47`／`0x15`（NPC 對話，FINDINGS §4.23）由 **ADR-011** 接手；
+  `0x46`／`0x48` 在 CQuestMan 的分派器裡**沒有 case**（`sub_4A58F0` 只把 71 交給 `sub_4A5910`），
+  所以真正的「任務流程」不是還沒解的封包，而是**我們要自己定義的功能**。
+
+---
+
+## ADR-012：世界是「每張地圖一份」，玩家進出的是同一個 instance
+
+**日期**：2026-10-16 ｜ **狀態**：已定案（可再評估）
+
+**決策**：伺服器的世界階層固定為 `FieldRegistry`（mapId → `FieldInstance`）：
+
+1. **一個 mapId 一個 `FieldInstance`**，第一次有人進場時建立、**最後一個人離開後不刪**。
+   怪物、NPC、掉落物、在場玩家全部屬於它，不屬於連線。
+2. **連線只是「成員」**：`FieldMember`（`characterId`／`name`／`avatarItems`／`send`）是
+   `FieldInstance` 對一個玩家的全部認識；socket 關閉＝`leave`，不是「這個世界結束」。
+3. **廣播範圍照 client 的池子決定**（FINDINGS §4.24.1）：坐落在場地池子上的封包（`0x1C`／`0x1D`／
+   `0x22`、怪物 `0x2F`–`0x35`、NPC `0x39`–`0x3B`、掉落 `0x43`／`0x44`）送給**場地裡的每個人**；
+   動到某個人角色紀錄的（`0x0B`／`0x0D`／`0x11`、`0x16`）只送給那個人。
+4. **一個時鐘**：`GameEntryServer` 只有一個 server-wide interval（`tickFields` 用 `FieldRegistry.instances()` 走過所有場地，每個場地一次 `FieldInstance.tick`）；
+   原本「每條連線一個 `setInterval`」造成的「同一隻怪在兩個人螢幕上走不同的路」隨之消失。
+5. **`FieldInstance.tick` 只在有人看的時候走路**：沒人看的場地不派 `0x33`，但屍體／重生計時與
+   掉落物過期照算 —— 世界比連線長壽，離線期間發生的事仍然發生。
+6. **角色 id 全伺服器唯一**（`nextCharacterId(accounts)`）：`CUserPool` 以 id 為 key，
+   兩個帳號各自從 1 起算會在同一張圖撞 id，而 client 的自我排除會**安靜地**吃掉那筆進場紀錄。
+7. **不刪場地、不廣播給離線者、snapshot 只補活著的怪物**都是**我們的選擇**，集中在 `world.ts` 一處。
+
+**理由**：
+1. **ADR-001 的「完整 MMO」就是這一條**：不是「一個 socket 一個世界」。玩家 A 打死的怪必須對 B 也死了，
+   否則所有權（誰的血、誰的掉落物）會在第一次連線進來時就崩掉。
+2. **所有權只有一處**：`MobField`／`NpcField`／`DropField` 原本掛在 socket 的 session 上，
+   等於「每個玩家一份世界」；搬到 `FieldInstance` 後，「這隻怪的血」只有一個數字。
+3. **擴充點是資料結構而不是 if**：頻道／分流只要把 registry 的 key 從 `mapId` 改成 `(mapId, channel)`；
+   換圖只要 `leave` ＋ 另一個 `of(mapId).join` —— 沒有連線層的知識。
+4. **最省事的實作就是最不容易壞的實作**：成員只有一個 `send` 函式，廣播＝走過成員；
+   沒有 event bus、沒有 per-socket 狀態複本（§4.24.3 說明了「填 0 是安全的」那幾個欄位）。
+
+**被否決的選項與原因**：
+- **每條連線一份世界（現狀）**：實作最簡單，但它不是 MMO，而且越晚換越貴。
+- **全域單一 `Field`（不分地圖）**：`0x16` 的換圖語意會消失。
+- **把場地在最後一個人離開時刪掉**：重登會看到一張「剛開機」的圖（怪全在、掉落物全沒）；
+  留著記憶體成本上限＝地圖數，換來「世界是持續的」。
+
+**後果**：
+- `net/loginserver.ts` 不再自己持有 `MobField`／`NpcField`／`DropField`，只持有 `instance` 與
+  「我這個成員」；NPC／怪物的生成只發生一次（`spawnAll`），不再每位玩家一次。
+- `0x1C`／`0x1D`／`0x22` 的 sender 只在 `game/world.ts`，`protocol/field.ts` 保持純 codec。
+- 測試必須是**假成員**（`test/world.test.ts`）：真的 socket 保留給「兩條連線真的互相看見」的煙霧測試。
+- 未實作的部分照 FINDINGS §4.24.9 掛著：`0x29`（別人升級的特效）未解、`0x1C` 的三個欄位語意未解、
+  頻道還沒做。

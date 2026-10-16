@@ -208,10 +208,10 @@ export interface DropFieldOptions {
 /**
  * The drops of one field.
  *
- * Owned by one connection for now, exactly like `MobField` (there is no shared world yet - ADR-001):
- * two players in one map would each get their own copies of the map's monsters *and* the drops they
- * leave. Nothing here knows about players or packets beyond the three encoders: the caller decides
- * when a drop appears, whether the player at `(x, y)` has it, and what to do with the gain.
+ * One per map, owned by the field (`game/world.ts`, ADR-012), so a drop any player sees is the same
+ * drop: `dropId` is the field's key, and the `0x44` that takes one away names whoever took it. Nothing
+ * here knows about players or packets beyond the three encoders: the caller decides when a drop
+ * appears, whether the player at `(x, y)` has it, and what to do with the gain.
  */
 export class DropField {
   readonly drops: DropEntry[] = [];

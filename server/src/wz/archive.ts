@@ -573,6 +573,36 @@ export function footholdYAt(chain: FootholdSegment[], x: number): number | undef
   return Math.round(segment.y1 + t * (segment.y2 - segment.y1));
 }
 
+/**
+ * The foothold segment a point stands on, or `undefined` when no segment covers its x.
+ *
+ * `footholdSegmentAt` needs a chain, and a bare point does not carry one (a map's portals and its
+ * `0x1C` positions name a foothold id, not a chain), so this walks every segment and keeps the one
+ * whose x-range covers `x` and whose interpolated y is **nearest** to `y`. For a point that is on the
+ * ground - every portal and every `life` entry in the shipped data is - that is the segment it stands
+ * on. Missing the segment is not fatal: `sub_485400` returns no foothold for an unknown id, so a
+ * caller that cannot place a point can send 0 and mean "no foothold".
+ */
+export function footholdUnderPoint(
+  segments: FootholdSegments,
+  x: number,
+  y: number,
+): FootholdSegment | undefined {
+  let best: FootholdSegment | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const segment of segments.values()) {
+    const low = Math.min(segment.x1, segment.x2);
+    const high = Math.max(segment.x1, segment.x2);
+    if (x < low || x > high) continue;
+    const distance = Math.abs(y - footholdYAt([segment], x)!);
+    if (distance < bestDistance) {
+      best = segment;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** The walkable x range of a foothold chain: the union of its segments. */
 export function footholdRange(chain: FootholdSegment[]): { x0: number; x1: number } | undefined {
   if (chain.length === 0) return undefined;

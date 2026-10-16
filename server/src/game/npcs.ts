@@ -13,9 +13,8 @@
  * has no image is skipped and reported, instead of being sent as a packet that would make the client
  * look up a file that is not there - the same rule `game/mobs.ts` applies to mobs.
  *
- * ONE FIELD PER CONNECTION: like `MobField` and `DropField`, the ids are this object's own. Two
- * players in one map would each see their own copy, with their own ids (ADR-001's shared world is
- * the step that changes this).
+ * ONE OBJECT PER FIELD (`game/world.ts`): the ids are the field's own, handed out once, and every
+ * player in the map is sent the same packets - `enterPackets` is the snapshot a joining player gets.
  */
 import type { WzArchive } from "../wz/archive.ts";
 import { asText, infoOf } from "../wz/props.ts";
@@ -112,13 +111,31 @@ export class NpcField {
    * would make the client load a file that does not exist.
    */
   spawnPackets(): Uint8Array[] {
-    const packets: Uint8Array[] = [];
-    for (const spawn of this.options.spawns) {
-      const entry = this.spawn(spawn);
-      if (entry === undefined) continue;
-      packets.push(this.enterPacket(entry));
-    }
-    return packets;
+    this.spawnAll();
+    return this.enterPackets();
+  }
+
+  /**
+   * Puts the map's `life` list into this field, with no packets at all.
+   *
+   * A field spawns its NPCs once, when it comes up (`FieldInstance`'s constructor) and never again:
+   * calling this twice would hand the *same* map entry a second id, and the client would end up with
+   * two NPCs standing on each other.
+   */
+  spawnAll(): void {
+    for (const spawn of this.options.spawns) this.spawn(spawn);
+  }
+
+  /**
+   * The **full** `0x39` for every NPC that is present - what a player who has just entered the map
+   * needs, and the same bodies `spawnPackets` produced for the first one.
+   *
+   * The short form (`refreshPacket`) is not what a joining player gets: it carries no template and no
+   * position, and only means something to a client whose pool already has that id (`sub_49F6C0` ends
+   * the packet as soon as the id is known).
+   */
+  enterPackets(): Uint8Array[] {
+    return this.npcs.filter((entry) => entry.present).map((entry) => this.enterPacket(entry));
   }
 
   /** Adds one NPC to the field (no packet - see `enterPacket`). */
@@ -159,7 +176,11 @@ export class NpcField {
     return encodeNpcEnterField(field);
   }
 
-  /** The `0x39` that only refreshes a live id - what a second player would be sent. */
+  /**
+   * The `0x39` that only refreshes an id the client already has (`sub_49F6C0`): five bytes, no
+   * template and no position. Refreshing is all it can do - a client that has never seen the id
+   * would create an NPC out of the id alone.
+   */
   refreshPacket(npcId: number): Uint8Array | undefined {
     const entry = this.byId(npcId);
     if (entry === undefined) return undefined;

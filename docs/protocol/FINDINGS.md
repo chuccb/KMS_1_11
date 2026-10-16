@@ -1501,9 +1501,9 @@ s8 second     // 上面那個模板裡有兩組陣列（npc+19 的 +32／+36）
 | 位置 | 內容 |
 |---|---|
 | `protocol/npc.ts` | `NPC_OPCODE`（`enterField 0x39`／`leaveField 0x3A`／`stateToggle 0x3B`／`update 0x3D`）、`encodeNpcEnterField`／`readNpcEnterField`／`describeNpcEnterField`、`encodeNpcLeaveField`／`readNpcId`、`encodeNpcState`／`readNpcState` |
-| `game/npcs.ts` | `NpcTemplate`（`templateId`／`name`／`description?`／`func?`）、`npcTemplateProvider(WzArchive)`（讀 `info/name`）、`NpcField`（`spawnPackets`／`refreshPacket`／`byId`／`present`／`setSecondState`／`remove`）|
+| `game/npcs.ts` | `NpcTemplate`（`templateId`／`name`／`description?`／`func?`）、`npcTemplateProvider(WzArchive)`（讀 `info/name`）、`NpcField`（`spawnAll`／`spawnPackets`／`enterPackets`／`refreshPacket`／`byId`／`present`／`setSecondState`／`remove`）；一個場地只 spawn 一次，`enterPackets()` 是給**新進場玩家**的完整 body（§4.24.2）|
 | `wz/props.ts` | 新的共用層：`entriesOf`／`propertyOf`／`asNumber`／`asText`／`infoOf`，`game/mobs.ts` 與 `game/map.ts` 也改成用它（同一個規則：**形狀不對的值不算值**，預設值由呼叫端給）|
-| `net/loginserver.ts` | `npcTemplate?` 選項、`FieldSession.npcs`、`spawnNpcs`：NPC 的 `0x39` 緊接在怪物的 `0x2F` 之後、**在同一個 TCP 串流、同一組加密狀態**（`0x16` → 每個怪一個 `0x2F` → 每個 NPC 一個 `0x39`）|
+| `net/loginserver.ts` | `npcTemplate?` 選項；NPC 的 `0x39` 由場地送（`FieldInstance.join`），緊接在怪物的 `0x2F` 之後、**在同一個 TCP 串流、同一組加密狀態**（`0x16` → 每個怪一個 `0x2F` → 每個 NPC 一個 `0x39` → 玩家 `0x1C`，§4.24.2）|
 | `wz/paths.ts` | `npcImagePath(id)` |
 | `cli.ts serve` | 有 `Data.wz` 時同時建立 `npcTemplateProvider(archive)` |
 
@@ -2103,6 +2103,141 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
   「把 126 × 190 個合法 lead/trail 解一次再反轉」建出來的；編不出來的字元**丟例外**而不是送出去變亂碼
   （Latin-1 的重音字母不在這個字碼頁裡、emoji 也不在；漢字／假名／希臘／西里爾在）。
 
+### 4.24 ✅ 一張地圖上的多個玩家：哪些封包是「世界的事實」（`game/world.ts`，ADR-012）
+
+§4.11 把「兩個 client 走進同一張圖並互相看見」需要的封包解到欄位層，但伺服器那一側一直是
+**一個連線一份世界**：`MobField`／`NpcField`／`DropField` 都掛在連線上，所以第二個玩家會拿到自己的一份
+怪物（各自扣各自的血）、自己的一套掉落物 id，以及自己的 timer（同一個怪物在兩個 client 上走不同的路）。
+這一節記的是把世界搬到「每張地圖一份」之後學到的東西：哪些封包是**場地的事實**（對站在圖裡的每個人都
+成立）、哪些是**個人的**，以及一個剛進場的人要看到什麼才和早進來的人看到同一張圖。
+
+實作：`server/src/game/world.ts`（`FieldInstance`／`FieldRegistry`，`FieldMember` 是唯一的介面），
+測試：`server/test/world.test.ts`（18 個，假成員）＋ `server/test/serve.test.ts` 的兩個真 socket 測試。
+
+#### 4.24.1 「世界的事實」與「個人的事」怎麼分（證據：handler 落在哪個池子）
+
+| opcode | 讀它的物件（§4.11.1） | 這句話在說什麼 | 誰收到 |
+|---|---|---|---|
+| `0x1C`／`0x1D` | CUserPool（`sub_51CFE0`／`sub_51D280`）| 有人進場／離場 | 場地裡的所有人（含剛進場的：他要看到已經在的人）|
+| `0x22` | CUserPool（`sub_51D590`）| 某個人在走 | 除了那個人以外的所有人 |
+| `0x2F`／`0x30`／`0x31` | CMobPool（`sub_4924A0`／`sub_4926B0`／`sub_4927B0`）| 怪物出現／開始死亡／屍體走了或回來了 | 所有人 |
+| `0x33`／`0x34`／`0x35` | CMobPool（`sub_492380`）| 怪物在走／受到攻擊（閃爍）／換動畫 | 所有人（`0x34` 見 4.24.4 的保留）|
+| `0x39`／`0x3A`／`0x3B` | CNpcPool（`sub_49F6C0`…）| NPC 出現／離開／第二狀態 | 所有人 |
+| `0x43`／`0x44` | CRewardPool（`sub_4A88A0`／`sub_4A95B0`）| 地上多了一個掉落物／某個掉落物沒了 | 所有人 |
+| `0x16` | CStage 基底（`sub_4C2780`）| **你**進這張圖（帶你的 `CharacterData`）| 只有你 |
+| `0x0B`／`0x0D`／`0x11` | CWvsApp（`sub_55A900`）| **你的**某一格道具／能力值／撿到東西的訊息 | 只有你 |
+| `0x19`／`0x4A`／`0x4B`／`0x47` | `CField`／`CUniqueModeless`／`CQuestMan` | 你的請求被放行／你的商店視窗／你的對話框 | 只有你 |
+
+判準不是猜的：上面「所有人」那一組的 handler 全部掛在**場地自己的池子**上，每一句話都是「這張圖現在長
+什麼樣」——`0x1C` 是「池子裡多了一個使用者」，`0x43` 是「地上多了一個 id」，對每個站在圖裡的人都成立；
+反過來 `0x0B`／`0x0D`／`0x11` 動的是**這個人的角色紀錄**（`0x0D` 是能力值差異包，§4.21），
+`0x16` 帶的是他自己的 `CharacterData`。
+
+`0x1C` 還多一行自我排除：`sub_51CFE0` 讀到 id 後先比 `n3000[5]`（＝本機角色 id），相等就直接 return。
+⇒ 伺服器**不需要**送自己的 `0x1C`（送了自己也會忽略），而自己的頭像來自 `0x16` 的 `CharacterData`。
+
+#### 4.24.2 剛進場的人要看到什麼（snapshot）
+
+| 送什麼 | 為什麼是這個形狀 |
+|---|---|
+| 每個**還活著**的怪物一個 `0x2F`（§4.15）| 新 client 的 `CMobPool` 是空的；位置用怪物**現在**的位置，不是出生點 |
+| 每個 NPC 一個**完整** `0x39`（§4.19）| ⚠️ 5-byte 的形狀**不是**給新玩家的：`sub_49F6C0` 只要 id 已知就結束讀取，而新 client 的池子是空的。完整 body（20 bytes）才有模板與座標 |
+| 地上每個掉落物一個 `0x43`（§4.18）| 一樣的理由：`dropId` 是場地的，新 client 沒見過 |
+| 每個已在場的玩家一個 `0x1C` | 見下（4.24.3）|
+| 已在場的玩家各收到新人的一個 `0x1C` | 同一件事的另一半 |
+
+- 只有**活著**的怪物會進 snapshot（屍體不補送）。這一格是**我們的選擇**：沒有證據說原伺服器會補，
+  補了也不會錯，只是多播一段不在場的死亡動畫。
+- 順序是 `0x16`（client 的場地要先存在）→ 怪物 → NPC → 掉落物 → 玩家（`0x1C`）。每個封包彼此獨立，
+  所以順序本身沒有證據，這是**我們的選擇**。
+
+#### 4.24.3 `0x1C` 的九個欄位：能填的、填 0 的、以及為什麼填 0 是安全的
+
+| 欄位 | 我們送 | 依據 |
+|---|---|---|
+| `characterId` | 角色 id | `sub_51CFE0` 用它當 `CUserPool` 的 key |
+| `name` | 角色名（ASCII，§4.9）| `sub_520680` → `ZXString`，就是頭上的名字 |
+| `avatarItems` | `CharacterData` 兩個穿戴陣列的 item id | `sub_45F340` 依 **id 自己分類**（`itemId/1000/10`），所以順序不重要；**0 不能出現**（那是清單結尾），所以 0 的 id 會被濾掉 |
+| `unknown64` | `0` | `CUser+64`，語意未解（§6 第 2 項）|
+| `avatarKey` | `0` | `sub_508260`＝`CUser::SetAvatar` 的版本鍵；client 只在「這個值**或**陣列變了」時重做外觀 → 對一個沒見過的使用者任何值都會重建 |
+| `unknownA`／`unknownB` | `0` | `sub_520680` 讀了直接丟掉（不存）|
+| `x`／`y` | 場地記得的位置；沒動過的人＝出生點 | `sub_485400(field, id)` 之後交給 vecctrl |
+| `action` | `0` | `CUser+180` 的姿態，值表未解 → 一律「站著」 |
+| `foothold` | 腳踏點 id（算得出來時）| 見下 |
+
+- **填 0 為什麼安全**：`sub_485400` 對未知的 foothold id 回 0（＝沒有 foothold），所以「算不出來」
+  不會壞；`action`／`unknown64`／`avatarKey` 只是外觀的細節，不是長度或順序的一部分。
+- **出生點**（`spawnPointOf`）：地圖的 `sp` portal → 第一個 `pt = 0` 的 portal → 第一個 portal，
+  再用 `footholdUnderPoint()`（腳踏點的 x 覆蓋 + y 最接近的線段）取那個位置的腳踏點 id。
+  ⚠️ `0x16` 的 `mode` 語意未解（§6 第 2 項），所以「`mode = 0` ⇒ 玩家站在 `sp` portal」是**我們的假設**，
+  要改只有一處（`spawnPointOf`）。真 `Data.wz` 上它落在합당한 값：地圖 40000 的 `sp` portal (1,183)
+  → foothold 28（就是那個線段的 id）。
+
+#### 4.24.4 廣播 vs 個人：含**我們的選擇**的部分
+
+| 事件 | 送什麼 | 給誰 | 依據 |
+|---|---|---|---|
+| 打死一隻怪物 | `0x34`（受擊閃爍）→ `0x30`（死亡動畫）| 全場 | `0x30` 是明顯的世界事實；⚠️ `0x34` 的廣播範圍**沒有證據**（原伺服器可能只回攻擊者），我們選「大家都看到同一隻怪的反應」 |
+| 那一擊的經驗值 | `0x0D` 差異包 | 只有攻擊者 | 差異是**他的**角色紀錄（§4.21，ADR-009）|
+| 怪物掉的東西 | `0x43` | 全場 | 掉落物屬於場地（§4.18）|
+| 拾取 | `0x44` kind 2 | 全場 | 見 4.24.6 |
+| 升級 | （不送）| — | ⚠️ 別人的升級特效是 `0x29`，**未解**（§6）→ 目前別人看不到你升級 |
+| 離線 | `0x1D` | 其他人 | `sub_51D280` |
+
+#### 4.24.5 世界的時鐘：一個 interval，不是每個連線一個
+
+原本每個連線一個 `setInterval`：兩個人在同一張圖就會各自拿到一份 `0x33` 腿、各自算一次重生。
+現在是**一個 server-wide interval**（`GameEntryServer.startClock`，第一個場地出現時啟動），
+每 tick 走過所有場地（`FieldInstance.tick`）。兩個是**我們的選擇**：
+
+1. **沒人看的場地不派 `0x33`**：一條腿是對 client 的承諾（它會把怪物走到那裡），沒人看就不走；
+   但屍體／重生照算，所以下一個進來的人看到的是「該在的怪物都在」。
+2. **場地在最後一個人離開後不刪**（`FieldRegistry` 留著）：世界比連線長壽，重登看到同一張圖；
+   代價是記憶體隨「去過的地圖數」成長（上限＝地圖數，出貨資料 100 張）。
+
+#### 4.24.6 拾取：一件掉落的消失是世界的，拿到什麼是個人的
+
+`0x44` kind 2 只說「這個 `dropId` 沒了，是這個人拿走的」→ 全場（**含**撿的人：飛行／音效就是這個封包）；
+`0x0B`（哪一格多了什麼）、`0x0D`（錢）、`0x11`（訊息）只在撿的人身上才有意義。
+
+⚠️ 這一節順手修掉一個缺口：**撿到 mesos 原本只送 `0x11`**，錢在 client 上不會動——錢是角色紀錄的第
+22 欄，只有 `0x0D` 會動它（§4.22.5）。現在 `pickUp` 先送 `0x0D` 的 `{mesos}`、再送 `0x11`。
+
+#### 4.24.7 一個 character id 只能在一張圖裡出現一次
+
+- `CUserPool` 以 id 為 key，所以同一張圖裡重複的 id 會讓 client 少算一個人（或更新錯的人）。
+  `FieldInstance.join` 遇到重複的 id 會先送 `0x1D` 再讓新的進場。
+- 這一節也把**角色 id 的配發改成全伺服器唯一**（`nextCharacterId(accounts)`）：原本是「每個帳號從 1
+  起算」，兩個帳號的第一個角色都會是 1 → 同一張圖就撞 id。⚠️ 症狀很難查，因為 `sub_51CFE0` 的自我排除
+  會讓 client **安靜地忽略**那筆進場紀錄（其中一個人看不到另一個人，而不是崩潰）。
+
+#### 4.24.8 真的跑起來的樣子（真 `Data.wz`、兩個 socket）
+
+地圖 40000（달팽이사냥터，63 隻怪／1 個 NPC）：
+
+```
+Hero 進場    : snapshot 65 個封包（0x16 + 63 × 0x2F + 0x39），出生點 (1,183)、foothold 28
+Alt 進場     : 同一份 snapshot，然後 0x1C「Hero 在 (1,183)、foothold 28、avatar=[]」
+Hero 收到    : 0x1C「Alt 在 (1,183)」
+Hero 走一步  : Alt 收到 0x22 characterId=11 → (441,395)（Hero 送的路徑，前面多了 id）
+Hero 打第一隻: Hero 收到 0x34 0x30 0x0d 0x43、Alt 收到 0x34 0x30 0x43
+               兩邊的掉落物一模一樣（dropId 1、(458,395)、錢 1）；0x0d 只在 Hero（+3 exp）
+Alt 走上掉落 : Alt 收到 0x44 0x0d 0x11、Hero 收到同一個 0x44 {dropId 1, kind 2, characterId 12}
+Alt 離線     : Hero 收到 0x1D characterId=12
+```
+
+#### 4.24.9 還不能宣稱的部分
+
+1. **沒有實機驗證**：這一節全部是「我們的兩個假 client」；原 client 看不看得到另一個人、頭像長什麼樣、
+   走路的插值順不順，都要靠 ADR-004 的 oracle run。
+2. `0x34` 的廣播範圍是**我們的選擇**（4.24.4）；原伺服器的行為沒有證據。
+3. `0x29`（別人升級的特效）未解，所以升級對別人是不可見的。
+4. 「場地不刪」「沒人看不走路」是**我們的選擇**（沒有 server 可以對照）。
+5. **沒有頻道／分流**：整個 server 只有一份世界（一張圖一個 instance）。加頻道時要改的是
+   `FieldRegistry.of(mapId)`（key 要變成 map + channel）。
+6. NPC 的 `0x3D`（走動的 NPC）仍未實作（§4.19.9 第 2 項）。
+7. 進場 snapshot 沒有補送屍體、也沒有補送「正在死亡中」的怪物（4.24.2 的選擇）。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -2169,6 +2304,9 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
 12. ~~**`mesos` 在 client 角色紀錄裡的位移**~~ → **已解**：`+89/+93`（第 22 欄）就是錢，
    `0x0D` 的旗標 `0x40000` 送它（§4.22.5）。剩下的延伸題是「**商店的庫存與收購價**」——
    原伺服器的商店是腳本，所以那是我們的選擇（ADR-010），而不是還沒解出來的東西。
+13. **多玩家在同一張圖之後剩下的洞**（§4.24.9）：`0x1C` 的 `unknown64`／`avatarKey`／`action` 語意
+   （仍送 0）、`0x34` 的廣播範圍（我們的選擇）、`0x29`（別人升級的特效，未解）、
+   頻道／分流（`FieldRegistry.of` 是入口）、以及**兩個真 client 的實機驗證**。
 
 ## 7. 擷取工作流（ADR-004）
 

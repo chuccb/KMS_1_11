@@ -20,6 +20,8 @@ import {
   encodeClientAttack,
   encodeClientUserMove,
   readSetField,
+  readUserEnterField,
+  readUserMove,
 } from "../src/protocol/field.ts";
 import {
   DROP_OPCODE,
@@ -144,6 +146,33 @@ class FakeClient {
       for (const body of taken) process.stderr.write(`[test] s2c ${[...body].map((b) => b.toString(16).padStart(2, "0")).join("")}\n`);
     }
     return taken;
+  }
+
+  /**
+   * Waits for the first packet with this opcode and returns every packet up to it (inclusive).
+   *
+   * Counting packets does not work once a field is shared: the mobs walk, the other players move, and
+   * the packets under test therefore arrive in a stream that has other things in it. Reading by opcode
+   * is what that stream asks for.
+   */
+  async takeOpcode(opcode: number, timeoutMs = 4000): Promise<Uint8Array[]> {
+    const seen: Uint8Array[] = [];
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.queue.length === 0) {
+        await new Promise<void>((resolve) => {
+          this.waiter = resolve;
+          setTimeout(resolve, 20);
+        });
+        continue;
+      }
+      const packet = this.queue.shift()!.plain;
+      seen.push(packet);
+      if (packet[0] === opcode) return seen;
+    }
+    throw new Error(
+      `no 0x${opcode.toString(16)} arrived; saw [${seen.map((bytes) => bytes[0]!.toString(16)).join(",")}]`,
+    );
   }
 
   send(packet: ClientPacket): void {
@@ -776,6 +805,11 @@ test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice"
     kind: "mesos",
     amount: 25,
   });
+  // The mesos are part of the character record, so what moves them is a 0x0D diff; the `0x11` line is
+  // only the chat notice (FINDINGS 4.22.5).
+  const wallet = mesoNotice.find((packet) => packet[0] === STAT_OPCODE);
+  assert.ok(wallet !== undefined, "a meso pickup sends the wallet as 0x0D");
+  assert.deepEqual(readStatUpdate(new PacketReader(wallet, 1)).diff, { mesos: 25 });
   assert.ok(
     log.some((line) => line.includes("took 25 mesos")),
     log.join("\n"),
@@ -1039,4 +1073,186 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
   assert.deepEqual(await client.take(0), [], "the secondary button ends the talk");
   assert.ok(log.some((line) => line.includes("conversation ended")), log.join("\n"));
   client.close();
+});
+
+/**
+ * The MMO half of ADR-012, over real sockets: two players in one map.
+ *
+ * The field is the server's, not the connection's (`game/world.ts`), so the second socket sees the
+ * first player enter (`0x1C`), their walk (`0x22`), a monster dying under their swing, and their
+ * departure (`0x1D`) - while the packets that belong to one player (the exp of that kill, in `0x0D`)
+ * go to that player alone. Nothing moves on its own here (`speedPercent: 0`), so every packet in the
+ * test is one the test itself caused.
+ */
+test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [{ money: 25 }],
+    handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+  });
+  const heroBurst = await hero.take(4);
+  assert.deepEqual(
+    heroBurst.map((bytes) => bytes[0]),
+    [FIELD_OPCODE.setField, MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
+    "the first player gets the map and its world, and no 0x1C: there is nobody else",
+  );
+
+  // The second player into the same map: the snapshot, and then who is already standing there.
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  assert.deepEqual(
+    altBurst.map((bytes) => bytes[0]),
+    [
+      FIELD_OPCODE.setField,
+      MOB_OPCODE.enterField,
+      MOB_OPCODE.enterField,
+      NPC_OPCODE.enterField,
+      FIELD_OPCODE.userEnterField,
+    ],
+    "the joiner gets the world first, then the players",
+  );
+  const aboutHero = readUserEnterField(new PacketReader(altBurst[4]!, 1));
+  assert.deepEqual(
+    {
+      characterId: aboutHero.characterId,
+      name: aboutHero.name,
+      x: aboutHero.x,
+      y: aboutHero.y,
+      foothold: aboutHero.foothold,
+    },
+    { characterId: 7, name: "Hero", x: 100, y: 200, foothold: 32 },
+    "the player already there, at the map's spawn portal and on its foothold",
+  );
+
+  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  assert.deepEqual(heroSaw.map((bytes) => bytes[0]), [FIELD_OPCODE.userEnterField], "and the one who was there gets the newcomer");
+  const aboutAlt = readUserEnterField(new PacketReader(heroSaw[0]!, 1));
+  assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [8, "Alt"]);
+  assert.equal(hero.headersOk, true, "every packet of a shared field survives the cipher/header check");
+
+  // A walk: relayed as the other client's own path, with the id in front (0x0E carries none).
+  const move = encodeClientUserMove({
+    stageByte: 0,
+    path: {
+      originX: 0,
+      originY: 0,
+      elements: [{ attr: 0, x: 300, y: 290, vx: 0, vy: 0, action: 0, foothold: 32, duration: 60 }],
+    },
+  });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+  const altSawMove = await alt.takeOpcode(FIELD_OPCODE.userMove);
+  const relayed = readUserMove(new PacketReader(altSawMove[altSawMove.length - 1]!, 1));
+  assert.equal(relayed.characterId, 7);
+  assert.deepEqual(relayed.path.elements.map((element) => [element.x, element.y]), [[300, 290]]);
+  assert.deepEqual(await hero.take(0), [], "the mover is not told about their own walk");
+
+  // One swing kills a monster: the death is the field's, the exp is the attacker's.
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+  const altSawKill = await alt.takeOpcode(DROP_OPCODE.appear);
+  assert.deepEqual(
+    altSawKill.map((bytes) => bytes[0]),
+    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
+    "the other player sees the hit, the death and the loot, and nothing of the reward",
+  );
+  assert.equal(readDropAppear(new PacketReader(altSawKill[2]!, 1)).mobId, 1, "the loot flies out of the monster that died");
+
+  const heroSawKill = await hero.takeOpcode(DROP_OPCODE.appear);
+  assert.deepEqual(
+    heroSawKill.map((bytes) => bytes[0]),
+    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, STAT_OPCODE, DROP_OPCODE.appear],
+    "the attacker gets the same world packets plus their own exp",
+  );
+  assert.deepEqual(readStatUpdate(new PacketReader(heroSawKill[2]!, 1)).diff, { exp: 1 });
+
+  // The way out: the field tells the one still standing there.
+  alt.close();
+  const heroSawLeave = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
+  assert.equal(
+    new PacketReader(heroSawLeave[heroSawLeave.length - 1]!, 1).readU32(),
+    8,
+    "the id of the character that left",
+  );
+  assert.ok(log.some((line) => line.includes('"Alt" (8) entered map 1000000')), log.join("\n"));
+  assert.ok(log.some((line) => line.includes("(8) left map 1000000")), log.join("\n"));
+});
+
+/**
+ * Character ids are the field's key for a player (`CUserPool`, `sub_51CFE0`) and the handoff's, so two
+ * accounts must never be given the same one (ADR-012). The stub has no database to hand out sequences,
+ * so it takes the maximum over every account - this pins that it does.
+ */
+test("two accounts never hand out the same character id", { timeout: 20000 }, async (t) => {
+  const handoffs = new HandoffRegistry();
+  const accounts = new Map<string, AccountRecord>([
+    ["admin", { password: "admin", characters: [] }],
+    ["guest", { password: "guest", characters: [] }],
+  ]);
+  const login = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 1 },
+    handoffs,
+    handshake: { clientSendSeed: 0x12341234, clientRecvSeed: 0x56785678 },
+  });
+  const info = await login.listen(0);
+  t.after(async () => {
+    await login.close();
+  });
+
+  const create = async (username: string, name: string): Promise<number> => {
+    const client = await FakeClient.connect(info.port);
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    client.send({ kind: "login-request", opcode: 0x01, username, password: username });
+    await client.take(1);
+    client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+    await client.take(1);
+    client.send({ kind: "check-name", opcode: 0x06, name, appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    await client.take(1);
+    client.send({ kind: "create-character", opcode: 0x05, name });
+    const reply = (await client.take(1))[0]!;
+    client.close();
+    return readCharacterData(new PacketReader(reply, 2)).stats.id;
+  };
+
+  const first = await create("admin", "Hero");
+  const second = await create("guest", "Guest");
+  assert.equal(first, 1, "the first character of the server");
+  assert.equal(second, 2, "the next one follows the *server's* maximum, not the account's");
 });

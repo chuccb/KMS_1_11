@@ -27,9 +27,9 @@
  * what will tune it). Everything else - the range, the ground, the relative speed - comes from the
  * map and the mob's own WZ entry.
  *
- * ONE FIELD PER CONNECTION: this class owns its ids and its positions, so two players in the same map
- * today each get their own copy of the monsters (ADR-001's shared world is a later step: whoever owns
- * a `MobField` per map also owns the mob's hit points).
+ * ONE OBJECT PER FIELD (`game/world.ts`, ADR-012): the ids, the positions and the hit points belong
+ * to the map, not to a connection, so two players in the same map hit the same monster and see the
+ * same `0x33` legs.
  *
  * DAMAGE AND DEATH: the packets are `protocol/mob.ts`'s 0x30/0x31/0x34 (that file has the client-side
  * evidence); the numbers behind them are here:
