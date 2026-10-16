@@ -449,3 +449,38 @@ test("the registry hands the same field to every player of a map, and keeps it",
     "so a late joiner is sent the one monster that is still alive, plus the NPC",
   );
 });
+
+
+test("a portal is found by the name the client sends, and knows where it leads", () => {
+  const portal = { name: "west00", type: 2, x: 130, y: 300, toMapId: 2000000, toName: "east00" };
+  const field = stubField({ portals: [portal] });
+
+  assert.deepEqual(field.portal("west00"), portal, "the name is the `pn` the client read out of the map file");
+  assert.equal(field.portal("WEST00"), portal, "the name is data, so case must not decide whether a portal works");
+  assert.equal(field.portal("nowhere"), undefined, "a name the map does not have is not a teleport");
+  assert.equal(field.mapId, 1000000);
+  assert.equal(field.map.id, 1000000, "a field keeps the map it simulates - the portals and the spawn point are its questions");
+});
+
+test("a second map is a second field: its own spawn point, its own mobs, and it is kept too", () => {
+  const registry = new FieldRegistry<FakeMember>({
+    mapProvider: (mapId: number) =>
+      mapId === 2000000
+        ? stubMap({ id: 2000000, name: "stub-alt", portals: [{ name: "east00", type: 2, x: 600, y: 300, toMapId: 1000000, toName: "west00" }] })
+        : undefined,
+    mobTemplate: () => STUB_TEMPLATE,
+  });
+
+  const alt = registry.of(2000000);
+  assert.ok(alt !== undefined);
+  assert.equal(alt.mapId, 2000000);
+  assert.deepEqual(alt.spawnAt(), { x: 600, y: 300, foothold: 32 }, "this map's portal, this map's foothold");
+  assert.equal(alt.portal("west00"), undefined, "the portal of the other map is not here");
+  assert.equal(registry.size, 1);
+
+  const hero = new FakeMember(1, "Hero");
+  alt.join(hero);
+  assert.deepEqual(hero.opcodes.slice(0, 3), [MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField]);
+  assert.equal(registry.of(2000000), alt);
+  assert.equal(registry.size, 1, "and asking for it again is still the same field");
+});

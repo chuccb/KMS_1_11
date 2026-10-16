@@ -38,7 +38,7 @@ import {
 import type { MovePath } from "../protocol/movepath.ts";
 import { footholdUnderPoint } from "../wz/archive.ts";
 import { DropField, type DropFieldOptions, type DropPolicy } from "./drops.ts";
-import type { MapData } from "./map.ts";
+import type { MapData, MapPortal } from "./map.ts";
 import { MobField, type MobFieldOptions, type MobTemplate } from "./mobs.ts";
 import { NpcField, type NpcTemplate } from "./npcs.ts";
 
@@ -111,6 +111,14 @@ export interface FieldInstanceOptions {
  * removed (`FieldRegistry`), so nothing has to be rebuilt on the next login either.
  */
 export class FieldInstance<M extends FieldMember = FieldMember> {
+  /**
+   * The map this field simulates, as it was read out of `Data.wz`.
+   *
+   * Kept because the field is where the questions about a map are asked - which portal leads where
+   * (`portal`), where a player enters (`spawnAt`) - and because a field that only remembered its id
+   * would need the archive again for every one of them.
+   */
+  readonly map: MapData;
   readonly mapId: number;
   readonly mobs: MobField;
   readonly npcs: NpcField;
@@ -120,6 +128,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   private readonly log?: (line: string) => void;
 
   constructor(options: FieldInstanceOptions) {
+    this.map = options.map;
     this.mapId = options.map.id;
     this.log = options.log;
     this.spawnPoint = spawnPointOf(options.map);
@@ -173,6 +182,20 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
    */
   spawnAt(): FieldPosition {
     return { ...this.spawnPoint };
+  }
+
+  /**
+   * The portal of this map with that name, or `undefined` when the map has none.
+   *
+   * The name is the client's own: it is the `pn` of the portal the mouse was over when the player
+   * clicked (`sub_5124C0`/`sub_512510` send it in `0x0D`, FINDINGS 4.11.6), so this lookup is what
+   * turns "the player used a portal" into "the player goes to map N". The comparison ignores case -
+   * the names are map data, the client's own comparison is not located, and a case difference is the
+   * difference between a working portal and a teleport that silently does nothing.
+   */
+  portal(name: string): MapPortal | undefined {
+    const wanted = name.toLowerCase();
+    return this.map.portals.find((entry) => entry.name.toLowerCase() === wanted);
   }
 
   /**

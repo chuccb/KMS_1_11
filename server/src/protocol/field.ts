@@ -935,9 +935,19 @@ export function encodeClientMobAttack(attack: ClientMobAttackBody): Uint8Array {
   return writer.toBytes();
 }
 
+/**
+ * The `kind` a click sends when the object under the cursor is what was clicked
+ * (`sub_5124C0`/`sub_512510`): "it", whatever `name` says it is.
+ *
+ * It is the only value with evidence - the GM map command builds the same packet, and what it puts
+ * here is not located - so a handler that wants "the player used a portal" checks for this one and
+ * logs anything else instead of guessing (`net/loginserver.ts`).
+ */
+export const INTERACT_KIND_CURSOR = -1;
+
 /** `0x0D` as it arrives from the client. */
 export interface ClientInteract {
-  /** `-1` for "the portal/object under the cursor"; other values are not located. */
+  /** `INTERACT_KIND_CURSOR` (-1) for "the portal/object under the cursor"; other values are not located. */
   kind: number;
   name: string;
 }

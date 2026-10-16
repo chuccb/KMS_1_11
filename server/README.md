@@ -14,12 +14,12 @@
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行。 |
 | `src/protocol/mob.ts` | ✅ **怪物封包**：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊）、`0x33` 移動（動作位元組 + `u32` + `CMovePath`）、`0x30` 開始死亡動畫（`s16 delayMs`）、`0x31` 收屍／重生（`u8 flag`＋`u32 mobId`，`flag != 0` 時再接 `templateId` 與**與 `0x2F` 逐 byte 相同**的身體）、`0x35` 怪物動畫（＝`0x2F` 尾巴那塊動畫區塊，同一份實作）、`0x34` 怪物 MP；另有 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16／§4.17）。 |
 | `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
-| `src/game/world.ts` | ✅ **每一張地圖的共享世界**（ADR-012）：`FieldRegistry`（`mapId → FieldInstance`，第一次有人進場才建立、之後留著）＋`FieldInstance`（`mobs`／`npcs`／`drops` ＋ 在場成員）。`join()` 把整張圖的快照送給新來的人（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個 `0x43`、每個已在場玩家 `0x1C`）並讓其他人收到他的 `0x1C`；`leave()` 送 `0x1D`；`reportMove()` 把別人走的路包成 `0x22`；`applyDamage`／`spawnFromDeath`／`pickUp` 的結果廣播全場；`tick()` 只有在**有人在看**的時候才派 `0x33`，但屍體、重生與掉落物過期照算。`0x1C`／`0x1D`／`0x22` 的 sender 只在這裡（FINDINGS §4.24）。 |
+| `src/game/world.ts` | ✅ **每一張地圖的共享世界**（ADR-012）：`FieldRegistry`（`mapId → FieldInstance`，第一次有人進場才建立、之後留著）＋`FieldInstance`（`mobs`／`npcs`／`drops` ＋ 在場成員）。`join()` 把整張圖的快照送給新來的人（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個 `0x43`、每個已在場玩家 `0x1C`）並讓其他人收到他的 `0x1C`；`leave()` 送 `0x1D`；`reportMove()` 把別人走的路包成 `0x22`；`applyDamage`／`spawnFromDeath`／`pickUp` 的結果廣播全場；`tick()` 只有在**有人在看**的時候才派 `0x33`，但屍體、重生與掉落物過期照算；`portal(name)` 是「玩家用了哪個傳送門」的查詢（名字不分大小寫，查不到就是沒有）。`0x1C`／`0x1D`／`0x22` 的 sender 只在這裡（FINDINGS §4.24／§4.25）。 |
 | `src/game/mobs.ts` | ✅ **一場地的怪物**：出生點吸附腳踏點、巡邏範圍 = 腳踏點折線 ∩ `rx0/rx1`、每段一個 `0x33`（`MobField`）；`Mob/<id>.img -> info` 的 `speed`／`maxHP`／`maxMP`／`level`／`exp` 與 die 動畫長度（`dieMs`，Σ 影格 `delay`，預設 180 ms）由 `mobTemplateProvider` 快取。怪物屬於**場地**（`game/world.ts`，ADR-012）：id、位置與 HP 都是那張圖的，兩個玩家打的是同一隻。怪物是**伺服器驅動**的，而且**有 HP**：`applyDamage` → `0x34`＋（死亡時）`0x30`，`tickPackets` 收屍與重生（§4.16／§4.17）。⚠️ 原 client 的怪物 AI **在自己身上**（§4.20／ADR-008）：這裡的巡邏是我們 client 還沒有 AI 之前的替代品，不是最終架構。 |
 | `src/protocol/drop.ts` | ✅ **掉落物封包**：`0x43`（出現：`kind`／`dropId`／`money`／`value`／落點，`kind <= 1` 再多一顆怪物區塊）、`0x44`（消失／被撿走，`kind 2` 帶角色 id）、`0x11`（獲得提示的三種形狀）；`0x42`／`0x45` 在 client 裡沒有 handler（FINDINGS §4.18）。 |
 | `src/protocol/inventory.ts` | ✅ **道具欄異動 `0x0B`**：`result`／`count`／每筆 `{op, inventory, slot, …}`，`op 0` 接一個 `GW_ItemSlot`（**沒有種類位元組**）；`op 1`（換金鑰）在裝備欄會被 client 丟 `CTerminateException`，encoder 直接拒絕（§4.18.4）。 |
@@ -133,7 +133,7 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
 （領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物與 `0x39` NPC、之後每個 tick 送 `0x33` 讓怪物巡邏，見下）；
-**一個 port 就是一個世界**：所有進來的角色都進 `--map` 那張圖，走同一份怪物、同一份掉落物，並互相看見（ADR-012）。
+**一個 port 就是一個世界**：同一個 `mapId` 的角色走同一份怪物、同一份掉落物，並互相看見（ADR-012）；角色進哪張圖由**他自己的紀錄**決定（換過圖就留在那裡），`--map` 是新角色的起始圖與沒有 mapId 的紀錄的後備（ADR-013）；走進傳送門就會換圖（見下一節）。
 `--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔）、
 `--mob-speed <px/s>` 調巡邏速度（預設 60 px/s，再乘上怪物自己的 `info.speed` 百分比）、
 `--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms），角色建立後外觀取自**帳號第一個角色**
@@ -157,7 +157,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 §4.20.7；所以這條路沒有現成的傷害來源）與能力面板／buff 區塊
 （`panelFlags != 0` 的內容未解，伺服器一律送 0）；**商店已經做完**（`0x4A`／`0x4B`／`0x16`／`0x33`，§4.22）；
 **NPC 的對話也做完了**（`0x47` 開一個對話框、client 的 `0x15` 回答案、台詞取自
-`Npc/<id>.img -> info/speak`，§4.23／ADR-011）；**世界已經是多玩家的**（§4.24／ADR-012：一張地圖一份 `FieldInstance`，見下一節），所以
+`Npc/<id>.img -> info/speak`，§4.23／ADR-011）；**世界已經是多玩家的**（§4.24／ADR-012：一張地圖一份 `FieldInstance`），
+而且**走過傳送門就會換地圖**（`0x0D` → `0x19` ＋ `0x16`，§4.25／ADR-013，兩節都在下面），所以
 **下一個最有價值的目標**是 oracle run（ADR-004：讓原 client 連上這台 server —— 它一次就能回答
 §4.11／§4.24 的所有 UNKNOWN），其次是 NPC 的走動（`0x3D`）與
 「被怪物打 → 扣玩家的血」這條還沒接上的路（§4.20.7 先修正了它的前提：`0x2C` 的尾段是**移動路徑**，
@@ -174,7 +175,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 `field.ts` 的 `SetField.character.mapId` 就是它。
 
 `serve --game-port` 的遊戲伺服器現在會**把角色送進地圖並讓怪物出現**：領到 `0x04` 的角色 id 之後送
-`0x16`（`u8 mode, u8 full, u32 亂數種子 ×3, CharacterData`），地圖由 `--map`（預設 `1000000`）決定，
+`0x16`（`u8 mode, u8 full, u32 亂數種子 ×3, CharacterData`），**地圖取自角色紀錄自己的 `mapId`**
+（`--map`（預設 `1000000`）只是新角色與沒有 mapId 的紀錄的後備；§4.25／ADR-013），
 接著對地圖 `life` 清單裡的每隻怪物送 `0x2F`（`src/game/map.ts`；`--data off` 可關掉），
 客戶端接著回報的移動（`0x0E`）與攻擊（`0x0F`）都會被 `decode` 的解讀器寫進日誌
 （FINDINGS §4.11.2b；`test/serve.test.ts` 用假 client 逐欄驗證）。
@@ -195,7 +197,7 @@ client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）�
 所以 `serve` 不送 —— NPC 站在那裡是對的，走動要等 oracle run（ADR-004）。
 **對話則已經接上**：點一個沒有商店的 NPC 會送 `0x47`（台詞是它自己的 `info/speak`，§4.23／ADR-011）。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**一個 port 只有一張圖**（`--map`，沒有換圖與頻道）、**沒有怪物 AI／技能**
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘；角色只活在記憶體裡，換圖也只是改紀錄的 `mapId`）、**沒有頻道／分流**（一個 port 一個世界；世界現在有多張圖，但都在同一個 process 裡）、**傳送門沒有條件**（不分等級／道具／任務，`pt` 的種類也沒有語意證據）、**沒有怪物 AI／技能**
 （怪物會出現、會巡邏、會被打死、會重生、也會掉東西，但不會追人、不會攻擊；只有 `Mob/9999997.img`／
 `Mob/9999999.img` 兩張測試圖帶攻擊資料，見 FINDINGS §4.17.6 與 §6 第 5 項）、
 建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受；`chardata.ts` 已經能寫完整道具區塊，
@@ -227,9 +229,30 @@ socket 關掉等於 `leave()`，不是「這場遊戲結束」。
 | 怪物掉東西 | `0x43`；被撿走 `0x44 kind 2` | 全場 |
 | 撿到什麼 | `0x0B`（哪一格）／`0x0D`（錢）／`0x11`（訊息）| **只有撿的人**（那是他的角色紀錄）|
 | 殺怪的經驗值 | `0x0D` 差異包 | **只有攻擊的人** |
+| 有人用了傳送門 | `0x19`（解鎖）＋ `0x16`（新地圖）＋ 新場地的整份快照 | **只有他**（他離開的那張圖收到他的 `0x1D`）|
 
 界線不是猜的：上表「全場」那一組的封包在 client 裡都掛在**場地自己的池子**上（`CUserPool`／`CMobPool`／
 `CNpcPool`／`CRewardPool`），「只有他」那一組動的是那個人的角色紀錄（FINDINGS §4.24.1）。
+
+### 換地圖（傳送門，ADR-013／FINDINGS §4.25）
+
+client 用 `0x0D` 說「我按了滑鼠下這個東西」（`kind = -1` ＋ 它的名字，傳送門就是它的 `pn`）；伺服器**先回一個空的 `0x19`**
+（client 送完 `0x0D` 就把互動閘門鎖上，只有 `0x19` 解得開 —— 不回，玩家之後再也按不了任何東西），然後才是 `0x16`。
+
+**去哪裡是地圖資料說的**：拿那個名字在**當前地圖**的 `portal` 清單裡找，用它自己的 `tm`；封包裡沒有地圖 id，所以
+「從封包讀目的地」就是發明。`tm = 0`（出貨資料裡「沒有目的地」的寫法）⇒ 不換圖，只記一行日誌。順序是：
+目的地先建好（建不出來就留在原地）→ 離開舊場地（還在的人收到 `0x1D`）→ `0x16` → 新場地的快照（怪物、NPC、
+掉落物、已經在那裡的人）。商店與對話跟著換圖清掉（那些視窗屬於舊圖的 NPC）。
+
+**人落在哪裡**：`0x16` 裡沒有座標，落點由 client 自己決定，而 `mode`（`0x16` 的第一個 byte）的語意**沒有解出來**，
+所以 `mode` 一律送 `0`，伺服器記的位置就是**目的地的出生點**（`sp` 傳送門 → 第一個 `pt = 0` → 第一個傳送門，再取腳踏點）。
+⚠️ 地圖資料裡的 `tn`（目的地那一側的傳送門名字）因此**只用於日誌**：真 `Data.wz` 上它指向的傳送門是真的存在的
+（102020000 的 `west00` 帶 `tn = "east00"`，而 102030000 真的有一個 `east00`），但沒有 `mode` 就不知道怎麼請 client
+站在那裡 —— 要改只有 `spawnPointOf` 一個地方。
+
+**進哪張圖是紀錄的事**：`0x16` 的地圖 id 來自 `CharacterData`（`stats.mapId`），所以登入時用的就是**這份紀錄自己的地圖**
+（換圖會改寫它 ⇒ 下線在哪、上線就在哪）；紀錄沒有地圖（`0`）才用 `--map`。`--map` 因此是「新角色的起始圖 ＋
+沒有 mapId 的紀錄的後備」，`cli.ts` 把它同時交給 `LoginServer.startMapId` 與 `GameEntryServer.mapId`。
 
 - **一個時鐘**：`GameEntryServer.startClock()` 只有一個 interval，走過所有場地 → 兩個人在同一張圖看到的是
   同一條腿、同一次重生。沒人看的場地不派 `0x33`（沒有觀眾的承諾），但屍體／重生與掉落物過期照算 ——

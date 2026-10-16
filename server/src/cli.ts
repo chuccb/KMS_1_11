@@ -293,6 +293,7 @@ async function runServe(rest: string[]): Promise<number> {
     accounts,
     worlds,
     gameServer: { ip: gameIp, port: gamePort ?? 0 },
+    startMapId: mapId,
     handoffs,
     ...(handshake ? { handshake } : {}),
     ...(log ? { log } : {}),
@@ -316,7 +317,7 @@ async function runServe(rest: string[]): Promise<number> {
     });
     const info = await game.listen(gamePort, host);
     boundGamePort = info.port;
-    log?.(`game entry listening on ${info.host}:${info.port} (claims the handoff, then 0x16 into map ${mapId})`);
+    log?.(`game entry listening on ${info.host}:${info.port} (claims the handoff, then 0x16 into the character's map, new characters in ${mapId})`);
     map = mapProvider?.(mapId);
     if (mapProvider !== undefined && map === undefined) {
       log?.(`map ${mapId} is not in ${dataPath} - the client will still be sent into it, without mobs`);
@@ -329,7 +330,7 @@ async function runServe(rest: string[]): Promise<number> {
       `  worlds:   ${worlds.map((world) => world.name).join(", ")}\n` +
       (gamePort === undefined
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
-        : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into map ${mapId}; ` +
+        : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
   );

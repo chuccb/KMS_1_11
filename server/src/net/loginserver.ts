@@ -33,11 +33,14 @@ import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
+  INTERACT_KIND_CURSOR,
   encodeFieldRequestRelease,
   encodeSetField,
   readClientAttack,
+  readClientInteract,
   readClientUserMove,
   type ClientAttack,
+  type ClientInteract,
   type SetField,
 } from "../protocol/field.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
@@ -488,7 +491,15 @@ export const ATTACK_OPCODES: readonly number[] = [
 export interface GameEntryServerOptions {
   handoffs: HandoffRegistry;
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
-  /** Map the claimer is moved into (`0x16`). Defaults to `DEFAULT_MAP_ID`. */
+  /**
+   * Where a character enters when their **record has no map of its own** (`stats.mapId == 0`).
+   * Defaults to `DEFAULT_MAP_ID`.
+   *
+   * Every character the login server creates carries its own map (`startMapId` there), so this is the
+   * fallback: a hand-built handoff, or a record from before this server had more than one map. A
+   * character whose record *does* name a map enters that one - a player logs back in where they left
+   * (`net/loginserver.ts`'s `withMapId`, FINDINGS 4.11.2b).
+   */
   mapId?: number;
   /**
    * Where the map's monsters come from. `mapDataProvider(WzArchive)` is the real one; tests pass a
@@ -695,22 +706,15 @@ export class GameEntryServer {
   private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): FieldSession | undefined {
     const character = withMapId(entry, this.mapId);
     const send = (packet: Uint8Array): void => void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
-    const field: SetField = {
-      mode: 0,
-      full: true,
-      randomSeedA: randomSeed(),
-      randomSeedB: randomSeed(),
-      randomSeedC: randomSeed(),
-      character,
-    };
-    send(encodeSetField(field));
-    this.options.log?.(
-      `game: sent 0x16 - "${entry.characterName}" enters map ${this.mapId} ` +
-        `(seeds 0x${hex(field.randomSeedA)} 0x${hex(field.randomSeedB)} 0x${hex(field.randomSeedC)})`,
-    );
-    const instance = this.fields.of(this.mapId);
+    const instance = this.fields.of(character.stats.mapId);
     if (instance === undefined) {
-      this.options.log?.(`game: map ${this.mapId} has no Map/Map/*.img in Data.wz, nothing to spawn`);
+      // A map this server cannot read - no `Map/Map/*.img` in `Data.wz` for that id - still gets the
+      // `0x16` (the map id lives in the record, and the client would otherwise sit waiting), and then
+      // nothing: there is no field to put the connection in, so there is no session either.
+      send(encodeSetField(this.setFieldOf(character)));
+      this.options.log?.(
+        `game: map ${character.stats.mapId} has no Map/Map/*.img in Data.wz, nothing to spawn`,
+      );
       return undefined;
     }
     const session: FieldSession = {
@@ -722,9 +726,121 @@ export class GameEntryServer {
       wallet: new MesoWallet(character.stats),
       send,
     };
+    session.at = instance.spawnAt();
+    send(encodeSetField(this.setFieldOf(character)));
+    this.logSetField(session);
     instance.join(session);
     this.startClock();
     return session;
+  }
+
+  /**
+   * Moves a session to another map: out of the field it is in, `0x16` for the new one, into the new
+   * field (whose `join` hands it the snapshot - the monsters, the NPCs, the loot, the players there).
+   *
+   * The order is the one the client forces, and it is also the one the pool keys force:
+   *
+   *   1. the destination has to exist *first*: `false` - a map with no `Map/Map/*.img` - leaves the
+   *      player where they are, which is the only answer that never strands them in a map nobody
+   *      simulates;
+   *   2. then out of the old field (`0x1D` to everyone still there) - before the new one is
+   *      announced, because the client keys users by character id and a player who is "in" two fields
+   *      at once would be two users with one id;
+   *   3. then `0x16`, because the client has no field object to put the destination's packets in
+   *      until it arrives;
+   *   4. then the join, which is where the snapshot goes.
+   *
+   * The shop and the dialog are dropped with the map: the windows belong to NPCs of the map the
+   * player just left, and the client tears its own down when the new field is built.
+   */
+  private enterMap(session: FieldSession, mapId: number): boolean {
+    const target = this.fields.of(mapId);
+    if (target === undefined) {
+      this.options.log?.(
+        `game: map ${mapId} has no Map/Map/*.img in Data.wz - "${session.name}" stays in map ` +
+          `${session.instance.mapId}`,
+      );
+      return false;
+    }
+    session.instance.leave(session.characterId);
+    session.instance = target;
+    session.character.stats.mapId = mapId;
+    session.at = target.spawnAt();
+    session.shop = undefined;
+    session.talk = undefined;
+    session.send(encodeSetField(this.setFieldOf(session.character)));
+    this.logSetField(session);
+    target.join(session);
+    return true;
+  }
+
+  /**
+   * The `0x16` body for one character: the map comes from `character.stats.mapId`, and `mode` stays
+   * `0` because what the client does with other values is not located (FINDINGS 4.11.2b) - so a
+   * portal change lands the player where a first entry lands them, at the map's own spawn point
+   * (`FieldInstance.spawnAt`).
+   */
+  private setFieldOf(character: CharacterData): SetField {
+    return {
+      mode: 0,
+      full: true,
+      randomSeedA: randomSeed(),
+      randomSeedB: randomSeed(),
+      randomSeedC: randomSeed(),
+      character,
+    };
+  }
+
+  /** The one line every field entry logs, first one and map change alike. */
+  private logSetField(session: FieldSession): void {
+    this.options.log?.(
+      `game: sent 0x16 - "${session.name}" enters map ${session.character.stats.mapId}`,
+    );
+  }
+
+  /**
+   * The player used a portal (`0x0D`: `s32 kind` + `string name`, FINDINGS 4.11.6).
+   *
+   * `name` is what the client read out of the map file for the thing under the cursor; **where it
+   * leads comes from the same map data** (`portal.tm`), never from the packet - a name that is not
+   * this map's portal is a log line, not a teleport. The release byte is owed before anything else:
+   * `sub_472590` arms the client's interact gate when it sends `0x0D` and nothing clears it but an
+   * empty `0x19`, so a portal the server does not know still has to be answered or the player could
+   * never click anything again.
+   *
+   * A portal that leads to the map the player is already in is handled like any other: the field is
+   * left and joined again, which is what a client does when it walks through one (it rebuilds the
+   * field) - there is no special case here to get wrong.
+   */
+  private handlePortal(session: FieldSession, plain: Uint8Array): void {
+    session.send(encodeFieldRequestRelease());
+    let request: ClientInteract;
+    try {
+      request = readClientInteract(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x0D unreadable: ${(error as Error).message}`);
+      return;
+    }
+    if (request.kind !== INTERACT_KIND_CURSOR) {
+      // The GM map command builds the same packet; what it puts in `kind` is not located, so this
+      // handler only claims the value the click handlers are known to send.
+      this.options.log?.(`game: 0x0D kind ${request.kind} is not a portal click (only ${INTERACT_KIND_CURSOR} is), ignored`);
+      return;
+    }
+    const portal = session.instance.portal(request.name);
+    if (portal === undefined) {
+      this.options.log?.(`game: 0x0D "${request.name}" is no portal of map ${session.instance.mapId}`);
+      return;
+    }
+    if (portal.toMapId === 0) {
+      this.options.log?.(`game: portal "${request.name}" of map ${session.instance.mapId} leads nowhere (tm = 0)`);
+      return;
+    }
+    this.options.log?.(
+      `game: "${session.name}" uses portal "${request.name}" of map ${session.instance.mapId} -> ${portal.toMapId}` +
+        (portal.toName === "" ? "" : ` (portal "${portal.toName}")`),
+    );
+    this.enterMap(session, portal.toMapId);
   }
 
   /**
@@ -1164,6 +1280,12 @@ export class GameEntryServer {
           this.applyAttack(session, event.plain);
           continue;
         }
+        // Using a portal: `0x0D` with the name of the portal under the cursor, answered with the
+        // release byte and a `0x16` for wherever that portal leads.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.interact) {
+          this.handlePortal(session, event.plain);
+          continue;
+        }
         // Clicking an NPC: the server answers with the release byte, and with a shop if it has one.
         if (session !== undefined && opcode === CLIENT_OBJECT_CLICK_OPCODE) {
           this.handleObjectClick(session, event.plain);
@@ -1219,8 +1341,15 @@ export class GameEntryServer {
  * The character record to send back in `0x16`: the login server's own record with the map id
  * replaced. A handoff issued without a record (tests, tooling) gets a minimal but complete one.
  */
-function withMapId(entry: HandoffEntry, mapId: number): CharacterData {
-  if (entry.character) return { ...entry.character, stats: { ...entry.character.stats, mapId } };
+function withMapId(entry: HandoffEntry, fallbackMapId: number): CharacterData {
+  if (entry.character) {
+    // A character's own `mapId` is where they were when they left: the record is the truth for the
+    // map the same way it is for level and mesos, and it is the only field `sub_4C2780` reads to pick
+    // the map (FINDINGS 4.11.2b). `0` means "no map of its own" - a record built by hand, or one
+    // from before this server had more than one map - and that is what the server's option is for.
+    const mapId = entry.character.stats.mapId !== 0 ? entry.character.stats.mapId : fallbackMapId;
+    return { ...entry.character, stats: { ...entry.character.stats, mapId } };
+  }
   const stats = zeroStats();
   stats.id = entry.characterId;
   stats.name = entry.characterName;
@@ -1229,7 +1358,7 @@ function withMapId(entry: HandoffEntry, mapId: number): CharacterData {
   stats.maxHp = 50;
   stats.mp = 50;
   stats.maxMp = 50;
-  stats.mapId = mapId;
+  stats.mapId = fallbackMapId;
   // A hand-built handoff has no login server behind it, so it gets the bags `createCharacter` would
   // have given it: the capacity byte is what makes the client allocate an inventory at all, and a
   // character with no slots could never be handed a drop (`startingCharacterItems`).

@@ -17,7 +17,9 @@ import { characterDataOf, readCharacterData, startingCharacterItems, zeroStats }
 import {
   CLIENT_FIELD_OPCODE,
   FIELD_OPCODE,
+  INTERACT_KIND_CURSOR,
   encodeClientAttack,
+  encodeClientInteract,
   encodeClientUserMove,
   readSetField,
   readUserEnterField,
@@ -417,7 +419,12 @@ const STUB_MAP: MapData = {
     { templateId: 1210100, x: -5, y: 7, foothold: 0, facing: 1, rx0: -5, rx1: -5, cy: 7 },
   ],
   npcs: [{ templateId: 2003, x: 69, y: 275, foothold: 28, facing: 0, rx0: 0, rx1: 0, cy: 275 }],
-  portals: [{ name: "sp", type: 0, x: 100, y: 200, toMapId: 0, toName: "" }],
+  portals: [
+    { name: "sp", type: 0, x: 100, y: 200, toMapId: 0, toName: "" },
+    // The one portal out of this map: `tm` is where it leads, `tn` the name of the portal it lands
+    // on in the destination (FINDINGS 4.11.6).
+    { name: "west00", type: 2, x: 130, y: 300, toMapId: 2000000, toName: "east00" },
+  ],
   footholds: 2,
   ladderRopes: 0,
   // One straight foothold under both spawns, so the test can watch the mobs walk on it.
@@ -427,6 +434,27 @@ const STUB_MAP: MapData = {
       { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 },
     ],
   ]),
+};
+
+/**
+ * The map `STUB_MAP`'s `west00` portal leads to: a second field with a world of its own, so a test can
+ * watch a player leave one map and arrive in another. Its only portal is called `east00` and *not*
+ * `sp`, which is what makes the spawn point visible in a packet: a first entry lands on the map's
+ * first portal (`FieldInstance.spawnAt`).
+ */
+const STUB_MAP_ALT: MapData = {
+  id: 2000000,
+  imagePath: "Map/Map/002000000.img",
+  name: "stub-alt",
+  streetName: "stub",
+  bgm: "",
+  returnMapId: 0,
+  mobs: [{ templateId: 120100, x: 700, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 }],
+  npcs: [{ templateId: 2003, x: 650, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 0, cy: 300 }],
+  portals: [{ name: "east00", type: 2, x: 600, y: 300, toMapId: 1000000, toName: "west00" }],
+  footholds: 1,
+  ladderRopes: 0,
+  footholdSegments: new Map([[32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }]]),
 };
 
 test("the game server spawns the map's monsters and NPCs right after 0x16", { timeout: 20000 }, async (t) => {
@@ -1255,4 +1283,124 @@ test("two accounts never hand out the same character id", { timeout: 20000 }, as
   const second = await create("guest", "Guest");
   assert.equal(first, 1, "the first character of the server");
   assert.equal(second, 2, "the next one follows the *server's* maximum, not the account's");
+});
+
+
+/**
+ * A portal is a map change (FINDINGS 4.25): the client sends the name of the portal under the cursor
+ * (`0x0D`, `kind = -1`) and the server answers with the release byte and then the field that portal
+ * leads to (`0x16` + that field's own world), while the map the player left is told they are gone
+ * (`0x1D`).
+ *
+ * It also pins the other half of "where do I log in": a character record carries its own map
+ * (`CharacterData.mapId`, the only field `sub_4C2780` reads to pick one), so the third client here
+ * arrives in map 2000000 by *record* - and finds the player who took the portal standing there, at
+ * that map's own spawn portal.
+ */
+test("a portal moves a player to another map, and the map they left hears about it", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    handshake: { clientSendSeed: 0xdddddddd, clientRecvSeed: 0xeeeeeeee },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // A name that is no portal of this map: the release byte is owed either way - the client's interact
+  // gate stays armed until it arrives (`sub_472590`) - and nothing else happens.
+  alt.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.interact,
+    body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "nowhere" }).slice(1),
+  });
+  const release = await alt.take(1);
+  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease, "the release byte answers every 0x0D");
+  assert.deepEqual(await alt.take(0), [], "an unknown portal is not a teleport");
+  assert.ok(log.some((line) => line.includes('"nowhere" is no portal of map 1000000')), log.join("\n"));
+
+  // The real one. `tm` of the map's own portal is where it leads, so the answer is a new field.
+  alt.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.interact,
+    body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "west00" }).slice(1),
+  });
+  const moved = await alt.take(4);
+  assert.deepEqual(
+    moved.map((bytes) => bytes[0]),
+    [FIELD_OPCODE.requestRelease, FIELD_OPCODE.setField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
+    "release byte, then the destination map and its world",
+  );
+  const arrived = readSetField(new PacketReader(moved[1]!, 1));
+  assert.equal(arrived.character.stats.mapId, 2000000, "the record the client holds now names the new map");
+  assert.deepEqual([arrived.character.stats.id, arrived.character.stats.name], [8, "Alt"]);
+
+  // The map the player left: one 0x1D, and nothing else - the two players are in two maps now.
+  const left = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
+  assert.equal(
+    new PacketReader(left[left.length - 1]!, 1).readU32(),
+    8,
+    "exactly the character that walked through the portal",
+  );
+  assert.deepEqual(await hero.take(0), [], "a field does not report what another field is doing");
+
+  // Where a player enters is their own record: this one names map 2000000, so that is the field the
+  // new connection is put into - and the player who took the portal is in it.
+  const guest = await FakeClient.connect(gameInfo.port);
+  t.after(() => guest.close());
+  const record = characterDataOf(
+    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
+    startingCharacterItems(),
+  );
+  guest.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
+  });
+  const guestBurst = await guest.takeOpcode(FIELD_OPCODE.userEnterField);
+  assert.deepEqual(
+    guestBurst.map((bytes) => bytes[0]),
+    [FIELD_OPCODE.setField, MOB_OPCODE.enterField, NPC_OPCODE.enterField, FIELD_OPCODE.userEnterField],
+    "the record\'s map, its world, then who is in it",
+  );
+  assert.equal(readSetField(new PacketReader(guestBurst[0]!, 1)).character.stats.mapId, 2000000);
+  const aboutAlt = readUserEnterField(new PacketReader(guestBurst[3]!, 1));
+  assert.deepEqual(
+    [aboutAlt.characterId, aboutAlt.name, aboutAlt.x, aboutAlt.y, aboutAlt.foothold],
+    [8, "Alt", 600, 300, 32],
+    "the player who took the portal is at the destination\'s own portal, on its foothold",
+  );
+
+  // ... and the one who was there hears the newcomer, the same way as in any other map.
+  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  assert.equal(readUserEnterField(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId, 9);
+  assert.ok(
+    log.some((line) => line.includes('"Alt" uses portal "west00" of map 1000000 -> 2000000')),
+    log.join("\n"),
+  );
 });
