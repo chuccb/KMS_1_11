@@ -253,20 +253,29 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
     }
-    if (opcode === CLIENT_FIELD_OPCODE.attack) {
-      const attack = readClientAttack(new PacketReader(plain, 1));
+    if (
+      opcode === CLIENT_FIELD_OPCODE.attack ||
+      opcode === CLIENT_FIELD_OPCODE.magicAttack ||
+      opcode === CLIENT_FIELD_OPCODE.skillAttack
+    ) {
+      const attack = readClientAttack(new PacketReader(plain, 1), opcode);
       const targets = attack.targets
         .map((target) => `${target.mobId}@(${target.x},${target.y})[${target.damages.join("+")}] anim=${target.hitAnimation}`)
         .join(" ");
       return (
-        `0x0f attack: ${attack.facingLeft ? "left" : "right"} action=${attack.action} ` +
+        `${hexOpcode(opcode)} attack: ${attack.facingLeft ? "left" : "right"} action=${attack.action} ` +
         `hits=${attack.hits} cap=${attack.targetCap} clicked=${attack.clickedMobId} targets=${attack.targetCount} ${targets}`
       );
     }
   } catch (error) {
-    return `0x${opcode.toString(16)} (truncated: ${(error as Error).message})`;
+    return `${hexOpcode(opcode)} (truncated: ${(error as Error).message})`;
   }
   return undefined;
+}
+
+/** `0x0f`, not `0xf`: the decode tool's lines line up this way. */
+function hexOpcode(opcode: number): string {
+  return `0x${opcode.toString(16).padStart(2, "0")}`;
 }
 
 /**
@@ -342,17 +351,29 @@ export const CLIENT_FIELD_OPCODE = {
    */
   interact: 0x0d,
   /**
-   * The melee swing (`sub_512F90`, the "normal attack"):
+   * The melee swing (`sub_512F90`):
    *
    *   `[0x0F][u8 hits | targets << 4][u32 clicked id][u8 facing << 7 | action][u8 targetCap]`
    *   then per target `[u32 mob id][s8 hit animation][u16 x][u16 y][u16 sequence][u16 damage * hits]`
    *
    * The target list is a real spatial query - `sub_491E90(CMobPool, swing rect, out, n)` - so the
    * client is telling the server "these mobs were inside my swing, and this is what I rolled".
-   * Byte for byte from the writer's own `ZArray` appends in FINDINGS 4.13.1; `0x10`/`0x11` are the
-   * sibling senders (magic/skill) with the same shape but their own count packing, not decoded yet.
+   * Byte for byte from the writer's own `ZArray` appends in FINDINGS 4.13.1.
    */
   attack: 0x0f,
+  /**
+   * The magic attack (`sub_513C80`). Same header and the *same 11-byte target record* as `0x0F`,
+   * with two differences: the high nibble of byte 1 is a "second object exists" flag rather than a
+   * target count (`16 * (v129 != nullptr)`, so it can only be 0 or 1), and there is one extra `u16`
+   * between the header and the record.
+   */
+  magicAttack: 0x10,
+  /**
+   * The skill attack (`sub_514D30`). Header = `u8 hits | flag << 4, u32 clicked id, u8 facing |
+   * action, u8 cap`; the whole target record is written under `if (v36 != nullptr)`, i.e. only when
+   * the flag is set. The record itself is the same 11 bytes + damages.
+   */
+  skillAttack: 0x11,
 } as const;
 
 /** `0x0E` as it arrives from the client. */
@@ -410,7 +431,11 @@ export interface ClientAttackTarget {
 export interface ClientAttack {
   /** Low nibble of byte 1: hits per target (the client clamps them to 1..15). */
   hits: number;
-  /** High nibble of byte 1: how many target records follow (`sub_491E90` returns at most 6). */
+  /**
+   * High nibble of byte 1. For `0x0F` that is the number of target records (`sub_491E90` returns
+   * at most 6); for `0x10`/`0x11` the client writes it from a pointer test
+   * (`16 * (v129 != nullptr)`) instead of a count, so it can only be 0 or 1.
+   */
   targetCount: number;
   /** `*right`: the object the cursor was over (`sub_4BDD20` found it in the field object list). */
   clickedMobId: number;
@@ -424,19 +449,43 @@ export interface ClientAttack {
    * the bound it must not exceed.
    */
   targetCap: number;
+  /** `0x10` only: the `u16` between the header and the target record (`sub_513C80`); not named. */
+  unknownU16?: number | undefined;
   targets: ClientAttackTarget[];
 }
 
 const ATTACK_HEADER_BYTES = 8; // opcode + packed + clicked id + packed action + target cap
 const ATTACK_TARGET_FIXED_BYTES = 11; // u32 + s8 + 3 * u16
 
-export function readClientAttack(reader: PacketReader): ClientAttack {
+/**
+ * How the three attack senders differ. Everything else - the header order, the 11-byte target
+ * record, the damages - is one shared layout (`sub_512F90` / `sub_513C80` / `sub_514D30`), so all
+ * three go through the same reader instead of three near-identical ones.
+ */
+interface AttackShape {
+  /** `true` for `0x10`, which writes a `u16` between the header and the target record. */
+  extraU16AfterHeader: boolean;
+}
+
+export const ATTACK_SHAPE: Record<number, AttackShape> = {
+  [CLIENT_FIELD_OPCODE.attack]: { extraU16AfterHeader: false },
+  [CLIENT_FIELD_OPCODE.magicAttack]: { extraU16AfterHeader: true },
+  [CLIENT_FIELD_OPCODE.skillAttack]: { extraU16AfterHeader: false },
+};
+
+function attackShapeOf(opcode: number): AttackShape {
+  return ATTACK_SHAPE[opcode] ?? ATTACK_SHAPE[CLIENT_FIELD_OPCODE.attack]!;
+}
+
+export function readClientAttack(reader: PacketReader, opcode: number = CLIENT_FIELD_OPCODE.attack): ClientAttack {
   const packed = reader.readByte();
   const hits = packed & 0x0f;
   const targetCount = (packed >> 4) & 0x0f;
   const clickedMobId = reader.readU32();
   const packedAction = reader.readByte();
   const targetCap = reader.readByte();
+  let unknownU16: number | undefined;
+  if (attackShapeOf(opcode).extraU16AfterHeader) unknownU16 = reader.readU16();
   const targets: ClientAttackTarget[] = [];
   for (let i = 0; i < targetCount; i++) {
     const mobId = reader.readU32();
@@ -449,7 +498,7 @@ export function readClientAttack(reader: PacketReader): ClientAttack {
     for (let hit = 0; hit < hits; hit++) damages.push(reader.readU16());
     targets.push({ mobId, hitAnimation, x, y, sequence, damages });
   }
-  return {
+  const attack: ClientAttack = {
     hits,
     targetCount,
     clickedMobId,
@@ -458,18 +507,25 @@ export function readClientAttack(reader: PacketReader): ClientAttack {
     targetCap,
     targets,
   };
+  // only `0x10` has the slot, so the other two never grow an undefined key
+  if (unknownU16 !== undefined) attack.unknownU16 = unknownU16;
+  return attack;
 }
 
-export function encodeClientAttack(attack: ClientAttack): Uint8Array {
+export function encodeClientAttack(attack: ClientAttack, opcode: number = CLIENT_FIELD_OPCODE.attack): Uint8Array {
   const hits = attack.hits & 0x0f;
   const targetCount = attack.targets.length;
-  if (targetCount > 0x0f) throw new RangeError(`0x0F packs at most 15 targets, got ${targetCount}`);
-  const writer = new PacketWriter(ATTACK_HEADER_BYTES + targetCount * (ATTACK_TARGET_FIXED_BYTES + 2 * hits));
-  writer.writeByte(CLIENT_FIELD_OPCODE.attack);
+  if (targetCount > 0x0f) throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
+  const shape = attackShapeOf(opcode);
+  const writer = new PacketWriter(
+    ATTACK_HEADER_BYTES + (shape.extraU16AfterHeader ? 2 : 0) + targetCount * (ATTACK_TARGET_FIXED_BYTES + 2 * hits),
+  );
+  writer.writeByte(opcode);
   writer.writeByte(hits | (targetCount << 4));
   writer.writeU32(attack.clickedMobId >>> 0);
   writer.writeByte((attack.facingLeft ? 0x80 : 0) | (attack.action & 0x7f));
   writer.writeByte(attack.targetCap & 0xff);
+  if (shape.extraU16AfterHeader) writer.writeU16(attack.unknownU16 ?? 0);
   for (const target of attack.targets) {
     if (target.damages.length !== hits) {
       throw new RangeError(`a target carries exactly ${hits} damage value(s), got ${target.damages.length}`);

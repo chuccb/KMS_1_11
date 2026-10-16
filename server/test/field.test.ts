@@ -310,5 +310,45 @@ test("describeClientFieldPacket names the three client field packets and stays q
   const text = describeClientFieldPacket(attack)!;
   assert.match(text, /^0x0f attack: left action=17 hits=2 cap=6 clicked=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
   assert.equal(describeClientFieldPacket(new Uint8Array([0x7f, 1, 2, 3])), undefined);
-  assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0xf \(truncated: packet underflow/);
+  assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0x0f \(truncated: packet underflow/);
+});
+
+/**
+ * The magic (`0x10`) and skill (`0x11`) attacks reuse `0x0F`'s header order and its 11-byte target
+ * record - only two things differ, and both are visible here: `0x10` writes one extra `u16` right
+ * after the header, and its high nibble is a "second object exists" flag (`sub_513C80` writes
+ * `16 * (v129 != nullptr)`) rather than a count. If a capture ever shows a different record shape,
+ * this test is the one that has to change.
+ */
+test("magic attack (0x10) is the same record plus one extra u16", () => {
+  const attack: ClientAttack = {
+    hits: 2,
+    targetCount: 1,
+    clickedMobId: 0x30,
+    facingLeft: true,
+    action: 0x11,
+    targetCap: 6,
+    unknownU16: 0x1234,
+    targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
+  };
+  const bytes = encodeClientAttack(attack, 0x10);
+  assert.equal(toHex(bytes), "10123000000091063412" + "10000000ff6400c8000500" + "0b000c00");
+  assert.deepEqual(readClientAttack(new PacketReader(bytes, 1), 0x10), attack);
+  assert.match(describeClientFieldPacket(bytes)!, /^0x10 attack: left action=17 hits=2/);
+});
+
+test("skill attack (0x11) is the same record with no extra u16", () => {
+  const attack: ClientAttack = {
+    hits: 1,
+    targetCount: 1,
+    clickedMobId: 0x30,
+    facingLeft: false,
+    action: 0x20,
+    targetCap: 6,
+    targets: [{ mobId: 0x10, hitAnimation: 3, x: 100, y: 200, sequence: 5, damages: [9] }],
+  };
+  const bytes = encodeClientAttack(attack, 0x11);
+  assert.equal(toHex(bytes), "1111300000002006" + "10000000036400c8000500" + "0900");
+  assert.deepEqual(readClientAttack(new PacketReader(bytes, 1), 0x11), attack);
+  assert.match(describeClientFieldPacket(bytes)!, /^0x11 attack: right action=32/);
 });
