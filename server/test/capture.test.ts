@@ -142,13 +142,19 @@ test("capture: lifecycle records and JSONL serialization", async () => {
 
 test("capture (session): adopts the handshake seeds and records decrypted opcodes", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "session", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "session",
+    handshake: "off", // this test plays the client: it sends the handshake itself
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
     const handshake = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x41), 0xaabbccdd, 0x11223344);
     const sender = new CipherState(0x11223344); // the client's receive seed is our send state
-    const packet = encodeSessionPacket(fromHex("0a0102"), sender);
+    const packet = encodeSessionPacket(fromHex("0a0102"), sender, "c2s"); // client -> server
 
     // one write, so the handshake and the first packet share a chunk
     socket.write(Buffer.concat([Buffer.from(handshake), Buffer.from(packet)]));
@@ -184,6 +190,82 @@ test("capture (session): an undecodable chunk is flagged once and then dumped ra
     assert.match(error.note ?? "", /handshake|seed|length/i);
     const raw = await waitFor(records, (r) => r.kind === "raw");
     assert.ok(raw.hex.length > 0);
+    socket.destroy();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("capture (session): sends the handshake itself, since the 2003 client speaks second", async () => {
+  const records: CaptureRecord[] = [];
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "session",
+    handshake: { clientSendSeed: 0x01020304, clientRecvSeed: 0x05060708 },
+    onRecord: (r) => records.push(r),
+  });
+  const info = await server.start();
+  try {
+    const socket = await connectTo(info.port);
+    const sent = await waitFor(records, (r) => r.kind === "handshake");
+    assert.equal(sent.dir, "s2c");
+    assert.equal(sent.len, HANDSHAKE_TOTAL_BYTES);
+    // the seed we told the client to send with is the state we decrypt with
+    assert.deepEqual(sent.seeds, { sendSeed: 0x01020304, recvSeed: 0x05060708 });
+
+    // a client answering with that seed must be decoded without any handshake of its own
+    const client = new CipherState(0x01020304);
+    socket.write(Buffer.from(encodeSessionPacket(fromHex("1a00"), client, "c2s")));
+    const frame = await waitFor(records, (r) => r.kind === "frame");
+    assert.equal(frame.opcode, 0x1a);
+    assert.equal(frame.headerOk, true);
+    assert.equal(frame.plainHex, "1a00");
+    socket.destroy();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("capture (session): the 211-byte handshake it sends carries 199 body bytes", async () => {
+  const records: CaptureRecord[] = [];
+  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "session", onRecord: (r) => records.push(r) });
+  const info = await server.start();
+  try {
+    const socket = await connectTo(info.port);
+    const sent = await waitFor(records, (r) => r.kind === "handshake");
+    const bytes = fromHex(sent.hex);
+    assert.equal(bytes.length, HANDSHAKE_TOTAL_BYTES);
+    const view = new DataView(bytes.buffer);
+    assert.equal(view.getUint16(0, true), HANDSHAKE_TOTAL_BYTES); // u16@0 = total length
+    assert.equal(view.getUint16(2, true), HANDSHAKE_BODY_BYTES); // u16@2 = 199
+    // the seeds sit at 4 + bodyLength and 8 + bodyLength, as sub_43A410 reads them
+    assert.equal(view.getUint32(4 + HANDSHAKE_BODY_BYTES, true), sent.seeds!.sendSeed);
+    assert.equal(view.getUint32(8 + HANDSHAKE_BODY_BYTES, true), sent.seeds!.recvSeed);
+    socket.destroy();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("capture (session): handshake off waits for a client-sent handshake", async () => {
+  const records: CaptureRecord[] = [];
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "session",
+    handshake: "off",
+    onRecord: (r) => records.push(r),
+  });
+  const info = await server.start();
+  try {
+    const socket = await connectTo(info.port);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(records.filter((r) => r.kind === "handshake").length, 0, "nothing is sent unprompted");
+    socket.write(Buffer.from(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 7, 9)));
+    const received = await waitFor(records, (r) => r.kind === "handshake");
+    assert.equal(received.dir, "c2s");
+    assert.deepEqual(received.seeds, { sendSeed: 7, recvSeed: 9 });
     socket.destroy();
   } finally {
     await server.stop();

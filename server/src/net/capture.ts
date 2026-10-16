@@ -18,8 +18,15 @@
  * stdout through the provided logger.
  */
 import { createServer, type Server, type Socket } from "node:net";
+import { randomBytes } from "node:crypto";
 import { HeaderDeframer, U16LengthFramer, toHex } from "../protocol/frame.ts";
-import { SessionDeframer } from "../protocol/session.ts";
+import { CipherState, CLIENT_SEND_MAGIC } from "../protocol/cipher.ts";
+import {
+  HANDSHAKE_BODY_BYTES,
+  SessionDeframer,
+  encodeHandshake,
+  type SessionDeframerOptions,
+} from "../protocol/session.ts";
 
 export type CaptureDirection = "c2s" | "s2c";
 export type CaptureKind =
@@ -61,6 +68,20 @@ export interface CaptureRecord {
 
 export type CaptureMode = "session" | "framed" | "raw";
 
+/**
+ * How the harness opens a session.
+ *
+ * The client does not speak first: sub_43A410 receives the 211-byte handshake and reads its two
+ * seeds, so a capture that wants to see anything from the original client has to send it.
+ * `auto` picks seeds here (recorded in the trace, so the capture stays self-consistent);
+ * `off` waits for a client-sent handshake instead; an object pins the seeds (and optionally the
+ * still-unknown 199-byte body) for a reproducible experiment.
+ */
+export type HandshakePolicy =
+  | "auto"
+  | "off"
+  | { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
+
 export interface CaptureServerOptions {
   port: number;
   host?: string;
@@ -71,6 +92,8 @@ export interface CaptureServerOptions {
   onRecord?: (record: CaptureRecord) => void;
   /** log connect/disconnect noise (default true) */
   logLifecycle?: boolean;
+  /** session mode only: send the 211-byte handshake the client waits for (default "auto") */
+  handshake?: HandshakePolicy;
 }
 
 export interface CaptureStartInfo {
@@ -85,8 +108,8 @@ export class CaptureServer {
   private readonly startedAt = Date.now();
   private seq = 0;
   private nextConn = 1;
-  private readonly options: Required<Omit<CaptureServerOptions, "out" | "onRecord">> &
-    Pick<CaptureServerOptions, "out" | "onRecord">;
+  private readonly options: Required<Omit<CaptureServerOptions, "out" | "onRecord" | "handshake">> &
+    Pick<CaptureServerOptions, "out" | "onRecord"> & { handshake: HandshakePolicy };
 
   constructor(options: CaptureServerOptions) {
     this.options = {
@@ -94,6 +117,7 @@ export class CaptureServer {
       port: options.port,
       mode: options.mode ?? "session",
       logLifecycle: options.logLifecycle ?? true,
+      handshake: options.handshake ?? "auto",
       out: options.out,
       onRecord: options.onRecord,
     };
@@ -146,7 +170,8 @@ export class CaptureServer {
     // byte stream. This is what keeps an HTTP probe or a half-written stream from corrupting
     // the trace (verified against the sandbox preview proxy).
     let mismatch = false;
-    const sessionDeframer = this.options.mode === "session" ? new SessionDeframer() : undefined;
+    const sessionDeframer =
+      this.options.mode === "session" ? new SessionDeframer(this.openSession(socket, conn)) : undefined;
     const headerDeframer = this.options.mode === "framed" ? new HeaderDeframer() : undefined;
 
     socket.on("data", (chunk: Buffer) => {
@@ -229,6 +254,43 @@ export class CaptureServer {
     });
   }
 
+  /**
+   * Picks the session opening, sending the handshake when we are the side that speaks first.
+   * Returns the deframer options: our receive state mirrors the client's send seed.
+   */
+  private openSession(socket: Socket, conn: number): SessionDeframerOptions {
+    const policy = this.options.handshake;
+    const pinned = typeof policy === "object" ? policy : {};
+    const clientSendSeed = pinned.clientSendSeed ?? randomSeed();
+    const clientRecvSeed = pinned.clientRecvSeed ?? randomSeed();
+
+    if (policy === "off") {
+      // Wait for a client-sent handshake instead (useful when replaying a stream, not the client).
+      return {};
+    }
+
+    const body = pinned.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
+    const bytes = encodeHandshake(body, clientSendSeed, clientRecvSeed);
+    socket.write(Buffer.from(bytes));
+    this.emit({
+      conn,
+      dir: "s2c",
+      kind: "handshake",
+      len: bytes.length,
+      hex: toHex(bytes),
+      bodyLength: body.length,
+      seeds: { sendSeed: clientSendSeed, recvSeed: clientRecvSeed },
+      note:
+        `sent by us: clientSendSeed=0x${hex32(clientSendSeed)} clientRecvSeed=0x${hex32(clientRecvSeed)}` +
+        (pinned.body ? "; body from the caller" : "; body is 199 zero bytes (contents still unknown)"),
+    });
+    return {
+      expectHandshake: false, // already consumed on the way out
+      recvState: new CipherState(clientSendSeed), // the client will send with this seed
+      expectedMagic: CLIENT_SEND_MAGIC,
+    };
+  }
+
   private emitRaw(conn: number, bytes: Uint8Array, note?: string): void {
     this.emit({ conn, dir: "c2s", kind: "raw", len: bytes.length, hex: toHex(bytes), note });
   }
@@ -237,6 +299,14 @@ export class CaptureServer {
     const record: CaptureRecord = { t: Date.now() - this.startedAt, seq: this.seq++, ...partial };
     this.options.onRecord?.(record);
   }
+}
+
+function randomSeed(): number {
+  return randomBytes(4).readUInt32LE(0);
+}
+
+function hex32(value: number): string {
+  return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 /** Rebuild the raw wire bytes from a decoded frame: u16 header + u16 bodyLength + body. */

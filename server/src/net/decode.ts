@@ -13,7 +13,7 @@
  * Evidence: sub_43A410 (handshake + first framing), sub_4A1940 (assembler),
  * sub_4A1B90 (decrypt), sub_43AFA0 (packet loop that reads the +124 receive state).
  */
-import { CipherState, headerMagicOf } from "../protocol/cipher.ts";
+import { CipherState, headerMagicOf, magicFor, type Direction } from "../protocol/cipher.ts";
 import { HANDSHAKE_BODY_BYTES, HANDSHAKE_TOTAL_BYTES, decodeHandshake } from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
 
@@ -57,16 +57,19 @@ export interface DecodedPacket {
 }
 
 export interface DecodeOptions {
-  /** receive-side LCG seed (client -> server), low byte is the key */
-  recvSeed?: number;
-  /** send-side LCG seed (server -> client) */
-  sendSeed?: number;
+  /**
+   * Cipher seed for client -> server packets (the state the *client sends* with, i.e. the
+   * `sendSeed` a handshake assigned to the client). Only needed when the trace has no handshake.
+   */
+  c2sSeed?: number;
+  /** Cipher seed for server -> client packets (the client's receive state). */
+  s2cSeed?: number;
 }
 
 export interface DecodeResult {
   packets: DecodedPacket[];
-  /** seed adopted from a handshake found in the trace, if any */
-  handshake?: { sendSeed: number; recvSeed: number; bodyHex: string };
+  /** the seeds a handshake in the trace assigned, from the client's point of view */
+  handshake?: { clientSendSeed: number; clientRecvSeed: number; bodyHex: string };
 }
 
 function fromHex(hex: string): Uint8Array {
@@ -76,22 +79,24 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 
-function hiWord(value: number): number {
-  return (value >>> 16) & 0xffff;
-}
-
 /**
  * Replays the framing records of a trace through the session cipher.
+ *
+ * States are keyed by WIRE DIRECTION, never by "our side": a c2s packet is always encrypted with
+ * the client's send state and an s2c packet with the client's receive state, whichever end
+ * produced the trace. A handshake assigns `sendSeed` to its RECEIVER's send state and `recvSeed`
+ * to that receiver's receive state, so which direction it seeds depends on who sent it - that is
+ * exactly where a first version of this function got it backwards.
  *
  * Unframed records (`raw`, `framing-error`, `connect`) are skipped: a framing mismatch means the
  * trace is not (yet) a clean session, and the caller sees that as a missing packet rather than as
  * decoded garbage.
  */
 export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {}): DecodeResult {
-  let recvSeed = options.recvSeed;
-  let sendSeed = options.sendSeed;
-  let recvState = recvSeed === undefined ? undefined : new CipherState(recvSeed);
-  let sendState = sendSeed === undefined ? undefined : new CipherState(sendSeed);
+  let c2sSeed = options.c2sSeed;
+  let s2cSeed = options.s2cSeed;
+  let c2sState = c2sSeed === undefined ? undefined : new CipherState(c2sSeed);
+  let s2cState = s2cSeed === undefined ? undefined : new CipherState(s2cSeed);
   const packets: DecodedPacket[] = [];
   let handshake: DecodeResult["handshake"];
 
@@ -115,31 +120,38 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
 
     // The opening packet is plaintext and defines the keys for everything after it. The harness
     // marks it `handshake`; a raw 211-byte `frame` is treated the same way.
-    const isHandshake = record.kind === "handshake" || raw.length === HANDSHAKE_TOTAL_BYTES;
-    if (isHandshake && raw.length === HANDSHAKE_TOTAL_BYTES) {
+    const isHandshake = raw.length === HANDSHAKE_TOTAL_BYTES && (record.kind === "handshake" || record.kind === "frame");
+    if (isHandshake) {
       const parsed = decodeHandshake(raw);
-      const seeds = record.seeds ?? { sendSeed: parsed.sendSeed, recvSeed: parsed.recvSeed };
-      handshake = { sendSeed: seeds.sendSeed, recvSeed: seeds.recvSeed, bodyHex: toHex(parsed.body) };
-      recvState = new CipherState(seeds.recvSeed);
-      sendState = new CipherState(seeds.sendSeed);
+      const sendSeed = record.seeds?.sendSeed ?? parsed.sendSeed;
+      const recvSeed = record.seeds?.recvSeed ?? parsed.recvSeed;
+      // `sendSeed` seeds the receiver's send state; the receiver is the other end.
+      const clientSendSeed = record.dir === "s2c" ? sendSeed : recvSeed;
+      const clientRecvSeed = record.dir === "s2c" ? recvSeed : sendSeed;
+      handshake = { clientSendSeed, clientRecvSeed, bodyHex: toHex(parsed.body) };
+      c2sSeed = clientSendSeed;
+      s2cSeed = clientRecvSeed;
+      c2sState = new CipherState(c2sSeed);
+      s2cState = new CipherState(s2cSeed);
       packets.push({
         ...base,
         bodyLength: HANDSHAKE_BODY_BYTES,
         bodyHex: toHex(parsed.body),
         expectedHeader: HANDSHAKE_TOTAL_BYTES,
         headerOk: base.header === HANDSHAKE_TOTAL_BYTES,
-        note: "handshake: 211 bytes, seeds adopted (sendSeed/recvSeed)",
+        note: `handshake sent by ${record.dir}: receiver (${record.dir === "s2c" ? "client" : "server"}) seeded`,
       });
       continue;
     }
     if (record.kind !== "frame") continue; // connect / disconnect / server-info carry no payload
 
-    const state = record.dir === "c2s" ? recvState : sendState;
+    const state = record.dir === "c2s" ? c2sState : s2cState;
     if (!state) {
-      packets.push({ ...base, note: `no seed for ${record.dir}; pass --recv-seed / --send-seed` });
+      packets.push({ ...base, note: `no seed for ${record.dir}; pass --c2s-seed / --s2c-seed` });
       continue;
     }
-    const expectedHeader = state.headerMagic();
+    // The magic is direction-tied: the client writes 0xD3 and verifies 0xFF2C (cipher.ts).
+    const expectedHeader = state.headerMagic(magicFor(record.dir));
     const plain = state.decrypt(raw.slice(4));
     packets.push({
       ...base,
@@ -153,9 +165,9 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
   return handshake ? { packets, handshake } : { packets };
 }
 
-/** `0xD3 ^ HIWORD(state)` for a raw seed - handy when reading a hex dump by hand. */
-export function headerForSeed(seed: number): number {
-  return headerMagicOf(seed);
+/** `magic ^ HIWORD(seed)` - handy when reading a hex dump by hand. */
+export function headerForSeed(seed: number, direction: Direction = "s2c"): number {
+  return headerMagicOf(seed, magicFor(direction));
 }
 
 export function formatDecoded(packets: DecodedPacket[]): string {

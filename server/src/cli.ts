@@ -9,14 +9,21 @@
  * `decode` replays that trace through the session cipher so the packets are readable.
  */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { CaptureServer, toJsonl, type CaptureMode, type CaptureRecord } from "./net/capture.ts";
+import {
+  CaptureServer,
+  toJsonl,
+  type CaptureMode,
+  type CaptureRecord,
+  type CaptureServerOptions,
+} from "./net/capture.ts";
 import { decodeTrace, formatDecoded, type TraceRecord } from "./net/decode.ts";
 
 const USAGE = `kms111-rebuild
 
 usage:
-  capture --port <n> [--mode session|framed|raw] [--host <addr>] [--out <file>] [--quiet]
-  decode <trace.jsonl> [--recv-seed <n>] [--send-seed <n>] [--json]
+  capture --port <n> [--mode session|framed|raw] [--handshake auto|off|<sendSeed>:<recvSeed>]
+          [--handshake-body <hex>] [--host <addr>] [--out <file>] [--quiet]
+  decode <trace.jsonl> [--c2s-seed <n>] [--s2c-seed <n>] [--json]
 
 notes:
   capture --mode session (default) is the real client model: a 211-byte handshake opens the
@@ -25,10 +32,17 @@ notes:
   --mode framed is the same framing without the handshake; --mode raw logs recv() chunks.
   A chunk that cannot be decoded is flagged once and from then on dumped as raw bytes, so an
   untrusted probe (or the sandbox preview proxy's HTTP GET) can never corrupt the trace.
+  The client speaks second, so session mode sends the 211-byte handshake itself (--handshake
+  auto, seeds chosen here and recorded in the trace) and then decrypts the client's replies.
+  --handshake off waits for a client-sent handshake instead; --handshake 0xS:0xR pins the seeds
+  for a reproducible experiment, and --handshake-body sets the 199 body bytes (still unknown;
+  the trace shows what the client does with whatever you send).
 
-  decode replays a trace through the session cipher: the header is 0xD3 ^ HIWORD(state) and each
-  body byte is key ^ swapNibbles(byte). If a 211-byte handshake is present its two u32 seeds are
-  adopted automatically; otherwise pass --recv-seed/--send-seed. Seeds accept decimal or 0x hex.
+  decode replays a trace through the session cipher: the header is MAGIC ^ HIWORD(state) and each
+  body byte is key ^ swapNibbles(byte). MAGIC is 0xD3 client->server and 0xFF2C server->client
+  (measured in both places; a server that echoes 0xD3 is disconnected by the client). If a 211-byte handshake is present its two u32 seeds are
+  adopted automatically; otherwise pass --c2s-seed/--s2c-seed (the client's send/receive states).
+  Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
 `;
 
@@ -57,9 +71,26 @@ function parseSeed(value: string | boolean | undefined): number | undefined {
   return parsed >>> 0;
 }
 
+/** `auto` | `off` | `<sendSeed>:<recvSeed>` (each decimal or 0x hex). */
+function parseHandshake(value: string | boolean | undefined): CaptureServerOptions["handshake"] {
+  if (value === undefined || value === "auto") return "auto";
+  if (value === "off") return "off";
+  if (typeof value !== "string") return "auto";
+  const [send, recv] = value.split(":");
+  const sendSeed = parseSeed(send);
+  const recvSeed = parseSeed(recv);
+  if (sendSeed === undefined || recvSeed === undefined) {
+    process.stderr.write(`invalid --handshake: expected auto, off, or <sendSeed>:<recvSeed>\n`);
+    process.exit(1);
+  }
+  return { clientSendSeed: sendSeed, clientRecvSeed: recvSeed };
+}
+
 function runDecode(rest: string[]): number {
   const args = parseArgs(rest);
-  const file = rest.find((arg) => !arg.startsWith("--") && arg !== args.recvSeed && arg !== args.sendSeed);
+  const file = rest.find(
+    (arg) => !arg.startsWith("--") && arg !== args["c2s-seed"] && arg !== args["s2c-seed"],
+  );
   if (!file) {
     process.stderr.write(`decode needs a trace file\n\n${USAGE}`);
     return 1;
@@ -74,7 +105,7 @@ function runDecode(rest: string[]): number {
     }
   }
 
-  const options = { recvSeed: parseSeed(args.recvSeed), sendSeed: parseSeed(args.sendSeed) };
+  const options = { c2sSeed: parseSeed(args["c2s-seed"]), s2cSeed: parseSeed(args["s2c-seed"]) };
   const result = decodeTrace(records, options);
   if (args.json === true) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -85,11 +116,28 @@ function runDecode(rest: string[]): number {
   process.stdout.write(
     `${records.length} records, ${result.packets.length} packets decoded, ${mismatches} header mismatches\n` +
       (result.handshake
-        ? `handshake seeds: sendSeed=0x${result.handshake.sendSeed.toString(16)} recvSeed=0x${result.handshake.recvSeed.toString(16)}\n`
+        ? `handshake: clientSendSeed=0x${hex(result.handshake.clientSendSeed)} ` +
+          `clientRecvSeed=0x${hex(result.handshake.clientRecvSeed)}\n`
         : "") +
       formatDecoded(result.packets),
   );
   return mismatches > 0 ? 2 : 0;
+}
+
+/** Hex string -> bytes, tolerating spaces and a 0x prefix. */
+function fromHexArg(text: string): Uint8Array {
+  const clean = text.replace(/^0x/i, "").replace(/[\s:]/g, "");
+  if (clean.length % 2 !== 0 || /[^0-9a-f]/i.test(clean)) {
+    process.stderr.write(`invalid hex: ${text.slice(0, 40)}\n`);
+    process.exit(1);
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function hex(value: number): string {
+  return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 function clamp(text: string, max = 160): string {
@@ -117,6 +165,10 @@ async function main(argv: string[]): Promise<number> {
   const mode: CaptureMode = args.mode === "framed" || args.mode === "raw" ? args.mode : "session";
   const out = typeof args.out === "string" ? args.out : undefined;
   const quiet = args.quiet === true;
+  const handshake = parseHandshake(args.handshake);
+  const handshakeBody =
+    typeof args["handshake-body"] === "string" ? fromHexArg(String(args["handshake-body"])) : undefined;
+  if (typeof handshake === "object" && handshakeBody) handshake.body = handshakeBody;
 
   if (out) writeFileSync(out, "", { flag: "w" }); // start a fresh trace
 
@@ -138,12 +190,16 @@ async function main(argv: string[]): Promise<number> {
     }
   };
 
-  const server = new CaptureServer({ port, mode, out, onRecord, logLifecycle: true });
+  const server = new CaptureServer({ port, mode, out, onRecord, logLifecycle: true, handshake });
   const info = await server.start();
   if (!quiet) {
     process.stdout.write(`capture listening on ${info.host}:${info.port} (mode=${info.mode})\n`);
     if (info.mode === "session") {
-      process.stdout.write("waiting for the client's 211-byte handshake to adopt the cipher seeds\n");
+      process.stdout.write(
+        handshake === "off"
+          ? "waiting for the client's 211-byte handshake to adopt the cipher seeds\n"
+          : "sending the 211-byte handshake on connect, then decrypting the client's packets\n",
+      );
     }
     if (out) process.stdout.write(`writing trace to ${out}\n`);
     process.stdout.write("point the client at this port; Ctrl-C to stop\n");

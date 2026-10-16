@@ -23,7 +23,7 @@
  *                          The body cannot be encrypted with the session cipher because the
  *                          cipher state arrives inside this same packet (state unverified).
  */
-import { CipherState, HEADER_MAGIC } from "./cipher.ts";
+import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC, magicFor, type Direction } from "./cipher.ts";
 import { FramingError, toHex } from "./frame.ts";
 
 export const HANDSHAKE_TOTAL_BYTES = 211;
@@ -89,12 +89,27 @@ export function decodeHandshake(wire: Uint8Array): Handshake {
   };
 }
 
-/** Encode one session packet (header magic + encrypted body). */
-export function encodeSessionPacket(plainBody: Uint8Array, sendState: CipherState): Uint8Array {
-  if (plainBody.length > 0xffff) throw new FramingError("body too large for a u16 length");
+/** Largest body a single packet may carry; bigger payloads are split by the sender (sub_4A2030). */
+export const MAX_BODY_BYTES = 1456;
+
+/**
+ * Encode one session packet: `u16 header` + `u16 bodyLength` + encrypted body.
+ *
+ * `direction` picks the header magic and defaults to `s2c` because the normal caller is a server
+ * replying to a client. See cipher.ts: the two directions really do use different constants.
+ */
+export function encodeSessionPacket(
+  plainBody: Uint8Array,
+  sendState: CipherState,
+  direction: Direction = "s2c",
+): Uint8Array {
+  if (plainBody.length > MAX_BODY_BYTES) {
+    throw new FramingError(
+      `body of ${plainBody.length} bytes exceeds the ${MAX_BODY_BYTES}-byte packet limit; split it first`,
+    );
+  }
   const total = plainBody.length + 4;
-  if (total > 0xffff) throw new FramingError("packet too large");
-  const headerMagic = sendState.headerMagic(); // read the state BEFORE encrypt() advances it
+  const headerMagic = sendState.headerMagic(magicFor(direction)); // read the state before encrypt advances it
   const encrypted = sendState.encrypt(plainBody);
   const out = new Uint8Array(total);
   const view = new DataView(out.buffer);
@@ -129,6 +144,12 @@ export interface SessionDeframerOptions {
   expectHandshake?: boolean;
   /** Largest acceptable packet, body + 4-byte header. The client's receive buffer is 1460. */
   maxPacketBytes?: number;
+  /**
+   * Magic constant of the packets being decoded. Defaults to CLIENT_SEND_MAGIC because this
+   * class is normally fed what a *client* sends; a client-side implementation decoding server
+   * packets must pass SERVER_SEND_MAGIC.
+   */
+  expectedMagic?: number;
 }
 
 /**
@@ -143,12 +164,14 @@ export class SessionDeframer {
   private recvState: CipherState | undefined;
   private readonly expectHandshake: boolean;
   private readonly maxPacketBytes: number;
+  private readonly expectedMagic: number;
   private failed: string | undefined;
 
   constructor(options: SessionDeframerOptions = {}) {
     this.recvState = options.recvState;
     this.expectHandshake = options.expectHandshake ?? options.recvState === undefined;
     this.maxPacketBytes = options.maxPacketBytes ?? 1460;
+    this.expectedMagic = options.expectedMagic ?? CLIENT_SEND_MAGIC;
   }
 
   /** Reason the stream stopped being decodable, if any. */
@@ -202,7 +225,7 @@ export class SessionDeframer {
         break;
       }
       if (this.buf.length < total) break;
-      const expectedHeader = state.headerMagic();
+      const expectedHeader = state.headerMagic(this.expectedMagic);
       const body = this.buf.slice(4, total);
       const plain = state.decrypt(body);
       events.push({
@@ -235,4 +258,4 @@ export function describePacket(event: SessionEvent): string {
   );
 }
 
-export { HEADER_MAGIC };
+export { CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC, magicFor };
