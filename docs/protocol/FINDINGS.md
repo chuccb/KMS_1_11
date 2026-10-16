@@ -408,7 +408,7 @@ n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（
 | 20 | u32 | `exp` | 記憶體 +77/+81；`0x0D` 升級訊息讀這一對 |
 | 21 | u16 | `fame` | 記憶體 +85/+87 |
 | 22 | u32 | `unknown93` | 記憶體 +89/+93 |
-| 23 | u32 | `unknown97` | 記憶體 +97，**不混淆**；`0x16` 進地圖時它與 `mode` 一起被交給新場地物件的建構子（§4.11.2）→ **很可能是角色存檔裡的地圖／場地 id**，但建構子本身還沒讀，先保留名字 |
+| 23 | u32 | **`mapId`** | 記憶體 +97，**不混淆**。**已證實是地圖 id**：`0x16` 把它與 `mode` 一起交給新場地物件（§4.11.2），最終 `sub_468E00` 用它載入 `Map/Map/%09d.img`（`sub_4694F0`）|
 | 24 | u8 | `unknown101` | 記憶體 +101，**不混淆** |
 
 - ⚠️ **本節前一版寫的「75 bytes、尾巴多 u32/u16 各一」是錯的**：那版把 `sub_45D840` 的
@@ -550,6 +550,47 @@ hasData == 0:
 > `randomRange`／`class ClientRandom`），`test/random.test.ts` 用手算的序列釘住（同一組公式、
 > 五個輸出值、狀態演進都在測試裡），所以「伺服器重算客戶端傷害」現在是程式碼而不是想法。
 > 剩下的 UNKNOWN 只有 `mode` 的具體值，以及 `hasData == 0` 分支怎麼找到角色物件。
+
+#### 4.11.2b ✅ 地圖是怎麼被指定的：`CharacterData.mapId` → `Map/Map/%09d.img`
+
+上一節留下的「`mode` ＋ `CharacterData` 的 `unknown97`」這一對，這輪追完了整條鏈：
+
+```
+sub_4C2780                        // 0x16 的處理函式
+  k_7 = CharacterData 本體（sub_45FCC0 解出來的）
+  v48 = *(u32 *)((char *)k_7 + 97)   // ← CharacterData 的第 23 個欄位 = mapId
+  LOBYTE(v49) = 封包的 mode byte
+  sub_4C3460(newCField, &{mapId, mode})   // 安裝成當前場地，並呼叫它的 vtable slot 1
+     └─ sub_468E00(CField, init)
+          *(CField + 152) = init[0]            // mapId
+          *(CField + 156) = init[1]（u8）      // mode
+          sub_4694F0(mapId)                    // 載入 Map/Map/%09d.img
+          sub_403190(CField + 36, 載入的節點)
+          sub_469980(CField)                   // 解 foothold／ladderRope／portal／…
+          sub_4C3440(1); sub_4C2AE0(CField)    // 收尾（CStage::Init 系列）
+```
+
+所以 **`CharacterData` 的第 23 欄就是地圖 id**（原本叫 `unknown97`，現在定名 `mapId`），而
+**伺服器要讓客戶端進哪張地圖，就是把那個 id 塞進 `0x16` 的 `CharacterData`**——不需要別的封包。
+
+地圖檔名由 `sub_4694F0` 以 `L"Map/Map/%09d.img"`（`sub_4389B0` 格式化）產生，例如 `1000000` →
+`Map/Map/001000000.img`。同一個字串區塊把整支 **地圖載入器** 的位置全都標了出來（全部以 WZ 路徑定位，
+不是猜的）：
+
+| 函式 | WZ 路徑／節點 | 內容 |
+|---|---|---|
+| `sub_4694F0` | `Map/Map/%09d.img` | 開檔（回傳 map 根節點）|
+| `sub_469980` | `foothold`、`ladderRope`、`portal` | 碰撞／傳送點 |
+| `sub_469CC0` | `Map/Tile/`（`tile`、`z`、`zM`、`y`、`x`、`%s/%d`、`u`、`no`）| 背景圖磚 |
+| `sub_46A9F0` | `Map/Obj/%s.img/%s/%s/%s`（`obj`、`oS`、`l0`、`l1`、`l2`）| 場地物件 |
+| `sub_46BDA0` | `Map/Back/`、`back`、`back/%d`、`bS`、`BA`（`a`、`cy`、`cx`、`type`、`ry`、`rx`）| 背景層 |
+| `sub_46DA30` | `MapHelper.img/mark/`、`mapName`、`streetName` | 小地圖標記與地名 |
+| `sub_46E7C0` | `Map/MapHelper.img`（`weather`、`rain`、`snow`、`cloud`、`VR`）| 天氣／VR |
+| `sub_4A4430` | `portal` | 傳送門清單（NPC／場地物件側）|
+
+伺服器端需要的正是前三個（`foothold`／`ladderRope`／`portal`）：角色落點、可走範圍與傳送點都在那裡；
+它們的路徑已收在 `server/src/wz/paths.ts`（`mapImagePath`、`MAP_NODES`、`MAP_HELPER_PATH`，
+golden 測試 `test/paths.test.ts`）。
 
 #### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
 
@@ -908,8 +949,8 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
    `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應（同一支 client 對不同 body
    的反應就是唯一的量測工具）。
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
-   `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，§4.11.2）；`0x1C` 的 `unknown64`／`avatarKey`／
-   `unknownA/B`；`0x0D` 的 `kind` 其他取值。
+   `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，地圖 id 已解＝`CharacterData.mapId`，§4.11.2／
+   §4.11.2b）；`0x1C` 的 `unknown64`／`avatarKey`／`unknownA/B`；`0x0D` 的 `kind` 其他取值。
 3. **攻擊家族已全部解出**（`0x0F`／`0x10`／`0x11`，§4.13.1＋§4.13.1b），三支共用一個 codec。
    還缺的是**真實流量驗證**（§6 第 2 項）與 `0x10` 的 `u16 v138`。
    另一邊 `CMob::Init`（§4.12.1）已解到 x／y／面向＋動畫區塊；補完它就與攻擊包合起來是完整的打怪迴圈。
@@ -924,9 +965,9 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 7. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
    `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
-8. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown101`
-   （能力值區塊）：傳輸上已完整，語意待找讀取端。`unknown97` 有了第一條線索（`0x16` 拿它當場地參數，
-   見 §4.11.2），下一步是讀 `sub_468D40`／`sub_4C3460` 的建構子，確認它是不是地圖 id。
+8. ~~`unknown97`~~ → **已證實是 `mapId`**（§4.11.2b：`sub_468E00` 用它載入 `Map/Map/%09d.img`）。
+   剩下的：**`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown101`
+   （能力值區塊），傳輸上已完整，語意待找讀取端。
 9. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 
@@ -969,3 +1010,4 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 | `tools/hexfunc.py <dump.c> <name> [--list\|--calls\|--globals]` | 從反編譯輸出抽出單一函式（或其呼叫／全域引用），是這一整份文件的證據來源 |
 | `tools/kstr.py <dump.c> <function> [--list\|--names]` | 把函式引用的字串以 **CP949** 解出來。`.c` 直接 `grep` 會看到亂碼，而 2003 年的 client 只有這些字串能替函式命名（§4.13）|
 | `server/src/protocol/random.ts` | 客戶端自訂亂數產生器的逐位元移植（種子遮罩 `sub_48A900`／步進 `sub_4619F0`）；golden 序列在 `server/test/random.test.ts`，伺服器用它重算客戶端回報的傷害（§4.11.2）|
+| `server/src/wz/paths.ts` | 客戶端自己的 WZ 路徑（`Map/Map/%09d.img` ＝ `mapImagePath`、`foothold`／`ladderRope`／`portal`、`MapHelper.img`）；地圖載入器的函式表在 §4.11.2b，golden 測試在 `server/test/paths.test.ts` |

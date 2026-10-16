@@ -40,9 +40,11 @@ export const FIELD_OPCODE = {
    * The three `u32`s are the field's **random seed**: `sub_4C7930` hands all three to
    * `sub_48A900` ("scramble and store"), whose inverse `sub_4619F0` is the client's `Random()`,
    * and `sub_4C7960(CWvsApp+632, ...)` is what rolls the damage numbers with it. The field and
-   * spawn parameter is `mode` plus the `CharacterData`'s `unknown97`, both handed to the new field
-   * object (`sub_4C3460(field, &{mode, unknown97})`), after which `sub_51CBF0` makes the field and
-   * the local user on `CUserPool`.
+   * spawn parameter is `mode` plus the `CharacterData`'s `mapId`, both handed to the new field
+   * object (`sub_4C3460(field, &{mapId, mode})`): `sub_468E00` stores the id at `CField+152`, the
+   * mode at `CField+156`, and loads `Map/Map/%09d.img` from the id (`sub_4694F0`) - so the server
+   * picks the map by sending the right `mapId` in the `CharacterData`, after which `sub_51CBF0`
+   * makes the field and the local user on `CUserPool`.
    */
   setField: 0x16,
   /**
@@ -206,9 +208,10 @@ export function encodeUserMove(move: UserMove): Uint8Array {
  */
 export interface SetField {
   /**
-   * First byte of the packet (`sub_4C2780`). It is handed to the *new* field object's constructor
-   * (`sub_4C3460(field, &{mode, character.unknown97})`), so it is the spawn mode/portal, but which
-   * values mean what is not located; real traffic has to pin it down.
+   * First byte of the packet (`sub_4C2780`). It travels with the map id to the new field object
+   * (`sub_4C3460(field, &{mapId, mode})` -> `sub_468E00`, which keeps it at `CField+156`), so it is
+   * the spawn mode/portal; which values mean what is not located, and real traffic has to pin it
+   * down. `mapId` itself comes from `CharacterData.mapId`.
    */
   mode: number;
   /** `0` = the "already known character" form, non-zero = carry a full `CharacterData`. */

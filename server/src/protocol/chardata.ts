@@ -43,7 +43,7 @@
  * u32 exp                  // @+77/+81 - the 0x0D handler calls this pair "exp" (level-up message)
  * u16 fame                 // @+85/+87
  * u32 unknown93            // @+89/+93
- * u32 unknown97            // @+97, not obfuscated
+ * u32 mapId                // @+97, not obfuscated - the map to load (see below)
  * u8  unknown101           // @+101, not obfuscated
  * ```
  *
@@ -111,8 +111,16 @@ export interface CharacterStats {
   fame: number;
   /** u32 @+89/+93. */
   unknown93: number;
-  /** u32 @+97; stored plainly (no obfuscation), like the byte below. */
-  unknown97: number;
+  /**
+   * u32 @+97; stored plainly (no obfuscation), like the byte below.
+   *
+   * This is the character's **map**: `sub_4C2780` (the 0x16 handler) copies it out of the
+   * `CharacterData` it just decoded and hands `{mapId, mode}` to the new field object
+   * (`sub_4C3460` -> vtable slot 1 -> `sub_468E00`), which stores it at `CField+152` and loads
+   * `Map/Map/%09d.img` with it (`sub_4694F0`). The server therefore decides which map a client
+   * enters purely by putting the right id in this field - `0x16` carries the whole block.
+   */
+  mapId: number;
   /** u8 @+101; stored plainly. */
   unknown101: number;
 }
@@ -214,7 +222,7 @@ export function writeCharacterStats(writer: PacketWriter, s: CharacterStats): vo
   writer.writeU32(s.exp);
   writer.writeU16(s.fame);
   writer.writeU32(s.unknown93);
-  writer.writeU32(s.unknown97);
+  writer.writeU32(s.mapId);
   writer.writeByte(s.unknown101);
 }
 
@@ -312,7 +320,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
   const exp = reader.readU32();
   const fame = reader.readU16();
   const unknown93 = reader.readU32();
-  const unknown97 = reader.readU32();
+  const mapId = reader.readU32();
   const unknown101 = reader.readByte();
   return {
     id,
@@ -337,7 +345,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
     exp,
     fame,
     unknown93,
-    unknown97,
+    mapId,
     unknown101,
   };
 }
@@ -417,7 +425,7 @@ export function zeroStats(): CharacterStats {
     exp: 0,
     fame: 0,
     unknown93: 0,
-    unknown97: 0,
+    mapId: 0,
     unknown101: 0,
   };
 }

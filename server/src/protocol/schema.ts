@@ -394,12 +394,12 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.11 (CStage base, sub_4C2780)",
     codecs: ["readSetField", "encodeSetField"],
     fields: [
-      { name: "mode", type: "u8" },
+      { name: "mode", type: "u8", note: "spawn mode, kept at CField+156 (sub_468E00)" },
       { name: "full", type: "u8", note: "non-zero means the three seed parts and a CharacterData follow" },
       { name: "randomSeedA", type: "u32", note: "field RNG seed part 1 (sub_4C7930 -> sub_48A900)" },
       { name: "randomSeedB", type: "u32", note: "seed part 2 - the client's Random() is the inverse" },
       { name: "randomSeedC", type: "u32", note: "seed part 3 - damage rolls become reproducible" },
-      { name: "character", type: "CharacterData" },
+      { name: "character", type: "CharacterData", note: "its mapId field is what gets loaded (Map/Map/%09d.img)" },
     ],
   },
   {

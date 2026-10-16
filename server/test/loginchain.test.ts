@@ -59,7 +59,7 @@ function sampleStats(): CharacterStats {
     exp: 0x0c141516,
     fame: 0x0d17,
     unknown93: 0x101c1d1e,
-    unknown97: 0x111f2021,
+    mapId: 0x111f2021,
     unknown101: 0x12,
   };
 }
@@ -87,7 +87,7 @@ test("the stat block layout is byte-exact against sub_45D840's read order", () =
     hex.slice(2 * 32, 2 * 54),
     "0901" + "0a02" + "0b03" + "0c04" + "0d05" + "0e06" + "0f07" + "1008" + "1109" + "120a" + "130b",
   );
-  // exp(u32) fame(u16) unknown93(u32) unknown97(u32) unknown101(u8)
+  // exp(u32) fame(u16) unknown93(u32) mapId(u32) unknown101(u8)
   assert.equal(hex.slice(2 * 54), "1615140c" + "170d" + "1e1d1c10" + "21201f11" + "12");
 });
 
