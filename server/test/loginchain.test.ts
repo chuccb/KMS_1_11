@@ -16,6 +16,7 @@ import {
   type CharacterStats,
 } from "../src/protocol/chardata.ts";
 import {
+  CREATE_CHARACTER_RESULT,
   LOGIN_OPCODE,
   LOGIN_RESULT,
   NAME_CHECK_RESULT,
@@ -135,9 +136,27 @@ test("an item block with nothing in it is a legal, empty block", () => {
 });
 
 test("a failed login reply is a single result byte", () => {
-  for (const result of [LOGIN_RESULT.wrongPassword, LOGIN_RESULT.suspended, LOGIN_RESULT.systemError]) {
+  for (const result of [LOGIN_RESULT.wrongPassword, LOGIN_RESULT.alreadyConnected, LOGIN_RESULT.systemError]) {
     assert.equal(toHex(encodeLoginResult(result)), `01${result.toString(16).padStart(2, "0")}`);
   }
+});
+
+test("the result codes are the client's own, and each one means what its message says", () => {
+  // The three handlers that read this byte group the codes the same way (`sub_4D0DB0`,
+  // `sub_54E250`, `sub_432FB0`), and the strings behind them are in the client's `.rdata`. The
+  // numbers are what a server must send; the *meanings* are what reading the Hex-Rays symbol names
+  // got wrong once (see `LOGIN_RESULT`), so both are pinned here.
+  assert.equal(LOGIN_RESULT.erasedOrStopped, 2, "지워지거나 접속 중지된 아이디입니다.");
+  assert.equal(LOGIN_RESULT.erasedOrStopped2, 3);
+  assert.equal(LOGIN_RESULT.wrongPassword, 4, "잘못된 패스워드입니다.");
+  assert.equal(LOGIN_RESULT.notRegistered, 5, "등록되지 않은 아이디입니다.");
+  assert.equal(LOGIN_RESULT.alreadyConnected, 7, "현재 접속중인 아이디이거나, 현재 서버점검중입니다.");
+  assert.equal(LOGIN_RESULT.systemError, 0xff, "시스템 오류로 접속 할 수 없습니다.");
+  assert.deepEqual(
+    [LOGIN_RESULT.systemError6, LOGIN_RESULT.systemError8, LOGIN_RESULT.systemError9],
+    [6, 8, 9],
+    "the client has four codes for the one system-error string",
+  );
 });
 
 test("a successful login reply carries the account info and the world list", () => {
@@ -186,7 +205,7 @@ test("the IPv4 field goes out in network order, the port as a little-endian u16"
 
 test("a redirect is mandatory when the client is told to enter the game", () => {
   assert.throws(() => encodeSelectCharacterResult(LOGIN_RESULT.ok), /game server address/);
-  assert.equal(toHex(encodeSelectCharacterResult(LOGIN_RESULT.suspended)), "0307");
+  assert.equal(toHex(encodeSelectCharacterResult(LOGIN_RESULT.alreadyConnected)), "0307");
 });
 
 test("the name-check reply is a string plus a signed byte", () => {
@@ -195,12 +214,20 @@ test("the name-check reply is a string plus a signed byte", () => {
   assert.throws(() => encodeNameCheckResult("Hero", 200), RangeError);
 });
 
-test("create and delete replies keep the client from terminating", () => {
-  const created = encodeCreateCharacterResult(LOGIN_RESULT.ok, characterDataOf(sampleStats()));
+test("the create reply is the one place 0 means failure - and a refused create sends just that", () => {
+  // 0x05 is the one reply in this chain where 0 is the *failure*: `sub_4329A0` reads one byte and
+  // only decodes a record when it is non-zero. A create reply carrying LOGIN_RESULT.ok would show
+  // "캐릭터 생성에 실패했습니다" and throw the record away.
+  const created = encodeCreateCharacterResult(characterDataOf(sampleStats()));
   assert.equal(created[0], LOGIN_OPCODE.createCharacter);
-  assert.equal(created[1], LOGIN_RESULT.ok);
+  assert.equal(created[1], CREATE_CHARACTER_RESULT.created);
+  assert.notEqual(created[1], 0, "a zero result byte is the client's failure path");
   assert.equal(created[2], CHAR_FLAG_STATS);
-  assert.throws(() => encodeCreateCharacterResult(LOGIN_RESULT.ok), /new character/);
+  const back = readCharacterData(new PacketReader(created, 2));
+  assert.deepEqual(back.stats, sampleStats(), "the record starts right after the result byte");
+
+  // A refusal is the opcode and one zero byte: no record for the client to read.
+  assert.equal(toHex(encodeCreateCharacterResult()), "0500");
 
   // The answer to a delete request is opcode 0x06, echoing the id and a non-zero flag.
   assert.equal(toHex(encodeDeleteCharacterResult(0x11223344, 1)), "064433221101");

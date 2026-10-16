@@ -172,8 +172,8 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8 (sub_4D0DB0 switches on the result byte)",
     codecs: ["encodeLoginResult"],
     fields: [
-      { name: "result", type: "u8", note: "LOGIN_RESULT: 0/1/>=10 continue, 2..9 are refusals" },
-      { name: "worlds", type: "u8 count + {u8 id, string name}[]", note: "only when result continues" },
+      { name: "result", type: "u8", note: "LOGIN_RESULT: 0/1/>=10 continue, 2..9/0xff are refusals" },
+      { name: "worlds", type: "u8 count + {string name, u32 unknownId}[]", note: "only when result continues" },
     ],
   },
   {
@@ -186,7 +186,7 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["encodeWorldSelectResult"],
     fields: [
       { name: "result", type: "u8" },
-      { name: "slots", type: "u8 count + {u8, u8}[]", note: "per channel occupancy, layout from sub_54E210" },
+      { name: "characters", type: "u8 count + CharacterData[]", note: "the client fills exactly three slots and zeroes the rest (sub_54E250)" },
     ],
   },
   {
@@ -226,7 +226,7 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8 / 4.9: result byte plus a whole CharacterData",
     codecs: ["encodeCreateCharacterResult"],
     fields: [
-      { name: "result", type: "u8" },
+      { name: "result", type: "u8", note: "CREATE_CHARACTER_RESULT: **0 = failed**, non-zero = a record follows (sub_4329A0)" },
       { name: "character", type: "CharacterData", note: "chardata.ts, flags tell which blocks follow" },
     ],
   },
@@ -239,8 +239,8 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8",
     codecs: ["encodeDeleteCharacterResult"],
     fields: [
-      { name: "characterId", type: "u32" },
-      { name: "flag", type: "u8" },
+      { name: "characterId", type: "u32", note: "the id the client sent; it must match a slot on screen" },
+      { name: "flag", type: "u8", note: "non-zero: 0 makes the client throw CTerminateException 570425350 (sub_432890)" },
     ],
   },
 

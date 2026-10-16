@@ -72,7 +72,7 @@ import { WzArchive } from "../src/wz/archive.ts";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { MapData } from "../src/game/map.ts";
-import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
+import { CREATE_CHARACTER_RESULT, LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 import { MemorySaveStore, loadAccounts } from "../src/game/save.ts";
 
@@ -268,10 +268,18 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   // 1. The client's first packet is always [0x04][id], which is 0 on the login connection.
   client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
 
-  // 2. A wrong password is refused and does not advance the stage.
+  // 2. A wrong password is refused and does not advance the stage - with the code whose message is
+  // "잘못된 패스워드입니다." (4, sub_4D0DB0), not the "id was erased or its connection stopped" one.
   client.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "wrong" });
   const refused = parseLoginReply((await client.take(1))[0]!);
-  assert.equal(refused.result, LOGIN_RESULT.wrongCredentials);
+  assert.equal(refused.result, LOGIN_RESULT.wrongPassword);
+  assert.equal(refused.result, 4);
+
+  // 2b. An id that is not in the table gets its own message: "등록되지 않은 아이디입니다." (5).
+  client.send({ kind: "login-request", opcode: 0x01, username: "nobody", password: "wrong" });
+  const noSuchAccount = parseLoginReply((await client.take(1))[0]!);
+  assert.equal(noSuchAccount.result, LOGIN_RESULT.notRegistered);
+  assert.equal(noSuchAccount.result, 5);
 
   // 3. The right password gets the world list.
   client.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "hunter2" });
@@ -298,7 +306,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   const createReply = (await client.take(1))[0]!;
   const createReader = new PacketReader(createReply);
   assert.equal(createReader.readByte(), LOGIN_OPCODE.createCharacter);
-  assert.equal(createReader.readByte(), LOGIN_RESULT.ok);
+  assert.equal(createReader.readByte(), CREATE_CHARACTER_RESULT.created);
   const created = readCharacterData(createReader);
   assert.equal(created.stats.name, "Hero");
   assert.equal(created.stats.level, 1);
@@ -1852,7 +1860,7 @@ test("the world comes back after a restart: the save file is the accounts", { ti
   const createdReply = (await create.take(1))[0]!;
   const createdReader = new PacketReader(createdReply);
   createdReader.readByte();
-  assert.equal(createdReader.readByte(), LOGIN_RESULT.ok);
+  assert.equal(createdReader.readByte(), CREATE_CHARACTER_RESULT.created);
   const hero = readCharacterData(createdReader);
   assert.equal(hero.stats.name, "Hero");
   create.close();

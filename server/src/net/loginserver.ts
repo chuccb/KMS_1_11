@@ -335,9 +335,17 @@ export class LoginServer {
       case "login-request": {
         if (state.stage !== "login") return;
         const account = this.options.accounts.get(packet.username);
-        if (!account || account.password !== packet.password) {
-          this.log(`  login refused for "${packet.username}"`);
-          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.wrongCredentials));
+        // Two different codes, because the client has two different messages: an unknown id is
+        // "등록되지 않은 아이디입니다." (5) and a wrong password is "잘못된 패스워드입니다." (4,
+        // `sub_4D0DB0`). Telling them apart is what the 2003 client was written for.
+        if (!account) {
+          this.log(`  login refused: no account named "${packet.username}"`);
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.notRegistered));
+          return;
+        }
+        if (account.password !== packet.password) {
+          this.log(`  login refused for "${packet.username}": wrong password`);
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.wrongPassword));
           return;
         }
         state.stage = "world";
@@ -415,20 +423,23 @@ export class LoginServer {
         if (state.stage !== "char" || state.username === undefined) return;
         const account = this.options.accounts.get(state.username);
         if (!account) return;
+        // A refusal is the bare reply with result 0 - the client prints "캐릭터 생성에 실패했습니다"
+        // for every failure (the *why* is this log), and 0 is the one value it never decodes a record
+        // from (`sub_4329A0`; see `encodeCreateCharacterResult`).
         if (account.characters.length >= 3) {
           this.log(`  create refused: "${state.username}" already has three characters`);
-          this.reply(socket, sendState, encodeCreateCharacterResult(LOGIN_RESULT.cannotConnect));
+          this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
         }
         if (this.nameTaken(packet.name)) {
           this.log(`  create refused: the name "${packet.name}" is taken`);
-          this.reply(socket, sendState, encodeCreateCharacterResult(LOGIN_RESULT.wrongCredentials));
+          this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
         }
         const template = account.characters[0]?.stats;
         const created = this.createCharacter(nextCharacterId(this.options.accounts), packet.name, state.appearanceHint ?? [], template);
         account.characters.push(created);
-        this.reply(socket, sendState, encodeCreateCharacterResult(LOGIN_RESULT.ok, created));
+        this.reply(socket, sendState, encodeCreateCharacterResult(created));
         this.log(`  created "${created.stats.name}" (id ${created.stats.id})`);
         this.persist();
         return;

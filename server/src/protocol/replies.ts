@@ -48,32 +48,55 @@ export const LOGIN_OPCODE = {
 } as const;
 
 /**
- * The result byte of the 0x01 / 0x02 / 0x03 replies and the message each one shows (`sub_4D0DB0`).
+ * The result byte of the 0x01 / 0x02 / 0x03 replies, with the message each value makes the client
+ * show.
  *
- * Only `ok` continues into the payload. The other values are grouped by message, exactly as the
- * client's switch groups them - a server that wants to say "wrong password" sends 4, not 3.
+ * ⚠️ The strings below were **read out of the binary** (`.rdata`; `aAi`, `aAi_0`, `aO_2`, `aAiI_0`
+ * are just Hex-Rays' names for the string constants) - and they are not what the symbol names
+ * suggest, so an earlier version of this file had four of the eight meanings wrong:
+ *
+ *   - `aAi`   = "지워지거나 접속 중지된 아이디입니다." - the id was **erased**, or its connection was
+ *               stopped. It is *not* "wrong id or password" (that id would be `aAi_0` below).
+ *   - `aAi_0` = "등록되지 않은 아이디입니다." - the id is not registered (what a login with an unknown
+ *               account wants).
+ *   - `aO_2`  = "시스템 오류로 접속 할 수 없습니다." - a plain system error, the client's generic
+ *               failure.
+ *   - `aAiI_0`= "현재 접속중인 아이디이거나,\r\n현재 서버점검중입니다." - the id is **currently
+ *               connected**, or the server is under maintenance.
+ *
+ * `7` is the one this server will want next: it is the client's own "already connected" message, so
+ * refusing a second login for an account that is already in a field is a state the 2003 client was
+ * built to display (FINDINGS 4.8, §6). Only `ok` continues into the payload, and the three handlers
+ * that read this byte (`sub_4D0DB0` login, `sub_54E250` world, `sub_432FB0` character) group the
+ * codes identically - so a code means the same thing wherever it is sent. The one packet in the login
+ * chain that **does not** use 0 for success is the create-character reply, see
+ * `encodeCreateCharacterResult`.
+ *
+ * The `.c` is CP949: grepping it for Korean text that was typed as UTF-8 in this repo finds nothing
+ * and *looks* like proof of absence. Use `tools/kstr.py`, or decode the file first.
  */
 export const LOGIN_RESULT = {
   /** Success: parse the payload and switch to the next stage. */
   ok: 0,
-  /** "아이디 또는 비밀번호가 틀렸습니다." (aAi) - wrong id or password. */
-  wrongCredentials: 2,
+  /** "지워지거나 접속 중지된 아이디입니다." (aAi) - the id was erased or its connection stopped. */
+  erasedOrStopped: 2,
   /** Same message as 2; the client has two codes for it. */
-  wrongCredentials2: 3,
-  /** "잘못된 비밀번호입니다." (asc_5B3610) - wrong password. */
+  erasedOrStopped2: 3,
+  /** "잘못된 패스워드입니다." (asc_5B3610) - wrong password. */
   wrongPassword: 4,
-  /** "접속할 수 없는 아이디입니다." (aAi_0) - this id may not connect. */
-  cannotConnect: 5,
-  /** "이용에 제한이 있는 아이디입니다." (aO_2) - the id is restricted. */
-  restricted: 6,
-  /** "정지 당한 아이디이거나\r\n차단된 아이피입니다." (aAiI_0) - suspended id / blocked ip. */
-  suspended: 7,
-  /** Same message as 6. */
-  restricted2: 8,
-  /** Same message as 6. */
-  restricted3: 9,
-  /** Same message as 6 (this is the value 0 - 1, i.e. 255 as a signed byte). */
+  /** "등록되지 않은 아이디입니다." (aAi_0) - no such id. */
+  notRegistered: 5,
+  /** "현재 접속중인 아이디이거나,\r\n현재 서버점검중입니다." (aAiI_0) - already connected, or in
+   *  maintenance. The code to answer a second login with once this server tracks who is in a field. */
+  alreadyConnected: 7,
+  /** "시스템 오류로 접속 할 수 없습니다." (aO_2) - a system error; the generic failure. */
   systemError: 0xff,
+  /** Same message as `systemError`; the client's switch has four codes for one string. */
+  systemError6: 6,
+  /** Same message as `systemError`. */
+  systemError8: 8,
+  /** Same message as `systemError`. */
+  systemError9: 9,
 } as const;
 
 /** One entry of the world list that rides along in the 0x01 reply. */
@@ -194,11 +217,17 @@ export function encodeSelectCharacterResult(result: number, redirect?: GameServe
   return writer.toBytes();
 }
 
-/** Result byte of the 0x04 reply (`sub_432430`). Signed: 0 = free, < 0 = error, > 0 = taken. */
+/**
+ * Result byte of the 0x04 reply (`sub_432430`). Signed: 0 = free, < 0 = error, > 0 = taken.
+ *
+ * The client's own three messages (`.rdata`): free -> "캐릭터이름 '%s'는\r\n 사용하실 수 있습니다",
+ * taken -> "캐릭터이름 '%s'는\r\n 이미 사용중 입니다", error -> "알 수 없는 오류로\r\n 캐릭터이름
+ * 중복 확인에 실패했습니다".
+ */
 export const NAME_CHECK_RESULT = {
-  /** "캐릭터명 '%s'으로 생성하실 수 있습니다" - the name is free. */
+  /** The name is free. */
   available: 0,
-  /** "그 밖의 오류 ..." - the check itself failed (any negative value). */
+  /** The check itself failed (any negative value) - the client's "unknown error" line. */
   failed: -1,
   /** Any positive value; the client then shows the duplicate-name message. */
   taken: 1,
@@ -217,17 +246,37 @@ export function encodeNameCheckResult(name: string, result: number): Uint8Array 
 }
 
 /**
- * 0x05 reply: the result of a create-character request, plus the created character.
+ * The result byte of the 0x05 reply (`sub_4329A0`): the one packet in the login chain where **0 is
+ * the failure**.
+ *
+ * The client reads one byte and, only when it is non-zero *and* it has a free character slot, reads a
+ * whole `CharacterData` into that slot. On any other value it prints "알 수 없는 오류로\r\n 캐릭터
+ * 생성에 실패했습니다" ("character creation failed due to an unknown error") - it has no second
+ * message for this reply, so *why* creation failed is a server log line, not wire data. That is also
+ * why this encoder takes the record instead of a code: "success" and "a record follows" are the same
+ * fact, and 0 is not a success value here the way it is in the 0x01/0x02/0x03 replies.
+ *
+ * The exact non-zero value the 2003 server sent is not in the client (nothing looks at it but
+ * zero-ness), so this build sends 1.
+ */
+export const CREATE_CHARACTER_RESULT = {
+  /** "알 수 없는 오류로\r\n 캐릭터 생성에 실패했습니다" - nothing follows. */
+  failed: 0,
+  /** Any non-zero value; a whole `CharacterData` follows. */
+  created: 1,
+} as const;
+
+/**
+ * 0x05 reply: the created character, or - with no argument - the client's generic failure.
  *
  * The client's request carries only the name (`sub_42FD30` sends opcode 5 and one string), so the
  * server has to remember the appearance from the preceding 0x06 request until the user confirms.
  */
-export function encodeCreateCharacterResult(result: number, character?: CharacterData): Uint8Array {
+export function encodeCreateCharacterResult(character?: CharacterData): Uint8Array {
   const writer = new PacketWriter(256);
   writer.writeByte(LOGIN_OPCODE.createCharacter);
-  writer.writeByte(result & 0xff);
-  if (result !== LOGIN_RESULT.ok) return writer.toBytes();
-  if (!character) throw new Error("a successful create-character reply needs the new character");
+  writer.writeByte(character === undefined ? CREATE_CHARACTER_RESULT.failed : CREATE_CHARACTER_RESULT.created);
+  if (character === undefined) return writer.toBytes();
   writeCharacterData(writer, character);
   return writer.toBytes();
 }
