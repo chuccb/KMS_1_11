@@ -70,6 +70,11 @@ export interface FieldMember {
   /** The name shown over the head (`0x1C`'s name string). */
   readonly name: string;
   /**
+   * The face the client draws this user with - `0x1C`'s first u32, stored at `CUser+68`
+   * (`CharacterData.appearanceA`; `lookOf` fills the starter face in when a character has none).
+   */
+  readonly face: number;
+  /**
    * The item ids the client draws the avatar from (`0x1C`'s list, terminated by 0 on the wire).
    * Zero never appears in it: the client stops reading at the first 0 (`sub_45F340`).
    */
@@ -318,11 +323,12 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   /**
    * The `0x1C` for one member: the body `CUserRemote::Init` reads (`sub_520680`).
    *
-   * Four fields are the client's own shape, not this server's knowledge: `unknown64` (a byte stored
-   * at `CUser+64`), `avatarKey` (the look's version key, `sub_508260`), and the two u32s the client
-   * reads and drops without storing. None of them is located, so all four go out as 0 - which is
-   * what a client that rebuilds the look for a user it has never seen needs. `action` is the same
-   * story: the stance byte of `CUser+180`, whose value table is not decoded, so a remote user always
+   * `face` is the one field of this packet that is this server's to fill and that the client really
+   * draws: it is the user's face id (`CharacterData.appearanceA`), and 0 would leave the user
+   * faceless. Three fields are the client's own shape, not this server's knowledge: `unknown64` (a
+   * byte stored at `CUser+64`) and the two u32s after the face, which the client reads and drops
+   * without storing. None of them is located, so all three go out as 0. `action` is the same story:
+   * the stance byte of `CUser+180`, whose value table is not decoded, so a remote user always
    * arrives standing.
    */
   private enterPacket(member: M): Uint8Array {
@@ -331,7 +337,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       characterId: member.characterId,
       name: member.name,
       unknown64: 0,
-      avatarKey: 0,
+      face: member.face,
       unknownA: 0,
       unknownB: 0,
       avatarItems: member.avatarItems,

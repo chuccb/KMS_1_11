@@ -18,7 +18,7 @@
 | `src/net/heartbeat.ts` | ✅ **心跳**：對安靜的 session 送 `0x08`，client 的 `sub_43B280` 無條件回聲（任何階段都有效，FINDINGS §4.2／§4.30）；安靜超過三個間隔就 `destroy()`，於是座位歸還、`0x1D`、存檔都照既有的 close 路徑走。間隔與逾時是我們的選擇（預設 30 s／90 s，`--ping <ms\|off>`）|
 | `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色的**唯一真相是一份記憶體表**（`LoginServerOptions.accounts`），寫進檔案由 `persist` 回呼負責（`src/game/save.ts`，ADR-017）：建立角色、刪除角色與 **session 結束**時各存一次；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**密語與找人**也會在這裡落地（`handleUserRequest` → `sessionNamed` 掃線上 session，跨圖用 `target.send`，§4.31）；**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
-| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）、**0x27 表情**（`u32 characterId`＋`u32 emotion`，0..8 ＝ `EMOTION_NAMES`）；client 端的 0x0E（自己的移動）、**0x13 表情**與 0x0D（點擊傳送門／物件），以及 **0x1C 玩家自己的 HP／MP 變動回報**
+| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場（**第一個 u32 ＝ 臉**，`face`）、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）、**0x27 表情**（`u32 characterId`＋`u32 emotion`，0..8 ＝ `EMOTION_NAMES`）；client 端的 0x0E（自己的移動）、**0x13 表情**與 0x0D（點擊傳送門／物件），以及 **0x1C 玩家自己的 HP／MP 變動回報**
 （`[u32 flags][s16 hpΔ][s16 mpΔ][u8 flag]`，旗標與 `0x0D` 共用 `statDiffFlag`；`readClientStatReport`／
 `encodeClientStatReport`，§4.33）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行；以及 **聊天**（client 的 `0x12` 說一句 → `0x1A` ＋ sub-op `0x12` ＋ 名字 ＋ 同一串 bytes，`readClientChat`／`encodeUserChat`／`readUserChat`）與 **密語／找人**（client 的 `0x23`（`u8 kind`＋名字＋〔訊息〕）→ `0x1A` sub-op `0x09`（名字＋地圖 id）／`0x0A`（名字＋成功旗標），`readClientUserRequest`／`encodeUserFindAnswer`／`encodeUserWhisperAnswer`，§4.31）。 |
 | `src/protocol/mob.ts` | ✅ **怪物封包**：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊）、`0x33` 移動（動作位元組 + `u32` + `CMovePath`）、`0x30` 開始死亡動畫（`s16 delayMs`）、`0x31` 收屍／重生（`u8 flag`＋`u32 mobId`，`flag != 0` 時再接 `templateId` 與**與 `0x2F` 逐 byte 相同**的身體）、`0x35` 怪物動畫（＝`0x2F` 尾巴那塊動畫區塊，同一份實作）、`0x34` 怪物 MP；另有 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16／§4.17）。 |
@@ -423,7 +423,38 @@ client 打字送 `0x12`（一個字串）；伺服器把它轉成 `0x1A` ＋ sub
   `Effect/BasicEff.img/LevelUp`（`sub_55BEB0` 的尾端）；其他人收到 `0x29`（`u32 characterId` ＋
   `u8 0`），同一組特效畫在那個人身上。⚠️「不送給升級的人自己」是推論（兩條路都會播，兩者都送會播兩次）。
 - **還沒有**：頻道／分流（`FieldRegistry.of` 的 key 要加上 channel）、`0x1C` 的三個欄位
-  （`unknown64`／`avatarKey`／`action` 送 0，語意未解）、`0x29` 的 effect `1`（後面還有一個 `u32`，未解）。
+  （`unknown64`／第二與第三個 u32／`action` 送 0，語意未解；第一個 u32 是**臉**，已解，見下一節）、
+  `0x29` 的 effect `1`（後面還有一個 `u32`，未解）。
+
+### 起始外觀：臉與頭髮（ADR-024／FINDINGS §4.8.1a、§4.11.3c）
+
+client 畫一個角色的頭只需要兩個數字，而它們在網路上的位置以前是錯的（或根本沒送）：
+
+| 值 | `CharacterData` | `0x1C`（別人進場）| 送到 `CUser` 的哪裡 |
+|---|---|---|---|
+| **臉**（`Character/Face/000xxxxx.img`）| `appearanceA`（`+18`）| 第一個 u32（欄位名 `face`）| `+68`（`sub_508260`）|
+| **頭髮**（`Character/Hair/0003xxxx.img`）| `appearanceB`（`+22`）| 外觀清單裡的那一格 | 外觀第 0 格（`sub_508290`）|
+| 臉部裝飾（`101xxxx`）| 穿戴裝備 | 外觀清單（`sub_45F340` 會把它挑出來）| `+72` |
+
+三條獨立的路都指向同一組：`0x1C` 的第一個 u32（`sub_520680` → `sub_507A20` → `sub_508260`）、
+紀錄的 `appearanceA`／`appearanceB`（`sub_42E2C0` → `sub_424590`／外觀第 0 格）、以及 `0x28` 的 flag bit 0
+（`sub_5221A0` 寫 `this[17]`）。`+68` 之所以確定是**臉**而不是「外觀版本鍵」，是因為表情播放器
+`sub_509070` 拿它去 `sub_408400` 找 `Character/Face/*.img` 的情緒節點（`"0"`..`"8"`）—— 別的圖沒有那些節點。
+`0x06`（建立角色）的十個 u32 也因此全部歸位：**臉、頭髮、上衣、褲子、鞋子、武器，然後四顆骰子**
+（`sub_431620` 依 `CUINewChar + 496 + 8k` 的順序送；`sub_430D00` 顯示這六格寫進 avatar 的部位 0／5／6／7／11）。
+
+伺服器端的規則：
+
+- **有就照用**：`createCharacter` 把 `0x06` 的第 1／2 個 u32 寫進紀錄的 `appearanceA`／`appearanceB`；
+  `0x1C` 送角色的臉，外觀清單是**頭髮 ＋ 穿戴中的裝備 id**（`sub_45F340` 靠 id 前綴歸位，清單唯一的
+  規則是不得含 0）。
+- **缺就補起始值，但只在送出邊界補**：`lookOf`（臉 `20000`、頭髮 `30000` —— `Data.wz` 裡
+  `Character/Face/00020000.img` 與 `Character/Hair/00030000.img`）＋`withDefaultLook`（`0x16` 與
+  `0x02`／`0x05` 的回包）。**存檔不改寫**：0 仍然讀作「還沒設定」，所以以後真的證明「沒設定」與
+  「起始值」在 client 端不同時，資料還在。
+- **衣服與骰子只記日誌**：衣服要變成穿戴裝備，得先證明「穿戴格欄號 ↔ 部位格」是同一套號碼
+  （`sub_42E2C0` 的線性迴圈是唯一線索）；骰子哪一顆是 STR／DEX／INT／LUK 沒有文字證據
+  （`.exe` 裡沒有那四個韓文字串）。兩者都留在 FINDINGS §6 第 16 項。
 
 ### 密語與找人（ADR-019／FINDINGS §4.31）
 
@@ -445,13 +476,15 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 
 `scripts/whisper_probe.mjs` 是這幾節（密語／死亡與復活／表情／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
-「跨圖密語／找人／找不到／氣球不回應／被打掉血／復活／**表情**／**買卷軸並用掉**」**34 個檢查** —— 其中兩條連線**真的在不同地圖上**：
+「跨圖密語／找人／找不到／氣球不回應／被打掉血／復活／**別人的臉與頭髮**／**表情**／**買卷軸並用掉**」**36 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
 報的是**對方**的地圖 id、密語也照樣送達（第二次跑同一份存檔會跳過那一步：角色的紀錄已經記得 `1010000`）；
 在復活之前它先送兩次 c2s `0x1C`（`sub_55B870(-damage, 0, 0)` 的位元組：`-30` 兩次），驗證第一次回來的
 `0x0D` 是 `hp = 20`、第二次是 `hp = 0`（夾住，不會到負的）；最後它送一次 `0x0D` `kind = 0`（復活），
 驗證回來的 `0x16` 進的是 `1000000` 真正的 `info/returnMap`（`1010000` 암허스트 村莊）、HP 補回 `50/50`，
-而且站在那裡的另一個人看到 `0x1C`。同一張圖上的表情那一項也一樣：Hero 送一個 `0x13`（臉 6，
+而且站在那裡的另一個人看到 `0x1C` —— 那個 `0x1C` 也順便被檢查：它的第一個 u32 是 Hero 的臉、
+外觀清單裡有他的頭髮（兩者都是伺服器在新角色身上填的起始外觀，因為這支探針的 `0x06` 送十個 0）。
+同一張圖上的表情那一項也一樣：Hero 送一個 `0x13`（臉 6，
 「bewildered」），Alt 收到 `0x27` 帶著 Hero 的角色 id 與 `6`，而 Hero **自己什麼都沒收到**
 （他的 client 已經套用過了）。最後一段用的是**同一份真資料**：Hero 認出村莊 `0x39` 裡 마이（12100）的池 id、
 點它開窗（`0x4A` 的四列裡 헤네시스 귀환 주문서 ＝ 90）、買下來（`0x4B silent`＋`0x0B put`＋錢包 `200 → 110`），
@@ -461,7 +494,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 ```bash
 node server/src/cli.ts serve --port 8495 --game-port 8496 \
      --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（34 個檢查）
+node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（36 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

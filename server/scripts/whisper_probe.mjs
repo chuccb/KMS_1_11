@@ -38,7 +38,13 @@ import { PacketReader, PacketWriter } from "../src/protocol/packet.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
 import { readStatUpdate } from "../src/protocol/stat.ts";
-import { CLIENT_FIELD_OPCODE, encodeClientUseItem, encodeClientEmotion, readUserEmotion } from "../src/protocol/field.ts";
+import {
+  CLIENT_FIELD_OPCODE,
+  encodeClientUseItem,
+  encodeClientEmotion,
+  readUserEmotion,
+  readUserEnterField,
+} from "../src/protocol/field.ts";
 import { FIELD_OPCODE } from "../src/protocol/field.ts";
 import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
@@ -149,6 +155,9 @@ async function enterGame(user, password, wanted) {
   console.log(`  ${user}: ${count} character(s) [${list.map((c) => `${c.stats.name}#${c.stats.id}`).join(", ")}]`);
 
   if (!list.some((character) => character.stats.name === wanted)) {
+    // Ten zero appearance words: the client would send its dialog's picks here (face, hair, top,
+    // bottom, shoes, weapon, then four dice), so this is the "picked nothing" case - the server has
+    // to fall back on the starter face and hair (`lookOf`) rather than create a faceless character.
     const check = new PacketWriter(64);
     check.writeByte(0x06).writeAsciiString(wanted);
     for (let i = 0; i < 10; i++) check.writeU32(0);
@@ -187,7 +196,7 @@ async function enterGame(user, password, wanted) {
   const claim = new PacketWriter(8);
   claim.writeByte(0x04).writeU32(handoff);
   game.send(claim.toBytes());
-  return { game, name: character.stats.name, characterId: handoff };
+  return { game, name: character.stats.name, characterId: handoff, character };
 }
 
 /** `0x16` = opcode, mode, "carries data", three seed u32s, then the full CharacterData. */
@@ -315,8 +324,18 @@ expect(revived.stats.hp === revived.stats.maxHp, `and refilled the HP the report
 
 // The town Alt is standing in hears Hero come back: the revive joined the new field, it was not just
 // a packet to the one person who died.
-const arrived = new PacketReader(await alt.game.take(0x1c), 1).readU32();
-expect(arrived === hero.characterId, `the others see Hero arrive (0x1C id ${arrived})`);
+const arrivedUser = readUserEnterField(new PacketReader(await alt.game.take(0x1c), 1));
+expect(arrivedUser.characterId === hero.characterId, `the others see Hero arrive (0x1C id ${arrivedUser.characterId})`);
+// The 0x1C's first u32 is the face the client draws (`sub_507A20` -> `sub_508260` -> `CUser+68`),
+// not an opaque version key, and the hair travels in the avatar list (`sub_42E2C0` puts the
+// record's `appearanceB` into body-part slot 0). Both are filled from the record the login chain
+// created, or with the starter look where it has none (FINDINGS 4.8.1a/4.11.3c).
+const heroLook = hero.character.stats;
+expect(arrivedUser.face === heroLook.appearanceA, `and with Hero's own face (${arrivedUser.face})`);
+expect(
+  arrivedUser.avatarItems.includes(heroLook.appearanceB),
+  `and his hair (${heroLook.appearanceB}) among the avatar ids [${arrivedUser.avatarItems.join(",")}]`,
+);
 
 // --- an emotion: 0x13 out, 0x27 to the rest of the field, nothing back (FINDINGS 4.35) ------------
 // Hero and Alt are both in the town 1010000 here (the revive above moved Hero in). The F-keys are the

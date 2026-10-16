@@ -14,6 +14,8 @@ import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import {
+  DEFAULT_FACE_ID,
+  DEFAULT_HAIR_ID,
   characterDataOf,
   readCharacterData,
   startingCharacterItems,
@@ -347,7 +349,15 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(worldReply[2], 0, "no characters yet");
 
   // 5. Name check -> 0x04 reply; then create -> 0x05 reply carrying the new CharacterData.
-  client.send({ kind: "check-name", opcode: 0x06, name: "Hero", appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+  // `0x06`'s ten words are the dialog's six picks - face, hair, top, bottom, shoes, weapon - and its
+  // four dice rolls (FINDINGS 4.8.1a). Only the first two can reach the record today: the clothes
+  // would have to arrive as worn equips, and nothing in this build proves their slot numbers yet.
+  client.send({
+    kind: "check-name",
+    opcode: 0x06,
+    name: "Hero",
+    appearance: [20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 7],
+  });
   const nameReply = (await client.take(1))[0]!;
   const nameReader = new PacketReader(nameReply);
   assert.equal(nameReader.readByte(), LOGIN_OPCODE.nameCheckResult);
@@ -361,6 +371,11 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(createReader.readByte(), CREATE_CHARACTER_RESULT.created);
   const created = readCharacterData(createReader);
   assert.equal(created.stats.name, "Hero");
+  assert.deepEqual(
+    [created.stats.appearanceA, created.stats.appearanceB],
+    [20000, 30000],
+    "the new character carries the face and hair the dialog picked (0x06 words 1 and 2)",
+  );
   assert.equal(created.stats.level, 1);
   assert.ok(created.stats.id > 0);
   assert.equal(createReader.exhausted, true);
@@ -1612,6 +1627,12 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
     },
     { characterId: 7, name: "Hero", x: 100, y: 200, foothold: 32 },
     "the player already there, at the map's spawn portal and on its foothold",
+  );
+  assert.deepEqual(
+    [aboutHero.face, aboutHero.avatarItems],
+    [DEFAULT_FACE_ID, [DEFAULT_HAIR_ID]],
+    "and with a face and hair - a hand-built handoff record has no look of its own, so the " +
+      "server fills the starter one in rather than sending a user with no face at all",
   );
 
   const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userEnterField);

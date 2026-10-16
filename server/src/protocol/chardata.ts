@@ -84,13 +84,31 @@ export interface CharacterStats {
   name: string;
   /** u8 @+17. */
   gender: number;
-  /** u32 @+18. Cosmetic ids from `Character.wz`, fed to `sub_424590`. */
+  /**
+   * u32 @+18 - the character's **face** (`Character/Face/000xxxxx.img`).
+   *
+   * `sub_42E2C0` (the char-select window's avatar) copies the record and then hands `*(record+18)`
+   * to `sub_424590(avatar, face, faceAccessory)` - the twin of `sub_508260`, whose first argument
+   * is the face a user is drawn with (`CUser+68`, the slot the emotion code animates through
+   * `sub_509070` -> `sub_408400`). `0x06`'s first appearance word is the same slot
+   * (`sub_430D00`'s first combo, fed to `sub_424590`).
+   */
   appearanceA: number;
-  /** u32 @+22; `sub_42E2C0` copies it into avatar body-part slot 0. */
+  /**
+   * u32 @+22 - the character's **hair** (`Character/Hair/0003xxxx.img`).
+   *
+   * `sub_42E2C0` puts `*(record+22)` straight into `src[0]` of the avatar's 15-slot body-part
+   * array, and slot 0 is the slot `sub_45F340` files a `3xxxx` id into (FINDINGS 4.11.3b) - the
+   * hair. `0x06`'s second appearance word is that same slot (`sub_430D00`).
+   */
   appearanceB: number;
   /** u8 @+26; role unlocated. Must still be present - the client throws on underflow. */
   unknown26: number;
-  /** u32 @+27. */
+  /**
+   * u32 @+27 - **not** the hair the client draws: `sub_45D840` stores this word verbatim and
+   * nothing in the record path reads it back, while the drawn hair is `appearanceB` (above).
+   * Role unlocated; our records always write 0.
+   */
   hair: number;
   /** u8 @+31. Level-up detection in the `0x0D` handler reads the pair at +31/+32. */
   level: number;
@@ -199,6 +217,39 @@ export const START_INVENTORY_SLOTS = 24;
 export function startingCharacterItems(slots = START_INVENTORY_SLOTS): CharacterItems {
   const empty = (): Inventory => ({ capacity: slots, items: new Map(), records: [] });
   return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
+}
+
+/**
+ * The face and hair a character with none of its own is drawn with.
+ *
+ * Two *server* numbers, like the drop odds: the client has no defaults of its own - `sub_42E2C0`
+ * hands whatever `appearanceA`/`appearanceB` hold to `sub_424590`/`sub_424410`, and a 0 there is a
+ * body part that does not exist in the archive. `20000` and `30000` are the first images of
+ * `Character/Face/00020000.img` and `Character/Hair/00030000.img` in the shipped `Data.wz`, i.e.
+ * the look every generation of this client starts a character with.
+ */
+export const DEFAULT_FACE_ID = 20000;
+export const DEFAULT_HAIR_ID = 30000;
+
+/** What sits on the character's head: the record's face and hair, or the starters when it has none. */
+export function lookOf(stats: { appearanceA: number; appearanceB: number }): { face: number; hair: number } {
+  return {
+    face: stats.appearanceA !== 0 ? stats.appearanceA : DEFAULT_FACE_ID,
+    hair: stats.appearanceB !== 0 ? stats.appearanceB : DEFAULT_HAIR_ID,
+  };
+}
+
+/**
+ * The same record with `lookOf`'s face and hair filled in - the form a client should be sent.
+ *
+ * A save written before the two fields were known (or one made by hand) has 0 there, and the client
+ * would draw that character without a face or hair; the *stored* record stays untouched, so a
+ * server that later learns what a character really wears can still tell "never set" from "set".
+ */
+export function withDefaultLook(data: CharacterData): CharacterData {
+  const look = lookOf(data.stats);
+  if (look.face === data.stats.appearanceA && look.hair === data.stats.appearanceB) return data;
+  return { ...data, stats: { ...data.stats, appearanceA: look.face, appearanceB: look.hair } };
 }
 
 /** Pads/validates the 13-byte name field. Names are byte strings in this client (`sub_45DD00`). */

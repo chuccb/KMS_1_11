@@ -141,7 +141,7 @@ const sampleUser: UserEnterField = {
   characterId: 1000,
   name: "Bob",
   unknown64: 1,
-  avatarKey: 0x11223344,
+  face: 0x11223344,
   unknownA: 0,
   unknownB: 0,
   avatarItems: [1040000, 30000],
@@ -159,7 +159,7 @@ test("user enter field is byte exact (opcode, name string, avatar list, position
       "e8030000" + // characterId 1000
       "0300426f62" + // "Bob" with its u16 length
       "01" + // unknown64
-      "44332211" + // avatarKey
+      "44332211" + // face (the drawn face id; 0x11223344 is deliberate nonsense)
       "00000000" +
       "00000000" +
       "80de0f00" + // 1040000

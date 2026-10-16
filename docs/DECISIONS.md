@@ -938,3 +938,54 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
   「別人收到 `0x27`、送出的人什麼都沒收到、`9` 被丟掉」）→ **386**；`whisper_probe.mjs` 多 3 項 → **34**。
 - 這一格收掉 `CUserPool` 的 `0x27`；同一個範圍剩下的是 `0x1E`／`0x20`／`0x21`／`0x23`–`0x26`／`0x28`／
   `0x2A`（其中 `0x1F` 的形狀已定位）。
+
+## ADR-024：起始外觀 —— `appearanceA`／`appearanceB` 是臉與頭髮，缺的一律補起始值：`appearanceA`／`appearanceB` 是臉與頭髮，缺的一律補起始值
+
+**背景**：`0x1C`（別人進場）的第一個 u32 一直當成「外觀版本鍵」送 0，`createCharacter` 也從不寫紀錄的
+`appearanceA`／`appearanceB`（`0x06` 的十個 u32 只進日誌）。結果是**每個角色都沒有臉、沒有頭髮** ——
+「建立的角色全身空著」（§6 第 16 項）講的就是這件事。
+
+**證據**（全部是呼叫鏈，見 FINDINGS §4.8.1a／§4.11.3c）：
+
+- `0x1C` 的第一個 u32 → `sub_507A20` → `sub_508260` → `CUser+68`，而 `+68` 正是表情／動畫播放器
+  `sub_509070` 拿給 `sub_408400` 去 `Character/Face/*.img` 找情緒節點的那個**臉**（`sub_45D500` 讀
+  `"0"`..`"8"`）。第二個 u32 的孿生路徑是 `0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）。
+- 紀錄的兩個字：`sub_42E2C0` 把 `+18`（`appearanceA`）餵 `sub_424590`（與 `sub_508260` 同形，寫的是
+  同一格臉），把 `+22`（`appearanceB`）放進外觀第 0 格 —— 第 0 格是 `sub_45F340` 給 `3xxxx`
+  （`Character/Hair`）的那一格（§4.11.3b）。
+- `0x06` 的十個 u32：`sub_431620(1002)` 依 `CUINewChar + 496 + 8k` 的順序送六個下拉選單
+  （`.c:57462`），而預覽刷新 `sub_430D00` 顯示這六格是臉／`src[0]`／`src[5]`／`src[6]`／`src[7]`／`src[11]`
+  —— 臉、頭髮、上衣、褲子、鞋子、武器；尾巴四個是骰子（`+420..+432`，`sub_430630`）。
+
+**決策**：
+
+1. **正名**：`0x1C` 的第一個 u32 由 `avatarKey` 改成 `face`（`UserEnterField`、`schema.ts` 同步），
+   `FieldMember` 多一個 `face`。留著錯的名字等於留著一個會被下一個人照著實作的誤解。
+2. **紀錄的 `appearanceA`／`appearanceB` 就是臉與頭髮**：`createCharacter` 用 `0x06` 的前兩個 u32 寫入；
+   `appearanceB` 同時進 `0x1C` 的外觀清單（`avatarItemsOf` 把頭髮放在最前面）—— `sub_45F340` 靠 id 前綴
+   歸位，清單唯一的規則是「不得含 0」。
+3. **缺外觀的角色補起始值，而且只在送出的邊界補**：`lookOf`（臉 `20000`、頭髮 `30000`，即
+   `Data.wz` 裡的 `Character/Face/00020000.img` 與 `Character/Hair/00030000.img`）＋`withDefaultLook`
+   （`0x16`、`0x02`／`0x05` 的回包）。**存檔不因此改寫**：0 仍然讀作「還沒設定」。
+4. **衣服與骰子那八個 u32 繼續只記日誌**：衣服變成穿戴裝備前必須先證明「穿戴格欄號 ↔ 部位格」是同一套
+   號碼；骰子哪一顆是哪個能力值沒有文字證據（`.exe` 裡沒有那四個韓文字串）。寧可少給，不要發明。
+
+**被否決的選項與原因**：
+
+- **繼續把第一個 u32 當「版本鍵」送 0**：client 會拿 0 去畫一個不存在的臉部部位（`Character/Face/00000000.img`），
+  等於明知有問題還送；而且第二條證據（`sub_42E2C0`）也指向同一格。
+- **把 `chardata.ts` 的 `hair`（`u32 @+27`）當成頭髮**：`sub_45D840` 只是把它原封不動存下來，紀錄路徑
+  沒有任何人讀它，而畫面上真正的頭髮來自 `+22`。改名會動到存檔欄位卻沒有任何行為差異 → 只改註解。
+- **在 `characterDataOf`（codec）裡補起始值**：那會讓每個 golden 測試的 bytes 跟「伺服器政策」綁死；
+  補在送出邊界語意清楚，也留得住「原樣」。
+- **一律蓋掉 client 選的臉／頭髮**：那會讓「選了沒生效」變成長期行為，而 `0x06` 的前兩個 u32 現在有證據。
+
+**後果**：
+
+- `protocol/chardata.ts`：`DEFAULT_FACE_ID`／`DEFAULT_HAIR_ID`／`lookOf`／`withDefaultLook` 與三個欄位的
+  註解；`protocol/field.ts`：`avatarKey` → `face`；`net/loginserver.ts`：`createCharacter` 用 `0x06` 的前兩個
+  u32、`avatarItemsOf` 帶頭髮、`setFieldOf`／`0x02`／`0x05` 補起始值；`game/world.ts`：`FieldMember.face`。
+- 測試 +4（新的 `test/look.test.ts`）＋既有案例改成帶臉與頭髮 → **390**；`whisper_probe.mjs` +2
+  （「別人的 `0x1C` 帶著他自己的臉與頭髮」）→ **36 項**。
+- `schema.ts` 的 `0x1C` 列改名並補上兩個「讀了就丟」的 u32（**64** 列不變）。
+- 剩下的兩塊留在 §6 第 16 項：(a) 骰子的能力值對應、(b) 衣服 → 穿戴裝備。

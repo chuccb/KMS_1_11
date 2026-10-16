@@ -27,14 +27,16 @@ import type { MobTemplate } from "../src/game/mobs.ts";
 class FakeMember implements FieldMember {
   readonly characterId: number;
   readonly name: string;
+  readonly face: number;
   readonly avatarItems: number[];
   at: FieldPosition | undefined;
   readonly packets: Uint8Array[] = [];
 
-  constructor(characterId: number, name: string, avatarItems: number[] = []) {
+  constructor(characterId: number, name: string, avatarItems: number[] = [], face = 0) {
     this.characterId = characterId;
     this.name = name;
     this.avatarItems = avatarItems;
+    this.face = face;
   }
 
   send(packet: Uint8Array): void {
@@ -155,8 +157,8 @@ test("0x3B: the client walks the NPCs the policy names, and a later player is to
 
 test("a second player and the first learn about each other with one 0x1C each - and never their own", () => {
   const field = stubField();
-  const hero = new FakeMember(1, "Hero");
-  const alt = new FakeMember(2, "Alt", [1002001]);
+  const hero = new FakeMember(1, "Hero", [], 20000);
+  const alt = new FakeMember(2, "Alt", [30000, 1002001], 20005);
   field.join(hero);
   hero.clear();
   field.join(alt);
@@ -169,8 +171,13 @@ test("a second player and the first learn about each other with one 0x1C each - 
   const aboutHero = readUserEnterField(new PacketReader(altSaw[0]!, 1));
   assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [2, "Alt"]);
   assert.deepEqual([aboutHero.characterId, aboutHero.name], [1, "Hero"]);
-  assert.deepEqual(aboutAlt.avatarItems, [1002001], "the worn items travel as the avatar list");
+  assert.deepEqual(aboutAlt.avatarItems, [30000, 1002001], "the hair and the worn items travel as the avatar list");
   assert.deepEqual(aboutHero.avatarItems, []);
+  assert.deepEqual(
+    [aboutAlt.face, aboutHero.face],
+    [20005, 20000],
+    "the face each member carries goes out as the 0x1C's first u32 - it is what the client draws",
+  );
   assert.equal(field.memberCount, 2);
 });
 

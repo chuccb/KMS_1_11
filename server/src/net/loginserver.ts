@@ -110,7 +110,9 @@ import {
 import {
   characterDataOf,
   emptyCharacterItems,
+  lookOf,
   startingCharacterItems,
+  withDefaultLook,
   zeroStats,
   type CharacterData,
   type CharacterItems,
@@ -290,6 +292,13 @@ export class LoginServer {
    * `items` is what makes the character look dressed: the client draws the avatar from the worn
    * equips in `CharacterData` (`flags & 0x02`), so a caller that has an item model should pass one.
    * With no items the record stays a flags byte + the 69-byte stat block, which the client accepts.
+   *
+   * `appearance` is the ten u32 of `0x06` (FINDINGS 4.8.1a). The first two are the only ones this
+   * server can use: they are the face and the hair, the same two body parts the record's
+   * `appearanceA`/`appearanceB` hold, and with a 0 in either the character would be faceless. Words
+   * 3..6 pick the starting top/bottom/shoes/weapon and words 7..10 are the client's dice roll - the
+   * clothes would have to arrive as *worn equips*, and this server has no proven worn-slot
+   * numbering for them yet, so both groups are logged and dropped instead of invented.
    */
   createCharacter(
     id: number,
@@ -298,7 +307,7 @@ export class LoginServer {
     template?: CharacterStats,
     items?: CharacterItems,
   ): CharacterData {
-    void appearance; // the 10 words of 0x06 are logged; their stat mapping is not proven yet
+    const look = lookOf({ appearanceA: appearance[0] ?? 0, appearanceB: appearance[1] ?? 0 });
     // A character without slots could never be handed anything: the capacity byte is what makes the
     // client allocate an inventory at all (see `startingCharacterItems`), so bags are the default.
     const block = items ?? startingCharacterItems();
@@ -307,6 +316,8 @@ export class LoginServer {
         ...template,
         id,
         name,
+        appearanceA: look.face,
+        appearanceB: look.hair,
         hp: template.maxHp,
         mp: template.maxMp,
       };
@@ -315,6 +326,8 @@ export class LoginServer {
     const stats = zeroStats();
     stats.id = id;
     stats.name = name;
+    stats.appearanceA = look.face;
+    stats.appearanceB = look.hair;
     stats.mapId = this.options.startMapId ?? DEFAULT_MAP_ID;
     stats.level = 1;
     stats.str = 5;
@@ -446,7 +459,11 @@ export class LoginServer {
           return;
         }
         state.stage = "char";
-        this.reply(socket, sendState, encodeWorldSelectResult(LOGIN_RESULT.ok, account.characters.slice(0, 3)));
+        this.reply(
+          socket,
+          sendState,
+          encodeWorldSelectResult(LOGIN_RESULT.ok, account.characters.slice(0, 3).map(withDefaultLook)),
+        );
         this.log(`  world ${packet.worldId} selected, ${Math.min(account.characters.length, 3)} character(s) sent`);
         return;
       }
@@ -514,7 +531,7 @@ export class LoginServer {
         const template = account.characters[0]?.stats;
         const created = this.createCharacter(nextCharacterId(this.options.accounts), packet.name, state.appearanceHint ?? [], template);
         account.characters.push(created);
-        this.reply(socket, sendState, encodeCreateCharacterResult(created));
+        this.reply(socket, sendState, encodeCreateCharacterResult(withDefaultLook(created)));
         this.log(`  created "${created.stats.name}" (id ${created.stats.id})`);
         this.persist();
         return;
@@ -895,6 +912,7 @@ export class GameEntryServer {
     const session: FieldSession = {
       characterId: entry.characterId,
       name: character.stats.name,
+      face: lookOf(character.stats).face,
       avatarItems: avatarItemsOf(character),
       instance,
       character,
@@ -955,6 +973,14 @@ export class GameEntryServer {
    * portal change lands the player where a first entry lands them, at the map's own spawn point
    * (`FieldInstance.spawnAt`).
    */
+  /**
+   * The `0x16` body for one character.
+   *
+   * The record is the one the client builds the whole field avatar from, so it is also the one place
+   * a look is *required*: `withDefaultLook` fills the starter face and hair into a record that has
+   * none (an older save, or a hand-built handoff), because a 0 there is a body part no WZ archive
+   * has and the player would stand there without a face.
+   */
   private setFieldOf(character: CharacterData): SetField {
     return {
       mode: 0,
@@ -962,7 +988,7 @@ export class GameEntryServer {
       randomSeedA: randomSeed(),
       randomSeedB: randomSeed(),
       randomSeedC: randomSeed(),
-      character,
+      character: withDefaultLook(character),
     };
   }
 
@@ -1966,23 +1992,26 @@ function withMapId(entry: HandoffEntry, fallbackMapId: number): CharacterData {
   stats.mapId = fallbackMapId;
   // A hand-built handoff has no login server behind it, so it gets the bags `createCharacter` would
   // have given it: the capacity byte is what makes the client allocate an inventory at all, and a
-  // character with no slots could never be handed a drop (`startingCharacterItems`).
+  // character with no slots could never be handed a drop (`startingCharacterItems`). Its look comes
+  // from the handoff's own record; `setFieldOf` fills the starter face and hair in when it has none.
   return characterDataOf(stats, startingCharacterItems());
 }
 
 /**
  * The item ids a client needs to draw a character's avatar (`0x1C`'s list).
  *
- * They are the worn equips of the record the player was sent (`CharacterData`'s two worn arrays are
- * `GW_ItemSlot`s, so each carries its item id), which is the same set the client files by slot when it
- * reads them (`sub_45F340`). A character with nothing worn gets the empty list - the client then draws
- * its own default look, which is what that client's own avatar looks like too. Zero never appears:
- * that list ends at the first 0.
+ * Two sources: the **hair** first - it is not a worn equip but the record's `appearanceB`
+ * (`sub_42E2C0` puts it straight into body-part slot 0, the slot `sub_45F340` files a `3xxxx` id
+ * into) - and then the worn equips of the record the player was sent (`CharacterData`'s two worn
+ * arrays are `GW_ItemSlot`s, so each carries its item id). `sub_45F340` sorts every id into its
+ * body-part slot by the id's own prefix, so the order inside the list carries no meaning; what does
+ * matter is that it never contains a 0, because the client stops reading at the first one. A bare
+ * character therefore still gets its hair, or it would be drawn bald.
  */
 function avatarItemsOf(character: CharacterData): number[] {
+  const ids: number[] = [lookOf(character.stats).hair];
   const items = character.items;
-  if (items === undefined) return [];
-  const ids: number[] = [];
+  if (items === undefined) return ids;
   for (const slot of [...items.worn.values(), ...items.wornCash.values()]) {
     if (slot.itemId !== 0) ids.push(slot.itemId);
   }

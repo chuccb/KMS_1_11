@@ -205,7 +205,7 @@ export const FIELD_OPCODE = {
  *   u32 charId            (read by the caller `sub_51CFE0`, so not part of this struct)
  *   string name           -> CUser+60
  *   u8  unknown64         -> CUser+64
- *   u32 avatarKey         -> CUser+68 (`sub_508260` = `CUser::SetAvatar`)
+ *   u32 face              -> CUser+68, the face the user is drawn with (`sub_508260`)
  *   u32 unknownA          read, then dropped by the client
  *   u32 unknownB          read, then dropped by the client
  *   u32 itemId...         avatar item ids, terminated by a 0 u32 (`sub_45F340`)
@@ -214,10 +214,17 @@ export const FIELD_OPCODE = {
  *   u8  action            -> CUser+180, and arg6 of the vecctrl init call
  *   u16 foothold          -> `sub_485400(field, id)`, the foothold lookup
  *
+ * `sub_520680` reads `name`, `unknown64`, **three** u32s and then the item list; the first of the
+ * three is the face. It ends by handing the list, that word and the item list's `101xxxx` entry (the
+ * face accessory `sub_45F340` pulls out) to `sub_507A20(user, face, faceAccessory, lookArray)`, which
+ * stores them at `CUser+68`/`+72` and `+76` (`sub_508260`, `sub_508290`). The other two words are
+ * read and never stored - they are still on the wire, so a server that omits them shifts everything
+ * after them.
+ *
  * The avatar list is *not* a `GW_ItemSlot` array: `sub_45F340` reads plain item ids until 0 and
  * files each one under a slot index derived from the id itself (`itemId / 1000 / 10`: 100 -> 1,
  * 101 -> 2, ... 3xxxx -> 0), which is what makes an avatar from item ids alone. The client keeps
- * the last pair (`avatarKey`, avatar) and only rebuilds the look when the pair changes.
+ * the last pair (`face`, avatar) and only rebuilds the look when the pair changes.
  */
 export interface UserEnterField {
   characterId: number;
@@ -225,11 +232,12 @@ export interface UserEnterField {
   /** Stored at `CUser+64`. Role not located - kept as a number instead of a guessed name. */
   unknown64: number;
   /**
-   * Stored at `CUser+68` by `CUser::SetAvatar` next to the avatar array; the client re-runs the
-   * avatar work only when this value *or* the array differs, so it acts as an avatar-change key.
-   * What the number itself is (job? level? a look version?) is not proven.
+   * The face id the client draws this user with (`Character/Face/000xxxxx.img`), stored at
+   * `CUser+68` by `sub_508260`. It is the same slot the emotion code animates (`sub_509070` ->
+   * `sub_408400`), so it has to be a real face, not a version number: a user sent 0 here has no
+   * face at all.
    */
-  avatarKey: number;
+  face: number;
   /**
    * Two more u32s that `sub_520680` reads and never stores. They are part of the packet all the
    * same - a server that omits them shifts every field after them - so they stay in the struct.
@@ -254,7 +262,7 @@ export function readUserEnterField(reader: PacketReader): UserEnterField {
   const characterId = reader.readU32();
   const name = reader.readAsciiString();
   const unknown64 = reader.readByte();
-  const avatarKey = reader.readU32();
+  const face = reader.readU32();
   const unknownA = reader.readU32();
   const unknownB = reader.readU32();
   const avatarItems: number[] = [];
@@ -267,7 +275,7 @@ export function readUserEnterField(reader: PacketReader): UserEnterField {
   const y = toS16(reader.readU16());
   const action = reader.readByte();
   const foothold = reader.readU16();
-  return { characterId, name, unknown64, avatarKey, unknownA, unknownB, avatarItems, x, y, action, foothold };
+  return { characterId, name, unknown64, face, unknownA, unknownB, avatarItems, x, y, action, foothold };
 }
 
 /** Writes a 0x1C body. The avatar list always gets its terminating 0 u32. */
@@ -275,7 +283,7 @@ export function writeUserEnterField(writer: PacketWriter, user: UserEnterField):
   writer.writeU32(user.characterId >>> 0);
   writer.writeAsciiString(user.name);
   writer.writeByte(user.unknown64 & 0xff);
-  writer.writeU32(user.avatarKey >>> 0);
+  writer.writeU32(user.face >>> 0);
   writer.writeU32(user.unknownA >>> 0);
   writer.writeU32(user.unknownB >>> 0);
   for (const itemId of user.avatarItems) writer.writeU32(itemId >>> 0);
