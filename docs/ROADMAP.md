@@ -10,9 +10,11 @@
 | WZ 容器/樹/字串解碼 | ✅ 完成 | `tools/wz1.py` 解析 1,052 張 `.img` |
 | `.img` 屬性樹 | ✅ 結構完成 | 186 個屬性完整還原（`analysis/sample_Cap_01000000_properties.txt`）|
 | `.img` 像素（canvas + ZLZ） | ⬜ | 能輸出 `UI/Basic.img` 的 `Cursor` 為正確 PNG |
-| 協定：framing | 🟡 | u16 LE 長度 + 1460 上限已證實；待擷取確認 |
-| 協定：dispatch/opcode 表 | ⬜ | `docs/protocol/FINDINGS.md` §3 的四步完成，產出 opcode 表 |
-| **capure harness** | ⬜ | `node server/src/cli.ts capture` 能錄下原 client 的登入→選角序列 |
+| 協定：framing / cipher | ✅ 完成 | 握手、雙方向標頭、LCG 金鑰全部有 binary 證據（FINDINGS §2–§3）|
+| 協定：dispatch/opcode 表 | 🟡 | 分派鏈已完整定位（FINDINGS §4.1／§4.7：階段 → opcode）；client 送出的 39 個 opcode 已建目錄，**登入鏈四個階段已解到欄位層**（§4.8／§4.9）。剩下的：`CharacterData` 道具區塊與 CField 各區間 |
+| 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
+| **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
+| 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
 | oracle 重現 | ⬜ | 原 client 能連上我們的 listener 並完成握手（不 crash） |
 
 **出口條件**：能回答「這個封包是什麼意思」，且每個答案都有 binary 或擷取證據。

@@ -7,10 +7,36 @@
 | `src/protocol/frame.ts` | ✅ 框架層：4-byte 標頭（`u16 header` + `u16 bodyLen`）+ 1460 上限，皆有 binary 證據；另保留舊的 u16 總長 framing 供握手用。 |
 | `src/protocol/cipher.ts` | ✅ 會話加密：MSVC rand LCG、`swapNibbles`、送/收狀態；標頭 = `magic ^ HIWORD(state)`，**兩個方向常數不同**（c2s `0xD3` / s2c `0xFF2C`，見 `docs/protocol/FINDINGS.md` §3.1）。 |
 | `src/protocol/session.ts` | ✅ 211-byte 握手 codec + 串流解碼器 `SessionDeframer`：吃握手取種子、逐包解密並**自檢標頭**；握手可由任一方送出（`expectHandshake`）。 |
+| `src/protocol/packet.ts` | ✅ 欄位編碼：`u8`/`u16`/`u32` LE、字串 = `u16 長度` + 原始 bytes；越界丟 `PacketUnderflowError(38)`（client 丟 `ZException(38)`）。 |
+| `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 建角、0x06 名檢查+外觀、0x07 刪角、0x08 echo。 |
+| `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **75-byte** 能力值區塊（`id`/13-byte 名字/等級/職業/11 個能力值/…）。⚠️ 道具區塊（`flags & 2`）尚未解，因此只送 `flags = 1`。 |
+| `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址+token、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
 | `src/cli.ts` | ✅ `capture` / `decode` 子命令 |
-| login/world/game 邏輯 | ❌ **尚未實作**，且**不會在協定被擷取證實之前實作**（避免憑空發明封包） |
+| 遊戲邏輯（CField、移動、戰鬥…）| ❌ **尚未實作**；登入鏈以外的封包一律不猜（`decode` 仍會原封不動記錄它們） |
+
+## 登入鏈（已解，`docs/protocol/FINDINGS.md` §4.7–§4.9）
+
+伺服器封包不是靠一張全域表分派，而是**看 client 現在在哪個階段**：`dword_5C212C` 是當前 stage，
+`sub_43B170` 把 opcode 交給它的 `OnPacket`。所以同一號碼在不同階段是不同封包，請求與回應也可能不同號。
+
+```
+server ──211-byte handshake────────▶ client             （伺服器先講話，種子寫在這裡）
+client ──0x01 帳號/密碼────────────▶ server
+server ──0x01 u8 result [+世界清單]─▶ client  → CWorldSelect（清單就是這個階段的參數）
+client ──0x02 世界 index───────────▶ server
+server ──0x02 u8 result [+角色×3]──▶ client  → CCharSelect
+client ──0x03 u32 characterId──────▶ server
+server ──0x03 u32 ip u16 port u32 token ▶ client → 連到遊戲伺服器，token 存進 CWvsApp+0x14
+client ──0x04 u32 token────────────▶ server   （新連線、握手之後的第一個封包）
+```
+
+`u32 ip` 是**網路位元組序**（client 原封不動塞進 `sockaddr_in.sin_addr`），其餘整數都是 little-endian。
+失敗訊息表在三個 handler 共用，只有 `result = 0` 會繼續解析 payload。
+
+`server/test/loginflow.test.ts` 會用假 client 走完整條鏈（含真實加密與框架），所以「編碼器」與
+「client 的讀取順序」一旦漂移就會紅燈。
 
 ## 為什麼先做擷取？
 
