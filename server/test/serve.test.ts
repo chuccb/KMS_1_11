@@ -15,6 +15,8 @@ import { PacketReader } from "../src/protocol/packet.ts";
 import { decodeClientPacket, encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { FIELD_OPCODE, readSetField } from "../src/protocol/field.ts";
+import { MOB_OPCODE, readMobEnterField } from "../src/protocol/mob.ts";
+import type { MapData } from "../src/game/map.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 
@@ -316,4 +318,99 @@ test("the game server claims the character id the login server issued", { timeou
   assert.equal(otherField.character.stats.mapId, 1000000);
   assert.equal(otherField.character.stats.id, 4242);
   other.close();
+});
+
+/**
+ * The map the stub provider answers for. Two mobs is enough to prove ordering and that the id
+ * sequence is the server's own; the real `Data.wz` numbers are pinned in `map.test.ts`.
+ */
+const STUB_MAP: MapData = {
+  id: 1000000,
+  imagePath: "Map/Map/001000000.img",
+  name: "암허스트서쪽필드",
+  streetName: "레인보우스트리트",
+  bgm: "Bgm00/RestNPeace",
+  returnMapId: 1010000,
+  mobs: [
+    { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 0 },
+    { templateId: 1210100, x: -5, y: 7, foothold: 0, facing: 1 },
+  ],
+  npcs: [{ templateId: 2003, x: 69, y: 275, foothold: 28, facing: 0 }],
+  portals: [{ name: "sp", type: 0, x: 100, y: 200, toMapId: 0, toName: "" }],
+  footholds: 289,
+  ladderRopes: 0,
+};
+
+test("the game server spawns the map's monsters right after 0x16", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  const packets = await client.take(3);
+  client.close();
+
+  assert.equal(packets[0]![0], FIELD_OPCODE.setField, "0x16 comes first: the field has to exist");
+  assert.equal(packets[1]![0], MOB_OPCODE.enterField, "then one 0x2F per mob, in WZ order");
+  assert.equal(packets[2]![0], MOB_OPCODE.enterField);
+  assert.equal(client.headersOk, true, "every spawned packet survives the cipher/header check");
+
+  const first = readMobEnterField(new PacketReader(packets[1]!, 1));
+  assert.deepEqual(
+    { mobId: first.mobId, templateId: first.templateId, x: first.x, y: first.y, facing: first.facing },
+    { mobId: 1, templateId: 120100, x: 509, y: 300, facing: 0 },
+    "the first life entry of the map, with a server-chosen pool id",
+  );
+  const second = readMobEnterField(new PacketReader(packets[2]!, 1));
+  assert.deepEqual(
+    { mobId: second.mobId, templateId: second.templateId, x: second.x, y: second.y, facing: second.facing },
+    { mobId: 2, templateId: 1210100, x: -5, y: 7, facing: 1 },
+    "negative coordinates and the left-facing bit survive the wire",
+  );
+  assert.equal(second.channels, undefined, "no animation channel is claimed by the server yet");
+  assert.equal(new PacketReader(packets[2]!, 1).remaining, 21, "a channel-less 0x2F is 22 bytes");
+  assert.ok(log.some((line) => line.includes("spawned 2 mobs")), log.join("\n"));
+});
+
+test("a map the provider does not know still enters, it just has nothing to spawn", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: () => undefined,
+    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 8, characterName: "Solo" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  const first = (await client.take(1))[0]!;
+  assert.equal(first[0], FIELD_OPCODE.setField, "0x16 is sent even without map data");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const rest = await client.take(0);
+  assert.deepEqual(
+    rest.map((bytes) => bytes[0]),
+    [],
+    "and no 0x2F follows, rather than a mob at (0,0)",
+  );
+  assert.ok(log.some((line) => line.includes("has no Map/Map/*.img")), log.join("\n"));
+  client.close();
 });

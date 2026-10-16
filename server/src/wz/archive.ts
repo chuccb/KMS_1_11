@@ -375,11 +375,34 @@ function isEntry(value: unknown): value is WzEntry {
   return typeof value === "object" && value !== null && "name" in value && "type" in value;
 }
 
-/** Properties of a nested object as a plain record. */
+/**
+ * Properties of a nested object as a plain record.
+ *
+ * A parsed `WzNode` is the normal case; a value that is *already* plain (a fixture, or data that
+ * went through `plain()`) is accepted as well, which keeps `mapSummary` usable without an archive.
+ */
 function asRecord(node: WzValue | undefined): Record<string, WzValue> {
-  if (!(node instanceof WzNode)) return {};
-  const out: Record<string, WzValue> = {};
-  for (const entry of node.props) out[entry.name] = entry.value;
+  if (node instanceof WzNode) {
+    const out: Record<string, WzValue> = {};
+    for (const entry of node.props) out[entry.name] = entry.value;
+    return out;
+  }
+  if (typeof node !== "object" || node === null || Array.isArray(node) || node instanceof Uint8Array) return {};
+  return node as Record<string, WzValue>;
+}
+
+/** A property list (`portal`, `life`, ...) as plain records, from a `WzNode` or a plain array. */
+function asList(node: WzValue | undefined): Record<string, WzValue>[] {
+  const items: WzValue[] = node instanceof WzNode
+    ? node.props.map((entry) => entry.value)
+    : Array.isArray(node)
+      ? (node as WzValue[])
+      : [];
+  const out: Record<string, WzValue>[] = [];
+  for (const item of items) {
+    const record = asRecord(item);
+    if (Object.keys(record).length > 0) out.push(record);
+  }
   return out;
 }
 
@@ -413,11 +436,7 @@ export function mapSummary(root: WzObject | undefined): MapSummary {
         break;
       case "portal":
       case "life":
-        if (entry.value instanceof WzNode) {
-          for (const item of entry.value.props) {
-            if (item.value instanceof WzNode) summary[entry.name].push(asRecord(item.value));
-          }
-        }
+        summary[entry.name] = asList(entry.value);
         break;
       default:
         break;

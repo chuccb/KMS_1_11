@@ -14,9 +14,11 @@
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端的交接（只驗角色 id，還不會送遊戲內封包）。 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。 |
+| `src/protocol/mob.ts` | ✅ **0x2F 怪物進場**：`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊（`u32` ＋ 每個設定位元 2 個 `u16`；7 個通道）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`（FINDINGS §4.12.1／§4.15）。 |
+| `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive.mapMetadata()` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、foothold 數）；`mapDataProvider(archive)` 快取，`GameEntryServer` 用它送 `0x2F`（§4.15）。 |
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
 | 遊戲邏輯（地圖／怪物／戰鬥／道具欄伺服器端）| ❌ **尚未實作**；已解出的封包有 codec（`field.ts`／`movepath.ts`），沒解的一律不猜（`decode` 仍會原封不動記錄它們） |
 | `src/wz/img.ts` | ✅ WZ v1 `.img` 值層編解碼器：物件 marker、名稱表（blob 相對位移）、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、像素解壓（容忍缺少 adler32 trailer 的 stream）。規格與證據在 `docs/WZ1_FORMAT.md` §4，雙胞胎是 `tools/wzimg.py`。 |
@@ -108,18 +110,21 @@ node server/src/cli.ts wz png <image path> --out assets/   # 每張 canvas → P
 
 # 登入伺服器：把原 client（或重寫的 client）導到這個 port，就能走到選角畫面
 node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
-     --world Scania[,Bera] --game-ip 127.0.0.1
+     --world Scania[,Bera] --game-ip 127.0.0.1 [--map 1000000] [--data Data.wz|off]
 ```
 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
-（領取交接的角色 id 後送 `0x16` 進地圖，見下），角色建立後外觀取自**帳號第一個角色**
+（領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物，見下）；
+`--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
 client 的**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 都已完整解出**（FINDINGS §4.13.1／§4.13.1b）：`field.ts` 的
 `readClientAttack`／`encodeClientAttack` 三個 opcode 共用一段程式碼（差異用 `ATTACK_SHAPE` 描述），
 golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把擷取到的攻擊翻成可讀的一行。
-**下一個最有價值的目標**是怪物進場（`CMob::Init`，§4.12.1）——補完它就與攻擊包合起來是
-「打怪 → 回傷害」的完整迴圈。
+怪物進場（`CMob::Init`，§4.12.1）**已經進到產品**（§4.15）：`serve --game-port` 會依地圖的 `life`
+清單把怪物送上畫面，object id 由伺服器配。**下一個最有價值的目標**是讓它動：`0x31`（怪物移動，
+`sub_4927B0` → `sub_491630`，內容就是 `CMovePath`）與受傷／死亡（`0x32`–`0x36`），
+接上已完成的攻擊包就是「打怪 → 回傷害」的完整迴圈。
 
 `0x16`（進地圖）的三個 u32 現在已知是**場地的亂數種子**（FINDINGS §4.11.2）：客戶端的
 傷害數字、掉落與怪物行為都由它決定，所以伺服器送出種子後就能重算客戶端回報的傷害——
@@ -131,13 +136,14 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 就是把地圖 id 放進那個欄位——`src/wz/paths.ts` 的 `mapImagePath()` 是同一個檔名格式，
 `field.ts` 的 `SetField.character.mapId` 就是它。
 
-`serve --game-port` 的遊戲伺服器現在會**把角色送進地圖**：領到 `0x04` 的角色 id 之後送
+`serve --game-port` 的遊戲伺服器現在會**把角色送進地圖並讓怪物出現**：領到 `0x04` 的角色 id 之後送
 `0x16`（`u8 mode, u8 full, u32 亂數種子 ×3, CharacterData`），地圖由 `--map`（預設 `1000000`）決定，
+接著對地圖 `life` 清單裡的每隻怪物送 `0x2F`（`src/game/map.ts`；`--data off` 可關掉），
 客戶端接著回報的移動（`0x0E`）與攻擊（`0x0F`）都會被 `decode` 的解讀器寫進日誌
 （FINDINGS §4.11.2b；`test/serve.test.ts` 用假 client 逐欄驗證）。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物／掉落／技能**（進地圖後只有自己與場地；
-`0x2F` 還缺欄位，見 FINDINGS §6 第 5 項）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物 AI／移動／掉落／技能**
+（怪物會出現，但只站在出生點不動，也不會被打死；`0x31` 之後才輪到它們，見 FINDINGS §6 第 5 項）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
 client 接受；`chardata.ts` 已經能寫完整道具區塊，缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，
 見 FINDINGS §4.8 的註記）。
 

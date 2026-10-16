@@ -23,6 +23,8 @@ import {
   encodeSessionPacket,
   type SessionEvent,
 } from "../protocol/session.ts";
+import { encodeMobEnterField } from "../protocol/mob.ts";
+import type { MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket, CLIENT_OPCODE } from "../protocol/login.ts";
 import { describeClientFieldPacket, encodeSetField, type SetField } from "../protocol/field.ts";
 import {
@@ -432,6 +434,11 @@ export interface GameEntryServerOptions {
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
   /** Map the claimer is moved into (`0x16`). Defaults to `DEFAULT_MAP_ID`. */
   mapId?: number;
+  /**
+   * Where the map's monsters come from. `mapDataProvider(WzArchive)` is the real one; tests pass a
+   * stub. Without it the connection still enters its map, it just has nothing to spawn.
+   */
+  mapProvider?: (mapId: number) => MapData | undefined;
   log?(line: string): void;
 }
 
@@ -499,6 +506,50 @@ export class GameEntryServer {
     this.options.log?.(
       `game: sent 0x16 - "${entry.characterName}" enters map ${this.mapId} ` +
         `(seeds 0x${hex(field.randomSeedA)} 0x${hex(field.randomSeedB)} 0x${hex(field.randomSeedC)})`,
+    );
+    this.spawnMobs(socket, sendState);
+  }
+
+  /**
+   * Puts the map's monsters on screen: one `0x2F` per `life` entry of the map (FINDINGS 4.15).
+   *
+   * The object ids are this server's choice - the client only needs them unique inside the field
+   * (`sub_492C00` is a pool lookup by that id) - so they are handed out from 1 per connection.
+   * Nothing was found that makes them collide with player ids: players are keyed in `CUserPool`,
+   * mobs in `CMobPool`.
+   *
+   * The packets are written right after `0x16` and in the same TCP stream, which assumes the client
+   * finishes building the field before it reads the next packet (the 0x16 handler loads
+   * `Map/Map/%09d.img` synchronously, so it should). Whether that holds for a real client is one of
+   * the things the oracle run (ADR-004) has to confirm.
+   *
+   * Because there is no shared world yet (ADR-001 is still ahead), each connection gets its *own*
+   * copy of the map's mobs and its own id sequence: two players in one field would each see a full
+   * set of monsters and would not see each other's. A per-field registry that owns the ids (and the
+   * hit points) is the Phase 2 step that turns this into one world.
+   */
+  private spawnMobs(socket: net.Socket, sendState: CipherState): void {
+    const map = this.options.mapProvider?.(this.mapId);
+    if (map === undefined) {
+      if (this.options.mapProvider !== undefined) {
+        this.options.log?.(`game: map ${this.mapId} has no Map/Map/*.img in Data.wz, nothing to spawn`);
+      }
+      return;
+    }
+    let mobId = 1;
+    for (const spawn of map.mobs) {
+      const body = {
+        mobId: mobId++,
+        templateId: spawn.templateId,
+        x: spawn.x,
+        y: spawn.y,
+        facing: spawn.facing,
+      };
+      socket.write(encodeSessionPacket(encodeMobEnterField(body), sendState, "s2c"));
+    }
+    this.options.log?.(
+      `game: spawned ${map.mobs.length} mobs (${map.name || map.imagePath}); ` +
+        `${map.npcs.length} NPCs are known but not spawned yet`,
     );
   }
 

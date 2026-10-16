@@ -693,7 +693,7 @@ count × {
 
 > `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
 
-### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式，欄位只到骨架
+### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式，欄位只到骨架（`0x2F` 是例外，已完成 → §4.15）
 
 §4.11 把「哪個子系統」解到欄位層；這一節把同一條路線再往下一層拆成「哪個函式處理哪個 opcode」。
 **未標「已證實」的欄位都還不能當規格用**（這一節的目的是讓下一個回合不必重讀反編譯）。
@@ -703,7 +703,7 @@ count × {
 | opcode | 分支 | 目前已知（讀取順序）|
 |---|---|---|
 | 0x2E | — | 沒有分支 |
-| 0x2F | `sub_4924A0` | **怪物進場**：`u32 mobId`；池中已有 → `[mob+112] = 1` 後返回；沒有 → `u32 templateId`（`sub_48CFA0`→`sub_4848E0` 載模板）→ 建池項 → `sub_484ED0(newMob, mobId, packet)` = `CMob::Init` 讀剩下的欄位（下一段）|
+| 0x2F | `sub_4924A0` | **怪物進場（✅ 已實作，§4.15）**：`u32 mobId`；池中已有 → `[mob+112] = 1` 後返回；沒有 → `u32 templateId`（`sub_48CFA0`→`sub_4848E0` 載模板）→ 建池項 → `sub_484ED0(newMob, mobId, packet)` = `CMob::Init` 讀剩下的欄位（下一段）|
 | 0x30 | `sub_4926B0` | `u32 mobId` + `s16`，再依 `CWvsApp+0x14`（自己的角色 id）分支 |
 | 0x31 | `sub_4927B0` | `u8 flag` + `u32 mobId`；`flag != 0` → `sub_491630`：查到怪 → `sub_485330(mob, 1)` 推進移動；查不到 → `u32 templateId` + `CMob::Init` + 推進；`flag == 0` → `sub_491830` |
 | 0x32–0x36 | `sub_492380` | `u32 mobId` 查表，然後 0x33→`sub_488BC0`、0x34→`sub_488D90`、0x35→`sub_488E10`（0x32／0x36 沒有分支）|
@@ -943,6 +943,70 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 查詢方式：`node server/src/cli.ts schema`（人看的表格）或 `schema --json`（工具用）。
 目前共 **31 列**：login c2s 8、login s2c 6、field c2s 11、field s2c 6。
 
+### 4.15 ✅ 怪物進場到產品：地圖 `life` → `0x2F`
+
+§4.12.1 只給欄位表；這一節記的是**把它做成產品的那一步**，以及驗證它、以及還不能宣稱的部分。
+實作：`server/src/game/map.ts`（地圖視圖）＋`server/src/protocol/mob.ts`（codec）＋
+`GameEntryServer.spawnMobs`（送包時機）。
+
+#### 出生點來自地圖檔自己：`life`
+
+`0x16` 讓 client 自己載入 `Map/Map/%09d.img`（§4.11.2b），伺服器讀**同一張** image 的 `life`
+（`sub_469980` 讀的五個節點之一）——所以兩邊看到的怪物必然一致，沒有第二份資料要同步：
+
+| 欄位 | 型別 | 內容 |
+|---|---|---|
+| `type` | string | `"m"` = 怪物、`"n"` = NPC |
+| `id` | 7 位數字**字串** | 模板 id：`"0120100"` → `120100` = `Mob/0120100.img`（`sub_48CFA0` 查的就是它）|
+| `x`／`y` | u16 | 出生座標（`0x2F` 的 `s16 x,y`）|
+| `fh` | u16 | 腳踏點索引；`sub_485DA0` 之後用它把怪物綁到 foothold，伺服器目前只帶著 |
+| `f` | u8 | 地圖自己的翻轉位元（**只有部分地圖有**），直接當 `0x2F` 的 `facing`；沒有就 0 = 面向右 |
+| `cy`／`rx0`／`rx1`／`info` | — | 巡邏範圍，AI 之後才要 |
+
+100 張地圖共 2,322 筆 `life`：**2,256 隻怪物、66 個 NPC**，61 張地圖有怪物。實際數字
+（`server/test/map.test.ts` 釘住）：
+
+| 地圖 | 名稱 | 怪物 | NPC |
+|---|---|---|---|
+| `1000000`（`DEFAULT_MAP_ID`）| 암허스트서쪽필드 | **45**（第一隻是 `120100`）| 0 |
+| `100000000` | 헤네시스 | 0 | 2（Heena `1012000`、Roger `1010100`）|
+| `40000` | 달팽이사냥터 | 63（`100100` 蝸牛）| 1（`2003`）|
+
+#### 送出的內容與時機
+
+`GameEntryServer` 領到 `0x04` 的角色 id → 送 `0x16`（§4.11.2b）→ **緊接著每一筆 `type == "m"`
+送一個 `0x2F`**，欄位照 §4.12.1（`mobId`、`templateId`、`x`、`y`、`facing`）。
+
+- `mobId` 由伺服器從 1 開始配：client 只用它在 `CMobPool` 查表（`sub_492C00`），
+  池裡沒有這個 id 才會去讀 `templateId`；玩家在 `CUserPool`、怪物在 `CMobPool`，
+  目前找不到兩者會撞 id 的路徑——但這條也還沒實機驗證。
+- 兩個語意未解的 `u16` 送 **0**：`sub_489800` 查表失敗時 client 自己會替代一筆零記錄
+  （§4.12.1），所以 0 是合法包，不是猜值。
+- 動畫旗標送 **0**：不代表任何通道（`sub_4C6CE0` 對沒設定的 bit 就是把通道歸零）。
+- NPC（`type == "n"`）**不送**：`0x39`（`sub_49F6C0`）尚未解到欄位層。
+- 時機假設：`0x2F` 與 `0x16` 在同一個 TCP 流、且緊接在後。`0x16` 的處理器是**同步**載入地圖檔
+  （`sub_4C2780` → `sub_4694F0`），所以 client 應該在讀下一個封包前就把場地建好；
+  但這是推論，**只有原 client 能證實**（§6 第 2 項／ADR-004）。
+
+#### 已被測試釘住的行為
+
+| 測試 | 內容 |
+|---|---|
+| `server/test/mob.test.ts` | 逐 byte 的欄位順序（不是只有 round-trip）、`i` 號通道 ⇔ 旗標 bit `1 << i`、未設定的通道在讀回來時仍是洞、bit 7 以上被丟掉（client 沒有那些通道）、`unknownA/B` 與旗標預設 0、**任何長度的截斷都會丟 `PacketUnderflowError`**、`describeFieldPacket` 認得 `0x2F` |
+| `server/test/map.test.ts` | `life` → 出生點（`"0120100"` → `120100`、沒有 `id` 的紀錄被丟掉、`f` 缺席時預設 0）、`portal` 保留 `tm`/`tn`、`DEFAULT_MAP_ID` 真的有怪且座標放得進 `s16`、헤네시스 0 怪 2 NPC、달팽이사냥터 63 怪、未知地圖回 `undefined`（不是空 map）、`mapDataProvider` 只讀一次 |
+| `server/test/serve.test.ts` | 真 socket：`0x16` 之後逐隻 `0x2F`、id 由 1 遞增、負座標與面向位元活著回來、每個包的標頭都通過驗證、地圖不在地圖檔裡時**不送任何怪物**（而不是送一隻在 (0,0)） |
+
+#### 還不能宣稱的部分
+
+1. 兩個只被查表的 `u16` 語意未解（§4.12.1）——目前送 0 走的是 client 會處理的失敗路徑。
+2. `0x31`（怪物移動，`sub_4927B0` → `sub_491630`，內容就是 §4.11.5 的 `CMovePath`）與
+   受傷／死亡（`0x32`–`0x36`）未實作：**怪物會站著不動**，也不會被打死。
+3. 沒有 AI、沒有重生、沒有 `fh` 綁定（`sub_485DA0` 那一端）。
+4. 送的時機與 id 的無碰撞都還是推論，待原 client 實測（`serve --game-port --data Data.wz`）。
+5. **每個連線各自一份怪物**：還沒有共享世界（ADR-001 的 Phase 2），所以兩個玩家在同一張地圖上
+   會各看到一份怪物、彼此的 id 也不一致。要變成「一個世界」需要**以場地為單位的註冊表**（擁有 id
+   與血量），這是下一階段的伺服器工作，不是這個 codec 的事。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -961,12 +1025,15 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
    還缺的是**真實流量驗證**（§6 第 2 項）與 `0x10` 的 `u16 v138`。
    另一邊 `CMob::Init`（§4.12.1）已解到 x／y／面向＋動畫區塊；補完它就與攻擊包合起來是完整的打怪迴圈。
 4. **CField 其餘區間**（分派已拆到函式，見 §4.12）：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、
-   CUserPool 的 `0x1E–0x29` 分支、`0x2F`–`0x36` 的欄位（怪物進場 `CMob::Init`、移動、受傷／死亡）、
+   CUserPool 的 `0x1E–0x29` 分支、`0x30`–`0x36` 的欄位（怪物移動 `0x31`、受傷／死亡；
+   `0x2F` 怪物進場已完成，§4.15）、
    `0x39`–`0x40`（CNpcPool）、`0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、
    `0x4D–0x52`（messenger／miniroom）。怪物進場（`sub_484ED0`）與第 3 項是同一條迴圈的兩半。
-5. **進地圖之後還缺的東西**：伺服器已能送 `0x16`（§4.11.2b），但接下來 client 會回報移動（`0x0E`）
-   並期待怪物（`0x2F`）。要讓畫面真的動起來，需要 `0x2F` 剩下那兩個只被查表的 `u16`（§4.12.1）
-   與 `CMob::Init` 尾端的 foothold 綁定（`sub_485DA0`）；在那之前伺服器只送 `0x16`，不編造怪物。
+5. **進地圖之後還缺的東西** ✅ 前半已完成：伺服器送 `0x16`（§4.11.2b）之後會依地圖的 `life`
+   清單送 `0x2F` 怪物進場（§4.15）。剩下的是**讓怪物會動**：`0x31`（移動，`sub_4927B0` →
+   `sub_491630` ＋`CMovePath`）、受傷／死亡（`0x32`–`0x36`）與 AI／重生。
+   `0x2F` 那兩個只被查表的 `u16`（§4.12.1）仍是 OPEN，但目前送 0 走的是 client 自己會處理的
+   「查表失敗」路徑，所以不擋這條路。
 6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
    以及 `0x0F` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板的第二種更新格式）。
 7. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
@@ -1022,4 +1089,6 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 | `tools/wzimg.py` | `.img` 值層編解碼器：物件語法、名稱表、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、zlib 像素解碼。全檔 1,052 張 image 逐 byte 驗證（規格見 `docs/WZ1_FORMAT.md` §4） |
 | `tools/wzdata.py <Data.wz> [--census\|--manifest STEM\|--maps OUT\|--dump PATH]` | 讀 `Data.wz` 的**唯一支援入口**：解析樹、驗證／掃描定位每張 image、統計 canvas 與像素、輸出 manifest／地圖 metadata／單張屬性樹 |
 | `node server/src/cli.ts wz <images|census|maps|dump|png>` | WZ 的產品端入口（ADR-005）：目錄樹、值層、canvas 普查、地圖 metadata、單張 dump、像素→PNG；與上面兩個 Python 工具對同一組黃金值 |
+| `server/src/protocol/mob.ts` | `0x2F` 怪物進場 codec（`encodeMobEnterField`／`readMobEnterField`／`describeMobEnterField`）：`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`＋動畫旗標區塊（§4.12.1）；golden 測試在 `server/test/mob.test.ts`，`decode` 與 `cli.ts schema` 共用同一份（§4.15）|
+| `server/src/game/map.ts` | 伺服器端的地圖視圖：`WzArchive.mapMetadata()` → `life`（怪物／NPC 出生點）、`portal`、`info`、foothold 數；`mapDataProvider(archive)` 做快取，`GameEntryServer` 用它送 `0x2F`（§4.15）|
 | `server/src/wz/paths.ts` | 客戶端自己的 WZ 路徑（`Map/Map/%09d.img` ＝ `mapImagePath`、`foothold`／`ladderRope`／`portal`、`MapHelper.img`）；地圖載入器的函式表在 §4.11.2b，golden 測試在 `server/test/paths.test.ts` |

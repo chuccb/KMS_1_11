@@ -16,6 +16,7 @@
 import * as chardata from "./chardata.ts";
 import * as field from "./field.ts";
 import * as login from "./login.ts";
+import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as packet from "./packet.ts";
 import * as replies from "./replies.ts";
@@ -446,26 +447,23 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: 0x2f,
+    opcode: mob.MOB_OPCODE.enterField,
     direction: "s2c",
     stage: "field",
     name: "mobEnterField",
     status: "partial",
-    evidence: "FINDINGS 4.12 / 4.12.1 (sub_4924A0 + CMob::Init sub_484ED0)",
-    codecs: [],
+    evidence: "FINDINGS 4.12.1/4.15 (CMobPool 0x2F, sub_4924A0 + CMob::Init sub_484ED0)",
+    codecs: ["encodeMobEnterField", "readMobEnterField", "describeMobEnterField"],
     fields: [
-      { name: "mobId", type: "u32", note: "stored at mob+120" },
-      { name: "templateId", type: "u32", note: "only read when the pool has no such mob yet" },
-      { name: "x", type: "s16", note: "mob+368 and mob+360" },
-      { name: "y", type: "s16", note: "mob+372 and mob+364" },
-      { name: "facing", type: "u8", note: "mob+272, bit 0 selects the hit rect" },
-      { name: "unknownA", type: "u16", note: "only used for a hash-map lookup, never stored" },
-      { name: "unknownB", type: "u16", note: "same lookup; its +32 field feeds sub_53D310" },
-      {
-        name: "animation",
-        type: "u32 flags + 2 u16 per set bit (7 channels)",
-        note: "sub_4C6CE0: (index, delay index), delay * 100 ms added to timeGetTime()",
-      },
+      { name: "mobId", type: "u32", note: "pool key; a second 0x2F for a known id has no fields at all" },
+      { name: "templateId", type: "u32", note: "read only when the id is new: 1210100 = Mob/0120100.img" },
+      { name: "x", type: "s16" },
+      { name: "y", type: "s16" },
+      { name: "facing", type: "u8", note: "only bit 0 is read (0 = right, 1 = left)" },
+      { name: "unknownA", type: "u16", note: "ZMap lookup only, meaning open; a miss is handled" },
+      { name: "unknownB", type: "u16", note: "second lookup, feeds sub_53D310 with a template field" },
+      { name: "animFlags", type: "u32", note: "bits 1..0x40 switch on one channel each (sub_4C6CE0)" },
+      { name: "animChannels", type: "s16 x2 per bit", note: "(index, delay in 100 ms ticks)" },
     ],
   },
   {
@@ -481,7 +479,7 @@ export const PACKETS: readonly PacketSchema[] = [
 ];
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
-const CODEC_MODULES: readonly Record<string, unknown>[] = [chardata, field, login, movepath, packet, replies];
+const CODEC_MODULES: readonly Record<string, unknown>[] = [chardata, field, login, mob, movepath, packet, replies];
 
 /**
  * Looks a catalogue `codecs` entry up by name across the protocol modules. Returns `undefined` for

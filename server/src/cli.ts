@@ -13,7 +13,9 @@
  */
 import { schemaJson, schemaText } from "./protocol/schema.ts";
 import { runWzCommand } from "./wz/cli.ts";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { WzArchive } from "./wz/archive.ts";
+import { mapDataProvider, type MapData } from "./game/map.ts";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
   toJsonl,
@@ -40,7 +42,7 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
-        [--seed <n>] [--handshake-body <hex>] [--quiet]
+        [--data <Data.wz|off>] [--seed <n>] [--handshake-body <hex>] [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
@@ -63,6 +65,10 @@ notes:
   adopted automatically; otherwise pass --c2s-seed/--s2c-seed (the client's send/receive states).
   Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
+
+  serve --game-port also spawns the map's monsters once the character is in: Data.wz is read for
+  Map/Map/<mapId>.img (default: ./Data.wz when it exists, --data to point elsewhere, --data off to
+  skip) and one 0x2F is sent per "life" entry of type "m" (FINDINGS 4.15).
 
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
@@ -222,6 +228,20 @@ async function runServe(rest: string[]): Promise<number> {
   const handshakeBody =
     typeof args["handshake-body"] === "string" ? fromHexArg(String(args["handshake-body"])) : undefined;
 
+  // Mobs come from the same Data.wz the client reads. `--data off` keeps the server archive-free
+  // (useful for protocol work), and without the flag an existing ./Data.wz is picked up.
+  const dataArg = args.data === true ? "Data.wz" : typeof args.data === "string" ? args.data : undefined;
+  const dataPath = dataArg === "off" ? undefined : (dataArg ?? (existsSync("Data.wz") ? "Data.wz" : undefined));
+  let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
+  if (dataPath !== undefined) {
+    try {
+      mapProvider = mapDataProvider(WzArchive.open(dataPath));
+    } catch (error) {
+      process.stderr.write(`--data ${dataPath}: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+  }
+
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
   const handoffs = new HandoffRegistry();
@@ -234,15 +254,23 @@ async function runServe(rest: string[]): Promise<number> {
     ...(log ? { log } : {}),
   });
   let game: GameEntryServer | undefined;
+  let boundGamePort = gamePort ?? 0;
+  let map: MapData | undefined;
   if (gamePort !== undefined) {
     game = new GameEntryServer({
       handoffs,
       mapId,
+      ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(handshake ? { handshake } : {}),
       ...(log ? { log } : {}),
     });
     const info = await game.listen(gamePort, host);
+    boundGamePort = info.port;
     log?.(`game entry listening on ${info.host}:${info.port} (claims the handoff, then 0x16 into map ${mapId})`);
+    map = mapProvider?.(mapId);
+    if (mapProvider !== undefined && map === undefined) {
+      log?.(`map ${mapId} is not in ${dataPath} - the client will still be sent into it, without mobs`);
+    }
   }
   const info = await login.listen(port, host);
   process.stdout.write(
@@ -251,7 +279,8 @@ async function runServe(rest: string[]): Promise<number> {
       `  worlds:   ${worlds.map((world) => world.name).join(", ")}\n` +
       (gamePort === undefined
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
-        : `  game:     ${gameIp}:${gamePort} (handoff + 0x16 into map ${mapId}; no mobs yet)\n`) +
+        : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into map ${mapId}; ` +
+          `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
   );
   await new Promise<void>((resolve) => {
