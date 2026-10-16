@@ -52,11 +52,14 @@ import {
 } from "./npc.ts";
 import {
   MOB_OPCODE,
+  mobActionName,
+  describeMobAnim,
   describeMobEnterField,
   describeMobLeaveDelayed,
   describeMobMove,
   describeMobPresence,
   describeMobStat,
+  readMobAnim,
   readMobEnterField,
   readMobLeaveDelayed,
   readMobMove,
@@ -310,6 +313,15 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.mobAttack) {
+      const attack = readClientMobAttack(new PacketReader(plain, 1));
+      const action =
+        attack.action === undefined
+          ? "reset"
+          : `${mobActionName(attack.actionByte) ?? attack.action}${attack.facing === 1 ? ",left" : ",right"}`;
+      const at = attack.hasPosition ? ` at (${attack.positionX},${attack.positionY})` : "";
+      return `0x2c mob attack: mobId=${attack.mobId} ${action} flags=0x${attack.flags.toString(16)}${at} tail=${attack.tail.length}B`;
+    }
     if (
       opcode === CLIENT_FIELD_OPCODE.attack ||
       opcode === CLIENT_FIELD_OPCODE.magicAttack ||
@@ -419,6 +431,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  if (opcode === MOB_OPCODE.anim) {
+    try {
+      return `${name}: ${describeMobAnim(readMobAnim(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === MOB_OPCODE.stat) {
     try {
       return `${name}: ${describeMobStat(readMobStat(new PacketReader(plain, 1)))}`;
@@ -473,6 +492,7 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === 0x19) return "0x19 CField(cached-character reset)";
   if (opcode === 0x1a) return "0x1a CField(chat/whisper/find)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
+  if (opcode === MOB_OPCODE.anim) return "0x35 CMobPool(mob animation)";
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
   if (opcode === NPC_OPCODE.enterField) return "0x39 CNpcPool(npc appear)";
   if (opcode === NPC_OPCODE.leaveField) return "0x3a CNpcPool(npc leave)";
@@ -539,6 +559,18 @@ export const CLIENT_FIELD_OPCODE = {
    * the flag is set. The record itself is the same 11 bytes + damages.
    */
   skillAttack: 0x11,
+  /**
+   * The mob's own attack, reported by the client (`sub_4885D0` -> `sub_4A1EA0(..., 44, ...)`,
+   * FINDINGS 4.20): `[0x2C][u32 mob id][u8 flags][u8 action | facing][u32 position][tail]`.
+   *
+   * In 2003 the monster AI runs **on the client**: `sub_4862C0` (the mob's per-frame virtual) asks
+   * `sub_487D10` to pick one of the mob's WZ attacks that (a) the player's rect/line is inside and
+   * (b) `conMP <= mob MP`, and `sub_4885D0` then plays it and sends this packet. The same function
+   * is reached from the action's hit frame (`sub_487A30`) and from the reset path, with `0xFF` as
+   * the action byte - so this is "the mob's action state, as the client sees it", not a clean
+   * "attack" record.
+   */
+  mobAttack: 0x2c,
 } as const;
 
 /** `0x0E` as it arrives from the client. */
@@ -702,6 +734,88 @@ export function encodeClientAttack(attack: ClientAttack, opcode: number = CLIENT
     writer.writeU16(target.sequence);
     for (const damage of target.damages) writer.writeU16(damage);
   }
+  return writer.toBytes();
+}
+
+/**
+ * `0x2C` as it arrives from the client: a mob's action state change, which for an attack means
+ * "this mob just swung at me".
+ *
+ * What is proven (FINDINGS 4.20): the first three fields and that `sub_495880`/`sub_495620` append a
+ * tail afterwards. What is **not** proven: the meaning of the flag bits and of that tail, so the
+ * tail is kept verbatim and the flags keep their bits.
+ */
+export interface ClientMobAttack {
+  /** The mob's object id (`*(mob + 120)`) - the key every server -> client mob packet uses. */
+  mobId: number;
+  /**
+   * The raw flag byte. Bit 0 is a 71-in-101 roll of the client's own global generator
+   * (`sub_4619F0(&dword_5D2C20) % 0x65 <= 0x46`), which the server cannot reproduce; the high
+   * nibble is the caller's own `a5` (1 from the AI's attack, 0 from the hit-frame/reset paths).
+   */
+  flags: number;
+  /**
+   * The action byte, encoded like `0x33`'s: `(action << 1) | facing`. `0xFF` is the reset form
+   * (`sub_4885D0(mob, -1, 0, 0, 0)`), which is why this stays a byte instead of being unpacked.
+   */
+  actionByte: number;
+  /** The action index, or `undefined` for the `0xFF` reset form. */
+  action?: number;
+  /** Bit 0 of the action byte: 0 = right, 1 = left. */
+  facing: number;
+  /**
+   * `u32`: for the attack types that have a throw/magic origin (`v9[3] != 0`) the client packs the
+   * spot into `x | y << 16`; otherwise it writes 0 (`sub_487D10`). Both halves are read as `s16`
+   * because that is how `sub_487D10` builds them.
+   */
+  positionX: number;
+  positionY: number;
+  /** `positionX | positionY << 16 != 0`: the client only writes a spot for some attack types. */
+  hasPosition: boolean;
+  /** Everything after the position, appended by `sub_495880` -> `sub_495620`. Not decoded. */
+  tail: Uint8Array;
+}
+
+/** Read the fields of a `0x2C` body (no opcode byte; the reader must sit at the mob id). */
+export function readClientMobAttack(reader: PacketReader): ClientMobAttack {
+  const mobId = reader.readU32();
+  const flags = reader.readByte();
+  const actionByte = reader.readByte();
+  const raw = reader.readU32();
+  const attack: ClientMobAttack = {
+    mobId,
+    flags,
+    actionByte,
+    action: actionByte === 0xff ? undefined : (actionByte >> 1) & 0x7f,
+    facing: actionByte & 1,
+    positionX: (raw & 0xffff) << 16 >> 16,
+    positionY: (raw >>> 16) << 16 >> 16,
+    hasPosition: raw !== 0,
+    tail: reader.readBytes(reader.remaining),
+  };
+  // `action` is absent for the 0xFF form - an undefined key would show up in JSON and in deepEqual.
+  if (attack.action === undefined) delete attack.action;
+  return attack;
+}
+
+/**
+ * The `0x2C` fields that are *written*: `action` and `facing` live inside `actionByte` and
+ * `hasPosition` is just "the raw u32 is not 0", so none of the three is an input.
+ */
+export type ClientMobAttackBody = Omit<ClientMobAttack, "action" | "facing" | "hasPosition">;
+
+/**
+ * Encode one `0x2C` body. `tail` is passed through untouched, because it is not decoded yet - the
+ * oracle run (ADR-004) can capture what the real client appends and hand it back in unchanged.
+ */
+export function encodeClientMobAttack(attack: ClientMobAttackBody): Uint8Array {
+  const writer = new PacketWriter(9 + attack.tail.length);
+  writer.writeByte(CLIENT_FIELD_OPCODE.mobAttack);
+  writer.writeU32(attack.mobId >>> 0);
+  writer.writeByte(attack.flags & 0xff);
+  writer.writeByte(attack.actionByte & 0xff);
+  writer.writeU32(((attack.positionY & 0xffff) << 16 >>> 0) | (attack.positionX & 0xffff));
+  writer.writeBytes(attack.tail);
   return writer.toBytes();
 }
 

@@ -142,6 +142,18 @@ export const MOB_OPCODE = {
    * flash state that lets the client replay its hit animation.
    */
   stat: 0x34,
+  /**
+   * `CMobPool` 0x35 (`sub_492380` case '5' -> `sub_488E10`): `u32 mobId` + the animation block.
+   *
+   * `sub_488E10` is three lines - `sub_4C6CE0(mob + 136, packet, timeGetTime())` - and `CMob::Init`
+   * hands the same function its `mob + 136` (`sub_484ED0`, 4.12.1), so this packet is **the animation
+   * block on its own**: a `u32` of channel flags and, per set bit, `s16 index` + `s16 delay`.
+   *
+   * That makes it the server's "play this action on that mob" packet, for the clients that are not
+   * driving the mob themselves - the animation the block switches on is the same seven channels
+   * `0x2F` sets at spawn. An unknown `mobId` returns before anything is read.
+   */
+  anim: 0x35,
   /** `CMobPool` 0x32/0x36 (`sub_492380` default): `u32 mobId`, then nothing. Effectively unused. */
   unusedLookup: 0x32,
 } as const;
@@ -242,18 +254,59 @@ function writeMobSpawnTail(writer: PacketWriter, body: MobSpawnTail): void {
   writer.writeByte(body.facing & 0xff);
   writer.writeU16(body.unknownA ?? 0);
   writer.writeU16(body.unknownB ?? 0);
+  writeMobChannels(writer, body.channels);
+}
+
+/** The `sub_4C6CE0` block: a `u32` of channel flags, then `s16 index` + `s16 delay` per set bit. */
+function writeMobChannels(writer: PacketWriter, channels: (MobChannel | undefined)[] | undefined): void {
   let flags = 0;
-  const channels: (MobChannel | undefined)[] = body.channels ?? [];
+  const list: (MobChannel | undefined)[] = channels ?? [];
   for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
-    if (channels[i] !== undefined) flags |= 1 << i;
+    if (list[i] !== undefined) flags |= 1 << i;
   }
   writer.writeU32(flags >>> 0);
   for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
-    const channel = channels[i];
+    const channel = list[i];
     if (channel === undefined) continue;
     writeS16(writer, channel.index);
     writeS16(writer, channel.delay);
   }
+}
+
+/** Read a `sub_4C6CE0` block. Returns `undefined` when the flag word is 0 (no channels at all). */
+function readMobChannels(reader: PacketReader): (MobChannel | undefined)[] | undefined {
+  const flags = reader.readU32();
+  if (flags === 0) return undefined;
+  // Dense on purpose: the gaps are the channels the client switched off (see `MobEnterField`).
+  const channels: (MobChannel | undefined)[] = [];
+  for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
+    channels.push((flags & (1 << i)) === 0 ? undefined : { index: readS16(reader), delay: readS16(reader) });
+  }
+  return channels;
+}
+
+/** The body of one `0x35` (mob animation) packet: the field entry's animation block, nothing else. */
+export interface MobAnim {
+  /** Pool key; an id the client does not know makes the packet a no-op (the handler returns early). */
+  mobId: number;
+  /** Channel `i` is flag bit `1 << i`; `undefined` leaves that channel alone. */
+  channels?: (MobChannel | undefined)[];
+}
+
+/** Encode one `0x35` packet, opcode byte included. */
+export function encodeMobAnim(body: MobAnim): Uint8Array {
+  const writer = new PacketWriter(32);
+  writer.writeByte(MOB_OPCODE.anim);
+  writer.writeU32(body.mobId >>> 0);
+  writeMobChannels(writer, body.channels);
+  return writer.toBytes();
+}
+
+/** Read the fields of a `0x35` body (no opcode byte; the reader must sit at `mobId`). */
+export function readMobAnim(reader: PacketReader): MobAnim {
+  const mobId = reader.readU32();
+  const channels = readMobChannels(reader);
+  return channels === undefined ? { mobId } : { mobId, channels };
 }
 
 /** Encode one `0x2F` packet, opcode byte included (the convention `encodeSetField` uses). */
@@ -361,17 +414,9 @@ export function readMobEnterField(reader: PacketReader): MobEnterField {
   const facing = reader.readByte();
   const unknownA = reader.readU16();
   const unknownB = reader.readU16();
-  const flags = reader.readU32();
   const body: MobEnterField = { mobId, templateId, x, y, facing, unknownA, unknownB };
-  if (flags !== 0) {
-    // Dense on purpose: a sparse array would make `channels.map(...)` and JSON.stringify skip the
-    // gaps, and the gaps are exactly the channels the client switched off.
-    const channels: (MobChannel | undefined)[] = [];
-    for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
-      channels.push((flags & (1 << i)) === 0 ? undefined : { index: readS16(reader), delay: readS16(reader) });
-    }
-    body.channels = channels;
-  }
+  const channels = readMobChannels(reader);
+  if (channels !== undefined) body.channels = channels;
   return body;
 }
 
@@ -411,6 +456,19 @@ export function readMobMove(reader: PacketReader): { mobId: number; body: MobMov
   const value = reader.readU32();
   const path = readMovePath(reader);
   return { mobId, body: { actionByte, value, path } };
+}
+
+/**
+ * One line describing a `0x35` packet body, for logs and `decode`.
+ *
+ * The channel *names* are not proven (the client keeps them as plain `(index, delay)` pairs), so the
+ * index is printed as the number it is.
+ */
+export function describeMobAnim(body: MobAnim): string {
+  const channels = (body.channels ?? [])
+    .map((channel, index) => (channel === undefined ? undefined : `${index}=(${channel.index},${channel.delay})`))
+    .filter((text): text is string => text !== undefined);
+  return `mobId=${body.mobId} channels=${channels.length === 0 ? "none" : channels.join(" ")}`;
 }
 
 /** One line describing a `0x33` packet body, for logs and `decode`. */

@@ -15,12 +15,15 @@ import {
   MOB_OPCODE,
   MOB_PRESENCE_KEEP,
   MOB_PRESENCE_REMOVE,
+  describeMobAnim,
   describeMobEnterField,
+  encodeMobAnim,
   encodeMobAppear,
   encodeMobEnterField,
   encodeMobLeaveDelayed,
   encodeMobRemove,
   encodeMobStat,
+  readMobAnim,
   readMobEnterField,
   readMobLeaveDelayed,
   readMobPresence,
@@ -252,4 +255,50 @@ test("the 0x31 tail is only read for an id the pool does not have", () => {
   const reader = new PacketReader(appear, 1);
   assert.deepEqual(readMobPresence(reader), { flag: 1, mobId: 9 });
   assert.equal(reader.remaining, 17, "templateId (4) + the Init body (13) are left for CMob::Init");
+});
+
+test("0x35 is the animation block on its own, after a mobId", () => {
+  // sub_492380 case '5' -> sub_488E10 -> sub_4C6CE0(mob + 136, packet, now), the same decoder
+  // CMob::Init uses for the tail of 0x2F - so the body is exactly that block.
+  const channels = new Array(MOB_CHANNEL_COUNT).fill(undefined);
+  channels[2] = { index: 10, delay: 4 };
+  const bytes = encodeMobAnim({ mobId: 0x01020304, channels });
+  assert.equal(MOB_OPCODE.anim, 0x35);
+  assert.equal(bytes[0], 0x35);
+  assert.equal(u32(bytes, 1), 0x01020304);
+  assert.equal(u32(bytes, 5), 1 << 2, "only channel 2 is switched on");
+  assert.deepEqual([s16(bytes, 9), s16(bytes, 11)], [10, 4]);
+  assert.equal(bytes.length, 13);
+  assert.deepEqual(readMobAnim(new PacketReader(bytes, 1)), { mobId: 0x01020304, channels });
+});
+
+test("0x35 with no channels is the id plus a zero flag word - i.e. \"switch every channel off\"", () => {
+  const bytes = encodeMobAnim({ mobId: 7 });
+  assert.deepEqual([...bytes], [0x35, 7, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(readMobAnim(new PacketReader(bytes, 1)), { mobId: 7 }, "no channels means the key is absent");
+  assert.equal(describeMobAnim(readMobAnim(new PacketReader(bytes, 1))), "mobId=7 channels=none");
+});
+
+test("0x35 describes its channels without naming them", () => {
+  const channels = new Array(MOB_CHANNEL_COUNT).fill(undefined);
+  channels[0] = { index: 13, delay: 72 };
+  channels[6] = { index: -1, delay: 0 };
+  const text = describeMobAnim(readMobAnim(new PacketReader(encodeMobAnim({ mobId: 3, channels }), 1)));
+  assert.equal(text, "mobId=3 channels=0=(13,72) 6=(-1,0)");
+  assert.equal(
+    describeFieldPacket(encodeMobAnim({ mobId: 3, channels })),
+    "0x35 CMobPool(mob animation): mobId=3 channels=0=(13,72) 6=(-1,0)",
+  );
+  assert.match(describeFieldPacket(new Uint8Array([0x35, 1])) ?? "", /truncated/);
+});
+
+test("the 0x35 block is byte for byte the block a 0x2F carries", () => {
+  const channels = new Array(MOB_CHANNEL_COUNT).fill(undefined);
+  channels[1] = { index: 7, delay: 2 };
+  channels[4] = { index: 9, delay: 0 };
+  const anim = encodeMobAnim({ mobId: 1, channels });
+  const enter = encodeMobEnterField({ mobId: 1, templateId: 5, x: 0, y: 0, facing: 0, channels });
+  // The block starts at byte 5 of 0x35 (opcode + mobId) and at byte 18 of 0x2F (opcode, mobId,
+  // templateId, x, y, facing, unknownA, unknownB); both then run to the end of the packet.
+  assert.deepEqual([...anim.slice(5)], [...enter.slice(AT.animFlags)], "one decoder, one encoding");
 });

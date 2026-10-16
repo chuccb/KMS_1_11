@@ -13,9 +13,12 @@ import { readMovePath, writeMovePath, pathStart, type MovePath } from "../src/pr
 import {
   FIELD_OPCODE,
   describeClientFieldPacket,
+  CLIENT_FIELD_OPCODE,
   encodeClientAttack,
   encodeClientInteract,
+  encodeClientMobAttack,
   readClientAttack,
+  readClientMobAttack,
   type ClientAttack,
   encodeClientUserMove,
   readClientInteract,
@@ -364,4 +367,68 @@ test("skill attack (0x11) is the same record with no extra u16", () => {
   assert.equal(toHex(bytes), "1111300000002006" + "10000000036400c8000500" + "0900");
   assert.deepEqual(readClientAttack(new PacketReader(bytes, 1), 0x11), attack);
   assert.match(describeClientFieldPacket(bytes)!, /^0x11 attack: right action=32/);
+});
+
+test("mob attack (0x2c): the mob's own action, as the client reports it", () => {
+  // The action byte is the same encoding 0x33 uses, and attack1 is action 10 - which is exactly what
+  // the picker hands over: `*p_n13 = v46[..] + 10` (FINDINGS 4.20).
+  const attack = {
+    mobId: 0x01020304,
+    flags: 0x11,
+    actionByte: (10 << 1) | 1,
+    positionX: -5,
+    positionY: 300,
+    tail: new Uint8Array([1, 2, 3]),
+  };
+  const bytes = encodeClientMobAttack(attack);
+  assert.equal(CLIENT_FIELD_OPCODE.mobAttack, 0x2c);
+  assert.equal(CLIENT_FIELD_OPCODE.attack, 0x0f, "0x0f is the player's swing, 0x2c is the mob's");
+  // opcode | mobId | flags | (attack1<<1)|left | x=-5 y=300 packed as x|y<<16 | tail
+  assert.equal(toHex(bytes), "2c" + "04030201" + "11" + "15" + "fbff2c01" + "010203");
+  assert.deepEqual(readClientMobAttack(new PacketReader(bytes, 1)), {
+    ...attack,
+    action: 10,
+    facing: 1,
+    hasPosition: true,
+  });
+});
+
+test("mob attack (0x2c) without a position, and the 0xff reset form", () => {
+  const bytes = encodeClientMobAttack({
+    mobId: 7,
+    flags: 0x10,
+    actionByte: (13 << 1) | 0,
+    positionX: 0,
+    positionY: 0,
+    tail: new Uint8Array(0),
+  });
+  assert.equal(toHex(bytes), "2c07000000101a00000000");
+  const back = readClientMobAttack(new PacketReader(bytes, 1));
+  assert.equal(back.hasPosition, false);
+  assert.equal(back.action, 13);
+  assert.equal(back.tail.length, 0);
+  assert.equal("action" in back, true);
+
+  // `sub_4885D0(mob, -1, 0, 0, 0)` writes the signed byte straight through, so 0xFF is "reset".
+  const reset = readClientMobAttack(new PacketReader(encodeClientMobAttack({
+    mobId: 7, flags: 0, actionByte: 0xff, positionX: 0, positionY: 0, tail: new Uint8Array(0),
+  }), 1));
+  assert.equal(reset.action, undefined);
+  assert.equal("action" in reset, false, "no undefined key, so JSON and deepEqual stay honest");
+});
+
+test("the mob-attack describer names the action and says how much it did not read", () => {
+  const bytes = encodeClientMobAttack({
+    mobId: 42, flags: 0x11, actionByte: (0 << 1) | 1, positionX: -1, positionY: 2,
+    tail: new Uint8Array([9, 9]),
+  });
+  assert.equal(
+    describeClientFieldPacket(bytes),
+    "0x2c mob attack: mobId=42 move,left flags=0x11 at (-1,2) tail=2B",
+  );
+  const noPosition = encodeClientMobAttack({
+    mobId: 42, flags: 1, actionByte: 10 << 1, positionX: 0, positionY: 0, tail: new Uint8Array(0),
+  });
+  assert.equal(describeClientFieldPacket(noPosition), "0x2c mob attack: mobId=42 attack1,right flags=0x1 tail=0B");
+  assert.match(describeClientFieldPacket(new Uint8Array([0x2c, 1]))!, /truncated/);
 });
