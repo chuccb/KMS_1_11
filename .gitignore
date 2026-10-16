@@ -18,6 +18,9 @@ generated/
 
 # local scratch
 *.tmp
+
+# the server's save file (server/src/game/save.ts) - a running world, not source
+kms111-save.json
 .DS_Store
 
 # capture traces (regenerate with server/src/cli.ts capture)

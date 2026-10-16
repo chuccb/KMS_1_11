@@ -74,6 +74,7 @@ import { fileURLToPath } from "node:url";
 import type { MapData } from "../src/game/map.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
+import { MemorySaveStore, loadAccounts } from "../src/game/save.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
 const archive: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
@@ -1702,5 +1703,192 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
   assert.ok(
     log.some((line) => line.includes('0x29 level-up effect for "Hero" sent to 1 other player(s)')),
     log.join("\n"),
+  );
+});
+
+/**
+ * A session that ends writes the character back to the save.
+ *
+ * The point of a save is not the file: it is that what happened in a field is still there tomorrow.
+ * Exp, level, hp and the items all change *in place* on the `CharacterData` the login server handed
+ * over - the same object the account table holds - so "persist when the session ends" is the whole
+ * save. This test walks the loop an operator would: a character enters, kills the mob, disconnects,
+ * and what comes out of the store is the record the client was last told about in `0x0D`.
+ */
+test("a session that ends leaves the character's progress in the save", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const store = new MemorySaveStore();
+  let saves = 0;
+  // The table *is* the world: the record the game server is handed is the one in here, which is what
+  // `LoginServerOptions.accounts` means and what the CLI's `persist` closure saves.
+  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
+    mobTickMs: 20,
+    mobRespawnMs: 60_000,
+    dropPolicy: () => [],
+    handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
+    persist: () => {
+      saves += 1;
+      store.save(accounts);
+    },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 21;
+  stats.name = "Fighter";
+  stats.level = 1;
+  stats.exp = 10;
+  stats.hp = 20;
+  stats.maxHp = 50;
+  stats.mp = 5;
+  stats.maxMp = 30;
+  stats.mesos = 500;
+  const record = characterDataOf(stats, startingCharacterItems());
+  accounts.get("admin")!.characters.push(record);
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({
+    username: "admin",
+    characterId: 21,
+    characterName: "Fighter",
+    character: record,
+  });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(4); // 0x16 + the two mobs + the NPC
+  t.after(() => client.close());
+
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+  await client.take(2); // the mob's stat + the corpse
+  const stat = (await client.take(1))[0]!;
+  const told = readStatUpdate(new PacketReader(stat, 1));
+  assert.deepEqual(told.diff, { exp: 15, level: 2, hp: 50, mp: 30 }, "the 0x0D this test then persists");
+
+  // The player leaves. That is the only moment this test has to wait for: the save happens on the
+  // server's `close` event, which is not synchronous with the client's.
+  assert.equal(saves, 0, "nothing is saved while the session is still open");
+  client.close();
+  const deadline = Date.now() + 2000;
+  while (saves === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(saves, 1, `the session ending saved once; log:\n${log.join("\n")}`);
+
+  // What the store holds is the character as they left: the level-up, the refill that came with it,
+  // and the rest of the record untouched.
+  const saved = loadAccounts(store, new Map()).get("admin")!.characters[0]!;
+  assert.equal(saved.stats.name, "Fighter");
+  assert.equal(saved.stats.id, 21);
+  assert.equal(saved.stats.level, 2);
+  assert.equal(saved.stats.exp, 15);
+  assert.equal(saved.stats.hp, 50);
+  assert.equal(saved.stats.mp, 30);
+  assert.equal(saved.stats.mesos, 500);
+  assert.equal(saved.items?.inventories.length, 4, "the bags came back too");
+});
+
+/**
+ * The whole reason a save exists: the next run of the server is the same world.
+ *
+ * Two login servers in one test, one store: the first run creates a character over a real socket
+ * (0x04 -> 0x01 -> 0x02 -> 0x06 -> 0x05), and the second one - a fresh `LoginServer` over the same
+ * store, seeded with a *different* password for the same user - sees that character in the 0x02
+ * character list. The seed losing is the point: the save file is the world, and `--account` is only
+ * what a first run starts from.
+ */
+test("the world comes back after a restart: the save file is the accounts", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const store = new MemorySaveStore();
+  const startLogin = async (accounts: Map<string, AccountRecord>) => {
+    const server = new LoginServer({
+      accounts,
+      worlds: [{ name: "Scania", unknownId: 0 }],
+      gameServer: { ip: "127.0.0.1", port: 8585 },
+      handoffs: new HandoffRegistry(),
+      persist: () => store.save(accounts),
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      log: (line) => log.push(line),
+    });
+    const info = await server.listen(0);
+    return { server, port: info.port };
+  };
+
+  // Run one: no save yet, so the --account seed is the world.
+  const seed = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+  const first = await startLogin(loadAccounts(store, seed, (line) => log.push(line)));
+  t.after(async () => {
+    await first.server.close();
+  });
+
+  const create = await FakeClient.connect(first.port);
+  t.after(() => create.close());
+  create.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  create.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  await create.take(1);
+  create.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+  await create.take(1);
+  create.send({ kind: "check-name", opcode: 0x06, name: "Hero", appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+  await create.take(1);
+  create.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+  const createdReply = (await create.take(1))[0]!;
+  const createdReader = new PacketReader(createdReply);
+  createdReader.readByte();
+  assert.equal(createdReader.readByte(), LOGIN_RESULT.ok);
+  const hero = readCharacterData(createdReader);
+  assert.equal(hero.stats.name, "Hero");
+  create.close();
+  await first.server.close();
+
+  // Run two: the same store, and a seed whose password is *wrong* on purpose. If the seed won, the
+  // login below would be refused.
+  const reloaded = loadAccounts(store, new Map([["admin", { password: "not-the-password", characters: [] }]]), (line) =>
+    log.push(line),
+  );
+  assert.deepEqual([...reloaded.keys()], ["admin"]);
+  assert.equal(reloaded.get("admin")!.characters.length, 1);
+  const second = await startLogin(reloaded);
+  t.after(async () => {
+    await second.server.close();
+  });
+
+  const back = await FakeClient.connect(second.port);
+  t.after(() => back.close());
+  back.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  back.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  const loginReply = parseLoginReply((await back.take(1))[0]!);
+  assert.equal(loginReply.result, LOGIN_RESULT.ok, "the saved password is the one that works");
+  back.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+  const worldReply = (await back.take(1))[0]!;
+  const reader = new PacketReader(worldReply);
+  assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
+  assert.equal(reader.readByte(), LOGIN_RESULT.ok);
+  assert.equal(reader.readByte(), 1, "the character survived the restart");
+  const sameHero = readCharacterData(reader);
+  assert.equal(sameHero.stats.name, "Hero");
+  assert.equal(sameHero.stats.id, hero.stats.id, "and it is the same character, not a new one");
+  assert.equal(sameHero.items?.inventories.length, 4);
+  assert.equal(reader.exhausted, true);
+  assert.ok(
+    log.some((line) => line.includes("ignoring 1 --account entr(ies)")),
+    `the seed losing is worth a line:\n${log.join("\n")}`,
   );
 });

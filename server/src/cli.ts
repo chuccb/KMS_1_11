@@ -18,6 +18,7 @@ import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
 import { npcTemplateProvider, npcWalkPolicy } from "./game/npcs.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
+import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -47,7 +48,7 @@ usage:
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
-        [--npc-walk <none|all|id,id,...>] [--seed <n>]
+        [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--seed <n>]
         [--handshake-body <hex>]
         [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
@@ -93,6 +94,14 @@ notes:
   list of Npc/<id>.img template ids. Which NPCs the 2003 server walked is not located, which is why
   the default is the quiet one. A bare --npc-walk means "all".
 
+  --save keeps the accounts (and every character in them) between two runs of serve: accounts,
+  characters, their items, exp, mesos and the map they are standing in (game/save.ts, ADR-017). The
+  default is ./kms111-save.json; --save off keeps everything in memory, which is what the server did
+  before it could save. The file wins over --account on startup (the seed is only what a *first* run
+  starts from), and a file this build cannot read is refused - the server prints why and exits instead
+  of overwriting it. Saves happen after a character is created or deleted and when a session leaves
+  the field (the one place a character's play ends), written atomically: a crash never truncates it.
+
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
   showing up as a failing assertion (docs/WZ1_FORMAT.md 4.6).
@@ -107,6 +116,14 @@ notes:
   (FINDINGS 4.11.2b), which is why the server can pick a map at all. Nothing else is served yet:
   mobs, skills and drops are still unknown (FINDINGS 6).
 `;
+
+/**
+ * Where the accounts live when `--save` is not given.
+ *
+ * Next to the server, like `--data`'s default of `./Data.wz`: a save file that is not somewhere
+ * obvious is a save file that gets lost. `.gitignore` keeps it out of a commit.
+ */
+const DEFAULT_SAVE_PATH = "kms111-save.json";
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
   const out: Record<string, string | boolean> = {};
@@ -244,7 +261,7 @@ async function runServe(rest: string[]): Promise<number> {
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
   const quiet = args.quiet === true;
   const seed = parseSeed(args.seed);
-  const accounts = parseAccounts(args.account);
+  const seedAccounts = parseAccounts(args.account);
   const worldNames = typeof args.world === "string" ? args.world.split(",") : ["Scania"];
   const worlds = worldNames.map((name, index) => ({ name, unknownId: index }));
   const gameIp = typeof args["game-ip"] === "string" ? args["game-ip"] : "127.0.0.1";
@@ -305,6 +322,21 @@ async function runServe(rest: string[]): Promise<number> {
   }
 
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
+  // Where the accounts live between two runs of this process (game/save.ts, ADR-017). `off` is what
+  // this server did before it could save: accounts and characters in memory only. A save file this
+  // build cannot read stops the start instead of being overwritten - the operator decides.
+  const saveArg = args.save;
+  const savePath = saveArg === "off" ? undefined : typeof saveArg === "string" ? saveArg : DEFAULT_SAVE_PATH;
+  const saveStore =
+    savePath === undefined ? undefined : new FileSaveStore({ path: savePath, ...(log ? { log } : {}) });
+  let accounts: Map<string, AccountRecord>;
+  try {
+    accounts = loadAccounts(saveStore, seedAccounts, log);
+  } catch (error) {
+    process.stderr.write(`${savePath}: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+  const persist = saveStore === undefined ? undefined : () => saveStore.save(accounts);
   for (const warning of shopWarnings) log?.(warning);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
   const handoffs = new HandoffRegistry();
@@ -315,6 +347,7 @@ async function runServe(rest: string[]): Promise<number> {
     startMapId: mapId,
     handoffs,
     ...(handshake ? { handshake } : {}),
+    ...(persist ? { persist } : {}),
     ...(log ? { log } : {}),
   });
   let game: GameEntryServer | undefined;
@@ -333,6 +366,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
       ...(handshake ? { handshake } : {}),
+      ...(persist ? { persist } : {}),
       ...(log ? { log } : {}),
     });
     const info = await game.listen(gamePort, host);
@@ -353,7 +387,8 @@ async function runServe(rest: string[]): Promise<number> {
         : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
-      `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n`,
+      `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
+      `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n`,
   );
   await new Promise<void>((resolve) => {
     const stop = () => resolve();

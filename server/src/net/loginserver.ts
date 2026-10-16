@@ -8,10 +8,14 @@
  * yet decoded is *not* invented (see `GameEntryServer` at the bottom).
  *
  * What is deliberately missing:
- *   - persistence: accounts and characters live in memory, so a restart forgets them;
- *   - the in-game stage (CField, opcodes 0x15-0x52): not decoded yet;
+ *   - the in-game stage (CField, opcodes 0x15-0x52): 0x16 to 0x52 is implemented, the rest is not;
  *   - the CharacterData item block (30 equip slots + 4 inventories), so created characters are
  *     stat-only - the client accepts that (`flags = 1`, FINDINGS 4.9).
+ *
+ * Persistence is **not** here: both servers take a `persist` callback and call it after a mutation
+ * (a character created or deleted here, a session that leaves the field at the bottom of this file),
+ * and `game/save.ts` is what turns that call into a file. Keeping the file out of this module is what
+ * lets a test run a whole login + gameplay flow without touching a disk.
  */
 import net from "node:net";
 import { CipherState } from "../protocol/cipher.ts";
@@ -156,6 +160,14 @@ export interface LoginServerOptions {
   startMapId?: number;
   /** Cipher seeds and handshake body. Defaults: random seeds, 199 zero bytes. */
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
+  /**
+   * Called after a mutation this server is responsible for: a character created (`0x05`) or deleted
+   * (`0x07`). `game/save.ts` is the implementation that writes a file; a test can pass nothing.
+   *
+   * A throw from here is caught and logged, not propagated: a save that fails must not kill the
+   * connection that triggered it (the login flow already answered the client by then).
+   */
+  persist?(): void;
   /** One line per event; defaults to nothing. Pass a printer for an operator-facing log. */
   log?(line: string): void;
 }
@@ -418,6 +430,7 @@ export class LoginServer {
         account.characters.push(created);
         this.reply(socket, sendState, encodeCreateCharacterResult(LOGIN_RESULT.ok, created));
         this.log(`  created "${created.stats.name}" (id ${created.stats.id})`);
+        this.persist();
         return;
       }
 
@@ -435,6 +448,7 @@ export class LoginServer {
         const [removed] = account.characters.splice(index, 1);
         this.reply(socket, sendState, encodeDeleteCharacterResult(packet.characterId, 1));
         this.log(`  deleted "${removed?.stats.name ?? "?"}" (id ${packet.characterId})`);
+        this.persist();
         return;
       }
 
@@ -445,6 +459,21 @@ export class LoginServer {
       case "unknown":
         this.log(`  note: unmapped opcode kept as ${packet.body.length} raw byte(s)`);
         return;
+    }
+  }
+
+  /**
+   * Hands the accounts to the caller's store, if there is one.
+   *
+   * The accounts table is the same object the caller keeps (`LoginServerOptions.accounts`), and the
+   * character records inside it are the objects the game server mutates, so "persist now" needs no
+   * argument: the truth is already in one place.
+   */
+  private persist(): void {
+    try {
+      this.options.persist?.();
+    } catch (error) {
+      this.log(`persist failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -561,6 +590,16 @@ export interface GameEntryServerOptions {
   pickupRangeY?: number;
   /** How far from the monster a drop may land, in px. Defaults to `DROP_SPREAD_PX`. */
   dropSpreadPx?: number;
+  /**
+   * Called when a **session ends** - the one point where a character's play leaves this process.
+   *
+   * Everything a player changes in a field (exp, level, items, mesos, `mapId` from a portal) is
+   * written into the `CharacterData` the login server handed over, so "persist now" is the whole
+   * save: there is no second copy to reconcile. Saving only here is a choice: a server that is killed
+   * mid-session loses that session, and a save per packet would rewrite the file for every step of a
+   * walk.
+   */
+  persist?(): void;
   log?(line: string): void;
 }
 
@@ -1340,8 +1379,19 @@ export class GameEntryServer {
     socket.on("close", () => {
       // The field has to hear about it: the others get an `0x1D`, and the mobs keep walking.
       session?.instance.leave(session.characterId);
+      // And the character's record has to leave the process - this is the only place a session ends.
+      if (session !== undefined) this.persist();
       this.sockets.delete(socket);
     });
+  }
+
+  /** Hands the (mutated) character records to the caller's store; a throw is logged, not propagated. */
+  private persist(): void {
+    try {
+      this.options.persist?.();
+    } catch (error) {
+      this.options.log?.(`game: persist failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -1403,8 +1453,14 @@ function withMapId(entry: HandoffEntry, fallbackMapId: number): CharacterData {
     // map the same way it is for level and mesos, and it is the only field `sub_4C2780` reads to pick
     // the map (FINDINGS 4.11.2b). `0` means "no map of its own" - a record built by hand, or one
     // from before this server had more than one map - and that is what the server's option is for.
-    const mapId = entry.character.stats.mapId !== 0 ? entry.character.stats.mapId : fallbackMapId;
-    return { ...entry.character, stats: { ...entry.character.stats, mapId } };
+    //
+    // The record is used **as it is**, not copied: this is the same object the account table holds
+    // (`LoginServerOptions.accounts`), the field then mutates it in place (exp, hp, items, mesos,
+    // `mapId` when a portal moves them), and `persist` saves that one object when the session ends.
+    // A copy would mean two records with one name, and only one of them would ever be saved.
+    const character = entry.character;
+    if (character.stats.mapId === 0) character.stats.mapId = fallbackMapId;
+    return character;
   }
   const stats = zeroStats();
   stats.id = entry.characterId;
