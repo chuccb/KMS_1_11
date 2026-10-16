@@ -228,7 +228,7 @@ sub_45DC80(&dst, ptr, avail);  // 讀 2 bytes（u16）
 | 0x0A | `u16 len str` + `u32`，送出後 `Sleep(300)×2` 並丟 `CTerminateException` | `sub_5545F0` | **要求遷移**：等伺服器切換連線（配合 §4.2 的 0x07）|
 | 0x0D | `s32 kind` + `string name` | `sub_472590`（`CField::SendInteract`）| **點擊場地物件／傳送門**（`kind = -1`），也是 GM 的 `/헉맵 <mapId>`：見 §4.11.6、§4.13 |
 | 0x0E | `u8 *(CStage+156)` + `CMovePath` | `sub_542C40`（`CVecCtrlUser`）| **本機角色自己的移動**；舊註記只寫了那個 u8，因為 `CMovePath` 的來源是後來才定位的（§4.11.6）|
-| 0x0F | **已完整解出（byte-exact）**：`u8 段數\|目標數<<4`、`u32 游標物件 id`、`u8 面向<<7\|動作`、`u8 目標上限`、每目標 11 B ＋ 段數×`u16` 傷害 | `sub_512F90` | **普通攻擊**（§4.13.1）|
+| 0x0F | **已完整解出（byte-exact）**：`u8 段數\|目標數<<4`、`u32 技能 id`（0 ＝ 沒有技能）、`u8 面向<<7\|動作`、`u8 速度`、每目標 11 B ＋ 段數×`u16` 傷害 | `sub_512F90` | **普通攻擊**（§4.13.1）|
 | 0x10／0x11 | 同形狀；`0x10` 多一個 `u16`，兩者的高 nibble 是「有第二個物件」旗標而非計數 | `sub_513C80`／`sub_514D30` | 魔法／技能攻擊（§4.13.1b，已解）|
 | 0x12 | `string` | `sub_470C70` | **一般聊天**（§4.13；顯示端與伺服器那一半見 **§4.26**）|
 | 0x13 | `u32 emotion` | `sub_511E20`（case 10）| **表情**（F1..F7 → 1..7；送出前 client 已經自己套用了，見 **§4.35**）|
@@ -868,10 +868,10 @@ count × {
 |---|---|---|
 | 0x1E／0x20 | `sub_51D530` | 只讀 u32 查表，**沒有** payload 處理（0x1F 才有：`sub_50B320` ＝ **氣球**，形狀已定位但未實作，見 §4.35.5）|
 | 0x21／0x2A | `sub_51D590` | 讀 u32 查表後 `default` → 沒有分支 |
-| 0x23／0x24／0x25 | `sub_5209C0` → `sub_520F20`／`sub_521400`／`sub_521AD0` | **已解（本回合），見 §4.11.7b**：`sub_51D590` 先讀 `u32 characterId` 並在 `CUserPool` 查（查不到整包丟掉），本體＝`u8 (hits\|筆數<<4)`＋`u8 技能等級`＋〔`u32 技能 id`〕＋`u8 面向\|動作`＋`u8 速度`＋`u8 afterimage`＋`u32`，然後每筆 `u32 mobId`＋`u8 動畫`＋`hits × u16 傷害`——**別人的攻擊**（`0x23` 普攻已實作轉播）|
+| 0x23／0x24／0x25 | `sub_5209C0` → `sub_520F20`／`sub_521400`／`sub_521AD0` | **已解（本回合），見 §4.11.7b**：`sub_51D590` 先讀 `u32 characterId` 並在 `CUserPool` 查（查不到整包丟掉），本體＝`u8 (hits\|筆數<<4)`＋`u8 技能等級`＋〔`u32 技能 id`〕＋`u8 面向\|動作`＋`u8 速度`＋`u8 afterimage`＋`u32`，然後每筆 `u32 mobId`＋`u8 動畫`＋`hits × u16 傷害`——**別人的攻擊**（**三支都已實作轉播**，一對一見 §4.11.7c）|
 | 0x26 | `nullsub_13` | 空函式 |
 | 0x27 | `sub_509790` | **已解，見 §4.35**：`u32 characterId` ＋ `u32 emotion`（0..8）→ `CUser::SetFace`；同一格就是 c2s `0x13` 的送出端|
-| 0x28 | `sub_5221A0` | 旗標式：u32 flags，bit 0／bit 4 之後各再讀欄位 |
+| 0x28 | `sub_5221A0` | **（本回合讀完）**`u32 flags` →〔bit 0：`u32`（存起來當第一格）〕〔bit 4：`u32`（跳過）〕〔bit 8：`u32`（跳過）〕→ `u8`：非 0 就 `sub_45F340(packet, src[15])` 讀 **id 清單**成 15 格，0 就 `src = *(this + 19)`（這個人自己那一份）→ `sub_508260(this, …)` → **`sub_508290(this, src)`**（＝安裝 look 區，也就是 §4.11.7c 說的那條「觀察者怎麼知道那個人的武器」的路）|
 | 0x29 | `sub_522300` | **已解，見 §4.27**：`u32 characterId`（由 `sub_51D590` 讀並在池裡查）＋ `u8 effect`；0 = 在那個人身上播 `Effect/BasicEff.img/LevelUp` + `LevelUp` 音效（升級），1 後面還有一個 `u32`（未解）|
 
 > `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
@@ -910,8 +910,9 @@ count × {
 - `sub_508690(user, 動作, speed)` 是**閘門**：`user+46 > -1`（這個人已經在攻擊中）或 `user+37` 的動作表查不到
   這個動作 → 回 0，**整包不做事**（不丟例外）。所以「送錯動作」的結果是安靜地什麼都不播。
 - 三支的差異：`0x24`（`sub_521400`）用 `sub_514BA0`／`sub_4892A0`／`sub_489580`／`sub_514D00`／`sub_515C70`
-  這一組（移動／子彈型特效）並且多收欄位 7；`0x25`（`sub_521AD0`）同組但不收欄位 7。
-  ⇒ 與 c2s 的 `0x0F`／`0x10`／`0x11` 一對一（普攻／魔法／技能）。**本回合只實作 `0x0F` → `0x23`。**
+  這一組（子彈型特效）並且多收欄位 7；`0x25`（`sub_521AD0`）同組但不收欄位 7。
+  ⇒ 與 c2s 的 `0x0F`／`0x10`／`0x11` 一對一，**但名字是普攻／射擊／魔法**（原本寫的「魔法／技能」是錯的）：
+  哪一支對哪一支、以及 `0x24` 的欄位 7 是什麼，見 **§4.11.7c**。
 - **WZ 這一側**（寫實作時要用）：`Character/Afterimage/` 只有 10 張圖（`axe`／`crossBow`／`hit`／`mace`／
   `poleArm`／`spear`／`swordOL`／`swordOS`／`swordTL`／`swordTS`），武器自己的
   `Character/Weapon/0<id>.img → info/afterImage` 指名用哪一張（`01302000.img`＝검 → `swordOL`、
@@ -919,7 +920,8 @@ count × {
   （`hit.img` 例外：子節點是 `sword1`／`sword2`／`mace1`／`mace2`／`maceF`／`swordF`），每個子節點底下才是
   `swingO1`／`stabO1`／`proneStab`… 的動畫。**選子節點編號的是 client 的 `sub_4BE270`（未定位）**，
   但 `0` 每一張都有，所以轉播送 0。
-- **伺服器端（本回合實作）**：`net/loginserver.ts` 的 `relaySwing` 把一次 c2s `0x0F` 轉播成 `0x23`：
+- **伺服器端（本回合實作）**：`net/loginserver.ts` 的 `relayAttack`（原 `relaySwing`）把一次 c2s 攻擊轉播出去
+  （`0x0F`→`0x23`；另外兩對見 §4.11.7c）：
   只給**同場地的其他人**（攻擊者自己的 client 在送包前已經播過同一組特效，跟 `0x27`／`0x29` 同一個理由）、
   目標只放**這場地真的收下的怪**（`applyDamage` 有回傳的），欄位 5 直接**照抄**攻擊者自己的第 4 byte。
   沒有來源的三格送中性值：`skillLevel`／`skillId` ＝ 0（沒有技能節點）、`afterimage` ＝ 0（每張圖都有 `0`）、
@@ -927,6 +929,65 @@ count × {
 - **驗證**：`test/field.test.ts` 三組（golden bytes、技能 id、拒絕 `mobId 0`），`test/serve.test.ts` 的同場地
   測試多驗「先 `0x23`、再 `0x34`／`0x30`，而且攻擊者自己沒有收到」；`whisper_probe.mjs` 用真 `Data.wz` 揮一刀
   （8 個檢查：有怪可打、Alt 收到、id／動作／hits／speed／目標／中性三格、揮擊先於怪物反應、攻擊者沒有回音）。
+
+#### 4.11.7c ✅ 三支攻擊的一對一（`0x23`↔`0x0F`、`0x24`↔`0x10`、`0x25`↔`0x11`）與 `0x24` 的投射物
+
+§4.11.7b 把「有哪些欄位」讀完，**哪一支對哪一支**是這一節定的：把六支函式（三個 c2s sender、三個 s2c 套用函式）
+各自呼叫的特效 helper 抓出來比，其中兩支是互斥的：
+
+| | `sub_50DAA0` | `sub_5095A0` | `sub_41B630` | `sub_41B850` | `sub_514BA0` | `sub_514D00` | `sub_515C70` | `sub_4892A0` | `sub_489580` | `sub_50D7F0` | `sub_4882F0` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| c2s `0x0F` `sub_512F90` | ✓ | ✓ | | | | | | | | ✓ | ✓ |
+| c2s `0x10` `sub_513C80` | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ |
+| c2s `0x11` `sub_514D30` | | ✓ | | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ |
+| s2c `0x23` `sub_520F20` | ✓ | ✓ | | | | | | | | ✓ | ✓ |
+| s2c `0x24` `sub_521400` | | | ✓ | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| s2c `0x25` `sub_521AD0` | | ✓ | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+- `sub_41B630`（子彈型特效）只出現在 c2s `0x10` 與 s2c `0x24`；`sub_41B850`（魔法特效）只出現在 c2s `0x11` 與
+  s2c `0x25`；`0x23` 與 `0x0F` 的呼叫集合**完全相同**。三對一因此是資料上的事實。
+- **命名更正**：`0x10` 不是「魔法」而是**射擊**——它的 sender 只服務弓／弩／爪
+  （`sub_4657F0(武器 id)`：`id/100000` 必須是 13／14，再回 `id/10000 %100`，只認 30–33、37、38、40–47；
+  射擊家族是其中的 45／46／47），`sub_511630` 也開頭就擋掉其他武器。`0x11` 才是**魔法**：唯一的上游是
+  `sub_518BF0` 對技能 `2001005`／`2101005` 走 `LABEL_53 → sub_5195D0`，而 `sub_5195D0` 就是
+  `if ((*(this + 45) & 0xFFFFFFFE) != 0xA) return sub_514D30(this, right, n30);`（狀態不是那個值就走 `0x11`，
+  是的話改跑 `sub_512F90` 並回 0）。⇒ `CLIENT_FIELD_OPCODE` 的 `magicAttack`（`0x10`）改名 `shootAttack`、
+  `skillAttack`（`0x11`）改名 `magicAttack`；`FIELD_OPCODE` 的 `userMagicAttack`（`0x24`）改名 `userShootAttack`、
+  `userSkillAttack`（`0x25`）改名 `userMagicAttack`。
+
+**c2s `0x10` 表頭那個 `u16` ＝ 投射物的 USE 分頁格號**（`sub_511630(this, right, n30, Args)`）：
+
+- 回傳值就是**格號**（1-based；它走分頁陣列的第 `v9` 格，`sub_465710(tab, …, 2, v9)`），**item id 走 out-param
+  `Args`**——所以「把封包抄進 `0x24` 的欄位 7」是錯的：`0x24` 的收端要的是 id（見下）。找不到 pile 就回 0，
+  而 caller 用 `if (… == 0) return` 表達「不要送這個包」。
+- 挑 pile 的條件：`v11/1000 - 2060`（箭，`2060xxx`）、`v11/1000 - 2061`（弩箭，`2061xxx`）、
+  `v11/10000 - 207`（飛鏢，`207xxxx`）三者之一必須為 0（依武器種類），而且那個 pile 的一個 `u16`
+  （`+34`／`+36` 兩 byte 互 xor 解出來；「數量」是最合理的讀法）必須 ≥ `n30`（目標自己那一格蓋寫後的值）。
+- c2s `0x11` 的表頭第 4 byte 是 `*(this + 38)` 原值，**沒有** `sub_4BE8B0` 的抖動（§4.13.1c 的兩個 sender 都有）。
+
+**s2c `0x24` 的欄位 7（那個 `u32`）＝投射物的 item id（推論，見最後一點）**：
+
+- `sub_521400(this, i, right, n, 動作, 面向, afterimage, bottom, 記錄陣列)` 多收的就是它，用處兩個：
+  `v96 = bottom / 10000 != 207 ? 0 : 0x78`（飛鏢家族才把每一排往下挪 120 px），以及當 `sub_41B630` 的最後一個參數。
+- **閘門不同**：`0x24` 開頭就要求 `sub_4657F0(*(this+34)) ∈ {45,46,47}`（觀察者手上這個人的武器不是弓／弩／爪就整包
+  不做事），`0x25` 沒有這個檢查。⇒ 射擊轉播要在別人的畫面上動起來，**觀察者必須已經知道那個人的武器**；那條路是
+  `0x1C` 的 id 清單（`sub_45F340` 歸格）→ `sub_507A20` → `sub_508290`，它把 `*(this+34) = src[11]`、`+38` 與 `+39`
+  換成武器 `info` 的那兩格（速度與 afterImage 字串）——也就是這個 server 已經在送的 `0x1C`。
+- `0x24` 內部的 `right[18] + 120*Value`、`sub_514BA0`、`sub_485AA0`、`sub_4892A0` 都是特效自己的事，轉播不必知道：
+  欄位對，收端自己會算。欄位錯的代價很小——`sub_508690` 是閘門（動作不在那個人的動作表就整包不做事），
+  而 `sub_50DAA0` 只用 `afterimage` 組路徑（每張 `Character/Afterimage/*.img` 都有子節點 `0`）。
+- ⚠️ **這一格是推論**：收端把 `bottom` 當 item id 用（`/10000 == 207` 的判斷與 `sub_41B630` 的最後一個參數）
+  是硬證據，但「原伺服器送的是 id，不是格號」沒有直接證據（沒有真實流量）。轉播時用 id 的理由是收端的
+  判斷形狀（`207xxxx`）；送格號永遠不會命中那個分支，等於送 0。
+
+**伺服器端（本回合實作）**：`ATTACK_RELAY_OPCODE` 一張表（`0x0F`→`0x23`、`0x10`→`0x24`、`0x11`→`0x25`；
+不在表上的 opcode 不轉播）＋ `relayAttack`（原 `relaySwing`）。`0x10` 的欄位 7 用**我們自己對那個分頁格的紀錄**
+查 item id（`projectileItemOf`；查不到＝0——原伺服器能回答這個問題，我們沒有那本帳時就送中性值），
+其餘與 §4.11.7b 相同（只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`skillId`／`afterimage` 送 0）。
+
+**驗證**：`test/field.test.ts`（`ATTACK_RELAY_OPCODE` 的三對＋`0x24`／`0x25` 的 golden bytes 與 `describe`）、
+`test/serve.test.ts`（同場地兩人：`0x10`→觀察者收到 `0x24` 且欄位 7 ＝ 2060000、`0x11`→`0x25` 欄位 7 ＝ 0、
+兩者攻擊者都沒有回音）、`whisper_probe.mjs`（真 `Data.wz`，射擊與魔法各一段）。
 
 ### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式（`0x2F` → §4.15、NPC `0x39`–`0x3B` → §4.19）
 
@@ -1064,9 +1125,9 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 | # | 寬度 | 寫入的運算式 | 解出的語意 |
 |---|---|---|---|
 | 1 | `u8` | `LOBYTE(rcSrc1.top) \| (16 * i_1)` | 低 4 bits = **每隻怪的傷害段數**（`*(right[18] + 120*n30 - 40)`，夾在 1..15）；高 4 bits = **目標數** `i_1`（`sub_491E90` 例項查詢的結果，上限 6）|
-| 2 | `u32` | `*right`（`right == nullptr` 時 0）| **滑鼠游標下的物件 id**：`sub_4BDD20(dword_5C2038, x, y, &right)` 從場地物件清單查到的那一個（`right[0]` 是 id、`right[3]` 是種類）|
+| 2 | `u32` | `*right`（`right == nullptr` 時 0）| **技能 id**（0 ＝ 這一擊沒有技能）：`right` 是 `sub_4BDD20(dword_5C2038, …)` 從 `CSkillInfo` 查到的 `SKILLENTRY`，而 `dword_5C2038` 就是 `CSkillInfo` 單例（`sub_4BA4B0`：`ZMap<long,ZRef<SKILLROOT>>` ＋ `ZMap<long,ZRef<SKILLENTRY>>`，`.c:194709`）；呼叫者把 `right` 交給 sender，sender 寫 `*right`（`.c:279079`）。舊名 `clickedMobId`（「游標下的物件」）沒有任何證據支持——被打的怪在目標記錄裡 |
 | 3 | `u8` | `v70 = (LOBYTE(rcSrc1.left) << 7) \| (n5 & 0x7F)` | **bit 7 = 面向左**（`*(this + 45) & 1`，同一 bit 也把揮擊矩形鏡射）；低 7 bits = **動作 id** `n5 = sub_427F60(*(this + 37), right)` |
-| 4 | `u8` | `rcSrc1.bottom` | `sub_4BE8B0(*(this + 38), targetId, app[86] ^ app[87])` 的結果，**夾在 0..6** ＝「這一擊還能再打幾隻」（目標上限；`targetId == 4001334` 時少 1）|
+| 4 | `u8` | `rcSrc1.bottom` | `sub_4BE8B0(*(this + 38), targetId, app[86] ^ app[87])` 的結果，**夾在 0..6** ＝**揮擊速度**（§4.13.1c：同一個值下面又交給 `sub_508690`；`targetId == 4001334` 時少 1）|
 | 5.. | per target | 見下表 | 每隻被判定命中的怪一段記錄 |
 
 每隻目標的記錄（**固定 11 bytes ＋ `段數 × 2 bytes`**）：
@@ -1120,10 +1181,10 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 | | `0x0F` `sub_512F90` | `0x10` `sub_513C80` | `0x11` `sub_514D30` |
 |---|---|---|---|
 | byte 1 | `u8 段數 \| 目標數<<4`（`i_1` ≤ 6）| `u8 段數 \| (16 * (v129 != nullptr))` | `u8 段數 \| (16 * (v95 != nullptr))` |
-| byte 2..5 | `u32 *right` | `u32 *right` | `u32 *a2` |
+| byte 2..5 | `u32 *right`（技能 id）| `u32 *right`（技能 id）| `u32 *a2`（技能 id）|
 | byte 6 | `u8 面向<<7 \| 動作` | `u8 (left<<7) \| (n5 & 0x7F)` | `u8 (left<<7) \| (n8 & 0x7F)` |
-| byte 7（表頭最後一個）| `u8 目標上限`（`sub_4BE8B0`）| `u8 n6` | `u8 n6`（`v49[v93++] = n6`）|
-| 目標記錄之前 | — | 多一個 `u16 v138` | — |
+| byte 7（表頭最後一個）| `u8 speed`（`sub_4BE8B0`，§4.13.1c）| `u8 speed`（`n6`）| `u8 speed`（`n6`；`v49[v93++] = n6`）|
+| 目標記錄之前 | — | 多一個 `u16`：投射物的 USE 分頁**格號**（`sub_511630` 的回傳值，item id 走 `Args`；§4.11.7c）| — |
 | 目標記錄 | `u32 mobId, u8 動畫, u16 x, u16 y, u16 序號, u16 × 段數` | 同左（`if (v55 != nullptr)` 內）| 同左（`if (v36 != nullptr)` 內）|
 | 送出 | `sub_43AD50` | `sub_43AD50` | `sub_43AD50` |
 
@@ -1134,8 +1195,9 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 - `server/src/protocol/field.ts` 因此寫成**一個** `readClientAttack(reader, opcode)`／
   `encodeClientAttack(attack, opcode)`，差異用 `ATTACK_SHAPE` 一張表描述（`0x10` 多讀一個 `u16`），
   三個 opcode 共用同一段程式碼；`test/field.test.ts` 各有一組 golden bytes。
-- 尚未有真實流量驗證（§6 第 2 項）：`0x10` 的 `u16 v138` 與 `0x10`／`0x11` 的 nibble 只有 0/1 這點，
-  都應該在第一次 `capture` 到的攻擊包上核對。
+- `0x0F`／`0x10` 的第 4 byte 都是 `sub_4BE8B0(*(this+38), …)` 的產物，`0x11` 是 `*(this+38)` 原值（無抖動）；
+  它與 `0x10` 的格號都已定位（§4.13.1c／§4.11.7c），但仍然**沒有真實流量**（§6 第 2 項）：
+  `0x10`／`0x11` 的 nibble 只有 0/1 這點，應該在第一次 `capture` 到的攻擊包上核對。
 
 ##### 4.13.1c ⚠️ 更正：表頭第 4 個 byte（`sub_4BE8B0` 那個值）是**揮擊速度**，不是「還能再打幾隻」
 

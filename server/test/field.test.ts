@@ -11,6 +11,7 @@ import { PacketReader } from "../src/protocol/packet.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import { readMovePath, writeMovePath, pathStart, type MovePath } from "../src/protocol/movepath.ts";
 import {
+  ATTACK_RELAY_OPCODE,
   FIELD_OPCODE,
   USER_EFFECT_LEVEL_UP,
   USER_MESSAGE_CHAT,
@@ -287,7 +288,7 @@ test("attack (0x0F) is byte exact, header and per-target records", () => {
   const attack: ClientAttack = {
     hits: 3,
     targetCount: 1,
-    clickedMobId: 0x30,
+    skillId: 0x30,
     facingLeft: true,
     action: 0x11,
     speed: 6,
@@ -311,7 +312,7 @@ test("attack round trips several targets and keeps the signed hit animation", ()
   const attack: ClientAttack = {
     hits: 1,
     targetCount: targets.length,
-    clickedMobId: 0,
+    skillId: 0,
     facingLeft: false,
     action: 0x20,
     speed: 6,
@@ -327,7 +328,7 @@ test("an attack without a target is still a legal packet", () => {
   const bytes = encodeClientAttack({
     hits: 1,
     targetCount: 0,
-    clickedMobId: 0,
+    skillId: 0,
     facingLeft: false,
     action: 0x20,
     speed: 6,
@@ -341,7 +342,7 @@ test("a target must carry exactly hits damage values, and 15 targets is the cap"
   const base = {
     hits: 2,
     targetCount: 1,
-    clickedMobId: 0,
+    skillId: 0,
     facingLeft: false,
     action: 0x20,
     speed: 6,
@@ -369,14 +370,14 @@ test("describeClientFieldPacket names the three client field packets and stays q
   const attack = encodeClientAttack({
     hits: 2,
     targetCount: 1,
-    clickedMobId: 0x30,
+    skillId: 0x30,
     facingLeft: true,
     action: 0x11,
     speed: 6,
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
   });
   const text = describeClientFieldPacket(attack)!;
-  assert.match(text, /^0x0f attack: left action=17 hits=2 speed=6 clicked=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
+  assert.match(text, /^0x0f attack: left action=17 hits=2 speed=6 skill=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
   assert.equal(describeClientFieldPacket(new Uint8Array([0x7f, 1, 2, 3])), undefined);
   assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0x0f \(truncated: packet underflow/);
 });
@@ -392,11 +393,11 @@ test("magic attack (0x10) is the same record plus one extra u16", () => {
   const attack: ClientAttack = {
     hits: 2,
     targetCount: 1,
-    clickedMobId: 0x30,
+    skillId: 0x30,
     facingLeft: true,
     action: 0x11,
     speed: 6,
-    unknownU16: 0x1234,
+    projectileSlot: 0x1234,
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
   };
   const bytes = encodeClientAttack(attack, 0x10);
@@ -409,7 +410,7 @@ test("skill attack (0x11) is the same record with no extra u16", () => {
   const attack: ClientAttack = {
     hits: 1,
     targetCount: 1,
-    clickedMobId: 0x30,
+    skillId: 0x30,
     facingLeft: false,
     action: 0x20,
     speed: 6,
@@ -766,7 +767,7 @@ test("user attack (0x23) is byte exact: the swing, for everyone but the attacker
     action: 0x11,
     speed: 2,
     afterimage: 0,
-    unknownU32: 0,
+    projectileItemId: 0,
     targets: [{ mobId: 0x10, hitAnimation: -1, damages: [11, 12] }],
   };
   const bytes = encodeUserAttack(swing);
@@ -792,6 +793,48 @@ test("user attack (0x23) is byte exact: the swing, for everyone but the attacker
   assert.deepEqual(readUserAttack(new PacketReader(whiffBytes, 1)).targets, []);
 });
 
+/**
+ * The two other halves of the family: `0x24` (a shot) and `0x25` (a magic cast) are the *same* body
+ * as `0x23` - one reader, one writer - and only the opcode byte differs. That byte is what picks the
+ * renderer on the receiving client (`sub_521400` vs `sub_521AD0`, FINDINGS 4.11.7c), so the relay's
+ * whole job is to mirror the client opcode onto it (`ATTACK_RELAY_OPCODE`); an opcode outside the
+ * three has no relay at all.
+ */
+test("the relay mirrors each client attack as the opcode whose receiver renders it", () => {
+  assert.deepEqual(ATTACK_RELAY_OPCODE, {
+    [CLIENT_FIELD_OPCODE.attack]: FIELD_OPCODE.userAttack,
+    [CLIENT_FIELD_OPCODE.shootAttack]: FIELD_OPCODE.userShootAttack,
+    [CLIENT_FIELD_OPCODE.magicAttack]: FIELD_OPCODE.userMagicAttack,
+  });
+  const relayTable: Record<number, number | undefined> = ATTACK_RELAY_OPCODE;
+  assert.equal(relayTable[CLIENT_FIELD_OPCODE.chat], undefined, "a chat is not an attack");
+  assert.equal(relayTable[0x99], undefined, "and neither is anything else");
+
+  // A claw's shot: the trailing u32 is the star's item id (2070000 = the family `sub_521400` tests
+  // with `bottom / 10000 == 207`), which is also the family `sub_511630` picks a projectile by.
+  const shot: UserAttack = {
+    characterId: 0x30,
+    hits: 1,
+    skillLevel: 0,
+    skillId: 0,
+    facingLeft: false,
+    action: 0x2e,
+    speed: 1,
+    afterimage: 0,
+    projectileItemId: 2070000,
+    targets: [{ mobId: 0x10, hitAnimation: -1, damages: [7] }],
+  };
+  const shotBytes = encodeUserAttack(shot, FIELD_OPCODE.userShootAttack);
+  assert.equal(toHex(shotBytes), "24" + "30000000" + "11" + "00" + "2e" + "01" + "00" + "f0951f00" + "10000000ff" + "0700");
+  assert.deepEqual(readUserAttack(new PacketReader(shotBytes, 1)), shot);
+  assert.match(describeFieldPacket(shotBytes)!, /^0x24 CUserPool\(user attack, shot\): characterId=48/);
+
+  const castBytes = encodeUserAttack({ ...shot, projectileItemId: 0 }, FIELD_OPCODE.userMagicAttack);
+  assert.equal(castBytes[0], FIELD_OPCODE.userMagicAttack);
+  assert.equal(castBytes.length, shotBytes.length, "the body is the same record");
+  assert.match(describeFieldPacket(castBytes)!, /^0x25 CUserPool\(user attack, magic\): characterId=48/);
+});
+
 test("a 0x23 skill level adds the skill id, and level 0 leaves it out", () => {
   const base: UserAttack = {
     characterId: 7,
@@ -802,7 +845,7 @@ test("a 0x23 skill level adds the skill id, and level 0 leaves it out", () => {
     action: 0x20,
     speed: 3,
     afterimage: 1,
-    unknownU32: 0,
+    projectileItemId: 0,
     targets: [{ mobId: 5, hitAnimation: 0, damages: [9] }],
   };
   const plain = encodeUserAttack(base);
@@ -813,7 +856,7 @@ test("a 0x23 skill level adds the skill id, and level 0 leaves it out", () => {
   assert.equal(read.skillId, 1001003);
   assert.equal(readUserAttack(new PacketReader(plain, 1)).skillId, 0);
   // Field 7 is read whatever the opcode is: only 0x24's handler receives it, but it is on the wire.
-  assert.equal(read.unknownU32, 0);
+  assert.equal(read.projectileItemId, 0);
 });
 
 test("a 0x23 target record with mobId 0 is refused, and hits must match the header", () => {
@@ -826,7 +869,7 @@ test("a 0x23 target record with mobId 0 is refused, and hits must match the head
     action: 1,
     speed: 2,
     afterimage: 0,
-    unknownU32: 0,
+    projectileItemId: 0,
     targets: [],
   };
   // A zero id means "empty slot" to the reader, which then reads no animation and no damages - so

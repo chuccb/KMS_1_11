@@ -1084,11 +1084,98 @@ s2c `0x23`（`encodeUserAttack`，FINDINGS **§4.11.7b**）。三個細節是決
 
 **後果**：
 
-- `protocol/field.ts`：`FIELD_OPCODE.userAttack`／`userMagicAttack`／`userSkillAttack`（0x23／0x24／0x25）、
+- `protocol/field.ts`：`FIELD_OPCODE.userAttack`（0x23）＋ 當時叫 `userMagicAttack`／`userSkillAttack` 的 `0x24`／`0x25`
+  （**ADR-027 改名為 `userShootAttack`／`userMagicAttack`**）、
   `UserAttack`／`readUserAttack`／`encodeUserAttack`／`describeUserAttack`（**拒絕 `mobId 0` 的目標記錄** ——
   讀端會把它當空位而少讀尾巴）；`ClientAttack.targetCap` → `speed`（含 schema 與測試）。
 - `net/loginserver.ts`：`applyAttack` 改成「先收集、後送」（揮擊 → 怪物反應 → 獎勵），新增 `relaySwing`。
 - 測試 **+3 → 401**；`whisper_probe.mjs` **+8 → 47** 個檢查；`schema` 目錄 **65 個封包**
   （41 byte-exact／20 partial／4 skeleton）。
-- 未實作：`0x24`／`0x25`（魔法／技能的轉播）、`afterimage` 的正確子節點（`sub_4BE270` 未定位）、
-  `speed` 的抖動來源（`sub_4BE8B0` 第三個參數）。
+- 未實作：`afterimage` 的正確子節點（`sub_4BE270` 未定位）、`speed` 的抖動來源（`sub_4BE8B0` 第三個參數）。
+  （本 ADR 決策 3 裡「第 7 個 `u32` ＝ 0」與被否決的「把 `0x10`／`0x11` 一起轉播」兩點，**由 ADR-027 取代**。）
+
+## ADR-027：射擊（`0x10`）與魔法（`0x11`）也轉播，用的 opcode 由**渲染器**決定 —— 一對一是 `0x23`↔`0x0F`／`0x24`↔`0x10`／`0x25`↔`0x11`
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（取代 ADR-026 的兩點：第 7 個 `u32` 送 0、以及「`0x10`／`0x11` 暫不轉播」；
+`0x23` 那一半照舊）。證據在 FINDINGS **§4.11.7c**。
+
+**決策**：
+
+1. **三支 c2s 攻擊各有自己的 s2c 孿生兄弟，表寫在 `ATTACK_RELAY_OPCODE`**：`0x0F`→`0x23`、`0x10`→`0x24`、`0x11`→`0x25`。
+   不在表上的 opcode 不轉播（不猜渲染器）。
+2. **判準是渲染器，不是「是不是技能」**：三個 sender 與三個套用函式的呼叫集合比對下來，`sub_41B630`（子彈型特效）
+   只在 c2s `0x10` 與 s2c `0x24`、`sub_41B850`（魔法特效）只在 c2s `0x11` 與 s2c `0x25`，而 `0x0F` 與 `0x23` 的
+   呼叫集合完全相同。⇒ opcode 選的是「觀察者要用哪一支特效」。
+3. **兩個 opcode 的名字一起更正**（FINDINGS §4.11.7c 的證據）：`0x10` 是**射擊**——sender 只服務弓／弩／爪
+   （`sub_4657F0(武器 id) ∈ {45,46,47}`），而且挑的是箭／弩箭／飛鏢；`0x11` 才是**魔法**——唯一上游是法師技能
+   `2001005`／`2101005`（`sub_518BF0` 的 `LABEL_53 → sub_5195D0`，而 `sub_5195D0` 只是 `sub_514D30` 的別名）。
+   `CLIENT_FIELD_OPCODE.magicAttack`（`0x10`）→ `shootAttack`、`skillAttack`（`0x11`）→ `magicAttack`；
+   `FIELD_OPCODE.userMagicAttack`（`0x24`）→ `userShootAttack`、`userSkillAttack`（`0x25`）→ `userMagicAttack`。
+4. **`0x24` 的第 7 格（`u32`）＝投射物的 item id，而且要用「格號 → id」查一次**：c2s `0x10` 帶的是
+   **USE 分頁的格號**（`sub_511630` 的回傳值；item id 走 out-param `Args`），`0x24` 的收端要的是 id
+   （`bottom / 10000 == 207` 才把飛鏢家族的每一排往下挪 120 px，並當 `sub_41B630` 的最後一個參數）。
+   伺服器因此用**自己對那個分頁格的紀錄**（`projectileItemOf`）回答；**查不到就送 0**——原伺服器有那本帳，
+   我們沒有那筆資料時送中性值，而不是把格號當 id 送出去。`0x23`／`0x25` 的 handler 不收這一格，一樣送 0。
+
+**理由**：轉播的價值就是「別人看到你在打」；只轉播揮擊會讓弓手／法師在同場地變成**看不見的傷害來源**
+（怪物會閃、會死，但沒有攻擊動作）。一對一既然是渲染器的硬事實，轉播只要照抄攻擊者已經算過的東西
+（動作、`speed`、目標、傷害與受擊動畫），再補上唯一缺的那一格（投射物 id）。
+
+**被否決的選項與原因**：
+
+- **一律用 `0x23`**：觀察者的 client 會跑 `sub_520F20`（揮擊那組），弓／法師的攻擊會被畫成近戰揮刀，
+  而且 `sub_5095A0` 拿到的動作 id 在弓的動作表裡可能不存在——`sub_508690` 是閘門，結果是整包安靜地不播。
+- **把 `0x10` 的格號原封不動寫進第 7 格**：格號（1..96）永遠不會 `== 207xxxx`，等於送 0，但會讓
+  「這一格是 item id」這個已證的語意變成謊話。
+- **伺服器自己從 WZ 推導 `afterimage`**：`sub_4BE270`（選子節點的那支）還沒定位，維持 ADR-026 的決定：送 `0`
+  （每張 `Character/Afterimage/*.img` 都有子節點 `0`）。
+- **幫 `0x24`／`0x25` 補 `skillLevel`／`skillId`**：c2s 的兩個 opcode 都沒有這兩格，我們也沒有技能系統；
+  送 0 ＝「沒有技能節點」，收端的 `sub_521400`／`sub_521AD0` 對 `right == nullptr` 是有防護的。
+
+**後果**：
+
+- `protocol/field.ts`：`ATTACK_RELAY_OPCODE`、`USER_ATTACK_OPCODES`、`encodeUserAttack(attack, opcode)`、
+  `ClientAttack.projectileSlot`（原 `unknownU16`）、`UserAttack.projectileItemId`（原 `unknownU32`；**「是 item id」這一半是推論**，
+  硬證據只有收端的用法與 `207` 那個判斷，見 §4.11.7c 最後一點）。
+- `net/loginserver.ts`：`relaySwing` → `relayAttack`（查表、查投射物 id、日誌帶上真正送出的 opcode）；
+  新增 `projectileItemOf`。
+- 測試 **+2 → 403**（`0x24`／`0x25` 的 golden bytes 與轉播對照）；`whisper_probe.mjs` 多兩段（射擊、魔法）。
+- 未實作：`afterimage` 的正確子節點、`speed` 的抖動來源（同 ADR-026），以及 `0x24` 特效內部那一組
+  （`right[18] + 120*Value`／`sub_514BA0`）——轉播不需要它們。
+
+## ADR-028：c2s 攻擊的第 2 欄是**技能 id**，不是「游標下的怪」—— `clickedMobId` 改名 `skillId`
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（更正 §4.13.1 的欄位命名；**不動任何位元組**）。
+
+**決策**：`0x0F`／`0x10`／`0x11` 表頭第 2 欄那個 `u32` ＝**技能 id**（0 ＝ 這一擊沒有技能）。`ClientAttack.clickedMobId`
+改名 `skillId`；describe 的 `clicked=` 改 `skill=`；`ATTACK_HEADER_BYTES` 的註解改成
+「opcode + packed + skill id + action|facing + speed」。golden bytes 一個都沒動。
+
+**證據**（三條，全部是 binary）：
+
+1. `dword_5C2038` 是 **`CSkillInfo` 單例**：`sub_4BA4B0`（`.c:194709`）把 vtable 設成 `CSkillInfo::vftable`，
+   成員是 `ZMap<long, ZRef<SKILLROOT>>` 與 `ZMap<long, ZRef<SKILLENTRY>>`。
+2. **三個 sender 的 `right` 都從那裡來**：`.c:285381` 是 `sub_4BDD20((_DWORD *)dword_5C2038, v11, v7, &right)`，
+   緊接著 `switch (*(this + 105))`（武器的動作家族）挑 sender——30–33／40–44 走 `sub_512F90`（`0x0F`）、
+   45／46／47 走 `sub_513C80`（`0x10`）；`sub_512F90` 把 `*right` 寫進第 2 欄（`.c:279079`）。
+3. **同一個 `right` 在 `sub_511630` 裡就是技能**：`*(right + 72)` 是它的等級陣列、`n30` 是等級索引
+   （`*(*(right+72) + 120*n30 - 36)` 被夾到 ≥1），而 `sub_511630` 回傳的是 USE 分頁**格號**、item id 走 `Args`。
+
+**理由**：被打的怪在**目標記錄**裡（每筆 `u32 mobId` ＋ `u8 動畫` ＋ 傷害），表頭不需要牠；把第 2 欄讀成
+「游標下的物件」會讓 `0x0F` 與它的收端 `0x23` 對不起來（收端同一個位置是「技能等級 ＋〔技能 id〕」那一對），
+也會讓伺服器以為那個值可以用來找怪。改名讓「這一擊是不是技能」有一個誠實的名字。
+
+**被否決的選項與原因**：
+
+- **保留 `clickedMobId`、只加註解**：名字會被下一個讀 code 的人當成事實（`targetCap` 就是這樣留下來的，見 ADR-026）。
+- **拿這個值去場地裡查怪**：沒有證據；`applyDamage` 的目標一律來自目標記錄，這一點不變。
+
+**後果**：
+
+- `protocol/field.ts`（`ClientAttack.skillId`、`ATTACK_HEADER_BYTES` 註解、describe 的 `skill=`）、
+  `protocol/schema.ts`（三個 opcode 的欄位名與註解）、`test/field.test.ts`（golden 值 0x30 保留：證明它會被原樣帶過）、
+  `test/serve.test.ts`（那幾筆改成 0＝沒有技能）、`whisper_probe.mjs`（`skillId: 0`）。
+- **伺服器行為零改變**：`loginserver.ts` 沒有任何 handler 讀過這個值。
+- 順手把 §4.11.7 的 `0x28` 那一列讀完（`u32 flags` →〔bit 0／4／8 各一個 `u32`〕→ `u8`：非 0 就
+  `sub_45F340` 讀 **id 清單**成 15 格、0 就用這個人自己的 look 區 → `sub_508260` → **`sub_508290`**，
+  也就是 §4.11.7c 說的那條「觀察者怎麼知道那個人的武器」的路）。

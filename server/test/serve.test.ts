@@ -60,7 +60,7 @@ import {
   readDropRemove,
   readLootNotice,
 } from "../src/protocol/drop.ts";
-import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
+import { INVENTORY_OP, INVENTORY_OPCODE, INVENTORY_TAB, readInventoryChange } from "../src/protocol/inventory.ts";
 import {
   MOB_OPCODE,
   readMobEnterField,
@@ -84,6 +84,7 @@ import {
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
+import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import {
   QUEST_REPLY_OPCODE,
   QUEST_TALK_OPCODE,
@@ -1054,7 +1055,7 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -1153,7 +1154,7 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -1218,7 +1219,7 @@ test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice"
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -1352,7 +1353,7 @@ test("a swing at an unknown mob id answers nothing and leaves the field alone", 
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 99,
+      skillId: 99,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -1691,7 +1692,7 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -1715,7 +1716,7 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
     "0x23 carries the swing the attacker reported, under the attacker's own character id",
   );
   assert.deepEqual(
-    [swing.afterimage, swing.skillLevel, swing.skillId, swing.unknownU32],
+    [swing.afterimage, swing.skillLevel, swing.skillId, swing.projectileItemId],
     [0, 0, 0, 0],
     "the three fields with no source here go out as their neutral values, not as a guess (FINDINGS 4.11.7b)",
   );
@@ -1739,6 +1740,134 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
   );
   assert.ok(log.some((line) => line.includes('"Alt" (8) entered map 1000000')), log.join("\n"));
   assert.ok(log.some((line) => line.includes("(8) left map 1000000")), log.join("\n"));
+});
+
+/**
+ * The other two halves of the attack family (ADR-027). A shot and a cast are the *same* body as a
+ * swing - one reader serves `0x23`/`0x24`/`0x25` - and the opcode byte alone says which renderer the
+ * observer runs, so the relay is the one mapping in `ATTACK_RELAY_OPCODE`.
+ *
+ * A shot has one field the attacker cannot fill in: it sends the USE-tab **slot** it drew the
+ * projectile from (`sub_511630` returns the slot and hands the id back out of band), while the
+ * observer's `0x24` wants the item id. The server has a record of that slot - the shop put the pile
+ * there - so it relays the id; the two opcodes without a slot send the neutral 0.
+ */
+test("a shot goes out as 0x24 with the projectile id, and a cast as 0x25", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    // A monster with room for two hits, so both relays have a live target.
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 60, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [],
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x55667788 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  // The attacker owns a pile of arrows in consume slot 3, which is what a shot's extra `u16` names.
+  const heroItems = startingCharacterItems();
+  heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(3, nonEquipSlot(2060000, 100));
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 7,
+      characterName: "Archer",
+      character: characterDataOf({ ...zeroStats(), id: 7, name: "Archer" }, heroItems),
+    }),
+  });
+  await hero.take(4); // 0x16 + the two mobs + the NPC
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // A shot: `0x10` carries the pile it used, `1` arrow's worth of damage, facing left.
+  const shot = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      skillId: 1,
+      facingLeft: true,
+      action: 0x2e,
+      speed: 2,
+      projectileSlot: 3,
+      targets: [{ mobId: 1, hitAnimation: -1, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.shootAttack,
+  );
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.shootAttack, body: shot.slice(1) });
+
+  const altShot = await alt.takeOpcode(FIELD_OPCODE.userShootAttack);
+  assert.equal(
+    altShot[0]![0],
+    FIELD_OPCODE.userShootAttack,
+    "the observer sees the shot before the monster's reaction - and nothing of someone else's reward",
+  );
+  const altSawHit = await alt.takeOpcode(MOB_OPCODE.stat);
+  assert.equal(altSawHit[altSawHit.length - 1]![0], MOB_OPCODE.stat, "the monster's reaction follows the shot");
+  const relayedShot = readUserAttack(new PacketReader(altShot[0]!, 1));
+  assert.deepEqual(
+    [relayedShot.characterId, relayedShot.facingLeft, relayedShot.action, relayedShot.hits, relayedShot.speed],
+    [7, true, 0x2e, 1, 2],
+    "0x24 is the shot the attacker reported: their id, their action, their speed (FINDINGS 4.11.7c)",
+  );
+  assert.equal(relayedShot.projectileItemId, 2060000, "the slot the client named is relayed as the item id");
+  assert.deepEqual(relayedShot.targets, [{ mobId: 1, hitAnimation: -1, damages: [10] }]);
+  // The attacker gets the world's reaction (and the `0x1C` about Alt joining, which was waiting), but
+  // never its own shot back: its client drew that one as it built the packet.
+  const heroSawShot = await hero.takeOpcode(MOB_OPCODE.stat);
+  assert.equal(heroSawShot[heroSawShot.length - 1]![0], MOB_OPCODE.stat, "the attacker gets the monster's reaction");
+  assert.deepEqual(
+    heroSawShot.filter((bytes) => bytes[0] === FIELD_OPCODE.userShootAttack || bytes[0] === FIELD_OPCODE.userAttack),
+    [],
+    "and nothing of its own attack back - it played that locally",
+  );
+
+  // A cast: same record, `0x11`'s header has no slot, so the projectile field goes out as 0.
+  const cast = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      skillId: 1,
+      facingLeft: false,
+      action: 0x20,
+      speed: 3,
+      targets: [{ mobId: 1, hitAnimation: 3, x: 509, y: 300, sequence: 2, damages: [9] }],
+    },
+    CLIENT_FIELD_OPCODE.magicAttack,
+  );
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.magicAttack, body: cast.slice(1) });
+
+  const altCast = await alt.takeOpcode(FIELD_OPCODE.userMagicAttack);
+  assert.equal(altCast[0]![0], FIELD_OPCODE.userMagicAttack, "a cast never goes out as the shot's opcode");
+  const relayedCast = readUserAttack(new PacketReader(altCast[0]!, 1));
+  assert.deepEqual(
+    [relayedCast.characterId, relayedCast.action, relayedCast.speed, relayedCast.projectileItemId],
+    [7, 0x20, 3, 0],
+    "and its projectile field is the neutral 0: there is no slot in the packet to look up",
+  );
+  assert.deepEqual(relayedCast.targets, [{ mobId: 1, hitAnimation: 3, damages: [9] }]);
+  assert.ok(
+    log.some((line) => line.includes("0x24 attack of \"Archer\"") && line.includes("1 target(s)")),
+    log.join("\n"),
+  );
+  assert.ok(log.some((line) => line.includes("0x25 attack of \"Archer\"")), log.join("\n"));
 });
 
 /**
@@ -2331,7 +2460,7 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,
@@ -2506,7 +2635,7 @@ test("a session that ends leaves the character's progress in the save", { timeou
     {
       hits: 1,
       targetCount: 1,
-      clickedMobId: 1,
+      skillId: 1,
       facingLeft: false,
       action: 0,
       speed: 1,

@@ -186,14 +186,16 @@ export const FIELD_OPCODE = {
    * numbers over the mobs. That is what makes a relay possible at all: every field the observer
    * needs is a field the attacker already computed.
    *
-   * The magic and skill halves are the same record (`0x24`'s handler is the only one that receives
-   * field 7), but only `0x23` has a codec: the relayed swings this server sends are all melee.
+   * The other two are the same record (`0x24`'s handler is the only one that receives field 7), and
+   * the opcode picks the **renderer**, not "a skill or not": `0x24` is the shot, and its handler only
+   * animates one when the attacker's own weapon is a bow, a crossbow or a claw (FINDINGS 4.11.7c),
+   * while `0x25` is the magic cast. Which client opcode goes out as which is `ATTACK_RELAY_OPCODE`.
    */
   userAttack: 0x23,
   /** `CUserPool` 0x24: same reader, `sub_521400` (the one that also takes the trailing `u32`). */
-  userMagicAttack: 0x24,
+  userShootAttack: 0x24,
   /** `CUserPool` 0x25: same reader, `sub_521AD0`. */
-  userSkillAttack: 0x25,
+  userMagicAttack: 0x25,
   /**
    * `CUserPool` 0x29 (`sub_51D590` case ')' -> `sub_522300`): an effect **on one user**. The range
    * dispatcher reads the `u32 characterId` first and resolves it in the pool (`sub_51CD30`); if the
@@ -215,6 +217,17 @@ export const FIELD_OPCODE = {
    */
   questTalk: QUEST_TALK_OPCODE,
 } as const;
+
+/**
+ * The three "somebody attacked" opcodes. One reader serves all of them (`sub_5209C0`); the opcode
+ * only decides which renderer the client runs and which client opcode the relay mirrors
+ * (`ATTACK_RELAY_OPCODE`).
+ */
+export const USER_ATTACK_OPCODES = new Set<number>([
+  FIELD_OPCODE.userAttack,
+  FIELD_OPCODE.userShootAttack,
+  FIELD_OPCODE.userMagicAttack,
+]);
 
 /**
  * `CUserRemote::Init` (0x1C payload after the character id). Field order and widths are the read
@@ -468,8 +481,8 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     }
     if (
       opcode === CLIENT_FIELD_OPCODE.attack ||
-      opcode === CLIENT_FIELD_OPCODE.magicAttack ||
-      opcode === CLIENT_FIELD_OPCODE.skillAttack
+      opcode === CLIENT_FIELD_OPCODE.shootAttack ||
+      opcode === CLIENT_FIELD_OPCODE.magicAttack
     ) {
       const attack = readClientAttack(new PacketReader(plain, 1), opcode);
       const targets = attack.targets
@@ -477,7 +490,7 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
         .join(" ");
       return (
         `${hexOpcode(opcode)} attack: ${attack.facingLeft ? "left" : "right"} action=${attack.action} ` +
-        `hits=${attack.hits} speed=${attack.speed} clicked=${attack.clickedMobId} targets=${attack.targetCount} ${targets}`
+        `hits=${attack.hits} speed=${attack.speed} skill=${attack.skillId} targets=${attack.targetCount} ${targets}`
       );
     }
   } catch (error) {
@@ -586,7 +599,7 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
-  if (opcode === FIELD_OPCODE.userAttack && plain.length >= 10) {
+  if (USER_ATTACK_OPCODES.has(opcode) && plain.length >= 10) {
     try {
       return `${name}: ${describeUserAttack(readUserAttack(new PacketReader(plain, 1)))}`;
     } catch (error) {
@@ -710,6 +723,8 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === FIELD_OPCODE.userEffect) return "0x29 CUserPool(user effect)";
   if (opcode === FIELD_OPCODE.userEmotion) return "0x27 CUserPool(user emotion)";
   if (opcode === FIELD_OPCODE.userAttack) return "0x23 CUserPool(user attack)";
+  if (opcode === FIELD_OPCODE.userShootAttack) return "0x24 CUserPool(user attack, shot)";
+  if (opcode === FIELD_OPCODE.userMagicAttack) return "0x25 CUserPool(user attack, magic)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode === MOB_OPCODE.anim) return "0x35 CMobPool(mob animation)";
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
@@ -888,18 +903,25 @@ export const CLIENT_FIELD_OPCODE = {
    */
   attack: 0x0f,
   /**
-   * The magic attack (`sub_513C80`). Same header and the *same 11-byte target record* as `0x0F`,
-   * with two differences: the high nibble of byte 1 is a "second object exists" flag rather than a
-   * target count (`16 * (v129 != nullptr)`, so it can only be 0 or 1), and there is one extra `u16`
-   * between the header and the record.
+   * The shot (`sub_513C80`): the sender's weapon is a bow, a crossbow or a claw. Same header and the
+   * *same 11-byte target record* as `0x0F`, with two differences: the high nibble of byte 1 is a
+   * "second object exists" flag rather than a target count (`16 * (v129 != nullptr)`, so it can only
+   * be 0 or 1), and the extra `u16` is the USE-tab **slot** of the projectile the sender just used -
+   * `sub_511630` walks the tab for the first 2060xxx/2061xxx/207xxxx pile big enough for the swing
+   * and returns its slot number (the id it matched goes back to the caller out of band, through
+   * `Args`). Its drivers are the weapon-class switch: `sub_519600(..., 45/46/47, ...)`, where the
+   * number is `sub_4657F0(weapon id)` = `weapon id / 10000 % 100`.
    */
-  magicAttack: 0x10,
+  shootAttack: 0x10,
   /**
-   * The skill attack (`sub_514D30`). Header = `u8 hits | flag << 4, u32 clicked id, u8 facing |
+   * The magic attack (`sub_514D30`). Header = `u8 hits | flag << 4, u32 clicked id, u8 facing |
    * action, u8 cap`; the whole target record is written under `if (v36 != nullptr)`, i.e. only when
-   * the flag is set. The record itself is the same 11 bytes + damages.
+   * the flag is set. The record itself is the same 11 bytes + damages. Its only drivers are three
+   * magician skills (2001005/2101003/2101005 -> `sub_5195D0`), which is what makes the name safe.
+   * Byte 4 here is `*(this + 38)` as it stands - `0x0F`/`0x10` add `sub_4BE8B0`'s jitter, this one
+   * does not.
    */
-  skillAttack: 0x11,
+  magicAttack: 0x11,
   /**
    * The mob's own attack, reported by the client (`sub_4885D0` -> `sub_4A1EA0(..., 44, ...)`,
    * FINDINGS 4.20): `[0x2C][u32 mob id][u8 flags][u8 action | facing][u32 position][tail]`.
@@ -1127,8 +1149,16 @@ export interface ClientAttack {
    * (`16 * (v129 != nullptr)`) instead of a count, so it can only be 0 or 1.
    */
   targetCount: number;
-  /** `*right`: the object the cursor was over (`sub_4BDD20` found it in the field object list). */
-  clickedMobId: number;
+  /**
+   * `*right`: the **skill id** this attack came from, 0 when it came from none. `right` is the
+   * `SKILLENTRY` `sub_4BDD20(dword_5C2038, ...)` returns - and `dword_5C2038` is the `CSkillInfo`
+   * singleton (`sub_4BA4B0`: a `ZMap<long, ZRef<SKILLROOT>>` plus a `ZMap<long, ZRef<SKILLENTRY>>`) -
+   * so the u32 the sender writes (`sub_512F90`, `.c:279079`) is its first dword, a skill id.
+   * The receiver of a `0x23` walks the same route and clamps byte 2 to the node's level count.
+   * The old name `clickedMobId` read it as the object under the cursor; nothing supports that -
+   * the monsters being hit travel in the target records, not here.
+   */
+  skillId: number;
   /** Bit 7 of byte 3: facing left (`*(this + 45) & 1`, the flag that also mirrors the swing rect). */
   facingLeft: boolean;
   /** Low 7 bits of byte 3: the action `sub_427F60` picked out of the table at `dword_5B2144`. */
@@ -1143,12 +1173,12 @@ export interface ClientAttack {
    * target bound; nothing in the client supports that.
    */
   speed: number;
-  /** `0x10` only: the `u16` between the header and the target record (`sub_513C80`); not named. */
-  unknownU16?: number | undefined;
+  /** `0x10` only: the USE-tab slot of the projectile the shot used (`sub_511630`). */
+  projectileSlot?: number | undefined;
   targets: ClientAttackTarget[];
 }
 
-const ATTACK_HEADER_BYTES = 8; // opcode + packed + clicked id + packed action + target cap
+const ATTACK_HEADER_BYTES = 8; // opcode + packed + skill id + action|facing + speed
 const ATTACK_TARGET_FIXED_BYTES = 11; // u32 + s8 + 3 * u16
 
 /**
@@ -1163,8 +1193,28 @@ interface AttackShape {
 
 export const ATTACK_SHAPE: Record<number, AttackShape> = {
   [CLIENT_FIELD_OPCODE.attack]: { extraU16AfterHeader: false },
-  [CLIENT_FIELD_OPCODE.magicAttack]: { extraU16AfterHeader: true },
-  [CLIENT_FIELD_OPCODE.skillAttack]: { extraU16AfterHeader: false },
+  [CLIENT_FIELD_OPCODE.shootAttack]: { extraU16AfterHeader: true },
+  [CLIENT_FIELD_OPCODE.magicAttack]: { extraU16AfterHeader: false },
+};
+
+/**
+ * Which server -> client opcode a client attack has to go out as.
+ *
+ * The three are not interchangeable: an attack opcode picks the renderer the *receiving* client
+ * runs, and a sender plays the animation locally with the same routines its own opcode's receiver
+ * uses (FINDINGS 4.11.7b/4.11.7c):
+ *
+ *   c2s `0x0F` `sub_512F90` -> s2c `0x23` `sub_520F20` (`sub_50D7F0` + `sub_4882F0` damage numbers)
+ *   c2s `0x10` `sub_513C80` -> s2c `0x24` `sub_521400` (`sub_41B630`; the shot's own effect)
+ *   c2s `0x11` `sub_514D30` -> s2c `0x25` `sub_521AD0` (`sub_41B850`; the magic effect)
+ *
+ * An opcode outside the table has no relay, which is what keeps a stray packet out of the world
+ * instead of guessing a renderer for it.
+ */
+export const ATTACK_RELAY_OPCODE: Record<number, number> = {
+  [CLIENT_FIELD_OPCODE.attack]: FIELD_OPCODE.userAttack,
+  [CLIENT_FIELD_OPCODE.shootAttack]: FIELD_OPCODE.userShootAttack,
+  [CLIENT_FIELD_OPCODE.magicAttack]: FIELD_OPCODE.userMagicAttack,
 };
 
 function attackShapeOf(opcode: number): AttackShape {
@@ -1175,11 +1225,11 @@ export function readClientAttack(reader: PacketReader, opcode: number = CLIENT_F
   const packed = reader.readByte();
   const hits = packed & 0x0f;
   const targetCount = (packed >> 4) & 0x0f;
-  const clickedMobId = reader.readU32();
+  const skillId = reader.readU32();
   const packedAction = reader.readByte();
   const speed = reader.readByte();
-  let unknownU16: number | undefined;
-  if (attackShapeOf(opcode).extraU16AfterHeader) unknownU16 = reader.readU16();
+  let projectileSlot: number | undefined;
+  if (attackShapeOf(opcode).extraU16AfterHeader) projectileSlot = reader.readU16();
   const targets: ClientAttackTarget[] = [];
   for (let i = 0; i < targetCount; i++) {
     const mobId = reader.readU32();
@@ -1195,14 +1245,14 @@ export function readClientAttack(reader: PacketReader, opcode: number = CLIENT_F
   const attack: ClientAttack = {
     hits,
     targetCount,
-    clickedMobId,
+    skillId,
     facingLeft: (packedAction & 0x80) !== 0,
     action: packedAction & 0x7f,
     speed,
     targets,
   };
   // only `0x10` has the slot, so the other two never grow an undefined key
-  if (unknownU16 !== undefined) attack.unknownU16 = unknownU16;
+  if (projectileSlot !== undefined) attack.projectileSlot = projectileSlot;
   return attack;
 }
 
@@ -1216,10 +1266,10 @@ export function encodeClientAttack(attack: ClientAttack, opcode: number = CLIENT
   );
   writer.writeByte(opcode);
   writer.writeByte(hits | (targetCount << 4));
-  writer.writeU32(attack.clickedMobId >>> 0);
+  writer.writeU32(attack.skillId >>> 0);
   writer.writeByte((attack.facingLeft ? 0x80 : 0) | (attack.action & 0x7f));
   writer.writeByte(attack.speed & 0xff);
-  if (shape.extraU16AfterHeader) writer.writeU16(attack.unknownU16 ?? 0);
+  if (shape.extraU16AfterHeader) writer.writeU16(attack.projectileSlot ?? 0);
   for (const target of attack.targets) {
     if (target.damages.length !== hits) {
       throw new RangeError(`a target carries exactly ${hits} damage value(s), got ${target.damages.length}`);
@@ -1258,22 +1308,22 @@ export interface UserAttackTarget {
  * | # | width | field |
  * |---|---|---|
  * | 1 | `u8` | low nibble `hits`, high nibble target count |
- * | 2 | `u8` | `skillLevel`: non-zero means field 3 follows |
- * | 3 | `u32` | `skillId` |
+ * | 2 | `u8` | `skillLevel`: non-zero means field 3 follows, and it is clamped to that node's child count |
+ * | 3 | `u32` | `skillId`: looked up in `dword_5C2038`, which is the `CSkillInfo` singleton, so the node is a `SKILLENTRY` |
  * | 4 | `u8` | bit 7 facing left, low 7 bits the action |
  * | 5 | `u8` | `speed`: byte 4 of the attacker's own `0x0F` |
  * | 6 | `u8` | `afterimage`: a child number of `Character/Afterimage/<weapon's info/afterImage>` |
- * | 7 | `u32` | read for all three opcodes, handed only to the `0x24` handler |
+ * | 7 | `u32` | `projectileItemId`: read for all three opcodes, handed only to the `0x24` handler (`bottom`) |
  *
  * What is proven and what is read: 1, 4 and the target records are the packing the client itself
  * uses in `0x0F` (nibbles, facing bit, action, `hits` damages), and 5 is *by construction* the value
  * the attacker handed its own `sub_508690` - the receiver hands it to the same function
- * (`sub_508700` turns it into frame delays, clamped to 0..6), so a relay copies it. 2/3 read as a
- * skill and its level: the byte is clamped to the looked-up node's child count and `sub_50C460`
+ * (`sub_508700` turns it into frame delays, clamped to 0..6), so a relay copies it. 2/3 are a skill
+ * and its level: the byte is clamped to the looked-up node's child count and `sub_50C460`
  * dereferences the node as `*node == 1001003`, an id of the WZ `Skill/` namespace - but no client has
- * been watched sending one, so a relay sends 0 (no skill node). 7 has no name. 6 selects the swing's
- * afterimage: `sub_4BE270` computes it client-side and is not located, so a relay sends 0, which
- * every `Character/Afterimage/*.img` carries as its first child.
+ * been watched sending one, so a relay sends 0 (no skill node). 7 is the projectile: see the field's
+ * own comment. 6 selects the swing's afterimage: `sub_4BE270` computes it client-side and is not
+ * located, so a relay sends 0, which every `Character/Afterimage/*.img` carries as its first child.
  */
 export interface UserAttack {
   characterId: number;
@@ -1284,7 +1334,15 @@ export interface UserAttack {
   action: number;
   speed: number;
   afterimage: number;
-  unknownU32: number;
+  /**
+   * Field 7, the only field the `0x24` handler consumes (as its `bottom`): the handler shifts the
+   * throwing-star family (`value / 10000 == 207`) down by 120px and hands the value to `sub_41B630`
+   * as its last argument. Reading it as the projectile's **item id** is ours - it is what makes the
+   * relay a lookup (`projectileItemOf`), and it is the only reading the receiver's comparison
+   * supports; that the original server sent an id rather than the `0x0F`-style slot number is an
+   * inference (FINDINGS 4.11.7c).
+   */
+  projectileItemId: number;
   targets: UserAttackTarget[];
 }
 
@@ -1303,7 +1361,7 @@ export function readUserAttack(reader: PacketReader): UserAttack {
   const packedAction = reader.readByte();
   const speed = reader.readByte();
   const afterimage = reader.readByte();
-  const unknownU32 = reader.readU32();
+  const projectileItemId = reader.readU32();
   const targets: UserAttackTarget[] = [];
   for (let i = 0; i < targetCount; i++) {
     const mobId = reader.readU32();
@@ -1326,12 +1384,15 @@ export function readUserAttack(reader: PacketReader): UserAttack {
     action: packedAction & 0x7f,
     speed,
     afterimage,
-    unknownU32,
+    projectileItemId,
     targets,
   };
 }
 
-export function encodeUserAttack(attack: UserAttack): Uint8Array {
+export function encodeUserAttack(
+  attack: UserAttack,
+  opcode: number = FIELD_OPCODE.userAttack,
+): Uint8Array {
   const hits = attack.hits & 0x0f;
   const targetCount = attack.targets.length;
   if (targetCount > 0x0f) throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
@@ -1339,7 +1400,7 @@ export function encodeUserAttack(attack: UserAttack): Uint8Array {
     USER_ATTACK_HEADER_BYTES + (attack.skillLevel === 0 ? 0 : 4) +
       targetCount * (USER_ATTACK_TARGET_FIXED_BYTES + 2 * hits),
   );
-  writer.writeByte(FIELD_OPCODE.userAttack);
+  writer.writeByte(opcode);
   writer.writeU32(attack.characterId >>> 0);
   writer.writeByte(hits | (targetCount << 4));
   writer.writeByte(attack.skillLevel & 0xff);
@@ -1347,7 +1408,7 @@ export function encodeUserAttack(attack: UserAttack): Uint8Array {
   writer.writeByte((attack.facingLeft ? 0x80 : 0) | (attack.action & 0x7f));
   writer.writeByte(attack.speed & 0xff);
   writer.writeByte(attack.afterimage & 0xff);
-  writer.writeU32(attack.unknownU32 >>> 0);
+  writer.writeU32(attack.projectileItemId >>> 0);
   for (const target of attack.targets) {
     if (target.mobId === 0) {
       throw new RangeError("a target record with mobId 0 has no tail on the wire (the reader skips it)");

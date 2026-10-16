@@ -35,6 +35,7 @@ import { MesoWallet, pickUpDrop, takeItem } from "../game/rewards.ts";
 import { reviveMapId, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
+  ATTACK_RELAY_OPCODE,
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
   describeClientStatReport,
@@ -72,7 +73,7 @@ import {
 } from "../protocol/field.ts";
 import { decodeCp949 } from "../protocol/cp949.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
-import { encodeInventoryChange } from "../protocol/inventory.ts";
+import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
@@ -631,8 +632,8 @@ const DEFAULT_MOB_TICK_MS = 250;
 
 export const ATTACK_OPCODES: readonly number[] = [
   CLIENT_FIELD_OPCODE.attack,
+  CLIENT_FIELD_OPCODE.shootAttack,
   CLIENT_FIELD_OPCODE.magicAttack,
-  CLIENT_FIELD_OPCODE.skillAttack,
 ];
 
 export interface GameEntryServerOptions {
@@ -1530,7 +1531,7 @@ export class GameEntryServer {
    * much HP they have, so a hit on a mob this field does not have is logged, not invented.
    *
    * What goes out, and in which order, is the world's answer to the swing: the swing itself as
-   * `0x23` for the others (see `relaySwing`), then the mob packets the hits owe - another player
+   * `0x23` for the others (see `relayAttack`), then the mob packets the hits owe - another player
    * standing next to the attacker sees the same mob flash and die (`game/world.ts`) - and then the
    * reward, which is the attacker's alone (the exp goes to the connection that reported the hit,
    * see `awardKillExp`).
@@ -1572,7 +1573,7 @@ export class GameEntryServer {
       );
       if (hit.killed) kills.push({ mobId: hit.mobId, templateId: hit.templateId });
     }
-    this.relaySwing(session, opcode, attack, relayed);
+    this.relayAttack(session, opcode, attack, relayed);
     session.instance.broadcastAll(mobPackets);
     // The reward first, the loot after: the exp is the kill's own payout (a stat diff plus, on a
     // level-up, the client's own effect), while a drop has to fly out of the corpse.
@@ -1583,11 +1584,13 @@ export class GameEntryServer {
   }
 
   /**
-   * Everybody else's half of a swing: `0x23` (FINDINGS 4.11.7b).
+   * Everybody else's half of an attack: the `0x23`/`0x24`/`0x25` the client opcode mirrors
+   * (FINDINGS 4.11.7b/4.11.7c).
    *
    * The attacker does not need it back - its own client ran the same effect routine while it built
-   * the `0x0F` (`sub_50DAA0`, `sub_50D7F0`, `sub_4882F0` all run *before* the packet is written) -
-   * so the copy goes to the others, exactly like `0x27` and `0x29`.
+   * its packet (for a swing that is `sub_50DAA0`, `sub_50D7F0` and `sub_4882F0`, all *before* the
+   * packet is written; for a shot and a cast, `sub_41B630`/`sub_41B850`) - so the copy goes to the
+   * others, exactly like `0x27` and `0x29`.
    *
    * Three of the receiver's fields have no source on this side, and they are sent as the value that
    * is not a guess:
@@ -1597,37 +1600,64 @@ export class GameEntryServer {
    *   `afterimage`            0 - the first child of `Character/Afterimage/<the weapon's
    *                           info/afterImage>`, which every one of those images has. Which child the
    *                           attacker used comes from `sub_4BE270` on its own client.
-   *   the trailing `u32`      0 - only the `0x24` handler receives it.
+   *   the trailing `u32`      0 for `0x0F`/`0x11`. For a `0x10` it is what the `0x24` handler reads
+   *                           it as - the projectile's item id, used to offset a throwing star's
+   *                           effect (`bottom / 10000 == 207`) - so it is looked up in the slot the
+   *                           attacker named (`ClientAttack.projectileSlot`); an empty slot, a slot
+   *                           whose contents the client lied about, and the two opcodes that do not
+   *                           carry a slot all go out as 0.
    *
-   * Only `0x0F` is relayed: a magic or skill swing would have to go out as `0x24`/`0x25`, whose
-   * handlers (`sub_521400`/`sub_521AD0`) are not read yet.
+   * `encodeUserAttack` writes the s2c opcode the client opcode mirrors, and an opcode outside the
+   * table (`ATTACK_RELAY_OPCODE`) has no relay at all.
    */
-  private relaySwing(
+  private relayAttack(
     session: FieldSession,
     opcode: number,
     attack: ClientAttack,
     targets: UserAttackTarget[],
   ): void {
-    if (opcode !== CLIENT_FIELD_OPCODE.attack) return;
+    const relayOpcode = ATTACK_RELAY_OPCODE[opcode];
+    if (relayOpcode === undefined) return;
     if (session.instance.memberCount <= 1) return;
-    const packet = encodeUserAttack({
-      characterId: session.characterId,
-      hits: attack.hits,
-      skillLevel: 0,
-      skillId: 0,
-      facingLeft: attack.facingLeft,
-      action: attack.action,
-      speed: attack.speed,
-      afterimage: 0,
-      unknownU32: 0,
-      targets,
-    });
+    const projectileItemId = attack.projectileSlot === undefined ? 0 : this.projectileItemOf(session, attack.projectileSlot);
+    const packet = encodeUserAttack(
+      {
+        characterId: session.characterId,
+        hits: attack.hits,
+        skillLevel: 0,
+        skillId: 0,
+        facingLeft: attack.facingLeft,
+        action: attack.action,
+        speed: attack.speed,
+        afterimage: 0,
+        projectileItemId,
+        targets,
+      },
+      relayOpcode,
+    );
     session.instance.broadcast(packet, session.characterId);
     this.options.log?.(
-      `game: 0x23 swing of "${session.name}" (${attack.facingLeft ? "left" : "right"} ` +
-        `action=${attack.action} hits=${attack.hits} speed=${attack.speed} ${targets.length} target(s)) ` +
-        `sent to ${session.instance.memberCount - 1} other player(s)`,
+      `game: 0x${relayOpcode.toString(16).padStart(2, "0")} attack of "${session.name}" ` +
+        `(${attack.facingLeft ? "left" : "right"} action=${attack.action} hits=${attack.hits} ` +
+        `speed=${attack.speed}${projectileItemId === 0 ? "" : ` projectile=${projectileItemId}`} ` +
+        `${targets.length} target(s)) sent to ${session.instance.memberCount - 1} other player(s)`,
     );
+  }
+
+  /**
+   * The item id sitting in one USE-tab slot of the attacker's own record.
+   *
+   * The client's `0x10` names the slot, not the item (`sub_511630` only ever returns a slot of a
+   * 2060xxx/2061xxx/207xxxx pile, but the packet carries the number), while the `0x24` receiver
+   * wants the id. This is a read: like the damage itself, what the client did with its own
+   * inventory is the client's account of the attack, and the server does not consume anything to
+   * relay a shot (FINDINGS 4.11.7c).
+   */
+  private projectileItemOf(session: FieldSession, slot: number): number {
+    const items = session.character.items ?? emptyCharacterItems();
+    const inventory = items.inventories[INVENTORY_TAB.consume - 1];
+    const item = inventory?.items.get(slot);
+    return item?.itemId ?? 0;
   }
 
   /**

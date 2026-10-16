@@ -26,6 +26,10 @@
  * the section checks the purchase, the price and the map; without the mesos it prints a note and
  * skips it.
  *
+ * Before the whisper, while both are still in 1000000, the two attack sections run: a swing (c2s
+ * `0x0F` -> s2c `0x23`), a shot (c2s `0x10` -> s2c `0x24`) and a cast (c2s `0x11` -> s2c `0x25`), each
+ * checked on the *other* player's socket and never echoed to the attacker (FINDINGS 4.11.7b/4.11.7c).
+ *
  * The emotion section runs while both are still in the town the revive landed in: Hero sends the
  * `0x13` an F-key sends (`[0x13][u32 face]`), and Alt - who is standing in the same map - is the one
  * who gets the `0x27` that puts the face on Hero. Hero gets nothing back, because his own client
@@ -263,7 +267,7 @@ if (altMap === heroMap && heroMap === 1000000) {
     const swing = encodeClientAttack({
       hits: 1,
       targetCount: 1,
-      clickedMobId: mobId,
+      skillId: mobId,
       facingLeft: true,
       action: 0x11,
       speed: 2,
@@ -315,6 +319,72 @@ if (altMap === heroMap && heroMap === 1000000) {
       await new Promise((r) => setTimeout(r, 20));
     }
     expect(echoed === 0, `the attacker is not echoed his own 0x23 (saw ${echoed})`);
+
+    // --- a shot (0x10) and a cast (0x11): 0x24 and 0x25 (FINDINGS 4.11.7c) ------------------------
+    // The opcode the server picks is the renderer the observer's client runs, so the other two halves
+    // of the family get their own legs. Both carry the same body as the swing; a shot additionally
+    // names the projectile, and this character's USE tab is empty, so the server's own record answers
+    // "no item in that slot" with 0. (The lookup itself is covered in `serve.test.ts`, which hands the
+    // attacker a pile of arrows first.)
+    const shot = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: mobId,
+        facingLeft: false,
+        action: 0x2e,
+        speed: 1,
+        projectileSlot: 3,
+        targets: [{ mobId, hitAnimation: -1, x: 0, y: 0, sequence: 4, damages: [1] }],
+      },
+      CLIENT_FIELD_OPCODE.shootAttack,
+    );
+    hero.game.send(shot);
+    const shotBurst = await alt.game.drain(400);
+    const sawShot = shotBurst.findIndex((packet) => packet[0] === FIELD_OPCODE.userShootAttack);
+    expect(sawShot >= 0, "a shot arrives as 0x24, the opcode whose receiver draws one");
+    if (sawShot >= 0) {
+      const relayed = readUserAttack(new PacketReader(shotBurst[sawShot], 1));
+      expect(
+        !relayed.facingLeft &&
+          relayed.action === 0x2e &&
+          relayed.speed === 1 &&
+          relayed.targets[0]?.mobId === mobId,
+        `carrying the shot's own fields (action=${relayed.action} speed=${relayed.speed} mob=${relayed.targets[0]?.mobId})`,
+      );
+      expect(
+        relayed.projectileItemId === 0,
+        `and the neutral projectile id - the slot names an empty USE slot (got ${relayed.projectileItemId})`,
+      );
+    }
+
+    const cast = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: mobId,
+        facingLeft: true,
+        action: 0x20,
+        speed: 3,
+        targets: [{ mobId, hitAnimation: 3, x: 0, y: 0, sequence: 5, damages: [1] }],
+      },
+      CLIENT_FIELD_OPCODE.magicAttack,
+    );
+    hero.game.send(cast);
+    const castBurst = await alt.game.drain(400);
+    const sawCast = castBurst.findIndex((packet) => packet[0] === FIELD_OPCODE.userMagicAttack);
+    expect(sawCast >= 0, "and a cast arrives as 0x25, never as the shot's opcode");
+    if (sawCast >= 0) {
+      const relayed = readUserAttack(new PacketReader(castBurst[sawCast], 1));
+      expect(
+        relayed.facingLeft && relayed.action === 0x20 && relayed.targets[0]?.hitAnimation === 3,
+        `with the cast's fields (action=${relayed.action} anim=${relayed.targets[0]?.hitAnimation})`,
+      );
+      expect(
+        relayed.projectileItemId === 0,
+        `and the same neutral projectile field: 0x11 has no slot in it to look up (got ${relayed.projectileItemId})`,
+      );
+    }
   }
 }
 

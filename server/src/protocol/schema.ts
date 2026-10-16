@@ -302,7 +302,7 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "hits", type: "u8 (nibble)", note: "damage numbers per mob, 1..15" },
       { name: "targetCount", type: "u8 (nibble)", note: "sub_491E90 returns at most 6" },
-      { name: "clickedMobId", type: "u32" },
+      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)", note: "index into dword_5B2144" },
       {
@@ -319,36 +319,49 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.CLIENT_FIELD_OPCODE.shootAttack,
+    direction: "c2s",
+    stage: "field",
+    name: "shootAttack",
+    status: "partial",
+    evidence:
+      "FINDINGS 4.13.1b (sub_513C80): same record as 0x0F, one extra u16, and the nibble is a presence " +
+      "flag instead of a count. The sender is the bow/crossbow/claw path (sub_519600 with " +
+      "sub_4657F0(weapon id) = 45/46/47), and the extra u16 is the USE-tab slot sub_511630 consumed " +
+      "the projectile from.",
+    codecs: ["readClientAttack", "encodeClientAttack"],
+    fields: [
+      { name: "hits", type: "u8 (nibble)" },
+      { name: "hasSecondObject", type: "u8 (nibble)", note: "16 * (v129 != nullptr), so 0 or 1" },
+      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
+      { name: "facingLeft", type: "bool (bit 7)" },
+      { name: "action", type: "u8 (bits 0..6)" },
+      { name: "speed", type: "u8", note: "same byte as 0x0F" },
+      {
+        name: "projectileSlot",
+        type: "u16",
+        note:
+          "the USE-tab slot sub_511630 took the projectile from: it walks the tab for the first " +
+          "2060xxx/2061xxx/207xxxx pile big enough for the swing and returns its slot number",
+      },
+      { name: "targets", type: "same 11-byte record + hits damages" },
+    ],
+  },
+  {
     opcode: field.CLIENT_FIELD_OPCODE.magicAttack,
     direction: "c2s",
     stage: "field",
     name: "magicAttack",
     status: "partial",
-    evidence: "FINDINGS 4.13.1b (sub_513C80): same record, one extra u16, nibble is a presence flag",
-    codecs: ["readClientAttack", "encodeClientAttack"],
-    fields: [
-      { name: "hits", type: "u8 (nibble)" },
-      { name: "hasSecondObject", type: "u8 (nibble)", note: "16 * (v129 != nullptr), so 0 or 1" },
-      { name: "clickedMobId", type: "u32" },
-      { name: "facingLeft", type: "bool (bit 7)" },
-      { name: "action", type: "u8 (bits 0..6)" },
-      { name: "speed", type: "u8", note: "same byte as 0x0F" },
-      { name: "unknownU16", type: "u16", note: "read off the local user before the packet is built" },
-      { name: "targets", type: "same 11-byte record + hits damages" },
-    ],
-  },
-  {
-    opcode: field.CLIENT_FIELD_OPCODE.skillAttack,
-    direction: "c2s",
-    stage: "field",
-    name: "skillAttack",
-    status: "partial",
-    evidence: "FINDINGS 4.13.1b (sub_514D30): the whole record sits under if (v36 != nullptr)",
+    evidence:
+      "FINDINGS 4.13.1b (sub_514D30): the whole record sits under if (v36 != nullptr), and its only " +
+      "drivers are three magician skills (2001005/2101003/2101005 -> sub_5195D0); byte 4 is the " +
+      "weapon block field as it stands, without the sub_4BE8B0 jitter 0x0F and 0x10 add.",
     codecs: ["readClientAttack", "encodeClientAttack"],
     fields: [
       { name: "hits", type: "u8 (nibble)" },
       { name: "hasSecondObject", type: "u8 (nibble)" },
-      { name: "clickedMobId", type: "u32" },
+      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)" },
       { name: "speed", type: "u8", note: "same byte as 0x0F" },
@@ -497,7 +510,13 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "child number of Character/Afterimage/<the weapon's info/afterImage>; sub_4BE270 picks it client-side",
       },
-      { name: "unknownU32", type: "u32", note: "read for all three opcodes, handed only to the 0x24 handler" },
+      {
+        name: "projectileItemId",
+        type: "u32",
+        note:
+          "read for all three opcodes; the 0x24 handler is the only reader and uses it as the " +
+          "projectile's item id (bottom / 10000 == 207 = the throwing-star family)",
+      },
       { name: "targets", type: "u32 mobId, s8 hitAnimation, u16 damage[hits]" },
     ],
   },
