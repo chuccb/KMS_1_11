@@ -697,7 +697,7 @@ count × {
 
 > `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
 
-### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式，欄位只到骨架（`0x2F` 是例外，已完成 → §4.15）
+### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式（`0x2F` → §4.15、NPC `0x39`–`0x3B` → §4.19）
 
 §4.11 把「哪個子系統」解到欄位層；這一節把同一條路線再往下一層拆成「哪個函式處理哪個 opcode」。
 **未標「已證實」的欄位都還不能當規格用**（這一節的目的是讓下一個回合不必重讀反編譯）。
@@ -720,11 +720,11 @@ count × {
 
 | opcode | 分支 | 目前已知 |
 |---|---|---|
-| 0x38／0x41 | — | 沒有分支 |
-| 0x39 | `sub_49F6C0` | **NPC 進場**（`sub_4A1720` 取 NPC 模板）|
-| 0x3A | `sub_49F810` | 未讀 |
-| 0x3B | `sub_49F970` | `u8 flag` + `u32 npcId`；`flag != 0` → `sub_49F260(npcId, packet)`、`flag == 0` → `sub_49F380(npcId)`（**與怪物 0x31 同型**）|
-| 0x3C–0x40 | `sub_49F5B0` | `sub_49F610` 查表後 → `sub_49A280(opcode, packet)` |
+| 0x38／0x41 | — | 沒有分支（`0x38` 到現在仍無法解釋）|
+| 0x39 | `sub_49F6C0` | **NPC 進場 ✅ 已實作 → §4.19**：`u32 npcId`；池中已有 → `+24 \|= 1` 後返回；沒有才讀 `u32 templateId`（`sub_49CB30` 快取模板 → `sub_498A20` 建物件）並進 `sub_498CF0` 讀剩下的欄位 |
+| 0x3A | `sub_49F810` | **NPC 離場 ✅ → §4.19**：`u32 npcId`；清 `+24` 的 bit 0，歸零才解除鏈結 |
+| 0x3B | `sub_49F970` | **NPC 第二狀態 ✅ → §4.19**：`u8 flag` + `u32 npcId`（**順序是 flag 在前**）；`flag != 0` → `sub_49F260(npcId, packet)`、`flag == 0` → `sub_49F380(npcId)`（**與怪物 0x31 同型**）|
+| 0x3C–0x40 | `sub_49F5B0` | `sub_49F610` 查表後**只有 0x3D** 才呼叫 `sub_49A280(opcode, packet)`；`0x3C`／`0x3E`／`0x3F`／`0x40` 讀完 `u32 npcId` 就結束 |
 
 #### 其餘區間（只有入口，尚未拆）
 
@@ -1399,6 +1399,145 @@ client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/n
 4. **`0x43` kind <= 1 的 `unknown` s16** 仍未解（本伺服器寫 0）。
 5. **沒有實機驗證**：`0x43` 的飛行、`0x44 kind 2` 的撿取音效、`0x0B` 放進格子的畫面，全部只由反編譯碼推導。
 
+### 4.19 ✅ NPC：`0x39`／`0x3A`／`0x3B`（`CNpcPool`）
+
+NPC 是 `0x2F` 的**簡化版**：同樣是「池中已有這個 id 就只改變狀態」，但進場包**沒有** `u32 動畫旗標`
+＋七個通道那一塊（§4.12.1）——NPC 的動畫由 client 自己從 `Npc/%07d.img` 的 `stand` 播，
+所以 `0x39` 不必送。`0x2F` 的教訓（欄位要一一對到讀取端）在這條路上一樣適用：以下每一列都對應
+`sub_49F6C0`／`sub_498CF0` 裡的某一次 `sub_45DC40`／`sub_45DC80`／`sub_45DCC0`。
+
+#### 4.19.1 分派（`sub_49F560`，168299-168317）
+
+`sub_472770` 把 `0x38`–`0x41` 送進 `sub_49F560(dword_5C2050, opcode, packet)`（`0x5C2050` 的建構子
+是 `sub_49F020`）：
+
+| opcode | 分支 | 位址（`.c` 行號）|
+|---|---|---|
+| 0x39 | `sub_49F6C0` | 168400-168475 |
+| 0x3A | `sub_49F810` | 168478-168595 |
+| 0x3B | `sub_49F970` | 168598-168631 |
+| 0x3C–0x40 | `sub_49F5B0` | 168320-168340 |
+| 0x38／0x41 | 沒有 case | — |
+
+#### 4.19.2 `0x39`：NPC 進場（已知 id **5 bytes**／新 id **20 bytes**）
+
+| # | 條件 | 寬度 | 寫入目標 | 語意 |
+|---|---|---|---|---|
+| 0 | 一定讀 | `u32` | 池的 key | `npcId`。查表用 `__ROR4__(id,5) % this[3]`（與 §4.12 的 CMobPool 同一個 ZMap）|
+| — | **查到了** | — | `entry + 24 \|= 1` | 就是全部：**只設 bit 0（refresh）**，之後不再讀任何欄位 → 封包總長 **5 bytes** |
+| 1 | 只有查不到 | `u32` | —（立刻拿去查模板）| `templateId`；`sub_49CB30`（165481-165518）是**有快取**的模板查詢，模板由 `sub_411E50` 的 `Npc/%07d.img`（`.c:20269`）建立，`sub_498A20` 再把它變成 NPC 物件 |
+| 2 | 只有查不到 | `s16` | `npc+32` 與 `npc+30` | **x**（兩個欄位都存，`sub_498CF0` 161467-161990）|
+| 3 | 只有查不到 | `s16` | `npc+33` 與 `npc+31` | **y** |
+| 4 | 只有查不到 | `u8` | `npc+20` | **面向**（＝地圖 `life` 的 `f`）|
+| 5 | 只有查不到 | `u16` | 只拿去查表 | `sub_489800(pool + 25, &key, &out)`：查到的 `+32` 欄位會進 vecctrl 的建立流程；**查不到是正常路徑** |
+| 6 | 只有查不到 | `s16` | `npc+16` | 成對的兩個值，一起交給 `sub_540400`（vecctrl 建立）；**沒有任何字串替它們命名** |
+| 7 | 只有查不到 | `s16` | `npc+17` | 同上 |
+
+新 id 讀完後 `sub_49F6C0` 把 `+24` 設成 `1`、把項目鏈進池，再交給 `sub_498CF0` 讀第 2–7 欄；
+**之後封包就結束了**（沒有動畫區塊、沒有 `CMovePath`）。
+
+- `sub_498CF0` 的讀取序列是 2×`sub_45DC80`(`u16`)、`sub_45DC40`(`u8`)、`sub_45DC80`、2×`sub_45DC80`
+  —— 精確對上第 2–7 欄（兩個 `s16` 由 `sub_45DC80` 讀，`u8` 由 `sub_45DC40` 讀，三個 `u16` 由
+  `sub_45DC80` 讀）。讀不完 → `ZException(38)`（與 §4.4 的契約相同）。
+- **已知 id 的 `0x39` 是「叫 client 重新整理這個 NPC」**，不是無意義的重複：`0x31`／`0x3B` 都動 bit 1，
+  bit 0 只有 `0x39` 會設，而 `0x3A` 只清 bit 0。
+- 沒有「目的地 id」這種東西：**`npcId` 由伺服器自己選**，與地圖 `life` 的順序無關（本伺服器從 1 開始編，
+  與怪物池各自獨立）。
+
+#### 4.19.3 `0x3A`：NPC 離場（**5 bytes**）
+
+`sub_49F810`（168478-168595）：`u32 npcId` → 查池 → 清 `+24` 的 bit 0；**只有 `+24` 變成 0 時**
+才解除鏈結（也就是 `0x3B` 打開的第二狀態會讓離場「記著」）。
+查不到這個 id → 安安靜靜地什麼都不做。
+
+#### 4.19.4 `0x3B`：NPC 第二狀態（**6 bytes**）
+
+`sub_49F970`（168598-168631）：**`u8 flag` 先讀，`u32 npcId` 後讀，兩個都無條件讀**
+（這點和怪物 `0x31` 的「`u8 flag` + `u32 mobId`」同型，也和 §4.12 的舊猜測相反）。
+
+| flag | 分支 | 動作 |
+|---|---|---|
+| `!= 0` | `sub_49F260`（168057-168116）| 設 `+24` 的 bit 1，再 `sub_499760(npc+16, 1)` —— **已知 id** 就到此為止；**未知 id** 會再讀完整個 `0x39` 尾段並用 `sub_49F260` 直接建一個「已經是第二狀態」的 NPC |
+| `== 0` | `sub_49F380`（168119-168228）| 清 bit 1，再 `sub_499760(npc+16, 0)` |
+
+`sub_499760` 是 `CVecCtrlUser` 的同一組程式碼（§4.11.5 的移動路徑），`npc+16` 是 4.19.2 第 6 欄那個
+「沒有名字」的值。**所以第二狀態與 NPC 的移動路徑共用同一個欄位**，這是目前對第 6 欄最強的線索，
+但仍不足以命名它。
+
+⚠️ 本伺服器**只用已知 id 的形狀**（`u8 flag` + `u32 npcId`）：未知 id 的那條路會讓 client 在讀封包時
+就建立 NPC，`+24` 直接是 2，與「先 `0x39` 再 `0x3B`」在位元上的結果相同但順序不同，沒有實機證據前
+不送。
+
+#### 4.19.5 `0x3C`–`0x40`：只有 id，**只有 `0x3D` 讀更多**
+
+`sub_49F5B0`（168320-168340）讀一個 `u32 npcId` 查表，**所有 case 都只有這 4 bytes**，唯一的分支是
+`0x3D` → `sub_49A280(npc, packet)`（162629-162717）：
+
+```
+s8 first      // 負值／非負值走不同分支
+s8 second     // 上面那個模板裡有兩組陣列（npc+19 的 +32／+36）
+<CMovePath>   // 兩個索引都命中時才由 sub_4967C0 讀（= §4.11.5 的移動路徑讀取器）
+```
+
+也就是說 **NPC 也可以是會走路的**，只是要走的路徑（以及那兩組陣列到底是表情還是動作）還沒有觀測到。
+`0x3C`／`0x3E`／`0x3F`／`0x40` 讀完 id 就結束；`0x38` 與 `0x41` 在 `sub_49F560` 裡**沒有 case**，
+`0x38` 至今無法解釋（§6 已記錄）。
+
+#### 4.19.6 資料面：`Npc/%07d.img` 與地圖的 `life`
+
+- 路徑格式來自 `sub_411E50`（`.c:20269` 的 `Npc/%07d.img`），`server/src/wz/paths.ts` 的
+  `npcImagePath(id)` 就是它。`analysis/data_wz_manifest.json` 這次以正確的形狀（**`images` 是扁平清單**）
+  讀出來：1052 張圖裡 **70 張 `Npc/*.img`、28 張 `Mob/*.img`**。
+- 地圖的 `life` 區塊同時裝怪物與 NPC（`type` 為 `"m"`／`"n"`），`game/map.ts` 早就把兩者分開；
+  NPC 進場用的是同一個 `{x, y, foothold, facing}`（`rx0`／`rx1`／`cy` 對 NPC 沒用）。
+- 已核對的現實資料：`헤네시스`（100000000）2 個 NPC／0 隻怪、`달팽이사냥터`（40000）1 個 NPC（2003）
+  ／63 隻怪、`암허스트서쪽필드`（1000000）0 個 NPC／45 隻怪。
+- 樣本裡**沒有** `Npc/<id>.img` 的地圖（例如自製的 `STUB_MAP` 若指向不存在的 id）→ 這個 NPC 直接
+  不生成、並記一行 log。這與怪物不同：`applyDamage` 對不存在模板回 `undefined`，NPC 這條路則是
+  **進場前**就查模板，因為 `Npc/%07d.img` 不存在時 client 也畫不出東西。
+
+#### 4.19.7 伺服器這一側：`protocol/npc.ts` 與 `game/npcs.ts`
+
+| 位置 | 內容 |
+|---|---|
+| `protocol/npc.ts` | `NPC_OPCODE`（`enterField 0x39`／`leaveField 0x3A`／`stateToggle 0x3B`／`update 0x3D`）、`encodeNpcEnterField`／`readNpcEnterField`／`describeNpcEnterField`、`encodeNpcLeaveField`／`readNpcId`、`encodeNpcState`／`readNpcState` |
+| `game/npcs.ts` | `NpcTemplate`（`templateId`／`name`／`description?`／`func?`）、`npcTemplateProvider(WzArchive)`（讀 `info/name`）、`NpcField`（`spawnPackets`／`refreshPacket`／`byId`／`present`／`setSecondState`／`remove`）|
+| `wz/props.ts` | 新的共用層：`entriesOf`／`propertyOf`／`asNumber`／`asText`／`infoOf`，`game/mobs.ts` 與 `game/map.ts` 也改成用它（同一個規則：**形狀不對的值不算值**，預設值由呼叫端給）|
+| `net/loginserver.ts` | `npcTemplate?` 選項、`FieldSession.npcs`、`spawnNpcs`：NPC 的 `0x39` 緊接在怪物的 `0x2F` 之後、**在同一個 TCP 串流、同一組加密狀態**（`0x16` → 每個怪一個 `0x2F` → 每個 NPC 一個 `0x39`）|
+| `wz/paths.ts` | `npcImagePath(id)` |
+| `cli.ts serve` | 有 `Data.wz` 時同時建立 `npcTemplateProvider(archive)` |
+
+- **id 不重用**：`NpcField.remove()` 只把項目的 `present` 設成 false，id 留在池裡。理由與怪物池相同
+  ——client 也在自己的池裡留著那個 id，重用會讓 `0x3A`／`0x3B` 打到錯的對象。池是**單調遞增**的。
+- `encodeNpcEnterField` 送 `0` 給第 5–7 欄（`lookupKey`／`pointX`／`pointY`）。第 5 欄的查表失敗是
+  client 自己就會處理的路徑（和 §4.12.1 的 `0x2F` 那兩個 `u16` 一樣），後兩欄**沒有證據**，所以不猜。
+- `describeNpcEnterField` 對已知 id 的形狀會直接說出「refresh only」；`describeFieldPacket(0x39)` 的 5-byte
+  情況則兩種讀法都印（refresh／被截斷），因為**光看長度分不出來**，只有讀取器會不會丟 `ZException(38)` 知道。
+
+#### 4.19.8 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/npc.test.ts` | `0x39` 的 20-byte 形狀與常數 hex、已知 id 的 5-byte 形狀、負座標的 `s16`、`0x3A`／`0x3B` 的 5／6 bytes 與欄位順序、描述器對 refresh／截斷的兩種說法、`NpcField` 的 id 從 1 起算、模板不存在就跳過（並記 log）、沒有模板來源時仍然生成、`setSecondState`／`remove` 的合法性（重複 remove 不發封包、id 不重用）、`npcImagePath` 的補零與錯誤輸入 |
+| `server/test/field.test.ts` | `describeFieldOpcode` 的 `0x38`（無 handler）／`0x39`–`0x41` 各一列 |
+| `server/test/schema.test.ts` | 新的 5 筆目錄列（`0x39`／`0x3A`／`0x3B`／`0x3C`／`0x3D`）都要能被描述器認出來 |
+| `server/test/serve.test.ts` | 真 socket：`0x16` → 兩個 `0x2F` → 一個 `0x39`（`templateId 2003`、`x 69`、`y 275`）的順序與欄位；既有的打怪／掉寶測試把 spawn 爆量從 3 改成 4 |
+
+#### 4.19.9 還不能宣稱的部分
+
+1. **第 5–7 欄的語意**（`lookupKey`／`pointX`／`pointY`）：只知道 `sub_489800` 的查表與
+   `sub_540400` 的 vecctrl 建立，**沒有名字**。目前送 0。
+2. **`0x3D` 的兩組索引**：`sub_49A280` 的兩個 `s8` 指向模板裡的兩組陣列，陣列內容（表情？動作？）
+   未讀；`CMovePath` 是否真的會被走出來也沒有實機證據。
+3. **`0x38` 與 `0x41` 沒有 case**：`0x38` 夾在 `0x37`（CMobPool 最後一個）與 `0x39` 之間，
+   很可能是某個已停用的 NPC 封包；`0x41` 同理。沒有字串或呼叫點能定位。
+4. **NPC 的生成是伺服器決定的**：`life` 裡有 2 個 NPC 的地圖就會有 2 個，沒有「NPC 重生」這種事
+   （`0x2F`／`0x30` 那一套不存在）。這一點符合 `sub_49F260` 的設計，但沒有實機驗證。
+5. **第二狀態在做什麼**：`sub_499760(npc+16, flag)` 與移動路徑共用欄位，所以它很可能是
+   「NPC 開始／停止走動」或「表情切換」——**兩種都說得通**，證據不足。
+6. **沒有實機驗證**：`0x39` 之後 client 畫出來的 NPC 站在哪、面向哪，全部只由反編譯碼推導；
+   需要 ADR-004 的 oracle run。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -1419,12 +1558,13 @@ client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/n
 4. **CField 其餘區間**（分派已拆到函式，見 §4.12）：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、
    CUserPool 的 `0x1E–0x29` 分支、`0x35`（動畫區塊）的用途（`0x2F` 進場、`0x33` 移動、`0x30`／`0x31`／
    `0x34` 的離場／收屍／受擊都已完成，§4.15／§4.16／§4.17）、
-   `0x39`–`0x40`（CNpcPool）、`0x49–0x4C`（對話框／商店）、`0x4D–0x52`（messenger／miniroom）。
-   （CRewardPool 的 `0x42–0x45` **已完成**：只有 `0x43`／`0x44` 有 handler，見 §4.18。）
+   `0x49–0x4C`（對話框／商店）、`0x4D–0x52`（messenger／miniroom）。
+   （CRewardPool 的 `0x42–0x45` **已完成**：只有 `0x43`／`0x44` 有 handler，見 §4.18；
+   CNpcPool 的 `0x39`／`0x3A`／`0x3B` **已完成**，`0x38`／`0x41` 與 `0x3D` 的欄位仍 OPEN，見 §4.19。）
 5. **進地圖之後還缺的東西** ✅ 進場、移動、打怪與掉寶的閉環都已完成：`0x16` → `0x2F`（§4.15）→
    每段一個 `0x33`（§4.16，含腳踏點幾何）→ 命中／死亡／重生（§4.17：`0x34`／`0x30`／`0x31`，
    含 `dieMs` 與重生計時）→ 掉落物與拾取（§4.18：`0x43`／`0x44`／`0x0B`／`0x11`）。
-   剩下的是怪物的 AI／攻擊（只有 `attack1` 的兩張測試圖有攻擊資料）與 NPC（`0x39`–`0x40`）。
+   剩下的是怪物的 AI／攻擊（只有 `attack1` 的兩張測試圖有攻擊資料）與 NPC 的 `0x3D`（會走動的 NPC）。
    `0x2F` 那兩個只被查表的 `u16`（§4.12.1）仍是 OPEN，但目前送 0 走的是 client 自己會處理的
    「查表失敗」路徑，所以不擋這條路。
 6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支（已解＝背包滿的訊息，§4.18.5）、

@@ -42,6 +42,14 @@ import {
   readLootNotice,
 } from "./drop.ts";
 import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
+// The NPC pool (`0x39`..`0x41`): the same packet shape as `CMobPool`, one range further up.
+import {
+  NPC_OPCODE,
+  describeNpcEnterField,
+  readNpcEnterField,
+  readNpcId,
+  readNpcState,
+} from "./npc.ts";
 import {
   MOB_OPCODE,
   describeMobEnterField,
@@ -418,6 +426,35 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  if (opcode === NPC_OPCODE.enterField) {
+    // No length guard: a 5-byte packet is either the refresh form or a cut-short body, and the
+    // reader's own exception is what tells the two apart, so the catch reports it.
+    try {
+      return `${name}: ${describeNpcEnterField(readNpcEnterField(new PacketReader(plain, 1), false))}`;
+    } catch {
+      try {
+        const { npcId } = readNpcEnterField(new PacketReader(plain, 1), true);
+        return `${name}: npcId=${npcId} (known id: refresh only, or a truncated body)`;
+      } catch (error) {
+        return `${name}: (truncated: ${(error as Error).message})`;
+      }
+    }
+  }
+  if (opcode === NPC_OPCODE.leaveField) {
+    try {
+      return `${name}: npcId=${readNpcId(new PacketReader(plain, 1))} leave`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === NPC_OPCODE.stateToggle) {
+    try {
+      const { npcId, on } = readNpcState(new PacketReader(plain, 1));
+      return `${name}: npcId=${npcId} secondState=${on ? "on" : "off"}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === MOB_OPCODE.enterField) {
     // No length guard: the reader throws `PacketUnderflowError` and the catch reports it, which is
     // more useful than "fields not decoded yet" for a packet that is simply cut short.
@@ -437,7 +474,14 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === 0x1a) return "0x1a CField(chat/whisper/find)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
-  if (opcode >= 0x38 && opcode <= 0x41) return `0x${opcode.toString(16)} CNpcPool`;
+  if (opcode === NPC_OPCODE.enterField) return "0x39 CNpcPool(npc appear)";
+  if (opcode === NPC_OPCODE.leaveField) return "0x3a CNpcPool(npc leave)";
+  if (opcode === NPC_OPCODE.stateToggle) return "0x3b CNpcPool(npc second state)";
+  if (opcode === 0x38 || opcode === 0x41) return `0x${opcode.toString(16)} CNpcPool(no handler)`;
+  if (opcode >= 0x3c && opcode <= 0x40) {
+    // 0x3C..0x40 all read a u32 id and stop, except 0x3D, which reads more (`sub_49A280`).
+    return `0x${opcode.toString(16)} CNpcPool(${opcode === NPC_OPCODE.update ? "action + move path" : "id only"})`;
+  }
   if (opcode === DROP_OPCODE.appear) return "0x43 CRewardPool(drop appear)";
   if (opcode === DROP_OPCODE.remove) return "0x44 CRewardPool(drop gone)";
   if (opcode === 0x42 || opcode === 0x45) return `0x${opcode.toString(16)} CRewardPool(no handler)`;

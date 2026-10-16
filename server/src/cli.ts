@@ -16,6 +16,7 @@ import { runWzCommand } from "./wz/cli.ts";
 import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
+import { npcTemplateProvider } from "./game/npcs.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -246,11 +247,13 @@ async function runServe(rest: string[]): Promise<number> {
   const dataPath = dataArg === "off" ? undefined : (dataArg ?? (existsSync("Data.wz") ? "Data.wz" : undefined));
   let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
   let mobTemplate: ReturnType<typeof mobTemplateProvider> | undefined;
+  let npcTemplate: ReturnType<typeof npcTemplateProvider> | undefined;
   if (dataPath !== undefined) {
     try {
       const archive = WzArchive.open(dataPath);
       mapProvider = mapDataProvider(archive);
       mobTemplate = mobTemplateProvider(archive);
+      npcTemplate = npcTemplateProvider(archive);
     } catch (error) {
       process.stderr.write(`--data ${dataPath}: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
@@ -287,6 +290,7 @@ async function runServe(rest: string[]): Promise<number> {
       mapId,
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
+      ...(npcTemplate !== undefined ? { npcTemplate } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
       ...(handshake ? { handshake } : {}),

@@ -14,9 +14,9 @@
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18）。 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
-| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。 |
+| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。另含 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**。 |
 | `src/protocol/mob.ts` | ✅ **怪物封包**：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊）、`0x33` 移動（動作位元組 + `u32` + `CMovePath`）、`0x30` 開始死亡動畫（`s16 delayMs`）、`0x31` 收屍／重生（`u8 flag`＋`u32 mobId`，`flag != 0` 時再接 `templateId` 與**與 `0x2F` 逐 byte 相同**的身體）、`0x34` 怪物 MP；另有 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16／§4.17）。 |
 | `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
 | `src/game/mobs.ts` | ✅ **一場地的怪物**：出生點吸附腳踏點、巡邏範圍 = 腳踏點折線 ∩ `rx0/rx1`、每段一個 `0x33`（`MobField`）；`Mob/<id>.img -> info` 的 `speed`／`maxHP`／`maxMP`／`level`／`exp` 與 die 動畫長度（`dieMs`，Σ 影格 `delay`，預設 180 ms）由 `mobTemplateProvider` 快取。怪物是**伺服器驅動**的，而且**有 HP**：`applyDamage` → `0x34`＋（死亡時）`0x30`，`tickPackets` 收屍與重生（§4.16／§4.17）。 |
@@ -24,10 +24,13 @@
 | `src/protocol/inventory.ts` | ✅ **道具欄異動 `0x0B`**：`result`／`count`／每筆 `{op, inventory, slot, …}`，`op 0` 接一個 `GW_ItemSlot`（**沒有種類位元組**）；`op 1`（換金鑰）在裝備欄會被 client 丟 `CTerminateException`，encoder 直接拒絕（§4.18.4）。 |
 | `src/game/drops.ts` | ✅ **一場地的掉落物**（`DropField`）：掉落表（`MOB_JUNK_DROP`／`POTION_BY_LEVEL`／三個機率常數）、落點吸附腳踏點、壽命與「玩家站在上面」的判定；機率與壽命都是**伺服器的選擇**（ADR-007）。 |
 | `src/game/rewards.ts` | ✅ **獎勵與錢包**（`grantItem`／`MesoWallet`／`pickUpDrop`）：同 id 堆疊到 200、否則第一個空格、**裝備與現金道具永不堆疊**、背包滿就留在原地；`pickUpDrop` 回傳「該送哪幾個封包」的資料。`MesoWallet` 目前只是伺服器端的帳（client 的錢包顯示還不會動，§4.18.8）。 |
+| `src/protocol/npc.ts` | ✅ **NPC 封包**：`0x39` 進場（`u32 npcId`；**已知 id 只有 5 bytes**，新 id 才接 `u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16`＋`s16 ×2`，共 20 bytes）、`0x3A` 離場（只有 `u32 npcId`）、`0x3B` 第二狀態（**`u8 flag` 在前**＋`u32 npcId`）；`0x3C`–`0x40` 只讀 id，只有 `0x3D` 再讀兩顆動作索引＋`CMovePath`（FINDINGS §4.19）。**沒有**怪物 `0x2F` 那個動畫旗標區塊。 |
+| `src/game/npcs.ts` | ✅ **一場地的 NPC**（`NpcField`）：地圖 `life` 的 NPC 出生點 → 每個一個 `0x39`（id 從 1 起算，**永不重用**）；`setSecondState`／`remove` 是 `0x3B`／`0x3A` 的合法形狀，`npcs` 是唯讀視圖。模板來自 `npcTemplateProvider`（`Npc/<id>.img` 的 `info/name`）；模板查不到就**不生成**並記一行 log。 |
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
-| 遊戲邏輯（地圖／怪物／戰鬥／掉落／道具欄伺服器端）| 🟡 地圖／怪物／戰鬥／掉落都已實作（`game/map.ts`／`game/mobs.ts`／`game/drops.ts`／`game/rewards.ts`）；**尚未實作**的是 NPC、對話框／商店、組隊、以及道具的「使用」與裝備欄操作。沒解的一律不猜（`decode` 仍會原封不動記錄它們）。 |
+| 遊戲邏輯（地圖／怪物／NPC／戰鬥／掉落／道具欄伺服器端）| 🟡 地圖／怪物／NPC 進場／戰鬥／掉落都已實作（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts`／`game/drops.ts`／`game/rewards.ts`）；**尚未實作**的是怪物 AI 與攻擊、NPC 的對話與走動（`0x3D`）、對話框／商店、組隊、以及道具的「使用」與裝備欄操作。沒解的一律不猜（`decode` 仍會原封不動記錄它們）。 |
 | `src/wz/img.ts` | ✅ WZ v1 `.img` 值層編解碼器：物件 marker、名稱表（blob 相對位移）、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、像素解壓（容忍缺少 adler32 trailer 的 stream）。規格與證據在 `docs/WZ1_FORMAT.md` §4，雙胞胎是 `tools/wzimg.py`。 |
 | `src/wz/archive.ts` | ✅ `Data.wz`：PKG1 表頭、目錄樹、逐張「解析驗證 → 全檔掃描 size 唯一匹配」定位（922 declared + 130 scanned）、canvas 普查、`Map/Map/*.img` 的 info/foothold/portal/life。 |
+| `src/wz/props.ts` | ✅ WZ 屬性樹的**共用小層**：`entriesOf`／`propertyOf`／`asNumber`／`asText`／`infoOf`（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts` 都用它）。規則：**形狀不對的值不算值**，預設值由呼叫端給。 |
 | `src/wz/png.ts` | ✅ 零依賴 PNG 寫入器（8-bit RGBA、filter 0），把解出的像素變成看得見的檔案。 |
 | `src/wz/cli.ts` | ✅ `wz images`／`census`／`maps`／`dump`／`png`：唯一一份 WZ 讀取器（ADR-005）。 |
 | 讀反編譯的工具 | ✅ `tools/hexfunc.py`（抽函式）、`tools/kstr.py`（**CP949 字串**：2003 client 沒有符號，字串就是函式的名字，見 FINDINGS §4.13）、`tools/wz1.py`；皆有 unittest（`python3 -m unittest discover -s tools/tests`）|
@@ -120,7 +123,7 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 ```
 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
-（領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物、之後每個 tick 送 `0x33` 讓它們巡邏，見下）；
+（領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物與 `0x39` NPC、之後每個 tick 送 `0x33` 讓怪物巡邏，見下）；
 `--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔）、
 `--mob-speed <px/s>` 調巡邏速度（預設 60 px/s，再乘上怪物自己的 `info.speed` 百分比）、
 `--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms），角色建立後外觀取自**帳號第一個角色**
@@ -134,7 +137,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 （`src/game/mobs.ts`；速度 = `--mob-speed` × 怪物 `info.speed` 百分比）；client 的 `0x0F`／`0x10`／`0x11`
 落地時，傷害直接從怪物的 `info.maxHP` 扣（**傷害是 client 算的**，伺服器不重算），命中回 `0x34`
 （怪物的 MP，同時讓 client 進受擊狀態）、殺死送 `0x30`（死亡動畫立刻開始）、動畫結束後 `0x31 flag = 0`
-收屍、`--mob-respawn` 之後 `0x31 flag != 0` 重生。**下一個最有價值的目標**是 NPC（`0x39`–`0x40`）。
+收屍、`--mob-respawn` 之後 `0x31 flag != 0` 重生。NPC 也已在同一趟 `serve` 裡進場（`0x39`，§4.19）。**下一個最有價值的目標**是怪物的 AI／攻擊
+（現在怪物只會巡邏、被打、掉東西，不會追人也不會打人）。
 
 `0x16`（進地圖）的三個 u32 現在已知是**場地的亂數種子**（FINDINGS §4.11.2）：客戶端的
 傷害數字、掉落與怪物行為都由它決定，所以伺服器送出種子後就能重算客戶端回報的傷害——
@@ -159,12 +163,21 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 要換一份掉落表只需傳一個 `policy` 進去（`DropField` 的選項），不用動網路層。
 ⚠️ client 自己的錢包顯示**不會**跟著變（`MesoWallet` 是伺服器端的帳，§4.18.8 第 2 項）。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物 AI／技能／NPC**
+**NPC 也已經進場**（FINDINGS §4.19）：同一個 `life` 清單裡 `type = "n"` 的出生點會各拿到一個 `0x39`
+（`u32 npcId`＋`u32 templateId`＋座標＋面向），**緊接在怪物的 `0x2F` 之後、同一個 TCP 串流**；
+`src/game/npcs.ts` 的 id 從 1 起算且**永不重用**（`remove()` 只把項目標成不在場），因為 client 的池裡
+也留著那個 id。NPC 的圖由 client 自己從 `Npc/%07d.img` 播 `stand`，所以**進場包裡沒有動畫區塊**
+（這是與怪物 `0x2F` 最大的差別）。目前只有「進場」：`0x3B`（第二狀態）與 `0x3D`（會走動的 NPC，
+兩個動作索引＋`CMovePath`）的 codec 已在 `protocol/npc.ts`，但沒有證據說明 client 看到它們會做什麼，
+所以 `serve` 不送 —— NPC 站在那裡是對的，走動與對話要等 oracle run（ADR-004）。
+
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物 AI／技能**
 （怪物會出現、會巡邏、會被打死、會重生、也會掉東西，但不會追人、不會攻擊；只有 `Mob/9999997.img`／
 `Mob/9999999.img` 兩張測試圖帶攻擊資料，見 FINDINGS §4.17.6 與 §6 第 5 項）、
 建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受；`chardata.ts` 已經能寫完整道具區塊，
 缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，見 FINDINGS §4.8 的註記）、
-沒有 NPC／對話框／商店，也沒有道具的「使用」與裝備欄操作（`0x0B` 的 `op 1`–`op 3` 已有 codec，
+NPC 會出現但**不會走動、不能對話**（`0x3D` 與對話框 `0x49`–`0x4C` 都還沒實作），
+也沒有商店，以及道具的「使用」與裝備欄操作（`0x0B` 的 `op 1`–`op 3` 已有 codec，
 但還沒有誰去用它們）。
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

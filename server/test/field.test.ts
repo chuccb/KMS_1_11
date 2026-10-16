@@ -188,7 +188,15 @@ test("every opcode range of the CField router maps to its subsystem", () => {
   assert.equal(describeFieldOpcode(0x1c), "0x1c CUserPool");
   assert.equal(describeFieldOpcode(0x2d), "0x2d CUserPool");
   assert.equal(describeFieldOpcode(0x2e), "0x2e CMobPool");
-  assert.equal(describeFieldOpcode(0x38), "0x38 CNpcPool");
+  assert.equal(describeFieldOpcode(0x38), "0x38 CNpcPool(no handler)");
+  assert.equal(describeFieldOpcode(0x39), "0x39 CNpcPool(npc appear)");
+  assert.equal(describeFieldOpcode(0x3a), "0x3a CNpcPool(npc leave)");
+  assert.equal(describeFieldOpcode(0x3b), "0x3b CNpcPool(npc second state)");
+  assert.equal(describeFieldOpcode(0x3c), "0x3c CNpcPool(id only)");
+  assert.equal(describeFieldOpcode(0x3d), "0x3d CNpcPool(action + move path)");
+  assert.equal(describeFieldOpcode(0x3e), "0x3e CNpcPool(id only)");
+  assert.equal(describeFieldOpcode(0x40), "0x40 CNpcPool(id only)");
+  assert.equal(describeFieldOpcode(0x41), "0x41 CNpcPool(no handler)");
   assert.equal(describeFieldOpcode(0x42), "0x42 CRewardPool(no handler)");
   assert.equal(describeFieldOpcode(0x43), "0x43 CRewardPool(drop appear)");
   assert.equal(describeFieldOpcode(0x44), "0x44 CRewardPool(drop gone)");

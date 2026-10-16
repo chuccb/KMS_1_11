@@ -65,6 +65,7 @@ import {
   mobActionByte,
   type MobEnterField,
 } from "../protocol/mob.ts";
+import { asNumber, entriesOf, infoOf } from "../wz/props.ts";
 import { mobImagePath } from "../wz/paths.ts";
 import type { LifeSpawn, MapData } from "./map.ts";
 
@@ -108,17 +109,6 @@ export const MOB_FRAME_DELAY_MS = 180;
 
 /** The die actions a mob image may have, in the order the client's action table names them. */
 const MOB_DIE_ACTION_NAMES = ["die1", "die2", "dieF"] as const;
-
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" ? value : fallback;
-}
-
-/** The property list of a `Property`-shaped node (`WzNode.props` for objects, `[]` otherwise). */
-function entriesOf(node: unknown): { name: string; value: unknown }[] {
-  if (node === null || typeof node !== "object") return [];
-  const props = (node as { props?: unknown }).props;
-  return Array.isArray(props) ? (props as { name: string; value: unknown }[]) : [];
-}
 
 /**
  * The property list of a canvas frame.
@@ -180,10 +170,7 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
   if (!archive.has(path)) return undefined;
   const root = archive.objects(path)[0];
   if (root === undefined) return undefined;
-  const props: Record<string, unknown> = {};
-  for (const entry of entriesOf(entriesOf(root).find((e) => e.name === "info")?.value)) {
-    props[entry.name] = entry.value;
-  }
+  const props = infoOf(root);
   const speed = asNumber(props.speed, 0);
   return {
     templateId,

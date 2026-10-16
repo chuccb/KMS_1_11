@@ -25,6 +25,7 @@ import {
 } from "../protocol/session.ts";
 import { MobField, type MobTemplate } from "../game/mobs.ts";
 import { DropField, type DropPolicy } from "../game/drops.ts";
+import { NpcField, type NpcTemplate } from "../game/npcs.ts";
 import { MesoWallet, pickUpDrop } from "../game/rewards.ts";
 import type { MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
@@ -469,6 +470,15 @@ export interface GameEntryServerOptions {
   mapProvider?: (mapId: number) => MapData | undefined;
   /** Mob stats (`Mob/<id>.img -> info`); `mobTemplateProvider(WzArchive)` is the real one. */
   mobTemplate?: (templateId: number) => MobTemplate | undefined;
+  /**
+   * NPC templates (`Npc/<id>.img`). `npcTemplateProvider(WzArchive)` is the real one.
+   *
+   * With it, a `life` entry whose image is not in the archive is **skipped** (the client would look
+   * up a file that is not there) and the rest carry their `info/name` into the logs. Without it every
+   * entry is spawned unnamed: the packet itself does not depend on the template, because the client
+   * loads the image on its own.
+   */
+  npcTemplate?: (templateId: number) => NpcTemplate | undefined;
   /** Walking speed of a mob at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
   mobSpeedPxPerSecond?: number;
   /** How often the field hands out mob movement legs, in ms. Defaults to 250. */
@@ -500,6 +510,7 @@ export interface GameEntryServerOptions {
  */
 interface FieldSession {
   mobs: MobField;
+  npcs: NpcField;
   drops: DropField;
   wallet: MesoWallet;
   /** The record the client was sent (`0x16`); the inventories here are what a pickup fills. */
@@ -576,6 +587,7 @@ export class GameEntryServer {
     );
     const mobs = this.spawnMobs(socket, sendState);
     if (mobs === undefined) return undefined;
+    const npcs = this.spawnNpcs(socket, sendState);
     const map = this.options.mapProvider?.(this.mapId);
     const drops = new DropField({
       // The drop table and the droppable-item ids come from the archive's own names and items
@@ -589,6 +601,7 @@ export class GameEntryServer {
     });
     return {
       mobs,
+      npcs,
       drops,
       wallet: new MesoWallet(),
       character,
@@ -639,7 +652,7 @@ export class GameEntryServer {
     }
     this.options.log?.(
       `game: spawned ${field.mobs.length} mobs (${map.name || map.imagePath}), ` +
-        `${field.walking} of them walking; ${map.npcs.length} NPCs are known but not spawned yet`,
+        `${field.walking} of them walking; ${map.npcs.length} NPCs follow`,
     );
     return field;
   }
@@ -666,6 +679,36 @@ export class GameEntryServer {
       this.options.log?.(`game: drop ${drop.dropId} expired and was removed`);
     }
     this.pickUp(session, write);
+  }
+
+  /**
+   * Puts the map's NPCs on screen: one `0x39` per `life` entry of type `n` (FINDINGS 4.19).
+   *
+   * Sent after the mobs and before the field starts ticking, in the same TCP stream as `0x16` - the
+   * same assumption `spawnMobs` makes (the client's `0x16` handler loads the map synchronously).
+   *
+   * Nothing here moves an NPC: the client owns that, exactly as it owns the standing animation. What
+   * the server owns is *which* NPCs are in the field, which is the whole content of `0x39` - so the
+   * only work is turning `life` into packets and refusing the entries whose `Npc/<id>.img` is not in
+   * the archive (a packet would make the client look up a file that is not there).
+   */
+  private spawnNpcs(socket: net.Socket, sendState: CipherState): NpcField {
+    const map = this.options.mapProvider?.(this.mapId);
+    const spawns = map?.npcs ?? [];
+    const field = new NpcField({
+      spawns,
+      ...(this.options.npcTemplate !== undefined ? { template: this.options.npcTemplate } : {}),
+      log: (line) => this.options.log?.(`game: ${line}`),
+    });
+    for (const packet of field.spawnPackets()) {
+      socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+    }
+    if (spawns.length > 0) {
+      this.options.log?.(
+        `game: spawned ${field.present} of ${spawns.length} NPCs (${map?.name || map?.imagePath})`,
+      );
+    }
+    return field;
   }
 
   /**

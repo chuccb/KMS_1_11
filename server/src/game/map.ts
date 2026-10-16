@@ -17,6 +17,7 @@
  *   portal      `pn` (name), `pt` (type), `x`, `y`, `tm`/`tn` (target map id / target portal name)
  *   foothold    pages -> groups -> items; this module only counts them for now
  */
+import { asNumber, asText } from "../wz/props.ts";
 import { mapImagePath } from "../wz/paths.ts";
 import { footholdSegments, mapSummary } from "../wz/archive.ts";
 import type { FootholdSegments, MapObject, MapSummary, WzArchive } from "../wz/archive.ts";
@@ -72,14 +73,6 @@ export interface MapData {
    * `mapDataFrom` gets the count from a `MapSummary`, which does not carry the segments.
    */
   footholdSegments?: FootholdSegments;
-}
-
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" ? value : fallback;
-}
-
-function asText(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
 }
 
 /** `"0120100"` -> `1210100`; a `life` entry without a usable id is dropped, not guessed at. */

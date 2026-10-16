@@ -38,6 +38,7 @@ import {
   readMobPresence,
   readMobStat,
 } from "../src/protocol/mob.ts";
+import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import type { MapData } from "../src/game/map.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
@@ -375,7 +376,7 @@ const STUB_MAP: MapData = {
   ]),
 };
 
-test("the game server spawns the map's monsters right after 0x16", { timeout: 20000 }, async (t) => {
+test("the game server spawns the map's monsters and NPCs right after 0x16", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
   const handoffs = new HandoffRegistry();
   const game = new GameEntryServer({
@@ -395,13 +396,22 @@ test("the game server spawns the map's monsters right after 0x16", { timeout: 20
   const client = await FakeClient.connect(gameInfo.port);
   const characterId = handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" });
   client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  const packets = await client.take(3);
+  // 0x16, then the map's two mobs, then its one NPC - all four in the same TCP stream.
+  const packets = await client.take(4);
   client.close();
 
   assert.equal(packets[0]![0], FIELD_OPCODE.setField, "0x16 comes first: the field has to exist");
   assert.equal(packets[1]![0], MOB_OPCODE.enterField, "then one 0x2F per mob, in WZ order");
   assert.equal(packets[2]![0], MOB_OPCODE.enterField);
+  assert.equal(packets[3]![0], NPC_OPCODE.enterField, "then one 0x39 per NPC (FINDINGS 4.19)");
   assert.equal(client.headersOk, true, "every spawned packet survives the cipher/header check");
+
+  const npc = readNpcEnterField(new PacketReader(packets[3]!, 1), false);
+  assert.deepEqual(
+    { npcId: npc.npcId, templateId: npc.templateId, x: npc.x, y: npc.y, facing: npc.facing },
+    { npcId: 1, templateId: 2003, x: 69, y: 275, facing: 0 },
+    "the map's life entry, with an id from the NPC pool's own sequence",
+  );
 
   const first = readMobEnterField(new PacketReader(packets[1]!, 1));
   assert.deepEqual(
@@ -499,15 +509,16 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
   const client = await FakeClient.connect(gameInfo.port);
   const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
   client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  const spawn = await client.take(3);
-  client.close(); // the spawn burst is all this test needs from 0x16/0x2F
+  const spawn = await client.take(4);
+  client.close(); // the spawn burst (0x16, two mobs, the NPC) is all this test needs
 
   const killer = await FakeClient.connect(gameInfo.port);
   t.after(() => killer.close());
   const otherId = handoffs.issue({ username: "admin", characterId: 12, characterName: "Fighter2" });
   killer.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
-  await killer.take(3);
+  await killer.take(4);
   assert.equal(spawn[1]![0], MOB_OPCODE.enterField);
+  assert.equal(spawn[3]![0], NPC_OPCODE.enterField, "the NPC spawn rides along with the mob burst");
 
   // One swing, one target, 10 damage - exactly the mob's HP, so it dies.
   const attack = encodeClientAttack(
@@ -585,7 +596,7 @@ test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice"
   const client = await FakeClient.connect(gameInfo.port);
   const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
   client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(3); // 0x16 + the mob spawns
+  await client.take(4); // 0x16 + the two mobs + the NPC
   t.after(() => client.close());
 
   const attack = encodeClientAttack(
@@ -714,7 +725,7 @@ test("a swing at an unknown mob id answers nothing and leaves the field alone", 
   const client = await FakeClient.connect(gameInfo.port);
   const characterId = handoffs.issue({ username: "admin", characterId: 13, characterName: "Sloppy" });
   client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(3);
+  await client.take(4); // 0x16 + the two mobs + the NPC
 
   const attack = encodeClientAttack(
     {

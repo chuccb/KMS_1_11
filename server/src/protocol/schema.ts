@@ -20,6 +20,7 @@ import * as inventory from "./inventory.ts";
 import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
+import * as npc from "./npc.ts";
 import * as packet from "./packet.ts";
 import * as replies from "./replies.ts";
 
@@ -580,6 +581,72 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [],
   },
   {
+    opcode: npc.NPC_OPCODE.enterField,
+    direction: "s2c",
+    stage: "field",
+    name: "npcEnterField",
+    status: "partial",
+    evidence: "FINDINGS 4.19 (CNpcPool 0x39, sub_49F6C0 -> sub_498CF0; a known id ends the packet)",
+    codecs: ["encodeNpcEnterField", "readNpcEnterField", "describeNpcEnterField"],
+    fields: [
+      { name: "npcId", type: "u32", note: "the pool key; a known id only sets bit 0 of npc+24 (a refresh) and reads nothing else" },
+      { name: "templateId", type: "u32", note: "unknown ids only: Npc/%07d.img, cached by sub_49CB30" },
+      { name: "x", type: "s16" },
+      { name: "y", type: "s16" },
+      { name: "facing", type: "u8", note: "npc+20; the map's life.f" },
+      { name: "lookupKey", type: "u16", note: "sub_489800 lookup whose result goes to the vecctrl; a miss is handled, so 0" },
+      { name: "pointX", type: "s16", note: "npc+16; nothing located names the pair, so 0" },
+      { name: "pointY", type: "s16", note: "npc+17" },
+    ],
+  },
+  {
+    opcode: npc.NPC_OPCODE.leaveField,
+    direction: "s2c",
+    stage: "field",
+    name: "npcLeaveField",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.19 (CNpcPool 0x3A, sub_49F810: clear bit 0, unlink only when npc+24 becomes 0)",
+    codecs: ["encodeNpcLeaveField", "readNpcId"],
+    fields: [{ name: "npcId", type: "u32" }],
+  },
+  {
+    opcode: npc.NPC_OPCODE.stateToggle,
+    direction: "s2c",
+    stage: "field",
+    name: "npcStateToggle",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.19 (CNpcPool 0x3B, sub_49F970 -> sub_49F260/sub_49F380: bit 1 + sub_499760(npc+16, flag))",
+    codecs: ["encodeNpcState", "readNpcState"],
+    fields: [
+      { name: "flag", type: "u8", note: "read BEFORE the id, and the id is read for both values; an unknown id with flag != 0 creates the NPC (this server does not send that form)" },
+      { name: "npcId", type: "u32" },
+    ],
+  },
+  {
+    opcode: 0x3c,
+    direction: "s2c",
+    stage: "field",
+    name: "npcLookupU32",
+    status: "partial",
+    evidence: "FINDINGS 4.19 (sub_49F5B0: u32 id + a pool lookup; 0x3C/0x3E/0x3F/0x40 then stop, 0x38/0x41 have no case at all)",
+    codecs: ["readNpcId"],
+    fields: [{ name: "npcId", type: "u32", note: "0x3E..0x40 are the same packet; what the client does with the hit is not located" }],
+  },
+  {
+    opcode: npc.NPC_OPCODE.update,
+    direction: "s2c",
+    stage: "field",
+    name: "npcAction",
+    status: "partial",
+    evidence: "FINDINGS 4.19 (sub_49A280: two s8 indices into the template's arrays, then sub_4967C0 = the CMovePath reader)",
+    codecs: [],
+    fields: [
+      { name: "first", type: "s8", note: "negative and non-negative take different branches (two per-template arrays at npc+19+32/+36)" },
+      { name: "second", type: "s8" },
+      { name: "path", type: "CMovePath", note: "read by sub_4967C0 when the template's arrays hold those indices - i.e. an NPC can be made to walk" },
+    ],
+  },
+  {
     opcode: drop.DROP_OPCODE.appear,
     direction: "s2c",
     stage: "field",
@@ -689,6 +756,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   login,
   mob,
   movepath,
+  npc,
   packet,
   replies,
 ];

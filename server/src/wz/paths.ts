@@ -32,6 +32,20 @@ export function mobImagePath(templateId: number): string {
   return `Mob/${String(templateId).padStart(7, "0")}.img`;
 }
 
+/**
+ * `L"Npc/%07d.img"` (`sub_411E50(&buf, "Npc/%07d.img", id)`, 20269) - the NPC image for a template
+ * id, the same zero padding the mob path uses. `sub_49CB30` caches the template built from it.
+ *
+ * `Data.wz` has 70 of them (`Npc/0000070.img` .. `Npc/0002003.img`), which is why a map's `life`
+ * entries of type `n` can be spawned with the ids they carry.
+ */
+export function npcImagePath(templateId: number): string {
+  if (!Number.isInteger(templateId) || templateId < 0) {
+    throw new RangeError(`npc template id must be a non-negative integer, got ${templateId}`);
+  }
+  return `Npc/${String(templateId).padStart(7, "0")}.img`;
+}
+
 /** The map `.img`'s sub-nodes, in the order `sub_469980` reads them (all three are required). */
 export const MAP_NODES = {
   /** `L"foothold"` - the walkable platforms, addressed as `foothold/<group>/<id>`. */
