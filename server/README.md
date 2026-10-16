@@ -116,6 +116,7 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 `0x16`（進地圖）的三個 u32 現在已知是**場地的亂數種子**（FINDINGS §4.11.2）：客戶端的
 傷害數字、掉落與怪物行為都由它決定，所以伺服器送出種子後就能重算客戶端回報的傷害——
 `field.ts` 的 `SetField.randomSeedA/B/C` 因此不再是三個不明欄位，`encodeSetField` 可以照填。
+整支產生器已移植成 `src/protocol/random.ts`（`ClientRandom`，golden 序列在 `test/random.test.ts`）。
 
 `serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段（只到「角色被交給遊戲伺服器」，
 遊戲伺服器只記錄誰到了，不會送 0x16 進地圖）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，

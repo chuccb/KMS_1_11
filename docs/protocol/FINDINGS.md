@@ -545,6 +545,10 @@ hasData == 0:
 >
 > 對伺服器的意義：`0x16` 送出的種子決定客戶端接下來所有「隨機」結果（傷害數字、掉落、怪物行為），
 > 所以客戶端在 `0x0F` 裡回報的傷害是**可以由種子重算出來**的，不是黑箱——這是伺服器端驗證傷害的基礎。
+>
+> ✅ 這支產生器已經逐位元移植到 `server/src/protocol/random.ts`（`seedState`／`nextRandom`／
+> `randomRange`／`class ClientRandom`），`test/random.test.ts` 用手算的序列釘住（同一組公式、
+> 五個輸出值、狀態演進都在測試裡），所以「伺服器重算客戶端傷害」現在是程式碼而不是想法。
 > 剩下的 UNKNOWN 只有 `mode` 的具體值，以及 `hasData == 0` 分支怎麼找到角色物件。
 
 #### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
@@ -964,8 +968,4 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 |---|---|
 | `tools/hexfunc.py <dump.c> <name> [--list\|--calls\|--globals]` | 從反編譯輸出抽出單一函式（或其呼叫／全域引用），是這一整份文件的證據來源 |
 | `tools/kstr.py <dump.c> <function> [--list\|--names]` | 把函式引用的字串以 **CP949** 解出來。`.c` 直接 `grep` 會看到亂碼，而 2003 年的 client 只有這些字串能替函式命名（§4.13）|
-| `tools/wz1.py` | Data.wz（WZ v1）解析 |
-| `tools/tests/` | 上述工具的 unittest（`python3 -m unittest discover -s tools/tests`）|
-
-> 讀 `.c` 的注意事項：檔案是 **CP949**，要用 `open(...,'rb').read().decode('cp949')`；
-> `strings` 只有超過 4 bytes 才會出現，所以「找不到字串」不等於「沒有字串」。
+| `server/src/protocol/random.ts` | 客戶端自訂亂數產生器的逐位元移植（種子遮罩 `sub_48A900`／步進 `sub_4619F0`）；golden 序列在 `server/test/random.test.ts`，伺服器用它重算客戶端回報的傷害（§4.11.2）|
