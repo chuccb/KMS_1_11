@@ -175,3 +175,58 @@ export function fromHex(hex: string): Uint8Array {
   for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
   return out;
 }
+
+/**
+ * General session framing: `u16 header` + `u16 bodyLength` + body, total = bodyLength + 4.
+ *
+ * EVIDENCE: sub_4A1940 assembles 4 bytes, stores u16@0 and u16@2, and completes the packet
+ * once `filled >= (u16@2) + 4`. sub_4A1B90 decrypts starting at data+4 for (u16@2) bytes, so
+ * the 4-byte header is plaintext. This supersedes the simpler u16-total framing above, which
+ * only describes the very first (211-byte) handshake packet.
+ */
+export interface RawPacket {
+  /** u16 at offset 0 (plaintext; obfuscated magic for session packets) */
+  header: number;
+  /** u16 at offset 2 - length of the body that follows */
+  bodyLength: number;
+  body: Uint8Array;
+  raw: Uint8Array;
+}
+
+export class HeaderDeframer {
+  private readonly maxPacketBytes: number;
+  private buf: Uint8Array = new Uint8Array(0);
+
+  constructor(maxPacketBytes = MAX_FRAME_BYTES) {
+    this.maxPacketBytes = maxPacketBytes;
+  }
+
+  get bufferedBytes(): number {
+    return this.buf.length;
+  }
+
+  push(chunk: Uint8Array): RawPacket[] {
+    if (chunk.length > 0) {
+      const merged = new Uint8Array(this.buf.length + chunk.length);
+      merged.set(this.buf, 0);
+      merged.set(chunk, this.buf.length);
+      this.buf = merged;
+    }
+    const packets: RawPacket[] = [];
+    for (;;) {
+      if (this.buf.length < 4) break;
+      const view = new DataView(this.buf.buffer, this.buf.byteOffset, this.buf.byteLength);
+      const header = view.getUint16(0, true);
+      const bodyLength = view.getUint16(2, true);
+      const total = bodyLength + 4;
+      if (total > this.maxPacketBytes) {
+        throw new FramingError(`body length ${bodyLength} exceeds the ${this.maxPacketBytes} cap`);
+      }
+      if (this.buf.length < total) break;
+      const raw = this.buf.slice(0, total);
+      packets.push({ header, bodyLength, body: raw.slice(4), raw });
+      this.buf = this.buf.slice(total);
+    }
+    return packets;
+  }
+}

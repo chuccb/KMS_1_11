@@ -7,17 +7,29 @@
  * falls back to dumping raw bytes instead of dropping data.
  *
  * Modes:
- *   framed : decode with U16LengthFramer, record one line per frame (+ opcode candidate)
- *   raw    : record one line per recv() chunk
+ *   session : the real client model. A 211-byte handshake opens the session and carries the two
+ *             cipher seeds; every later packet is "u16 header + u16 bodyLength + body" with the
+ *             body encrypted, and the header is checked against the state prediction.
+ *   framed  : the same 4-byte header without the handshake (use when the seeds are known and the
+ *             first packet is not a handshake).
+ *   raw     : record one line per recv() chunk.
  *
  * Output: JSONL, one record per line, appended to `out` when given, otherwise printed to
  * stdout through the provided logger.
  */
 import { createServer, type Server, type Socket } from "node:net";
-import { U16LengthFramer, U16LengthDeframer, FramingError, toHex } from "../protocol/frame.ts";
+import { HeaderDeframer, U16LengthFramer, toHex } from "../protocol/frame.ts";
+import { SessionDeframer } from "../protocol/session.ts";
 
 export type CaptureDirection = "c2s" | "s2c";
-export type CaptureKind = "connect" | "disconnect" | "frame" | "raw" | "framing-error" | "server-info";
+export type CaptureKind =
+  | "connect"
+  | "disconnect"
+  | "frame"
+  | "handshake"
+  | "raw"
+  | "framing-error"
+  | "server-info";
 
 export interface CaptureRecord {
   /** ms since the capture started */
@@ -32,15 +44,27 @@ export interface CaptureRecord {
   len: number;
   /** lowercase hex of the bytes */
   hex: string;
-  /** first u16 of the payload, if any - a *candidate* opcode, not confirmed */
-  opcodeCandidate?: number;
+  /** u16 at offset 0 of a framed packet (0xD3 ^ HIWORD(state) for session packets) */
+  header?: number;
+  /** u16 at offset 2 of a framed packet (# of body bytes that follow) */
+  bodyLength?: number;
+  /** first body byte - the opcode, once the body has been decrypted */
+  opcode?: number;
+  /** decrypted body, lowercase hex (session mode only) */
+  plainHex?: string;
+  /** true when the wire header matched 0xD3 ^ HIWORD(cipher state) */
+  headerOk?: boolean;
+  /** cipher seeds adopted from the handshake, lowercase hex without 0x */
+  seeds?: { sendSeed: number; recvSeed: number };
   note?: string;
 }
+
+export type CaptureMode = "session" | "framed" | "raw";
 
 export interface CaptureServerOptions {
   port: number;
   host?: string;
-  mode?: "framed" | "raw";
+  mode?: CaptureMode;
   /** file path for the JSONL trace; when omitted, records go to onRecord only */
   out?: string;
   /** called for every record (use for tests / custom sinks) */
@@ -52,7 +76,7 @@ export interface CaptureServerOptions {
 export interface CaptureStartInfo {
   port: number;
   host: string;
-  mode: "framed" | "raw";
+  mode: CaptureMode;
 }
 
 export class CaptureServer {
@@ -68,7 +92,7 @@ export class CaptureServer {
     this.options = {
       host: options.host ?? "0.0.0.0",
       port: options.port,
-      mode: options.mode ?? "framed",
+      mode: options.mode ?? "session",
       logLifecycle: options.logLifecycle ?? true,
       out: options.out,
       onRecord: options.onRecord,
@@ -118,10 +142,12 @@ export class CaptureServer {
       this.emit({ conn, dir: "c2s", kind: "connect", len: 0, hex: "", note: peer });
     }
 
-    const framer = new U16LengthDeframer();
-    // In framed mode, remember the bytes of a frame we failed to decode so that a framing
-    // mismatch loses nothing: we still emit them as raw.
+    // Once a chunk cannot be decoded we never un-see it: from then on the connection is a raw
+    // byte stream. This is what keeps an HTTP probe or a half-written stream from corrupting
+    // the trace (verified against the sandbox preview proxy).
     let mismatch = false;
+    const sessionDeframer = this.options.mode === "session" ? new SessionDeframer() : undefined;
+    const headerDeframer = this.options.mode === "framed" ? new HeaderDeframer() : undefined;
 
     socket.on("data", (chunk: Buffer) => {
       const bytes = new Uint8Array(chunk);
@@ -130,21 +156,55 @@ export class CaptureServer {
         return;
       }
       try {
-        for (const frame of framer.push(bytes)) {
-          const reader = frame.payload.length >= 2;
-          const opcodeCandidate = reader ? frame.payload[0] | (frame.payload[1] << 8) : undefined;
-          this.emit({
-            conn,
-            dir: "c2s",
-            kind: "frame",
-            len: frame.wireLength,
-            hex: toHex(frame.raw),
-            opcodeCandidate,
-          });
+        if (sessionDeframer) {
+          for (const event of sessionDeframer.push(bytes)) {
+            if (event.kind === "handshake") {
+              this.emit({
+                conn,
+                dir: "c2s",
+                kind: "handshake",
+                len: event.raw.length,
+                hex: toHex(event.raw),
+                bodyLength: event.handshake.body.length,
+                seeds: { sendSeed: event.handshake.sendSeed, recvSeed: event.handshake.recvSeed },
+                note: `seeds adopted: sendSeed=0x${event.handshake.sendSeed.toString(16)} recvSeed=0x${event.handshake.recvSeed.toString(16)}`,
+              });
+              continue;
+            }
+            // `hex` stays the RAW wire bytes: it is the evidence, and `decode` re-checks the
+            // framing against it. The decrypted body goes in `plainHex`.
+            this.emit({
+              conn,
+              dir: "c2s",
+              kind: "frame",
+              len: event.body.length + 4,
+              hex: toHex(wireBytes(event.header, event.body)),
+              header: event.header,
+              bodyLength: event.body.length,
+              opcode: event.opcode,
+              plainHex: toHex(event.plain),
+              headerOk: event.headerOk,
+              note: event.headerOk ? undefined : `header mismatch: expected 0x${event.expectedHeader.toString(16)}`,
+            });
+          }
+          const failure = sessionDeframer.failure;
+          if (failure !== undefined) throw new Error(failure);
+        } else if (headerDeframer) {
+          for (const packet of headerDeframer.push(bytes)) {
+            this.emit({
+              conn,
+              dir: "c2s",
+              kind: "frame",
+              len: packet.raw.length,
+              hex: toHex(packet.raw),
+              header: packet.header,
+              bodyLength: packet.bodyLength,
+            });
+          }
         }
       } catch (error) {
         mismatch = true;
-        const note = error instanceof FramingError ? error.message : String(error);
+        const note = error instanceof Error ? error.message : String(error);
         this.emit({
           conn,
           dir: "c2s",
@@ -177,6 +237,16 @@ export class CaptureServer {
     const record: CaptureRecord = { t: Date.now() - this.startedAt, seq: this.seq++, ...partial };
     this.options.onRecord?.(record);
   }
+}
+
+/** Rebuild the raw wire bytes from a decoded frame: u16 header + u16 bodyLength + body. */
+function wireBytes(header: number, body: Uint8Array): Uint8Array {
+  const out = new Uint8Array(body.length + 4);
+  const view = new DataView(out.buffer);
+  view.setUint16(0, header, true);
+  view.setUint16(2, body.length, true);
+  out.set(body, 4);
+  return out;
 }
 
 /** Framer used by tools/tests that need to *produce* client-looking traffic. */
