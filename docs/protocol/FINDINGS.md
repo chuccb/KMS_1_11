@@ -102,26 +102,66 @@ server → client : header = 0xFF2C ^ HIWORD(recvState)      // 0xFF2C = ~0x00D3
 所以**伺服器必須送 0xFF2C 系列、且必須接受 0xD3 系列**。搞錯的症狀是「client 靜默斷線」。
 > ✅ 這條已用「兩處獨立位址 + 兩處皆為唯一呼叫點」確認；`0D3h` 與 `0FF2Ch` 在整個 `.lst` 中各只出現一次。
 
-## 4. 封包分派（dispatch）✅ 已定位
+## 4. 封包分派（dispatch）✅ 已完整定位（含分派鏈）
 
-**已證實**：opcode 是**本文第 0 個 byte**，由 `sub_43B170` 讀取後分派（**不是** jump table，也不是 if-chain）。
+opcode 是**本文第 0 個 byte**。`sub_43B170`（由 `sub_43AFA0` 的解密後呼叫）讀取它並分派：
 
 ```c
 // sub_43B170(this = CClientSocket, packet)
-opcode = packet->bytes[0];
+// packet 物件：bytes @+8、len @+12、header @+14、bodyLen @+16、cursor @+20
+opcode = packet->bytes[cursor++];          // cursor 從 4 之後開始
 switch (opcode) {
-  case 0x07: sub_43B400(...);  break;   // byte1 == 0 → _TI3_AVCDisconnectException__；否則配置 0x18 bytes 物件（sub_4772F0 + sub_4C3460）後讀 u32、u16
-  case 0x08: sub_43B280(...);  break;   // 讀 u32 → 走 sub_43AD50 送出路徑
-  case 0x0A ... 0x14:                   // 10..20
-             sub_55A900(3000, opcode, packet); break;
-  default:   (**(dword_5C212C + 8))(dword_5C212C + 8, opcode, packet);   // 萬用 handler 物件
+  case 0x07: sub_43B400(packet); break;
+  case 0x08: sub_43B280(this, packet); break;
+  case 0x0A..0x14: sub_55A900(n3000, opcode, packet); break;   // 只有 0x0B..0x13 真的被處理
+  default:   (**(dword_5C212C + 8))(dword_5C212C + 8, opcode, packet);   // → CField 的訊息介面
 }
 ```
 
-- 呼叫端：`sub_43AFA0`（收包迴圈）→ `sub_43B170`。
-- 「無大型靜態 handler 表」為**已排除**的線索：86 個 `jpt_` 中最多的 `jpt_56FB8B`（46 目標）屬於
-  `sub_56FA9D`（韓文 Hangul 0x4003–0x400D 的 COM/BSTR 轉換），與封包無關；「小整數 cmp 數量」啟發法的
-  最高分者 `sub_4F9AD0` 是 UI tooltip。這些都不必再試。
+`dword_5C212C` = **當前 CStage 實例**（登入階段或 CField）；由 `sub_4C3460`（= `SetStage`，內含
+`_RTDynamicCast(..., &CStage, &CField, ...)` 與 `dword_5C212C = ...`）安裝。`+8` 是它的多重繼承子物件，
+其 vtable `??_7CField@@6B@_1`（`.rdata:005865EC`）slot 0 = **`sub_472770`**，也就是**遊戲封包的總路由**。
+
+### 4.1 遊戲封包路由（`sub_472770`，唯一入口）
+
+`sub_472770(this, opcode, packet)` 依 opcode 區間轉給各子系統（`.c 121119`）：
+
+| opcode | 子系統 / 目標 | 證據 |
+|---|---|---|
+| 0x15–0x17 | `sub_4C2760(this, opcode, packet)`（CField 本身）| `sub_472770` |
+| 0x19 | `sub_4728B0(packet)` | 同上 |
+| 0x1A | `sub_472910(this - 8, packet)` | 同上 |
+| 0x1B–0x2D | **CUserPool**（`sub_51CF70(dword_5C1CEC, …)`）| 見下 |
+| 0x2E–0x37 | **CMobPool**（`sub_492330(dword_5C2054, …)`）| ctor `sub_4913E0` 安裝 `??_7CMobPool@@6B@` |
+| 0x38–0x41 | **CNpcPool**（`sub_49F560(dword_5C2050, …)`）| ctor `sub_49F020` 安裝 `??_7CNpcPool@@6B@` |
+| 0x42–0x45 | **CRewardPool**（`sub_4A8870(this_4 = 0x5C204C, …)`）| ctor `sub_4A73A0` 安裝 `??_7CRewardPool@@6B@` + 寫入 0x5C204C |
+| 0x46–0x48 | **CQuestMan**（`sub_4A58F0(dword_5C2048, …)`）| ctor `sub_4A5830` 安裝 `??_7CQuestMan@@6B@` |
+| 0x49–0x4C | `sub_4B73A0(opcode, packet)` | `sub_472770` |
+| 0x4D–0x4F | `sub_4E18D0(opcode, packet)` | 同上 |
+| 0x50–0x52 | `sub_4815E0(opcode, packet)` | 同上 |
+| 其他 | 忽略（無 else 分支）| 同上 |
+
+第二層（`CUserPool` = `sub_51CF70`，`.c 289155`）：0x1C→`sub_51CFE0`、0x1D→`sub_51D280`、
+0x1E–0x20→`sub_51D530`、0x21–0x2A→`sub_51D590`、0x2B–0x2C→`sub_51D6A0`（0x1B、0x2D 在這一層被忽略）。
+`CUserPool` 的 ctor `sub_51CA30` 內含 `ZMap<ulong, ZRef<USERREMOTE_ENTRY>, ulong>`（`+0x0C`）。
+
+> **結論**：遊戲 opcode 空間落在 **0x15–0x52**（有空洞），且每個區間屬於一個明確子系統。
+> 這是產生 `protocol/schema/` 的路線圖：每個子系統 handler 的欄位讀取順序即為該區間封包的欄位。
+
+### 4.2 已解出的三個特殊 opcode
+
+| opcode | 內容 | 證據 |
+|---|---|---|
+| 0x07 | **伺服器遷移/斷線**：`[u8 flag][u32 addr][u16 port]`。`flag == 0` → 直接丟 `AVCDisconnectException`（斷線）；否則把 addr/port 組成 `sockaddr_in`（port 經 `htons`）交給 `sub_558BD0` 連線。 | `sub_43B400`（`.c 67092`）|
+| 0x08 | **echo/ping**：讀 1 個 `u32`，把 `[0x08][u32]` 送回對端（走一般送出路徑 `sub_43AD50`）。 | `sub_43B280`（`.c 67002`）＋ `sub_4A1EA0`/`sub_4A1F20`（逐 byte append 的緩衝）|
+| 0x0B–0x13 | 登入/選角階段的九個處理函式（0x0B→`sub_55BAB0`、0x0C→`sub_55BDC0`、0x0D→`sub_55BEB0`、0x0E→`sub_55B6A0`、0x0F→`sub_55C090`、0x10→`sub_55C5E0`、0x11→`sub_55C130`、0x12→`sub_55C390`、0x13→`sub_55CDE0`）。**0x0A 與 0x14 會被忽略**（switch 沒有 case）。 | `sub_55A900`（`.c 351269`）|
+
+### 4.3 已排除的錯誤線索（勿重試）
+
+- ❌ 沒有大型靜態 jump table 分派器：最大的 `jpt_56FB8B`（46 目標）屬於 `sub_56FA9D`（韓文 Hangul
+  0x4003–0x400D 的 COM/BSTR 轉換）。`sub_4F9AD0` 是 UI tooltip。
+- ❌ `sub_43B6B0` 是 `ZRef<T>::operator=`（refcount），不是收包佇列的消費端。
+- ❌ `sub_449F30`（含 `jpt_449F68`、cases 112–123）是**UI 事件路由**，不是封包分派。
 
 ## 5. 字元編碼
 
@@ -134,9 +174,9 @@ switch (opcode) {
 1. **211-byte 握手的 `body`（199 bytes）要放什麼**：client 端只把它交給 `sub_418610` 存成物件，語意未定。
    已知的是「長度必須是 199、總長必須是 211」，而**我們（伺服器）先送**，所以可以用 `capture --handshake-body`
    餵不同內容、觀察原 client 的反應——這是目前最快的解法。
-2. opcode 語意：`0x07`（斷線/例外路徑）、`0x08`（送出路徑）、`0x0A–0x14`（`sub_55A900`）各自讀取的欄位，
-   以及 `dword_5C212C` 指向的萬用 handler 表。
-3. 由分派與擷取反推 opcode 常數表 → 產生 `protocol/schema/`。
+2. 逐區間解出欄位：先做 **0x0B–0x13（登入/選角）**——這是客戶端一連線就會走的路徑，且只有九個函式；
+   再依 §4.1 的區間表往下做。每個 handler 讀取的欄位順序 = 該 opcode 的欄位定義。
+3. 由 §4.1／§4.2 的對照表產生 `protocol/schema/`（opcode 常數＋欄位），並用 `capture` 對照真實流量驗證。
 4. 反推字串編碼規則並補測試向量。
 5. `sub_43AFA0` 的 `-212` 檢查已解（= §3.1 的接收端標頭檢查），不再列為未知。
 
