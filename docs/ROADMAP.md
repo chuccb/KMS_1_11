@@ -70,6 +70,8 @@
 - 出口條件：2 個 client 可各自登入、選角、進入同一張地圖並互相看見移動
   → **假 client 已達成**（`serve.test.ts` 的兩條真 socket、`test/world.test.ts`、真 `Data.wz` 的兩 client 實跑，§4.24.8）；
   原 client 的實機驗證仍待 oracle run（ADR-004）
+- 出口條件：**重啟之後世界還在** → **已達成第一版**（ADR-017：`--save`，建立／刪除角色與下線各存一次，
+  `serve.test.ts` 的「重啟後同一個角色還在、種子輸掉」＋真 CLI 實跑）
 
 ## Phase 3 — 客戶端殼層（~8–12 週）
 
