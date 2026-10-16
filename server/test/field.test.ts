@@ -12,10 +12,17 @@ import { toHex } from "../src/protocol/frame.ts";
 import { readMovePath, writeMovePath, pathStart, type MovePath } from "../src/protocol/movepath.ts";
 import {
   FIELD_OPCODE,
+  USER_MESSAGE_CHAT,
+  describeClientChat,
   describeClientFieldPacket,
+  describeUserChat,
   CLIENT_FIELD_OPCODE,
   encodeClientAttack,
+  encodeClientChat,
   encodeClientInteract,
+  encodeUserChat,
+  readClientChat,
+  readUserChat,
   encodeClientMobAttack,
   readClientAttack,
   readClientMobAttack,
@@ -37,6 +44,7 @@ import {
 } from "../src/protocol/field.ts";
 import { PacketWriter } from "../src/protocol/packet.ts";
 import { zeroStats, type CharacterData } from "../src/protocol/chardata.ts";
+import { encodeCp949 } from "../src/protocol/cp949.ts";
 
 const samplePath: MovePath = {
   originX: -300,
@@ -436,4 +444,38 @@ test("the mob-attack describer names the action and says how much it did not rea
   });
   assert.equal(describeClientFieldPacket(noPosition), "0x2c mob attack: mobId=42 attack1,right flags=0x1 tail=0B");
   assert.match(describeClientFieldPacket(new Uint8Array([0x2c, 1]))!, /truncated/);
+});
+
+test("chat: 0x12 out is one string, 0x1a back is the speaker's name and the same bytes", () => {
+  // What the client sends (`sub_470C70`, FINDINGS 4.13): the opcode and one string, nothing else.
+  const said = encodeClientChat({ text: encodeCp949("안녕") });
+  assert.equal(CLIENT_FIELD_OPCODE.chat, 0x12);
+  assert.equal(toHex(said), "12" + "0400" + "bec8b3e7");
+  assert.deepEqual(readClientChat(new PacketReader(said, 1)), { text: Uint8Array.from([0xbe, 0xc8, 0xb3, 0xe7]) });
+  assert.equal(describeClientChat(readClientChat(new PacketReader(said, 1))), "0x12 chat: 안녕");
+  assert.equal(describeClientFieldPacket(said), "0x12 chat: 안녕");
+
+  // What the field sends (`sub_472910`'s jump table case 0x12): the sub-op, then the name and the
+  // text as two strings - the name first, because the client formats them as "%s>> %s".
+  const line = encodeUserChat({ name: "Hero", text: encodeCp949("안녕") });
+  assert.equal(FIELD_OPCODE.userMessage, 0x1a);
+  assert.equal(USER_MESSAGE_CHAT, 0x12);
+  assert.equal(toHex(line), "1a12" + "0400" + "4865726f" + "0400" + "bec8b3e7");
+  assert.deepEqual(readUserChat(new PacketReader(line, 1)), {
+    name: "Hero",
+    text: Uint8Array.from([0xbe, 0xc8, 0xb3, 0xe7]),
+  });
+  assert.equal(describeUserChat(readUserChat(new PacketReader(line, 1))), 'chat "Hero": 안녕');
+  assert.equal(describeFieldOpcode(0x1a), "0x1a CField(user message)");
+  assert.equal(describeFieldPacket(line), '0x1a CField(user message): chat "Hero": 안녕');
+});
+
+test("0x1a's other sub-ops are refused instead of read as chat", () => {
+  // `sub_472910` has four cases, all of them two-strings-or-fewer display messages, and only 0x12 is
+  // chat. 0x22 is the whisper refusal: one name, and the client's line is "'name' refuses whispers".
+  const refusal = Uint8Array.from([0x1a, 0x22, 0x03, 0x00, 0x41, 0x42, 0x43]);
+  assert.throws(() => readUserChat(new PacketReader(refusal, 1)), /sub-op 0x22 is not chat \(0x12\)/);
+  assert.match(describeFieldPacket(refusal)!, /^0x1a CField\(user message\): \(unreadable: .*not chat/);
+  // A chat packet that runs out mid-string is still an error, not a short line.
+  assert.throws(() => readUserChat(new PacketReader(Uint8Array.from([0x1a, 0x12, 0x04, 0x00, 0x41]), 1)));
 });

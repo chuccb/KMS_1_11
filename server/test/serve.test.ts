@@ -19,12 +19,16 @@ import {
   FIELD_OPCODE,
   INTERACT_KIND_CURSOR,
   encodeClientAttack,
+  encodeClientChat,
   encodeClientInteract,
   encodeClientUserMove,
   readSetField,
+  readUserChat,
   readUserEnterField,
   readUserMove,
 } from "../src/protocol/field.ts";
+import { encodeCp949 } from "../src/protocol/cp949.ts";
+import { toHex } from "../src/protocol/frame.ts";
 import {
   DROP_OPCODE,
   DROP_REMOVE_KIND,
@@ -175,6 +179,24 @@ class FakeClient {
     throw new Error(
       `no 0x${opcode.toString(16)} arrived; saw [${seen.map((bytes) => bytes[0]!.toString(16)).join(",")}]`,
     );
+  }
+
+  /**
+   * Everything that arrives within `ms` - the honest way to say "and nothing more".
+   *
+   * `take(0)` cannot say it: asking for zero packets is answered by an empty list before anything has
+   * had a chance to arrive. And a quiet check cannot just demand an empty stream either, because a
+   * shared field never goes quiet (the walking mobs keep `0x33` coming) - so the assertion is about
+   * *which* packets arrived, and the caller filters.
+   */
+  async drain(ms = 120): Promise<Uint8Array[]> {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    return this.queue.splice(0, this.queue.length).map((event) => event.plain);
+  }
+
+  /** The opcodes of everything that arrives within `ms`. */
+  async drainOpcodes(ms = 120): Promise<number[]> {
+    return (await this.drain(ms)).map((bytes) => bytes[0]!);
   }
 
   send(packet: ClientPacket): void {
@@ -550,10 +572,8 @@ test("a map the provider does not know still enters, it just has nothing to spaw
   client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
   const first = (await client.take(1))[0]!;
   assert.equal(first[0], FIELD_OPCODE.setField, "0x16 is sent even without map data");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  const rest = await client.take(0);
   assert.deepEqual(
-    rest.map((bytes) => bytes[0]),
+    await client.drainOpcodes(80),
     [],
     "and no 0x2F follows, rather than a mob at (0,0)",
   );
@@ -913,8 +933,12 @@ test("a swing at an unknown mob id answers nothing and leaves the field alone", 
     CLIENT_FIELD_OPCODE.attack,
   );
   client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.deepEqual(await client.take(0), [], "no reply at all: there is no mob 99 to answer for");
+  const answered = await client.drainOpcodes();
+  assert.equal(
+    answered.includes(MOB_OPCODE.stat),
+    false,
+    `no mob stat answers for a mob that is not there (saw [${answered.map((op) => op.toString(16)).join(",")}])`,
+  );
   assert.ok(log.some((line) => line.includes("no such mob")), log.join("\n"));
 });
 
@@ -1006,8 +1030,12 @@ test("clicking an NPC opens its shop, and buying moves the item and the mesos", 
     opcode: CLIENT_SHOP_OPCODE,
     body: encodeClientShopRequest({ kind: "close" }).slice(1),
   });
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.deepEqual(await client.take(0), [], "a close is not answered");
+  const answered = await client.drainOpcodes();
+  assert.equal(
+    answered.includes(SHOP_RESULT_OPCODE) || answered.includes(SHOP_OPEN_OPCODE),
+    false,
+    "a close is not answered",
+  );
   client.close();
 });
 
@@ -1076,14 +1104,21 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
   assert.equal(readQuestTalk(new PacketReader(third[0]!, 1)).body.message, "three");
 
   client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.deepEqual(await client.take(0), [], "the last line's answer ends the talk: nothing follows");
+  const answered = await client.drainOpcodes();
+  assert.equal(
+    answered.includes(QUEST_TALK_OPCODE),
+    false,
+    "the last line's answer ends the talk: nothing follows",
+  );
   assert.ok(log.some((line) => line.includes("the last line was read")), log.join("\n"));
 
   // A reply with no dialog open is dropped, and a new click starts a fresh conversation.
   client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.deepEqual(await client.take(0), [], "an answer with no dialog is not answered");
+  assert.equal(
+    (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
+    false,
+    "an answer with no dialog is not answered",
+  );
   assert.ok(log.some((line) => line.includes("without a dialog open")), log.join("\n"));
 
   client.send({
@@ -1097,8 +1132,11 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
 
   // The second button (answer 0) closes it without another packet.
   client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 0 }).slice(1) });
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.deepEqual(await client.take(0), [], "the secondary button ends the talk");
+  assert.equal(
+    (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
+    false,
+    "the secondary button ends the talk",
+  );
   assert.ok(log.some((line) => line.includes("conversation ended")), log.join("\n"));
   client.close();
 });
@@ -1196,7 +1234,8 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
   const relayed = readUserMove(new PacketReader(altSawMove[altSawMove.length - 1]!, 1));
   assert.equal(relayed.characterId, 7);
   assert.deepEqual(relayed.path.elements.map((element) => [element.x, element.y]), [[300, 290]]);
-  assert.deepEqual(await hero.take(0), [], "the mover is not told about their own walk");
+  const echoedMoves = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userMove);
+  assert.deepEqual(echoedMoves, [], "the mover is not told about their own walk");
 
   // One swing kills a monster: the death is the field's, the exp is the attacker's.
   const attack = encodeClientAttack(
@@ -1341,7 +1380,8 @@ test("a portal moves a player to another map, and the map they left hears about 
   });
   const release = await alt.take(1);
   assert.equal(release[0]![0], FIELD_OPCODE.requestRelease, "the release byte answers every 0x0D");
-  assert.deepEqual(await alt.take(0), [], "an unknown portal is not a teleport");
+  const jumps = (await alt.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.setField);
+  assert.deepEqual(jumps, [], "an unknown portal is not a teleport");
   assert.ok(log.some((line) => line.includes('"nowhere" is no portal of map 1000000')), log.join("\n"));
 
   // The real one. `tm` of the map's own portal is where it leads, so the answer is a new field.
@@ -1367,7 +1407,10 @@ test("a portal moves a player to another map, and the map they left hears about 
     8,
     "exactly the character that walked through the portal",
   );
-  assert.deepEqual(await hero.take(0), [], "a field does not report what another field is doing");
+  const otherFieldNews = (await hero.drain()).filter(
+    (bytes) => bytes[0] === FIELD_OPCODE.userEnterField || bytes[0] === FIELD_OPCODE.userLeaveField,
+  );
+  assert.deepEqual(otherFieldNews, [], "a field does not report what another field is doing");
 
   // Where a player enters is their own record: this one names map 2000000, so that is the field the
   // new connection is put into - and the player who took the portal is in it.
@@ -1403,4 +1446,113 @@ test("a portal moves a player to another map, and the map they left hears about 
     log.some((line) => line.includes('"Alt" uses portal "west00" of map 1000000 -> 2000000')),
     log.join("\n"),
   );
+});
+
+/**
+ * Chat (FINDINGS 4.26): the client's `0x12` is relayed to the map as `0x1A` + sub-op `0x12` + the
+ * speaker's name + the same bytes.
+ *
+ * The two things worth a test are the two that a "reasonable" implementation gets wrong:
+ *
+ *  - **the speaker is included**. `sub_470C70` only builds and sends the packet - there is no local
+ *    echo anywhere in the chat input path - and the `"%s>> %s"` renderer lives on the receiving side
+ *    (`sub_472910` case 0x12). Skipping the sender would leave players unable to read their own words.
+ *  - **it does not leave the map**. Chat is the field's (`CField`'s own opcode 0x1A), so a player in
+ *    another map is not a listener, and the text is passed through as bytes - the server never has to
+ *    decode what it is relaying.
+ */
+test("chat reaches everyone in the map, the speaker included, and stays in it", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // A third player, in the *other* map: the same server, a different field.
+  const guest = await FakeClient.connect(gameInfo.port);
+  t.after(() => guest.close());
+  const record = characterDataOf(
+    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
+    startingCharacterItems(),
+  );
+  guest.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
+  });
+  await guest.takeOpcode(FIELD_OPCODE.setField);
+
+  // Hero says hello, in the CP949 bytes the chat box produced.
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.chat,
+    body: encodeClientChat({ text: encodeCp949("안녕") }).slice(1),
+  });
+  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userMessage);
+  const heard = readUserChat(new PacketReader(altSaw[altSaw.length - 1]!, 1));
+  assert.deepEqual(
+    [heard.name, toHex(heard.text)],
+    ["Hero", "bec8b3e7"],
+    "the other player hears the speaker's name and the bytes they typed",
+  );
+  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(
+    readUserChat(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
+    heard,
+    "and so does the speaker - the client only ever renders what it receives",
+  );
+
+  // A second line from the other player: the name is the session's, so it changes with the speaker.
+  alt.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.chat,
+    body: encodeClientChat({ text: Uint8Array.from([0x68, 0x69]) }).slice(1),
+  });
+  const heroSawAlt = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(
+    [
+      readUserChat(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).name,
+      toHex(readUserChat(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).text),
+    ],
+    ["Alt", "6869"],
+    "the same opcode, the other speaker",
+  );
+
+  // The map 2000000 player: a field of their own, so the line is not theirs to hear.
+  assert.equal(
+    (await guest.drainOpcodes()).includes(FIELD_OPCODE.userMessage),
+    false,
+    "chat does not leave the map it was said in",
+  );
+  assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
+  assert.ok(log.some((line) => line.includes('chat "Hero": 안녕 in map 1000000')), log.join("\n"));
+  assert.ok(log.some((line) => line.includes('chat "Alt": hi in map 1000000')), log.join("\n"));
 });

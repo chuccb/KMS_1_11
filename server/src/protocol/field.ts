@@ -8,7 +8,7 @@
  *   opcode      target                                class        handler
  *   0x15-0x17   sub_4C2760(this, opcode, packet)      CStage base  sub_4C2780 on 0x16 only
  *   0x19        sub_4728B0(packet)                    CField
- *   0x1A        sub_472910(this - 8, packet)          CField       (chat/whisper/find family)
+ *   0x1A        sub_472910(this - 8, packet)          CField       (user message: chat/whisper)
  *   0x1B-0x2D   sub_51CF70(dword_5C1CEC, ...)         CUserPool    ctor `sub_51CA30`
  *   0x2E-0x37   sub_492330(dword_5C2054, ...)         CMobPool     ctor `sub_4913E0`
  *   0x38-0x41   sub_49F560(dword_5C2050, ...)         CNpcPool     ctor `sub_49F020`
@@ -28,6 +28,7 @@
  * have an implementation behind them - not guesses.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
+import { decodeCp949 } from "./cp949.ts";
 import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
 // The reward pool (`0x43`/`0x44`) and the two app-level packets that belong to a pickup (`0x0B`,
 // `0x11`): they are dispatched outside `CField`, but they are what a field session actually carries.
@@ -120,6 +121,22 @@ export const FIELD_OPCODE = {
    * same gate.
    */
   requestRelease: 0x19,
+  /**
+   * `CField` 0x1A (`sub_472910`, dispatched as case 26 of `sub_472770`): a message **about one of the
+   * field's users**, shown to whoever receives it. The payload starts with a `u8` sub-op, and the
+   * four the jump table has cases for are:
+   *
+   *   0x09  whisper result   `string name` + `u32 characterId`  -> "'name' is not online" / sent
+   *   0x0A  whisper received `string name` + `u8` + `string text` -> "name<< text"
+   *   0x12  field chat       `string name` + `string text`       -> "name>> text"
+   *   0x22  whisper refusal  `string name`                        -> "'name' refuses whispers"
+   *
+   * `0x12` is the one a shared field needs, and the only one implemented here (`UserChat` below);
+   * the other three are whisper plumbing, and this server has no whisper system to hang them on.
+   * (`0x1A`'s sub-ops are *not* the CWvsApp-level opcodes of §4.10: that table's `0x12` is the
+   * popularity system. They are simply the numbers this packet happens to use.)
+   */
+  userMessage: 0x1a,
   /**
    * `CUserPool` 0x1C (`sub_51CFE0`): another user entered the field - or, when the id turns out
    * to be `CWvsApp+0x14` (our own character id, the value the 0x03 login reply stored), nothing
@@ -365,6 +382,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.chat) {
+      return describeClientChat(readClientChat(new PacketReader(plain, 1)));
+    }
     if (opcode === CLIENT_SHOP_OPCODE) {
       return describeClientShopRequest(readClientShopRequest(new PacketReader(plain, 1)));
     }
@@ -441,6 +461,15 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode < 0x15 || opcode > 0x52) return undefined;
   const name = describeFieldOpcode(opcode);
+  if (opcode === FIELD_OPCODE.userMessage) {
+    try {
+      return `${name}: ${describeUserChat(readUserChat(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      // Not `truncated`: the usual reason is a sub-op that is not chat, and saying which is better
+      // than pretending the packet ran out.
+      return `${name}: (unreadable: ${(error as Error).message})`;
+    }
+  }
   if (opcode === SHOP_OPEN_OPCODE) {
     try {
       return `${name}: ${describeShopOpen(readShopOpen(new PacketReader(plain, 1)))}`;
@@ -582,7 +611,7 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
 export function describeFieldOpcode(opcode: number): string {
   if (opcode >= 0x15 && opcode <= 0x17) return `0x${opcode.toString(16)} CStage(set-field)`;
   if (opcode === 0x19) return "0x19 CField(cached-character reset)";
-  if (opcode === 0x1a) return "0x1a CField(chat/whisper/find)";
+  if (opcode === FIELD_OPCODE.userMessage) return "0x1a CField(user message)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode === MOB_OPCODE.anim) return "0x35 CMobPool(mob animation)";
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
@@ -616,6 +645,16 @@ export function describeFieldOpcode(opcode: number): string {
  * `sub_512F90` applies the damage to each mob before it builds the packet (FINDINGS 4.13.1).
  */
 export const CLIENT_FIELD_OPCODE = {
+  /**
+   * The chat input (`sub_470C70`): `[0x12][string text]`. Its only caller (`sub_4F8CB0`, the Enter
+   * key of the chat box) reaches it when the line is not a `/` command and there is no whisper
+   * target, i.e. this is what the player says out loud.
+   *
+   * The client does **not** show the line locally: `sub_470C70` builds the packet and returns, and
+   * the only renderer of a chat line is on the receiving side (`sub_472910` case 0x12). The server is
+   * therefore what makes a player see their own words - by sending them back (FINDINGS 4.26).
+   */
+  chat: 0x12,
   /**
    * `CVecCtrlUser::SendMove` (`sub_542C40`): `[0x0E][u8 *(CStage+156)][CMovePath]`. The path comes
    * from `vecctrl + 216` (the embedded `CMovePath`), the byte from the current stage object - role
@@ -963,4 +1002,79 @@ export function encodeClientInteract(interact: ClientInteract): Uint8Array {
   writer.writeU32(interact.kind >>> 0);
   writer.writeAsciiString(interact.name);
   return writer.toBytes();
+}
+
+/**
+ * The sub-op of `0x1A` that carries **field chat**: the jump table case of `sub_472910` that formats
+ * two strings as `"%s>> %s"` and hands the line to the chat window (`sub_4FB670`) - or, when the
+ * chat window is closed, builds the client's own balloon packet out of the name and the text.
+ */
+export const USER_MESSAGE_CHAT = 0x12;
+
+/**
+ * A chat line as it goes out: the speaker's name and what they said.
+ *
+ * The **name is the only thing identifying the speaker** - there is no character id in the packet,
+ * because the receiving client only needs it to say "this is who" (it looks a user up by name when it
+ * has to draw something over a head). It is written as an ASCII/byte string, the way every other name
+ * in this protocol is (`CharacterData`'s name field, `0x0D`'s object name).
+ *
+ * The text stays **bytes** (CP949, `u16 length` + raw): the server relays it and never has to read
+ * it, and a byte-level pass-through is the only version that cannot lose a character to a
+ * decode/encode round trip. `describeUserChat` decodes it for the log, where a human eye is the
+ * consumer.
+ */
+export interface UserChat {
+  name: string;
+  text: Uint8Array;
+}
+
+/**
+ * `0x1A` as it arrives: `u8 sub-op` + the sub-op's body. Only chat is understood - a different
+ * sub-op throws, because naming its body would be a guess (FINDINGS 4.11.6's rule for `0x0D`'s
+ * `kind`).
+ */
+export function readUserChat(reader: PacketReader): UserChat {
+  const subOp = reader.readByte();
+  if (subOp !== USER_MESSAGE_CHAT) {
+    throw new RangeError(
+      `0x1a sub-op 0x${subOp.toString(16)} is not chat (0x${USER_MESSAGE_CHAT.toString(16)})`,
+    );
+  }
+  return { name: reader.readAsciiString(), text: reader.readStringBytes() };
+}
+
+export function encodeUserChat(chat: UserChat): Uint8Array {
+  const writer = new PacketWriter(chat.text.length + chat.name.length + 8);
+  writer.writeByte(FIELD_OPCODE.userMessage);
+  writer.writeByte(USER_MESSAGE_CHAT);
+  writer.writeAsciiString(chat.name);
+  writer.writeStringBytes(chat.text);
+  return writer.toBytes();
+}
+
+/** `chat "Hero": hello` - the text decoded, because the point of the line is to be read. */
+export function describeUserChat(chat: UserChat): string {
+  return `chat "${chat.name}": ${decodeCp949(chat.text)}`;
+}
+
+/** `0x12` as it arrives from the client: the message, in the bytes the client typed. */
+export interface ClientChat {
+  /** The message exactly as it came off the wire (CP949, no length prefix). */
+  text: Uint8Array;
+}
+
+export function readClientChat(reader: PacketReader): ClientChat {
+  return { text: reader.readStringBytes() };
+}
+
+export function encodeClientChat(chat: ClientChat): Uint8Array {
+  const writer = new PacketWriter(chat.text.length + 4);
+  writer.writeByte(CLIENT_FIELD_OPCODE.chat);
+  writer.writeStringBytes(chat.text);
+  return writer.toBytes();
+}
+
+export function describeClientChat(chat: ClientChat): string {
+  return `0x12 chat: ${decodeCp949(chat.text)}`;
 }

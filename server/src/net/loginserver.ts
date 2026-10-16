@@ -33,10 +33,13 @@ import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
+  describeUserChat,
   INTERACT_KIND_CURSOR,
   encodeFieldRequestRelease,
   encodeSetField,
+  encodeUserChat,
   readClientAttack,
+  readClientChat,
   readClientInteract,
   readClientUserMove,
   type ClientAttack,
@@ -1301,6 +1304,12 @@ export class GameEntryServer {
           this.handleQuestReply(session, event.plain);
           continue;
         }
+        // Chat: the one field packet whose meaning is entirely social, and the only one that goes
+        // back to the player who sent it (see `handleChat`).
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.chat) {
+          this.handleChat(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -1314,6 +1323,34 @@ export class GameEntryServer {
       session?.instance.leave(session.characterId);
       this.sockets.delete(socket);
     });
+  }
+
+  /**
+   * A line of chat (`0x12`, one string - `sub_470C70`), relayed to the map as `0x1A` + sub-op `0x12`
+   * + the speaker's name + the same bytes.
+   *
+   * **The speaker gets it too**, and that is not a convenience: the client's chat input only *sends*
+   * (`sub_470C70` builds the packet and returns - no local echo), and the `"%s>> %s"` renderer lives
+   * on the receiving side (`sub_472910` case 0x12). A server that skipped the sender would make
+   * players unable to see what they just said.
+   *
+   * The text is passed through as **bytes**: the server relays it and never reads it, so there is no
+   * reason to risk a decode/encode round trip. The name is the server's own fact about the session,
+   * because the packet has nowhere to put a character id (the receiving client only needs a name to
+   * look the speaker up by).
+   */
+  private handleChat(session: FieldSession, plain: Uint8Array): void {
+    let text: Uint8Array;
+    try {
+      text = readClientChat(new PacketReader(plain, 1)).text;
+    } catch (error) {
+      this.options.log?.(`game: 0x12 chat unreadable: ${(error as Error).message}`);
+      return;
+    }
+    this.options.log?.(
+      `game: ${describeUserChat({ name: session.name, text })} in map ${session.instance.mapId}`,
+    );
+    session.instance.broadcast(encodeUserChat({ name: session.name, text }));
   }
 
   /**

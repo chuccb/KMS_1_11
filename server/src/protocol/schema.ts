@@ -330,14 +330,16 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: 0x12,
+    opcode: field.CLIENT_FIELD_OPCODE.chat,
     direction: "c2s",
     stage: "field",
     name: "chat",
-    status: "partial",
-    evidence: "FINDINGS 4.13 (sub_470C70: one string)",
-    codecs: [],
-    fields: [{ name: "text", type: STRING }],
+    status: "byte-exact",
+    evidence: "FINDINGS 4.13 / 4.26 (sub_470C70: one string, and nothing else)",
+    codecs: ["readClientChat", "encodeClientChat", "describeClientChat"],
+    fields: [
+      { name: "text", type: STRING, note: "kept as bytes: the server relays it, it never reads it" },
+    ],
   },
   {
     opcode: 0x22,
@@ -417,6 +419,24 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "randomSeedB", type: "u32", note: "seed part 2 - the client's Random() is the inverse" },
       { name: "randomSeedC", type: "u32", note: "seed part 3 - damage rolls become reproducible" },
       { name: "character", type: "CharacterData", note: "its mapId field is what gets loaded (Map/Map/%09d.img)" },
+    ],
+  },
+  {
+    opcode: field.FIELD_OPCODE.userMessage,
+    direction: "s2c",
+    stage: "field",
+    name: "userMessage",
+    status: "partial",
+    evidence: "FINDINGS 4.26 (CField 0x1A -> sub_472910; the chat case is 0x12 of the sub-op switch)",
+    codecs: ["readUserChat", "encodeUserChat", "describeUserChat"],
+    fields: [
+      {
+        name: "subOp",
+        type: "u8",
+        note: "only 0x12 (chat) is located; 0x09/0x0A/0x22 are whisper plumbing, no codec here",
+      },
+      { name: "name", type: STRING, note: "the speaker - there is no character id in this packet" },
+      { name: "text", type: STRING },
     ],
   },
   {
