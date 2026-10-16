@@ -44,7 +44,7 @@ function wornRecord(): CharacterStats {
   stats.sp = 0x0007;
   stats.exp = 0x01020304;
   stats.fame = 0xff;
-  stats.unknown93 = 0x0a;
+  stats.mesos = 0x0a;
   return stats;
 }
 
@@ -82,7 +82,7 @@ test("every field is written in flag order, with the widths the diff reader uses
       "07 00", //       0x08000 sp           s16
       "04 03 02 01", // 0x10000 exp          u32
       "ff 00 00 00", // 0x20000 fame         u32 on the wire (2 bytes kept in memory)
-      "0a 00 00 00", // 0x40000 unknown93    u32
+      "0a 00 00 00", // 0x40000 mesos        u32
       "00 00 00 00", // panelFlags
     ].join(" "),
   );
@@ -100,7 +100,7 @@ test("the flag bits are the reader's order, checked one field at a time", () => 
   assert.equal(statDiffFlag("sp"), 0x8000);
   assert.equal(statDiffFlag("exp"), 0x10000);
   assert.equal(statDiffFlag("fame"), 0x20000);
-  assert.equal(statDiffFlag("unknown93"), 0x40000);
+  assert.equal(statDiffFlag("mesos"), 0x40000);
   assert.equal(statDiffFlags({}), 0);
   assert.equal(statDiffFlags({ level: 1, hp: 2 }), 0x410);
   // 19 bits, no more: 0x7ffff is the highest flags word this codec can ever build.

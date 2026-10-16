@@ -9,7 +9,6 @@
  * written down: **a value of the wrong shape is not a value**, and every caller has to say what it
  * wants instead.
  */
-import type { WzObject } from "../wz/img.ts";
 
 /** One `name : type = value` pair of a property list. */
 export interface WzPropertyEntry {
@@ -50,7 +49,7 @@ export function asText(value: unknown, fallback = ""): string {
  * image starts with. Missing `info` gives `{}`, which makes every field inside it `undefined` and
  * therefore a caller-visible default rather than an exception.
  */
-export function infoOf(root: WzObject | undefined): Record<string, unknown> {
+export function infoOf(root: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const entry of entriesOf(propertyOf(root, "info"))) out[entry.name] = entry.value;
   return out;

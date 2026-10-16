@@ -17,7 +17,7 @@ import {
   schemaJson,
   schemaText,
 } from "../src/protocol/schema.ts";
-import { describeClientFieldPacket, describeFieldPacket } from "../src/protocol/field.ts";
+import { FIELD_OPCODE, describeClientFieldPacket, describeFieldPacket } from "../src/protocol/field.ts";
 import { describeClientPacket } from "../src/protocol/login.ts";
 
 test("every codec name in the catalogue still resolves to an exported function", () => {
@@ -56,9 +56,13 @@ test("a skeleton row stays empty instead of listing columns nobody decoded", () 
   for (const entry of PACKETS) {
     if (entry.status === "skeleton") {
       assert.deepEqual(entry.fields, [], `${entry.name} is a skeleton but claims fields`);
-    } else {
-      assert.ok(entry.fields.length > 0, `${entry.name} is ${entry.status} but lists no fields`);
+      continue;
     }
+    // A decoded packet normally has at least one column. The one exception is a body that *is*
+    // empty (`0x19`, whose handler reads nothing at all): `requestRelease` is the only opcode that
+    // is allowed to list no fields and be `byte-exact`, because there is nothing to list.
+    if (entry.opcode === FIELD_OPCODE.requestRelease && entry.stage === "field") continue;
+    assert.ok(entry.fields.length > 0, `${entry.name} is ${entry.status} but lists no fields`);
   }
 });
 

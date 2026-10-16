@@ -17,6 +17,7 @@ import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
 import { npcTemplateProvider } from "./game/npcs.ts";
+import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -248,12 +249,23 @@ async function runServe(rest: string[]): Promise<number> {
   let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
   let mobTemplate: ReturnType<typeof mobTemplateProvider> | undefined;
   let npcTemplate: ReturnType<typeof npcTemplateProvider> | undefined;
+  let shops: ShopKeeper | undefined;
+  const shopWarnings: string[] = [];
   if (dataPath !== undefined) {
     try {
       const archive = WzArchive.open(dataPath);
       mapProvider = mapDataProvider(archive);
       mobTemplate = mobTemplateProvider(archive);
       npcTemplate = npcTemplateProvider(archive);
+      shops = shopKeeper(archive);
+      // A shop row without a price cannot be sent (the client prints it), so it is collected here
+      // and reported once the logger exists.
+      for (const shop of SHOPS) {
+        const unpriced = unpricedShopItems(shop, shops.priceOf);
+        if (unpriced.length > 0) {
+          shopWarnings.push(`shop ${shop.shopId}: no info/price for ${unpriced.join(", ")} - those rows are skipped`);
+        }
+      }
     } catch (error) {
       process.stderr.write(`--data ${dataPath}: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
@@ -271,6 +283,7 @@ async function runServe(rest: string[]): Promise<number> {
   }
 
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
+  for (const warning of shopWarnings) log?.(warning);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
   const handoffs = new HandoffRegistry();
   const login = new LoginServer({
@@ -291,6 +304,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
       ...(npcTemplate !== undefined ? { npcTemplate } : {}),
+      ...(shops !== undefined ? { shops } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
       ...(handshake ? { handshake } : {}),

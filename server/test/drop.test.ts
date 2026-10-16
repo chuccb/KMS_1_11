@@ -34,7 +34,7 @@ import {
   type DropSource,
 } from "../src/game/drops.ts";
 import { MesoWallet, grantItem, inventoryTabOfItemId } from "../src/game/rewards.ts";
-import { startingCharacterItems } from "../src/protocol/chardata.ts";
+import { startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 
 /** A fixed generator: returns the given sequence, wrapping around. */
 function scripted(values: number[]): { next(): number; range(lo: number, span: number): number } {
@@ -361,12 +361,14 @@ test("equips never stack (a cash item is unique, an equip is not a pile)", () =>
 });
 
 test("the wallet keeps what the client cannot: mesos are the server's own counter", () => {
-  const wallet = new MesoWallet();
-  assert.equal(wallet.of(1), 0);
-  assert.equal(wallet.earn(1, 250), 250);
-  assert.equal(wallet.earn(1, 50), 300);
-  assert.equal(wallet.of(2), 0);
-  assert.equal(wallet.spend(1, 300), true);
-  assert.equal(wallet.of(1), 0);
-  assert.equal(wallet.spend(1, 1), false);
+  const stats = zeroStats();
+  const wallet = new MesoWallet(stats);
+  assert.equal(wallet.balance, 0);
+  assert.equal(wallet.earn(250), 250);
+  assert.equal(wallet.earn(50), 300);
+  assert.equal(stats.mesos, 300); // the record *is* the balance
+  assert.equal(wallet.spend(300), true);
+  assert.equal(wallet.balance, 0);
+  assert.equal(wallet.spend(1), false);
+  assert.equal(wallet.earn(-5), 0); // a negative gain is ignored, not subtracted
 });

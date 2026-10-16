@@ -38,11 +38,11 @@
  * u32 appearanceB          // @+22
  * u8  unknown26            // @+26 - a genuine u8 between the second appearance word and hair
  * u32 hair                 // @+27
- * u8  level                // @+31/+32; level..unknown93 are XOR-obfuscated in CLIENT MEMORY only
+ * u8  level                // @+31/+32; level..mesos are XOR-obfuscated in CLIENT MEMORY only
  * u16 job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp     // 11 u16
  * u32 exp                  // @+77/+81 - the 0x0D handler calls this pair "exp" (level-up message)
  * u16 fame                 // @+85/+87
- * u32 unknown93            // @+89/+93
+ * u32 mesos                // @+89/+93 (its identity is evidence: FINDINGS 4.22)
  * u32 mapId                // @+97, not obfuscated - the map to load (see below)
  * u8  unknown101           // @+101, not obfuscated
  * ```
@@ -110,7 +110,14 @@ export interface CharacterStats {
   /** u16 @+85/+87. */
   fame: number;
   /** u32 @+89/+93. */
-  unknown93: number;
+  /**
+   * u32 @+89/+93 - the character's **mesos**.
+   *
+   * Read as `+89 ^ +93` by the client's shop (the total is compared against a row's price before a
+   * purchase, `sub_4B6B40`) and by the meso-drop dialog (`sub_4B6E90`'s "얼마를 버리시겠습니까?", capped
+   * at 50000), and carried by `0x0D`'s flag `0x40000` (FINDINGS 4.22).
+   */
+  mesos: number;
   /**
    * u32 @+97; stored plainly (no obfuscation), like the byte below.
    *
@@ -238,7 +245,7 @@ export function writeCharacterStats(writer: PacketWriter, s: CharacterStats): vo
   writer.writeU16(s.sp);
   writer.writeU32(s.exp);
   writer.writeU16(s.fame);
-  writer.writeU32(s.unknown93);
+  writer.writeU32(s.mesos);
   writer.writeU32(s.mapId);
   writer.writeByte(s.unknown101);
 }
@@ -336,7 +343,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
   const sp = reader.readU16();
   const exp = reader.readU32();
   const fame = reader.readU16();
-  const unknown93 = reader.readU32();
+  const mesos = reader.readU32();
   const mapId = reader.readU32();
   const unknown101 = reader.readByte();
   return {
@@ -361,7 +368,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
     sp,
     exp,
     fame,
-    unknown93,
+    mesos,
     mapId,
     unknown101,
   };
@@ -441,7 +448,7 @@ export function zeroStats(): CharacterStats {
     sp: 0,
     exp: 0,
     fame: 0,
-    unknown93: 0,
+    mesos: 0,
     mapId: 0,
     unknown101: 0,
   };

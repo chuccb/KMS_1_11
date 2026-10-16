@@ -122,7 +122,9 @@ export const STAT_DIFF_FIELDS: readonly StatDiffFieldSpec[] = [
   { name: "exp", bytes: 4 },
   // 4 bytes on the wire, 2 kept in memory - the reader is `sub_45DDC0`, not `sub_45DD80`.
   { name: "fame", bytes: 4 },
-  { name: "unknown93", bytes: 4 },
+  // 4 bytes on the wire, 4 kept: the character's mesos, the field a shop reads and writes
+  // (`sub_4B6B40`'s price check - FINDINGS 4.22).
+  { name: "mesos", bytes: 4 },
 ];
 
 /** The flag bit of field `name` (`1 << index`). Throws for a name the client does not read. */

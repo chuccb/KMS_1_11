@@ -205,7 +205,10 @@ test("every opcode range of the CField router maps to its subsystem", () => {
   assert.equal(describeFieldOpcode(0x44), "0x44 CRewardPool(drop gone)");
   assert.equal(describeFieldOpcode(0x45), "0x45 CRewardPool(no handler)");
   assert.equal(describeFieldOpcode(0x46), "0x46 CQuestMan");
-  assert.equal(describeFieldOpcode(0x49), "0x49 field dialogs");
+  assert.equal(describeFieldOpcode(0x49), "0x49 field dialogs(no handler)");
+  assert.equal(describeFieldOpcode(0x4a), "0x4a CShopDlg(open)");
+  assert.equal(describeFieldOpcode(0x4b), "0x4b CShopDlg(result)");
+  assert.equal(describeFieldOpcode(0x4c), "0x4c field dialogs(no handler)");
   assert.equal(describeFieldOpcode(0x4d), "0x4d CUIMessenger");
   assert.equal(describeFieldOpcode(0x50), "0x50 CMiniRoomBaseDlg");
 });

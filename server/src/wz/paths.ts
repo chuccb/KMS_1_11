@@ -46,6 +46,35 @@ export function npcImagePath(templateId: number): string {
   return `Npc/${String(templateId).padStart(7, "0")}.img`;
 }
 
+/**
+ * `Item/<kind>/<id-prefix>.img` - the image one item id lives in: `02000000` -> `Item/Consume/0200.img`,
+ * `04000019` -> `Item/Etc/0400.img`.
+ *
+ * The client resolves an item's icon by building a path out of the id (`sub_47CE40` reads
+ * `info/iconRaw` of it, see FINDINGS 4.18), and the four kind names are the archive's own layout -
+ * `Data.wz` has exactly `Item/Consume`, `Item/Etc`, `Item/Book` and `Item/Special`
+ * (`analysis/data_wz_manifest.json`). Equipment is **not** under `Item/` in this build: it lives in
+ * `Character/<type>/<id>.img` (`Character/Accessory/01010000.img` and friends), which is why this
+ * function only answers for the four kinds it has evidence for.
+ */
+export function itemImagePath(itemId: number): string {
+  if (!Number.isInteger(itemId) || itemId < 0) {
+    throw new RangeError(`item id must be a non-negative integer, got ${itemId}`);
+  }
+  const padded = String(itemId).padStart(8, "0");
+  const kind = ITEM_KIND_BY_PREFIX[padded.slice(0, 2)];
+  if (kind === undefined) throw new RangeError(`item ${itemId} is not one of the item kinds Data.wz has`);
+  return `Item/${kind}/${padded.slice(0, 4)}.img`;
+}
+
+/** The four item kinds `Data.wz` carries, by the first two digits of an item id. */
+export const ITEM_KIND_BY_PREFIX: Readonly<Record<string, string>> = {
+  "02": "Consume",
+  "04": "Etc",
+  "05": "Book",
+  "09": "Special",
+};
+
 /** The map `.img`'s sub-nodes, in the order `sub_469980` reads them (all three are required). */
 export const MAP_NODES = {
   /** `L"foothold"` - the walkable platforms, addressed as `foothold/<group>/<id>`. */

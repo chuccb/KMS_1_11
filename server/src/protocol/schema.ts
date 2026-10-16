@@ -21,6 +21,7 @@ import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
+import * as shop from "./shop.ts";
 import * as stat from "./stat.ts";
 import * as packet from "./packet.ts";
 import * as replies from "./replies.ts";
@@ -802,6 +803,81 @@ export const PACKETS: readonly PacketSchema[] = [
       },
     ],
   },
+  {
+    opcode: field.FIELD_OPCODE.requestRelease,
+    direction: "s2c",
+    stage: "field",
+    name: "requestRelease",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.11.6 (sub_4728B0: an empty packet that only clears CWvsApp+24/+28)",
+    codecs: ["encodeFieldRequestRelease"],
+    // One byte and no body: the client's handler reads nothing at all.
+    fields: [],
+  },
+  {
+    opcode: shop.SHOP_OPEN_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "shopOpen",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.22 (sub_4B73A0 case 0x4A -> sub_4B3780; opened by an NPC click, 0x33)",
+    codecs: ["encodeShopOpen", "readShopOpen", "describeShopOpen"],
+    fields: [
+      { name: "shopId", type: "u32", note: "dlg+144; the client never sends it back" },
+      { name: "count", type: "u16", note: "rows that follow; 0 is a legal empty shop" },
+      { name: "itemId", type: "u32", note: "per row" },
+      { name: "price", type: "u32", note: "per row; the client prints it and charges it to itself" },
+      { name: "cash", type: "u8[8]", note: "per row, itemId / 10000 == 207 only, copied verbatim" },
+      {
+        name: "maxCount",
+        type: "u16",
+        note: "per row; the buy dialog's default and its cap (sub_4B6B40 reads the row's +32)",
+      },
+    ],
+  },
+  {
+    opcode: shop.SHOP_RESULT_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "shopResult",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.22 (sub_4B73A0 case 0x4B: one u8, then one of the client's own messages)",
+    codecs: ["encodeShopResult", "readShopResult", "describeShopResult"],
+    fields: [
+      {
+        name: "code",
+        type: "u8",
+        note: "0 silent, 1/4 물품이 부족합니다, 2 현금이 부족합니다, 3 slots, >4 error; only legal while a request is in flight",
+      },
+    ],
+  },
+  {
+    opcode: shop.CLIENT_SHOP_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "shopRequest",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.22 (sub_4B6B40 / sub_4B6E90 / sub_4B7130 / sub_4B3C80 on the CShopDlg buttons)",
+    codecs: ["encodeClientShopRequest", "readClientShopRequest", "describeClientShopRequest"],
+    fields: [
+      { name: "action", type: "u8", note: "0 buy, 1 sell, 2 recharge, 3 close" },
+      { name: "slot", type: "u16", note: "buy: the row index the client picked; sell/recharge: the inventory slot" },
+      { name: "itemId", type: "u32", note: "buy and sell only" },
+      { name: "count", type: "u16", note: "buy and sell only" },
+    ],
+  },
+  {
+    opcode: shop.CLIENT_OBJECT_CLICK_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "objectClick",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.22 (sub_55AF20, called by sub_4A7770's object-under-the-mouse pick)",
+    codecs: ["encodeClientObjectClick", "readClientObjectClick", "describeClientObjectClick"],
+    fields: [
+      { name: "objectId", type: "u32", note: "the field object's runtime id - for an NPC the id 0x39 gave it" },
+    ],
+  },
 ];
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
@@ -816,6 +892,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   npc,
   packet,
   replies,
+  shop,
   stat,
 ];
 

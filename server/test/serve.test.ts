@@ -40,9 +40,26 @@ import {
 } from "../src/protocol/mob.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import { STAT_OPCODE, readStatUpdate } from "../src/protocol/stat.ts";
+import {
+  CLIENT_OBJECT_CLICK_OPCODE,
+  CLIENT_SHOP_OPCODE,
+  SHOP_OPEN_OPCODE,
+  SHOP_RESULT,
+  SHOP_RESULT_OPCODE,
+  encodeClientObjectClick,
+  encodeClientShopRequest,
+  readShopOpen,
+} from "../src/protocol/shop.ts";
+import { shopKeeper } from "../src/game/shops.ts";
+import { WzArchive } from "../src/wz/archive.ts";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { MapData } from "../src/game/map.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
+
+const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
+const archive: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
 
 /** A fake 2003 client: reads the handshake, then speaks the session protocol. */
 class FakeClient {
@@ -831,4 +848,97 @@ test("a swing at an unknown mob id answers nothing and leaves the field alone", 
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.deepEqual(await client.take(0), [], "no reply at all: there is no mob 99 to answer for");
   assert.ok(log.some((line) => line.includes("no such mob")), log.join("\n"));
+});
+
+
+test("clicking an NPC opens its shop, and buying moves the item and the mesos", { skip: archive === null, timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
+    npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
+    shops: shopKeeper(archive!),
+    // No patrol packets in this test: the mobs are still, so every burst below is exactly the
+    // shop's own packets and the order stays readable.
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  // The wallet starts at 100 mesos, which is enough for two red potions (25 each) and nothing else.
+  const stats = { ...zeroStats(), level: 1, mesos: 100 };
+  const characterId = handoffs.issue({
+    username: "admin",
+    characterId: 21,
+    characterName: "Shopper",
+    character: characterDataOf(stats, startingCharacterItems()),
+  });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(4); // 0x16 + the two mobs + the NPC
+
+  // Click the NPC: the release byte first, then the window. The NPC pool gave it id 1.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_OBJECT_CLICK_OPCODE,
+    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+  });
+  const opened = await client.take(2);
+  assert.equal(opened[0]![0], FIELD_OPCODE.requestRelease, "0x19 comes first: a click arms the client's gate");
+  assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+  const shop = readShopOpen(new PacketReader(opened[1]!, 1));
+  assert.equal(shop.shopId, 2003, "로빈's shop, keyed by the NPC template id");
+  assert.deepEqual(
+    shop.items.map((line) => [line.itemId, line.price]),
+    [
+      [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
+      [2000003, 100], // 파란 포션
+    ],
+  );
+  assert.equal(client.headersOk, true);
+
+  // Buy one red potion: the result, the inventory change, and the mesos.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_SHOP_OPCODE,
+    body: encodeClientShopRequest({ kind: "buy", row: 0, itemId: 2000000, count: 1 }).slice(1),
+  });
+  const trade = await client.take(3);
+  assert.equal(trade[0]![0], SHOP_RESULT_OPCODE);
+  assert.equal(trade[0]![1], SHOP_RESULT.silent, "a trade that happened says nothing in words");
+  assert.equal(trade[1]![0], INVENTORY_OPCODE);
+  const change = readInventoryChange(new PacketReader(trade[1]!, 1));
+  assert.equal(change.changes.length, 1);
+  assert.equal(change.changes[0]!.op, INVENTORY_OP.put, "the potion lands in a consume slot");
+  assert.equal(trade[2]![0], STAT_OPCODE);
+  const diff = readStatUpdate(new PacketReader(trade[2]!, 1));
+  assert.deepEqual(diff, { ack: false, diff: { mesos: 75 } }, "the 0x0D flag 0x40000 is the money field");
+  assert.ok(log.some((line) => line.includes("bought") && line.includes("mesos 75")), log.join("\n"));
+
+  // A purchase the wallet cannot pay for: the client gets code 2 and nothing moves.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_SHOP_OPCODE,
+    body: encodeClientShopRequest({ kind: "buy", row: 1, itemId: 2000003, count: 1 }).slice(1),
+  });
+  const refused = await client.take(1);
+  assert.deepEqual([refused[0]![0], refused[0]![1]], [SHOP_RESULT_OPCODE, SHOP_RESULT.notEnoughMesos]);
+
+  // Closing is deliberate silence: the client's close does not arm its in-flight flag, and a 0x4B
+  // would make it throw (`sub_4B73A0` case 75).
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_SHOP_OPCODE,
+    body: encodeClientShopRequest({ kind: "close" }).slice(1),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(await client.take(0), [], "a close is not answered");
+  client.close();
 });

@@ -43,6 +43,22 @@ import {
 } from "./drop.ts";
 import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
 import { STAT_OPCODE, describeStatUpdate, readStatUpdate } from "./stat.ts";
+// The NPC shop (`0x4A`/`0x4B` server -> client, `0x16`/`0x33` client -> server): dispatched by
+// `sub_4B73A0` / `sub_55AF20`, i.e. next to the field pool that carries them.
+import {
+  CLIENT_OBJECT_CLICK_OPCODE,
+  CLIENT_SHOP_OPCODE,
+  SHOP_OPEN_OPCODE,
+  SHOP_RESULT_OPCODE,
+  describeClientObjectClick,
+  describeClientShopRequest,
+  describeShopOpen,
+  describeShopResult,
+  readClientObjectClick,
+  readClientShopRequest,
+  readShopOpen,
+  readShopResult,
+} from "./shop.ts";
 // The NPC pool (`0x39`..`0x41`): the same packet shape as `CMobPool`, one range further up.
 import {
   NPC_OPCODE,
@@ -85,6 +101,15 @@ export const FIELD_OPCODE = {
    * makes the field and the local user on `CUserPool`.
    */
   setField: 0x16,
+  /**
+   * `sub_4728B0`: an **empty** packet whose only effect is clearing the client's "a field request
+   * is pending" gate (`CWvsApp+24 = 0`, `+28 = timeGetTime()`). `sub_472590` (the `0x0D` interact
+   * request) and `sub_55AF20` (the `0x33` object click) both arm that gate, and the client refuses to
+   * send another one until it is cleared - so every click owes this answer, whether or not the
+   * server has anything else to say (FINDINGS 4.11.6). A `0x0D` whose ack byte is set clears the
+   * same gate.
+   */
+  requestRelease: 0x19,
   /**
    * `CUserPool` 0x1C (`sub_51CFE0`): another user entered the field - or, when the id turns out
    * to be `CWvsApp+0x14` (our own character id, the value the 0x03 login reply stored), nothing
@@ -298,6 +323,16 @@ export function encodeSetField(field: SetField): Uint8Array {
 }
 
 /**
+ * The empty `0x19` that releases the client's pending-field-request gate (`sub_4728B0`).
+ *
+ * One byte, no body: the client's handler reads nothing at all. It is what a field session answers
+ * an object click with before (or instead of) anything else.
+ */
+export function encodeFieldRequestRelease(): Uint8Array {
+  return new Uint8Array([FIELD_OPCODE.requestRelease]);
+}
+
+/**
  * One-line meaning for a decrypted client -> field packet (the interesting half of a capture:
  * what the original client actually sent), for the `decode` tool. Unknown opcodes stay `undefined`
  * so `decode` can say "unmapped" instead of inventing a reading.
@@ -313,6 +348,12 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.interact) {
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
+    }
+    if (opcode === CLIENT_SHOP_OPCODE) {
+      return describeClientShopRequest(readClientShopRequest(new PacketReader(plain, 1)));
+    }
+    if (opcode === CLIENT_OBJECT_CLICK_OPCODE) {
+      return describeClientObjectClick(readClientObjectClick(new PacketReader(plain, 1)));
     }
     if (opcode === CLIENT_FIELD_OPCODE.mobAttack) {
       const attack = readClientMobAttack(new PacketReader(plain, 1));
@@ -381,6 +422,20 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode < 0x15 || opcode > 0x52) return undefined;
   const name = describeFieldOpcode(opcode);
+  if (opcode === SHOP_OPEN_OPCODE) {
+    try {
+      return `${name}: ${describeShopOpen(readShopOpen(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === SHOP_RESULT_OPCODE) {
+    try {
+      return `${name}: ${describeShopResult(readShopResult(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === DROP_OPCODE.appear) {
     try {
       return `${name}: ${describeDropAppear(readDropAppear(new PacketReader(plain, 1)))}`;
@@ -491,6 +546,9 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  // `0x19` has nothing to decode: an empty body *is* the whole packet, so the name alone is the
+  // truth and the usual suffix would be wrong about it.
+  if (opcode === FIELD_OPCODE.requestRelease) return name;
   return `${name} (fields not decoded yet)`;
 }
 
@@ -514,6 +572,9 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === DROP_OPCODE.remove) return "0x44 CRewardPool(drop gone)";
   if (opcode === 0x42 || opcode === 0x45) return `0x${opcode.toString(16)} CRewardPool(no handler)`;
   if (opcode >= 0x46 && opcode <= 0x48) return `0x${opcode.toString(16)} CQuestMan`;
+  if (opcode === SHOP_OPEN_OPCODE) return "0x4a CShopDlg(open)";
+  if (opcode === SHOP_RESULT_OPCODE) return "0x4b CShopDlg(result)";
+  if (opcode === 0x49 || opcode === 0x4c) return `0x${opcode.toString(16)} field dialogs(no handler)`;
   if (opcode >= 0x49 && opcode <= 0x4c) return `0x${opcode.toString(16)} field dialogs`;
   if (opcode >= 0x4d && opcode <= 0x4f) return `0x${opcode.toString(16)} CUIMessenger`;
   if (opcode >= 0x50 && opcode <= 0x52) return `0x${opcode.toString(16)} CMiniRoomBaseDlg`;
@@ -543,6 +604,19 @@ export const CLIENT_FIELD_OPCODE = {
    * server's 0x19 reply).
    */
   interact: 0x0d,
+  /**
+   * `sub_55AF20`: `[0x33][u32 objectId]` - the player clicked a field object. `sub_4A7770` picks the
+   * object under the cursor (only one whose type field `+48` is 3, with a 3 s re-click guard) and
+   * hands its id to this sender, so for an NPC the id is the one `0x39` gave it. The same gate as
+   * `0x0D` is armed, and the server answers with `0x19` (and a shop, when the NPC keeps one).
+   */
+  objectClick: CLIENT_OBJECT_CLICK_OPCODE,
+  /**
+   * The shop buttons: `[0x16][u8 action][...]`. See `protocol/shop.ts` for the four shapes - the
+   * opening byte is the action, and the rest depends on it. Same opcode number as `setField` in the
+   * other direction, like `0x0D`/`0x0B`.
+   */
+  shop: CLIENT_SHOP_OPCODE,
   /**
    * The melee swing (`sub_512F90`):
    *

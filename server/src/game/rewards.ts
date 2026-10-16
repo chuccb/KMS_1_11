@@ -10,13 +10,11 @@
  *   `0x11`  (`protocol/drop.ts`)       the chat line - "아이템을 얻었습니다 (%s)" / "메소를 얻었습니다
  *                                      (+%d)". Without it a pickup is silent except for the animation.
  *
- * WHAT THE SERVER CANNOT DO YET: the client's own counters. The meso total in the status bar and the
- * experience a player sees are drawn from client state that no located packet writes - the stat block
- * travels once, inside `CharacterData` (`0x16`), and its only update packet (`0x0D`, `sub_55BEB0` ->
- * `sub_45E0D0`) is a bit-flagged stat delta whose flag map is not decoded yet (FINDINGS 4.18/6). So
- * the mesos live in `MesoWallet` (server-side, per character) and the player reads the gain from the
- * `0x11` notice until that packet is done. The wallet is what a shop, a trade and a save routine need
- * anyway; it is not a workaround, it is where the money has to be.
+ * THE MESOS ARE THE CHARACTER'S OWN FIELD. `CharacterData`'s 22nd field is the money (`+89/+93`): it
+ * is what the client's shop compares a price against ("현금이 부족합니다") and what its meso-drop
+ * dialog shows with a 50000 cap (FINDINGS 4.22). `0x0D`'s flag `0x40000` is that same field, so a
+ * change the server makes here travels to the client's screen - the wallet is a *view* over
+ * `stats.mesos`, never a second account, and `MesoChange` is what the caller sends.
  *
  * Stack limits are a server rule like the drop odds: the wire carries `u16 quantity`
  * (`GW_ItemSlotNonEquip`), so 65535 would fit, but the original server's limit is not in the binary.
@@ -28,7 +26,7 @@ import {
   type InventoryChange,
 } from "../protocol/inventory.ts";
 import { equipSlot, isEquipItemId, nonEquipSlot, type ItemSlot } from "../protocol/itemslot.ts";
-import type { CharacterItems, Inventory } from "../protocol/chardata.ts";
+import type { CharacterItems, CharacterStats, Inventory } from "../protocol/chardata.ts";
 import type { LootNotice } from "../protocol/drop.ts";
 
 /** Most of one item a slot may hold. A server choice - see the header. */
@@ -114,32 +112,38 @@ export function grantItem(items: CharacterItems, itemId: number, count = 1): Gra
 }
 
 /**
- * The money the server keeps for its characters.
+ * One character's money, as the character record holds it.
  *
- * In memory, like the accounts: a restart forgets it. Nothing sends it to the client yet (see the
- * header), and that is the only reason the client cannot show it - the number itself has to live
- * somewhere authoritative, and this is that place.
+ * The record *is* the balance (`stats.mesos`, wire field 22 - see the header): a wallet is a view
+ * over one record, so there is exactly one number to keep consistent, and every change is a change
+ * the client can be told about with `0x0D` (flag `0x40000`).
  */
 export class MesoWallet {
-  private readonly balances = new Map<number, number>();
+  private readonly stats: CharacterStats;
 
-  /** The balance of one character (0 for a character who never earned anything). */
-  of(characterId: number): number {
-    return this.balances.get(characterId) ?? 0;
+  constructor(stats: CharacterStats) {
+    this.stats = stats;
   }
 
-  /** Adds `amount` and returns the new balance. Negative amounts are ignored, not subtracted. */
-  earn(characterId: number, amount: number): number {
-    const next = this.of(characterId) + Math.max(0, Math.round(amount));
-    this.balances.set(characterId, next);
-    return next;
+  /** The balance. */
+  get balance(): number {
+    return this.stats.mesos;
+  }
+
+  /**
+   * Adds `amount` and returns the new balance. A negative amount is ignored rather than subtracted,
+   * and the wire field is a `u32`, so a sum beyond it stays at the ceiling instead of wrapping.
+   */
+  earn(amount: number): number {
+    const next = this.balance + Math.max(0, Math.round(amount));
+    this.stats.mesos = Math.min(next, 0xffffffff);
+    return this.stats.mesos;
   }
 
   /** Takes money out; `false` when it is not there, and then nothing moves. */
-  spend(characterId: number, amount: number): boolean {
-    const balance = this.of(characterId);
-    if (amount < 0 || balance < amount) return false;
-    this.balances.set(characterId, balance - amount);
+  spend(amount: number): boolean {
+    if (!Number.isFinite(amount) || amount < 0 || this.balance < amount) return false;
+    this.stats.mesos = this.balance - amount;
     return true;
   }
 }
@@ -167,9 +171,9 @@ export interface Pickup {
  * server does not, so a player standing on a drop with a full bag is not spammed every tick - see
  * `loginserver.ts` - and the message is left for the day pickups have a request to answer).
  */
-export function pickUpDrop(drop: Pickup, characterId: number, items: CharacterItems, wallet: MesoWallet): PickupResult {
+export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWallet): PickupResult {
   if (drop.money) {
-    const total = wallet.earn(characterId, drop.amount);
+    const total = wallet.earn(drop.amount);
     return { kind: "mesos", notice: { kind: "mesos", amount: drop.amount }, amount: drop.amount, total };
   }
   const granted = grantItem(items, drop.itemId, drop.count);
@@ -185,4 +189,54 @@ export function pickUpDrop(drop: Pickup, characterId: number, items: CharacterIt
     slot: granted.slot,
     change: granted.change,
   };
+}
+
+/** What taking one item out of an inventory did, in the terms `0x0B` needs. */
+export interface TakenItem {
+  inventory: number;
+  slot: number;
+  /** How many were taken (the request asked for `count`). */
+  count: number;
+  /** How many are left in that slot (0 when the stack is gone). */
+  remaining: number;
+  /**
+   * The change to send: a `clear` when the stack ran out, otherwise the same slot `put` again with
+   * the remainder - the only two shapes a shop needs, and both are decoded (`INVENTORY_OP`).
+   */
+  change: InventoryChange;
+}
+
+/**
+ * Takes `count` of `itemId` out of `slot` - the counterpart of `grantItem`, used by a shop sale.
+ *
+ * The caller's slot and id are both checked: a request that names a slot holding something else (or
+ * fewer than it asks for) is refused instead of quietly emptying the wrong stack. Equipment does not
+ * stack, so `count` has to be 1 there.
+ */
+export function takeItem(
+  items: CharacterItems,
+  itemId: number,
+  slot: number,
+  count: number,
+): TakenItem | undefined {
+  if (!Number.isInteger(count) || count <= 0) return undefined;
+  const inventory = inventoryTabOfItemId(itemId);
+  const tab = items.inventories[inventory - 1]!;
+  const item = tab.items.get(slot);
+  if (item === undefined || item.itemId !== itemId) return undefined;
+  if (isEquipItemId(itemId)) {
+    if (count !== 1) return undefined;
+    tab.items.delete(slot);
+    return { inventory, slot, count: 1, remaining: 0, change: { op: INVENTORY_OP.clear, inventory, slot } };
+  }
+  const quantity = "quantity" in item ? item.quantity : 0;
+  if (quantity < count) return undefined;
+  const remaining = quantity - count;
+  if (remaining === 0) {
+    tab.items.delete(slot);
+    return { inventory, slot, count, remaining, change: { op: INVENTORY_OP.clear, inventory, slot } };
+  }
+  const left = { ...item, quantity: remaining };
+  tab.items.set(slot, left);
+  return { inventory, slot, count, remaining, change: { op: INVENTORY_OP.put, inventory, slot, item: left } };
 }

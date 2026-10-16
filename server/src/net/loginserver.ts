@@ -32,6 +32,7 @@ import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
+  encodeFieldRequestRelease,
   encodeSetField,
   readClientAttack,
   readClientUserMove,
@@ -41,6 +42,16 @@ import {
 import { DROP_REMOVE_KIND, encodeDropRemove, encodeLootNotice } from "../protocol/drop.ts";
 import { encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
+import {
+  CLIENT_OBJECT_CLICK_OPCODE,
+  CLIENT_SHOP_OPCODE,
+  SHOP_RESULT,
+  encodeShopOpen,
+  encodeShopResult,
+  readClientObjectClick,
+  readClientShopRequest,
+} from "../protocol/shop.ts";
+import { shopResultCode, type ShopDef, type ShopKeeper } from "../game/shops.ts";
 import { awardExp } from "../game/exp.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
@@ -470,6 +481,11 @@ export interface GameEntryServerOptions {
    * stub. Without it the connection still enters its map, it just has nothing to spawn.
    */
   mapProvider?: (mapId: number) => MapData | undefined;
+  /**
+   * The NPC shops (which NPC sells what, and at which price). `shopKeeper(WzArchive)` is the real
+   * one; without it an NPC click is answered with the empty `0x19` and nothing else.
+   */
+  shops?: ShopKeeper;
   /** Mob stats (`Mob/<id>.img -> info`); `mobTemplateProvider(WzArchive)` is the real one. */
   mobTemplate?: (templateId: number) => MobTemplate | undefined;
   /**
@@ -520,6 +536,14 @@ interface FieldSession {
   characterId: number;
   /** Where the player is, from the last move packet read (`0x0E`). Unknown until they move. */
   at?: { x: number; y: number };
+  /**
+   * The shop this session has open, if any (`0x4A` was sent and no close came back).
+   *
+   * It is what a `0x16` request is validated against: the client sends an item id and a slot, never
+   * the shop, so the server has to remember which window it opened. A second `0x4A` while one is
+   * open would make the client throw (`sub_4B73A0` case 74), so this is also the guard for that.
+   */
+  shop?: ShopDef;
 }
 
 export class GameEntryServer {
@@ -605,7 +629,7 @@ export class GameEntryServer {
       mobs,
       npcs,
       drops,
-      wallet: new MesoWallet(),
+      wallet: new MesoWallet(character.stats),
       character,
       characterId: entry.characterId,
     };
@@ -714,6 +738,129 @@ export class GameEntryServer {
   }
 
   /**
+   * The player clicked a field object (`0x33`) - for an NPC, the click that should open its shop.
+   *
+   * Two things have to happen, in this order:
+   *
+   *   `0x19`  an empty packet that clears the client's "a field request is pending" gate. Every
+   *           click arms it (`sub_55AF20`), and the client sends nothing else until it is cleared -
+   *           so this is owed even when the answer is "nothing here".
+   *   `0x4A`  when the object is an NPC this server keeps a shop for: the window and its rows. The
+   *           price of every row is the item's own `info/price` (`game/shops.ts`), never a guess.
+   *
+   * An object id the field does not have, or an NPC without a shop, gets the `0x19` alone - there is
+   * no dialogue system yet, and inventing one is not this packet's business.
+   */
+  private handleObjectClick(
+    session: FieldSession,
+    socket: net.Socket,
+    sendState: CipherState,
+    plain: Uint8Array,
+  ): void {
+    let objectId: number;
+    try {
+      objectId = readClientObjectClick(new PacketReader(plain, 1)).objectId;
+    } catch (error) {
+      this.options.log?.(`game: 0x33 object click unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const write = (packet: Uint8Array): void => void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+    write(encodeFieldRequestRelease());
+    const npc = session.npcs.byId(objectId);
+    if (npc === undefined) {
+      this.options.log?.(`game: object click ${objectId} is not an NPC of this field - released only`);
+      return;
+    }
+    const shop = this.options.shops?.shopOfNpc(npc.templateId);
+    if (shop === undefined) {
+      this.options.log?.(
+        `game: NPC ${objectId} (template ${npc.templateId}) has no shop in this server's table - released only`,
+      );
+      return;
+    }
+    if (session.shop !== undefined) {
+      // A second 0x4A while a dialog is already open is a `CDisconnectException` on the client.
+      this.options.log?.(
+        `game: NPC ${objectId} clicked while shop ${session.shop.shopId} is open - not re-sending 0x4A`,
+      );
+      return;
+    }
+    const items = this.options.shops?.linesOf(shop) ?? [];
+    session.shop = shop;
+    write(encodeShopOpen({ shopId: shop.shopId, items }));
+    this.options.log?.(
+      `game: opened shop ${shop.shopId} for NPC ${objectId} (template ${npc.templateId}) with ${items.length} row(s)`,
+    );
+  }
+
+  /**
+   * One shop button (`0x16`): buy, sell, recharge or close.
+   *
+   * The reply is `0x4B` **only for the three requests that arm the client's in-flight flag**
+   * (`sub_4B6B40`/`sub_4B6E90`/`sub_4B7130`); its handler clears that flag and throws a
+   * `CDisconnectException` when it finds it unset, so a `0x4B` that answers nothing would kick the
+   * client. `close` (`sub_4B3C80`) does not arm it and is therefore answered with nothing.
+   *
+   * A trade that happened is told in three packets, the same three a pickup uses: `0x4B` silent (the
+   * client's window is free again), `0x0B` for the slot whose contents changed, and `0x0D` for the
+   * mesos - whose own flag `0x40000` is what moves the number in the status bar (FINDINGS 4.22).
+   */
+  private handleShopRequest(
+    session: FieldSession,
+    socket: net.Socket,
+    sendState: CipherState,
+    plain: Uint8Array,
+  ): void {
+    let request;
+    try {
+      request = readClientShopRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x16 shop request unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const write = (packet: Uint8Array): void => void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+    if (request.kind === "close") {
+      this.options.log?.(`game: shop ${session.shop?.shopId ?? "-"} closed`);
+      session.shop = undefined;
+      return; // deliberately unanswered: the client's close does not arm the in-flight flag
+    }
+    const keeper = this.options.shops;
+    const shop = session.shop;
+    if (keeper === undefined || shop === undefined) {
+      this.options.log?.(`game: 0x16 shop request without an open shop - dropped (no 0x4B)`);
+      return;
+    }
+    if (request.kind === "recharge") {
+      // No row of any shop this server opens is a rechargeable (the 207 family), so there is
+      // nothing to charge: the client gets the "not enough items" line and its window is freed.
+      write(encodeShopResult(SHOP_RESULT.notEnoughItems));
+      this.options.log?.(`game: shop ${shop.shopId} recharge of slot ${request.slot} refused (not stocked)`);
+      return;
+    }
+    const items = session.character.items ?? emptyCharacterItems();
+    const before = { ...session.character.stats };
+    const outcome =
+      request.kind === "buy"
+        ? keeper.buy(items, session.wallet, shop, request.itemId, request.count)
+        : keeper.sell(items, session.wallet, request.slot, request.itemId, request.count);
+    if (outcome.kind === "failed") {
+      write(encodeShopResult(shopResultCode(outcome.reason)));
+      this.options.log?.(
+        `game: shop ${shop.shopId} ${request.kind} of ${request.itemId} x${request.count} refused (${outcome.reason})`,
+      );
+      return;
+    }
+    write(encodeShopResult(SHOP_RESULT.silent));
+    write(encodeInventoryChange([outcome.change]));
+    const diff = diffStats(before, session.character.stats);
+    if (Object.keys(diff).length > 0) write(encodeStatUpdate({ diff }));
+    this.options.log?.(
+      `game: shop ${shop.shopId} ${outcome.kind} ${outcome.itemId} x${outcome.count} at ${outcome.unitPrice} ` +
+        `(total ${outcome.total}, tab ${outcome.inventory} slot ${outcome.slot}, mesos ${outcome.mesos})`,
+    );
+  }
+
+  /**
    * Hand the player the drop under them, if there is one and it fits.
    *
    * The client cannot ask for this: a v1.11 client has no pickup request at all (every send site in
@@ -742,7 +889,7 @@ export class GameEntryServer {
     const drop = session.drops.reachable(at.x, at.y);
     if (drop === undefined) return;
     const items = session.character.items ?? emptyCharacterItems();
-    const outcome = pickUpDrop(drop, session.characterId, items, session.wallet);
+    const outcome = pickUpDrop(drop, items, session.wallet);
     if (outcome.kind === "no-room") {
       this.options.log?.(
         `game: drop ${drop.dropId} (item ${drop.itemId}) is under ${session.characterId} but the ` +
@@ -957,6 +1104,16 @@ export class GameEntryServer {
         // A swing is the other packet this server acts on: it is what moves a mob's HP here.
         if (session !== undefined && ATTACK_OPCODES.includes(opcode)) {
           this.applyAttack(session, socket, sendState, event.plain);
+          continue;
+        }
+        // Clicking an NPC: the server answers with the release byte, and with a shop if it has one.
+        if (session !== undefined && opcode === CLIENT_OBJECT_CLICK_OPCODE) {
+          this.handleObjectClick(session, socket, sendState, event.plain);
+          continue;
+        }
+        // The shop window's buttons.
+        if (session !== undefined && opcode === CLIENT_SHOP_OPCODE) {
+          this.handleShopRequest(session, socket, sendState, event.plain);
           continue;
         }
         this.options.log?.(
