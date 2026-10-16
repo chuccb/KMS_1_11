@@ -32,7 +32,7 @@ packet = alloc();                       // 物件欄位：bytes @+8、len @+12�
 if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
 ```
 
-- `u16 @ 0`：`0xD3 ^ HIWORD(cipherState)`——**每個封包都不同**，同時作為狀態同步自檢（§3）。
+- `u16 @ 0`：`magic ^ HIWORD(cipherState)`——**每個封包都不同**，同時作為狀態同步自檢（§3、§3.1）。
 - `u16 @ 2`：本文長度；本文 = 接下來的 `bodyLen` bytes，**加密**。
 - 上限：單包不超過 **1456 bytes** 本文；超過時 `sub_4A2030` 會切成 **1460 bytes 的 socket chunk** 送出，
   **只有第一塊帶標頭**（`sub_4A2030` 內 `v11 > 1456` 分支）。
@@ -41,20 +41,24 @@ if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
 **已證實的 211-byte 握手**（`sub_43A410`，於 `FD_CONNECT` 後執行）：
 
 ```
-u16 totalLen                     // == 211，否則：
+u16 totalLen                     // == 211（= 0xD3），否則：
     > 211 → CxxThrowException(_TI3_AVCPatchException__)      // 需要更新（PATCH）
     < 211 → CxxThrowException(_TI3_AVCTerminateException__)  // 終止
 u16 bodyLen                      // == 199
 u8[bodyLen] body                 // 199 bytes
-u32 sendSeed                     // @ 4 + bodyLen = 203  → *(this + 120)
-u32 recvSeed                     // @ 8 + bodyLen = 207  → *(this + 124)
+u32 clientSendSeed               // @ 4 + bodyLen = 203  → CClientSocket+120（送 state）
+u32 clientRecvSeed               // @ 8 + bodyLen = 207  → CClientSocket+124（收 state）
 ```
 
 > 解讀：這是**登入/版本檢查握手**。長度必須等於 211 是這支 handler 的契約；兩個例外類別的存在意味著
 > 「版本不符 → 走更新流程」。`body` 的內容語意仍為 **UNKNOWN**（§6 待辦 1）。
 >
-> 🟡 **HYPOTHESIS（未證實）**：`sub_43A410` 是**接收**路徑（`FD_CONNECT` → 讀 211 bytes），因此推論
-> **由伺服器先送這 211 bytes**。若成立，重寫版 client 必須等握手才能送出任何封包——可用擷取一秒確認。
+> ✅ **已證實：伺服器先送**。`sub_43A410` 由 `FD_CONNECT` 觸發，函式內以 `recv()` **兩段式**讀取
+> （先 2 bytes 長度，再讀到 `總長 == u16@0`），所以它不可能是 client 的招呼封包——client 在收到這 211 bytes
+> 之前不會送任何東西。重寫版 client 必須等握手；重寫版**伺服器必須先送握手**。
+>
+> 欄位順序（`.lst 0043A744–0043A774`）：`u32 @ 4+bodyLen` → `CClientSocket+120`（**送** state）、
+> `u32 @ 8+bodyLen` → `+124`（**收** state），兩者皆原樣寫入（無 `not`、無轉換）。
 
 ## 3. 加密（cipher）✅
 
@@ -75,11 +79,28 @@ state = state * 214013 + 2531011;      // mod 2^32
 |---|---|---|
 | 送／收狀態 | `CClientSocket + 120`（送）、`+ 124`（收）| `sub_43AD50`（送）、`sub_43AFA0`（收：`*((_BYTE*)this + 124)` 取 key）|
 | 種子來源 | 上述握手的兩個 `u32` | `sub_43A410` |
-| 標頭 | `0xD3 ^ HIWORD(state)`，取「推進前」的狀態 | `sub_4A2030`（先寫標頭再推進）|
+| 標頭 | **兩個方向不同**（見下）| `.lst 0043AD75`、`.lst 0043AFF9` |
 | 推進時機 | **每個封包一次**（不是每個 byte）| `sub_4A2030`、`sub_4A1B90` 呼叫端 |
 
 > 驗證自檢：因為標頭由狀態推導，**用錯種子會立刻在標頭出現不符**，不會靜默產生看似合理的亂碼。
 > 實作把這點變成硬檢查（`SessionDeframer.headerOk`、`decode` 的 exit code）。
+
+### 3.1 ⚠️ 兩個方向的標頭常數不同（實測兩處）
+
+```
+client → server : header = 0x00D3 ^ HIWORD(sendState)
+server → client : header = 0xFF2C ^ HIWORD(recvState)      // 0xFF2C = ~0x00D3
+```
+
+- **送**：client 只有一條送出路徑（`sub_43AD50`，login/選角/遊戲全走它）。`.lst 0043AD75` 將 `0D3h`
+  推入 `sub_4A2030`；`.lst 004A20F7–004A2113` 計算 `HIWORD(state) ^ 0xD3` 並存成封包第一個 word。
+- **收**：`.lst 0043AFF9`（`sub_43AFA0`）要求 `header ^ HIWORD(recvState) == 0FF2Ch`，不符就
+  `sub_43AC20` → `AVCDisconnectException`（斷線）。Hex-Rays 把這個比較顯示成 `!= -212`
+  （0xFF2C 的 signed 16-bit 值），是容易誤讀的地方。`sub_43AFA0` 另外要求 `bodyLen <= 0x8000`。
+
+0xFF2C 正好是 `~0xD3`，看起來是「同一常數在某一側被反相」。**原因不重要**：client 的檢查就是契約，
+所以**伺服器必須送 0xFF2C 系列、且必須接受 0xD3 系列**。搞錯的症狀是「client 靜默斷線」。
+> ✅ 這條已用「兩處獨立位址 + 兩處皆為唯一呼叫點」確認；`0D3h` 與 `0FF2Ch` 在整個 `.lst` 中各只出現一次。
 
 ## 4. 封包分派（dispatch）✅ 已定位
 
@@ -110,26 +131,38 @@ switch (opcode) {
 
 ## 6. 待辦（依重要性）
 
-1. **211-byte 握手的 `body`（199 bytes）要放什麼**：擷取原 client 對真實伺服器的請求，或反推
-   `sub_418610` 呼叫端對 `body` 的期待。🟡 待辦 1 之前先確認方向（§2 HYPOTHESIS）。
+1. **211-byte 握手的 `body`（199 bytes）要放什麼**：client 端只把它交給 `sub_418610` 存成物件，語意未定。
+   已知的是「長度必須是 199、總長必須是 211」，而**我們（伺服器）先送**，所以可以用 `capture --handshake-body`
+   餵不同內容、觀察原 client 的反應——這是目前最快的解法。
 2. opcode 語意：`0x07`（斷線/例外路徑）、`0x08`（送出路徑）、`0x0A–0x14`（`sub_55A900`）各自讀取的欄位，
    以及 `dword_5C212C` 指向的萬用 handler 表。
 3. 由分派與擷取反推 opcode 常數表 → 產生 `protocol/schema/`。
 4. 反推字串編碼規則並補測試向量。
-5. 🟡 未解的驗證項：`sub_43AFA0` 中的 `-212` 標頭字檢查（`header - 212` / 與 `0xD3` 的關係）語意。
+5. `sub_43AFA0` 的 `-212` 檢查已解（= §3.1 的接收端標頭檢查），不再列為未知。
 
 ## 7. 擷取工作流（ADR-004）
 
 ```bash
-# 1. 接住原 client（預設 session 模式：等 211-byte 握手取種子，之後即時解密）
+# 1. 接住原 client。session 模式會「先送」211-byte 握手（種子由我們選、寫進 trace），
+#    再即時解密 client 回送的封包。
 node server/src/cli.ts capture --port 8484 --out traces/login.jsonl
 
-# 2. 把 JSONL 重播成可讀封包（種子可自動取自握手）
+#    想要可重現的實驗就固定種子；想試握手 body 內容就餵它（body 語意仍未知，看 client 反應）
+node server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
+     --handshake-body 0001020304... --out traces/login.jsonl
+
+#    若手上是「client 先送握手」的流量（例如重播），改用 --handshake off
+node server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl
+
+# 2. 把 JSONL 重播成可讀封包（種子由 trace 內的握手自動決定；沒有握手時手動給）
 node server/src/cli.ts decode traces/login.jsonl
-node server/src/cli.ts decode traces/login.jsonl --recv-seed 0x11223344 --json
+node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 ```
 
 - trace 的 `hex` 一律是**線上的原始 bytes**（證據），`plainHex` 才是解密的本文。
 - 任何無法解碼的 chunk 只會被標記一次，之後該連線改為 raw dump——外部探測（如 sandbox 的 HTTP probe）
   不會汙染 trace。
 - `decode` 會逐包檢查標頭並以非零 exit code 回報不符：**用錯種子的假成功會被抓出來**。
+  （此機制已抓到一個真實 bug：早期版本用同一個種子解兩個方向，client 的封包會解成「看似合理的亂碼」。）
+- 方向與種子的對應：**c2s 用 client 的送 state、s2c 用 client 的收 state**；握手由其**接收方**取得
+  `sendSeed`（送）與 `recvSeed`（收）。伺服器先送握手時，「接收方」就是 client。
