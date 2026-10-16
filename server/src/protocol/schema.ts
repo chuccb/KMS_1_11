@@ -371,16 +371,22 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: 0x23,
+    opcode: field.CLIENT_FIELD_OPCODE.userRequest,
     direction: "c2s",
     stage: "field",
-    name: "whisper",
-    status: "partial",
-    evidence: "FINDINGS 4.13 (/귓속말, /헉추적; sub_4717D0, also sent by sub_472910)",
-    codecs: [],
+    name: "userRequest",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.31 (sub_4717D0: the kind byte is `(hasText + 1) | 4` at .text:00471859, the name is written before the text)",
+    codecs: ["readClientUserRequest", "encodeClientUserRequest", "describeClientUserRequest"],
     fields: [
-      { name: "target", type: STRING },
-      { name: "text", type: STRING },
+      {
+        name: "kind",
+        type: "u8",
+        note: "0x05 find / 0x06 whisper / 0x22 the client's own balloon request (0x20 | 2)",
+      },
+      { name: "name", type: STRING, note: "the target by name - the packet carries no character id" },
+      { name: "text", type: STRING, note: "only the kinds with a body carry it" },
     ],
   },
   {
@@ -456,16 +462,33 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "userMessage",
     status: "partial",
-    evidence: "FINDINGS 4.26 (CField 0x1A -> sub_472910; the chat case is 0x12 of the sub-op switch)",
-    codecs: ["readUserChat", "encodeUserChat", "describeUserChat"],
+    evidence:
+      "FINDINGS 4.26 / 4.31 (CField 0x1A -> sub_472910; its four jump-table cases are 0x09, 0x0A, 0x12, 0x22)",
+    codecs: [
+      "readUserChat",
+      "encodeUserChat",
+      "describeUserChat",
+      "readUserFindAnswer",
+      "encodeUserFindAnswer",
+      "describeUserFindAnswer",
+      "readUserWhisperAnswer",
+      "encodeUserWhisperAnswer",
+      "describeUserWhisperAnswer",
+    ],
     fields: [
       {
         name: "subOp",
         type: "u8",
-        note: "only 0x12 (chat) is located; 0x09/0x0A/0x22 are whisper plumbing, no codec here",
+        note:
+          "0x12 chat (also the delivered whisper's line) / 0x09 find answer / 0x0A whisper answer / " +
+          "0x22 whisper refusal (shape known, no client input sets it - no codec)",
       },
       { name: "name", type: STRING, note: "the speaker - there is no character id in this packet" },
-      { name: "text", type: STRING },
+      {
+        name: "text",
+        type: STRING,
+        note: "0x12 only; 0x09 has a u32 mapId instead, 0x0A a u8 flag, 0x22 nothing else",
+      },
     ],
   },
   {

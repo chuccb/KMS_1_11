@@ -24,8 +24,12 @@ import {
   encodeClientChat,
   encodeClientInteract,
   encodeClientUserMove,
+  encodeClientUserRequest,
+  USER_REQUEST_KIND,
   readSetField,
   readUserChat,
+  readUserFindAnswer,
+  readUserWhisperAnswer,
   readUserEffect,
   readUserEnterField,
   readUserMove,
@@ -2208,4 +2212,155 @@ test("the world comes back after a restart: the save file is the accounts", { ti
     log.some((line) => line.includes("ignoring 1 --account entr(ies)")),
     `the seed losing is worth a line:\n${log.join("\n")}`,
   );
+});
+
+/**
+ * Whisper and find (FINDINGS 4.31): the client's `0x23` names **one** user, and the answers are two
+ * of `0x1A`'s four sub-ops.
+ *
+ * What makes this different from every other field packet is the target: it is looked up by *name*
+ * (the packet has no character id), and the player found may be in another map - this is the first
+ * packet in this server that leaves the field it was sent in. The receiver's line is the *chat*
+ * packet (0x1A sub-op 0x12, same name + text), while the sender gets 0x1A sub-op 0x0A, which carries
+ * the target's name and one flag and nothing else: their client prints "name<< text" from the text it
+ * kept locally (`sub_4717D0` stores it at `CField+28`).
+ */
+test("whisper and find reach a player by name, across maps, and answer the asker", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // A third player in the *other* map: still reachable, because a whisper is about a character, not
+  // about a field.
+  const guest = await FakeClient.connect(gameInfo.port);
+  t.after(() => guest.close());
+  const record = characterDataOf(
+    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
+    startingCharacterItems(),
+  );
+  guest.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
+  });
+  await guest.takeOpcode(FIELD_OPCODE.setField);
+
+  // Hero whispers Guest, who is in the other map. The text is CP949 bytes, exactly as typed.
+  const sendWhisper = (name: string, text: string) =>
+    encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name, text: encodeCp949(text) }).slice(1);
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.userRequest,
+    body: sendWhisper("guest", "안녕"),
+  });
+  const guestSaw = await guest.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(
+    [
+      readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).name,
+      toHex(readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).text),
+    ],
+    ["Hero", toHex(encodeCp949("안녕"))],
+    "the receiver's line is the chat packet, with the sender's own name in front of it",
+  );
+  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(
+    readUserWhisperAnswer(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
+    { name: "Guest", delivered: true },
+    "and the asker gets the target's **stored** name - typed as \"guest\", answered as \"Guest\"",
+  );
+  assert.equal(
+    (await alt.drainOpcodes()).filter((opcode) => opcode === FIELD_OPCODE.userMessage).length,
+    0,
+    "the player in the sender's own map hears nothing: this one is addressed",
+  );
+
+  // A name nobody is playing: the same field packet, flag 0 - the client prints "'name'님을 찾지
+  // 못했습니다" for it, which is the only failure this answer has.
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.userRequest,
+    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name: "Nobody", text: Uint8Array.from([0x68]) }).slice(1),
+  });
+  const notFound = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(
+    readUserWhisperAnswer(new PacketReader(notFound[notFound.length - 1]!, 1)),
+    { name: "Nobody", delivered: false },
+  );
+
+  // A find is the other kind: no text, and the answer names the *map*, which the client turns into
+  // "street:map" out of its own data. Alt is online, so the id is real...
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.userRequest,
+    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Alt" }).slice(1),
+  });
+  const whereIsAlt = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(readUserFindAnswer(new PacketReader(whereIsAlt[whereIsAlt.length - 1]!, 1)), {
+    name: "Alt",
+    mapId: 1000000,
+  });
+  // ... and an offline name is `0xFFFFFFFF`, the id the client never loads.
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.userRequest,
+    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Nobody" }).slice(1),
+  });
+  const nowhere = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(readUserFindAnswer(new PacketReader(nowhere[nowhere.length - 1]!, 1)), {
+    name: "Nobody",
+    mapId: -1,
+  });
+
+  // The client's balloon request (`0x20 | 2`) is read and logged, and answered with nothing: which
+  // packet draws a balloon is not located (FINDINGS 4.31, §6).
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.userRequest,
+    body: encodeClientUserRequest({
+      kind: USER_REQUEST_KIND.balloon,
+      name: "Hero",
+      text: Uint8Array.from([0x68, 0x69]),
+    }).slice(1),
+  });
+  await eventually(() => log.some((line) => line.includes('0x23 balloon "Hero": hi')));
+  assert.equal(
+    (await hero.drainOpcodes()).filter((opcode) => opcode === FIELD_OPCODE.userMessage).length,
+    0,
+    "a balloon request is not answered",
+  );
+
+  assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
+  assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Guest": 안녕')), log.join("\n"));
+  assert.ok(log.some((line) => line.includes('find "Alt" -> "Alt" in map 1000000')), log.join("\n"));
+  assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Nobody": no such player')), log.join("\n"));
 });

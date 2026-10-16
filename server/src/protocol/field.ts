@@ -123,16 +123,21 @@ export const FIELD_OPCODE = {
   requestRelease: 0x19,
   /**
    * `CField` 0x1A (`sub_472910`, dispatched as case 26 of `sub_472770`): a message **about one of the
-   * field's users**, shown to whoever receives it. The payload starts with a `u8` sub-op, and the
-   * four the jump table has cases for are:
+   * field's users**, shown to whoever receives it. The payload starts with a `u8` sub-op (`v8 =
+   * (char)ArgList - 9` switches on it), and the four the jump table has cases for are:
    *
-   *   0x09  whisper result   `string name` + `u32 characterId`  -> "'name' is not online" / sent
-   *   0x0A  whisper received `string name` + `u8` + `string text` -> "name<< text"
-   *   0x12  field chat       `string name` + `string text`       -> "name>> text"
-   *   0x22  whisper refusal  `string name`                        -> "'name' refuses whispers"
+   *   0x09  find answer      `string name` + `u32 mapId`     -> "'name' is at 'street:map'"
+   *   0x0A  whisper answer   `string name` + `u8 flag`       -> "name<< <the text you sent>"
+   *   0x12  field chat       `string name` + `string text`   -> "name>> text"
+   *   0x22  whisper refusal  `string name`                   -> "'name' refuses whispers"
    *
-   * `0x12` is the one a shared field needs, and the only one implemented here (`UserChat` below);
-   * the other three are whisper plumbing, and this server has no whisper system to hang them on.
+   * Three of those four are *answers* (`0x09` counts; `0xFFFFFFFF` is the "not found" the same handler
+   * renders as "'name'님을 찾지 못했습니다"), and `0x0A` carries the flag only: the text it
+   * shows is the sender's **own last-sent whisper**, kept client-side at `CField+28` by the send
+   * function (`sub_4717D0`), so a server never repeats it on the wire. `0x12` is the only one that
+   * carries a body worth relaying - and it is *both* the chat line and the delivered whisper, which
+   * is why the receiver's client cannot tell the two apart (FINDINGS 4.31).
+   *
    * (`0x1A`'s sub-ops are *not* the CWvsApp-level opcodes of §4.10: that table's `0x12` is the
    * popularity system. They are simply the numbers this packet happens to use.)
    */
@@ -387,6 +392,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const move = readClientUserMove(new PacketReader(plain, 1));
       return `0x0e move: stageByte=${move.stageByte} elements=${move.path.elements.length}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.userRequest) {
+      return describeClientUserRequest(readClientUserRequest(new PacketReader(plain, 1)));
+    }
     if (opcode === CLIENT_FIELD_OPCODE.interact) {
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
@@ -479,10 +487,21 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode === FIELD_OPCODE.userMessage) {
     try {
+      // Which of the four `sub_472910` bodies is in there is the sub-op, and it is also the first
+      // byte any of the readers would read - so the peek and the reader always agree.
+      const subOp = plain[1] ?? -1;
+      if (subOp === USER_MESSAGE_FIND_ANSWER) {
+        return `${name}: ${describeUserFindAnswer(readUserFindAnswer(new PacketReader(plain, 1)))}`;
+      }
+      if (subOp === USER_MESSAGE_WHISPER_ANSWER) {
+        return `${name}: ${describeUserWhisperAnswer(
+          readUserWhisperAnswer(new PacketReader(plain, 1)),
+        )}`;
+      }
       return `${name}: ${describeUserChat(readUserChat(new PacketReader(plain, 1)))}`;
     } catch (error) {
-      // Not `truncated`: the usual reason is a sub-op that is not chat, and saying which is better
-      // than pretending the packet ran out.
+      // Not `truncated`: the usual reason is a sub-op with no codec (0x22, the refusal), and saying
+      // which is better than pretending the packet ran out.
       return `${name}: (unreadable: ${(error as Error).message})`;
     }
   }
@@ -743,6 +762,17 @@ export const CLIENT_FIELD_OPCODE = {
    * "attack" record.
    */
   mobAttack: 0x2c,
+  /**
+   * The client's request **about one user** (`sub_4717D0`), the packet `/귓속말` and `/헉추적` build:
+   * `[0x23][u8 kind][string name][string text]` - see `ClientUserRequest` below for the kind byte and
+   * which of the two strings a kind carries.
+   *
+   * It shares its body's first byte with nothing else: `0x22` (the GM broadcast) and `0x25`/`0x26`
+   * (trade and party) are *different opcodes* built by the sibling senders `sub_470E10` / `sub_471A40`
+   * / `sub_471E90` - `0x23` is only ever this request, and the same byte inside it happens to be a
+   * kind (`0x22` = the client's balloon request, FINDINGS 4.31).
+   */
+  userRequest: 0x23,
 } as const;
 
 /** `0x0E` as it arrives from the client. */
@@ -1094,6 +1124,165 @@ export function encodeClientChat(chat: ClientChat): Uint8Array {
 
 export function describeClientChat(chat: ClientChat): string {
   return `0x12 chat: ${decodeCp949(chat.text)}`;
+}
+
+/**
+ * The sub-op of `0x1A` that carries the answer to a **find** (`/헉추적 <name>`): the jump table case
+ * of `sub_472910` that reads `string name` + `u32 mapId`, loads `Map/Map/%09d.img` from the id with
+ * `sub_4694F0` and prints "'name'님의 현재 위치는 'street:map'입니다".
+ *
+ * `0xFFFFFFFF` is "not found" - the same handler prints "'name'님을 찾지 못했습니다" for it, and the
+ * second field is an id the *client* turns into a place name out of its own data. That is why there
+ * is no map name on the wire (FINDINGS 4.31).
+ */
+export const USER_MESSAGE_FIND_ANSWER = 0x09;
+
+/** A find answer as it goes out: who was asked about, and where they are (`mapId` = -1 when nobody). */
+export interface UserFindAnswer {
+  /** The name to print: the typed one when nobody was found, the character's own name when somebody was. */
+  name: string;
+  /** `0xFFFFFFFF` = not found; anything else is a `Map/Map/%09d.img` id. */
+  mapId: number;
+}
+
+export function readUserFindAnswer(reader: PacketReader): UserFindAnswer {
+  const subOp = reader.readByte();
+  if (subOp !== USER_MESSAGE_FIND_ANSWER) {
+    throw new RangeError(
+      `0x1a sub-op 0x${subOp.toString(16)} is not a find answer (0x${USER_MESSAGE_FIND_ANSWER.toString(16)})`,
+    );
+  }
+  return { name: reader.readAsciiString(), mapId: reader.readU32() | 0 };
+}
+
+export function encodeUserFindAnswer(answer: UserFindAnswer): Uint8Array {
+  const writer = new PacketWriter(answer.name.length + 8);
+  writer.writeByte(FIELD_OPCODE.userMessage);
+  writer.writeByte(USER_MESSAGE_FIND_ANSWER);
+  writer.writeAsciiString(answer.name);
+  writer.writeU32(answer.mapId >>> 0);
+  return writer.toBytes();
+}
+
+export function describeUserFindAnswer(answer: UserFindAnswer): string {
+  return answer.mapId === -1
+    ? `find answer "${answer.name}": not found`
+    : `find answer "${answer.name}": map ${answer.mapId}`;
+}
+
+/**
+ * The sub-op of `0x1A` that answers a **whisper**: the `sub_472910` case that reads `string name` +
+ * `u8 flag` and shows either "'name'님께 귓속말을 전달했습니다." (delivered) or
+ * "'name'님을 찾지 못했습니다" (flag 0).
+ *
+ * The text is **not** in this packet: the client kept the one it sent (`CField+28`, written by
+ * `sub_4717D0`) and renders "name<< text" from it, which is what makes this an echo of the sender's
+ * own line rather than a message (FINDINGS 4.31).
+ */
+export const USER_MESSAGE_WHISPER_ANSWER = 0x0a;
+
+/** A whisper's answer: the target's name, and whether it was delivered. */
+export interface UserWhisperAnswer {
+  name: string;
+  /** `false` = "not found"; the client has no second failure message for this packet. */
+  delivered: boolean;
+}
+
+export function readUserWhisperAnswer(reader: PacketReader): UserWhisperAnswer {
+  const subOp = reader.readByte();
+  if (subOp !== USER_MESSAGE_WHISPER_ANSWER) {
+    throw new RangeError(
+      `0x1a sub-op 0x${subOp.toString(16)} is not a whisper answer (0x${USER_MESSAGE_WHISPER_ANSWER.toString(16)})`,
+    );
+  }
+  return { name: reader.readAsciiString(), delivered: reader.readByte() !== 0 };
+}
+
+export function encodeUserWhisperAnswer(answer: UserWhisperAnswer): Uint8Array {
+  const writer = new PacketWriter(answer.name.length + 8);
+  writer.writeByte(FIELD_OPCODE.userMessage);
+  writer.writeByte(USER_MESSAGE_WHISPER_ANSWER);
+  writer.writeAsciiString(answer.name);
+  // Only zero-ness is read (`if ((_BYTE)this_1 != 0)`), so one value means "delivered" and no other
+  // value can mean anything - the 2003 server's own choice of non-zero is not in the client.
+  writer.writeByte(answer.delivered ? 1 : 0);
+  return writer.toBytes();
+}
+
+export function describeUserWhisperAnswer(answer: UserWhisperAnswer): string {
+  return `whisper answer "${answer.name}": ${answer.delivered ? "delivered" : "not found"}`;
+}
+
+/**
+ * `0x23`: the client's **request about one user** (`sub_4717D0`), the packet both `/귓속말` and
+ * `/헉추적` send.
+ *
+ *   u8  kind   0x05 find / 0x06 whisper / 0x22 balloon (`0x04 | hasText + 1`, `0x20 | 2`)
+ *   str name   the target, ASCII/CP949 bytes
+ *   str text   only for the kinds that carry one
+ *
+ * `sub_4717D0` writes the kind as `(v6 + 1) | 4` where `v6` is "the text is non-empty"
+ * (`.text:00471859`: `sete %bl` / `inc %ebx` / `or $0x4,%bl`), so the byte is `0x04 | 1` for a
+ * request without text and `0x04 | 2` with it. The two strings follow name-then-text: the function
+ * writes its 3rd argument first (`.text:004718ad`), and at the `/귓속말` call site that argument is
+ * the name (`sub_526370`'s first output, the one `sub_524A00` validates as a character name) while
+ * the 2nd is the text (FINDINGS 4.31).
+ */
+export interface ClientUserRequest {
+  /** `USER_REQUEST_KIND.*`. */
+  kind: number;
+  name: string;
+  /** The message, as typed (CP949 bytes). Absent for a request that carries none. */
+  text?: Uint8Array;
+}
+
+export const USER_REQUEST_KIND = {
+  /** `0x04 | 1`: "where is this user" - `/헉추적 <name>`. */
+  find: 0x05,
+  /** `0x04 | 2`: "say this to this user" - `/귓속말 <name> <text>`. */
+  whisper: 0x06,
+  /**
+   * `0x20 | 2`: the client's **balloon request** - what it sends when it cannot print a line it
+   * received. `sub_472910`'s `0x12` case hands the line to the chat window only while
+   * `dword_5C1F74 + 24` is non-zero (`.text:004729DC`), and otherwise builds a packet of its own:
+   * opcode `0x23` (`.text:00472A06`), this kind byte (`.text:00472A2C`), then the speaker's name and
+   * the text (`sub_430230` at `.text:00472A53` and `.text:00472A79`), and sends it to the game
+   * server (`.text:00472A89`).
+   *
+   * Nothing here answers it: which server packet draws a balloon (if any) is not located, so the
+   * request is decodable and the server logs it instead of guessing (FINDINGS 4.31, §6).
+   */
+  balloon: 0x22,
+} as const;
+
+/** `0x23` as it arrives from the client. */
+export function readClientUserRequest(reader: PacketReader): ClientUserRequest {
+  const kind = reader.readByte();
+  const name = reader.readAsciiString();
+  if (kind === USER_REQUEST_KIND.find) return { kind, name };
+  if (kind === USER_REQUEST_KIND.whisper || kind === USER_REQUEST_KIND.balloon) {
+    return { kind, name, text: reader.readStringBytes() };
+  }
+  throw new RangeError(`0x23 kind 0x${kind.toString(16)} is not a user request (0x05 / 0x06 / 0x22)`);
+}
+
+export function encodeClientUserRequest(request: ClientUserRequest): Uint8Array {
+  const text = request.text;
+  const writer = new PacketWriter((text?.length ?? 0) + request.name.length + 4);
+  writer.writeByte(CLIENT_FIELD_OPCODE.userRequest);
+  writer.writeByte(request.kind);
+  writer.writeAsciiString(request.name);
+  if (text !== undefined) writer.writeStringBytes(text);
+  return writer.toBytes();
+}
+
+export function describeClientUserRequest(request: ClientUserRequest): string {
+  const text = request.text;
+  if (text === undefined) return `0x23 find "${request.name}"`;
+  const said = decodeCp949(text);
+  return request.kind === USER_REQUEST_KIND.balloon
+    ? `0x23 balloon "${request.name}": ${said}`
+    : `0x23 whisper "${request.name}": ${said}`;
 }
 
 /**

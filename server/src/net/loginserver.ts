@@ -37,21 +37,28 @@ import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
+  describeClientUserRequest,
   describeUserChat,
+  encodeUserChat,
+  encodeUserFindAnswer,
+  encodeUserWhisperAnswer,
   INTERACT_KIND_CURSOR,
   encodeFieldRequestRelease,
   encodeSetField,
-  encodeUserChat,
   encodeUserEffect,
   readClientAttack,
   readClientChat,
   readClientInteract,
   readClientUserMove,
+  readClientUserRequest,
   USER_EFFECT_LEVEL_UP,
+  USER_REQUEST_KIND,
   type ClientAttack,
   type ClientInteract,
+  type ClientUserRequest,
   type SetField,
 } from "../protocol/field.ts";
+import { decodeCp949 } from "../protocol/cp949.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -1470,6 +1477,12 @@ export class GameEntryServer {
           this.handleChat(session, event.plain);
           continue;
         }
+        // A message about **one** user, sent by name: a whisper, or a find (`/헉추적`). The only
+        // packet in the field stage that reaches a player on another map (see `handleUserRequest`).
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userRequest) {
+          this.handleUserRequest(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -1526,6 +1539,90 @@ export class GameEntryServer {
       `game: ${describeUserChat({ name: session.name, text })} in map ${session.instance.mapId}`,
     );
     session.instance.broadcast(encodeUserChat({ name: session.name, text }));
+  }
+
+  /**
+   * A request about one user by name - `0x23` (`sub_4717D0`): a whisper (`0x06`), a find
+   * (`0x05`), or the client's own balloon request (`0x22`, which nothing here answers).
+   *
+   * This is the **first** packet in this server that reaches a player who is not in the sender's
+   * map, so it is also the first one whose target is looked up by name: the client has no character
+   * ids to offer beyond its own, and the send function takes the name as typed. `sessionNamed` is
+   * that lookup, and it is a scan over the live sessions rather than a second index - the sessions
+   * map is already the one truth about who is online, and a name index would be one more thing to
+   * keep in step with it (FINDINGS 4.31, ADR-019).
+   *
+   *   find     -> `0x1A sub-op 0x09` (`string name` + `u32 mapId`, `0xFFFFFFFF` = not found)
+   *   whisper  -> `0x1A sub-op 0x0A` to the sender (`string name` + `u8`), and a `0x1A sub-op 0x12`
+   *               with the sender's name and the text to the receiver
+   *
+   * "Online" is the whole of the answer: a character with no session has no map to name and no
+   * client to deliver to, and the client's own messages for that case - "'name'님을 찾지 못했습니다"
+   * for both a find and a whisper - are exactly what those two answers render (ADR-019).
+   *
+   * The text is passed through as **bytes**, like chat: the server never reads it.
+   */
+  private handleUserRequest(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientUserRequest;
+    try {
+      request = readClientUserRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x23 unreadable: ${(error as Error).message}`);
+      return;
+    }
+    if (request.kind === USER_REQUEST_KIND.find) {
+      const target = this.sessionNamed(request.name);
+      if (target === undefined) {
+        this.options.log?.(`game: find "${request.name}": no such player`);
+        session.send(encodeUserFindAnswer({ name: request.name, mapId: -1 }));
+        return;
+      }
+      this.options.log?.(`game: find "${request.name}" -> "${target.name}" in map ${target.instance.mapId}`);
+      session.send(encodeUserFindAnswer({ name: target.name, mapId: target.instance.mapId }));
+      return;
+    }
+    if (request.kind === USER_REQUEST_KIND.balloon) {
+      // `USER_REQUEST_KIND.balloon`: the client could not print a line it received and asked the
+      // server to show it as a balloon. Which packet draws one is not located, so this is logged, not
+      // guessed - and the sender is told nothing, because a client that gets no answer here is
+      // exactly where it was before it asked (FINDINGS 4.31).
+      this.options.log?.(
+        `game: ${describeClientUserRequest(request)} - balloon requests are not implemented yet`,
+      );
+      return;
+    }
+    const text = request.text ?? new Uint8Array(0);
+    const target = this.sessionNamed(request.name);
+    if (target === undefined) {
+      this.options.log?.(`game: whisper "${session.name}" -> "${request.name}": no such player`);
+      session.send(encodeUserWhisperAnswer({ name: request.name, delivered: false }));
+      return;
+    }
+    this.options.log?.(
+      `game: whisper "${session.name}" -> "${target.name}": ${decodeCp949(text)}`,
+    );
+    // The receiver's client renders the same `%s>> %s` line as chat - the packet *is* the chat one -
+    // so a delivered whisper arrives with the sender's name in front of it. The sender's own echo
+    // (`0x0A`) carries no text: their client kept what it sent and prints "name<< text" from it.
+    target.send(encodeUserChat({ name: session.name, text }));
+    session.send(encodeUserWhisperAnswer({ name: target.name, delivered: true }));
+  }
+
+  /**
+   * The live session of the character with that name, if anyone is playing them.
+   *
+   * Names are unique server-wide and checked case-insensitively when a character is created
+   * (`nameTaken`), so a case-insensitive comparison here cannot pick the wrong player - and it is
+   * what lets a player whisper "hero" to "Hero" as the login server would have allowed them to
+   * create it. The answer always names the **stored** spelling, never the typed one, so what the
+   * other side sees is the character's real name.
+   */
+  private sessionNamed(name: string): FieldSession | undefined {
+    const wanted = name.toLowerCase();
+    for (const session of this.sessionsByCharacter.values()) {
+      if (session.name.toLowerCase() === wanted) return session;
+    }
+    return undefined;
   }
 
   /**

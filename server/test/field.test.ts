@@ -44,6 +44,18 @@ import {
   readUserEnterField,
   readUserMove,
   writeUserEnterField,
+  USER_MESSAGE_FIND_ANSWER,
+  USER_MESSAGE_WHISPER_ANSWER,
+  USER_REQUEST_KIND,
+  describeClientUserRequest,
+  describeUserFindAnswer,
+  describeUserWhisperAnswer,
+  encodeClientUserRequest,
+  encodeUserFindAnswer,
+  encodeUserWhisperAnswer,
+  readClientUserRequest,
+  readUserFindAnswer,
+  readUserWhisperAnswer,
   type UserEnterField,
 } from "../src/protocol/field.ts";
 import { PacketWriter } from "../src/protocol/packet.ts";
@@ -482,6 +494,100 @@ test("0x1a's other sub-ops are refused instead of read as chat", () => {
   assert.match(describeFieldPacket(refusal)!, /^0x1a CField\(user message\): \(unreadable: .*not chat/);
   // A chat packet that runs out mid-string is still an error, not a short line.
   assert.throws(() => readUserChat(new PacketReader(Uint8Array.from([0x1a, 0x12, 0x04, 0x00, 0x41]), 1)));
+});
+
+test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-before-text", () => {
+  // `sub_4717D0` writes `(v6 + 1) | 4` where v6 is "the text is non-empty" (`.text:00471859`), then
+  // its 3rd argument (the name at the `/귓속말` call site - the one `sub_524A00` validates) and
+  // finally its 2nd (the text).
+  assert.equal(CLIENT_FIELD_OPCODE.userRequest, 0x23);
+  assert.equal(USER_REQUEST_KIND.find, 0x05);
+  assert.equal(USER_REQUEST_KIND.whisper, 0x06);
+  assert.equal(USER_REQUEST_KIND.balloon, 0x22);
+
+  const find = encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Alt" });
+  assert.equal(toHex(find), "23" + "05" + "0300" + "416c74");
+  assert.deepEqual(readClientUserRequest(new PacketReader(find, 1)), {
+    kind: USER_REQUEST_KIND.find,
+    name: "Alt",
+  });
+  assert.equal(describeClientUserRequest(readClientUserRequest(new PacketReader(find, 1))), '0x23 find "Alt"');
+  assert.equal(describeClientFieldPacket(find), '0x23 find "Alt"');
+
+  const whisper = encodeClientUserRequest({
+    kind: USER_REQUEST_KIND.whisper,
+    name: "Alt",
+    text: encodeCp949("안녕"),
+  });
+  assert.equal(toHex(whisper), "23" + "06" + "0300" + "416c74" + "0400" + "bec8b3e7");
+  assert.deepEqual(readClientUserRequest(new PacketReader(whisper, 1)), {
+    kind: USER_REQUEST_KIND.whisper,
+    name: "Alt",
+    text: Uint8Array.from([0xbe, 0xc8, 0xb3, 0xe7]),
+  });
+  assert.equal(
+    describeClientUserRequest(readClientUserRequest(new PacketReader(whisper, 1))),
+    '0x23 whisper "Alt": 안녕',
+  );
+
+  // The client's own balloon request is the third kind (`0x20 | 2`), and it is read like a whisper -
+  // only the server's answer differs, and there is none yet (FINDINGS 4.31).
+  const balloon = encodeClientUserRequest({
+    kind: USER_REQUEST_KIND.balloon,
+    name: "Hero",
+    text: Uint8Array.from([0x68, 0x69]),
+  });
+  assert.equal(toHex(balloon), "23" + "22" + "0400" + "4865726f" + "0200" + "6869");
+  assert.equal(
+    describeClientUserRequest(readClientUserRequest(new PacketReader(balloon, 1))),
+    '0x23 balloon "Hero": hi',
+  );
+
+  // A kind nobody has a body for is refused, not half-read: 0x04 alone is the whisper family with
+  // neither bit set, i.e. a text-less whisper, which the client cannot build.
+  assert.throws(
+    () => readClientUserRequest(new PacketReader(Uint8Array.from([0x23, 0x04, 0x01, 0x00, 0x41]), 1)),
+    /0x23 kind 0x4 is not a user request/,
+  );
+});
+
+test("the two 0x1a answers: a map id for a find, one flag byte for a whisper", () => {
+  // `sub_472910` case 0x09: `string name` + `u32 mapId`; `0xFFFFFFFF` is the "-1" that makes the
+  // client print "'name'님을 찾지 못했습니다", anything else an id it loads `Map/Map/%09d.img` from.
+  assert.equal(USER_MESSAGE_FIND_ANSWER, 0x09);
+  const found = encodeUserFindAnswer({ name: "Alt", mapId: 2000000 });
+  assert.equal(toHex(found), "1a" + "09" + "0300" + "416c74" + "80841e00");
+  assert.deepEqual(readUserFindAnswer(new PacketReader(found, 1)), { name: "Alt", mapId: 2000000 });
+  assert.equal(describeUserFindAnswer(readUserFindAnswer(new PacketReader(found, 1))), 'find answer "Alt": map 2000000');
+  assert.equal(describeFieldPacket(found), '0x1a CField(user message): find answer "Alt": map 2000000');
+
+  const missing = encodeUserFindAnswer({ name: "Nobody", mapId: -1 });
+  assert.equal(toHex(missing), "1a" + "09" + "0600" + "4e6f626f6479" + "ffffffff");
+  assert.equal(
+    describeUserFindAnswer(readUserFindAnswer(new PacketReader(missing, 1))),
+    'find answer "Nobody": not found',
+  );
+
+  // `sub_472910` case 0x0A: `string name` + `u8 flag`. Only zero-ness is read, so the encoder's own
+  // choice of 1 for "delivered" is not part of the format - and there is no text in the packet: the
+  // sender's client prints "name<< text" from the text it kept locally.
+  assert.equal(USER_MESSAGE_WHISPER_ANSWER, 0x0a);
+  const delivered = encodeUserWhisperAnswer({ name: "Alt", delivered: true });
+  assert.equal(toHex(delivered), "1a" + "0a" + "0300" + "416c74" + "01");
+  assert.deepEqual(readUserWhisperAnswer(new PacketReader(delivered, 1)), { name: "Alt", delivered: true });
+  assert.equal(
+    describeFieldPacket(delivered),
+    '0x1a CField(user message): whisper answer "Alt": delivered',
+  );
+  const refused = readUserWhisperAnswer(
+    new PacketReader(encodeUserWhisperAnswer({ name: "Nope", delivered: false }), 1),
+  );
+  assert.equal(refused.delivered, false);
+  assert.equal(describeUserWhisperAnswer(refused), 'whisper answer "Nope": not found');
+
+  // Each reader refuses the other's sub-op, the way `readUserChat` refuses both.
+  assert.throws(() => readUserFindAnswer(new PacketReader(delivered, 1)), /is not a find answer/);
+  assert.throws(() => readUserWhisperAnswer(new PacketReader(found, 1)), /is not a whisper answer/);
 });
 
 test("the level-up effect (0x29) names a user, and one byte says which effect", () => {
