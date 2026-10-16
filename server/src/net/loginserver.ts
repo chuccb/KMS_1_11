@@ -37,6 +37,7 @@ import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
+  describeClientStatReport,
   describeClientUserRequest,
   describeUserChat,
   encodeUserChat,
@@ -50,6 +51,7 @@ import {
   readClientAttack,
   readClientChat,
   readClientInteract,
+  readClientStatReport,
   readClientUserMove,
   readClientUserRequest,
   USER_EFFECT_LEVEL_UP,
@@ -81,6 +83,7 @@ import {
   type QuestReply,
 } from "../protocol/quest.ts";
 import { awardExp } from "../game/exp.ts";
+import { applyVitalReport } from "../game/vitals.ts";
 import { DEFAULT_PING_MS, Heartbeat } from "./heartbeat.ts";
 import { OnlineAccounts, SeatKeeper, describeSessions } from "./online.ts";
 import { PacketReader } from "../protocol/packet.ts";
@@ -1034,6 +1037,40 @@ export class GameEntryServer {
   }
 
   /**
+   * The player's own HP/MP change (`0x1C`, FINDINGS 4.33) - the packet that makes "a monster hit me"
+   * visible, because the damage itself never travels:
+   *
+   *   `[0x1C][u32 flags][s16 hp delta][s16 mp delta][u8 flag]`
+   *
+   * The 2003 client runs the monster AI and rolls the damage it takes locally (`sub_511C60` ->
+   * `sub_4C8ED0` -> `sub_5114A0`), then reports the signed delta here - and its own character record
+   * is **not** written on that path: the record's HP is written by this server's `0x0D`
+   * (`sub_45E0D0`). So the answer to this packet *is* what moves the HP bar: apply, clamp, and send
+   * the diff back. The map's own regeneration rides the same packet with positive deltas
+   * (`sub_558950`).
+   *
+   * The value is a delta, so no absolute number has to be trusted - but the amount is still the
+   * client's arithmetic, and there is no server-side damage model to check it against (ADR-021).
+   * The rules that *are* the server's - the `[0, max]` clamp and "a dead character does not
+   * regenerate" - live in `game/vitals.ts`; the diff it returns is only sent when a field moved.
+   */
+  private handleStatReport(session: FieldSession, plain: Uint8Array): void {
+    try {
+      const report = readClientStatReport(new PacketReader(plain, 1));
+      const stats = session.character.stats;
+      const diff = applyVitalReport(stats, report);
+      if (Object.keys(diff).length > 0) session.send(encodeStatUpdate({ diff }));
+      this.options.log?.(
+        `game: "${session.name}" 0x1c stat report: ${describeClientStatReport(report)} - hp ` +
+          `${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}` +
+          (Object.keys(diff).length === 0 ? " (nothing changed)" : ""),
+      );
+    } catch (error) {
+      this.options.log?.(`game: 0x1C stat report unreadable: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * The player clicked a field object (`0x33`) - for an NPC, the click that opens its shop or starts
    * a conversation.
    *
@@ -1491,6 +1528,12 @@ export class GameEntryServer {
         // it) and relays it to the rest of the map as 0x22.
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userMove) {
           this.handleUserMove(session, event.plain);
+          continue;
+        }
+        // The player's own HP/MP, changing: a monster's hit or the map's regeneration, both rolled by
+        // the client and answered with the `0x0D` that moves the bar (see `handleStatReport`).
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.statReport) {
+          this.handleStatReport(session, event.plain);
           continue;
         }
         // A swing is the other packet this server acts on: it is what moves a mob's HP here.

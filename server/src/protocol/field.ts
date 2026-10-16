@@ -43,7 +43,7 @@ import {
   readLootNotice,
 } from "./drop.ts";
 import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
-import { STAT_OPCODE, describeStatUpdate, readStatUpdate } from "./stat.ts";
+import { STAT_OPCODE, describeStatUpdate, readStatUpdate, statDiffFlag } from "./stat.ts";
 // The NPC dialog (`0x47` server -> client, `0x15` back): `sub_4A58F0`, the third object of the
 // field's dispatch chain, next to the shop one.
 import {
@@ -392,6 +392,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const move = readClientUserMove(new PacketReader(plain, 1));
       return `0x0e move: stageByte=${move.stageByte} elements=${move.path.elements.length}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.statReport) {
+      return `0x1c stat report: ${describeClientStatReport(readClientStatReport(new PacketReader(plain, 1)))}`;
+    }
     if (opcode === CLIENT_FIELD_OPCODE.userRequest) {
       return describeClientUserRequest(readClientUserRequest(new PacketReader(plain, 1)));
     }
@@ -698,6 +701,31 @@ export const CLIENT_FIELD_OPCODE = {
    */
   userMove: 0x0e,
   /**
+   * The player's own HP/MP change, as the client reports it (`sub_55B870`):
+   *
+   *   `[0x1C][u32 flags][s16 hp delta][s16 mp delta][u8 flag]`
+   *
+   * This is the half of "a monster hit me" that travels: the 2003 client runs the monster AI itself
+   * and rolls the damage locally, but it does **not** write its own record with it - the record's HP
+   * is written by the server's `0x0D` (`sub_45E0D0`, see `protocol/stat.ts`), so the report and the
+   * server's answer are what actually move the HP bar (FINDINGS 4.33).
+   *
+   * Two senders exist, and they are the two ways a player's vitals change in this build:
+   *
+   *   `sub_5114A0`  damage: `sub_55B870(-damage, 0, 0)`, reached from the local user's per-frame
+   *                 overlap check against the mobs (`sub_511C60` -> `sub_4C8ED0`) and from the
+   *                 knockback path (`sub_542F10`, `CVecCtrlUser` slot 49). The same call plays the
+   *                 knockback, the hurt action and the damage number.
+   *   `sub_558950`  regeneration: the field's own tick (one second per 10000 ms, HP from item group
+   *                 `1000000` + 10, MP from `2000000` + 3), positive deltas on both fields.
+   *
+   * The `flags` word uses the **same bit meanings as the `0x0D` diff** (`0x400` = hp, `0x1000` =
+   * mp - `statDiffFlag`), which is why the two fields are read in that order; `sub_55B870` always
+   * writes both (`0x1400`). What differs from `0x0D` is the values: these are **signed deltas of the
+   * record**, not absolute numbers.
+   */
+  statReport: 0x1c,
+  /**
    * `CField::SendInteract` (`sub_472590`): `[0x0D][s32 kind][string name]`. The two click handlers
    * `sub_5124C0` / `sub_512510` send `kind = -1` and the name of the object under the cursor when
    * it is a portal (`[obj+0x14] != 999999999`), then play the "Portal" sound - so this is the
@@ -793,6 +821,85 @@ export function encodeClientUserMove(move: ClientUserMove): Uint8Array {
   writer.writeByte(move.stageByte & 0xff);
   writeMovePath(writer, move.path);
   return writer.toBytes();
+}
+
+/**
+ * A `0x1C` as the client sends it: the change of its own record, not the new value.
+ *
+ * `hpDelta`/`mpDelta` are `undefined` when the client did not set that flag bit - the writer always
+ * sets both, so a report from the real client has both, but the format allows either.
+ */
+export interface ClientStatReport {
+  /** HP change; negative is damage (`sub_5114A0` sends `-damage`). */
+  hpDelta?: number;
+  /** MP change; negative is MP spent, positive is the field's regeneration. */
+  mpDelta?: number;
+  /**
+   * The trailing byte, which the client writes unconditionally. Its role is not located: the damage
+   * path sends 0 and the regeneration path sends 1 when the field type is 36/37 and the recovery is
+   * item-driven (`sub_558950`, `sub_4BE790`). The server keeps it so the field is not lost.
+   */
+  flag: number;
+}
+
+/**
+ * The two fields of a `0x1C`, in the flag order the client writes them. The flags are the **`0x0D`
+ * diff's own bits**, taken from `statDiffFlag` rather than written out again, because that is what
+ * they are: `0x400` hp, `0x1000` mp.
+ */
+const STAT_REPORT_FIELDS = [
+  { name: "hpDelta", flag: statDiffFlag("hp") },
+  { name: "mpDelta", flag: statDiffFlag("mp") },
+] as const;
+
+const STAT_REPORT_KNOWN_FLAGS = STAT_REPORT_FIELDS.reduce((all, field) => all | field.flag, 0);
+
+/** Read one `0x1C` body (the reader must sit at `flags`, i.e. just past the opcode byte). */
+export function readClientStatReport(reader: PacketReader): ClientStatReport {
+  const flags = reader.readU32();
+  if ((flags & ~STAT_REPORT_KNOWN_FLAGS) !== 0) {
+    throw new RangeError(
+      `0x1c stat report flags 0x${flags.toString(16)}: only the hp (0x400) and mp (0x1000) fields are located`,
+    );
+  }
+  const report: ClientStatReport = { flag: 0 };
+  for (const field of STAT_REPORT_FIELDS) {
+    if ((flags & field.flag) === 0) continue;
+    // A delta is `s16`: -30 arrives as 0xFFE2.
+    const raw = reader.readU16();
+    report[field.name] = (raw << 16) >> 16;
+  }
+  report.flag = reader.readByte();
+  return report;
+}
+
+/** Write one `0x1C`. Refuses a delta that does not fit `s16` instead of wrapping it. */
+export function encodeClientStatReport(report: ClientStatReport): Uint8Array {
+  const writer = new PacketWriter(13);
+  writer.writeByte(CLIENT_FIELD_OPCODE.statReport);
+  let flags = 0;
+  for (const field of STAT_REPORT_FIELDS) {
+    if (report[field.name] !== undefined) flags = (flags | field.flag) >>> 0;
+  }
+  writer.writeU32(flags);
+  for (const field of STAT_REPORT_FIELDS) {
+    const value = report[field.name];
+    if (value === undefined) continue;
+    if (!Number.isInteger(value) || value < -0x8000 || value > 0x7fff) {
+      throw new RangeError(`0x1c stat report field "${field.name}" (s16) cannot hold ${value}`);
+    }
+    writer.writeU16(value & 0xffff);
+  }
+  writer.writeByte(report.flag & 0xff);
+  return writer.toBytes();
+}
+
+/** One line for the `decode` tool: `hpDelta=-30 mpDelta=0 flag=0`. */
+export function describeClientStatReport(report: ClientStatReport): string {
+  const parts = STAT_REPORT_FIELDS.filter((field) => report[field.name] !== undefined).map(
+    (field) => `${field.name}=${report[field.name]}`,
+  );
+  return `${parts.length === 0 ? "(no fields)" : parts.join(" ")} flag=${report.flag}`;
 }
 
 /**

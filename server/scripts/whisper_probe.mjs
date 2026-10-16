@@ -16,7 +16,9 @@
  * carry a real map id: after both players land in 1000000 the probe walks Alt through that map's
  * "east00" portal (0x0D), so the whisper really does cross a map boundary. It ends with the revive
  * dialog's request (0x0D `kind = 0`, FINDINGS 4.32), which turns 1000000's `info/returnMap` - the real
- * 1010000 - into the map the dead player is put back into.
+ * 1010000 - into the map the dead player is put back into. Before that it plays the client's own half
+ * of a monster's hit (c2s `0x1C`, FINDINGS 4.33: report the signed HP/MP delta, read the `0x0D` that
+ * comes back) so the revive has something to refill.
  */
 import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
@@ -24,6 +26,7 @@ import { encodeSessionPacket, SessionDeframer } from "../src/protocol/session.ts
 import { PacketReader, PacketWriter } from "../src/protocol/packet.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
+import { readStatUpdate } from "../src/protocol/stat.ts";
 
 const [loginPort, gamePort] = process.argv.slice(2).map(Number);
 
@@ -157,8 +160,12 @@ async function enterGame(user, password, wanted) {
 }
 
 /** `0x16` = opcode, mode, "carries data", three seed u32s, then the full CharacterData. */
+function characterOfSetField(packet) {
+  return readCharacterData(new PacketReader(packet, 15));
+}
+
 function mapIdOfSetField(packet) {
-  return readCharacterData(new PacketReader(packet, 15)).stats.mapId;
+  return characterOfSetField(packet).stats.mapId;
 }
 
 const failures = [];
@@ -241,21 +248,39 @@ while (Date.now() < deadline) {
 }
 expect(quiet.filter((opcode) => opcode === 0x1a).length === 0, "a balloon request is not answered");
 
+// --- a monster's hit: the client reports it (0x1C), the server answers with the diff (0x0D) -------
+// The damage itself never travels: the 2003 client runs the monster AI and rolls what it takes
+// (`sub_511C60` -> `sub_4C8ED0` -> `sub_5114A0`), and its own record is written *only* by the server's
+// `0x0D` - so these bytes (what `sub_55B870(-damage, 0, 0)` writes: opcode, `u32 0x1400`, the two
+// s16 deltas, the trailing byte) are the whole of "I got hit", and the answer is what moves the bar.
+// Hero is at full HP here, so -30 has to come back as 20/50, and one more hit has to land on 0.
+const report = (hpDelta, mpDelta) => {
+  const bytes = new PacketWriter(16);
+  bytes.writeByte(0x1c).writeU32(0x1400).writeU16(hpDelta & 0xffff).writeU16(mpDelta & 0xffff).writeByte(0);
+  hero.game.send(bytes.toBytes());
+};
+report(-30, 0);
+const hurtDiff = readStatUpdate(new PacketReader(await hero.game.take(0x0d), 1)).diff;
+expect(hurtDiff.hp === 20, `a reported -30 comes back as hp 20 (got ${hurtDiff.hp})`);
+report(-30, 0);
+const deadDiff = readStatUpdate(new PacketReader(await hero.game.take(0x0d), 1)).diff;
+expect(deadDiff.hp === 0, `a hit past zero lands on hp 0, never below (got ${deadDiff.hp})`);
+
 // --- the revive dialog's OK: 0x0D kind 0 -> the release byte, then a field (FINDINGS 4.32) --------
 // What `CUIRevive`'s OK button (and Enter) sends is `sub_472590(0, nullptr)`: kind 0, empty name - the
 // same packet a portal click uses, with the other kind. Hero is in map 1000000, whose real
 // `info/returnMap` is 1010000 (암허스트, a town), so with the real `Data.wz` behind the server this is
 // a real map change, into the map Alt walked into above.
 //
-// A revived character's HP travels in that same `0x16` (`serve.test.ts` starts one at 1/50 and reads
-// 50 back); these two clients are at full HP because *who damages a player* is still OPEN (4.32.6).
 const revive = new PacketWriter(32);
 revive.writeByte(0x0d).writeU32(0).writeAsciiString("");
 hero.game.send(revive.toBytes());
 await hero.game.take(0x19); // a revive owes the release byte exactly like a click does
-const revivedMap = mapIdOfSetField(await hero.game.take(0x16));
+const revived = characterOfSetField(await hero.game.take(0x16));
+const revivedMap = revived.stats.mapId;
 expect(revivedMap === 1010000, `the revive moved Hero into info/returnMap (1010000), got ${revivedMap}`);
 expect(revivedMap === altMap, "and that is the map the whisper crossed into");
+expect(revived.stats.hp === revived.stats.maxHp, `and refilled the HP the reports above took away (${revived.stats.hp}/${revived.stats.maxHp})`);
 
 // The town Alt is standing in hears Hero come back: the revive joined the new field, it was not just
 // a packet to the one person who died.

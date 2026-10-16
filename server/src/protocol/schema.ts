@@ -687,6 +687,26 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.CLIENT_FIELD_OPCODE.statReport,
+    direction: "c2s",
+    stage: "field",
+    name: "statReport",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.33 (sub_55B870: `push $0x1c` + `movl $0x1400` at .text:0055B88A/0055B8DD; the damage path sub_5114A0 and the map's own regeneration sub_558950 are its two callers)",
+    codecs: ["readClientStatReport", "encodeClientStatReport"],
+    fields: [
+      {
+        name: "flags",
+        type: "u32",
+        note: "the same bit meanings as the 0x0d diff (0x400 = hp, 0x1000 = mp); the client's writer always sets both (0x1400)",
+      },
+      { name: "hpDelta", type: "s16", note: "signed change of the record's hp; negative is damage (sub_5114A0 sends -damage)" },
+      { name: "mpDelta", type: "s16", note: "signed change of the record's mp; the map's regeneration sends +3 (sub_558950)" },
+      { name: "flag", type: "u8", note: "role not located: 0 from the damage path, 1 from an item-driven recovery" },
+    ],
+  },
+  {
     opcode: npc.NPC_OPCODE.enterField,
     direction: "s2c",
     stage: "field",

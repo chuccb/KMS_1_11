@@ -56,6 +56,9 @@ import {
   readClientUserRequest,
   readUserFindAnswer,
   readUserWhisperAnswer,
+  encodeClientStatReport,
+  readClientStatReport,
+  describeClientStatReport,
   type UserEnterField,
 } from "../src/protocol/field.ts";
 import { PacketWriter } from "../src/protocol/packet.ts";
@@ -610,4 +613,40 @@ test("the level-up effect (0x29) names a user, and one byte says which effect", 
   const unlocated = Uint8Array.from([0x29, 0x07, 0x00, 0x00, 0x00, 0x01, 0x2a, 0x00, 0x00, 0x00]);
   assert.throws(() => readUserEffect(new PacketReader(unlocated, 1)), /effect 1 is not the located one/);
   assert.match(describeFieldPacket(unlocated)!, /not the located one/);
+});
+
+test("the player's own HP/MP change (0x1c) travels as a signed delta of the record", () => {
+  // `sub_55B870` is the only writer, and the disassembly gives every width: `push $0x1c` +
+  // `call 0x4a1ea0` for the opcode, `movl $0x1400,(%ecx,%eax,1)` for the flags word, two `mov %cx`
+  // (s16) for the deltas, and `mov %cl` for the trailing byte (.text:0055B88A-0055B9E1).
+  assert.equal(CLIENT_FIELD_OPCODE.statReport, 0x1c);
+
+  // The damage path: `sub_5114A0` reports `-damage`, once per hit it rolled locally. The client
+  // always writes **both** fields (`sub_55B870(-damage, 0, 0)` -> flags 0x1400, mp delta 0), which
+  // is what these bytes are; the flags word follows the fields the caller gave, so a faithful
+  // replay of the client names both.
+  const damage = { hpDelta: -30, mpDelta: 0, flag: 0 };
+  const bytes = encodeClientStatReport(damage);
+  assert.equal(toHex(bytes), "1c" + "00140000" + "e2ff" + "0000" + "00");
+  assert.deepEqual(readClientStatReport(new PacketReader(bytes, 1)), damage);
+  assert.equal(describeClientStatReport(damage), "hpDelta=-30 mpDelta=0 flag=0");
+  assert.equal(describeClientFieldPacket(bytes), "0x1c stat report: hpDelta=-30 mpDelta=0 flag=0");
+
+  // The map's own regeneration: `sub_558950` sends both fields, positive, and its flag byte is 1
+  // when the recovery was item-driven (HP +10, MP +3 per 10000 ms).
+  const regen = { hpDelta: 10, mpDelta: 3, flag: 1 };
+  assert.equal(toHex(encodeClientStatReport(regen)), "1c" + "00140000" + "0a00" + "0300" + "01");
+  assert.deepEqual(readClientStatReport(new PacketReader(encodeClientStatReport(regen), 1)), regen);
+
+  // The format allows either field alone: the flags word decides what is on the wire.
+  const mpOnly = { mpDelta: -5, flag: 0 };
+  assert.equal(toHex(encodeClientStatReport(mpOnly)), "1c" + "00100000" + "fbff" + "00");
+  assert.deepEqual(readClientStatReport(new PacketReader(encodeClientStatReport(mpOnly), 1)), mpOnly);
+
+  // A delta is an s16: one that does not fit is refused instead of wrapped, and a flag bit nobody
+  // has located is refused instead of half-read (the same rule the 0x0d panel block gets).
+  assert.throws(() => encodeClientStatReport({ hpDelta: 0x8000, flag: 0 }), /cannot hold 32768/);
+  const unknownBit = Uint8Array.from([0x1c, 0x01, 0x14, 0x00, 0x00, 0x00]);
+  assert.throws(() => readClientStatReport(new PacketReader(unknownBit, 1)), /only the hp \(0x400\)/);
+  assert.match(describeClientFieldPacket(unknownBit)!, /only the hp \(0x400\)/);
 });

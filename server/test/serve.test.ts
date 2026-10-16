@@ -29,6 +29,7 @@ import {
   USER_EFFECT_LEVEL_UP,
   encodeClientAttack,
   encodeClientChat,
+  encodeClientStatReport,
   encodeClientInteract,
   encodeClientUserMove,
   encodeClientUserRequest,
@@ -1977,6 +1978,112 @@ test("a revive restores HP and re-enters a field: the return map if it can be re
     [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField],
     "the town sees them leave and arrive again",
   );
+});
+
+/**
+ * The other half of the death slice: what a monster's hit *is* on the wire (FINDINGS 4.33, ADR-021).
+ *
+ * The 2003 client runs the monster AI and rolls the damage it takes locally (`sub_511C60` ->
+ * `sub_4C8ED0` -> `sub_5114A0`), and it does **not** write its own record with it - the record's HP
+ * is written by the server's `0x0D` (`sub_45E0D0`). So the damage only shows up if this server takes
+ * the report (`0x1C`), applies it, and answers with the diff. The rules that are the server's own
+ * are the three this test walks through: the `[0, max]` clamp, "a dead character does not
+ * regenerate", and "a report that changes nothing costs no packet" - after which the revive path
+ * (ADR-020) closes the loop by refilling HP.
+ */
+test("a monster's damage lands because the client reports it: c2s 0x1C in, 0x0D out", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) =>
+      mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
+    handshake: { clientSendSeed: 0x0da0a0a0, clientRecvSeed: 0x0be1be1b },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 41;
+  stats.name = "PunchingBag";
+  stats.level = 1;
+  stats.hp = 50;
+  stats.maxHp = 50;
+  stats.mp = 5;
+  stats.maxMp = 30;
+
+  const client = await FakeClient.connect(gameInfo.port);
+  t.after(() => client.close());
+  client.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 41,
+      characterName: "PunchingBag",
+      character: characterDataOf(stats, startingCharacterItems()),
+    }),
+  });
+
+  // The entry burst (`0x16`, the mobs, the NPCs) first, so every drain below is about a report.
+  const entering = await client.drain();
+  assert.equal(entering[0]![0], FIELD_OPCODE.setField);
+
+  /** What `sub_55B870` puts on the wire, minus the opcode byte the client adds: both fields, always. */
+  const report = (hpDelta: number, mpDelta: number): void => {
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.statReport,
+      body: encodeClientStatReport({ hpDelta, mpDelta, flag: 0 }).slice(1),
+    });
+  };
+  /**
+   * The `0x0D`s among `packets`. A live field is never quiet - the mobs keep sending `0x33` - so the
+   * claim this test can make is "exactly these stat diffs arrived", not "only one packet arrived".
+   */
+  const statDiffs = (packets: Uint8Array[]): Record<string, number>[] =>
+    packets
+      .filter((bytes) => bytes[0] === STAT_OPCODE)
+      .map((bytes) => readStatUpdate(new PacketReader(bytes, 1)).diff);
+
+  // A monster's hit: the client rolled it, the server only hears "-30".
+  report(-30, 0);
+  assert.deepEqual(statDiffs(await client.drain()), [{ hp: 20 }]);
+  assert.ok(
+    log.some((line) =>
+      line.includes('"PunchingBag" 0x1c stat report: hpDelta=-30 mpDelta=0 flag=0 - hp 20/50'),
+    ),
+    log.join("\n"),
+  );
+
+  // One hit more than the HP that is left: it lands on 0 and never below it.
+  report(-30, 0);
+  assert.deepEqual(statDiffs(await client.drain()), [{ hp: 0 }]);
+
+  // The map's own regeneration tick while dead (`sub_558950`): MP lands, HP does not - the revive
+  // is what refills HP, so a corpse is not walked back up 10 HP at a time.
+  report(10, 3);
+  assert.deepEqual(statDiffs(await client.drain()), [{ mp: 8 }]);
+  report(10, 0);
+  assert.deepEqual(statDiffs(await client.drain()), [], "a report that changes nothing is not answered");
+
+  // The revive (ADR-020) closes the loop: HP is full again, and MP is left where it was - the
+  // original's death mechanic is HP, and nothing here invents an MP refill.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.interact,
+    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
+  });
+  const release = await client.take(1);
+  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease);
+  const revived = readSetField(new PacketReader((await client.take(1))[0]!, 1));
+  assert.equal(revived.character.stats.hp, 50, "the revive refills the HP that was reported away");
+  assert.equal(revived.character.stats.mp, 8, "and leaves the MP alone");
+  assert.equal(revived.character.stats.mapId, 1010000, "still the map info/returnMap names");
 });
 
 /**
