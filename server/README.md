@@ -104,7 +104,7 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 ```
 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
-（只領取 token 並記錄「哪個角色到了」，因為遊戲內封包還沒解），角色建立後外觀取自**帳號第一個角色**
+（領取交接的角色 id 後送 `0x16` 進地圖，見下），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
 client 的**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 都已完整解出**（FINDINGS §4.13.1／§4.13.1b）：`field.ts` 的
@@ -123,8 +123,13 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 就是把地圖 id 放進那個欄位——`src/wz/paths.ts` 的 `mapImagePath()` 是同一個檔名格式，
 `field.ts` 的 `SetField.character.mapId` 就是它。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段（只到「角色被交給遊戲伺服器」，
-遊戲伺服器只記錄誰到了，不會送 0x16 進地圖）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
+`serve --game-port` 的遊戲伺服器現在會**把角色送進地圖**：領到 `0x04` 的角色 id 之後送
+`0x16`（`u8 mode, u8 full, u32 亂數種子 ×3, CharacterData`），地圖由 `--map`（預設 `1000000`）決定，
+客戶端接著回報的移動（`0x0E`）與攻擊（`0x0F`）都會被 `decode` 的解讀器寫進日誌
+（FINDINGS §4.11.2b；`test/serve.test.ts` 用假 client 逐欄驗證）。
+
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物／掉落／技能**（進地圖後只有自己與場地；
+`0x2F` 還缺欄位，見 FINDINGS §6 第 5 項）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
 client 接受；`chardata.ts` 已經能寫完整道具區塊，缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，
 見 FINDINGS §4.8 的註記）。
 

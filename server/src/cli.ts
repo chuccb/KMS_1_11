@@ -21,7 +21,13 @@ import {
   type CaptureServerOptions,
 } from "./net/capture.ts";
 import { decodeTrace, formatDecoded, type TraceRecord } from "./net/decode.ts";
-import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "./net/loginserver.ts";
+import {
+  DEFAULT_MAP_ID,
+  GameEntryServer,
+  HandoffRegistry,
+  LoginServer,
+  type AccountRecord,
+} from "./net/loginserver.ts";
 
 const USAGE = `kms111-rebuild
 
@@ -32,7 +38,7 @@ usage:
   schema [--json]                 the protocol catalogue: every packet we can decode, with the
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
-        [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>]
+        [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
         [--seed <n>] [--handshake-body <hex>] [--quiet]
 
 notes:
@@ -59,9 +65,11 @@ notes:
   211-byte handshake, answers 0x01 with the world list, 0x02 with up to three character slots and
   0x03 with the game server address plus the character id; 0x06/0x04 handle name checks, 0x05 creates a
   character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
-  them) and created characters are stat-only, because the CharacterData item block is not decoded
-  yet. With --game-port it also opens the game-server listener, which claims the handoff and then
-  holds the connection: the in-game packets (0x15-0x52) are not decoded yet, so nothing is invented.
+  them) and created characters are stat-only; with --game-port it also opens the game-server
+  listener, which claims the handoff and then sends 0x16, moving the client into --map (default
+  1000000, a map that exists in Data.wz). The map id travels inside the CharacterData of 0x16
+  (FINDINGS 4.11.2b), which is why the server can pick a map at all. Nothing else is served yet:
+  mobs, skills and drops are still unknown (FINDINGS 6).
 `;
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
@@ -184,12 +192,17 @@ async function runServe(rest: string[]): Promise<number> {
   const args = parseArgs(rest);
   const port = Number(args.port ?? 8484);
   const gamePort = args["game-port"] === undefined ? undefined : Number(args["game-port"]);
+  const mapId = args.map === undefined ? DEFAULT_MAP_ID : Number(args.map);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
     return 1;
   }
   if (gamePort !== undefined && (!Number.isInteger(gamePort) || gamePort < 0 || gamePort > 65535)) {
     process.stderr.write(`invalid --game-port: ${String(args["game-port"])}\n`);
+    return 1;
+  }
+  if (!Number.isInteger(mapId) || mapId < 0) {
+    process.stderr.write(`invalid --map: ${String(args.map)} (a map id from Data.wz, e.g. 1000000)\n`);
     return 1;
   }
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
@@ -215,9 +228,14 @@ async function runServe(rest: string[]): Promise<number> {
   });
   let game: GameEntryServer | undefined;
   if (gamePort !== undefined) {
-    game = new GameEntryServer({ handoffs, ...(handshake ? { handshake } : {}), ...(log ? { log } : {}) });
+    game = new GameEntryServer({
+      handoffs,
+      mapId,
+      ...(handshake ? { handshake } : {}),
+      ...(log ? { log } : {}),
+    });
     const info = await game.listen(gamePort, host);
-    log?.(`game entry (stub) listening on ${info.host}:${info.port}`);
+    log?.(`game entry listening on ${info.host}:${info.port} (claims the handoff, then 0x16 into map ${mapId})`);
   }
   const info = await login.listen(port, host);
   process.stdout.write(
@@ -226,7 +244,7 @@ async function runServe(rest: string[]): Promise<number> {
       `  worlds:   ${worlds.map((world) => world.name).join(", ")}\n` +
       (gamePort === undefined
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
-        : `  game:     ${gameIp}:${gamePort} (handoff only so far; in-game packets are decoded but not served)\n`) +
+        : `  game:     ${gameIp}:${gamePort} (handoff + 0x16 into map ${mapId}; no mobs yet)\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
   );
   await new Promise<void>((resolve) => {

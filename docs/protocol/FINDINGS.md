@@ -592,6 +592,12 @@ sub_4C2780                        // 0x16 的處理函式
 它們的路徑已收在 `server/src/wz/paths.ts`（`mapImagePath`、`MAP_NODES`、`MAP_HELPER_PATH`，
 golden 測試 `test/paths.test.ts`）。
 
+> ✅ **伺服器已經會送這個封包**：`GameEntryServer`（`server/src/net/loginserver.ts`）領到 `0x04` 的角色 id
+> 之後就送 `0x16`（`mode = 0`、`full = 1`、三個亂數種子、把 `CharacterData.mapId` 換成要進的地圖），
+> 地圖由 `--map` 決定（預設 `1000000`，`Map/Map/001000000.img` 存在於 Data.wz）。
+> `test/serve.test.ts` 用假 client 逐欄驗證：領取 → `0x16` → `character.stats.mapId`、角色 id、名字都對，
+> 而且換一個連線不會沿用上一條的狀態。這是原 client 實機驗證之前能做的最完整一步。
+
 #### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
 
 ```
@@ -958,17 +964,20 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
    CUserPool 的 `0x1E–0x29` 分支、`0x2F`–`0x36` 的欄位（怪物進場 `CMob::Init`、移動、受傷／死亡）、
    `0x39`–`0x40`（CNpcPool）、`0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、
    `0x4D–0x52`（messenger／miniroom）。怪物進場（`sub_484ED0`）與第 3 項是同一條迴圈的兩半。
-5. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
+5. **進地圖之後還缺的東西**：伺服器已能送 `0x16`（§4.11.2b），但接下來 client 會回報移動（`0x0E`）
+   並期待怪物（`0x2F`）。要讓畫面真的動起來，需要 `0x2F` 剩下那兩個只被查表的 `u16`（§4.12.1）
+   與 `CMob::Init` 尾端的 foothold 綁定（`sub_485DA0`）；在那之前伺服器只送 `0x16`，不編造怪物。
+6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
    以及 `0x0F` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板的第二種更新格式）。
-6. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
+7. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
    在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
-7. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
+8. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
    `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
-8. ~~`unknown97`~~ → **已證實是 `mapId`**（§4.11.2b：`sub_468E00` 用它載入 `Map/Map/%09d.img`）。
+9. ~~`unknown97`~~ → **已證實是 `mapId`**（§4.11.2b：`sub_468E00` 用它載入 `Map/Map/%09d.img`）。
    剩下的：**`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown101`
    （能力值區塊），傳輸上已完整，語意待找讀取端。
-9. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
+10. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 
 ## 7. 擷取工作流（ADR-004）

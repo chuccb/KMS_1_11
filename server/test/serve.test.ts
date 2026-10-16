@@ -14,6 +14,7 @@ import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/
 import { PacketReader } from "../src/protocol/packet.ts";
 import { decodeClientPacket, encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
+import { FIELD_OPCODE, readSetField } from "../src/protocol/field.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 
@@ -216,7 +217,8 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   // 8. That id resolves to exactly this character, once.
   assert.deepEqual(
     handoffs.claim(handedId),
-    { username: "admin", characterId: created.stats.id, characterName: "Hero" },
+    // the entry carries the record the client just got, so the game server can hand it back in 0x16
+    { username: "admin", characterId: created.stats.id, characterName: "Hero", character: created },
     `id=0x${handedId.toString(16)} pending=${handoffs.pending}\n${log.join("\n")}`,
   );
   assert.equal(handoffs.claim(handedId), undefined, "a handoff is single use");
@@ -238,7 +240,11 @@ test("the game server claims the character id the login server issued", { timeou
   const log: string[] = [];
   const handoffs = new HandoffRegistry();
   const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
-  const game = new GameEntryServer({ handoffs, handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 }, log: (l) => log.push(l) });
+  const game = new GameEntryServer({
+    handoffs,
+    handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
+    log: (l) => log.push(l),
+  });
   const gameInfo = await game.listen(0);
   const login = new LoginServer({
     accounts,
@@ -290,5 +296,24 @@ test("the game server claims the character id the login server issued", { timeou
     log.some((line) => line.includes(`character 0x${(issuedId >>> 0).toString(16).padStart(8, "0")} claimed -> "Hero"`)),
     log.join("\n"),
   );
+
+  // ... and the claim is followed by 0x16, the packet that actually puts the client into a map.
+  const fieldEntry = (await gameClient.take(1))[0]!;
+  assert.equal(fieldEntry[0], FIELD_OPCODE.setField, "the game server's first in-game packet is 0x16");
+  const field = readSetField(new PacketReader(fieldEntry, 1));
+  assert.equal(field.full, true, "the full form carries the map id inside the CharacterData");
+  assert.equal(field.character.stats.mapId, 1000000, "DEFAULT_MAP_ID is a map that exists in Data.wz");
+  assert.equal(field.character.stats.id, issuedId, "the same character the handoff named");
+  assert.equal(field.character.stats.name, "Hero");
+  assert.notEqual(field.randomSeedA | field.randomSeedB | field.randomSeedC, 0, "the field seeds are chosen, not zero");
   gameClient.close();
+
+  // A second client can ask for a different map, and no state leaks between connections.
+  const other = await FakeClient.connect(gameInfo.port);
+  const otherId = handoffs.issue({ username: "admin", characterId: 4242, characterName: "Alt" });
+  other.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
+  const otherField = readSetField(new PacketReader((await other.take(1))[0]!, 1));
+  assert.equal(otherField.character.stats.mapId, 1000000);
+  assert.equal(otherField.character.stats.id, 4242);
+  other.close();
 });

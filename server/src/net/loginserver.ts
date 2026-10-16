@@ -24,6 +24,7 @@ import {
   type SessionEvent,
 } from "../protocol/session.ts";
 import { decodeClientPacket, describeClientPacket, CLIENT_OPCODE } from "../protocol/login.ts";
+import { describeClientFieldPacket, encodeSetField, type SetField } from "../protocol/field.ts";
 import {
   LOGIN_RESULT,
   NAME_CHECK_RESULT,
@@ -53,6 +54,12 @@ export interface HandoffEntry {
   username: string;
   characterId: number;
   characterName: string;
+  /**
+   * The character record the login server sent to the client, so the game server can hand the same
+   * one back in the `0x16` field-entry packet (`sub_4C2780` reads the map out of it, FINDINGS
+   * 4.11.2b). Optional: a handoff issued by hand has no record yet.
+   */
+  character?: CharacterData;
 }
 
 /**
@@ -94,6 +101,12 @@ export interface LoginServerOptions {
   gameServer: { ip: string; port: number };
   /** Handoff registry shared with the game server. Created here when omitted. */
   handoffs?: HandoffRegistry;
+  /**
+   * Map id stored in the `CharacterData` of a newly created character. It is the same field the
+   * `0x16` packet uses to enter a map (FINDINGS 4.11.2b), so keeping the two equal means the
+   * record the client holds matches the map it is about to enter. Defaults to `DEFAULT_MAP_ID`.
+   */
+  startMapId?: number;
   /** Cipher seeds and handshake body. Defaults: random seeds, 199 zero bytes. */
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
   /** One line per event; defaults to nothing. Pass a printer for an operator-facing log. */
@@ -180,6 +193,7 @@ export class LoginServer {
     const stats = zeroStats();
     stats.id = id;
     stats.name = name;
+    stats.mapId = this.options.startMapId ?? DEFAULT_MAP_ID;
     stats.level = 1;
     stats.str = 5;
     stats.dex = 5;
@@ -305,6 +319,7 @@ export class LoginServer {
           username: state.username,
           characterId: packet.characterId,
           characterName: character.stats.name,
+          character,
         });
         this.reply(
           socket,
@@ -393,15 +408,30 @@ export class LoginServer {
 }
 
 /**
- * The game-server side of the handoff: handshake, then `[0x04][characterId]`.
+ * The map a character enters when the game server has nothing better to say.
  *
- * This exists so the loop can be *demonstrated*: the id issued by the login server arrives here
- * and is claimed by name. Nothing else is implemented, because the in-game packets (0x15-0x52)
- * have not been decoded yet - the connection is left open and silent rather than fed invented data.
+ * `1000000` is a real map of the shipped client: `Map/Map/001000000.img` (83,463 bytes) is in
+ * `analysis/data_wz_manifest.txt`. Nothing is invented here - the server may tell the client any
+ * map id that exists in `Data.wz`, and this is the one the stub picks.
+ */
+export const DEFAULT_MAP_ID = 1000000;
+
+/**
+ * The game-server side of the handoff: handshake, then `[0x04][characterId]`, then the field.
+ *
+ * The order is the one FINDINGS 2 / 4.8 / 4.11.2b describe: the game server opens with the 211-byte
+ * handshake, the client answers `[0x04][characterId]` (the id the login server issued), and the
+ * server then sends `0x16` - `u8 mode, u8 full, [three u32 seed parts, CharacterData]` - which is
+ * what puts the client into a map. The map id is a field *inside* that `CharacterData`, so the
+ * server decides the map by rewriting one word (see `CharacterData.mapId`).
+ *
+ * Mobs, skills and drops are still unknown (FINDINGS 6), so the connection says nothing else.
  */
 export interface GameEntryServerOptions {
   handoffs: HandoffRegistry;
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
+  /** Map the claimer is moved into (`0x16`). Defaults to `DEFAULT_MAP_ID`. */
+  mapId?: number;
   log?(line: string): void;
 }
 
@@ -443,6 +473,35 @@ export class GameEntryServer {
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
+  /** The map this server puts claimers into (`0x16`). */
+  private get mapId(): number {
+    return this.options.mapId ?? DEFAULT_MAP_ID;
+  }
+
+  /**
+   * Sends `0x16` so the client enters a map.
+   *
+   * The `full` form is used (three seed parts + a whole `CharacterData`) because that is the form
+   * that carries the map id; the seeds are the server's choice, and they decide every "random"
+   * number the client will roll afterwards (FINDINGS 4.11.2).
+   */
+  private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): void {
+    const character = withMapId(entry, this.mapId);
+    const field: SetField = {
+      mode: 0,
+      full: true,
+      randomSeedA: randomSeed(),
+      randomSeedB: randomSeed(),
+      randomSeedC: randomSeed(),
+      character,
+    };
+    socket.write(encodeSessionPacket(encodeSetField(field), sendState, "s2c"));
+    this.options.log?.(
+      `game: sent 0x16 - "${entry.characterName}" enters map ${this.mapId} ` +
+        `(seeds 0x${hex(field.randomSeedA)} 0x${hex(field.randomSeedB)} 0x${hex(field.randomSeedC)})`,
+    );
+  }
+
   private onConnection(socket: net.Socket): void {
     this.sockets.add(socket);
     const clientSendSeed = this.options.handshake?.clientSendSeed ?? randomSeed();
@@ -456,30 +515,53 @@ export class GameEntryServer {
     socket.write(encodeHandshake(body, clientSendSeed, clientRecvSeed));
     this.options.log?.("game: handshake sent, waiting for the 0x04 character id");
 
+    const sendState = new CipherState(clientRecvSeed);
+    let entered = false;
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
         if (event.kind !== "packet") continue;
         const packet = decodeClientPacket(event.plain);
-        if (packet.kind !== "handshake-reply") {
-          this.options.log?.(`game: ignoring op=0x${hex(packet.opcode)} (in-game packets are not decoded yet)`);
+        if (packet.kind === "handshake-reply" && !entered) {
+          const entry = this.options.handoffs.claim(packet.value);
+          this.options.log?.(
+            entry
+              ? `game: character 0x${hex(packet.value)} claimed -> "${entry.characterName}" (${entry.username})`
+              : `game: character 0x${hex(packet.value)} is unknown or already claimed`,
+          );
+          if (!entry) {
+            socket.destroy();
+            return;
+          }
+          entered = true;
+          this.enterField(socket, sendState, entry);
           continue;
         }
-        const entry = this.options.handoffs.claim(packet.value);
         this.options.log?.(
-          entry
-            ? `game: character 0x${hex(packet.value)} claimed -> "${entry.characterName}" (${entry.username})`
-            : `game: character 0x${hex(packet.value)} is unknown or already claimed`,
+          `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
-        if (!entry) {
-          socket.destroy();
-          return;
-        }
-        this.options.log?.("game: in-game packets (0x15-0x52) are not decoded yet, holding the connection");
       }
     });
     socket.on("error", () => this.sockets.delete(socket));
     socket.on("close", () => this.sockets.delete(socket));
   }
+}
+
+/**
+ * The character record to send back in `0x16`: the login server's own record with the map id
+ * replaced. A handoff issued without a record (tests, tooling) gets a minimal but complete one.
+ */
+function withMapId(entry: HandoffEntry, mapId: number): CharacterData {
+  if (entry.character) return { ...entry.character, stats: { ...entry.character.stats, mapId } };
+  const stats = zeroStats();
+  stats.id = entry.characterId;
+  stats.name = entry.characterName;
+  stats.level = 1;
+  stats.hp = 50;
+  stats.maxHp = 50;
+  stats.mp = 50;
+  stats.maxMp = 50;
+  stats.mapId = mapId;
+  return characterDataOf(stats);
 }
 
 /** A non-zero u32 for the handshake seeds. */
