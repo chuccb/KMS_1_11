@@ -73,11 +73,14 @@ import {
   type QuestReply,
 } from "../protocol/quest.ts";
 import { awardExp } from "../game/exp.ts";
+import { DEFAULT_PING_MS, Heartbeat } from "./heartbeat.ts";
+import { OnlineAccounts, SeatKeeper, describeSessions } from "./online.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
   LOGIN_RESULT,
   NAME_CHECK_RESULT,
   encodeCreateCharacterResult,
+  encodeEcho,
   encodeDeleteCharacterResult,
   encodeLoginResult,
   encodeNameCheckResult,
@@ -153,6 +156,19 @@ export interface LoginServerOptions {
   /** Handoff registry shared with the game server. Created here when omitted. */
   handoffs?: HandoffRegistry;
   /**
+   * Who is online (`net/online.ts`). Created here when omitted - but a server that only has its own
+   * table cannot see the other half's sessions, so a caller that runs both (the CLI) passes **one**
+   * instance to both.
+   */
+  online?: OnlineAccounts;
+  /**
+   * How often a quiet session is asked "are you still there?" (`0x08`; `net/heartbeat.ts`).
+   * `0` turns the heartbeat off, which means a session that vanished silently keeps its account
+   * occupied until the OS notices - only honest for a test that wants no timers. Defaults to
+   * `DEFAULT_PING_MS` (30 s).
+   */
+  pingMs?: number;
+  /**
    * Map id stored in the `CharacterData` of a newly created character. It is the same field the
    * `0x16` packet uses to enter a map (FINDINGS 4.11.2b), so keeping the two equal means the
    * record the client holds matches the map it is about to enter. Defaults to `DEFAULT_MAP_ID`.
@@ -182,14 +198,24 @@ interface ConnectionState {
 /** The login half of a session: handshake out, stage-aware replies back. */
 export class LoginServer {
   readonly handoffs: HandoffRegistry;
+  /** The seats this server takes: one account, one live session (ADR-018). */
+  readonly online: OnlineAccounts;
   private readonly options: LoginServerOptions;
   private readonly server: net.Server;
   private readonly sockets = new Set<net.Socket>();
+  private readonly heartbeat: Heartbeat;
+  private readonly seats: SeatKeeper;
   private listenPort = 0;
 
   constructor(options: LoginServerOptions) {
     this.options = options;
     this.handoffs = options.handoffs ?? new HandoffRegistry();
+    this.online = options.online ?? new OnlineAccounts();
+    this.heartbeat = new Heartbeat({
+      intervalMs: options.pingMs ?? DEFAULT_PING_MS,
+      ...(options.log !== undefined ? { log: options.log } : {}),
+    });
+    this.seats = new SeatKeeper({ online: this.online, heartbeat: this.heartbeat, where: "login" });
     this.server = net.createServer((socket) => this.onConnection(socket));
     this.server.on("error", (error) => this.log(`listen error: ${error.message}`));
   }
@@ -219,6 +245,10 @@ export class LoginServer {
   }
 
   close(): Promise<void> {
+    // The seats first: a caller that closes this server and immediately opens another one on the same
+    // `OnlineAccounts` (a test, a restart) must not wait for the sockets' `close` events to land.
+    this.seats.releaseAll();
+    this.heartbeat.close();
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
     return new Promise((resolve) => this.server.close(() => resolve()));
@@ -293,6 +323,8 @@ export class LoginServer {
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
         if (event.kind !== "packet") continue;
+        // Any packet at all is proof of life for the heartbeat: the client is talking to us.
+        this.heartbeat.note(socket);
         if (!event.headerOk) {
           this.log(`conn: dropping packet with a bad header (0x${hex(event.header)})`);
           continue;
@@ -308,6 +340,7 @@ export class LoginServer {
     socket.on("error", () => this.sockets.delete(socket));
     socket.on("close", () => {
       this.sockets.delete(socket);
+      this.seats.release(socket);
       this.log("conn: closed");
     });
   }
@@ -348,8 +381,19 @@ export class LoginServer {
           this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.wrongPassword));
           return;
         }
+        // One account, one live session: the client has a message for exactly this - "현재 접속중인
+        // 아이디이거나, 현재 서버점검중입니다." (7) - and letting the second one in would give two
+        // connections one character record to fight over (`net/online.ts`, ADR-018).
+        const held = this.online.sessionsOf(packet.username);
+        if (held.length > 0) {
+          this.log(`  login refused: "${packet.username}" is already online (${describeSessions(held)})`);
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.alreadyConnected));
+          return;
+        }
         state.stage = "world";
         state.username = packet.username;
+        let pings = 0;
+        this.seats.claim(socket, packet.username, () => this.reply(socket, sendState, encodeEcho(++pings)));
         this.reply(
           socket,
           sendState,
@@ -464,7 +508,11 @@ export class LoginServer {
       }
 
       case "echo":
-        this.log("  note: echo reply (the client's answer to a server-side 0x08 heartbeat)");
+        // The client's answer to our `0x08` heartbeat. The data handler already counted it as proof
+        // of life, and there is nothing to answer and nothing to log: a line per heartbeat per
+        // session would be the loudest thing in this file. (The client only ever sends `0x08` as an
+        // echo - `sub_43B280` is both its handler and its only sender - so there is no request here
+        // to serve.)
         return;
 
       case "unknown":
@@ -601,6 +649,10 @@ export interface GameEntryServerOptions {
   pickupRangeY?: number;
   /** How far from the monster a drop may land, in px. Defaults to `DROP_SPREAD_PX`. */
   dropSpreadPx?: number;
+  /** Who is online. See `LoginServerOptions.online`: one instance for both halves. */
+  online?: OnlineAccounts;
+  /** Heartbeat interval for a quiet field session; see `LoginServerOptions.pingMs`. */
+  pingMs?: number;
   /**
    * Called when a **session ends** - the one point where a character's play leaves this process.
    *
@@ -660,16 +712,27 @@ interface FieldSession extends FieldMember {
 }
 
 export class GameEntryServer {
+  readonly online: OnlineAccounts;
   private readonly options: GameEntryServerOptions;
   private readonly server: net.Server;
   private readonly sockets = new Set<net.Socket>();
   /** The maps this server simulates: one field per map id, shared by every session standing in it. */
   private readonly fields: FieldRegistry<FieldSession>;
+  /** One character, one session: the second connection for an id is refused (see `onConnection`). */
+  private readonly sessionsByCharacter = new Map<number, FieldSession>();
+  private readonly heartbeat: Heartbeat;
+  private readonly seats: SeatKeeper;
   private listenPort = 0;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(options: GameEntryServerOptions) {
     this.options = options;
+    this.online = options.online ?? new OnlineAccounts();
+    this.heartbeat = new Heartbeat({
+      intervalMs: options.pingMs ?? DEFAULT_PING_MS,
+      ...(options.log !== undefined ? { log: options.log } : {}),
+    });
+    this.seats = new SeatKeeper({ online: this.online, heartbeat: this.heartbeat, where: "game" });
     this.fields = new FieldRegistry<FieldSession>({
       ...(options.mapProvider !== undefined ? { mapProvider: options.mapProvider } : {}),
       ...(options.mobTemplate !== undefined ? { mobTemplate: options.mobTemplate } : {}),
@@ -713,8 +776,11 @@ export class GameEntryServer {
   close(): Promise<void> {
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
+    this.seats.releaseAll();
+    this.heartbeat.close();
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
+    this.sessionsByCharacter.clear();
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
@@ -768,6 +834,13 @@ export class GameEntryServer {
   private enterField(socket: net.Socket, sendState: CipherState, entry: HandoffEntry): FieldSession | undefined {
     const character = withMapId(entry, this.mapId);
     const send = (packet: Uint8Array): void => void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+    // The account's seat is taken here rather than at the handshake: this is the moment the character
+    // is *in* the world, and the seat must stay taken until this socket ends even if the login
+    // connection that handed the character over is already gone (`net/online.ts`). Taken before the
+    // map lookup, because a map this server cannot simulate is still a player sitting in the game -
+    // their next login has to be refused all the same.
+    let pings = 0;
+    this.seats.claim(socket, entry.username, () => send(encodeEcho(++pings)));
     const instance = this.fields.of(character.stats.mapId);
     if (instance === undefined) {
       // A map this server cannot read - no `Map/Map/*.img` in `Data.wz` for that id - still gets the
@@ -1324,6 +1397,8 @@ export class GameEntryServer {
     socket.on("data", (chunk) => {
       for (const event of deframer.push(new Uint8Array(chunk))) {
         if (event.kind !== "packet") continue;
+        // Any packet at all is proof of life for the heartbeat: the client is talking to us.
+        this.heartbeat.note(socket);
         const packet = decodeClientPacket(event.plain);
         if (packet.kind === "handshake-reply" && !entered) {
           const entry = this.options.handoffs.claim(packet.value);
@@ -1336,8 +1411,24 @@ export class GameEntryServer {
             socket.destroy();
             return;
           }
+          // One character, one session. The check has to be here and not in `FieldInstance.join`:
+          // the field *does* handle a duplicate id (it drops the older member), but the older
+          // connection would stay open - a player nobody can see who still walks, chats and hits
+          // monsters - and both connections would write the same `CharacterData`, which is the
+          // account table's own object (ADR-017). Refused the same way an unclaimable handoff is:
+          // the socket goes, and the client's own disconnect path takes over.
+          const taken = this.sessionsByCharacter.get(entry.characterId);
+          if (taken !== undefined) {
+            this.options.log?.(
+              `game: character 0x${hex(entry.characterId)} ("${entry.characterName}") is already in map ` +
+                `${taken.instance.mapId} - refusing the second connection`,
+            );
+            socket.destroy();
+            return;
+          }
           entered = true;
           session = this.enterField(socket, sendState, entry);
+          if (session !== undefined) this.sessionsByCharacter.set(entry.characterId, session);
           continue;
         }
         const opcode = event.plain[0] ?? -1;
@@ -1390,6 +1481,10 @@ export class GameEntryServer {
     socket.on("close", () => {
       // The field has to hear about it: the others get an `0x1D`, and the mobs keep walking.
       session?.instance.leave(session.characterId);
+      // The seat and the character's place in the world go with the socket; both are idempotent, so a
+      // connection that was refused before it ever entered is just released (nothing to release).
+      this.seats.release(socket);
+      if (session !== undefined) this.sessionsByCharacter.delete(session.characterId);
       // And the character's record has to leave the process - this is the only place a session ends.
       if (session !== undefined) this.persist();
       this.sockets.delete(socket);

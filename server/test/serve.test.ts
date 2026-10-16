@@ -14,6 +14,7 @@ import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { characterDataOf, readCharacterData, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
+import { OnlineAccounts } from "../src/net/online.ts";
 import {
   CLIENT_FIELD_OPCODE,
   FIELD_OPCODE,
@@ -87,6 +88,7 @@ class FakeClient {
   private readonly serverSendSeed: number;
   private readonly queue: Extract<SessionEvent, { kind: "packet" }>[] = [];
   private waiter: (() => void) | undefined;
+  private collector: number[] | undefined;
 
   private constructor(socket: net.Socket) {
     this.socket = socket;
@@ -102,6 +104,7 @@ class FakeClient {
           continue;
         }
         this.queue.push(event);
+        this.collector?.push(event.plain[0] ?? -1);
       }
       if (before !== this.deframer.awaitingHandshake) this.waiter?.();
       this.waiter?.();
@@ -207,6 +210,29 @@ class FakeClient {
     this.socket.write(encodeSessionPacket(encodeClientPacket(packet), this.sendState, "c2s"));
   }
 
+  /**
+   * Stops discarding what arrives: every opcode from now on also lands in `into`.
+   *
+   * The queue is a snapshot of the moment a test looks at it, and a packet the server sends *after*
+   * that look is exactly what some tests are about (a heartbeat asking a quiet session); `waiting`
+   * is the other way round (it waits for the queue to grow).
+   */
+  collectOpcodes(into: number[]): void {
+    this.collector = into;
+  }
+
+  /** Calls `cb` once the server's end of the connection is gone (a FIN or a reset). */
+  socketClose(cb: () => void): void {
+    let done = false;
+    const once = (): void => {
+      if (done) return;
+      done = true;
+      cb();
+    };
+    this.socket.once("end", once);
+    this.socket.once("close", once);
+  }
+
   close(): void {
     this.socket.destroy();
   }
@@ -223,6 +249,16 @@ class FakeClient {
   get queueLength(): number {
     return this.queue.length;
   }
+}
+
+/** Waits until `check()` is true (false on timeout) - the seams where the kernel decides the order. */
+async function eventually(check: () => boolean, timeoutMs = 2000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return true;
 }
 
 function parseLoginReply(bytes: Uint8Array): {
@@ -353,6 +389,279 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(accounts.get("admin")?.characters.length, 0);
 
   assert.ok(log.some((line) => line.includes("handshake sent")));
+});
+
+/**
+ * One account, one live session (ADR-018).
+ *
+ * The 2003 client has a message for this - result `7`, "현재 접속중인 아이디이거나, 현재
+ * 서버점검중입니다." - and the seat is held by *either* half of the server: the login connection from
+ * `0x01` on, and the field session from the moment the character enters a map. This test walks the
+ * whole thing: a second login is refused while the first player is in the field, another account is
+ * unaffected, and the seat comes back when the session really ends.
+ */
+test("a second login for an account that is already online is refused with 7", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const online = new OnlineAccounts();
+  const accounts = new Map<string, AccountRecord>([
+    ["admin", { password: "admin", characters: [] }],
+    ["guest", { password: "guest", characters: [] }],
+  ]);
+  const stats = zeroStats();
+  stats.id = 21;
+  stats.name = "Hero";
+  stats.level = 1;
+  stats.hp = 50;
+  stats.maxHp = 50;
+  stats.mapId = 1000000;
+  accounts.get("admin")!.characters.push(characterDataOf(stats, startingCharacterItems()));
+
+  const game = new GameEntryServer({
+    handoffs,
+    online,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  const login = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: gameInfo.port },
+    handoffs,
+    online,
+    handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
+    log: (line) => log.push(line),
+  });
+  const loginInfo = await login.listen(0);
+  t.after(async () => {
+    await login.close();
+    await game.close();
+  });
+
+  /** Logs in and returns the result byte, leaving the connection open. */
+  const openLogin = async (username: string, password: string): Promise<{ client: FakeClient; result: number }> => {
+    const client = await FakeClient.connect(loginInfo.port);
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    client.send({ kind: "login-request", opcode: 0x01, username, password });
+    return { client, result: parseLoginReply((await client.take(1))[0]!).result };
+  };
+
+  // 1. The player logs in and enters the map.
+  const hero = await openLogin("admin", "admin");
+  assert.equal(hero.result, LOGIN_RESULT.ok);
+  hero.client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+  await hero.client.take(1);
+  hero.client.send({ kind: "select-character", opcode: 0x03, characterId: 21 });
+  const selectReader = new PacketReader((await hero.client.take(1))[0]!);
+  selectReader.readByte();
+  selectReader.readByte();
+  selectReader.readU32();
+  selectReader.readU16();
+  const issuedId = selectReader.readU32();
+  const inGame = await FakeClient.connect(gameInfo.port);
+  inGame.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
+  assert.equal((await inGame.take(1))[0]![0], FIELD_OPCODE.setField, "0x16: the character is in the map");
+
+  // 2. The login connection goes away - which is what the real client does once the 0x03 reply has
+  // sent it to the game server. The seat must stay taken: the character is still standing in a map.
+  hero.client.close();
+  const loginSocketGone = Date.now() + 2000;
+  while (online.sessionsOf("admin").some((session) => session.where === "login") && Date.now() < loginSocketGone) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(
+    online.sessionsOf("admin").map((session) => session.where),
+    ["game"],
+    "the field session is now the one holding the account",
+  );
+
+  // 3. A second login for the same account is refused - and the client has a message for exactly
+  // this result byte (FINDINGS 4.8).
+  const second = await openLogin("admin", "admin");
+  assert.equal(second.result, LOGIN_RESULT.alreadyConnected);
+  assert.equal(second.result, 7);
+  second.client.close();
+  assert.ok(
+    log.some((line) => line.includes('"admin" is already online (game 127.0.0.1:')),
+    log.join("\n"),
+  );
+
+  // 4. Another account is not affected: the seat is per account.
+  const other = await openLogin("guest", "guest");
+  assert.equal(other.result, LOGIN_RESULT.ok);
+  other.client.close();
+
+  // 5. The player leaves the game. The next login gets in again.
+  inGame.close();
+  const deadline = Date.now() + 2000;
+  let retry = await openLogin("admin", "admin");
+  while (retry.result !== LOGIN_RESULT.ok && Date.now() < deadline) {
+    retry.client.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    retry = await openLogin("admin", "admin");
+  }
+  assert.equal(retry.result, LOGIN_RESULT.ok, `the seat came back after the session ended; log:\n${log.join("\n")}`);
+  retry.client.close();
+});
+
+/**
+ * The same character, twice.
+ *
+ * The account seat makes this impossible through the normal flow, so this test drives it the way it
+ * would actually happen: two handoffs for one character id (a second `0x03`, a replaying client, a
+ * login server restarted between the two). `FieldInstance.join` would "take the new one" - and leave
+ * the older *connection* alive, unseen by everybody but still walking, chatting and hitting monsters,
+ * with both connections writing the same `CharacterData` (ADR-017). So the game server refuses the
+ * second connection instead, and the first one keeps playing.
+ */
+test("a character that is already in a field is not entered twice", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const online = new OnlineAccounts();
+  const game = new GameEntryServer({
+    handoffs,
+    online,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 21;
+  stats.name = "Hero";
+  stats.level = 1;
+  stats.hp = 50;
+  stats.maxHp = 50;
+  stats.mapId = 1000000;
+  const entry = { username: "admin", characterId: 21, characterName: "Hero", character: characterDataOf(stats) };
+
+  const first = await FakeClient.connect(gameInfo.port);
+  t.after(() => first.close());
+  first.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
+  assert.equal((await first.take(1))[0]![0], FIELD_OPCODE.setField, "the first connection gets its 0x16");
+
+  const second = await FakeClient.connect(gameInfo.port);
+  t.after(() => second.close());
+  second.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
+  const gone = new Promise<void>((resolve) => second.socketClose(() => resolve()));
+  await gone;
+  assert.equal(second.queueLength, 0, "no 0x16, no snapshot: nothing is sent to a refused connection");
+  assert.ok(
+    log.some((line) => line.includes('character 0x00000015 ("Hero") is already in map 1000000 - refusing the second connection')),
+    log.join("\n"),
+  );
+
+  // The player who was already there is untouched: chat still works, which means the field and the
+  // session are both intact (drain the entry snapshot first, or `take` would hand back a mob).
+  await first.drain();
+  first.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.chat, body: encodeClientChat({ text: encodeCp949("still here") }).slice(1) });
+  const chat = (await first.take(1))[0]!;
+  assert.equal(chat[0], FIELD_OPCODE.userMessage, `the first session still gets its chat back; log:\n${log.join("\n")}`);
+});
+
+/**
+ * The heartbeat is what makes "already online" self-healing.
+ *
+ * A client that vanishes without closing its socket (a pulled cable, a crashed machine) would
+ * otherwise hold its account for as long as the OS keeps the half-open connection - and the next
+ * login would be told "you are already connected" about a player who is gone. `0x08` is the packet
+ * the 2003 client always echoes (FINDINGS 4.2), so a session that does not answer three times is
+ * dropped, and its seat goes with it.
+ */
+test("a session that stops answering the 0x08 heartbeat loses its seat", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+  const login = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 1 },
+    pingMs: 40,
+    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+    log: (line) => log.push(line),
+  });
+  const info = await login.listen(0);
+  t.after(async () => {
+    await login.close();
+  });
+
+  // This fake client never answers a ping - it is the "cable pulled out" case.
+  const silent = await FakeClient.connect(info.port);
+  silent.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  silent.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  assert.equal(parseLoginReply((await silent.take(1))[0]!).result, LOGIN_RESULT.ok);
+  assert.equal(login.online.isOnline("admin"), true);
+
+  const dropped = new Promise<void>((resolve) => silent.socketClose(() => resolve()));
+  const pings: number[] = [];
+  silent.collectOpcodes(pings);
+  await dropped;
+  assert.ok(pings.includes(0x08), `the server asked before giving up (saw ${pings.join(",")})`);
+  assert.ok(
+    await eventually(() => !login.online.isOnline("admin")),
+    "the seat went with the connection (its close handler runs on our side of the FIN)",
+  );
+  assert.match(log.join("\n"), /heartbeat: login 127\.0\.0\.1:\d+ sent nothing for \d+ ms/);
+
+  // And the account can log in again, without waiting for anything.
+  const again = await FakeClient.connect(info.port);
+  again.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  again.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  assert.equal(parseLoginReply((await again.take(1))[0]!).result, LOGIN_RESULT.ok);
+  again.close();
+});
+
+/**
+ * A third timeout-free proof of the seat: the login server that is closed releases its seats itself.
+ *
+ * `close()` is called by the CLI on SIGINT and by every test's cleanup, and the seats are shared
+ * between the two halves - so "the sockets will close in a moment" is not good enough: a caller that
+ * opens the next server right away would see "already online" about a server that is gone.
+ */
+test("closing a server gives its seats back before it returns", { timeout: 20000 }, async (t) => {
+  const online = new OnlineAccounts();
+  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+  const first = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 1 },
+    online,
+    handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
+  });
+  const firstInfo = await first.listen(0);
+  const client = await FakeClient.connect(firstInfo.port);
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  client.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  assert.equal(parseLoginReply((await client.take(1))[0]!).result, LOGIN_RESULT.ok);
+  assert.equal(online.isOnline("admin"), true);
+
+  await first.close();
+  assert.equal(online.isOnline("admin"), false, "no waiting for the close events");
+
+  const second = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 1 },
+    online,
+    handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
+  });
+  const secondInfo = await second.listen(0);
+  t.after(async () => {
+    client.close();
+    await second.close();
+  });
+  const back = await FakeClient.connect(secondInfo.port);
+  back.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  back.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+  assert.equal(parseLoginReply((await back.take(1))[0]!).result, LOGIN_RESULT.ok);
+  back.close();
 });
 
 test("the game server claims the character id the login server issued", { timeout: 20000 }, async (t) => {

@@ -28,7 +28,12 @@ import * as packet from "./packet.ts";
 import * as replies from "./replies.ts";
 
 export type PacketDirection = "c2s" | "s2c";
-export type PacketStage = "login" | "field";
+/**
+ * When the packet exists. `any` is not a third stage: it is the client handling the opcode *before*
+ * it looks at the current stage at all (`0x07`/`0x08` in `sub_43B170`, FINDINGS 4) - so it is a
+ * packet of every stage, and saying "login" or "field" about it would be a lie either way.
+ */
+export type PacketStage = "any" | "login" | "field";
 
 /**
  * `byte-exact` - the codec mirrors the client's reader/writer field for field and has golden bytes
@@ -154,12 +159,23 @@ export const PACKETS: readonly PacketSchema[] = [
   {
     opcode: login.CLIENT_OPCODE.echoReply,
     direction: "c2s",
-    stage: "login",
-    name: "echoReply",
+    stage: "any",
+    name: "echo",
     status: "byte-exact",
-    evidence: "FINDINGS 4.2 (the client echoes the u32 the server sent; sub_43B280)",
+    evidence: "FINDINGS 4.2 / 4.30 (sub_43B170 case 8 -> sub_43B280: the client echoes the u32 back)",
     codecs: ["decodeClientPacket", "encodeClientPacket"],
-    fields: [{ name: "value", type: "u32", note: "verbatim echo, role not located" }],
+    fields: [{ name: "value", type: "u32", note: "the value the server pinged with, echoed verbatim" }],
+  },
+
+  {
+    opcode: replies.LOGIN_OPCODE.echo,
+    direction: "s2c",
+    stage: "any",
+    name: "echo",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.2 / 4.30 (the heartbeat: net/heartbeat.ts sends it, the client's echo proves the session is alive)",
+    codecs: ["encodeEcho"],
+    fields: [{ name: "value", type: "u32", note: "a counter in this build; the client echoes it and reads nothing into it" }],
   },
 
   // ---------------------------------------------------------------- login stage, server -> client
@@ -1010,17 +1026,19 @@ export function describePacketSchema(entry: PacketSchema): string {
 
 /** The whole catalogue as text, grouped the way the tables in the docs are grouped. */
 export function schemaText(): string {
-  const groups: [PacketDirection, PacketStage][] = [
-    ["c2s", "login"],
-    ["s2c", "login"],
-    ["c2s", "field"],
-    ["s2c", "field"],
+  const groups: { direction: PacketDirection; stage: PacketStage; label: string }[] = [
+    { direction: "c2s", stage: "any", label: "any stage c2s" },
+    { direction: "s2c", stage: "any", label: "any stage s2c" },
+    { direction: "c2s", stage: "login", label: "login c2s" },
+    { direction: "s2c", stage: "login", label: "login s2c" },
+    { direction: "c2s", stage: "field", label: "field c2s" },
+    { direction: "s2c", stage: "field", label: "field s2c" },
   ];
   const lines: string[] = ["kms111 protocol catalogue (only packets with evidence are listed)"];
-  for (const [direction, stage] of groups) {
+  for (const { direction, stage, label } of groups) {
     const rows = packetsOf(direction, stage);
     if (rows.length === 0) continue;
-    lines.push(`\n${stage} ${direction}  (${rows.length}):`);
+    lines.push(`\n${label}  (${rows.length}):`);
     for (const row of rows) {
       lines.push(`  ${describePacketSchema(row)}`);
       lines.push(`        evidence: ${row.evidence}`);

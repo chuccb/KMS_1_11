@@ -45,6 +45,12 @@ export const LOGIN_OPCODE = {
   deleteResult: 0x06,
   /** CCharSelect: request `u32 characterId`. */
   deleteCharacter: 0x07,
+  /**
+   * Both directions: a `u32` the receiver sends straight back (FINDINGS 4.2). The client's
+   * dispatcher (`sub_43B170`) handles it *before* the current stage, so it works at any point of a
+   * connection - which is why `net/heartbeat.ts` uses it to ask "are you still there?".
+   */
+  echo: 0x08,
 } as const;
 
 /**
@@ -265,6 +271,21 @@ export const CREATE_CHARACTER_RESULT = {
   /** Any non-zero value; a whole `CharacterData` follows. */
   created: 1,
 } as const;
+
+/**
+ * 0x08: the heartbeat, in either direction (`sub_43B280` - read a `u32`, send it back).
+ *
+ * The server sends this to a session that has gone quiet, and the client's echo is the proof that
+ * the connection is still alive (`net/heartbeat.ts`). The value carries no meaning to the client -
+ * it is echoed verbatim and nothing else reads it - so callers pass a counter to keep our own traces
+ * readable.
+ */
+export function encodeEcho(value: number): Uint8Array {
+  const writer = new PacketWriter(8);
+  writer.writeByte(LOGIN_OPCODE.echo);
+  writer.writeU32(value >>> 0);
+  return writer.toBytes();
+}
 
 /**
  * 0x05 reply: the created character, or - with no argument - the client's generic failure.

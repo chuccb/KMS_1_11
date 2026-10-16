@@ -17,6 +17,8 @@ import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
 import { npcTemplateProvider, npcWalkPolicy } from "./game/npcs.ts";
+import { DEFAULT_PING_MS } from "./net/heartbeat.ts";
+import { OnlineAccounts } from "./net/online.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
@@ -48,7 +50,7 @@ usage:
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
-        [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--seed <n>]
+        [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
         [--handshake-body <hex>]
         [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
@@ -94,6 +96,11 @@ notes:
   list of Npc/<id>.img template ids. Which NPCs the 2003 server walked is not located, which is why
   the default is the quiet one. A bare --npc-walk means "all".
 
+  --ping sets the heartbeat: every <ms> of silence this server asks a session "are you still there?"
+  with 0x08 (the one packet the 2003 client always echoes, FINDINGS 4.2/4.30), and a session that has
+  said nothing for three intervals is dropped - which frees the account and the character it was
+  holding. The default is 30000 ms; --ping off disables the mechanism (then a client that vanished
+  without closing its socket keeps its account refused as "already online" until the OS notices).
   --save keeps the accounts (and every character in them) between two runs of serve: accounts,
   characters, their items, exp, mesos and the map they are standing in (game/save.ts, ADR-017). The
   default is ./kms111-save.json; --save off keeps everything in memory, which is what the server did
@@ -322,6 +329,24 @@ async function runServe(rest: string[]): Promise<number> {
   }
 
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
+  // The heartbeat (net/heartbeat.ts): `off` means "no timers, trust TCP". A number is the interval;
+  // a dropped session frees its account and character, so this is what makes "already online"
+  // self-healing rather than a lockout (ADR-018).
+  const pingArg = args.ping;
+  let pingMs = DEFAULT_PING_MS;
+  if (pingArg === "off") pingMs = 0;
+  else if (typeof pingArg === "string") {
+    pingMs = Number(pingArg);
+    if (!Number.isInteger(pingMs) || pingMs < 0) {
+      process.stderr.write(`invalid --ping: ${pingArg} (ms, or off)\n`);
+      return 1;
+    }
+  }
+  if (pingArg === true) {
+    process.stderr.write(`invalid --ping: needs a value (ms, or off)\n`);
+    return 1;
+  }
+
   // Where the accounts live between two runs of this process (game/save.ts, ADR-017). `off` is what
   // this server did before it could save: accounts and characters in memory only. A save file this
   // build cannot read stops the start instead of being overwritten - the operator decides.
@@ -340,12 +365,17 @@ async function runServe(rest: string[]): Promise<number> {
   for (const warning of shopWarnings) log?.(warning);
   const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
   const handoffs = new HandoffRegistry();
+  // One table for both halves: an account that is logged in is refused at 0x01, and a session in a
+  // field keeps its account taken even after the login connection is gone (net/online.ts).
+  const online = new OnlineAccounts();
   const login = new LoginServer({
     accounts,
     worlds,
     gameServer: { ip: gameIp, port: gamePort ?? 0 },
     startMapId: mapId,
     handoffs,
+    online,
+    pingMs,
     ...(handshake ? { handshake } : {}),
     ...(persist ? { persist } : {}),
     ...(log ? { log } : {}),
@@ -356,6 +386,8 @@ async function runServe(rest: string[]): Promise<number> {
   if (gamePort !== undefined) {
     game = new GameEntryServer({
       handoffs,
+      online,
+      pingMs,
       mapId,
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
@@ -388,7 +420,8 @@ async function runServe(rest: string[]): Promise<number> {
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
       `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
-      `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n`,
+      `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
+      `  heartbeat: ${pingMs === 0 ? "off (--ping <ms>)" : `0x08 every ${pingMs} ms, drop after ${pingMs * 3} ms`}\n`,
   );
   await new Promise<void>((resolve) => {
     const stop = () => resolve();
