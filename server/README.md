@@ -9,9 +9,9 @@
 | `src/protocol/session.ts` | ✅ 211-byte 握手 codec + 串流解碼器 `SessionDeframer`：吃握手取種子、逐包解密並**自檢標頭**；握手可由任一方送出（`expectHandshake`）。 |
 | `src/protocol/packet.ts` | ✅ 欄位編碼：`u8`/`u16`/`u32` LE、字串 = `u16 長度` + 原始 bytes；越界丟 `PacketUnderflowError(38)`（client 丟 `ZException(38)`）。 |
 | `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 建角、0x06 名檢查+外觀、0x07 刪角、0x08 echo。 |
-| `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **69-byte** 能力值區塊 + 完整道具區塊（穿戴格 ×2、四個道具欄、每欄 8-byte 記錄、`0x20`/`0x40` 兩個 map）。 |
+| `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **69-byte** 能力值區塊 + 完整道具區塊（穿戴格 ×2、四個道具欄、每欄 8-byte 記錄、`0x20`/`0x40` 兩個 map）。其中「道具區塊」的寫入順序與 `sub_45F610`（編碼器）逐項對齊。 |
 | `src/protocol/itemslot.ts` | ✅ `GW_ItemSlot`：`itemId` + 現金區塊 + `GW_ItemSlotEquip`（ruc/cuc/15 個能力值）／`NonEquip`（quantity），含種類位元組規則。 |
-| `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
+| `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
 | `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端的交接（只驗角色 id，還不會送遊戲內封包）。 |
@@ -19,6 +19,7 @@
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。 |
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` 子命令 |
 | 遊戲邏輯（地圖／怪物／戰鬥／道具欄伺服器端）| ❌ **尚未實作**；已解出的封包有 codec（`field.ts`／`movepath.ts`），沒解的一律不猜（`decode` 仍會原封不動記錄它們） |
+| 讀反編譯的工具 | ✅ `tools/hexfunc.py`（抽函式）、`tools/kstr.py`（**CP949 字串**：2003 client 沒有符號，字串就是函式的名字，見 FINDINGS §4.13）、`tools/wz1.py`；皆有 unittest（`python3 -m unittest discover -s tools/tests`）|
 
 ## 登入鏈（已解，`docs/protocol/FINDINGS.md` §4.7–§4.9）
 
@@ -105,6 +106,9 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
 （只領取 token 並記錄「哪個角色到了」，因為遊戲內封包還沒解），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
+
+**下一個最有價值的目標**是 client 的攻擊封包（`0x0F`／`0x10`／`0x11`，FINDINGS §4.13.1）：
+前 5 bytes（`u8` + `u32 目標 id`）已解，讀完它們加上怪物進場（§4.12）就能形成「打怪 → 回傷害」的迴圈。
 
 `serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段（只到「角色被交給遊戲伺服器」，
 遊戲伺服器只記錄誰到了，不會送 0x16 進地圖）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，

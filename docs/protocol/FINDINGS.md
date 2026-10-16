@@ -9,7 +9,8 @@
 `server/src/protocol/{frame,cipher,session,packet,login,chardata,itemslot,replies}.ts`，並由
 `node --test` 覆蓋（含 `test/loginflow.test.ts` 的完整鏈重播、`test/itemslot.test.ts` 的逐 byte 佈局）。
 **遊戲內第一條垂直切片也已解到欄位層**（§4.11：進地圖 `0x16`、別人進場 `0x1C`、離場 `0x1D`、
-移動 `0x22`／`0x0E`、傳送門請求 `0x0D`），實作於 `server/src/protocol/{field,movepath}.ts`。
+移動 `0x22`／`0x0E`、傳送門請求 `0x0D`），實作於 `server/src/protocol/{field,movepath}.ts`；
+怪物／NPC／掉落物的分派也已拆到函式層（§4.12，欄位仍待讀）。
 剩下的未知：211-byte 握手的 199 bytes `body`、CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／
 CRewardPool／對話框／messenger／miniroom）欄位（§6）。
 
@@ -223,7 +224,12 @@ sub_45DC80(&dst, ptr, avail);  // 讀 2 bytes（u16）
 | 0x08 | `u32`（原封不動回傳）| `sub_43B280` | **echo/ping 回覆**（見 §4.2）|
 | 0x09 | `u32`（`*(this+300)`）| `sub_5545F0` | 世界伺服器相關請求 |
 | 0x0A | `u16 len str` + `u32`，送出後 `Sleep(300)×2` 並丟 `CTerminateException` | `sub_5545F0` | **要求遷移**：等伺服器切換連線（配合 §4.2 的 0x07）|
-| 0x0E | `u8 *(CStage+156)` | `sub_542C40`（`CVecCtrlUser`）| 意義未定（單 byte）|
+| 0x0D | `s32 kind` + `string name` | `sub_472590`（`CField::SendInteract`）| **點擊場地物件／傳送門**（`kind = -1`），也是 GM 的 `/헉맵 <mapId>`：見 §4.11.6、§4.13 |
+| 0x0E | `u8 *(CStage+156)` + `CMovePath` | `sub_542C40`（`CVecCtrlUser`）| **本機角色自己的移動**；舊註記只寫了那個 u8，因為 `CMovePath` 的來源是後來才定位的（§4.11.6）|
+| 0x12 | `string` | `sub_470C70` | **一般聊天**（§4.13）|
+| 0x0F/0x10/0x11 | `u8` + `u32 目標物件 id` + … | `sub_512F90`／`sub_513C80`／`sub_514D30` | **三種攻擊**（§4.13.1），欄位只讀到前 5 bytes |
+| 0x22/0x23/0x25/0x26/0x27 | 見 §4.13 | `sub_470E10`／`sub_4717D0`／`sub_471A40`／`sub_471C*` | GM 廣播／密語／交易／**組隊**／GM 數值指令 |
+| 其餘 39 個 | — | 見 §4.13.2 的完整 sender 目錄 | |
 
 ### 4.6 ⚠️ 修正：`0x0B` 不是登入封包，它是「道具欄操作」
 
@@ -623,6 +629,114 @@ count × {
 
 > `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
 
+### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式，欄位只到骨架
+
+§4.11 把「哪個子系統」解到欄位層；這一節把同一條路線再往下一層拆成「哪個函式處理哪個 opcode」。
+**未標「已證實」的欄位都還不能當規格用**（這一節的目的是讓下一個回合不必重讀反編譯）。
+
+#### CMobPool（`sub_492330(dword_5C2054, opcode, packet)`）
+
+| opcode | 分支 | 目前已知（讀取順序）|
+|---|---|---|
+| 0x2E | — | 沒有分支 |
+| 0x2F | `sub_4924A0` | **怪物進場**：`u32 mobId`；池中已有 → `[entry+112] = 1` 後返回；沒有 → `u32 templateId`（`sub_48CFA0`→`sub_4848E0` 載模板）→ 建池項 → `sub_484ED0(template, mobId, packet)` = `CMob::Init` 讀剩下的欄位 |
+| 0x30 | `sub_4926B0` | `u32 mobId` + `s16`，再依 `CWvsApp+0x14`（自己的角色 id）分支 |
+| 0x31 | `sub_4927B0` | `u8 flag` + `u32 mobId`；`flag != 0` → `sub_491630`：查到怪 → `sub_485330(mob, 1)` 推進移動；查不到 → `u32 templateId` + `CMob::Init` + 推進；`flag == 0` → `sub_491830` |
+| 0x32–0x36 | `sub_492380` | `u32 mobId` 查表，然後 0x33→`sub_488BC0`、0x34→`sub_488D90`、0x35→`sub_488E10`（0x32／0x36 沒有分支）|
+| 0x37 | — | 沒有分支 |
+
+> 移動本身**就是 §4.11.5 的 `CMovePath`**：`sub_485330` 是「取移動路徑的下一個元素並移動 vecctrl」，
+> 和玩家的 `sub_499760`（`CVecCtrlUser`）是同一組程式碼。`sub_491830`／`sub_485520` 是「有沒有下一個元素」。
+
+#### CNpcPool（`sub_49F560(dword_5C2050, opcode, packet)`）
+
+| opcode | 分支 | 目前已知 |
+|---|---|---|
+| 0x38／0x41 | — | 沒有分支 |
+| 0x39 | `sub_49F6C0` | **NPC 進場**（`sub_4A1720` 取 NPC 模板）|
+| 0x3A | `sub_49F810` | 未讀 |
+| 0x3B | `sub_49F970` | `u8 flag` + `u32 npcId`；`flag != 0` → `sub_49F260(npcId, packet)`、`flag == 0` → `sub_49F380(npcId)`（**與怪物 0x31 同型**）|
+| 0x3C–0x40 | `sub_49F5B0` | `sub_49F610` 查表後 → `sub_49A280(opcode, packet)` |
+
+#### 其餘區間（只有入口，尚未拆）
+
+| opcode | 入口 | 已知 |
+|---|---|---|
+| 0x42–0x45 | `sub_4A8870`（`dword_5C204C`）| 只有 0x43→`sub_4A88A0`、0x44→`sub_4A95B0` 兩個分支 |
+| 0x46–0x48 | `sub_4A58F0`（`dword_5C2048`）| CQuestMan（任務）|
+| 0x49–0x4C | `sub_4B73A0` | 對話框／商店（0x4A 開 `CShopDlg`；`this_15 = dword_5C2040` = `CUniqueModeless`）|
+| 0x4D–0x4F | `sub_4E18D0` | CUIMessenger，內部再 switch 0–7（`sub_4DF1D0`／`sub_4DF620`／`sub_4DF8B0`／`sub_4E19A0`／`sub_4E1E30`／`sub_4E2170`／`sub_4E2280`）|
+| 0x50–0x52 | `sub_4815E0` | CMiniRoomBaseDlg（交易／小房間），switch 3／5／6／7／8 → vtable slot 15–18 |
+
+#### 落掉的鉤子（本回合未做完，留給下一個回合）
+
+- `0x1E`／`0x20`／`0x21`／`0x2A` 在 CUserPool 內是「讀 u32 查表後什麼都不做」；`0x26` 是 `nullsub`。
+  這些很可能是**空實作或已停用**，但要先確認不是 Hex-Rays 掉的呼叫再下結論。
+- `sub_5209C0`（0x23／0x24／0x25）內有 76-byte 的 buff／怪物查表迴圈，還沒讀欄位。
+
+### 4.13 🟡 client → server 遊戲內封包的語意（證據：`/` 指令表 + CP949 字串 + 與 CMob 同區的呼叫）
+
+§4.5 的目錄只給號碼與 sender。這一節把其中幾個變成**有語意的封包**，方法是讀 `sub_470E10`
+＝聊天輸入框的「`/` 開頭」分支（`sub_4F8CB0`：Enter、非空、第一個字元是 `/` 才走到它）：
+它是一整張指令表，每一條指令就是「這個 opcode 該怎麼送」的現成範例。
+2003 年的 client 沒有符號，指令字串＝函式唯一的名字，而 `.c` 是 CP949——
+`grep` 只會看到亂碼，用本回合新增的 `tools/kstr.py` 讀：
+
+```bash
+python3 tools/kstr.py MapleStory.exe.c sub_470E10
+# /헉맵 /헉위치 [현재위치] Map : %09d  X : %d  Y : %d /헉추적 /헉경고 /헉공지 /헉창조 /헉소멸 /헉경험치
+# /귓속말 /찾기 /교환 /파티정보 /파티만들기 /파티탈퇴 /파티초대 /파티강퇴
+```
+
+| opcode | 指令 | sender | 已讀出的欄位 |
+|---|---|---|---|
+| `0x0D` | `/헉맵 <mapId>`（`atoi`）| `sub_472590(kind, name)` | `s32 kind` + `string name`；**name 為 null 時寫空字串**（`sub_430230` 收到 nullptr 會用全域空字串），所以 0x0D 永遠是「s32 + 字串」；節流 500 ms（`n3000[6]/[7]`，`0x19` 解除）|
+| `0x12` | 一般聊天（非 `/`、且沒有密語對象）| `sub_470C70` | `string`（`sub_430230`）|
+| `0x22` | `/헉공지 <msg>`／`/헉경고 <msg>` | `sub_470E10` 內嵌 | `u8 0`（公告）／`u8 1`（警告）+ `string` |
+| `0x23` | `/귓속말 <name> <msg>`、`/헉추적 <name>` | `sub_4717D0` | 兩個 `string`；sender 自己會擋「다른 요청을 처리 중입니다」（一次只允許一個請求）|
+| `0x25` | `/교환 <name>` | `sub_471A40` | 未讀（交易與找人的 sender 是同一個）|
+| `0x26` | `/파티만들기`、`/파티탈퇴`、`/파티초대 <name>`、`/파티강퇴 <name>` | `sub_471CD0`／`sub_471E90`／`sub_472050`／`sub_4722E0`，以及 `sub_55C5E0`（§4.10 `0x10` type 3 按「是」）| 各自的 sub-code；§4.10 已證實「邀請回覆」＝`u8 2` + `u32 邀請者 id` |
+| `0x27` | `/헉창조 <id>`／`/헉소멸 <n>`／`/헉경험치 <n>` | `sub_470E10` 內嵌 | `u8 0` + `u32`；`u8 1` + `u8`；`u8 2` + `u32` |
+| `0x16` | 商店購買 | `sub_4B6B40` | 未讀；字串「정말로 사시겠습니까?」「몇 개를 사시겠습니까?」「현금이 부족합니다」|
+| `0x20` | 找人 | `sub_55D7B0` | 未讀；字串「캐릭터를 찾을 수 없습니다」「잠시 후 다시 시도해 보세요」|
+| `0x14` | 社群選單（개인정보／인기도 +／인기도 -／귓속말／교환신청／파티초대）| `sub_512570` | 未讀；送出前用 `sub_51D7D0(CUserPool, name)` 找玩家 |
+| `0x24` | messenger（쪽지）| `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`（CUIMessenger）| 未讀 |
+
+`/헉*`（GM）系列全被 `if ((*(CWvsApp+9) & 1) != 0)` 包住——那就是 §4.8 `0x01` 回包的 `app9`；
+玩家指令（`/귓속말`、`/찾기`、`/교환`、`/파티*`）在這層之外。
+
+#### 4.13.1 三個最大的 sender 是攻擊封包
+
+| opcode | 函式 | 目前已知 |
+|---|---|---|
+| `0x0F` | `sub_512F90`（760 行）| `u8`（低 4 bits 未定，**bit 4 = 有附加資料**）＋ `u32 目標物件 id` ＋ 續欄位；送出前對每個目標呼叫 `sub_4882F0`（0x488xxx ＝ CMob 區，與 `CMob::Init` `sub_484ED0`、怪物移動 `sub_485330` 同區）|
+| `0x10` | `sub_513C80`（853 行）| 同形狀：`u8`（`值 | 16*(有附加資料)`）＋ `u32` |
+| `0x11` | `sub_514D30`（571 行）| 同形狀；多呼叫 `sub_50D7F0` |
+
+> 三者結構幾乎相同，且都對「目標物件」先做一次本地運算再送出 → 2003 年的三種攻擊
+> （普通／魔法／技能）各佔一號。**下一個回合最划算的一件事就是把 `sub_512F90` 在 `u8`/`u32`
+> 之後的欄位讀完**：那條線一完成，伺服器就能收「打怪」並回傷害，遊戲迴圈才真正閉合。
+> 這三個 sender 會呼叫的 0x0F/0x10/0x11 家族入口是 `sub_511E20`（opcode `0x13`）。
+
+#### 4.13.2 §4.5 那 39 個 opcode 的完整 sender 目錄
+
+抽取方式：`grep -n "sub_4A1EA0("` 後取第二個參數（＝要送的 opcode），再用「往上找最近的函式標頭」
+決定 sender。**這張表是為了不必再跑一次抽取**（同一 opcode 可能有多個 sender）。
+
+| opcode | sender（`@`＝程式碼行號，方便回頭查）|
+|---|---|
+| `0x01` | `sub_4D0B20` ｜ `0x02` `sub_54DFC0` ｜ `0x03`／`0x06`／`0x07` `sub_431620` ｜ `0x04` `sub_43A410` |
+| `0x05` | `sub_42FD30` ｜ `0x08` `sub_43B280` ｜ `0x09`／`0x0A` `sub_5545A0`（舊文件寫 `sub_5545F0`，已更正）|
+| `0x0D` | `sub_472590` ｜ `0x0E` `sub_542C40` ｜ `0x0F` `sub_512F90` ｜ `0x10` `sub_513C80` ｜ `0x11` `sub_514D30` |
+| `0x12` | `sub_470C70` ｜ `0x13` `sub_511E20` ｜ `0x14` `sub_512570` |
+| `0x15` | `sub_4A5A80`／`sub_4A5D00`／`sub_4A5F40`／`sub_4A6320`／`sub_4A65C0`（CQuestMan）|
+| `0x16` | `sub_4B3C80`／`sub_4B6B40`／`sub_4B6E90`／`sub_4B7130`（對話框／商店）|
+| `0x17`–`0x1A` | `sub_55ACB0`／`sub_55B2C0`／`sub_55B4B0`／`sub_55B0E0`（CWvsApp 層；`sub_55B0E0` 的簽章是兩個 `s16`）|
+| `0x1B`–`0x20` | `sub_55CF60`／`sub_55B870`／`sub_55D140`／`sub_55D320`／`sub_55D5F0`／`sub_55D7B0`（CWvsApp 層）|
+| `0x22`／`0x27` | `sub_470E10`（0x27 出現 3 次）｜ `0x23` `sub_4717D0`／`sub_472910` ｜ `0x25` `sub_471A40`／`sub_481910`／`sub_4820E0`／`sub_4D31F0`／`sub_4D5C80` |
+| `0x24` | `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`×2 ｜ `0x26` `sub_471CD0`／`sub_471E90`／`sub_472050`／`sub_4722E0`／`sub_55C5E0` |
+| `0x2C` | `sub_4885D0` ｜ `0x2F` `sub_49A3C0` ｜ `0x33` `sub_55AF20`（`sub_55AF20` 帶一個 `u32`，且有 `this+6/+7` 的一次性節流）|
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -637,17 +751,21 @@ count × {
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
    `0x16` 的 `mode` 與三個 u32；`0x1C` 的 `unknown64`／`avatarKey`／`unknownA/B`；
    `0x0D` 的 `kind` 其他取值。
-3. **CField 其餘區間**：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、CUserPool 的
-   `0x1E–0x29` 分支、`0x2E–0x37`（CMobPool：怪物進場／移動／受傷）、`0x38–0x41`（CNpcPool）、
-   `0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、`0x4D–0x52`（messenger／miniroom）。
-4. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
+3. **`sub_512F90` 的攻擊封包**（0x0F／0x10／0x11，§4.13.1）：前 5 bytes（`u8` + `u32 目標 id`）已讀，
+   後面還有欄位（bit 4 說「有附加資料」）。**這是下一個最划算的目標**：讀完它，伺服器就能收攻擊、
+   回傷害，加上 §4.12 的怪物進場 `CMob::Init`（`sub_484ED0`）就構成一整個打怪的迴圈。
+4. **CField 其餘區間**（分派已拆到函式，見 §4.12）：`0x1A` 的 sub-opcode 表（目前只有 9／10／18／34）、
+   CUserPool 的 `0x1E–0x29` 分支、`0x2F`–`0x36` 的欄位（怪物進場 `CMob::Init`、移動、受傷／死亡）、
+   `0x39`–`0x40`（CNpcPool）、`0x42–0x45`（CRewardPool：掉落物）、`0x49–0x4C`（對話框／商店）、
+   `0x4D–0x52`（messenger／miniroom）。怪物進場（`sub_484ED0`）與第 3 項是同一條迴圈的兩半。
+5. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支、`0x12` 的 type 4 之後，
    以及 `0x0F` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板的第二種更新格式）。
-5. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
+6. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
    在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
-6. 由 §4.1／§4.5／§4.7–§4.11 的對照表產生 `protocol/schema/`，並用 `capture` 對照真實流量驗證。
-7. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown97`／
+7. 由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`，並用 `capture` 對照真實流量驗證。
+8. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown97`／
    `unknown101`（能力值區塊）：傳輸上已完整，語意待找讀取端。
-8. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
+9. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 
 ## 7. 擷取工作流（ADR-004）
@@ -681,3 +799,15 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
   （此機制已抓到一個真實 bug：早期版本用同一個種子解兩個方向，client 的封包會解成「看似合理的亂碼」。）
 - 方向與種子的對應：**c2s 用 client 的送 state、s2c 用 client 的收 state**；握手由其**接收方**取得
   `sendSeed`（送）與 `recvSeed`（收）。伺服器先送握手時，「接收方」就是 client。
+
+## 8. 工具
+
+| 工具 | 用途 |
+|---|---|
+| `tools/hexfunc.py <dump.c> <name> [--list\|--calls\|--globals]` | 從反編譯輸出抽出單一函式（或其呼叫／全域引用），是這一整份文件的證據來源 |
+| `tools/kstr.py <dump.c> <function> [--list\|--names]` | 把函式引用的字串以 **CP949** 解出來。`.c` 直接 `grep` 會看到亂碼，而 2003 年的 client 只有這些字串能替函式命名（§4.13）|
+| `tools/wz1.py` | Data.wz（WZ v1）解析 |
+| `tools/tests/` | 上述工具的 unittest（`python3 -m unittest discover -s tools/tests`）|
+
+> 讀 `.c` 的注意事項：檔案是 **CP949**，要用 `open(...,'rb').read().decode('cp949')`；
+> `strings` 只有超過 4 bytes 才會出現，所以「找不到字串」不等於「沒有字串」。
