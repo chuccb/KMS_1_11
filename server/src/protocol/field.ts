@@ -35,9 +35,14 @@ import { readCharacterData, writeCharacterData, type CharacterData } from "./cha
 export const FIELD_OPCODE = {
   /**
    * `CStage` base (0x15-0x17, only 0x16 does anything): the server moves the client into a
-   * field. `sub_4C2780` reads `u8`, `u8`, and - when the second byte is non-zero - three u32s
-   * followed by a whole `CharacterData` (the same `sub_45FCC0` reader FINDINGS 4.9 documents),
-   * then creates the field object and the local user (`sub_51CBF0` on `CUserPool`).
+   * field. `sub_4C2780` reads `u8 mode`, `u8 full`, and - when `full` is non-zero - three `u32`s
+   * followed by a whole `CharacterData` (the same `sub_45FCC0` reader FINDINGS 4.9 documents).
+   * The three `u32`s are the field's **random seed**: `sub_4C7930` hands all three to
+   * `sub_48A900` ("scramble and store"), whose inverse `sub_4619F0` is the client's `Random()`,
+   * and `sub_4C7960(CWvsApp+632, ...)` is what rolls the damage numbers with it. The field and
+   * spawn parameter is `mode` plus the `CharacterData`'s `unknown97`, both handed to the new field
+   * object (`sub_4C3460(field, &{mode, unknown97})`), after which `sub_51CBF0` makes the field and
+   * the local user on `CUserPool`.
    */
   setField: 0x16,
   /**
@@ -200,13 +205,28 @@ export function encodeUserMove(move: UserMove): Uint8Array {
  * meaning, so the writer demands them from the caller instead of inventing values.
  */
 export interface SetField {
-  /** First byte of the packet. Its effect is not located; real traffic has to pin it down. */
+  /**
+   * First byte of the packet (`sub_4C2780`). It is handed to the *new* field object's constructor
+   * (`sub_4C3460(field, &{mode, character.unknown97})`), so it is the spawn mode/portal, but which
+   * values mean what is not located; real traffic has to pin it down.
+   */
   mode: number;
   /** `0` = the "already known character" form, non-zero = carry a full `CharacterData`. */
   full: boolean;
-  unknownA: number;
-  unknownB: number;
-  unknownC: number;
+  /**
+   * The three `u32`s are the **field's random seed**, not opaque words: `sub_4C2780` passes all
+   * three to `sub_4C7930`, which seeds the two random generators at `CWvsApp+632` and `+652` with
+   * them (`sub_48A900` = "scramble and store the three parts"). The inverse `sub_4619F0` is this
+   * client's `Random()` - a custom generator whose output is the xor of the three stored parts, and
+   * the very function the client calls to roll damage (`sub_4C7960(CWvsApp+632, ...)`), pick an
+   * attack action (`sub_427F60`) and drive drops.
+   *
+   * For a server that means: sending the same seed twice makes the client repeat its rolls, so the
+   * damage a client reports in `0x0F` is *reproducible from the seed* instead of being a black box.
+   */
+  randomSeedA: number;
+  randomSeedB: number;
+  randomSeedC: number;
   character: CharacterData;
 }
 
@@ -216,11 +236,11 @@ export function readSetField(reader: PacketReader): SetField {
   if (hasData === 0) {
     throw new Error("the 0x16 form without CharacterData is not decoded yet (see FINDINGS 4.11)");
   }
-  const unknownA = reader.readU32();
-  const unknownB = reader.readU32();
-  const unknownC = reader.readU32();
+  const randomSeedA = reader.readU32();
+  const randomSeedB = reader.readU32();
+  const randomSeedC = reader.readU32();
   const character = readCharacterData(reader);
-  return { mode, full: true, unknownA, unknownB, unknownC, character };
+  return { mode, full: true, randomSeedA, randomSeedB, randomSeedC, character };
 }
 
 export function encodeSetField(field: SetField): Uint8Array {
@@ -229,9 +249,9 @@ export function encodeSetField(field: SetField): Uint8Array {
   writer.writeByte(FIELD_OPCODE.setField);
   writer.writeByte(field.mode & 0xff);
   writer.writeByte(1);
-  writer.writeU32(field.unknownA >>> 0);
-  writer.writeU32(field.unknownB >>> 0);
-  writer.writeU32(field.unknownC >>> 0);
+  writer.writeU32(field.randomSeedA >>> 0);
+  writer.writeU32(field.randomSeedB >>> 0);
+  writer.writeU32(field.randomSeedC >>> 0);
   writeCharacterData(writer, field.character);
   return writer.toBytes();
 }

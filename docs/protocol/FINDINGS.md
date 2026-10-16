@@ -408,7 +408,7 @@ n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（
 | 20 | u32 | `exp` | 記憶體 +77/+81；`0x0D` 升級訊息讀這一對 |
 | 21 | u16 | `fame` | 記憶體 +85/+87 |
 | 22 | u32 | `unknown93` | 記憶體 +89/+93 |
-| 23 | u32 | `unknown97` | 記憶體 +97，**不混淆** |
+| 23 | u32 | `unknown97` | 記憶體 +97，**不混淆**；`0x16` 進地圖時它與 `mode` 一起被交給新場地物件的建構子（§4.11.2）→ **很可能是角色存檔裡的地圖／場地 id**，但建構子本身還沒讀，先保留名字 |
 | 24 | u8 | `unknown101` | 記憶體 +101，**不混淆** |
 
 - ⚠️ **本節前一版寫的「75 bytes、尾巴多 u32/u16 各一」是錯的**：那版把 `sub_45D840` 的
@@ -518,10 +518,10 @@ u16 ×15    str dex int luk maxHp maxMp pad mad pdd mdd acc eva craft speed jump
 #### 4.11.2 `0x16` = 進地圖（由 CStage 基底 `sub_4C2760` → `sub_4C2780`）
 
 ```
-u8  mode                      // 用途未證實
+u8  mode                      // 交給新場地物件建構子的第一個參數（= 出生方式／portal）
 u8  hasData
 hasData != 0:
-    u32 ×3                    // sub_4C7930(CWvsApp+632, …)，三個都還沒找到語意
+    u32 ×3                    // ＝場地的亂數種子（見下），不是三個不明數字
     CharacterData             // 與 §4.9 同一個讀取器（sub_45FCC0）
 hasData == 0:
     u32 → obj+97              // obj 由 sub_463050 取得；decompiler 掉了查表用的來源
@@ -530,10 +530,22 @@ hasData == 0:
 ```
 
 之後 `sub_4C2780` 會：建立 `CField` 物件 → `sub_4C3460`（= `SetStage`）→ `sub_51CBF0(CUserPool, charData, mode)`
-（配置 0x1C4 bytes = 本機角色 `CUserLocal`）。
+（配置 0x1C4 bytes = 本機角色 `CUserLocal`）；`hasData != 0` 時還多傳一個
+`sub_4C3460(field, &{mode, character.unknown97})`，所以**場地／出生點參數＝`mode` ＋ `CharacterData` 的 `unknown97`**。
 
-> ⚠️ `hasData != 0` 分支裡的三個 u32 目前只能照抄；`mode` 的用途、以及 `hasData == 0` 分支怎麼找到角色
-> 都還是 UNKNOWN。這是 CField 區間裡**最該先用真實流量驗證**的一格。
+> ✅ **三個 u32 已經確定是場地的亂數種子**（不再是三個不明數字）：`sub_4C2780` 把三個值一起交給
+> `sub_4C7930(CWvsApp+632, a, b, c)`，它對 `CWvsApp+632` 與 `+652` 各呼叫一次
+> `sub_48A900`——`sub_48A900` 是「把三個部分打亂後存起來」的函式，而且它與
+> `sub_4619F0`（同一個結構的反函式）正是這支 client 的**自訂亂數產生器**：
+>
+> - 全域的 `dword_5D2C20` 在第一次使用時以 `rand()` 取三個部分初始化
+>   （`sub_461930(&dword_5D2C20, a, b, c)`，見第 105600 行附近），
+> - 同一支函式就是 `Random(lo, hi)`：`return lo + sub_4619F0(&dword_5D2C20) % (hi - lo)`，
+> - 攻擊路徑的 `sub_4C7960(CWvsApp+632, …)` 就是**用這個種子產生傷害數字**。
+>
+> 對伺服器的意義：`0x16` 送出的種子決定客戶端接下來所有「隨機」結果（傷害數字、掉落、怪物行為），
+> 所以客戶端在 `0x0F` 裡回報的傷害是**可以由種子重算出來**的，不是黑箱——這是伺服器端驗證傷害的基礎。
+> 剩下的 UNKNOWN 只有 `mode` 的具體值，以及 `hasData == 0` 分支怎麼找到角色物件。
 
 #### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
 
@@ -892,8 +904,8 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
    `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應（同一支 client 對不同 body
    的反應就是唯一的量測工具）。
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
-   `0x16` 的 `mode` 與三個 u32；`0x1C` 的 `unknown64`／`avatarKey`／`unknownA/B`；
-   `0x0D` 的 `kind` 其他取值。
+   `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，§4.11.2）；`0x1C` 的 `unknown64`／`avatarKey`／
+   `unknownA/B`；`0x0D` 的 `kind` 其他取值。
 3. **攻擊家族已全部解出**（`0x0F`／`0x10`／`0x11`，§4.13.1＋§4.13.1b），三支共用一個 codec。
    還缺的是**真實流量驗證**（§6 第 2 項）與 `0x10` 的 `u16 v138`。
    另一邊 `CMob::Init`（§4.12.1）已解到 x／y／面向＋動畫區塊；補完它就與攻擊包合起來是完整的打怪迴圈。
@@ -908,8 +920,9 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 7. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
    `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
-8. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown97`／
-   `unknown101`（能力值區塊）：傳輸上已完整，語意待找讀取端。
+8. **`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`／`unknown101`
+   （能力值區塊）：傳輸上已完整，語意待找讀取端。`unknown97` 有了第一條線索（`0x16` 拿它當場地參數，
+   見 §4.11.2），下一步是讀 `sub_468D40`／`sub_4C3460` 的建構子，確認它是不是地圖 id。
 9. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 

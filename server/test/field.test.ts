@@ -155,7 +155,7 @@ test("set field carries mode, the three unknown words and a CharacterData", () =
   stats.id = 1000;
   stats.name = "Bob";
   const character: CharacterData = { flags: 1, stats };
-  const bytes = encodeSetField({ mode: 0, full: true, unknownA: 1, unknownB: 2, unknownC: 3, character });
+  const bytes = encodeSetField({ mode: 0, full: true, randomSeedA: 1, randomSeedB: 2, randomSeedC: 3, character });
   assert.equal(bytes[0], FIELD_OPCODE.setField);
   assert.equal(toHex(bytes.slice(0, 15)), "160001010000000200000003000000");
   const decoded = readSetField(new PacketReader(bytes, 1));
@@ -163,7 +163,7 @@ test("set field carries mode, the three unknown words and a CharacterData", () =
   // parts this test owns instead of the whole record.
   assert.equal(decoded.character.flags, character.flags);
   assert.deepEqual(decoded.character.stats, stats);
-  assert.equal(decoded.unknownC, 3);
+  assert.equal(decoded.randomSeedC, 3);
 });
 
 test("the 0x16 form without CharacterData is refused, not mis-parsed", () => {
