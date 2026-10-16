@@ -12,7 +12,11 @@ import { toHex } from "../src/protocol/frame.ts";
 import { readMovePath, writeMovePath, pathStart, type MovePath } from "../src/protocol/movepath.ts";
 import {
   FIELD_OPCODE,
+  describeClientFieldPacket,
+  encodeClientAttack,
   encodeClientInteract,
+  readClientAttack,
+  type ClientAttack,
   encodeClientUserMove,
   readClientInteract,
   readClientUserMove,
@@ -203,4 +207,108 @@ test("the portal/object click request is kind plus name (0x0D)", () => {
   const bytes = encodeClientInteract({ kind: -1, name: "west00" });
   assert.equal(toHex(bytes), "0dffffffff" + "0600776573743030");
   assert.deepEqual(readClientInteract(new PacketReader(bytes, 1)), { kind: -1, name: "west00" });
+});
+
+/**
+ * The `0x0F` swing. Its bytes come straight from the writer in `sub_512F90` (FINDINGS 4.13.1):
+ * header `u8 hits|count<<4`, `u32 clicked id`, `u8 facing<<7|action`, `u8 target cap`, then one
+ * 11-byte record per target plus `hits` damage words. If this test fails, the codec and the
+ * document disagree about the client's own byte order.
+ */
+test("attack (0x0F) is byte exact, header and per-target records", () => {
+  const attack: ClientAttack = {
+    hits: 3,
+    targetCount: 1,
+    clickedMobId: 0x30,
+    facingLeft: true,
+    action: 0x11,
+    targetCap: 6,
+    targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12, 13] }],
+  };
+  const bytes = encodeClientAttack(attack);
+  assert.equal(
+    toHex(bytes),
+    // 0f | 03|1<<4 | 30 00 00 00 | 80|11 | 06 | 10 00 00 00 | ff | 64 00 | c8 00 | 05 00 | 0b 00 0c 00 0d 00
+    "0f13300000009106" + "10000000ff" + "6400c8000500" + "0b000c000d00",
+  );
+  const read = readClientAttack(new PacketReader(bytes, 1));
+  assert.deepEqual(read, { ...attack, targetCount: 1 });
+});
+
+test("attack round trips several targets and keeps the signed hit animation", () => {
+  const targets = [
+    { mobId: 0x10, hitAnimation: -1, x: 0, y: 0, sequence: 0x1234, damages: [1] },
+    { mobId: 0x11, hitAnimation: 0x7f, x: 0xffff, y: 0x8000, sequence: 0x1234, damages: [1] },
+  ];
+  const attack: ClientAttack = {
+    hits: 1,
+    targetCount: targets.length,
+    clickedMobId: 0,
+    facingLeft: false,
+    action: 0x20,
+    targetCap: 6,
+    targets,
+  };
+  const read = readClientAttack(new PacketReader(encodeClientAttack(attack), 1));
+  assert.deepEqual(read.targets, targets);
+  assert.equal(read.targetCount, 2);
+  assert.equal(read.targets[0]!.hitAnimation, -1); // not 0xff
+});
+
+test("an attack without a target is still a legal packet", () => {
+  const bytes = encodeClientAttack({
+    hits: 1,
+    targetCount: 0,
+    clickedMobId: 0,
+    facingLeft: false,
+    action: 0x20,
+    targetCap: 6,
+    targets: [],
+  });
+  assert.equal(toHex(bytes), "0f01000000002006");
+  assert.equal(readClientAttack(new PacketReader(bytes, 1)).targets.length, 0);
+});
+
+test("a target must carry exactly hits damage values, and 15 targets is the cap", () => {
+  const base = {
+    hits: 2,
+    targetCount: 1,
+    clickedMobId: 0,
+    facingLeft: false,
+    action: 0x20,
+    targetCap: 6,
+  };
+  assert.throws(
+    () =>
+      encodeClientAttack({
+        ...base,
+        targets: [{ mobId: 1, hitAnimation: 0, x: 0, y: 0, sequence: 0, damages: [1] }],
+      }),
+    /exactly 2 damage/,
+  );
+  const many = Array.from({ length: 16 }, (_, i) => ({
+    mobId: i,
+    hitAnimation: 0,
+    x: 0,
+    y: 0,
+    sequence: 0,
+    damages: [1, 2],
+  }));
+  assert.throws(() => encodeClientAttack({ ...base, targets: many }), /at most 15 targets/);
+});
+
+test("describeClientFieldPacket names the three client field packets and stays quiet otherwise", () => {
+  const attack = encodeClientAttack({
+    hits: 2,
+    targetCount: 1,
+    clickedMobId: 0x30,
+    facingLeft: true,
+    action: 0x11,
+    targetCap: 6,
+    targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
+  });
+  const text = describeClientFieldPacket(attack)!;
+  assert.match(text, /^0x0f attack: left action=17 hits=2 cap=6 clicked=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
+  assert.equal(describeClientFieldPacket(new Uint8Array([0x7f, 1, 2, 3])), undefined);
+  assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0xf \(truncated: packet underflow/);
 });

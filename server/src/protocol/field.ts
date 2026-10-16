@@ -237,6 +237,39 @@ export function encodeSetField(field: SetField): Uint8Array {
 }
 
 /**
+ * One-line meaning for a decrypted client -> field packet (the interesting half of a capture:
+ * what the original client actually sent), for the `decode` tool. Unknown opcodes stay `undefined`
+ * so `decode` can say "unmapped" instead of inventing a reading.
+ */
+export function describeClientFieldPacket(plain: Uint8Array): string | undefined {
+  if (plain.length === 0) return undefined;
+  const opcode = plain[0]!;
+  try {
+    if (opcode === CLIENT_FIELD_OPCODE.userMove) {
+      const move = readClientUserMove(new PacketReader(plain, 1));
+      return `0x0e move: stageByte=${move.stageByte} elements=${move.path.elements.length}`;
+    }
+    if (opcode === CLIENT_FIELD_OPCODE.interact) {
+      const interact = readClientInteract(new PacketReader(plain, 1));
+      return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
+    }
+    if (opcode === CLIENT_FIELD_OPCODE.attack) {
+      const attack = readClientAttack(new PacketReader(plain, 1));
+      const targets = attack.targets
+        .map((target) => `${target.mobId}@(${target.x},${target.y})[${target.damages.join("+")}] anim=${target.hitAnimation}`)
+        .join(" ");
+      return (
+        `0x0f attack: ${attack.facingLeft ? "left" : "right"} action=${attack.action} ` +
+        `hits=${attack.hits} cap=${attack.targetCap} clicked=${attack.clickedMobId} targets=${attack.targetCount} ${targets}`
+      );
+    }
+  } catch (error) {
+    return `0x${opcode.toString(16)} (truncated: ${(error as Error).message})`;
+  }
+  return undefined;
+}
+
+/**
  * One-line meaning for a decrypted server -> field packet, for the `decode` tool. Only the
  * opcodes with located handlers are described; everything else says so instead of guessing.
  */
@@ -286,11 +319,11 @@ export function describeFieldOpcode(opcode: number): string {
 }
 
 /**
- * The two client -> server packets of the field stage that are decoded so far.
+ * The three client -> server packets of the field stage that are decoded so far.
  *
- * Both carry the *same* move-path layout as 0x22 (the client's `CMovePath::Encode`/`Decode` are
- * one codec), but the envelope differs, and so does the direction of the number: 0x22 is what the
- * server sends, 0x0E is what the client sends for its own character.
+ * `0x0E`/`0x0D` both carry pieces the client already uses locally (its move path, the object it
+ * clicked); `0x0F` goes further and carries the *result* of the client's own hit resolution -
+ * `sub_512F90` applies the damage to each mob before it builds the packet (FINDINGS 4.13.1).
  */
 export const CLIENT_FIELD_OPCODE = {
   /**
@@ -308,6 +341,18 @@ export const CLIENT_FIELD_OPCODE = {
    * server's 0x19 reply).
    */
   interact: 0x0d,
+  /**
+   * The melee swing (`sub_512F90`, the "normal attack"):
+   *
+   *   `[0x0F][u8 hits | targets << 4][u32 clicked id][u8 facing << 7 | action][u8 targetCap]`
+   *   then per target `[u32 mob id][s8 hit animation][u16 x][u16 y][u16 sequence][u16 damage * hits]`
+   *
+   * The target list is a real spatial query - `sub_491E90(CMobPool, swing rect, out, n)` - so the
+   * client is telling the server "these mobs were inside my swing, and this is what I rolled".
+   * Byte for byte from the writer's own `ZArray` appends in FINDINGS 4.13.1; `0x10`/`0x11` are the
+   * sibling senders (magic/skill) with the same shape but their own count packing, not decoded yet.
+   */
+  attack: 0x0f,
 } as const;
 
 /** `0x0E` as it arrives from the client. */
@@ -327,6 +372,115 @@ export function encodeClientUserMove(move: ClientUserMove): Uint8Array {
   writer.writeByte(CLIENT_FIELD_OPCODE.userMove);
   writer.writeByte(move.stageByte & 0xff);
   writeMovePath(writer, move.path);
+  return writer.toBytes();
+}
+
+/**
+ * One target of a `0x0F` attack, i.e. one mob the client decided it hit.
+ *
+ * The client keeps a 76-byte record per target (`sub_512F90`, `memset 0x4C`):
+ * `+0` mob object, `+4` hit animation, `+8..+67` up to fifteen `int` damages, `+68`/`+72` x/y.
+ * The wire form is the low byte of `+4`, the low 16 bits of `+360`/`+364` from the mob object,
+ * one sequence word and the low 16 bits of each damage.
+ */
+export interface ClientAttackTarget {
+  /** The mob's object id (`*(mob + 120)`) - the same field the server -> client packets carry. */
+  mobId: number;
+  /**
+   * Which hit animation the client played: `-1` when the mob's max damage stat
+   * (`*(*(mob + 124) + 112)`) is `<= 0`, else `rand() % that + 7`. Sent as a signed byte.
+   */
+  hitAnimation: number;
+  /** Low 16 bits of the mob's x (`mob + 360`, an `int` in memory). */
+  x: number;
+  /** Low 16 bits of the mob's y (`mob + 364`, an `int` in memory). */
+  y: number;
+  /**
+   * `v123`: `*(this + 49) - *(this + 50)[last]`, i.e. a difference between two attack counters of
+   * the local user. It is the *same* for every target in one packet, and the client also feeds it
+   * to its own hit routine, so it is per-swing rather than per-mob; what the server should do with
+   * it is not located, so it keeps its place (FINDINGS 4.13.1 `sequence`).
+   */
+  sequence: number;
+  /** Exactly `hits` numbers - what the client applied locally and drew on screen. */
+  damages: number[];
+}
+
+/** `0x0F` as it arrives from the client: one swing, with the client's damage already computed. */
+export interface ClientAttack {
+  /** Low nibble of byte 1: hits per target (the client clamps them to 1..15). */
+  hits: number;
+  /** High nibble of byte 1: how many target records follow (`sub_491E90` returns at most 6). */
+  targetCount: number;
+  /** `*right`: the object the cursor was over (`sub_4BDD20` found it in the field object list). */
+  clickedMobId: number;
+  /** Bit 7 of byte 3: facing left (`*(this + 45) & 1`, the flag that also mirrors the swing rect). */
+  facingLeft: boolean;
+  /** Low 7 bits of byte 3: the action `sub_427F60` picked out of the table at `dword_5B2144`. */
+  action: number;
+  /**
+   * Byte 4: how many more mobs this swing may still hit - `sub_4BE8B0(range, targetId, state)`,
+   * clamped to 0..6. The client derives the actual target list from it, so a server can use it as
+   * the bound it must not exceed.
+   */
+  targetCap: number;
+  targets: ClientAttackTarget[];
+}
+
+const ATTACK_HEADER_BYTES = 8; // opcode + packed + clicked id + packed action + target cap
+const ATTACK_TARGET_FIXED_BYTES = 11; // u32 + s8 + 3 * u16
+
+export function readClientAttack(reader: PacketReader): ClientAttack {
+  const packed = reader.readByte();
+  const hits = packed & 0x0f;
+  const targetCount = (packed >> 4) & 0x0f;
+  const clickedMobId = reader.readU32();
+  const packedAction = reader.readByte();
+  const targetCap = reader.readByte();
+  const targets: ClientAttackTarget[] = [];
+  for (let i = 0; i < targetCount; i++) {
+    const mobId = reader.readU32();
+    const rawAnimation = reader.readByte();
+    const hitAnimation = (rawAnimation << 24) >> 24; // the client writes a `_BYTE` here
+    const x = reader.readU16();
+    const y = reader.readU16();
+    const sequence = reader.readU16();
+    const damages: number[] = [];
+    for (let hit = 0; hit < hits; hit++) damages.push(reader.readU16());
+    targets.push({ mobId, hitAnimation, x, y, sequence, damages });
+  }
+  return {
+    hits,
+    targetCount,
+    clickedMobId,
+    facingLeft: (packedAction & 0x80) !== 0,
+    action: packedAction & 0x7f,
+    targetCap,
+    targets,
+  };
+}
+
+export function encodeClientAttack(attack: ClientAttack): Uint8Array {
+  const hits = attack.hits & 0x0f;
+  const targetCount = attack.targets.length;
+  if (targetCount > 0x0f) throw new RangeError(`0x0F packs at most 15 targets, got ${targetCount}`);
+  const writer = new PacketWriter(ATTACK_HEADER_BYTES + targetCount * (ATTACK_TARGET_FIXED_BYTES + 2 * hits));
+  writer.writeByte(CLIENT_FIELD_OPCODE.attack);
+  writer.writeByte(hits | (targetCount << 4));
+  writer.writeU32(attack.clickedMobId >>> 0);
+  writer.writeByte((attack.facingLeft ? 0x80 : 0) | (attack.action & 0x7f));
+  writer.writeByte(attack.targetCap & 0xff);
+  for (const target of attack.targets) {
+    if (target.damages.length !== hits) {
+      throw new RangeError(`a target carries exactly ${hits} damage value(s), got ${target.damages.length}`);
+    }
+    writer.writeU32(target.mobId >>> 0);
+    writer.writeByte(target.hitAnimation & 0xff);
+    writer.writeU16(target.x);
+    writer.writeU16(target.y);
+    writer.writeU16(target.sequence);
+    for (const damage of target.damages) writer.writeU16(damage);
+  }
   return writer.toBytes();
 }
 

@@ -107,8 +107,10 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 （只領取 token 並記錄「哪個角色到了」，因為遊戲內封包還沒解），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
-**下一個最有價值的目標**是 client 的攻擊封包（`0x0F`／`0x10`／`0x11`，FINDINGS §4.13.1）：
-前 5 bytes（`u8` + `u32 目標 id`）已解，讀完它們加上怪物進場（§4.12）就能形成「打怪 → 回傷害」的迴圈。
+client 的**普通攻擊 `0x0F` 已完整解出**（FINDINGS §4.13.1）：`field.ts` 的 `readClientAttack`／
+`encodeClientAttack` 與 golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把擷取到的
+攻擊翻成可讀的一行。**下一個最有價值的目標**是 `0x10`／`0x11`（魔法／技能，同形狀但段數與目標數的
+打包方式不同）加上怪物進場（`CMob::Init`，§4.12）——兩者合起來就是「打怪 → 回傷害」的完整迴圈。
 
 `serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段（只到「角色被交給遊戲伺服器」，
 遊戲伺服器只記錄誰到了，不會送 0x16 進地圖）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，

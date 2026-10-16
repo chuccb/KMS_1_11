@@ -15,9 +15,9 @@
 | 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
 | **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
 | 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
-| client → server 遊戲內目錄 | 🟡 | 39 個 sender 全部列出、其中聊天／密語／組隊／交易／商城／GM 指令有語意證據（FINDINGS §4.13）；**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 只讀到前 5 bytes**（下一個目標）|
+| client → server 遊戲內目錄 | 🟡 | 39 個 sender 全部列出、其中聊天／密語／組隊／交易／商城／GM 指令有語意證據（FINDINGS §4.13）；**普通攻擊 `0x0F` 已 byte-exact 解出並有 codec＋golden 測試**（§4.13.1），魔法／技能 `0x10`／`0x11` 未讀（下一個目標）|
 | 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）＋角色 id 交接；**待原 client 實機驗證** |
-| 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D 的逐 byte codec（`test/field.test.ts` golden 覆蓋）；尚未有遊戲伺服器的地圖邏輯 |
+| 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊** 的逐 byte codec（`test/field.test.ts` golden 覆蓋）；尚未有遊戲伺服器的地圖邏輯 |
 | oracle 重現 | ⬜ | 原 client 能連上我們的 listener 並完成握手（不 crash） |
 
 **出口條件**：能回答「這個封包是什麼意思」，且每個答案都有 binary 或擷取證據。
