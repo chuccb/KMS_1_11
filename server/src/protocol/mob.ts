@@ -31,11 +31,39 @@
  * Length checks are `ZException(38)` on the client (`sub_45DC40`/`sub_45DC80`), the same contract
  * `PacketReader` enforces here.
  *
- * What the opcode names itself (0x2E "mob enter" family, 0x31 move, 0x32-0x36 lookups) comes from
- * FINDINGS 4.12 and is *not* implemented: only 0x2F has a byte-exact layout, so only 0x2F is
- * encoded here.
+ * MOB MOVE (0x33)
+ * ---------------
+ * `sub_4927B0` is the 0x31 handler; the move comes from `sub_492380` (`sub_492330` case `'3'`),
+ * which reads a `u32 mobId` (`sub_492400` = pool lookup by id) and then calls `sub_488BC0(mob, p)`.
+ * Its disassembly (`.text:0x488BC0`, verified against `MapleStory.exe.lst`) is:
+ *
+ *   cmp  [esi+74h], 1            ; mob+116 == 1 -> return, the packet is not even read
+ *   u8  byte1                    ; only used for the state at the end: mob+116 = byte1 ? -3 : -2
+ *   u8  byte2                    ; `test dl, dl; jl` -> bit 7 set means "keep the current animation"
+ *   u32 value                    ; not optional: read before the branch, before the path
+ *   if byte2 >= 0:
+ *     facing = byte2 & 1, action = byte2 >> 1
+ *     if not (mob+276 (old action) in 10..12 and action in 7..9):
+ *       mob+272 = (mob+272 & ~1) | facing ; mob+276 = action ; sub_485DA0(mob)  (re-bind to foothold)
+ *     if action in 10..12 -> sub_488E30(mob, action, facing, value)     (attack actions get the u32)
+ *     else if action in 7..9 -> mob+280 = now + sub_486180(mob, action)  (hit actions get a duration)
+ *   CMovePath (sub_4967C0 -> sub_4953A0, the same decoder as 0x22/0x0E)
+ *   mob+116 = byte1 ? -3 : -2
+ *
+ * The action indices are the client's own (`CMob::GetAction` -> `sub_485400`, a hash lookup by index):
+ * `sub_40B530` + 0x156 allocates a `CActionMan::MOBACTIONENTRY` and names the action with
+ * `(&off_5B20FC)[index]`, and `.data:0x5B20FC` is the 16-entry table `MOB_ACTION_NAMES` below
+ * (`MapleStory.exe.lst` line 773757, entries 0x5B20FC..0x5B2138). The hit/attack/die ranges in
+ * `sub_488BC0`/`sub_485530` (13 + rand() % template+116) line up with that table.
+ *
+ * Opcodes without an implementation here: 0x30 (`u32 mobId` + `s16 delayMs`: the pool's timed queue
+ * in `sub_492100` calls `sub_491AB0(pool, mobId, 1)` when it expires, which plays the die animation
+ * and unlinks the mob; a negative delay removes it at once) and 0x31 (`u8 flag` + `u32 mobId`:
+ * flag != 0 keeps/creates the mob, flag == 0 removes it - see FINDINGS 4.12). Both are described but
+ * not encoded: nothing in this server kills a mob yet. 0x32/0x36 read a `u32 mobId` and do nothing.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
+import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
 
 /** `CMobPool` opcodes with a located handler (`sub_492330`). */
 export const MOB_OPCODE = {
@@ -43,11 +71,60 @@ export const MOB_OPCODE = {
    * `CMobPool` 0x2F (`sub_4924A0`): mob enter field. Body below, in `MobEnterField` order.
    */
   enterField: 0x2f,
-  /** `CMobPool` 0x30 (`sub_4926B0`): `u32 mobId` + `s16`; the pair is queued for later processing. */
-  queueMobEvent: 0x30,
-  /** `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`, then a `CMovePath` (4.11.5). */
-  move: 0x31,
+  /**
+   * `CMobPool` 0x30 (`sub_4926B0`): `u32 mobId` + `s16 delayMs`. `delayMs >= 0` puts the mob in the
+   * pool's timed queue (`sub_492100`) so it leaves - with its die animation - when the timer runs
+   * out; a negative `delayMs` removes it immediately. Not encoded yet: nothing kills a mob here.
+   */
+  leaveDelayed: 0x30,
+  /**
+   * `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`. `flag != 0` keeps the mob (creating it
+   * from a template id + `CMob::Init` body when the pool does not have the id yet), `flag == 0`
+   * removes it. Not encoded yet: see `leaveDelayed`.
+   */
+  presence: 0x31,
+  /**
+   * `CMobPool` 0x33 (`sub_492380` -> `sub_488BC0`): the mob moves - `u32 mobId` + `MobMove`.
+   */
+  move: 0x33,
+  /** `CMobPool` 0x32/0x36 (`sub_492380` default): `u32 mobId`, then nothing. Effectively unused. */
+  unusedLookup: 0x32,
 } as const;
+
+/**
+ * Mob action indices, as the client names them.
+ *
+ * `sub_485400(mob, index)` looks the index up in the mob's action map; the map is filled by
+ * `sub_40B530`, which allocates a `CActionMan::MOBACTIONENTRY` and takes the name from the table at
+ * `.data:0x5B20FC` - that table is what is spelled out here, in order. Only the actions a mob's own
+ * WZ image actually has exist for any given mob (`Mob/0120100.img` has move/stand/hit1/die1), and
+ * `Mob/<id>.img -> info.speed` decides whether it walks at all.
+ */
+export const MOB_ACTION_NAMES = [
+  "move", "stand", "jump", "magic", "throw", "ball1", "ball2",
+  "hit1", "hit2", "hitF", "attack1", "attack2", "attackF", "die1", "die2", "dieF",
+] as const;
+
+/** The action indices above, by name (bit 7 of the action byte is not part of the index). */
+export const MOB_ACTION = {
+  move: 0, stand: 1, jump: 2, magic: 3, throw: 4, ball1: 5, ball2: 6,
+  hit1: 7, hit2: 8, hitF: 9, attack1: 10, attack2: 11, attackF: 12,
+  die1: 13, die2: 14, dieF: 15,
+} as const;
+
+/** Bit 7 of `0x33`'s action byte: keep the animation the mob is playing instead of switching. */
+export const MOB_ACTION_KEEP = 0x80;
+
+/** The action a `0x33` action byte selects, or `undefined` when bit 7 says "keep". */
+export function mobActionName(actionByte: number): string | undefined {
+  if ((actionByte & MOB_ACTION_KEEP) !== 0) return undefined;
+  return MOB_ACTION_NAMES[(actionByte >> 1) & 0x0f];
+}
+
+/** Build the action byte of `0x33` from an action index and a facing (`0` = right, `1` = left). */
+export function mobActionByte(actionIndex: number, facing: number, keep = false): number {
+  return ((actionIndex << 1) | (facing & 1)) | (keep ? MOB_ACTION_KEEP : 0);
+}
 
 /** One animation channel of the `sub_4C6CE0` block: an index and a delay in 100 ms ticks. */
 export interface MobChannel {
@@ -141,6 +218,56 @@ export function readMobEnterField(reader: PacketReader): MobEnterField {
     body.channels = channels;
   }
   return body;
+}
+
+/**
+ * The body of one `0x33` (mob move) packet: everything `sub_488BC0` reads after the mob id.
+ *
+ * `value` is only handed to `sub_488E30` and only for the attack actions (10..12); for a walking or
+ * standing mob nothing reads it, so 0 is the value to send (see the header for the disassembly).
+ */
+export interface MobMove {
+  /** `u8`: only the sign matters - bit 7 set means "keep the animation that is running". */
+  actionByte: number;
+  /**
+   * `u32`, open meaning: it reaches `sub_488E30(mob, action, facing, value)` for attack actions only.
+   * The field itself is *not* optional - it is read before the branch, before the path.
+   */
+  value: number;
+  /** The path this mob is walking (`CMovePath`, 4.11.5). One element is one leg. */
+  path: MovePath;
+}
+
+/** Encode one `0x33` packet, opcode byte included. */
+export function encodeMobMove(mobId: number, body: MobMove): Uint8Array {
+  const writer = new PacketWriter(64);
+  writer.writeByte(MOB_OPCODE.move);
+  writer.writeU32(mobId >>> 0);
+  writer.writeByte(body.actionByte & 0xff);
+  writer.writeU32(body.value >>> 0);
+  writeMovePath(writer, body.path);
+  return writer.toBytes();
+}
+
+/** Read the fields of a `0x33` body (no opcode byte; the reader must sit at `mobId`). */
+export function readMobMove(reader: PacketReader): { mobId: number; body: MobMove } {
+  const mobId = reader.readU32();
+  const actionByte = reader.readByte();
+  const value = reader.readU32();
+  const path = readMovePath(reader);
+  return { mobId, body: { actionByte, value, path } };
+}
+
+/** One line describing a `0x33` packet body, for logs and `decode`. */
+export function describeMobMove(mobId: number, body: MobMove): string {
+  const action = mobActionName(body.actionByte) ?? "keep";
+  const facing = body.actionByte & 1;
+  const first = body.path.elements[0];
+  const where = first === undefined ? "no path" : `-> (${first.x},${first.y}) in ${first.duration}ms`;
+  return (
+    `mobId=${mobId} action=${action}(${(body.actionByte >> 1) & 0x0f}) facing=${facing} ` +
+    `legs=${body.path.elements.length} ${where}`
+  );
 }
 
 /** One line describing a `0x2F` packet body, for logs and `decode`. */

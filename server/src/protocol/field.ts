@@ -29,7 +29,13 @@
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
-import { MOB_OPCODE, describeMobEnterField, readMobEnterField } from "./mob.ts";
+import {
+  MOB_OPCODE,
+  describeMobEnterField,
+  describeMobMove,
+  readMobEnterField,
+  readMobMove,
+} from "./mob.ts";
 import { readCharacterData, writeCharacterData, type CharacterData } from "./chardata.ts";
 
 /** Field opcodes with a located handler. `read`/`write` say which directions make sense. */
@@ -331,6 +337,14 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode === FIELD_OPCODE.userLeaveField && plain.length >= 5) {
     return `${name}: characterId=${new PacketReader(plain, 1).readU32()}`;
+  }
+  if (opcode === MOB_OPCODE.move) {
+    try {
+      const { mobId, body } = readMobMove(new PacketReader(plain, 1));
+      return `${name}: ${describeMobMove(mobId, body)}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
   }
   if (opcode === MOB_OPCODE.enterField) {
     // No length guard: the reader throws `PacketUnderflowError` and the catch reports it, which is

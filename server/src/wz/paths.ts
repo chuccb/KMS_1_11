@@ -18,6 +18,20 @@ export function mapImagePath(mapId: number): string {
   return `Map/Map/${String(mapId).padStart(9, "0")}.img`;
 }
 
+/**
+ * `L"Mob/%07d.img"` (`sub_40AE20`: `sub_411E50(&buf, "Mob/%07d.img", templateId)`, the mob's action
+ * loader) - the mob image for a template id, zero-padded to seven digits.
+ *
+ * This is the id `life.id` carries and `0x2F`'s `templateId` names: `"0120100"` -> 120100 ->
+ * `"Mob/0120100.img"`. `sub_4A1720` does the same for NPCs (`Npc/%07d.img`).
+ */
+export function mobImagePath(templateId: number): string {
+  if (!Number.isInteger(templateId) || templateId < 0) {
+    throw new RangeError(`mob template id must be a non-negative integer, got ${templateId}`);
+  }
+  return `Mob/${String(templateId).padStart(7, "0")}.img`;
+}
+
 /** The map `.img`'s sub-nodes, in the order `sub_469980` reads them (all three are required). */
 export const MAP_NODES = {
   /** `L"foothold"` - the walkable platforms, addressed as `foothold/<group>/<id>`. */

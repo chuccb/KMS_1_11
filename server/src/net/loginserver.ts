@@ -23,7 +23,7 @@ import {
   encodeSessionPacket,
   type SessionEvent,
 } from "../protocol/session.ts";
-import { encodeMobEnterField } from "../protocol/mob.ts";
+import { MobField, type MobTemplate } from "../game/mobs.ts";
 import type { MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket, CLIENT_OPCODE } from "../protocol/login.ts";
 import { describeClientFieldPacket, encodeSetField, type SetField } from "../protocol/field.ts";
@@ -439,6 +439,12 @@ export interface GameEntryServerOptions {
    * stub. Without it the connection still enters its map, it just has nothing to spawn.
    */
   mapProvider?: (mapId: number) => MapData | undefined;
+  /** Mob stats (`Mob/<id>.img -> info`); `mobTemplateProvider(WzArchive)` is the real one. */
+  mobTemplate?: (templateId: number) => MobTemplate | undefined;
+  /** Walking speed of a mob at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
+  mobSpeedPxPerSecond?: number;
+  /** How often the field hands out mob movement legs, in ms. Defaults to 250. */
+  mobTickMs?: number;
   log?(line: string): void;
 }
 
@@ -527,6 +533,9 @@ export class GameEntryServer {
    * copy of the map's mobs and its own id sequence: two players in one field would each see a full
    * set of monsters and would not see each other's. A per-field registry that owns the ids (and the
    * hit points) is the Phase 2 step that turns this into one world.
+   *
+   * The mobs then walk (`src/game/mobs.ts`): a timer asks the field for the legs that are due and
+   * writes the `0x33`s on the same socket. The timer stops with the socket.
    */
   private spawnMobs(socket: net.Socket, sendState: CipherState): void {
     const map = this.options.mapProvider?.(this.mapId);
@@ -536,21 +545,31 @@ export class GameEntryServer {
       }
       return;
     }
-    let mobId = 1;
-    for (const spawn of map.mobs) {
-      const body = {
-        mobId: mobId++,
-        templateId: spawn.templateId,
-        x: spawn.x,
-        y: spawn.y,
-        facing: spawn.facing,
-      };
-      socket.write(encodeSessionPacket(encodeMobEnterField(body), sendState, "s2c"));
+    const field = new MobField({
+      map,
+      ...(map.footholdSegments !== undefined ? { footholds: map.footholdSegments } : {}),
+      ...(this.options.mobTemplate !== undefined ? { template: this.options.mobTemplate } : {}),
+      ...(this.options.mobSpeedPxPerSecond !== undefined
+        ? { speedPxPerSecond: this.options.mobSpeedPxPerSecond }
+        : {}),
+    });
+    for (const packet of field.spawnPackets()) {
+      socket.write(encodeSessionPacket(packet, sendState, "s2c"));
     }
     this.options.log?.(
-      `game: spawned ${map.mobs.length} mobs (${map.name || map.imagePath}); ` +
-        `${map.npcs.length} NPCs are known but not spawned yet`,
+      `game: spawned ${field.mobs.length} mobs (${map.name || map.imagePath}), ` +
+        `${field.walking} of them walking; ${map.npcs.length} NPCs are known but not spawned yet`,
     );
+    if (field.walking === 0) return;
+    const tickMs = this.options.mobTickMs ?? 250;
+    const timer = setInterval(() => {
+      for (const packet of field.movePackets(Date.now())) {
+        socket.write(encodeSessionPacket(packet, sendState, "s2c"));
+      }
+    }, tickMs);
+    const stop = (): void => clearInterval(timer);
+    socket.once("close", stop);
+    socket.once("error", stop);
   }
 
   private onConnection(socket: net.Socket): void {

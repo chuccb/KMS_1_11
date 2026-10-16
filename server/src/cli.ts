@@ -15,6 +15,7 @@ import { schemaJson, schemaText } from "./protocol/schema.ts";
 import { runWzCommand } from "./wz/cli.ts";
 import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
+import { mobTemplateProvider } from "./game/mobs.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -42,7 +43,8 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
-        [--data <Data.wz|off>] [--seed <n>] [--handshake-body <hex>] [--quiet]
+        [--data <Data.wz|off>] [--mob-speed <px/s>] [--seed <n>] [--handshake-body <hex>]
+        [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
@@ -66,9 +68,11 @@ notes:
   Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
 
-  serve --game-port also spawns the map's monsters once the character is in: Data.wz is read for
-  Map/Map/<mapId>.img (default: ./Data.wz when it exists, --data to point elsewhere, --data off to
-  skip) and one 0x2F is sent per "life" entry of type "m" (FINDINGS 4.15).
+  serve --game-port also spawns the map's monsters once the character is in, and then walks them:
+  Data.wz is read for Map/Map/<mapId>.img (default: ./Data.wz when it exists, --data to point
+  elsewhere, --data off to skip), one 0x2F is sent per "life" entry of type "m" (FINDINGS 4.15), and
+  each mob that has a foothold gets one 0x33 per leg of its patrol (FINDINGS 4.16). --mob-speed sets
+  the walking speed at 100% (default 60 px/s; the WZ's own info.speed scales it per mob).
 
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
@@ -233,13 +237,21 @@ async function runServe(rest: string[]): Promise<number> {
   const dataArg = args.data === true ? "Data.wz" : typeof args.data === "string" ? args.data : undefined;
   const dataPath = dataArg === "off" ? undefined : (dataArg ?? (existsSync("Data.wz") ? "Data.wz" : undefined));
   let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
+  let mobTemplate: ReturnType<typeof mobTemplateProvider> | undefined;
   if (dataPath !== undefined) {
     try {
-      mapProvider = mapDataProvider(WzArchive.open(dataPath));
+      const archive = WzArchive.open(dataPath);
+      mapProvider = mapDataProvider(archive);
+      mobTemplate = mobTemplateProvider(archive);
     } catch (error) {
       process.stderr.write(`--data ${dataPath}: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     }
+  }
+  const mobSpeed = args["mob-speed"] === undefined ? undefined : Number(args["mob-speed"]);
+  if (mobSpeed !== undefined && (!Number.isFinite(mobSpeed) || mobSpeed < 0)) {
+    process.stderr.write(`invalid --mob-speed: ${String(args["mob-speed"])} (px/s at 100%)\n`);
+    return 1;
   }
 
   const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
@@ -261,6 +273,8 @@ async function runServe(rest: string[]): Promise<number> {
       handoffs,
       mapId,
       ...(mapProvider !== undefined ? { mapProvider } : {}),
+      ...(mobTemplate !== undefined ? { mobTemplate } : {}),
+      ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(handshake ? { handshake } : {}),
       ...(log ? { log } : {}),
     });

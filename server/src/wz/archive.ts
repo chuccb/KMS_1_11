@@ -158,6 +158,17 @@ export class WzArchive {
     return parseImage(this.blob(path));
   }
 
+  /**
+   * Whether the archive has that image at all - the non-throwing companion of `image()`.
+   *
+   * `objects()` throws on a path the tree does not have, which is right for a caller that asked for
+   * one specific file, but wrong for the many paths the game computes from ids (`Map/Map/%09d.img`,
+   * `Mob/%07d.img`): those want "no such map/mob" as a value, not as an exception.
+   */
+  has(path: string): boolean {
+    return this.byPath.has(path);
+  }
+
   /** Every canvas of one image, depth first. */
   canvases(path: string): WzCanvas[] {
     const out: WzCanvas[] = [];
@@ -443,6 +454,130 @@ export function mapSummary(root: WzObject | undefined): MapSummary {
     }
   }
   return summary;
+}
+
+/**
+ * One foothold segment: the client's `FOOTHOLD` item, i.e. the line from `(x1,y1)` to `(x2,y2)`.
+ *
+ * The WZ tree is `foothold -> <page> -> <group> -> <item>`; the **item key is the foothold id** that
+ * `life.fh` and the `CMovePath` element's `foothold` field name, and `prev`/`next` chain segments
+ * into a polyline (0 = end of the chain). Verified against every spawn in the game: for all 100 maps
+ * (30,338 segments, no duplicate item keys) each of the 2,322 `life` entries resolves to a segment
+ * that covers its `x` and whose interpolated y equals its `cy`.
+ */
+export interface FootholdSegment {
+  id: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  prev: number;
+  next: number;
+}
+
+/** Every foothold segment of a map, keyed by foothold id. */
+export type FootholdSegments = Map<number, FootholdSegment>;
+
+/** `foothold` -> page -> group -> `<item = foothold id>`: the segments of one map. */
+export function footholdSegments(root: WzObject | undefined): FootholdSegments {
+  const segments: FootholdSegments = new Map();
+  if (root === undefined) return segments;
+  const foothold = root.props.find((entry) => entry.name === "foothold")?.value;
+  if (!(foothold instanceof WzNode)) return segments;
+  for (const page of foothold.props) {
+    if (!(page.value instanceof WzNode)) continue;
+    for (const group of page.value.props) {
+      if (!(group.value instanceof WzNode)) continue;
+      for (const item of group.value.props) {
+        const id = Number.parseInt(item.name, 10);
+        const values = asRecord(item.value);
+        const x1 = values.x1;
+        const y1 = values.y1;
+        const x2 = values.x2;
+        const y2 = values.y2;
+        if (!Number.isFinite(id) || typeof x1 !== "number" || typeof y1 !== "number") continue;
+        if (typeof x2 !== "number" || typeof y2 !== "number") continue;
+        segments.set(id, {
+          id,
+          x1,
+          y1,
+          x2,
+          y2,
+          prev: typeof values.prev === "number" ? values.prev : 0,
+          next: typeof values.next === "number" ? values.next : 0,
+        });
+      }
+    }
+  }
+  return segments;
+}
+
+/**
+ * The polyline one foothold id belongs to, in walking order (`prev`/`next`, not tree order).
+ *
+ * The chain is what the client's foothold tree links together: `next` walks forward, `prev` walks
+ * back to the head. A segment whose neighbours are missing from the map is its own chain.
+ */
+export function footholdChain(segments: FootholdSegments, id: number): FootholdSegment[] {
+  const first = segments.get(id);
+  if (first === undefined) return [];
+  const chain: FootholdSegment[] = [first];
+  const seen = new Set<number>([id]);
+  for (const step of ["next", "prev"] as const) {
+    let current = first;
+    while (current[step] !== 0) {
+      const next = segments.get(current[step]);
+      if (next === undefined || seen.has(next.id)) break;
+      seen.add(next.id);
+      if (step === "next") chain.push(next);
+      else chain.unshift(next);
+      current = next;
+    }
+  }
+  return chain;
+}
+
+/** The segment of a chain that covers `x` (the chain is a polyline, so at most one should). */
+export function footholdSegmentAt(chain: FootholdSegment[], x: number): FootholdSegment | undefined {
+  let best: FootholdSegment | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const segment of chain) {
+    const low = Math.min(segment.x1, segment.x2);
+    const high = Math.max(segment.x1, segment.x2);
+    if (x < low || x > high) continue;
+    const distance = Math.abs(x - segment.x1) + Math.abs(x - segment.x2);
+    if (distance < bestDistance) {
+      best = segment;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
+ * The y of a foothold at `x`, interpolated along the segment that covers that x.
+ *
+ * A foothold that does not reach `x` returns `undefined` rather than a guessed y, because "outside
+ * the foothold" is exactly what makes something fall in this game.
+ */
+export function footholdYAt(chain: FootholdSegment[], x: number): number | undefined {
+  const segment = footholdSegmentAt(chain, x);
+  if (segment === undefined) return undefined;
+  if (segment.x1 === segment.x2) return Math.min(segment.y1, segment.y2);
+  const t = (x - segment.x1) / (segment.x2 - segment.x1);
+  return Math.round(segment.y1 + t * (segment.y2 - segment.y1));
+}
+
+/** The walkable x range of a foothold chain: the union of its segments. */
+export function footholdRange(chain: FootholdSegment[]): { x0: number; x1: number } | undefined {
+  if (chain.length === 0) return undefined;
+  let x0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  for (const segment of chain) {
+    x0 = Math.min(x0, segment.x1, segment.x2);
+    x1 = Math.max(x1, segment.x1, segment.x2);
+  }
+  return { x0, x1 };
 }
 
 /** A property list's `name` -> value lookup. */

@@ -18,7 +18,8 @@
  *   foothold    pages -> groups -> items; this module only counts them for now
  */
 import { mapImagePath } from "../wz/paths.ts";
-import type { MapObject, MapSummary, WzArchive } from "../wz/archive.ts";
+import { footholdSegments, mapSummary } from "../wz/archive.ts";
+import type { FootholdSegments, MapObject, MapSummary, WzArchive } from "../wz/archive.ts";
 
 /** A monster or NPC spawn point from the WZ `life` list. */
 export interface LifeSpawn {
@@ -30,6 +31,12 @@ export interface LifeSpawn {
   foothold: number;
   /** WZ `f`: facing (0 = right, 1 = left; the same meaning the `0x2F` packet carries). */
   facing: number;
+  /** WZ `rx0`: the left end of the range the map lets this spawn wander in. */
+  rx0: number;
+  /** WZ `rx1`: the right end of that range. */
+  rx1: number;
+  /** WZ `cy`: the foothold's y at `x` (verified for every spawn in the game). */
+  cy: number;
 }
 
 export interface MapPortal {
@@ -53,9 +60,14 @@ export interface MapData {
   mobs: LifeSpawn[];
   npcs: LifeSpawn[];
   portals: MapPortal[];
-  /** Number of foothold segments (the full geometry is not read yet). */
+  /** Number of foothold segments. */
   footholds: number;
   ladderRopes: number;
+  /**
+   * The map's foothold geometry, keyed by foothold id (`life.fh`). Only `loadMapData` fills this -
+   * `mapDataFrom` gets the count from a `MapSummary`, which does not carry the segments.
+   */
+  footholdSegments?: FootholdSegments;
 }
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -78,12 +90,17 @@ function templateIdOf(entry: MapObject): number | undefined {
 function toSpawn(entry: MapObject): LifeSpawn | undefined {
   const templateId = templateIdOf(entry);
   if (templateId === undefined) return undefined;
+  const x = asNumber(entry.x);
   return {
     templateId,
-    x: asNumber(entry.x),
+    x,
     y: asNumber(entry.y),
     foothold: asNumber(entry.fh),
     facing: asNumber(entry.f, 0) & 1,
+    // A spawn that does not say where it may wander stands still: x..x is a range of one point.
+    rx0: asNumber(entry.rx0, x),
+    rx1: asNumber(entry.rx1, x),
+    cy: asNumber(entry.cy, asNumber(entry.y)),
   };
 }
 
@@ -129,9 +146,13 @@ export function mapDataFrom(summary: MapSummary, id: number): MapData {
 
 /** Read one map out of `Data.wz`; `undefined` when the archive has no such `Map/Map/*.img`. */
 export function loadMapData(archive: WzArchive, mapId: number): MapData | undefined {
-  const summaries = archive.mapMetadata([String(mapId).padStart(9, "0")]);
-  const summary = summaries[String(mapId).padStart(9, "0")];
-  return summary === undefined ? undefined : mapDataFrom(summary, mapId);
+  const imagePath = mapImagePath(mapId);
+  if (!archive.has(imagePath)) return undefined;
+  const root = archive.objects(imagePath)[0];
+  if (root === undefined) return undefined;
+  const map = mapDataFrom(mapSummary(root), mapId);
+  map.footholdSegments = footholdSegments(root);
+  return map;
 }
 
 /**

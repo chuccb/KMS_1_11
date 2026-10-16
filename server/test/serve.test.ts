@@ -15,8 +15,9 @@ import { PacketReader } from "../src/protocol/packet.ts";
 import { decodeClientPacket, encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { FIELD_OPCODE, readSetField } from "../src/protocol/field.ts";
-import { MOB_OPCODE, readMobEnterField } from "../src/protocol/mob.ts";
+import { MOB_OPCODE, readMobEnterField, readMobMove } from "../src/protocol/mob.ts";
 import type { MapData } from "../src/game/map.ts";
+import type { MobTemplate } from "../src/game/mobs.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 
@@ -332,13 +333,20 @@ const STUB_MAP: MapData = {
   bgm: "Bgm00/RestNPeace",
   returnMapId: 1010000,
   mobs: [
-    { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 0 },
-    { templateId: 1210100, x: -5, y: 7, foothold: 0, facing: 1 },
+    { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 },
+    { templateId: 1210100, x: -5, y: 7, foothold: 0, facing: 1, rx0: -5, rx1: -5, cy: 7 },
   ],
-  npcs: [{ templateId: 2003, x: 69, y: 275, foothold: 28, facing: 0 }],
+  npcs: [{ templateId: 2003, x: 69, y: 275, foothold: 28, facing: 0, rx0: 0, rx1: 0, cy: 275 }],
   portals: [{ name: "sp", type: 0, x: 100, y: 200, toMapId: 0, toName: "" }],
-  footholds: 289,
+  footholds: 2,
   ladderRopes: 0,
+  // One straight foothold under both spawns, so the test can watch the mobs walk on it.
+  footholdSegments: new Map([
+    [
+      32,
+      { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 },
+    ],
+  ]),
 };
 
 test("the game server spawns the map's monsters right after 0x16", { timeout: 20000 }, async (t) => {
@@ -348,6 +356,8 @@ test("the game server spawns the map's monsters right after 0x16", { timeout: 20
     handoffs,
     mapId: 1000000,
     mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, exp: 1, speedPercent: 100 }),
+    mobTickMs: 20,
     handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
     log: (line) => log.push(line),
   });
@@ -382,6 +392,25 @@ test("the game server spawns the map's monsters right after 0x16", { timeout: 20
   assert.equal(second.channels, undefined, "no animation channel is claimed by the server yet");
   assert.equal(new PacketReader(packets[2]!, 1).remaining, 21, "a channel-less 0x2F is 22 bytes");
   assert.ok(log.some((line) => line.includes("spawned 2 mobs")), log.join("\n"));
+
+  // ... and then they walk: the mob on foothold 32 gets one 0x33 per leg (mobTickMs = 20 here).
+  // `take` returns whole packets, one at a time: the second mob is on foothold 0 (the stub map has
+  // no segment for it), so the only thing that can arrive here is a 0x33 for the first mob.
+  const moves: Uint8Array[] = [];
+  for (let i = 0; i < 5 && moves.length === 0; i++) {
+    const packet = (await client.take(1))[0]!;
+    if (packet[0] === MOB_OPCODE.move) moves.push(packet);
+  }
+  assert.equal(moves.length >= 1, true, "the field sends 0x33 for a mob that can walk");
+  const move = readMobMove(new PacketReader(moves[0]!, 1));
+  assert.equal(move.mobId, 1, "the first mob is the one on the foothold");
+  const element = move.body.path.elements[0]!;
+  assert.equal(element.y, 300, "walking along the foothold's y");
+  assert.ok(element.x > 509 && element.x <= 1000, `the leg ends inside the range, at ${element.x}`);
+  assert.equal(move.body.path.originX, 509, "and starts where the mob spawned");
+  assert.equal(element.vx, 0);
+  assert.equal(element.vy, 0);
+  assert.equal(client.headersOk, true, "the movement packets survive the cipher too");
 });
 
 test("a map the provider does not know still enters, it just has nothing to spawn", { timeout: 20000 }, async (t) => {

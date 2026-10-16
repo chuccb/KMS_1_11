@@ -41,10 +41,13 @@ test("life entries become spawns, and an entry the WZ does not describe is dropp
   } as unknown as WzObject);
   const map = mapDataFrom(summary, 1234);
   assert.deepEqual(map.mobs, [
-    { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 1 },
-    { templateId: 1210100, x: -1, y: -2, foothold: 0, facing: 0 }, // `f` defaults to 0 = right
+    { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 1, rx0: 509, rx1: 509, cy: 300 },
+    // `f` defaults to 0 = right; `rx0`/`rx1`/`cy` fall back to the spawn itself when the WZ is silent
+    { templateId: 1210100, x: -1, y: -2, foothold: 0, facing: 0, rx0: -1, rx1: -1, cy: -2 },
   ]);
-  assert.deepEqual(map.npcs, [{ templateId: 1012000, x: 0, y: 0, foothold: 1, facing: 0 }]);
+  assert.deepEqual(map.npcs, [
+    { templateId: 1012000, x: 0, y: 0, foothold: 1, facing: 0, rx0: 0, rx1: 0, cy: 0 },
+  ]);
   assert.equal(map.name, "Test");
   assert.equal(map.imagePath, "Map/Map/000001234.img", "the client's own path (%09d), not a server file");
   assert.deepEqual(map.portals, []);

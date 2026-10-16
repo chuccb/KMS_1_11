@@ -17,8 +17,9 @@
 | `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。 |
-| `src/protocol/mob.ts` | ✅ **0x2F 怪物進場**：`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊（`u32` ＋ 每個設定位元 2 個 `u16`；7 個通道）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`（FINDINGS §4.12.1／§4.15）。 |
-| `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive.mapMetadata()` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、foothold 數）；`mapDataProvider(archive)` 快取，`GameEntryServer` 用它送 `0x2F`（§4.15）。 |
+| `src/protocol/mob.ts` | ✅ **0x2F 怪物進場 + 0x33 怪物移動**：`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊（`u32` ＋ 每個設定位元 2 個 `u16`；7 個通道）；另加 `0x33` 移動（`u32 mobId` + 動作位元組 + `u32` + `CMovePath`）與 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16）。 |
+| `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
+| `src/game/mobs.ts` | ✅ **一場地的怪物**：出生點吸附腳踏點、巡邏範圍 = 腳踏點折線 ∩ `rx0/rx1`、每段一個 `0x33`（`MobField`）；`Mob/<id>.img -> info` 的 `speed`／`maxHP`／`level`／`exp` 由 `mobTemplateProvider` 快取。怪物是**伺服器驅動**的（§4.16）。 |
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
 | 遊戲邏輯（地圖／怪物／戰鬥／道具欄伺服器端）| ❌ **尚未實作**；已解出的封包有 codec（`field.ts`／`movepath.ts`），沒解的一律不猜（`decode` 仍會原封不動記錄它們） |
 | `src/wz/img.ts` | ✅ WZ v1 `.img` 值層編解碼器：物件 marker、名稱表（blob 相對位移）、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、像素解壓（容忍缺少 adler32 trailer 的 stream）。規格與證據在 `docs/WZ1_FORMAT.md` §4，雙胞胎是 `tools/wzimg.py`。 |
@@ -114,17 +115,19 @@ node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin 
 ```
 
 `serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
-（領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物，見下）；
-`--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔），角色建立後外觀取自**帳號第一個角色**
+（領取交接的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 清單送 `0x2F` 怪物、之後每個 tick 送 `0x33` 讓它們巡邏，見下）；
+`--data <Data.wz|off>` 指定地圖資料來源（預設：工作目錄有 `./Data.wz` 就用它，`off` = 完全不讀檔）、
+`--mob-speed <px/s>` 調巡邏速度（預設 60 px/s，再乘上怪物自己的 `info.speed` 百分比），角色建立後外觀取自**帳號第一個角色**
 或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
 
 client 的**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 都已完整解出**（FINDINGS §4.13.1／§4.13.1b）：`field.ts` 的
 `readClientAttack`／`encodeClientAttack` 三個 opcode 共用一段程式碼（差異用 `ATTACK_SHAPE` 描述），
 golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把擷取到的攻擊翻成可讀的一行。
-怪物進場（`CMob::Init`，§4.12.1）**已經進到產品**（§4.15）：`serve --game-port` 會依地圖的 `life`
-清單把怪物送上畫面，object id 由伺服器配。**下一個最有價值的目標**是讓它動：`0x31`（怪物移動，
-`sub_4927B0` → `sub_491630`，內容就是 `CMovePath`）與受傷／死亡（`0x32`–`0x36`），
-接上已完成的攻擊包就是「打怪 → 回傷害」的完整迴圈。
+怪物進場（`CMob::Init`，§4.12.1）**已經進到產品**（§4.15），而且**會走動**了（§4.16）：
+`serve --game-port` 依地圖的 `life` 清單送 `0x2F`，再沿著地圖自己的腳踏點折線一段一段送 `0x33`
+（`src/game/mobs.ts`；速度 = `--mob-speed` × 怪物 `info.speed` 百分比）。**下一個最有價值的目標**
+是打怪的閉環：怪物**受傷／死亡**（離場 `0x30`／`0x31` 的欄位已解到形狀）與掉落物，
+接上已完成的攻擊包（`0x0F`）就是「打怪 → 回傷害」的完整迴圈。
 
 `0x16`（進地圖）的三個 u32 現在已知是**場地的亂數種子**（FINDINGS §4.11.2）：客戶端的
 傷害數字、掉落與怪物行為都由它決定，所以伺服器送出種子後就能重算客戶端回報的傷害——
@@ -142,8 +145,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 客戶端接著回報的移動（`0x0E`）與攻擊（`0x0F`）都會被 `decode` 的解讀器寫進日誌
 （FINDINGS §4.11.2b；`test/serve.test.ts` 用假 client 逐欄驗證）。
 
-`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物 AI／移動／掉落／技能**
-（怪物會出現，但只站在出生點不動，也不會被打死；`0x31` 之後才輪到它們，見 FINDINGS §6 第 5 項）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、**沒有怪物 AI／受傷／掉落／技能**
+（怪物會出現也會沿腳踏點巡邏，但不會追人、不會被打死，也不會重生；見 FINDINGS §6 第 5 項）、建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，
 client 接受；`chardata.ts` 已經能寫完整道具區塊，缺的是「外觀 10 個 u32 → `CharacterData` 欄位」的對應，
 見 FINDINGS §4.8 的註記）。
 
