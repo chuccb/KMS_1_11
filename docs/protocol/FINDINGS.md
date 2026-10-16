@@ -59,6 +59,12 @@ u32 clientRecvSeed               // @ 8 + bodyLen = 207  → CClientSocket+124�
 >
 > 欄位順序（`.lst 0043A744–0043A774`）：`u32 @ 4+bodyLen` → `CClientSocket+120`（**送** state）、
 > `u32 @ 8+bodyLen` → `+124`（**收** state），兩者皆原樣寫入（無 `not`、無轉換）。
+>
+> **client 的第一個回包**（`.lst 0043A7D4–0043A844`，`sub_43A410` 尾段）：握手解析完、且
+> `CClientSocket+36 == 0` 時，client 會建一個 buffer（`sub_4A1EA0(&buf, 4, 0)` = 先塞入 byte `0x04`）、
+> 再附上 `u32 *(CWvsApp+0x14)`（`mov edx, n3000` `mov esi, [edx+14h]`），走一般送出路徑送出。
+> 也就是說：**握手之後 client 送的第一個封包是 `[0x04][u32 app+0x14]`**。
+> 那個 u32 的語意仍 **UNKNOWN**（找不到寫入點；可能是 client key / 版本值），但伺服器會在第一時間收到它。
 
 ## 3. 加密（cipher）✅
 
