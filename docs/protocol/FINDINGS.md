@@ -694,7 +694,7 @@ count × {
 | 0x26 | `nullsub_13` | 空函式 |
 | 0x27 | `sub_509790` | u32 → 動作／姿勢切換（內部依 `user+180 >> 1` 選 weapon 動作）|
 | 0x28 | `sub_5221A0` | 旗標式：u32 flags，bit 0／bit 4 之後各再讀欄位 |
-| 0x29 | `sub_522300` | u8；0 = 播放 `Effect/BasicEff.img/LevelUp` + `LevelUp` 音效（升級）|
+| 0x29 | `sub_522300` | **已解，見 §4.27**：`u32 characterId`（由 `sub_51D590` 讀並在池裡查）＋ `u8 effect`；0 = 在那個人身上播 `Effect/BasicEff.img/LevelUp` + `LevelUp` 音效（升級），1 後面還有一個 `u32`（未解）|
 
 > `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
 
@@ -2183,7 +2183,7 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
 | 那一擊的經驗值 | `0x0D` 差異包 | 只有攻擊者 | 差異是**他的**角色紀錄（§4.21，ADR-009）|
 | 怪物掉的東西 | `0x43` | 全場 | 掉落物屬於場地（§4.18）|
 | 拾取 | `0x44` kind 2 | 全場 | 見 4.24.6 |
-| 升級 | （不送）| — | ⚠️ 別人的升級特效是 `0x29`，**未解**（§6）→ 目前別人看不到你升級 |
+| 升級 | `0x0D` 差異包 ＋ `0x29`（`u32 characterId`＋`u8 0`）| 差異包**只有升級的人**；`0x29` 給**其他人**（自己的 client 已經從 `0x0D` 播了，見 §4.27）|
 | 離線 | `0x1D` | 其他人 | `sub_51D280` |
 
 #### 4.24.5 世界的時鐘：一個 interval，不是每個連線一個
@@ -2233,7 +2233,7 @@ Alt 離線     : Hero 收到 0x1D characterId=12
 1. **沒有實機驗證**：這一節全部是「我們的兩個假 client」；原 client 看不看得到另一個人、頭像長什麼樣、
    走路的插值順不順，都要靠 ADR-004 的 oracle run。
 2. `0x34` 的廣播範圍是**我們的選擇**（4.24.4）；原伺服器的行為沒有證據。
-3. `0x29`（別人升級的特效）未解，所以升級對別人是不可見的。
+3. ~~`0x29` 未解~~ → **已解並實作（§4.27／ADR-015）**：別人看得到升級特效了；剩下的是「不送給升級者自己」是推論（§4.27.5）。
 4. 「場地不刪」「沒人看不走路」是**我們的選擇**（沒有 server 可以對照）。
 5. **沒有頻道／分流**：整個 server 只有一份世界（一張圖一個 instance）。加頻道時要改的是
    `FieldRegistry.of(mapId)`（key 要變成 map + channel）。
@@ -2440,6 +2440,65 @@ Alt 離線       : Hero 收到 0x1D
 5. **沒有頻道／分流**：聽眾是 `FieldInstance` 的成員，`(mapId, channel)` 這種 key 還不存在。
 6. **沒有實機驗證**：client 真的畫出 `名字>> 內容`、真的在聊天視窗關著時冒出氣泡，都還沒看過。
 
+### 4.27 ✅ 升級的兩半：自己的 `0x0D`、別人的 `0x29`
+
+§4.21 解了 `0x0D` 的升級分支，也在同一節記下「升級對別人不可見」——因為 `0x29`（別人看到的升級特效）
+當時沒有解。這一節把它解完：封包形狀、client 用它做什麼、以及為什麼**只送給別人**。
+
+實作：`protocol/field.ts` 的 `USER_EFFECT_LEVEL_UP`／`UserEffect`／`encodeUserEffect`／`readUserEffect`，
+`net/loginserver.ts` 的 `awardKillExp`；測試：`test/field.test.ts` 的 golden（1）、`test/serve.test.ts`
+的兩條真 socket（1）。
+
+#### 4.27.1 形狀：`u32 characterId` ＋ `u8 effect`，id 查不到就整個丟掉
+
+| 位置 | 內容 | 證據 |
+|---|---|---|
+| 分派 | `CUserPool` 的 `0x21`–`0x2A` 都由 `sub_51D590` 處理，case `')'`（0x29）呼叫 `sub_522300(user, packet)` | `.c:289577`（`sub_51D590`）|
+| id | `sub_51D590` 先讀 `u32`，再用 `sub_51CD30(pool, id)` 查那個人在不在；**查不到就 return**（封包整包丟棄）| 同上（`v5 == nullptr` 直接結束）|
+| effect | `sub_522300` 讀 `u8`：`0` → 用 `sub_50D6D0(this)` 在那個人身上建效果，資源是 `Effect/BasicEff.img/LevelUp` ＋ 音效 `LevelUp`；`1` → 再讀一個 `u32`（做什麼未解）；其他值 → 什麼都不做 | `.c:294701`（`sub_522300`）|
+
+- 「查不到就丟掉」是這個封包可以**安全廣播**的原因：對不知道的 id 送它等於沒送。
+- effect 只有 `0` 有證據，所以 codec 也只認 `0`（不是 0 就丟 `RangeError`，與 `0x1A` 的非聊天 sub-op
+  同一條規矩）。
+
+#### 4.27.2 為什麼只送給別人：升級的人自己已經播了
+
+`0x0D`（`sub_55BEB0`）的**尾端**會比較新舊等級，變大時在同一支函式裡播**同一組資源**
+（`Effect/BasicEff.img/LevelUp` ＋ `LevelUp` 音效，`.c:352616`）。也就是說：
+
+- **升級的人**：`0x0D` 的差異包 → client 自己播特效（§4.21 已記，`game/exp.ts` 的註解也提到）。
+- **其他人**：`0x29` ＋ 那個人的角色 id ＋ `0` → 同一組特效畫在**那個人的位置**上。
+
+⚠️ 「不送給升級的人自己」是**推論**：兩條路都會播同一組資源，兩者都送＝播兩次（疊在一起）。
+client 端沒有任何「同一個效果去重」的邏輯（`sub_50D6D0` 每次呼叫都建一個新效果物件），所以本伺服器
+送 `0x29` 時排除升級的人（`FieldInstance.broadcast` 的第二個參數）。這件事列進 §6，讓 oracle run 回答。
+
+#### 4.27.3 伺服器這一側
+
+`awardKillExp` 在 `gain.levels > 0` 時多做一件事：先送升級者自己的 `0x0D`（既有行為），再
+`session.instance.broadcast(encodeUserEffect({characterId, effect: USER_EFFECT_LEVEL_UP}), characterId)`
+—— 排除自己，並記一行 log（`0x29 level-up effect for "Hero" sent to 1 other player(s)`）。
+`awardKillExp` 原本那段「⚠️ 別人的升級特效 `0x29` 未解」的註解就是這一節的解。
+
+#### 4.27.4 測試與實跑
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/field.test.ts` | golden bytes `29`＋`07000000`＋`00`、`readUserEffect` 逐欄、`describeFieldOpcode(0x29)` 是 `0x29 CUserPool(user effect)`、effect `1` 被拒絕而不是被半讀 |
+| `server/test/serve.test.ts` | 兩條真 socket：殺怪升級時別人收到 `[0x34（被打）, 0x30（死）, 0x29]`（同一個同步處理常式，中間插不進怪的 tick）且 `0x29` 逐欄是 `{characterId: 7, effect: 0}`；升級的人收到 `0x0D`（`level: 2`、HP/MP 回滿）而**沒有** `0x29` |
+
+真 `Data.wz` 兩個 client（달팽이사냥터 40000）：달팽이（`maxHP 8`、把 exp 調成 20）一擊升到 2 級 ——
+Alt 收到 `[0x34, 0x30, 0x29]`、Hero 收到 `{level: 2, hp: 50, mp: 50, exp: 5}` 且 0 個 `0x29`。
+
+#### 4.27.5 還不能宣稱的部分
+
+1. **effect `1`**：只知道後面還有一個 `u32`，不知道它做什麼，所以沒有 codec。
+2. **「只送別人」是推論**（§4.27.2）：oracle run 可以確認（如果真正的伺服器也送給升級者自己，
+   差別只是特效播兩次）。
+3. **效果畫在哪裡、鏡頭怎麼動**：全在 client（伺服器只給 id 與 effect）。
+4. **沒有實機驗證**（ADR-004）：沒看過真的 client 播這個特效。
+5. **`0x29` 沒有其他用途的證據**：`0x23`–`0x25` 是技能／效果家族，`0x29` 只有 effect 0 解出來。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
@@ -2511,7 +2570,7 @@ Alt 離線       : Hero 收到 0x1D
    `0x0D` 的旗標 `0x40000` 送它（§4.22.5）。剩下的延伸題是「**商店的庫存與收購價**」——
    原伺服器的商店是腳本，所以那是我們的選擇（ADR-010），而不是還沒解出來的東西。
 13. **多玩家在同一張圖之後剩下的洞**（§4.24.9）：`0x1C` 的 `unknown64`／`avatarKey`／`action` 語意
-   （仍送 0）、`0x34` 的廣播範圍（我們的選擇）、`0x29`（別人升級的特效，未解）、
+   （仍送 0）、`0x34` 的廣播範圍（我們的選擇）、`0x29` 的 effect 1（未解）與「不送給升級者自己」的推論、
    頻道／分流（`FieldRegistry.of` 是入口）、以及**兩個真 client 的實機驗證**。
 
 ## 7. 擷取工作流（ADR-004）

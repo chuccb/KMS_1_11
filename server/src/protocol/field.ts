@@ -162,10 +162,19 @@ export const FIELD_OPCODE = {
   userSkillEffectFirst: 0x23,
   userSkillEffectLast: 0x25,
   /**
-   * `CUserPool` 0x29 (`sub_522300`): reads a u8 and plays an effect - 0 is
-   * "Effect/BasicEff.img/LevelUp" with the "LevelUp" sound, i.e. the level-up packet.
+   * `CUserPool` 0x29 (`sub_51D590` case ')' -> `sub_522300`): an effect **on one user**. The range
+   * dispatcher reads the `u32 characterId` first and resolves it in the pool (`sub_51CD30`); if the
+   * id is not in the pool the packet is dropped, which is what makes this safe to broadcast. The body
+   * then starts with a `u8`:
+   *
+   *   0  `Effect/BasicEff.img/LevelUp` + the "LevelUp" sound, built with `sub_50D6D0(user)` so it
+   *      plays **over that user**: the level-up effect for everybody who is not the one who levelled
+   *      (their own client plays it from the `0x0D` diff, `sub_55BEB0`'s tail - FINDINGS 4.21)
+   *   1  reads one more `u32`; what it plays is not located
+   *
+   * Only 0 has evidence, so only 0 has a codec (`UserEffect` below).
    */
-  userLevelUpEffect: 0x29,
+  userEffect: 0x29,
   /**
    * `CQuestMan` 0x47 (`sub_4A58F0` -> `sub_4A5910`): the NPC dialog. `0x46` and `0x48` are routed
    * to the same object and have no branch, so `0x47` is the only opcode of the three that reads
@@ -461,6 +470,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode < 0x15 || opcode > 0x52) return undefined;
   const name = describeFieldOpcode(opcode);
+  if (opcode === FIELD_OPCODE.userEffect) {
+    try {
+      return `${name}: ${describeUserEffect(readUserEffect(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (unreadable: ${(error as Error).message})`;
+    }
+  }
   if (opcode === FIELD_OPCODE.userMessage) {
     try {
       return `${name}: ${describeUserChat(readUserChat(new PacketReader(plain, 1)))}`;
@@ -612,6 +628,7 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode >= 0x15 && opcode <= 0x17) return `0x${opcode.toString(16)} CStage(set-field)`;
   if (opcode === 0x19) return "0x19 CField(cached-character reset)";
   if (opcode === FIELD_OPCODE.userMessage) return "0x1a CField(user message)";
+  if (opcode === FIELD_OPCODE.userEffect) return "0x29 CUserPool(user effect)";
   if (opcode >= 0x1b && opcode <= 0x2d) return `0x${opcode.toString(16)} CUserPool`;
   if (opcode === MOB_OPCODE.anim) return "0x35 CMobPool(mob animation)";
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
@@ -1077,4 +1094,48 @@ export function encodeClientChat(chat: ClientChat): Uint8Array {
 
 export function describeClientChat(chat: ClientChat): string {
   return `0x12 chat: ${decodeCp949(chat.text)}`;
+}
+
+/**
+ * The one `0x29` effect that is located: the level-up animation and sound, played over the user the
+ * packet names (`sub_522300`'s first branch).
+ */
+export const USER_EFFECT_LEVEL_UP = 0;
+
+/**
+ * `0x29` as it goes out: which user the effect happens to, and which effect.
+ *
+ * The id comes first because the range dispatcher reads it (and drops the packet when the pool does
+ * not know it), and the effect is one byte. `effect` is a number rather than a union because only
+ * `USER_EFFECT_LEVEL_UP` has evidence - the `1` branch reads a `u32` whose meaning is not located.
+ */
+export interface UserEffect {
+  characterId: number;
+  /** `USER_EFFECT_LEVEL_UP`; other values are not located and `readUserEffect` refuses them. */
+  effect: number;
+}
+
+export function readUserEffect(reader: PacketReader): UserEffect {
+  const characterId = reader.readU32();
+  const effect = reader.readByte();
+  if (effect !== USER_EFFECT_LEVEL_UP) {
+    throw new RangeError(
+      `0x29 effect ${effect} is not the located one (${USER_EFFECT_LEVEL_UP} = level-up)`,
+    );
+  }
+  return { characterId, effect };
+}
+
+export function encodeUserEffect(effect: UserEffect): Uint8Array {
+  const writer = new PacketWriter(8);
+  writer.writeByte(FIELD_OPCODE.userEffect);
+  writer.writeU32(effect.characterId >>> 0);
+  writer.writeByte(effect.effect);
+  return writer.toBytes();
+}
+
+export function describeUserEffect(effect: UserEffect): string {
+  return effect.effect === USER_EFFECT_LEVEL_UP
+    ? `level-up effect for characterId=${effect.characterId}`
+    : `effect ${effect.effect} for characterId=${effect.characterId}`;
 }

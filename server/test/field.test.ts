@@ -12,6 +12,7 @@ import { toHex } from "../src/protocol/frame.ts";
 import { readMovePath, writeMovePath, pathStart, type MovePath } from "../src/protocol/movepath.ts";
 import {
   FIELD_OPCODE,
+  USER_EFFECT_LEVEL_UP,
   USER_MESSAGE_CHAT,
   describeClientChat,
   describeClientFieldPacket,
@@ -21,8 +22,11 @@ import {
   encodeClientChat,
   encodeClientInteract,
   encodeUserChat,
+  encodeUserEffect,
   readClientChat,
   readUserChat,
+  readUserEffect,
+  describeUserEffect,
   encodeClientMobAttack,
   readClientAttack,
   readClientMobAttack,
@@ -478,4 +482,26 @@ test("0x1a's other sub-ops are refused instead of read as chat", () => {
   assert.match(describeFieldPacket(refusal)!, /^0x1a CField\(user message\): \(unreadable: .*not chat/);
   // A chat packet that runs out mid-string is still an error, not a short line.
   assert.throws(() => readUserChat(new PacketReader(Uint8Array.from([0x1a, 0x12, 0x04, 0x00, 0x41]), 1)));
+});
+
+test("the level-up effect (0x29) names a user, and one byte says which effect", () => {
+  // `sub_51D590` reads the u32 and resolves it in the pool; `sub_522300` then reads one byte, and 0
+  // is the level-up: `Effect/BasicEff.img/LevelUp` + the "LevelUp" sound, built over that user.
+  const effect = { characterId: 7, effect: USER_EFFECT_LEVEL_UP };
+  const bytes = encodeUserEffect(effect);
+  assert.equal(FIELD_OPCODE.userEffect, 0x29);
+  assert.equal(USER_EFFECT_LEVEL_UP, 0);
+  assert.equal(toHex(bytes), "29" + "07000000" + "00");
+  assert.deepEqual(readUserEffect(new PacketReader(bytes, 1)), effect);
+  assert.equal(describeUserEffect(effect), "level-up effect for characterId=7");
+  assert.equal(describeFieldOpcode(0x29), "0x29 CUserPool(user effect)");
+  assert.equal(
+    describeFieldPacket(bytes),
+    "0x29 CUserPool(user effect): level-up effect for characterId=7",
+  );
+  // The second branch of `sub_522300` reads another u32; what it plays is not located, so a packet
+  // that says 1 is refused rather than half-read (`0x1A`'s non-chat sub-ops get the same treatment).
+  const unlocated = Uint8Array.from([0x29, 0x07, 0x00, 0x00, 0x00, 0x01, 0x2a, 0x00, 0x00, 0x00]);
+  assert.throws(() => readUserEffect(new PacketReader(unlocated, 1)), /effect 1 is not the located one/);
+  assert.match(describeFieldPacket(unlocated)!, /not the located one/);
 });

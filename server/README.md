@@ -16,7 +16,7 @@
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
 | `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
-| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、0x29 升級效果；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行；以及 **聊天**（client 的 `0x12` 說一句 → `0x1A` ＋ sub-op `0x12` ＋ 名字 ＋ 同一串 bytes，`readClientChat`／`encodeUserChat`／`readUserChat`）。 |
+| `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）；client 端的 0x0E（自己的移動）與 0x0D（點擊傳送門／物件）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行；以及 **聊天**（client 的 `0x12` 說一句 → `0x1A` ＋ sub-op `0x12` ＋ 名字 ＋ 同一串 bytes，`readClientChat`／`encodeUserChat`／`readUserChat`）。 |
 | `src/protocol/mob.ts` | ✅ **怪物封包**：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊）、`0x33` 移動（動作位元組 + `u32` + `CMovePath`）、`0x30` 開始死亡動畫（`s16 delayMs`）、`0x31` 收屍／重生（`u8 flag`＋`u32 mobId`，`flag != 0` 時再接 `templateId` 與**與 `0x2F` 逐 byte 相同**的身體）、`0x35` 怪物動畫（＝`0x2F` 尾巴那塊動畫區塊，同一份實作）、`0x34` 怪物 MP；另有 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16／§4.17）。 |
 | `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
 | `src/game/world.ts` | ✅ **每一張地圖的共享世界**（ADR-012）：`FieldRegistry`（`mapId → FieldInstance`，第一次有人進場才建立、之後留著）＋`FieldInstance`（`mobs`／`npcs`／`drops` ＋ 在場成員）。`join()` 把整張圖的快照送給新來的人（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個 `0x43`、每個已在場玩家 `0x1C`）並讓其他人收到他的 `0x1C`；`leave()` 送 `0x1D`；`reportMove()` 把別人走的路包成 `0x22`；`applyDamage`／`spawnFromDeath`／`pickUp` 的結果廣播全場；`tick()` 只有在**有人在看**的時候才派 `0x33`，但屍體、重生與掉落物過期照算；`portal(name)` 是「玩家用了哪個傳送門」的查詢（名字不分大小寫，查不到就是沒有）。`0x1C`／`0x1D`／`0x22` 的 sender 只在這裡（FINDINGS §4.24／§4.25）。 |
@@ -152,7 +152,8 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 算傷害、播動畫都在 client 裡，結束後才用 `0x2C` 回報；伺服器的對應工作是讀懂那包（已做）、
 轉播 `0x35`／`0x33` 給其他 client（`0x35` 的 codec 已做）。**`0x0D`（能力值差異包）已經解出來了**（§4.21），
 所以「殺怪 → 經驗值 → 升級」這一條已經打通：殺怪後伺服器先送 `0x0D`（只帶有變的欄位）再送 `0x43`，
-升級時 client 會自己播 `Effect/BasicEff.img/LevelUp` 並印「레벨이 올랐습니다」（**升級是伺服器決定的**）。
+升級時 client 會自己播 `Effect/BasicEff.img/LevelUp` 並印「레벨이 올랐습니다」（**升級是伺服器決定的**，
+而**別人**看到的那份是 `0x29`，§4.27／ADR-015）。
 還缺的是「被怪物打 → 掉血」（`0x2C` 只是 client 的回報，而且它的尾段是**移動路徑**不是傷害，
 §4.20.7；所以這條路沒有現成的傷害來源）與能力面板／buff 區塊
 （`panelFlags != 0` 的內容未解，伺服器一律送 0）；**商店已經做完**（`0x4A`／`0x4B`／`0x16`／`0x33`，§4.22）；
@@ -229,6 +230,7 @@ socket 關掉等於 `leave()`，不是「這場遊戲結束」。
 | 怪物掉東西 | `0x43`；被撿走 `0x44 kind 2` | 全場 |
 | 撿到什麼 | `0x0B`（哪一格）／`0x0D`（錢）／`0x11`（訊息）| **只有撿的人**（那是他的角色紀錄）|
 | 殺怪的經驗值 | `0x0D` 差異包 | **只有攻擊的人** |
+| 有人升級 | `0x29`（`u32 characterId` ＋ `u8 0` ＝ LevelUp 特效；FINDINGS §4.27）| **其他所有人**（升級的人自己的 `0x0D` 就會讓他的 client 播同一個特效，見下）|
 | 有人說話 | `0x1A` ＋ sub-op `0x12`（`u8 sub-op`、`string 名字`、`string 內容`；FINDINGS §4.26）| **全場，包含說話的人**（client 只會顯示它收到的，見下）|
 | 有人用了傳送門 | `0x19`（解鎖）＋ `0x16`（新地圖）＋ 新場地的整份快照 | **只有他**（他離開的那張圖收到他的 `0x1D`）|
 
@@ -276,8 +278,11 @@ client 打字送 `0x12`（一個字串）；伺服器把它轉成 `0x1A` ＋ sub
   世界比連線長壽。
 - **角色 id 全伺服器唯一**（`nextCharacterId(accounts)`）：`CUserPool` 以 id 為 key，兩個帳號各自從 1 起算會撞 id，
   而 client 的自我排除會**安靜地**吃掉那筆進場紀錄（不是崩潰，是「看不到某個人」）。
-- **還沒有**：頻道／分流（`FieldRegistry.of` 的 key 要加上 channel）、傳送門換圖（client 的傳送門請求目前只被記錄）、
-  別人的升級特效（`0x29` 未解）、`0x1C` 的三個欄位（`unknown64`／`avatarKey`／`action` 送 0，語意未解）。
+- **升級特效的兩半**（§4.27／ADR-015）：升級的人收到 `0x0D`，他的 client 從等級變高自己播
+  `Effect/BasicEff.img/LevelUp`（`sub_55BEB0` 的尾端）；其他人收到 `0x29`（`u32 characterId` ＋
+  `u8 0`），同一組特效畫在那個人身上。⚠️「不送給升級的人自己」是推論（兩條路都會播，兩者都送會播兩次）。
+- **還沒有**：頻道／分流（`FieldRegistry.of` 的 key 要加上 channel）、`0x1C` 的三個欄位
+  （`unknown64`／`avatarKey`／`action` 送 0，語意未解）、`0x29` 的 effect `1`（後面還有一個 `u32`，未解）。
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`
 （`byte-exact`／`partial`／`skeleton`）、證據出處與對應的 codec 函式名稱。

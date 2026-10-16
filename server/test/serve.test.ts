@@ -18,12 +18,14 @@ import {
   CLIENT_FIELD_OPCODE,
   FIELD_OPCODE,
   INTERACT_KIND_CURSOR,
+  USER_EFFECT_LEVEL_UP,
   encodeClientAttack,
   encodeClientChat,
   encodeClientInteract,
   encodeClientUserMove,
   readSetField,
   readUserChat,
+  readUserEffect,
   readUserEnterField,
   readUserMove,
 } from "../src/protocol/field.ts";
@@ -1555,4 +1557,109 @@ test("chat reaches everyone in the map, the speaker included, and stays in it", 
   assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
   assert.ok(log.some((line) => line.includes('chat "Hero": 안녕 in map 1000000')), log.join("\n"));
   assert.ok(log.some((line) => line.includes('chat "Alt": hi in map 1000000')), log.join("\n"));
+});
+
+/**
+ * A level-up is the field's news too (FINDINGS 4.27): `0x29` is `u32 characterId` + `u8 effect`, and
+ * effect 0 is `Effect/BasicEff.img/LevelUp` played **over that user**.
+ *
+ * Which half each packet covers is the point of this test:
+ *
+ *  - the player who levelled gets the `0x0D` diff, and their own client plays the animation from the
+ *    level it sees in it (`sub_55BEB0`'s tail) - so the field's effect goes to the **others**, and
+ *    sending it back would play the same animation twice;
+ *  - everybody else sees the hit, the death and then the effect, all inside one synchronous handler
+ *    (nothing from the mob tick can slip in between).
+ */
+test("a level-up plays the effect for the other players (0x29), not for the one who levelled", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
+    mobTickMs: 20,
+    mobRespawnMs: 60_000,
+    // No loot, so the only packets after the death are the effect and the attacker's own diff.
+    dropPolicy: () => [],
+    handshake: { clientSendSeed: 0x2b2b2b2b, clientRecvSeed: 0x3c3c3c3c },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 7;
+  stats.name = "Hero";
+  stats.level = 1;
+  stats.exp = 0;
+  stats.hp = 20;
+  stats.maxHp = 50;
+  stats.mp = 5;
+  stats.maxMp = 50;
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 7,
+      characterName: "Hero",
+      character: characterDataOf(stats, startingCharacterItems()),
+    }),
+  });
+  await hero.take(4); // 0x16 + the two mobs + the NPC
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEffect);
+  assert.deepEqual(
+    altSaw.map((bytes) => bytes[0]),
+    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
+    "the field sees the hit, the death, and then the level-up effect",
+  );
+  assert.deepEqual(readUserEffect(new PacketReader(altSaw[2]!, 1)), {
+    characterId: 7,
+    effect: USER_EFFECT_LEVEL_UP,
+  });
+
+  // The attacker: their own 0x0D (level 2, and the refill that comes with it), and no 0x29.
+  const heroSaw = await hero.takeOpcode(STAT_OPCODE);
+  assert.deepEqual(readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)), {
+    ack: false,
+    diff: { exp: 5, level: 2, hp: 50, mp: 50 },
+  });
+  const effectsForHero = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userEffect);
+  assert.deepEqual(effectsForHero, [], "the effect is not echoed to the player who levelled");
+  assert.ok(
+    log.some((line) => line.includes('0x29 level-up effect for "Hero" sent to 1 other player(s)')),
+    log.join("\n"),
+  );
 });

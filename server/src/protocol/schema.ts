@@ -422,6 +422,19 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.FIELD_OPCODE.userEffect,
+    direction: "s2c",
+    stage: "field",
+    name: "userEffect",
+    status: "partial",
+    evidence: "FINDINGS 4.27 (CUserPool 0x29 -> sub_522300; the id is read by sub_51D590)",
+    codecs: ["readUserEffect", "encodeUserEffect", "describeUserEffect"],
+    fields: [
+      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      { name: "effect", type: "u8", note: "0 = level-up; 1 reads another u32 and is not located" },
+    ],
+  },
+  {
     opcode: field.FIELD_OPCODE.userMessage,
     direction: "s2c",
     stage: "field",

@@ -38,10 +38,12 @@ import {
   encodeFieldRequestRelease,
   encodeSetField,
   encodeUserChat,
+  encodeUserEffect,
   readClientAttack,
   readClientChat,
   readClientInteract,
   readClientUserMove,
+  USER_EFFECT_LEVEL_UP,
   type ClientAttack,
   type ClientInteract,
   type SetField,
@@ -1169,11 +1171,8 @@ export class GameEntryServer {
    * (`game/exp.ts`); the packet is the *difference* between the record before and after, so a plain
    * gain carries one field (`exp`) and a level-up carries the level plus the HP/MP refill the
    * client's own routine performs. The client plays the level-up effect itself when it sees the level
-   * grow, so nothing else has to be sent.
-   *
-   * ⚠️ The other players in the field see nothing of this: `0x29` is the packet that would tell them
-   * (the level-up effect for *other* players), and its body is not decoded (FINDINGS 6), so a level-up
-   * by somebody else is invisible for now - sending a guessed body would be inventing a packet.
+   * grow (`sub_55BEB0`'s tail, FINDINGS 4.21) - which is why the effect packet below goes to the
+   * **others** and not back to the player who levelled: for them the same animation is `0x29`.
    *
    * A monster with no template (no `Mob/<id>.img`, so no `info.exp`) awards nothing, like a drop.
    */
@@ -1189,6 +1188,19 @@ export class GameEntryServer {
     if (!gain.changed) return;
     const stats = session.character.stats;
     session.send(encodeStatUpdate({ diff: diffStats(before, stats) }));
+    if (gain.levels > 0) {
+      // The field's other half of a level-up: `0x29` plays over the levelling user the same effect
+      // their own client plays from the `0x0D` above, and the receiving pool resolves the id (an id
+      // it does not know is dropped) - so this is exactly "everybody else sees the effect".
+      session.instance.broadcast(
+        encodeUserEffect({ characterId: session.characterId, effect: USER_EFFECT_LEVEL_UP }),
+        session.characterId,
+      );
+      this.options.log?.(
+        `game: 0x29 level-up effect for "${session.name}" sent to ` +
+          `${session.instance.memberCount - 1} other player(s)`,
+      );
+    }
     this.options.log?.(
       `game: +${gain.gained} exp for killing ${template?.name ?? templateId} ` +
         `(template ${templateId}) - exp ${stats.exp}, level ${stats.level}` +
