@@ -19,6 +19,8 @@ import {
   characterDataOf,
   readCharacterData,
   startingCharacterItems,
+  withWorn,
+  wornOfLook,
   zeroStats,
   type CharacterData,
 } from "../src/protocol/chardata.ts";
@@ -350,8 +352,9 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
 
   // 5. Name check -> 0x04 reply; then create -> 0x05 reply carrying the new CharacterData.
   // `0x06`'s ten words are the dialog's six picks - face, hair, top, bottom, shoes, weapon - and its
-  // four dice rolls (FINDINGS 4.8.1a). Only the first two can reach the record today: the clothes
-  // would have to arrive as worn equips, and nothing in this build proves their slot numbers yet.
+  // four dice rolls (FINDINGS 4.8.1a). The six picks all reach the record: face and hair as the
+  // record's own fields, the four clothes as worn equips (the only place the client reads an avatar's
+  // clothes from). The dice are still unplaceable, so they are logged and dropped.
   client.send({
     kind: "check-name",
     opcode: 0x06,
@@ -375,6 +378,16 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
     [created.stats.appearanceA, created.stats.appearanceB],
     [20000, 30000],
     "the new character carries the face and hair the dialog picked (0x06 words 1 and 2)",
+  );
+  assert.deepEqual(
+    [...(created.items?.worn ?? [])].map(([slot, item]) => [slot, item.itemId]),
+    [
+      [5, 1040001],
+      [6, 1060001],
+      [7, 1071000],
+      [11, 1302000],
+    ],
+    "and wears words 3..6 as worn equips, in the slot each item's part code names (sub_45F340)",
   );
   assert.equal(created.stats.level, 1);
   assert.ok(created.stats.id > 0);
@@ -1599,10 +1612,18 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
   // The second player into the same map: the snapshot, and then who is already standing there.
   const alt = await FakeClient.connect(gameInfo.port);
   t.after(() => alt.close());
+  // Alt's record is the one a real `0x06` produces: the face and hair the dialog picked, and the four
+  // clothes as worn equips - exactly how `createCharacter` dresses a character. The others are
+  // hand-built handoffs with no record at all, which is why they arrive in the starter look.
+  const altStats = { ...zeroStats(), id: 8, name: "Alt" };
+  const altRecord = characterDataOf(
+    altStats,
+    withWorn(startingCharacterItems(), wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 7])),
+  );
   alt.send({
     kind: "handshake-reply",
     opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt", character: altRecord }),
   });
   const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
   assert.deepEqual(
@@ -1639,6 +1660,12 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
   assert.deepEqual(heroSaw.map((bytes) => bytes[0]), [FIELD_OPCODE.userEnterField], "and the one who was there gets the newcomer");
   const aboutAlt = readUserEnterField(new PacketReader(heroSaw[0]!, 1));
   assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [8, "Alt"]);
+  assert.deepEqual(
+    [aboutAlt.face, aboutAlt.avatarItems],
+    [20000, [30000, 1040001, 1060001, 1071000, 1302000]],
+    "the face and the worn equips of the record go out as the 0x1C's first u32 and its id list - " +
+      "which is the whole reason the clothes are stored as worn equips (`sub_42E2C0`, 4.11.3c)",
+  );
   assert.equal(hero.headersOk, true, "every packet of a shared field survives the cipher/header check");
 
   // A walk: relayed as the other client's own path, with the id in front (0x0E carries none).

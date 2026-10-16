@@ -53,7 +53,13 @@
  * guessed) desynchronises everything that follows.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
-import { ITEM_CATEGORY_EQUIP, readItemSlot, writeItemSlot, type ItemSlot } from "./itemslot.ts";
+import {
+  ITEM_CATEGORY_EQUIP,
+  equipSlot,
+  readItemSlot,
+  writeItemSlot,
+  type ItemSlot,
+} from "./itemslot.ts";
 
 /** Fixed width of the character name field on the wire (12 visible bytes + NUL). */
 export const CHARACTER_NAME_BYTES = 13;
@@ -64,6 +70,88 @@ export const CHARACTER_STATS_BYTES = 69;
 
 /** Slots the two worn item groups can hold: the client loops `1..14`, index 0 is unused. */
 export const WORN_SLOT_LIMIT = 14;
+
+/**
+ * The avatar's 15 slots, numbered the way the client numbers them.
+ *
+ * One numbering serves three places, which is why the numbers below are worth naming once:
+ *
+ *   - `sub_45F340` derives a slot from an item's **part code** (`itemId / 10000`) and writes the id
+ *     into that slot of the 15-dword look block - the list `0x1C` carries (4.11.3b).
+ *   - `sub_45F610` (Encode) writes the worn group as `{u8 slot, item}` where the slot byte *is* the
+ *     index into the 15-entry worn array, and `sub_45FCC0` (Decode) reads it back into that index.
+ *   - `sub_42E2C0` (the char-select window's avatar) walks both arrays with one loop -
+ *     `srca[1 + k] = worn[k].itemId` for k = 1..14, then `srca[0] = record's hair` - i.e. a worn
+ *     slot and a look slot with the same number are the same body part.
+ *
+ * So a top goes into worn slot 5 whether it arrives as a worn item or in a `0x1C` id list, and the
+ * equip slot numbers a server has to choose are the part codes the client itself derives.
+ */
+export const AVATAR_SLOT = {
+  /** 0: hair (`appearanceB`, `3xxxx` ids) - a look word, never a worn item. */
+  hair: 0,
+  /** 1: `100xxxx` cap. */
+  cap: 1,
+  /** 2: `101xxxx` face accessory - the one `0x1C` hands to `sub_508260`'s second parameter. */
+  faceAccessory: 2,
+  /** 3: `102xxxx` eye accessory. */
+  eyeAccessory: 3,
+  /** 4: `103xxxx` earring. */
+  earring: 4,
+  /** 5: `104xxxx` top *and* `105xxxx` overall - `sub_45F340` folds both onto one slot. */
+  clothes: 5,
+  /** 6: `106xxxx` pants. */
+  pants: 6,
+  /** 7: `107xxxx` shoes. */
+  shoes: 7,
+  /** 8: `108xxxx` gloves. */
+  gloves: 8,
+  /** 9: `110xxxx` cape. */
+  cape: 9,
+  /** 10: `109xxxx` shield. */
+  shield: 10,
+  /** 11: `13xxxxx` / `14xxxxx` weapon. */
+  weapon: 11,
+} as const;
+
+/** `sub_45F340`'s switch, keyed by the part code `itemId / 10000`. */
+const PART_CODE_SLOT = new Map<number, number>([
+  [100, AVATAR_SLOT.cap],
+  [101, AVATAR_SLOT.faceAccessory],
+  [102, AVATAR_SLOT.eyeAccessory],
+  [103, AVATAR_SLOT.earring],
+  [104, AVATAR_SLOT.clothes],
+  [105, AVATAR_SLOT.clothes],
+  [106, AVATAR_SLOT.pants],
+  [107, AVATAR_SLOT.shoes],
+  [108, AVATAR_SLOT.gloves],
+  [109, AVATAR_SLOT.shield],
+  [110, AVATAR_SLOT.cape],
+]);
+
+/**
+ * The slot the client files `itemId` under - `sub_45F340`'s switch, which is the only thing that
+ * reads a part code.
+ *
+ * `3xxxx` ids (hair) land on slot 0 and the two weapon groups (`13xxxxx`, `14xxxxx`) on slot 11
+ * through the two branches that do not go through the switch; `111xxxx` is the one code inside the
+ * range that names nothing, and everything outside it (a consumable, `0`) is `null`.
+ */
+export function avatarSlotOfItem(itemId: number): number | null {
+  if (itemId >= 30000 && itemId <= 39999) return AVATAR_SLOT.hair;
+  const part = Math.floor(itemId / 10000);
+  const slot = PART_CODE_SLOT.get(part);
+  if (slot !== undefined) return slot;
+  const group = Math.floor(itemId / 100000);
+  if (group === 13 || group === 14) return AVATAR_SLOT.weapon;
+  return null;
+}
+
+/** `avatarSlotOfItem`, but only for the slots a worn group can hold (`1..14`, `sub_45F610`). */
+export function wornSlotOfItem(itemId: number): number | null {
+  const slot = avatarSlotOfItem(itemId);
+  return slot !== null && slot >= 1 && slot <= WORN_SLOT_LIMIT ? slot : null;
+}
 
 /** `u8 flags` bits of `sub_45FCC0` / `sub_45F610`. */
 export const CHAR_FLAG_STATS = 0x01;
@@ -250,6 +338,57 @@ export function withDefaultLook(data: CharacterData): CharacterData {
   const look = lookOf(data.stats);
   if (look.face === data.stats.appearanceA && look.hair === data.stats.appearanceB) return data;
   return { ...data, stats: { ...data.stats, appearanceA: look.face, appearanceB: look.hair } };
+}
+
+/**
+ * The ten `u32` of the `0x06` request, by the dialog control they come from (FINDINGS 4.8.1a).
+ *
+ * The first six are the six dropdowns - each one a body part - and the last four are the dice the
+ * dialog rolls. Which die is STR/DEX/INT/LUK is not in the binary (4.8.1a), so a server can only
+ * log them; the six body parts, on the other hand, all have a slot.
+ */
+export const LOOK_WORD = {
+  face: 0,
+  hair: 1,
+  clothes: 2,
+  pants: 3,
+  shoes: 4,
+  weapon: 5,
+  /** First of the four dice; `LOOK_WORD.dice + 3` is the last. */
+  dice: 6,
+} as const;
+
+/** How many `u32` the six dropdowns plus the four dice take (`sub_431620(1002)`). */
+export const LOOK_WORDS = 10;
+
+/**
+ * The clothes a `0x06` request picked, as the worn group of a new character.
+ *
+ * Words 3..6 are the dialog's top/bottom/shoes/weapon; the client wears them the moment it has a
+ * character (`sub_42E2C0` rebuilds the whole look from the worn array), so a server that drops them
+ * hands back a character in its underwear. Each id goes to the slot its part code names
+ * (`wornSlotOfItem`), which also means an id that names no wearable part - a face, a hair, a
+ * consumable, `0` - is skipped rather than stored somewhere it would stop being drawn.
+ */
+export function wornOfLook(look: readonly number[]): Map<number, ItemSlot> {
+  const worn = new Map<number, ItemSlot>();
+  for (const word of [LOOK_WORD.clothes, LOOK_WORD.pants, LOOK_WORD.shoes, LOOK_WORD.weapon]) {
+    const itemId = look[word] ?? 0;
+    if (itemId === 0) continue;
+    const slot = wornSlotOfItem(itemId);
+    if (slot === null) continue;
+    worn.set(slot, equipSlot(itemId));
+  }
+  return worn;
+}
+
+/**
+ * `items` with `worn` merged over its worn group - a copy, because the block a caller passes can be
+ * one another character already uses (the login server hands `createCharacter` a template).
+ */
+export function withWorn(items: CharacterItems, worn: Map<number, ItemSlot>): CharacterItems {
+  if (worn.size === 0) return items;
+  return { ...items, worn: new Map([...items.worn, ...worn]) };
 }
 
 /** Pads/validates the 13-byte name field. Names are byte strings in this client (`sub_45DD00`). */

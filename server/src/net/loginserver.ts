@@ -108,11 +108,15 @@ import {
   type WorldEntry,
 } from "../protocol/replies.ts";
 import {
+  LOOK_WORD,
+  LOOK_WORDS,
   characterDataOf,
   emptyCharacterItems,
   lookOf,
   startingCharacterItems,
   withDefaultLook,
+  withWorn,
+  wornOfLook,
   zeroStats,
   type CharacterData,
   type CharacterItems,
@@ -293,12 +297,12 @@ export class LoginServer {
    * equips in `CharacterData` (`flags & 0x02`), so a caller that has an item model should pass one.
    * With no items the record stays a flags byte + the 69-byte stat block, which the client accepts.
    *
-   * `appearance` is the ten u32 of `0x06` (FINDINGS 4.8.1a). The first two are the only ones this
-   * server can use: they are the face and the hair, the same two body parts the record's
-   * `appearanceA`/`appearanceB` hold, and with a 0 in either the character would be faceless. Words
-   * 3..6 pick the starting top/bottom/shoes/weapon and words 7..10 are the client's dice roll - the
-   * clothes would have to arrive as *worn equips*, and this server has no proven worn-slot
-   * numbering for them yet, so both groups are logged and dropped instead of invented.
+   * `appearance` is the ten u32 of `0x06` (FINDINGS 4.8.1a): words 1..2 are the face and the hair
+   * the record's `appearanceA`/`appearanceB` hold (a 0 in either would draw a faceless character,
+   * hence `lookOf`), and words 3..6 are the top, pants, shoes and weapon the dialog picked - they
+   * become *worn equips* (`wornOfLook`), which is the only place the client reads clothes from when
+   * it rebuilds an avatar (`sub_42E2C0`). Words 7..10 are the dice the dialog rolled; which die is
+   * STR/DEX/INT/LUK is still unknown, so they are logged by the caller and otherwise dropped.
    */
   createCharacter(
     id: number,
@@ -310,7 +314,7 @@ export class LoginServer {
     const look = lookOf({ appearanceA: appearance[0] ?? 0, appearanceB: appearance[1] ?? 0 });
     // A character without slots could never be handed anything: the capacity byte is what makes the
     // client allocate an inventory at all (see `startingCharacterItems`), so bags are the default.
-    const block = items ?? startingCharacterItems();
+    const block = withWorn(items ?? startingCharacterItems(), wornOfLook(appearance));
     if (template) {
       const stats: CharacterStats = {
         ...template,
@@ -506,7 +510,7 @@ export class LoginServer {
         this.reply(socket, sendState, encodeNameCheckResult(packet.name, taken ? NAME_CHECK_RESULT.taken : NAME_CHECK_RESULT.available));
         this.log(
           `  name "${packet.name}" is ${taken ? "taken" : "free"} ` +
-            `(appearance hint: ${packet.appearance.join(",")})`,
+            `(look: ${describeLookWords(packet.appearance)})`,
         );
         return;
       }
@@ -532,7 +536,7 @@ export class LoginServer {
         const created = this.createCharacter(nextCharacterId(this.options.accounts), packet.name, state.appearanceHint ?? [], template);
         account.characters.push(created);
         this.reply(socket, sendState, encodeCreateCharacterResult(withDefaultLook(created)));
-        this.log(`  created "${created.stats.name}" (id ${created.stats.id})`);
+        this.log(`  created "${created.stats.name}" (id ${created.stats.id}) ${describeWorn(created)}`);
         this.persist();
         return;
       }
@@ -2016,6 +2020,30 @@ function avatarItemsOf(character: CharacterData): number[] {
     if (slot.itemId !== 0) ids.push(slot.itemId);
   }
   return ids;
+}
+
+/**
+ * The ten `0x06` words as one log line: the six body parts by name, and the dice as they came.
+ *
+ * The dice are the half of `0x06` this server cannot use yet - nothing in the binary says which die
+ * is STR/DEX/INT/LUK (FINDINGS 4.8.1a) - so they are printed rather than turned into stats.
+ */
+function describeLookWords(appearance: readonly number[]): string {
+  const word = (index: number): number => appearance[index] ?? 0;
+  const clothes = [LOOK_WORD.clothes, LOOK_WORD.pants, LOOK_WORD.shoes, LOOK_WORD.weapon].map(word);
+  const dice: number[] = [];
+  for (let index = LOOK_WORD.dice; index < LOOK_WORDS; index++) dice.push(word(index));
+  return (
+    `face ${word(LOOK_WORD.face)}, hair ${word(LOOK_WORD.hair)} ` +
+    `clothes ${clothes.join("/")}, dice ${dice.join("/")}`
+  );
+}
+
+/** What of the look words reached the record: the worn group the client draws the avatar from. */
+function describeWorn(character: CharacterData): string {
+  const entries = character.items === undefined ? [] : [...character.items.worn];
+  const worn = entries.sort((a, b) => a[0] - b[0]).map(([slot, item]) => `${slot}:${item.itemId}`);
+  return worn.length > 0 ? `wearing ${worn.join(" ")}` : "wearing nothing";
 }
 
 /** A non-zero u32 for the handshake seeds. */

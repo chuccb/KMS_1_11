@@ -61,6 +61,13 @@ import {
 
 const [loginPort, gamePort] = process.argv.slice(2).map(Number);
 
+/**
+ * The ten words the create dialog sends (FINDINGS 4.8.1a), with ids that exist in the shipped
+ * `Data.wz`: face 20000, hair 30000, a top (1040001), pants (1060001), shoes (1071000) and a weapon
+ * (1302000), then four dice. The last four are the ones nobody can place yet, so any values do.
+ */
+const DIALOG_LOOK = [20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 7];
+
 class Client {
   constructor(port) {
     this.queue = [];
@@ -155,12 +162,14 @@ async function enterGame(user, password, wanted) {
   console.log(`  ${user}: ${count} character(s) [${list.map((c) => `${c.stats.name}#${c.stats.id}`).join(", ")}]`);
 
   if (!list.some((character) => character.stats.name === wanted)) {
-    // Ten zero appearance words: the client would send its dialog's picks here (face, hair, top,
-    // bottom, shoes, weapon, then four dice), so this is the "picked nothing" case - the server has
-    // to fall back on the starter face and hair (`lookOf`) rather than create a faceless character.
+    // The ten appearance words the create dialog sends (FINDINGS 4.8.1a): face, hair, top, pants,
+    // shoes and weapon - all of them ids that exist in `Character/` of the shipped Data.wz - and then
+    // the four dice rolls, whose STR/DEX/INT/LUK order nobody has located yet. The server has to put
+    // the first two in the record and the other four in its worn group, which is the only place the
+    // client reads clothes from (`sub_42E2C0`).
     const check = new PacketWriter(64);
     check.writeByte(0x06).writeAsciiString(wanted);
-    for (let i = 0; i < 10; i++) check.writeU32(0);
+    for (const word of DIALOG_LOOK) check.writeU32(word);
     login.send(check.toBytes());
     const checkReply = await login.take(0x04);
     console.log(`  ${user}: name "${wanted}" check -> result ${checkReply[checkReply.length - 1]}`);
@@ -172,7 +181,12 @@ async function enterGame(user, password, wanted) {
     const flag = createReply[1];
     console.log(`  ${user}: create "${wanted}" -> flag ${flag}`);
     if (flag === 0) throw new Error(`create refused for ${user}`);
-    list.push(readCharacterData(new PacketReader(createReply, 2)));
+    const created = readCharacterData(new PacketReader(createReply, 2));
+    expect(
+      [...(created.items?.worn ?? new Map()).keys()].join(",") === "5,6,7,11",
+      `the four wardrobe words came back as worn equips in slots [${[...(created.items?.worn ?? new Map()).keys()].join(",")}]`,
+    );
+    list.push(created);
   }
 
   const character = list.find((entry) => entry.stats.name === wanted) ?? list[0];
@@ -335,6 +349,15 @@ expect(arrivedUser.face === heroLook.appearanceA, `and with Hero's own face (${a
 expect(
   arrivedUser.avatarItems.includes(heroLook.appearanceB),
   `and his hair (${heroLook.appearanceB}) among the avatar ids [${arrivedUser.avatarItems.join(",")}]`,
+);
+// The clothes the dialog picked are worn equips (FINDINGS 4.8.1a), and `0x1C` is where the other
+// players get them: one list of item ids the client files by part code (`sub_45F340`). On a save
+// that already had the character there is nothing worn to look for, so this only claims what the
+// record it just read actually holds.
+const heroWorn = [...(hero.character.items?.worn.values() ?? [])].map((slot) => slot.itemId);
+expect(
+  heroWorn.every((itemId) => arrivedUser.avatarItems.includes(itemId)),
+  `and every worn equip [${heroWorn.join(",")}] is in those ids [${arrivedUser.avatarItems.join(",")}]`,
 );
 
 // --- an emotion: 0x13 out, 0x27 to the rest of the field, nothing back (FINDINGS 4.35) ------------
