@@ -45,12 +45,17 @@ export function asText(value: unknown, fallback = ""): string {
 }
 
 /**
- * `info` of a top-level object as a plain record - the shape every `Mob/*.img`, `Npc/*.img` and map
- * image starts with. Missing `info` gives `{}`, which makes every field inside it `undefined` and
- * therefore a caller-visible default rather than an exception.
+ * One named sub-node of a property list as a plain record - the shape every `Mob/*.img`,
+ * `Npc/*.img` and map image starts with. A missing node gives `{}`, which makes every field inside
+ * it `undefined` and therefore a caller-visible default rather than an exception.
  */
-export function infoOf(root: unknown): Record<string, unknown> {
+export function recordOf(root: unknown, name: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const entry of entriesOf(propertyOf(root, "info"))) out[entry.name] = entry.value;
+  for (const entry of entriesOf(propertyOf(root, name))) out[entry.name] = entry.value;
   return out;
+}
+
+/** `info` of a top-level object (`recordOf(root, "info")`). */
+export function infoOf(root: unknown): Record<string, unknown> {
+  return recordOf(root, "info");
 }

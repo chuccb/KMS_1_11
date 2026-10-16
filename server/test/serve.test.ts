@@ -30,6 +30,7 @@ import {
   encodeClientAttack,
   encodeClientChat,
   encodeClientStatReport,
+  encodeClientUseItem,
   encodeClientInteract,
   encodeClientUserMove,
   encodeClientUserRequest,
@@ -75,6 +76,7 @@ import {
   readShopOpen,
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
+import { consumeSpecProvider } from "../src/game/items.ts";
 import {
   QUEST_REPLY_OPCODE,
   QUEST_TALK_OPCODE,
@@ -1387,6 +1389,7 @@ test("clicking an NPC opens its shop, and buying moves the item and the mesos", 
     [
       [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
       [2000003, 100], // 파란 포션
+      [2030000, 75], // 마을 귀환 주문서, out of Item/Consume/0203.img
     ],
   );
   assert.equal(client.headersOk, true);
@@ -2636,4 +2639,170 @@ test("whisper and find reach a player by name, across maps, and answer the asker
   assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Guest": 안녕')), log.join("\n"));
   assert.ok(log.some((line) => line.includes('find "Alt" -> "Alt" in map 1000000')), log.join("\n"));
   assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Nobody": no such player')), log.join("\n"));
+});
+
+test("using a USE-tab item: 0x18 restores and consumes it, 0x19 changes the map", { skip: archive === null, timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) =>
+      mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
+    shops: shopKeeper(archive!),
+    // What an item does is the client's own data: 빨간 포션 `spec/hp = 50`, 마을 귀환 주문서
+    // `spec/moveTo = -1`. Nothing about the effects lives in the handler.
+    consumeSpec: consumeSpecProvider(archive!),
+    // No patrol packets in this test: the mobs are still, so every burst below is exactly the use's
+    // own answer and the order stays readable.
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x55aa55aa, clientRecvSeed: 0xaa55aa55 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 51;
+  stats.name = "Drinker";
+  stats.level = 1;
+  stats.hp = 20;
+  stats.maxHp = 50;
+  stats.mp = 5;
+  stats.maxMp = 30;
+  stats.mesos = 200;
+
+  const client = await FakeClient.connect(gameInfo.port);
+  t.after(() => client.close());
+  client.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 51,
+      characterName: "Drinker",
+      character: characterDataOf(stats, startingCharacterItems()),
+    }),
+  });
+  await client.drain();
+
+  // The shop on STUB_MAP's NPC (로빈, 2003), priced out of the real archive.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_OBJECT_CLICK_OPCODE,
+    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+  });
+  const opened = await client.take(2);
+  assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+  assert.deepEqual(
+    readShopOpen(new PacketReader(opened[1]!, 1)).items.map((line) => [line.itemId, line.price]),
+    [
+      [2000000, 25], // 빨간 포션, Item/Consume/0200.img/02000000/info/price
+      [2000003, 100], // 파란 포션
+      [2030000, 75], // 마을 귀환 주문서, Item/Consume/0203.img/02030000/info/price
+    ],
+  );
+
+  const buy = async (row: number, itemId: number): Promise<number> => {
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "buy", row, itemId, count: 1 }).slice(1),
+    });
+    const trade = await client.take(3);
+    assert.deepEqual(
+      trade.map((bytes) => bytes[0]),
+      [SHOP_RESULT_OPCODE, INVENTORY_OPCODE, STAT_OPCODE],
+      "the result, the inventory change and the mesos",
+    );
+    const change = readInventoryChange(new PacketReader(trade[1]!, 1)).changes[0]!;
+    assert.equal(change.op, INVENTORY_OP.put);
+    return change.slot;
+  };
+  const potionSlot = await buy(0, 2000000);
+  assert.equal(await buy(0, 2000000), potionSlot, "the second potion stacks into the same slot");
+  const scrollSlot = await buy(2, 2030000);
+  assert.notEqual(scrollSlot, potionSlot);
+
+  /** What `sub_55B2C0` / `sub_55B4B0` send: two fields, and the item id is what picked the opcode. */
+  const use = (slot: number, itemId: number, opcode: number): void => {
+    client.send({
+      kind: "unknown",
+      opcode,
+      body: encodeClientUseItem({ slot, itemId }, opcode).slice(1),
+    });
+  };
+  /** The client's own `0x1C` report: a monster hit, rolled locally (`sub_5114A0`). */
+  const hit = (damage: number): void => {
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.statReport,
+      body: encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }).slice(1),
+    });
+  };
+
+  // One potion: the slot keeps the second one, and the HP comes from the archive's own `spec/hp` -
+  // 20 + 50 is clamped to the maximum, which is `game/vitals.ts`'s rule and not the file's.
+  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+  const drank = await client.take(2);
+  assert.deepEqual(drank.map((bytes) => bytes[0]), [INVENTORY_OPCODE, STAT_OPCODE]);
+  const left = readInventoryChange(new PacketReader(drank[0]!, 1)).changes[0]!;
+  assert.equal(left.op, INVENTORY_OP.put, "one potion is left in the slot");
+  assert.ok(
+    left.op === INVENTORY_OP.put && left.item.kind === "nonequip" && left.item.quantity === 1,
+    "the slot now holds one",
+  );
+  assert.deepEqual(readStatUpdate(new PacketReader(drank[1]!, 1)).diff, { hp: 50 });
+
+  // The same use at a full bar: nothing would move, so the potion has to stay in the bag - and the
+  // answer is still a packet (an *empty* 0x0B), because the client's use gate waits for one.
+  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+  const refused = await client.take(1);
+  const refusal = readInventoryChange(new PacketReader(refused[0]!, 1));
+  assert.equal(refusal.changes.length, 0, "an empty change list is the refusal");
+  assert.equal(refusal.result, 1, "and its result byte still re-arms the client's gate");
+  assert.equal((await client.drainOpcodes(120)).length, 0, "nothing else follows it");
+
+  // A monster hit lands first (`0x1C` -> `0x0D`), because that is the state a potion is drunk in.
+  hit(30);
+  assert.deepEqual(readStatUpdate(new PacketReader((await client.take(1))[0]!, 1)).diff, { hp: 20 });
+
+  // The last potion: the stack empties, so the change is a `clear`.
+  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+  const emptied = await client.take(2);
+  assert.equal(readInventoryChange(new PacketReader(emptied[0]!, 1)).changes[0]!.op, INVENTORY_OP.clear);
+  assert.deepEqual(readStatUpdate(new PacketReader(emptied[1]!, 1)).diff, { hp: 50 });
+
+  // Now the slot is empty and the bar is not full: the packet claims an item the server's own
+  // inventory does not have, and the server - not the packet - is what decides.
+  hit(30);
+  await client.take(1);
+  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+  assert.equal(readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length, 0);
+  assert.ok(
+    log.some((line) => line.includes(`slot ${potionSlot} of the USE tab does not hold item 2000000`)),
+    log.join("\n"),
+  );
+
+  // The scroll: 마을 귀환 주문서's own `spec/moveTo = -1` is read with the map's `info/returnMap`
+  // (STUB_MAP says 1010000), and the map change is the same `0x16` a portal sends.
+  use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
+  const jumped = await client.take(2);
+  assert.deepEqual(jumped.map((bytes) => bytes[0]), [INVENTORY_OPCODE, FIELD_OPCODE.setField]);
+  assert.equal(
+    readInventoryChange(new PacketReader(jumped[0]!, 1)).changes[0]!.op,
+    INVENTORY_OP.clear,
+    "a scroll is used up",
+  );
+  const entered = readSetField(new PacketReader(jumped[1]!, 1));
+  assert.equal(entered.character.stats.mapId, 1010000, "the ground under the player changed");
+  assert.ok(log.some((line) => line.includes("0x19 map item") && line.includes("map 1000000 -> 1010000 (moveTo -1)")), log.join("\n"));
+
+  // The slot is empty again, and this time the item cannot even name a map: the refusal comes before
+  // anything is taken (the town's own `returnMap` here is a map no provider knows).
+  use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
+  assert.equal(readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length, 0);
+  assert.deepEqual(await client.drainOpcodes(120), [], "no second 0x16");
 });

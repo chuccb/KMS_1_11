@@ -31,7 +31,7 @@ import type { MobTemplate } from "../game/mobs.ts";
 import type { DropPolicy } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
 import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
-import { MesoWallet, pickUpDrop } from "../game/rewards.ts";
+import { MesoWallet, pickUpDrop, takeItem } from "../game/rewards.ts";
 import { reviveMapId, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
@@ -52,12 +52,15 @@ import {
   readClientChat,
   readClientInteract,
   readClientStatReport,
+  readClientUseItem,
   readClientUserMove,
   readClientUserRequest,
+  USE_ITEM_OPCODES,
   USER_EFFECT_LEVEL_UP,
   USER_REQUEST_KIND,
   type ClientAttack,
   type ClientInteract,
+  type ClientUseItem,
   type ClientUserRequest,
   type SetField,
 } from "../protocol/field.ts";
@@ -84,6 +87,7 @@ import {
 } from "../protocol/quest.ts";
 import { awardExp } from "../game/exp.ts";
 import { applyVitalReport } from "../game/vitals.ts";
+import { consumeDeltas, healsVitals, type ConsumeSpec } from "../game/items.ts";
 import { DEFAULT_PING_MS, Heartbeat } from "./heartbeat.ts";
 import { OnlineAccounts, SeatKeeper, describeSessions } from "./online.ts";
 import { PacketReader } from "../protocol/packet.ts";
@@ -185,6 +189,17 @@ export interface LoginServerOptions {
    * record the client holds matches the map it is about to enter. Defaults to `DEFAULT_MAP_ID`.
    */
   startMapId?: number;
+  /**
+   * Mesos a newly created character starts with (`--start-mesos`). Defaults to **0**, which is what
+   * a 2003 character had: nothing in the binary gives one money, and the way to get some is to kill
+   * something and pick the mesos up (`game/drops.ts`).
+   *
+   * The knob exists because a fresh character otherwise cannot use a single shop - and *which*
+   * number a server starts its players with is a server's own decision, like the drop rates
+   * (ADR-007) or the starting inventory (`startingCharacterItems`). It only ever affects records
+   * created after it is set; a save that already has characters is untouched.
+   */
+  startMesos?: number;
   /** Cipher seeds and handshake body. Defaults: random seeds, 199 zero bytes. */
   handshake?: { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
   /**
@@ -306,6 +321,7 @@ export class LoginServer {
     stats.maxHp = 50;
     stats.mp = 50;
     stats.maxMp = 50;
+    stats.mesos = this.options.startMesos ?? 0;
     return characterDataOf(stats, block);
   }
 
@@ -636,6 +652,15 @@ export interface GameEntryServerOptions {
    * alone, which is what an NPC with nothing to say deserves.
    */
   npcDialogue?: (templateId: number) => NpcDialogue | undefined;
+  /**
+   * What a USE-tab item does when it is used (`Item/Consume/0XXX.img -> spec`).
+   * `consumeSpecProvider(WzArchive)` is the real one.
+   *
+   * With it, `0x18` restores HP/MP and `0x19` changes the map; without it (or for an item the
+   * archive has no `spec` for) every use is refused - with an empty `0x0B`, never with silence
+   * (`handleUseItem`).
+   */
+  consumeSpec?: (itemId: number) => ConsumeSpec | undefined;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -1068,6 +1093,132 @@ export class GameEntryServer {
     } catch (error) {
       this.options.log?.(`game: 0x1C stat report unreadable: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * The player used an item out of the USE tab: `0x18` for the 200/201/202 families (potions and
+   * food) and `0x19` for 203 (the 귀환 주문서 line, `spec/moveTo`). FINDINGS 4.34, `game/items.ts`.
+   *
+   * Both are two fields - `slot`, `itemId` - and both are **the client asking the server to do it**:
+   * the client's own character record is not written on this path (only `0x0D` writes it), so the
+   * heal or the teleport only happens because of what this sends back:
+   *
+   *   `0x0B`  the item left the slot (a `put` with what remains, or a `clear` when the stack ran
+   *           out) - the only packet that changes an inventory.
+   *   `0x0D`  for a potion: the vitals that moved, with the same `[0, max]` clamp every other HP
+   *           change goes through (`game/vitals.ts`).
+   *   `0x16`  for a return scroll: the map its own `spec/moveTo` names, through the same `enterMap`
+   *           a portal uses - `-1` (마을 귀환 주문서, "the nearest town") is read with the map's
+   *           `info/returnMap`, the one `reviveMapId` already answers with.
+   *
+   * A use that cannot happen is **still answered**, with an empty `0x0B`: the senders arm the same
+   * one-request-at-a-time gate an object click does (`*(this + 6)`, cleared by a non-zero `0x0B`
+   * result or `0x0D` ack), so silence would leave the player unable to use anything at all - and
+   * since the client's inventory only changes on `0x0B`, an empty one *is* the refusal.
+   */
+  private handleUseItem(session: FieldSession, plain: Uint8Array, opcode: number): void {
+    const label = opcode === CLIENT_FIELD_OPCODE.useMapItem ? "0x19 map item" : "0x18 item";
+    let request: ClientUseItem;
+    try {
+      request = readClientUseItem(new PacketReader(plain, 1), opcode);
+    } catch (error) {
+      // Nothing can be answered: the slot is what the answer would name, and it did not parse.
+      this.options.log?.(`game: ${label} unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const refuse = (reason: string): void => {
+      session.send(encodeInventoryChange([]));
+      this.options.log?.(
+        `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" refused (${reason})`,
+      );
+    };
+    const spec = this.options.consumeSpec?.(request.itemId);
+    if (spec === undefined) {
+      refuse("the archive does not say what this item does (no Item/Consume spec)");
+      return;
+    }
+    if (spec.unapplied.length > 0) {
+      // A buff item: applying half of it would burn the item for the fields that *are* located.
+      refuse(`spec field(s) ${spec.unapplied.join(", ")} are not applied yet`);
+      return;
+    }
+    const items = session.character.items ?? emptyCharacterItems();
+    const stats = session.character.stats;
+    if (opcode === CLIENT_FIELD_OPCODE.useMapItem) {
+      this.useMapItem(session, request, spec, refuse);
+      return;
+    }
+    if (!healsVitals(spec)) {
+      refuse("no hp/mp effect located in its spec");
+      return;
+    }
+    // The rules are `game/vitals.ts`'s, and the copy is how "would anything move?" is asked without
+    // applying twice: a potion used at full HP changes nothing, and nothing is what it should cost.
+    const probe: CharacterStats = { ...stats };
+    const diff = applyVitalReport(probe, consumeDeltas(spec, stats));
+    if (Object.keys(diff).length === 0) {
+      refuse(`hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp} is already what it restores`);
+      return;
+    }
+    const taken = takeItem(items, request.itemId, request.slot, 1);
+    if (taken === undefined) {
+      refuse(`slot ${request.slot} of the USE tab does not hold item ${request.itemId}`);
+      return;
+    }
+    stats.hp = probe.hp;
+    stats.mp = probe.mp;
+    session.send(encodeInventoryChange([taken.change]));
+    session.send(encodeStatUpdate({ diff }));
+    this.options.log?.(
+      `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
+        `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}, ${taken.remaining} left in the slot`,
+    );
+  }
+
+  /**
+   * The `0x19` half: a 203-family item changes the map the item itself names (`spec/moveTo`), through
+   * the same `enterMap` a portal or a revive uses.
+   *
+   * The destination is resolved **before** the item is taken: a map this server cannot read (or an
+   * item with no `moveTo` at all) refuses the use, so a scroll never disappears into nothing. `-1`
+   * is 마을 귀환 주문서 - "현재 위치에서 가장 가까운 마을" in its own `info/desc` - and the nearest
+   * town the data has an answer for is the map's `info/returnMap` (`reviveMapId`), which is the same
+   * field the revive dialog's town comes from. A town carries `RETURN_MAP_NONE` there, so the scroll
+   * re-enters the town it was used in - a real `0x16`, landing on the map's own spawn point.
+   */
+  private useMapItem(
+    session: FieldSession,
+    request: ClientUseItem,
+    spec: ConsumeSpec,
+    refuse: (reason: string) => void,
+  ): void {
+    if (spec.moveTo === undefined) {
+      refuse("no spec/moveTo: this item does not name a map");
+      return;
+    }
+    const target = spec.moveTo < 0 ? reviveMapId(session.instance.map) : spec.moveTo;
+    if (target <= 0) {
+      refuse(`spec/moveTo ${spec.moveTo} is not a map id`);
+      return;
+    }
+    // `of` is what a portal is checked with, and it refuses (without caching) a map the archive has
+    // no `Map/Map/*.img` for - the same answer `enterMap` would give, but asked before the item goes.
+    if (this.fields.of(target) === undefined) {
+      refuse(`map ${target} has no Map/Map/*.img in Data.wz`);
+      return;
+    }
+    const items = session.character.items ?? emptyCharacterItems();
+    const taken = takeItem(items, request.itemId, request.slot, 1);
+    if (taken === undefined) {
+      refuse(`slot ${request.slot} of the USE tab does not hold item ${request.itemId}`);
+      return;
+    }
+    session.send(encodeInventoryChange([taken.change]));
+    this.options.log?.(
+      `game: 0x19 map item slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
+        `map ${session.instance.mapId} -> ${target} (moveTo ${spec.moveTo})`,
+    );
+    this.enterMap(session, target);
   }
 
   /**
@@ -1534,6 +1685,12 @@ export class GameEntryServer {
         // the client and answered with the `0x0D` that moves the bar (see `handleStatReport`).
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.statReport) {
           this.handleStatReport(session, event.plain);
+          continue;
+        }
+        // Using an item out of the USE tab: `0x18` restores a vital, `0x19` changes the map. Both are
+        // answered even when the use is refused, or the client's use gate would never clear.
+        if (session !== undefined && USE_ITEM_OPCODES.includes(opcode)) {
+          this.handleUseItem(session, event.plain, opcode);
           continue;
         }
         // A swing is the other packet this server acts on: it is what moves a mob's HP here.

@@ -707,6 +707,34 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.CLIENT_FIELD_OPCODE.useItem,
+    direction: "c2s",
+    stage: "field",
+    name: "useItem",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.34 (sub_55B2C0: `push $0x18` at .text:0055B311, `mov %cx` for the slot and `mov %ecx` for the id; sent by the inventory double-click sub_462DC0 and the quickslot sub_512570 for itemId/10000 in 200|201|202)",
+    codecs: ["readClientUseItem", "encodeClientUseItem"],
+    fields: [
+      { name: "slot", type: "s16", note: "a slot of the USE tab; the tab byte is not on the wire" },
+      { name: "itemId", type: "u32", note: "what the client says the slot holds - not what the server says it holds" },
+    ],
+  },
+  {
+    opcode: field.CLIENT_FIELD_OPCODE.useMapItem,
+    direction: "c2s",
+    stage: "field",
+    name: "useMapItem",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.34 (sub_55B4B0: `push $0x19` at .text:0055B501; the 203 family from sub_462DC0, whose destination is the item's own `Item/Consume/0203.img/<id>/spec/moveTo`)",
+    codecs: ["readClientUseItem", "encodeClientUseItem"],
+    fields: [
+      { name: "slot", type: "s16" },
+      { name: "itemId", type: "u32", note: "2030000 = 마을 귀환 주문서 (moveTo -1), 02030001..02030005 name a town" },
+    ],
+  },
+  {
     opcode: npc.NPC_OPCODE.enterField,
     direction: "s2c",
     stage: "field",

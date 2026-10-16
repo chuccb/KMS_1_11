@@ -395,6 +395,10 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.statReport) {
       return `0x1c stat report: ${describeClientStatReport(readClientStatReport(new PacketReader(plain, 1)))}`;
     }
+    if (USE_ITEM_OPCODES.includes(opcode)) {
+      const use = readClientUseItem(new PacketReader(plain, 1), opcode);
+      return `${hexOpcode(opcode)} use item: ${describeClientUseItem(use)}`;
+    }
     if (opcode === CLIENT_FIELD_OPCODE.userRequest) {
       return describeClientUserRequest(readClientUserRequest(new PacketReader(plain, 1)));
     }
@@ -726,6 +730,51 @@ export const CLIENT_FIELD_OPCODE = {
    */
   statReport: 0x1c,
   /**
+   * `sub_55B2C0`: `[0x18][u16 slot][u32 itemId]` - **the player used a 200/201/202 item** (a potion
+   * or a piece of food) out of the USE tab.
+   *
+   * The second byte of a family of four CWvsApp-level senders that all mean "the inventory window
+   * did something". All four share the same preconditions, which are worth knowing because they are
+   * the whole of the client's own validation (`sub_55B2C0`, `sub_55B4B0`, `sub_55ACB0`,
+   * `sub_55B0E0`, each ~145 lines, identical prologue):
+   *
+   * ```
+   * *(this + 6) == 0            // one request at a time: this byte is set below and only a
+   *                             //   non-zero `0x0B` result / `0x0D` ack clears it (FINDINGS 4.34)
+   * (int16)(hp ^ mask) > 0      // alive: the record's HP pair is 0 only for a corpse
+   * timeGetTime() - *(this + 7) >= 200 (0x18) / 500 (the other three)
+   * ```
+   *
+   * then it appends its fields, calls `sub_4A1EA0(&buf, opcode, 0)` / `sub_43AD50`, sets the gate
+   * and stamps the clock. Nothing else happens locally - for `0x18` the caller plays
+   * `Sound/Item.img/<id>/Use` (`sub_526F30(itemId, 4)`) and returns, and the client's own record
+   * is **not** written, so the heal has to come back as a `0x0D`
+   * (`game/items.ts`, `handleUseItem`).
+   *
+   * Who sends it (`sub_462DC0`, the `CUIItem` double-click handler, and `sub_512570`, the quickslot
+   * key handler):
+   *
+   * ```
+   * itemId / 10000 == 200 | 201 | 202   ->  sub_55B2C0(slot, itemId)      // this opcode
+   * itemId / 10000 == 203               ->  sub_55B4B0(slot, itemId)      // useMapItem
+   * itemId / 10000 == 204 (a scroll)    ->  sub_55B0E0(slot, equipSlot)   // scroll over an equip
+   * tab 1 (equip) / 2..4 (move, drop)   ->  sub_55ACB0(kind, slot, …)     // inventory ops
+   * ```
+   *
+   * `slot` is a slot of the **USE tab** (the tab byte is not on the wire; the item id is what says
+   * which family it is) and it is `s16` - the client's own argument type, and the equip tab's worn
+   * slots are negative in the neighbouring opcodes.
+   */
+  useItem: 0x18,
+  /**
+   * `sub_55B4B0`: `[0x19][s16 slot][u32 itemId]` - the same shape as `useItem` for the **203**
+   * family, which is the 귀환 주문서 line: 마을 귀환 주문서 (`02030000`) and five town scrolls.
+   * Where one of them leads is the item's own `spec/moveTo`
+   * (`Item/Consume/0203.img/<id>/spec`), which is why this is a *map change* and not a heal:
+   * `-1` is 마을 귀환 주문서 - "the nearest town".
+   */
+  useMapItem: 0x19,
+  /**
    * `CField::SendInteract` (`sub_472590`): `[0x0D][s32 kind][string name]`. The two click handlers
    * `sub_5124C0` / `sub_512510` send `kind = -1` and the name of the object under the cursor when
    * it is a portal (`[obj+0x14] != 999999999`), then play the "Portal" sound - so this is the
@@ -900,6 +949,68 @@ export function describeClientStatReport(report: ClientStatReport): string {
     (field) => `${field.name}=${report[field.name]}`,
   );
   return `${parts.length === 0 ? "(no fields)" : parts.join(" ")} flag=${report.flag}`;
+}
+
+/**
+ * One "the USE tab did something" request - `useItem` (`0x18`) and `useMapItem` (`0x19`) carry the
+ * same two fields, and they are the whole of it: no count, no tab, no destination.
+ *
+ * `slot` is a slot of the USE tab, read as `s16` because that is the client's own argument type
+ * (`sub_55B2C0(int *this, __int16 a2, int Args)`), and the two agree on every value the USE tab can
+ * hold. What the slot holds is the server's business: only it knows the inventory
+ * (`game/items.ts`), so a request that names a different item than the slot holds is refused.
+ */
+export interface ClientUseItem {
+  /** The USE tab slot the client clicked. */
+  slot: number;
+  /** The item id the client says is there. */
+  itemId: number;
+}
+
+/** The two senders that share this layout; `0x17` and `0x1A` are different shapes (FINDINGS 4.34). */
+export const USE_ITEM_OPCODES: readonly number[] = [
+  CLIENT_FIELD_OPCODE.useItem,
+  CLIENT_FIELD_OPCODE.useMapItem,
+];
+
+function checkUseItemOpcode(opcode: number): void {
+  if (!USE_ITEM_OPCODES.includes(opcode)) {
+    throw new RangeError(`0x${opcode.toString(16)} is not one of the use-item opcodes (0x18, 0x19)`);
+  }
+}
+
+/** Read one `0x18`/`0x19` body (the reader must sit at `slot`, i.e. just past the opcode byte). */
+export function readClientUseItem(
+  reader: PacketReader,
+  opcode: number = CLIENT_FIELD_OPCODE.useItem,
+): ClientUseItem {
+  checkUseItemOpcode(opcode);
+  // `mov %cx` in `sub_55B2C0`: the slot is 16 bits of the client's own `__int16` parameter.
+  return { slot: (reader.readU16() << 16) >> 16, itemId: reader.readU32() };
+}
+
+/** Write one `0x18`/`0x19`. The opcode has to be one of the two, so the byte cannot go wrong. */
+export function encodeClientUseItem(
+  request: ClientUseItem,
+  opcode: number = CLIENT_FIELD_OPCODE.useItem,
+): Uint8Array {
+  checkUseItemOpcode(opcode);
+  if (!Number.isInteger(request.slot) || request.slot < -0x8000 || request.slot > 0x7fff) {
+    throw new RangeError(`use-item slot ${request.slot} does not fit the client's s16 field`);
+  }
+  if (!Number.isInteger(request.itemId) || request.itemId < 0 || request.itemId > 0xffffffff) {
+    throw new RangeError(`use-item itemId ${request.itemId} does not fit the u32 field`);
+  }
+  const writer = new PacketWriter(7);
+  writer.writeByte(opcode);
+  writer.writeU16(request.slot & 0xffff);
+  writer.writeU32(request.itemId >>> 0);
+  return writer.toBytes();
+}
+
+/** One line for the `decode` tool: `slot=3 itemId=2000000`. */
+export function describeClientUseItem(request: ClientUseItem): string {
+  return `slot=${request.slot} itemId=${request.itemId}`;
 }
 
 /**

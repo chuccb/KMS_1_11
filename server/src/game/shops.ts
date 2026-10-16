@@ -67,13 +67,21 @@ export interface ShopDef {
 }
 
 /**
- * The two shops this server opens, on the two shop-NPCs the shipping maps actually have.
+ * The three shops this server opens, on three shop-NPCs the shipping maps actually have.
  *
- * `1010100` 리나 (헤네시스, map 100000000) and `2003` 로빈 (달팽이사냥터, map 40000) are the NPCs
- * `life` puts in those maps; *that* they keep a shop is this table's decision, and both sell the
- * town potions the archive prices. Equipment is deliberately absent: in this build equipment images
- * live under `Character/<type>/<id>.img`, not `Item/`, and nothing located says how a shop row for
- * one is priced.
+ * `1010100` 리나 (헤네시스, map 100000000), `2003` 로빈 (달팽이사냥터, map 40000) and `12100` 마이
+ * (암허스트, map 1010000) are NPCs `life` puts in those maps; *that* they keep a shop is this
+ * table's decision, and they sell the potions and the two town scrolls the archive prices.
+ * Equipment is deliberately absent: in this build equipment images live under
+ * `Character/<type>/<id>.img`, not `Item/`, and nothing located says how a shop row for one is
+ * priced.
+ *
+ * 암허스트's shop is the one a **new player** can reach: `--map` starts a character in 1000000
+ * (암허스트서쪽필드, which has no shop NPC of its own) and the first town the data leads to is
+ * 1010000 - the same town `reviveMapId` puts a dead player back into. 마을 귀환 주문서 (`02030000`)
+ * is in every shop because it is the item that makes that trip repeatable, and 헤네시스 귀환
+ * 주문서 (`02030004`) is the one that names a town outright, which is what makes a *map change* by
+ * item observable (`handleUseItem` -> `enterMap`). Both cost what the archive says (75 / 90).
  */
 export const SHOPS: readonly ShopDef[] = [
   {
@@ -85,6 +93,7 @@ export const SHOPS: readonly ShopDef[] = [
       { itemId: 2000002 }, // 하얀 포션 (160)
       { itemId: 2000003 }, // 파란 포션 (100)
       { itemId: 2000004 }, // 엘릭서 (1000)
+      { itemId: 2030000 }, // 마을 귀환 주문서 (75)
     ],
   },
   {
@@ -93,6 +102,17 @@ export const SHOPS: readonly ShopDef[] = [
     items: [
       { itemId: 2000000 }, // 빨간 포션 (25)
       { itemId: 2000003 }, // 파란 포션 (100)
+      { itemId: 2030000 }, // 마을 귀환 주문서 (75)
+    ],
+  },
+  {
+    shopId: 12100, // 마이 - 암허스트
+    npcTemplateId: 12100,
+    items: [
+      { itemId: 2000000 }, // 빨간 포션 (25)
+      { itemId: 2000003 }, // 파란 포션 (100)
+      { itemId: 2030000 }, // 마을 귀환 주문서 (75)
+      { itemId: 2030004 }, // 헤네시스 귀환 주문서 (90)
     ],
   },
 ];

@@ -58,6 +58,10 @@ import {
   readUserWhisperAnswer,
   encodeClientStatReport,
   readClientStatReport,
+  encodeClientUseItem,
+  readClientUseItem,
+  describeClientUseItem,
+  USE_ITEM_OPCODES,
   describeClientStatReport,
   type UserEnterField,
 } from "../src/protocol/field.ts";
@@ -649,4 +653,36 @@ test("the player's own HP/MP change (0x1c) travels as a signed delta of the reco
   const unknownBit = Uint8Array.from([0x1c, 0x01, 0x14, 0x00, 0x00, 0x00]);
   assert.throws(() => readClientStatReport(new PacketReader(unknownBit, 1)), /only the hp \(0x400\)/);
   assert.match(describeClientFieldPacket(unknownBit)!, /only the hp \(0x400\)/);
+});
+
+test("using an item out of the USE tab (0x18/0x19) is a slot and an item id, nothing else", () => {
+  // Two senders, one shape. The disassembly gives the widths: `push $0x18` at .text:0055B311 and
+  // `push $0x19` at .text:0055B501 for the opcode, then `mov %cx` (the client's own `__int16`
+  // parameter, sub_55B2C0 `a2`) and `mov %ecx` (`Args`, the item id) in both.
+  assert.equal(CLIENT_FIELD_OPCODE.useItem, 0x18);
+  assert.equal(CLIENT_FIELD_OPCODE.useMapItem, 0x19);
+  assert.deepEqual([...USE_ITEM_OPCODES], [0x18, 0x19]);
+
+  // A red potion in the USE tab's third slot: `sub_462DC0` sends exactly these 7 bytes, and the
+  // client keeps nothing back - what the potion does only happens when the server answers.
+  const potion = { slot: 3, itemId: 2000000 };
+  const bytes = encodeClientUseItem(potion);
+  assert.equal(toHex(bytes), "18" + "0300" + "80841e00"); // 2000000 = 0x001E8480, little endian
+  assert.deepEqual(readClientUseItem(new PacketReader(bytes, 1)), potion);
+  assert.equal(describeClientUseItem(potion), "slot=3 itemId=2000000");
+  assert.equal(describeClientFieldPacket(bytes), "0x18 use item: slot=3 itemId=2000000");
+
+  // The 203 family shares it (`sub_55B4B0`, 마을 귀환 주문서 = 2030000): the item id is what
+  // decides which family - and therefore which handler - the same two fields mean.
+  const scroll = { slot: 1, itemId: 2030000 };
+  const scrollBytes = encodeClientUseItem(scroll, CLIENT_FIELD_OPCODE.useMapItem);
+  assert.equal(toHex(scrollBytes), "19" + "0100" + "b0f91e00"); // 2030000 = 0x001EF9B0
+  assert.deepEqual(readClientUseItem(new PacketReader(scrollBytes, 1)), scroll);
+  assert.equal(describeClientFieldPacket(scrollBytes), "0x19 use item: slot=1 itemId=2030000");
+
+  // The opcode cannot be a third value, and an item id cannot leave the u32: the two traps that
+  // would otherwise write a packet the client's own reader would misread.
+  assert.throws(() => encodeClientUseItem(potion, 0x1a), /not one of the use-item opcodes/);
+  assert.throws(() => readClientUseItem(new PacketReader(Uint8Array.from([0x1a, 0x00, 0x00]), 1), 0x1a), /0x18, 0x19/);
+  assert.throws(() => encodeClientUseItem({ slot: 1, itemId: 0x1_0000_0000 }), /does not fit the u32/);
 });

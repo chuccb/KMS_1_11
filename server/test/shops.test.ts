@@ -42,6 +42,7 @@ import {
   unpricedShopItems,
 } from "../src/game/shops.ts";
 import { MesoWallet, grantItem } from "../src/game/rewards.ts";
+import { consumeSpecOf, healsVitals } from "../src/game/items.ts";
 import { INVENTORY_OP } from "../src/protocol/inventory.ts";
 import { startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 
@@ -172,12 +173,12 @@ test("the decode tool understands all five new opcodes", () => {
 // the shop table, the prices, and the two transactions
 // ---------------------------------------------------------------------------
 
-test("every shop row is priced by the archive, and the two shops name real NPCs", needsArchive, () => {
+test("every shop row is priced by the archive, and the three shops name real NPCs", needsArchive, () => {
   const keeper = shopKeeper(archive!);
-  assert.deepEqual(unpricedShopItems(SHOPS[0]!, keeper.priceOf), []);
-  assert.deepEqual(unpricedShopItems(SHOPS[1]!, keeper.priceOf), []);
+  for (const shop of SHOPS) assert.deepEqual(unpricedShopItems(shop, keeper.priceOf), []);
   assert.equal(keeper.shopOfNpc(1010100)?.shopId, 1010100); // 리나, 헤네시스
   assert.equal(keeper.shopOfNpc(2003)?.shopId, 2003); // 로빈, 달팽이사냥터
+  assert.equal(keeper.shopOfNpc(12100)?.shopId, 12100); // 마이, 암허스트
   assert.equal(keeper.shopOfNpc(2004), undefined); // an NPC without a shop
   assert.equal(keeper.priceOf(2000000), 25); // 빨간 포션
   assert.equal(keeper.priceOf(2000001), 80); // 주황 포션
@@ -199,6 +200,7 @@ test("the rows the client is sent carry the archive's price and the shop's cap",
       [2000002, 160, DEFAULT_SHOP_MAX_COUNT],
       [2000003, 100, DEFAULT_SHOP_MAX_COUNT],
       [2000004, 1000, DEFAULT_SHOP_MAX_COUNT],
+      [2030000, 75, DEFAULT_SHOP_MAX_COUNT],
     ],
   );
   // A row without a price is skipped rather than sent as 0 - the client would print the 0.
@@ -309,6 +311,28 @@ test("without an archive no shop can be priced, so nothing is sold and nothing i
   const stats = zeroStats();
   const wallet = new MesoWallet(stats);
   assert.deepEqual(keeper.buy(items, wallet, SHOPS[0]!, 2000000, 1), { kind: "failed", reason: "notInShop" });
+});
+
+test("what a shop sells is something the use path understands", needsArchive, () => {
+  // A shop row is only worth a slot if using the item does something: every consumable either
+  // restores a vital (the `0x18` families) or names a map (the `0x19` one), out of its own `spec`.
+  for (const shop of SHOPS) {
+    for (const entry of shop.items) {
+      const spec = consumeSpecOf(archive!, entry.itemId);
+      assert.ok(spec !== undefined, `${entry.itemId} has no spec`);
+      const family = Math.floor(entry.itemId / 10000);
+      assert.equal(
+        healsVitals(spec!) || spec!.moveTo !== undefined,
+        true,
+        `${entry.itemId} (family ${family}) would do nothing when used`,
+      );
+    }
+  }
+  // The two scrolls, specifically: -1 is the town `reviveMapId` answers with, and 100000000 is
+  // 헤네시스 named outright - the one that makes a map change observable in a test.
+  assert.equal(consumeSpecOf(archive!, 2030000)?.moveTo, -1);
+  assert.equal(consumeSpecOf(archive!, 2030004)?.moveTo, 100000000);
+  assert.equal(itemPrice(archive!, 2030004), 90);
 });
 
 test("the shop id of every row is the NPC that opens it (a stable key, not a shared counter)", () => {

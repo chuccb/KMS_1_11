@@ -41,7 +41,8 @@
 | `src/protocol/shop.ts` | ✅ **NPC 商店封包**：`0x4A` 開窗（`u32 shopId`＋`u16 count`＋每列 `u32 itemId`／`u32 price`／（`itemId/10000 == 207` 時 8 bytes）／`u16 maxCount`）、`0x4B` 結果（`u8`；0 沉默／1・4 東西不夠／2 錢不夠／3 格子不夠／>4 錯誤）、client 的 `0x33`（點擊的物件 id）與 `0x16`（0 買／1 賣／2 充電／3 關窗），以及空的一 byte `0x19`（在 `field.ts`）。207 那 8 bytes **原封不動攜帶、拒絕自行組裝**（FINDINGS §4.22）。 |
 | `src/game/dialogue.ts` | ✅ **一場對話**：`Npc/<id>.img -> info/speak` 的台詞（`info/quest` 原樣帶著）、`npcDialogueProvider` 快取、`NpcTalk`（哪隻 NPC、第幾句、`advance()`）。沒有 `info/speak` 的 NPC 就是不說話。 |
 | `src/game/save.ts` | ✅ **角色存檔**（ADR-017）：`SaveStore` 介面（`FileSaveStore` 原子寫入／`MemorySaveStore` 給測試）＋ JSON 格式（版本、帳號、角色、道具；`bigint` 的現金序號用十進位字串）、`loadAccounts`（**檔案勝過 `--account` 種子**）、`readSave` 的拒絕清單（版本不合／不是 JSON／缺 `id` 或 `name`／兩個角色同一個 id／紀錄送不出去）。`flags` **不入檔**（它是內容的函式，載入時由 `characterDataOf` 推導），載入時再用 `writeCharacterData` 驗一次「client 收得下」。FINDINGS §4.29 說明為什麼這整件事是我們的設計：**沒有任何 c2s 封包帶角色資料**。 |
-| `src/game/shops.ts` | ✅ **商店的規則**：價格一律讀 `Item/Consume/0200.img/<id>/info/price`（讀不到就不送那一列），庫存（`SHOPS`：리나／헤네시스、로빈／달팽이사냥터）、`DEFAULT_SHOP_MAX_COUNT`、`SELL_PRICE_RATIO` 是**這份 repo 的選擇**（ADR-010）；`buy`／`sell` 是完整驗證的交易（錢、格子、數量、哪一格），失敗回 `TradeFailure`→`shopResultCode`→`0x4B`。 |
+| `src/game/shops.ts` | ✅ **商店的規則**：價格一律讀 `Item/Consume/0XXX.img/<id>/info/price`（讀不到就不送那一列），庫存（`SHOPS`：리나／헤네시스、로빈／달팽이사냥터、**마이／암허스트**）、`DEFAULT_SHOP_MAX_COUNT`、`SELL_PRICE_RATIO` 是**這份 repo 的選擇**（ADR-010）；`buy`／`sell` 是完整驗證的交易（錢、格子、數量、哪一格），失敗回 `TradeFailure`→`shopResultCode`→`0x4B`。 |
+| `src/game/items.ts` | ✅ **用掉道具的規則**（ADR-022、FINDINGS §4.34）：`consumeSpecOf` 讀 `Item/Consume/0XXX.img/<id>/spec`（**client 自己的效果表**，不是描述文字），`healsVitals`／`consumeDeltas` 把它換成 `0x0D` 要的差值（`hp`／`mp` 定值、`hpR`／`mpR` 是上限的百分比並**向下取整**）；沒定位的欄位收進 `ConsumeSpec.unapplied`（buff 家族 → 這次使用被拒絕，道具留在袋子裡）。 |
 | `src/wz/paths.ts` | ✅ WZ 路徑：`mapImagePath`／`mobImagePath`／`npcImagePath`／`itemImagePath`（`Item/<kind>/<前四位>.img`，四種 kind 是這份 `Data.wz` 的實際目錄；**裝備在 `Character/<type>/`，不在 `Item/`**）|
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
 | 遊戲邏輯（地圖／怪物／NPC／戰鬥／掉落／商店／對話／道具欄伺服器端）| 🟡 地圖／怪物／NPC 進場／戰鬥／掉落／**NPC 商店**／**NPC 對話**都已實作（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts`／`game/drops.ts`／`game/rewards.ts`／`game/shops.ts`／`game/dialogue.ts`）；**尚未實作**的是怪物 AI 與攻擊（AI 在 client，§4.20）、真正的任務流程、NPC 的走動（`0x3D`）、組隊、以及道具的「使用」與裝備欄操作。沒解的一律不猜（`decode` 仍會原封不動記錄它們）。 |
@@ -144,7 +145,8 @@ node server/src/cli.ts wz png <image path> --out assets/   # 每張 canvas → P
 
 # 登入伺服器：把原 client（或重寫的 client）導到這個 port，就能走到選角畫面
 node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
-     --world Scania[,Bera] --game-ip 127.0.0.1 [--map 1000000] [--data Data.wz|off] [--save <path|off>]
+     --world Scania[,Bera] --game-ip 127.0.0.1 [--map 1000000] [--start-mesos <n>] \
+     [--data Data.wz|off] [--save <path|off>]
 ```
 
 `serve` 的行為：帳號來自**存檔**（`--save`，預設 `./kms111-save.json`；檔案不存在時才用 `--account user:pass,...` 這種子）、`--game-port` 會同時開遊戲伺服器端
@@ -165,6 +167,9 @@ session 會被伺服器用 `0x08` 問一次，安靜超過三個間隔（＝ 3 �
 伺服器以前的樣子）：整張帳號表在建立角色、刪除角色與 session 結束時重寫一次，寫入是 `tmp` ＋ rename（崩潰
 不會留半個檔），而**讀不懂的檔案會讓伺服器起不來**（版本不合、不是 JSON、缺 `id`／`name`、兩個角色同一個 id、
 紀錄送不出去）—— 起成空的再把空的寫回去才是真正會弄丟角色的做法。
+`--start-mesos <n>` 決定**新角色**的起始錢（ADR-022；預設 `0` ＝ 2003 年的新角色身上一毛都沒有，
+連 25 元的 빨간 포션 都買不起 —— 那是設計，不是缺口）：它只影響這個旗標設定**之後建立**的角色，
+存檔裡已經有的人不受影響。要用商店買東西（例如 `--start-mesos 200`）就得靠它或去撿掉落物。
 
 client 的**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 都已完整解出**（FINDINGS §4.13.1／§4.13.1b）：`field.ts` 的
 `readClientAttack`／`encodeClientAttack` 三個 opcode 共用一段程式碼（差異用 `ATTACK_SHAPE` 描述），
@@ -320,6 +325,39 @@ client 用 `0x0D` 說「我按了滑鼠下這個東西」（`kind = -1` ＋ 它�
 `serve.test.ts`「a revive restores HP and re-enters a field」用三條真 socket 跑「1/50 → `0x19` ＋ `0x16`（50/50、換圖）
 → 別人看到 `0x1D`／`0x1C` → 在新圖被第三人看到 → 在村莊再復活一次（讀不到 `returnMap` ⇒ 重進）」。
 
+### 用掉道具（ADR-022／FINDINGS §4.34）
+
+c2s `0x18`（`200/201/202` 家族，藥水與食物）與 `0x19`（`203`， 귀환 주문서）是同一個形狀：
+`[opcode][s16 slot][u32 itemId]` —— **分頁不在線上**（兩個 opcode 只可能來自 USE 分頁），而 `itemId` 是
+client **宣稱**那個欄位裡有什麼，所以伺服器一定拿自己的紀錄再對一次。兩個送出者（道具欄的「使用」
+`sub_462DC0`、快捷鍵 `sub_512570`）都先過 client 自己的三道閘門：沒有在途的請求、**HP > 0**、以及
+節流（0x18 ＝ 200 ms、0x19 ＝ 500 ms）。
+
+**道具做什麼是 `Item/Consume/0XXX.img/<id>/spec`**（不是 `info/desc`：빨간 포션 的 desc 說「약 50」而
+`spec/hp` 正好是 50，엘릭서 的 desc 說「약 50%」而 `hpR`／`mpR` 是 50，파워 엘릭서 的 desc 說「모두 회복」而
+兩個都是 **100**）：
+
+| 家族 | `spec` | 用哪個 opcode |
+|---|---|---|
+| `02000000`–`02000006` | `hp` 50／150／300、`mp` 100／300、`hpR`／`mpR` 50 或 100 | `0x18` |
+| `0201xxxx` 食物 | `hp`／`mp`／`hpR`／`mpR`（`02010006` 的 `"50"` 是**字串**，形狀不對＝沒有值）| `0x18` |
+| `0202xxxx` 高階藥水 | `hp` 200–1000、`mp` 200／800 | `0x18` |
+| `0203xxxx` | `moveTo`：`−1` ＝最近的城市、`100000000` ＝헤네시스、… | `0x19` |
+| `02002000`+／`02012000`+／`02022002` | `time` ＋ `pad`／`mad`／`pdd`／`eva`／`acc`／`speed`／`pda` | —（**拒絕**：伺服器沒有 buff 狀態）|
+| `0204xxxx`（強化卷軸）／`0207xxxx`（標槍）| **沒有 `spec`** | —（兩個 opcode 都不是）|
+
+`0x19` 的 `moveTo = −1` 用**復活那條路同一個答案**（`reviveMapId`：地圖的 `info/returnMap`，村莊的哨兵
+`999999999` ＝ 重進這一張），伺服器**先確認目的地有圖才扣道具** —— 卷軸不會消失在一個讀不到的圖上。
+滿血喝藥水同理：**先驗「真的會動」再扣**，所以不會白白浪費一罐。
+
+**每一個使用請求都有回包**（client 的閘門由回包解開）：允許 → `0x0B`（`put` 剩下的數量／沒有了就是
+`clear`）＋ 藥水的 `0x0D` 或卷軸的 `0x16`；**拒絕 → 空的 `0x0B`**（`result` 非 0，語意正是「什麼都沒變」）。
+沉默會讓玩家連下一罐都喝不了，所以拒絕也是答案。
+
+**三間店、兩種卷軸**（ADR-010 的商店表延伸）：`1010100` 리나（헤네시스）、`2003` 로빈（달팽이사냥터）、
+`12100` 마이（**암허스트**，`--map` 的新角色與復活都會到的那個村）；三間都賣 마을 귀환 주문서（75），
+마이 還賣**指名一張圖**的 헤네시스 귀환 주문서（90）—— 後者讓「用道具換圖」是可以觀察、可以測試的。
+
 ### 誰在線上（ADR-018／FINDINGS §4.30）
 
 | 事件 | 做什麼 |
@@ -380,20 +418,23 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 - **拒收沒有實作**：`0x1A` sub-op `0x22`（`'name'님은 현재 귓속말이 거부되어 있습니다.`）的形狀已知，  但 client 端沒有任何輸入會設定「我拒收密語」（開關的封包還沒找到），沒有驅動者的 codec 是死碼。
 - **密語不進存檔**：沒有離線訊息，`--save` 的格式不動。
 
-`scripts/whisper_probe.mjs` 是這一節（以及死亡與復活那一節）的**實機煙霧測試**：一個迷你 2003 client（真的走
+`scripts/whisper_probe.mjs` 是這幾節（密語／死亡與復活／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
-「跨圖密語／找人／找不到／氣球不回應／復活」24 個檢查 —— 其中兩條連線**真的在不同地圖上**：
+「跨圖密語／找人／找不到／氣球不回應／被打掉血／復活／**買卷軸並用掉**」**32 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
 報的是**對方**的地圖 id、密語也照樣送達（第二次跑同一份存檔會跳過那一步：角色的紀錄已經記得 `1010000`）；
 在復活之前它先送兩次 c2s `0x1C`（`sub_55B870(-damage, 0, 0)` 的位元組：`-30` 兩次），驗證第一次回來的
 `0x0D` 是 `hp = 20`、第二次是 `hp = 0`（夾住，不會到負的）；最後它送一次 `0x0D` `kind = 0`（復活），
 驗證回來的 `0x16` 進的是 `1000000` 真正的 `info/returnMap`（`1010000` 암허스트 村莊）、HP 補回 `50/50`，
-而且站在那裡的另一個人看到 `0x1C`：
+而且站在那裡的另一個人看到 `0x1C`。最後一段用的是**同一份真資料**：Hero 認出村莊 `0x39` 裡 마이（12100）的池 id、
+點它開窗（`0x4A` 的四列裡 헤네시스 귀환 주문서 ＝ 90）、買下來（`0x4B silent`＋`0x0B put`＋錢包 `200 → 110`），
+再用 `0x19` 把它用掉 —— 回來的 `0x16` 進的是 `Item/Consume/0203.img/02030004/spec/moveTo` 寫的 `100000000`
+（헤네시스），不是伺服器挑的圖。這一段需要 `--start-mesos`（新角色才有錢）：
 
 ```bash
 node server/src/cli.ts serve --port 8495 --game-port 8496 \
-     --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS
+     --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
+node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（32 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

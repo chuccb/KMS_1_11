@@ -19,6 +19,12 @@
  * 1010000 - into the map the dead player is put back into. Before that it plays the client's own half
  * of a monster's hit (c2s `0x1C`, FINDINGS 4.33: report the signed HP/MP delta, read the `0x0D` that
  * comes back) so the revive has something to refill.
+ *
+ * The last section uses an item (`0x18`/`0x19`): it clicks 마이 (12100) in the town the revive lands
+ * in, buys 헤네시스 귀환 주문서, and then uses it - which is a map change by item (`0x0B` + `0x16`).
+ * That half needs a wallet: run the server with `--start-mesos 200` and a fresh `--save` file, and
+ * the section checks the purchase, the price and the map; without the mesos it prints a note and
+ * skips it.
  */
 import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
@@ -27,6 +33,19 @@ import { PacketReader, PacketWriter } from "../src/protocol/packet.ts";
 import { readCharacterData } from "../src/protocol/chardata.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
 import { readStatUpdate } from "../src/protocol/stat.ts";
+import { CLIENT_FIELD_OPCODE, encodeClientUseItem } from "../src/protocol/field.ts";
+import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
+import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
+import {
+  CLIENT_OBJECT_CLICK_OPCODE,
+  CLIENT_SHOP_OPCODE,
+  SHOP_OPEN_OPCODE,
+  SHOP_RESULT,
+  SHOP_RESULT_OPCODE,
+  encodeClientObjectClick,
+  encodeClientShopRequest,
+  readShopOpen,
+} from "../src/protocol/shop.ts";
 
 const [loginPort, gamePort] = process.argv.slice(2).map(Number);
 
@@ -86,6 +105,12 @@ class Client {
     throw new Error(
       `no 0x${opcode.toString(16)} within ${timeoutMs} ms; saw [${seen.map((b) => b.toString(16)).join(",")}]`,
     );
+  }
+
+  /** Everything that arrives within `ms` - the honest way to say "and then nothing". */
+  async drain(ms = 300) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return this.queue.splice(0, this.queue.length);
   }
 
   close() {
@@ -286,6 +311,58 @@ expect(revived.stats.hp === revived.stats.maxHp, `and refilled the HP the report
 // a packet to the one person who died.
 const arrived = new PacketReader(await alt.game.take(0x1c), 1).readU32();
 expect(arrived === hero.characterId, `the others see Hero arrive (0x1C id ${arrived})`);
+
+// --- using what a shop sold: 0x18 restores, 0x19 changes the map (FINDINGS 4.34) -------------------
+// The client never applies an item by itself. `sub_462DC0` (inventory double-click) and `sub_512570`
+// (quickslot) send `0x18` for the 200/201/202 families and `0x19` for 203, `[opcode][s16 slot][u32
+// itemId]`, and the shared prologue refuses to send at all while another use is pending - so what
+// the item does is whatever the server's `0x0B`/`0x0D`/`0x16` answer says. The one purchasable,
+// usable thing a fresh character can afford is 헤네시스 귀환 주문서 (`Item/Consume/0203.img/02030004`,
+// `spec/moveTo = 100000000`, price 90), sold by 마이 (12100) - the town NPC the revive above landed
+// next to - so the section buys it and then uses it, and the map has to really change.
+const town = await hero.game.drain(500);
+const poolIds = new Map();
+for (const packet of town) {
+  if (packet[0] !== NPC_OPCODE.enterField) continue;
+  const npc = readNpcEnterField(new PacketReader(packet, 1));
+  if (npc.templateId !== undefined) poolIds.set(npc.templateId, npc.npcId);
+}
+const mai = poolIds.get(12100);
+expect(mai !== undefined, `the town burst names 마이 (12100), with the pool id a click needs (${mai})`);
+const wallet = revived.stats.mesos;
+if (mai === undefined) {
+  console.log("  ..   no 마이 to click; the buying half of this section cannot run");
+} else if (wallet < 90) {
+  console.log(`  ..   Hero has ${wallet} mesos - start the server with --start-mesos 200 on a fresh save`);
+} else {
+  // Clicking the NPC: what `sub_55AF20` sends is the pool id, and the answer is the release gate
+  // (`0x19`, empty) followed by the window (`0x4A`).
+  hero.game.send(encodeClientObjectClick({ objectId: mai }));
+  await hero.game.take(0x19);
+  const shop = readShopOpen(new PacketReader(await hero.game.take(SHOP_OPEN_OPCODE), 1));
+  expect(shop.shopId === 12100, `마이's shop is keyed by the NPC template id (${shop.shopId})`);
+  const row = shop.items.findIndex((line) => line.itemId === 2030004);
+  const price = row < 0 ? undefined : shop.items[row].price;
+  expect(price === 90, `and 헤네시스 귀환 주문서 is on sale for the archive's own price (${price})`);
+
+  hero.game.send(encodeClientShopRequest({ kind: "buy", row, itemId: 2030004, count: 1 }));
+  const bought = await hero.game.take(SHOP_RESULT_OPCODE);
+  expect(bought[1] === SHOP_RESULT.silent, "the purchase answers 0x4B silent (a trade says nothing)");
+  const put = readInventoryChange(new PacketReader(await hero.game.take(INVENTORY_OPCODE), 1)).changes[0];
+  expect(put?.op === INVENTORY_OP.put && put.item.itemId === 2030004, "0x0B puts the scroll in the USE tab");
+  const paid = readStatUpdate(new PacketReader(await hero.game.take(0x0d), 1)).diff;
+  expect(paid.mesos === wallet - 90, `and the wallet went ${wallet} -> ${paid.mesos}`);
+
+  // The use itself: `[0x19][slot][itemId]` - the same two fields `0x18` carries, with the item id
+  // deciding the family. `0x0B` takes it out of the slot and `0x16` carries the new map, whose id is
+  // the one the item's own `spec/moveTo` names, not anything the server chose.
+  const slot = put.slot;
+  hero.game.send(encodeClientUseItem({ slot, itemId: 2030004 }, CLIENT_FIELD_OPCODE.useMapItem));
+  const used = readInventoryChange(new PacketReader(await hero.game.take(INVENTORY_OPCODE), 1)).changes[0];
+  expect(used?.op === INVENTORY_OP.clear, "using the scroll takes it out of the slot");
+  const landed = mapIdOfSetField(await hero.game.take(0x16));
+  expect(landed === 100000000, `and 0x16 really lands in 헤네시스 (100000000), got ${landed}`);
+}
 
 hero.game.close();
 alt.game.close();

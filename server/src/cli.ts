@@ -22,6 +22,7 @@ import { OnlineAccounts } from "./net/online.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
+import { consumeSpecProvider } from "./game/items.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -49,6 +50,7 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
+        [--start-mesos <n>]
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
         [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
         [--handshake-body <hex>]
@@ -253,6 +255,7 @@ async function runServe(rest: string[]): Promise<number> {
   const port = Number(args.port ?? 8484);
   const gamePort = args["game-port"] === undefined ? undefined : Number(args["game-port"]);
   const mapId = args.map === undefined ? DEFAULT_MAP_ID : Number(args.map);
+  const startMesos = args["start-mesos"] === undefined ? 0 : Number(args["start-mesos"]);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
     return 1;
@@ -263,6 +266,10 @@ async function runServe(rest: string[]): Promise<number> {
   }
   if (!Number.isInteger(mapId) || mapId < 0) {
     process.stderr.write(`invalid --map: ${String(args.map)} (a map id from Data.wz, e.g. 1000000)\n`);
+    return 1;
+  }
+  if (!Number.isInteger(startMesos) || startMesos < 0 || startMesos > 0xffffffff) {
+    process.stderr.write(`invalid --start-mesos: ${String(args["start-mesos"])} (0 = what the 2003 game gave)\n`);
     return 1;
   }
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
@@ -284,6 +291,7 @@ async function runServe(rest: string[]): Promise<number> {
   let npcTemplate: ReturnType<typeof npcTemplateProvider> | undefined;
   let npcDialogue: ReturnType<typeof npcDialogueProvider> | undefined;
   let shops: ShopKeeper | undefined;
+  let consumeSpec: ReturnType<typeof consumeSpecProvider> | undefined;
   const shopWarnings: string[] = [];
   if (dataPath !== undefined) {
     try {
@@ -293,6 +301,7 @@ async function runServe(rest: string[]): Promise<number> {
       npcTemplate = npcTemplateProvider(archive);
       npcDialogue = npcDialogueProvider(archive);
       shops = shopKeeper(archive);
+      consumeSpec = consumeSpecProvider(archive);
       // A shop row without a price cannot be sent (the client prints it), so it is collected here
       // and reported once the logger exists.
       for (const shop of SHOPS) {
@@ -373,6 +382,7 @@ async function runServe(rest: string[]): Promise<number> {
     worlds,
     gameServer: { ip: gameIp, port: gamePort ?? 0 },
     startMapId: mapId,
+    startMesos,
     handoffs,
     online,
     pingMs,
@@ -395,6 +405,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(npcDialogue !== undefined ? { npcDialogue } : {}),
       ...(npcWalk !== undefined ? { npcWalk } : {}),
       ...(shops !== undefined ? { shops } : {}),
+      ...(consumeSpec !== undefined ? { consumeSpec } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
       ...(handshake ? { handshake } : {}),
