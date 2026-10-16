@@ -317,6 +317,24 @@ docs/    evidence/ protocol/ architecture/
 - 要不要 **瀏覽器版**？（若是，GDScript 路線或「core 編 WASM + Web 前端」會比 Godot C# 更順）
 - 手機（Android/iOS）是否在計畫內？（影響 UI 縮放與輸入架構）
 
+### 7.5 開發環境限制（本沙箱實測，會影響語言選擇）
+
+在本倉庫目前的工作環境（Arena 沙箱）實測：
+
+| 工具鏈 | 可用性 | 說明 |
+|---|---|---|
+| Python 3.11 + pip | ✅ | 可用 pypi → 工具/管線可完整開發測試（本倉庫的 `tools/` 已在此驗證） |
+| Node / npm | ✅ | 可用 npm registry → TypeScript 核心可在此**完整編譯與測試**（vitest/jest） |
+| git / gh / GitHub | ✅ | 可下載 GitHub 上的 release（例如 Godot 執行檔） |
+| **.NET SDK** | ❌ | 沙箱內**未安裝且無法從允許的來源安裝**（dot.net / nuget.org 不在白名單） |
+| **Godot** | ⚠️ | 執行檔理論上可自 GitHub releases 取得（GDScript 版可直接跑）；**C# 版需要 .NET，故此處不可用** |
+
+**結論與建議**：
+- 若主開發在**自己的 Windows/macOS 機器**（有 .NET + Godot）→ 依 §5 建議用 **C# 核心**，AI 協作時以 GitHub Actions 跑 `dotnet test` 驗證（CI runner 有 .NET）。
+- 若主開發**就在這類沙箱/雲端環境**、要求「當場可編譯可測試」→ 核心改用 **TypeScript**（`tools/` 仍用 Python）；
+  架構完全不變（引擎無關核心 + Godot 殼層），差別只在核心語言與測試工具。
+- 兩種選擇都**不影響** §6 的分層與 §8 的路線圖，也都不影響「資源必須 offline 轉檔」這個決定。
+
 ---
 
 ## 8. 分階段路線圖（含驗收標準與風險）
@@ -361,7 +379,7 @@ login/world/channel/game loop、角色持久化、地圖實例管理。
 
 | 風險 | 等級 | 緩解 |
 |---|---|---|
-| `.img`/canvas/ZLZ 未完全解出 | **中→低**（樹/字串/屬性項已解，只剩 canvas 像素 + ZLZ） | 依 `docs/WZ1_FORMAT.md` §4.4 的三步 spike（先解 `UI/Basic.img` 的 `Cursor` canvas）|
+| `.img` 像素仍未解出 | **低**（屬性樹/名稱/型別/巢狀/物件大小已解；剩下 6 項小差距，清單見 `docs/WZ1_FORMAT.md` §4.6） | 依 §4.6 清單逐項處理；像素部分從 `ZLZ.dll.c sub_100028E0` 與 `Canvas.dll` 著手 |
 | 協定/加密未知 | 中 | 由 exe 的 dispatch 跳表 + `CClientSocket`/`ZSocket` 反推；oracle 錄包驗證 |
 | 沒有原始 server 可對照 | 高 | 自建 localhost server 當第一里程碑；用差異測試取代「參考實作」 |
 | 2003 行為細節被現代規則污染 | 中 | 每個系統寫 `docs/evidence/*`：結論 + 證據位址 + confidence；查不到就標 UNKNOWN |
@@ -395,6 +413,8 @@ login/world/channel/game loop、角色持久化、地圖實例管理。
 | `analysis/rtti_raw.txt` | 651 個原始 RTTI type descriptor（依 binary 分類） |
 | `analysis/rtti_classes.txt` | 去重複後的類別名清單（領域模型命名的依據） |
 | `docs/WZ1_FORMAT.md` | WZ v1 完整規格（容器/樹/字串/屬性項/型別表/canvas）＋每項的證據位址與驗證方式 |
+| `analysis/sample_Cap_01000000_properties.txt` | 由 `Data.wz` 還原的完整屬性樹（186 項：`info`/`walk1`/`swingO1`… 每個屬性的位移、型別、下一項位移）|
+| `tools/wzim.py` | `.img` 屬性讀取器（標記為 experimental：結構層可靠，值層待定案）|
 
 ## 附錄 B：關鍵證據位址（重寫時直接查這裡，不要重新摸索）
 

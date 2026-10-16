@@ -86,80 +86,88 @@ else:
 
 ---
 
-## 4. `.img` 內容 🟡（結構已解，值細節待補）
+## 4. `.img` 內容 🟡（結構已解、值細節剩小差距）
 
-### 4.1 檔案頭 — 有兩種以上變體
+### 4.1 已完整還原：屬性名稱/型別/巢狀結構 ✅
 
-| 變體 | 開頭位元組 | 實例 |
-|---|---|---|
-| **A** | `73` + 字串 `"Property"` + `u16 0x0000` | `Mob/0100100.img`、`UI/Basic.img` |
-| **B** | `00 00 00` + `compact-int count` | `Character/Cap/01000000.img`（count = 15） |
-| **C** | 其他/疑似壓縮 | `Etc/Tips.img`（開頭 `b7 5c c9 cb …`，但其中仍有明文屬性名） |
-
-變體 A 逐 byte（`Mob/0100100.img`）：
-```
-73                    check byte（= 已知的 WZ image check byte 0x73）
-f8 fa d9 c3 dd cb dd c4 c8   len=0xF8→8、再 8 bytes → 解碼 = "Property" ✅
-00 00                 u16 = 0
-05                    property 數量（compact-int）
-00 fc c3 c5 ca c2     prefix 0x00 + len 0xFC→4 + "info" ✅
-09                    type = 9（object/canvas）
-```
-另一種 check byte 為 **`0x1B`**（實測：`Character/Cap/01000000.img` 的 `iconRaw` 物件 payload 以 `1b` 開頭；`icon` 以 `73` 開頭）。
-
-### 4.2 property list 與屬性項 ✅（前幾項已逐步驗證）
+以 `Character/Cap/01000000.img`（10,290 bytes）為例，掃描 + 逐項驗證後**還原出 186 個屬性的完整樹**，
+內容與 2003 年 KMS 裝備圖完全一致（完整清單見 `analysis/sample_Cap_01000000_properties.txt`）：
 
 ```
-propertyList = compact-int count
-               之後 count 次：
-                 u8 0x00            // 固定前導（每項都有；Cap 實例 offset 4/714/1338 皆為 0x00）
-                 string name        // §3 編碼
-                 u8 type
-                 value
+icon(9)  origin(9)  iconRaw(9)
+info(9)
+    name(8) islot(8) vslot(8) reqJob(3) reqLevel(3) reqSTR(3) reqDEX(3) reqINT(3)
+    reqLUK(3) incPDD(3) tuc(3) price(3) cash(3)
+    default(9)   → map(9) brow(9) z(8) cap(37)
+    backDefault(9) → map(9) brow(9) z(8) backCap(37)
+    walk1(9)/walk2/stand1/stand2/alert/sit/jump/fly/heal/prone/proneStab
+    swingO1..O3,OF / swingT1..T3,TF / swingP1..P3,PF / stabO1,O2,OF / stabT1,T2,TF
+    shoot1,2,F / ladder / rope            （每組內含 0(9) 1(9) 2(9) 3(9) 影格節點）
 ```
+**證據**：`analysis/sample_Cap_01000000_properties.txt`（每個屬性的位移、名稱、型別、下一項位移）。
 
-`Character/Cap/01000000.img` 的實際 decode（已驗證三項）：
+### 4.2 property list / 屬性項（已量測）✅
+
 ```
-offset   3  count = 15
-offset   4  00                    prefix
-offset   5  fc → 4 bytes → "icon"       name
-offset  10  09                    type 9（object）
-offset  11  bb 02 00 00 = 699     子物件 size
-offset  15  73 …                  canvas payload（以 check byte 0x73 開頭）
-offset 714  00 / 715 f9(→7) / 716.. "iconRaw" / 723 09 / 724 62 02 00 00 = 610 / 728 1b …
+propertyList = compact-int count + count × entry
+entry        = string name          // §3 編碼
+               u8 type
+               value                // 依 type，見 §4.3
 ```
-→ 兩張 canvas（`icon` 699 bytes、`iconRaw` 610 bytes）**大小與偏移完全自洽**（699 = 714−15、610 = 1338−728）。
+關鍵：**entry 沒有額外前導位元組**。以「entry_bytes == 1 + len(name) + 1 + value_size」對 186 個屬性做量測，
+所有已知型別的 value_size 都得到**一致的整數值**（見 §4.3 表），即模型成立。
 
-### 4.3 型別表（15 種）✅（來源：`PCOM.dll.c`）
+### 4.3 型別表（由量測 + `PCOM.dll.c` 交叉驗證）
 
-deserializer `PCOM.dll.c` `sub_10018800`（`switch` 於 299/424 行的 15 個 case）、serializer `sub_10012920`。
+| type | 出現次數（Cap 樣本） | 量測 value_size | 判定 |
+|---|---:|---:|---|
+| 0 | 10 | 0 | Null（無值）：`name` 的進階容器節點會用此型別 |
+| 3 | 20 | **2** | 短整數（reqJob/reqLevel/price/tuc… 數值皆合理） |
+| 37 | 3 | — | **本版特有**（`cap`/`backCap` 影格資料，0x25）待查 |
+| 8 | 9 | 1 ~ 27 | 字串（`islot`/`vslot`/`z` 為 1 byte；`name` 為 27 bytes） |
+| 9 | 144 | 12 ~ 675 | 物件：`u32 size` + payload（可為 property list 或 canvas 描述） |
 
-| type | 值大小/型態（由 case 分支推得） | 備註 |
-|---|---|---|
-| 0 | 無值 | `goto LABEL_109`（僅寫 type） |
-| 2 / 11 / 18 | 2 bytes（走 `sub_10019FE0`） | 短整數系 |
-| 3 / 4 / 19 | 4 bytes（`sub_10015F30` / `sub_10015C10`） | 32-bit 系 |
-| 5 / 7 / 6 | 8 bytes（`sub_10016060` / `sub_10015FE0`） | 浮點/雙精度系 |
-| 8 | 字串（走 §3 編碼器 `sub_1000C9A0`） | 另有 4-byte 長度前綴變體（`v1[2] & 0x10` 旗標） |
-| 9 / 13 | 物件：`u32 size` + payload（payload 可為 property list 或 canvas） | case 9/13 為「有 size 的子串流」 |
-| 16 / 17 | 2 bytes（`sub_10010540(…, 2)`） | 與 2/11/18 共用讀取器 |
-| default | 錯誤 −2147352568 | |
+`PCOM.dll.c` 的 15-case 型別分派位於 deserializer `sub_10018800` / serializer `sub_10012920`
+（case 集合：0,2,3,4,5,6,7,8,9,11,13,16,17,18,19）。
+**注意**：本版不必然與現代 WZ 的 type 數值相同 — `37` 就是現代 WZ 沒有的值，**禁止用現代 type 表硬套**。
 
-> ❓ 仍待補：**每個 type 的精確 C 型別**（short/ushort/int/float/double 的對應）與 `sub_10019FE0` 的內部編碼。
-> 建議做法：對 `PCOM.dll.lst` 的 `sub_10018800` 逐 case 對照 register 讀取大小（`movsx`/`mov`），並用實檔比對數值合理性。
+### 4.4 Canvas 物件 ✅（描述部分）
 
-### 4.4 canvas payload ❓（唯一還需要 RE 的部分）
+`icon` 條目的值（18 bytes，位移 11..28）：
+```
+bb 02 00 00        u32 = 699         ← canvas 資料大小（像素區，見 4.5）
+73                 check byte 0x73
+fa                 len = 6
+e9 ca c2 db cf dc  → "Canvas"        ← 物件標籤（與 "Property" 同一套字串編碼）
+00 01 00 00 01 00  6 bytes 標頭       ← 寬/高/格式待對照 Canvas.dll 確認
+```
+`iconRaw` 則以 `0x1B` 開頭的另一種標記（見 §4.6）。
 
-已知：
-- payload 以 check byte `0x73` 或 `0x1B` 開頭（實測）。
-- `Canvas.dll` 是唯一 import `ZLZ.dll` 的模組 → 像素解壓走 **ZLZ**（Wizet 自製 LZ）。
-- `ZLZ.dll` 匯出僅 3 個：`?ZLZCreateInflator@@YAPAUZIStream@@PAU1@I@Z`、`?ZLZCreateDeflator@@YAPAUZIStream@@PAU1@H@Z`、`?ZLZCloseFilter@@YAXPAUZIStream@@@Z`；inflate 主體疑為 `sub_100028E0`（740 行）、deflate 為 `sub_100036A0`（447 行）、`sub_100049F0` / `sub_10004EC0` 為可疑的濾波器核心。
-- canvas 通常含 width/height/format/mag + 解壓後 BGRA；`Gr2D_DX8.dll` 內有 `>> 7` 反覆出現（整數 alpha 混合，非格式相關）。
+**重要發現**：`icon` 的 699 bytes **不在屬性區內**（屬性項只有 18 bytes）→ 像素資料存在 image blob 的**後段資料區**，
+由 `u32` 大小 + 某種位移關聯；`icon`(699) 與 `iconRaw`(610) 的兩個大小值都在條目內出現。
+（`Character/Cap/01000000.img` 總長 10,290，屬性項到 ~9,500，尾部即為像素資料區。）
 
-**下一步（預估 1–2 週）**：
-1. 讀 `Canvas.dll.c` 找 canvas 物件建構子（會出現寬高相乘 `*w * h`、`*4`、BGRA 常量）。
-2. 讀 `ZLZ.dll.c` `sub_100028E0` 還原 inflate（它只被少數地方使用，規模小）。
-3. 用 `UI/Basic.img` 的 `Cursor` canvas 當第一個解碼目標（小、易目視驗證）。
+### 4.5 影像標頭變體
+
+| 變體 | 開頭 | 實例 | 已驗證 |
+|---|---|---|---|
+| A | `73` + `"Property"` + `u16 0` + count | `Mob/0100100.img`、`UI/Basic.img` | ✅ 逐 byte |
+| B | `00 00 00` + count | `Character/Cap/01000000.img`（count = 15） | ✅ |
+| C | 其他（疑似 ZLZ 壓縮） | `Etc/Tips.img` | 🟡 |
+
+### 4.6 仍未解（**明確清單，含下一步**）
+
+| # | 項目 | 難度 | 下一步 |
+|---|---|---|---|
+| 1 | entry 值是否有 1 byte 前導/尾隨（量測上等價，需以原始碼定案）| 低 | 讀 `PCOM.dll.c sub_10018800` 的 `case 3`（`sub_10015C10`）確認讀取長度 |
+| 2 | type 8 字串值的格式（1~27 bytes 變動） | 低 | 同上，`case 8` 分支 |
+| 3 | type 37（本版特有） | 低 | 在 `MapleStory.exe` 找 `CActionMan` 的 frame entry 讀取 |
+| 4 | canvas 6-byte 標頭（寬/高/格式） | 低 | 對照 `Canvas.dll.c`（找 `*w * h`、`*4`、BGRA） |
+| 5 | **像素資料 + ZLZ inflate** | 中 | `ZLZ.dll.c sub_100028E0`（740 行）；先用 `UI/Basic.img` 的 `Cursor` 驗證 |
+| 6 | 標頭變體 C（`Etc/Tips.img` 等） | 低 | 檢查是否為整段 ZLZ 壓縮的 property list |
+
+> 影響：**屬性樹（名稱/型別/巢狀）已經可以匯出**，動畫的 frame 數量、origin/delay/z 等**metadata 可先解析**；
+> 只有「畫出像素」需要完成 #4/#5。
 
 ---
 
