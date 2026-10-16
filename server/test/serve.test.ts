@@ -13,7 +13,7 @@ import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protoc
 import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/protocol/session.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
-import { readCharacterData } from "../src/protocol/chardata.ts";
+import { characterDataOf, readCharacterData, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import {
   CLIENT_FIELD_OPCODE,
   FIELD_OPCODE,
@@ -39,6 +39,7 @@ import {
   readMobStat,
 } from "../src/protocol/mob.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
+import { STAT_OPCODE, readStatUpdate } from "../src/protocol/stat.ts";
 import type { MapData } from "../src/game/map.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
 import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
@@ -542,6 +543,12 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
   assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
   assert.equal(killer.headersOk, true, "both survive the cipher/header check");
 
+  // The kill pays the monster's own `info.exp` (stub: 1) as a 0x0D stat diff - exp only, because the
+  // bar did not fill up (FINDINGS 4.21). The level-up form is its own test below.
+  const stat = (await killer.take(1))[0]!;
+  assert.equal(stat[0], STAT_OPCODE);
+  assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), { ack: false, diff: { exp: 1 } });
+
   // The kill also leaves loot: one 0x43 per drop, and the monster's id is in it, which is what makes
   // the client fly the item out of the corpse (FINDINGS 4.18).
   const drop = await killer.take(1);
@@ -559,6 +566,86 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
 
   assert.ok(
     log.some((line) => line.includes("mob 1 (template 120100) killed by 10")),
+    log.join("\n"),
+  );
+});
+
+/**
+ * A kill pays experience, and the player's own numbers move for the first time: the packet is `0x0D`
+ * (FINDINGS 4.21), and the diff is exactly "what changed" - `exp`, plus the level and the HP/MP
+ * refill when the bar filled up.
+ *
+ * The character arrives with hp 20/50 and mp 5/30, and the stub monster is worth 20 exp at level 1
+ * (the client's own table wants 15 for that level), so one swing has to produce
+ * `{ level: 2, exp: 15, hp: 50, mp: 30 }` and nothing else - the client computes the level-up
+ * message and the effect from the level it sees (sub_55BEB0).
+ */
+test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
+    mobTickMs: 20,
+    mobRespawnMs: 60_000,
+    // No loot, so the only packets after the death are the corpse going and the stat diff.
+    dropPolicy: () => [],
+    handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const stats = zeroStats();
+  stats.id = 21;
+  stats.name = "Fighter";
+  stats.level = 1;
+  stats.exp = 10;
+  stats.hp = 20;
+  stats.maxHp = 50;
+  stats.mp = 5;
+  stats.maxMp = 30;
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({
+    username: "admin",
+    characterId: 21,
+    characterName: "Fighter",
+    character: characterDataOf(stats, startingCharacterItems()),
+  });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(4); // 0x16 + the two mobs + the NPC
+  t.after(() => client.close());
+
+  const attack = encodeClientAttack(
+    {
+      hits: 1,
+      targetCount: 1,
+      clickedMobId: 1,
+      facingLeft: false,
+      action: 0,
+      targetCap: 1,
+      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+    },
+    CLIENT_FIELD_OPCODE.attack,
+  );
+  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+  const hit = await client.take(2);
+  assert.equal(hit[0]![0], MOB_OPCODE.stat);
+  assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed);
+  const stat = (await client.take(1))[0]!;
+  assert.equal(stat[0], STAT_OPCODE, "the kill pays out as 0x0D");
+  assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), {
+    ack: false,
+    diff: { exp: 15, level: 2, hp: 50, mp: 30 },
+  });
+  assert.ok(
+    log.some((line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2")),
     log.join("\n"),
   );
 });
@@ -613,12 +700,13 @@ test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice"
   );
   client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-  // 0x34, 0x30, then the two drops.
-  const burst = await client.take(4);
+  // 0x34, 0x30, the kill's exp (0x0D), then the two drops.
+  const burst = await client.take(5);
   assert.equal(burst[0]![0], MOB_OPCODE.stat);
   assert.equal(burst[1]![0], MOB_OPCODE.leaveDelayed);
-  const mesos = readDropAppear(new PacketReader(burst[2]!, 1));
-  const item = readDropAppear(new PacketReader(burst[3]!, 1));
+  assert.equal(burst[2]![0], STAT_OPCODE);
+  const mesos = readDropAppear(new PacketReader(burst[3]!, 1));
+  const item = readDropAppear(new PacketReader(burst[4]!, 1));
   assert.equal(mesos.money, true);
   assert.equal(mesos.value, 25);
 

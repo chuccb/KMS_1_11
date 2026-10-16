@@ -21,6 +21,7 @@ import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
+import * as stat from "./stat.ts";
 import * as packet from "./packet.ts";
 import * as replies from "./replies.ts";
 
@@ -56,6 +57,16 @@ export interface PacketSchema {
 
 /** Strings on the wire are `u16 length` + raw bytes (FINDINGS 4.4). */
 const STRING = "string";
+
+/** Why three of the diff fields are not the width `CharacterData` uses (`sub_45E0D0` vs `sub_45D840`). */
+const STAT_DIFF_WIDTH_WARNINGS: Record<string, string | undefined> = {
+  unknown26: " - u32 here, a single byte in CharacterData",
+  str: " - ONE byte here, two in CharacterData",
+  dex: " - ONE byte here, two in CharacterData",
+  int: " - ONE byte here, two in CharacterData",
+  luk: " - ONE byte here, two in CharacterData",
+  fame: " - u32 here, two bytes in CharacterData",
+};
 
 export const PACKETS: readonly PacketSchema[] = [
   // ---------------------------------------------------------------- login stage, client -> server
@@ -762,6 +773,35 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "count", type: "u32", note: "kind 0 only; a count of 1 prints without the number" },
     ],
   },
+  {
+    opcode: stat.STAT_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "statUpdate",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.21 (CWvsApp sub_55A900 case 0x0D -> sub_55BEB0; the diff reader is sub_45E0D0)",
+    codecs: ["encodeStatUpdate", "readStatUpdate", "describeStatUpdate"],
+    // The 19 optional fields are described from the codec's own table - the flag of entry `i` is
+    // `1 << i`, and three widths differ from `CharacterData` (FINDINGS 4.21.1).
+    fields: [
+      {
+        name: "ack",
+        type: "u8",
+        note: "!= 0 clears the client's pending-request gate (CWvsApp+24/+28); the value itself is never compared",
+      },
+      { name: "flags", type: "u32", note: "one bit per field below, read from 0x01 upwards (0x7ffff is all of them)" },
+      ...stat.STAT_DIFF_FIELDS.map((field, index) => ({
+        name: field.name,
+        type: `u${field.bytes * 8}`,
+        note: `flag 0x${(1 << index).toString(16)}${STAT_DIFF_WIDTH_WARNINGS[field.name] ?? ""}`,
+      })),
+      {
+        name: "panelFlags",
+        type: "u32",
+        note: "0 = nothing more (the client returns immediately); the panel/buff block itself is not decoded yet",
+      },
+    ],
+  },
 ];
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
@@ -776,6 +816,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   npc,
   packet,
   replies,
+  stat,
 ];
 
 /**

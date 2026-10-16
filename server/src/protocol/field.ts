@@ -42,6 +42,7 @@ import {
   readLootNotice,
 } from "./drop.ts";
 import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
+import { STAT_OPCODE, describeStatUpdate, readStatUpdate } from "./stat.ts";
 // The NPC pool (`0x39`..`0x41`): the same packet shape as `CMobPool`, one range further up.
 import {
   NPC_OPCODE,
@@ -369,6 +370,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `0x11 notice: ${describeLootNotice(readLootNotice(new PacketReader(plain, 1)))}`;
     } catch (error) {
       return `0x11 notice: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === STAT_OPCODE) {
+    try {
+      return `0x0d stat: ${describeStatUpdate(readStatUpdate(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `0x0d stat: (truncated: ${(error as Error).message})`;
     }
   }
   if (opcode < 0x15 || opcode > 0x52) return undefined;

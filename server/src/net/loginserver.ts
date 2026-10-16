@@ -40,6 +40,8 @@ import {
 } from "../protocol/field.ts";
 import { DROP_REMOVE_KIND, encodeDropRemove, encodeLootNotice } from "../protocol/drop.ts";
 import { encodeInventoryChange } from "../protocol/inventory.ts";
+import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
+import { awardExp } from "../game/exp.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
   LOGIN_RESULT,
@@ -808,8 +810,54 @@ export class GameEntryServer {
               `- die animation ${hit.dieMs}ms, corpse goes at +${hit.dieMs}ms, respawn at +${hit.dieMs + hit.respawnMs}ms`
           : `game: mob ${hit.mobId} hit for ${damage} - hp ${hit.hp}/${hit.maxHp}`,
       );
-      if (hit.killed) this.spawnDrops(session, socket, sendState, hit.mobId, now);
+      // The reward first, the loot after: the exp is the kill's own payout (a stat diff plus, on a
+      // level-up, the client's own effect), while a drop has to fly out of the corpse.
+      if (hit.killed) {
+        this.awardKillExp(session, socket, sendState, hit.templateId);
+        this.spawnDrops(session, socket, sendState, hit.mobId, now);
+      }
     }
+  }
+
+  /**
+   * The player killed a monster: put its `info.exp` on the character's account and tell the client
+   * with `0x0D` (FINDINGS 4.21).
+   *
+   * The amount is the monster's own data and the level thresholds are the client's own table
+   * (`game/exp.ts`); the packet is the *difference* between the record before and after, so a plain
+   * gain carries one field (`exp`) and a level-up carries the level plus the HP/MP refill the
+   * client's own routine performs. The client plays the level-up effect itself when it sees the
+   * level grow, so nothing else has to be sent - `0x29` (the level-up effect for *other* players) is
+   * for the day a field is shared.
+   *
+   * A monster with no template (no `Mob/<id>.img`, so no `info.exp`) awards nothing, like a drop.
+   */
+  private awardKillExp(
+    session: FieldSession,
+    socket: net.Socket,
+    sendState: CipherState,
+    templateId: number,
+  ): void {
+    const template = this.options.mobTemplate?.(templateId);
+    const amount = template?.exp ?? 0;
+    if (amount <= 0) {
+      this.options.log?.(`game: mob template ${templateId} carries no exp, nothing awarded`);
+      return;
+    }
+    const before = { ...session.character.stats };
+    const gain = awardExp(session.character.stats, amount);
+    if (!gain.changed) return;
+    const stats = session.character.stats;
+    socket.write(
+      encodeSessionPacket(encodeStatUpdate({ diff: diffStats(before, stats) }), sendState, "s2c"),
+    );
+    this.options.log?.(
+      `game: +${gain.gained} exp for killing ${template?.name ?? templateId} ` +
+        `(template ${templateId}) - exp ${stats.exp}, level ${stats.level}` +
+        (gain.levels > 0
+          ? ` (+${gain.levels} level${gain.levels === 1 ? "" : "s"}, hp ${stats.hp}/${stats.maxHp})`
+          : ""),
+    );
   }
 
   /**
