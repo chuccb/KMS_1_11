@@ -280,11 +280,15 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "interact",
     status: "byte-exact",
-    evidence: "FINDINGS 4.11.6 / 4.13 (CField::SendInteract, sub_472590)",
+    evidence: "FINDINGS 4.11.6 / 4.13 / 4.32 (CField::SendInteract, sub_472590)",
     codecs: ["readClientInteract", "encodeClientInteract"],
     fields: [
-      { name: "kind", type: "s32", note: "-1 for the portal/object under the cursor" },
-      { name: "name", type: STRING, note: "the clicked object's name" },
+      {
+        name: "kind",
+        type: "s32",
+        note: "-1 = the object under the cursor, 0 = the revive dialog (sub_4E9E70), a map id = the GM /헉맵 command",
+      },
+      { name: "name", type: STRING, note: "the clicked object's name; empty for a revive" },
     ],
   },
   {

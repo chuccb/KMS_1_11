@@ -1025,15 +1025,31 @@ export function encodeClientMobAttack(attack: ClientMobAttackBody): Uint8Array {
  * The `kind` a click sends when the object under the cursor is what was clicked
  * (`sub_5124C0`/`sub_512510`): "it", whatever `name` says it is.
  *
- * It is the only value with evidence - the GM map command builds the same packet, and what it puts
- * here is not located - so a handler that wants "the player used a portal" checks for this one and
- * logs anything else instead of guessing (`net/loginserver.ts`).
+ * Three values are located, and they share this packet: this one, `INTERACT_KIND_REVIVE` (0), and the
+ * GM `/헉맵 <mapId>` command, which puts the **map id** in `kind` (`sub_472590(atoi(arg), nullptr)`,
+ * FINDINGS 4.13) - which is why a handler has to match on the value instead of assuming a click.
  */
 export const INTERACT_KIND_CURSOR = -1;
 
-/** `0x0D` as it arrives from the client. */
+/**
+ * The `kind` the revive dialog sends: `sub_4E9E70` - what the `CUIRevive` window's OK button and
+ * VK_RETURN both run (`sub_4E9E20` case 1, `sub_4E9E30`) - calls `sub_472590(0, nullptr)`, i.e. this
+ * same packet with `0 = kind` and an empty name. That dialog is the one that appears 2.2 s after the
+ * player dies, and it is the only thing in the client that asks the server for a revive (FINDINGS
+ * 4.32); the destination is the server's own answer (`game/map.ts`'s `reviveMapId`).
+ */
+export const INTERACT_KIND_REVIVE = 0;
+
+/**
+ * `0x0D` as it arrives from the client - `CField::SendInteract` (`sub_472590`), the one packet the
+ * two click paths and the revive share:
+ *
+ *   `kind` -1              the object under the cursor; `name` is its name (a portal's `pn`)
+ *   `kind` 0               the revive dialog's OK (the GM `/헉맵` command puts the map id here)
+ *   `name`                 an empty string for anything but a cursor click
+ */
 export interface ClientInteract {
-  /** `INTERACT_KIND_CURSOR` (-1) for "the portal/object under the cursor"; other values are not located. */
+  /** `INTERACT_KIND_CURSOR` (-1), `INTERACT_KIND_REVIVE` (0), or a GM map id - see above. */
   kind: number;
   name: string;
 }

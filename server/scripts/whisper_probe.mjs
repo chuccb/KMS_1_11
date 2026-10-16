@@ -14,7 +14,9 @@
  * It creates the two characters itself (0x06 name check + 0x05 create) when the save is empty,
  * so a fresh `--save` file is the easiest way to run it. `--data` is what makes the find answer
  * carry a real map id: after both players land in 1000000 the probe walks Alt through that map's
- * "east00" portal (0x0D), so the whisper really does cross a map boundary.
+ * "east00" portal (0x0D), so the whisper really does cross a map boundary. It ends with the revive
+ * dialog's request (0x0D `kind = 0`, FINDINGS 4.32), which turns 1000000's `info/returnMap` - the real
+ * 1010000 - into the map the dead player is put back into.
  */
 import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
@@ -151,7 +153,7 @@ async function enterGame(user, password, wanted) {
   const claim = new PacketWriter(8);
   claim.writeByte(0x04).writeU32(handoff);
   game.send(claim.toBytes());
-  return { game, name: character.stats.name };
+  return { game, name: character.stats.name, characterId: handoff };
 }
 
 /** `0x16` = opcode, mode, "carries data", three seed u32s, then the full CharacterData. */
@@ -238,6 +240,27 @@ while (Date.now() < deadline) {
   await new Promise((r) => setTimeout(r, 20));
 }
 expect(quiet.filter((opcode) => opcode === 0x1a).length === 0, "a balloon request is not answered");
+
+// --- the revive dialog's OK: 0x0D kind 0 -> the release byte, then a field (FINDINGS 4.32) --------
+// What `CUIRevive`'s OK button (and Enter) sends is `sub_472590(0, nullptr)`: kind 0, empty name - the
+// same packet a portal click uses, with the other kind. Hero is in map 1000000, whose real
+// `info/returnMap` is 1010000 (암허스트, a town), so with the real `Data.wz` behind the server this is
+// a real map change, into the map Alt walked into above.
+//
+// A revived character's HP travels in that same `0x16` (`serve.test.ts` starts one at 1/50 and reads
+// 50 back); these two clients are at full HP because *who damages a player* is still OPEN (4.32.6).
+const revive = new PacketWriter(32);
+revive.writeByte(0x0d).writeU32(0).writeAsciiString("");
+hero.game.send(revive.toBytes());
+await hero.game.take(0x19); // a revive owes the release byte exactly like a click does
+const revivedMap = mapIdOfSetField(await hero.game.take(0x16));
+expect(revivedMap === 1010000, `the revive moved Hero into info/returnMap (1010000), got ${revivedMap}`);
+expect(revivedMap === altMap, "and that is the map the whisper crossed into");
+
+// The town Alt is standing in hears Hero come back: the revive joined the new field, it was not just
+// a packet to the one person who died.
+const arrived = new PacketReader(await alt.game.take(0x1c), 1).readU32();
+expect(arrived === hero.characterId, `the others see Hero arrive (0x1C id ${arrived})`);
 
 hero.game.close();
 alt.game.close();

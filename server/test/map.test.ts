@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { WzArchive, mapSummary, type MapObject, type WzObject } from "../src/wz/archive.ts";
-import { mapDataFrom, mapDataProvider, loadMapData, type MapData } from "../src/game/map.ts";
+import { RETURN_MAP_NONE, mapDataFrom, mapDataProvider, loadMapData, reviveMapId, type MapData } from "../src/game/map.ts";
 import { encodeMobEnterField } from "../src/protocol/mob.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
@@ -116,9 +116,37 @@ test("a monster field spawns the ids the WZ lists, in order", needsArchive, () =
   assert.ok(data.mobs.some((mob) => mob.foothold > 0), "spawns are anchored to footholds");
 });
 
+test("a revive goes to the map's own info/returnMap, and to the map itself when the data has none", () => {
+  const withReturnMap = (returnMap: unknown): MapData =>
+    mapDataFrom(
+      mapSummary({
+        props: [{ name: "info", value: { mapName: "Test", returnMap } }],
+      } as unknown as WzObject),
+      40000,
+    );
+  assert.equal(reviveMapId(withReturnMap(100000000)), 100000000, "the town the map names");
+  assert.equal(
+    reviveMapId(withReturnMap(RETURN_MAP_NONE)),
+    40000,
+    "999999999 is not a map id: a town sends you back into itself",
+  );
+  assert.equal(reviveMapId(withReturnMap(undefined)), 40000, "no returnMap at all is the same answer");
+});
+
 test("an unknown map id is undefined, not an empty map", needsArchive, () => {
   assert.equal(loadMapData(archive!, 999999999), undefined);
   assert.equal(loadMapData(archive!, 1), undefined, "map 1 has no Map/Map/*.img either");
+});
+
+test("the real data sends a field to its town and a town back to itself", needsArchive, () => {
+  const field = loadMapData(archive!, DEFAULT_MAP) as MapData;
+  assert.equal(field.returnMapId, 1010000, "the field next to Amherst names the town");
+  assert.equal(reviveMapId(field), 1010000);
+  const town = loadMapData(archive!, 1010000) as MapData;
+  assert.equal(town.name, "암허스트");
+  assert.equal(town.returnMapId, RETURN_MAP_NONE, "a town has no map to send you back to");
+  assert.equal(reviveMapId(town), 1010000, "so a revive there re-enters the town");
+  assert.equal(loadMapData(archive!, RETURN_MAP_NONE), undefined, "and the sentinel is not a map");
 });
 
 test("the provider reads each map once and can be handed anywhere", needsArchive, () => {

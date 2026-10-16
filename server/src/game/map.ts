@@ -75,6 +75,34 @@ export interface MapData {
   footholdSegments?: FootholdSegments;
 }
 
+/**
+ * The `returnMap` value the shipped data uses for "this map has no map to send you back to": 25 of
+ * the 100 maps carry it (`analysis/map_meta.json`). It is **not** a map id - there is no
+ * `Map/Map/999999999.img` - so a server that passed it on would send a player into a map nobody can
+ * read. Every town carries its own id here instead (`test/map.test.ts` pins that for Henesys).
+ */
+export const RETURN_MAP_NONE = 999999999;
+
+/**
+ * Where the player who revived goes (c2s `0x0D` with `kind = 0`, the `CUIRevive` dialog's OK:
+ * `sub_4E9E70` -> `sub_472590(0, nullptr)`, FINDINGS 4.32).
+ *
+ * The client is no help here: it never reads `returnMap` (the string does not occur anywhere in its
+ * code), it only promises "you will be moved to a safe town" and asks the server to do it. So the
+ * destination is the server's answer, and the map's own `info/returnMap` is the only thing in the
+ * data that answers it. A map whose value is `RETURN_MAP_NONE` sends the player back into the map
+ * they died in - the `0x16` that does it is what brings them back to life in the first place
+ * (`sub_4C2780` builds a fresh local user, FINDINGS 4.32), so "same map" is a real revive and not a
+ * fallback that leaves someone dead.
+ *
+ * Returns an id, not a promise: whether that map can actually be read is `FieldRegistry`'s answer,
+ * and the caller re-enters the current map when it cannot (`GameEntryServer.revive`).
+ */
+export function reviveMapId(map: MapData): number {
+  const target = map.returnMapId;
+  return Number.isInteger(target) && target > 0 && target !== RETURN_MAP_NONE ? target : map.id;
+}
+
 /** `"0120100"` -> `1210100`; a `life` entry without a usable id is dropped, not guessed at. */
 function templateIdOf(entry: MapObject): number | undefined {
   const id = asNumber(entry.id, Number.NaN);

@@ -13,12 +13,19 @@ import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protoc
 import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/protocol/session.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
-import { characterDataOf, readCharacterData, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
+import {
+  characterDataOf,
+  readCharacterData,
+  startingCharacterItems,
+  zeroStats,
+  type CharacterData,
+} from "../src/protocol/chardata.ts";
 import { OnlineAccounts } from "../src/net/online.ts";
 import {
   CLIENT_FIELD_OPCODE,
   FIELD_OPCODE,
   INTERACT_KIND_CURSOR,
+  INTERACT_KIND_REVIVE,
   USER_EFFECT_LEVEL_UP,
   encodeClientAttack,
   encodeClientChat,
@@ -802,6 +809,28 @@ const STUB_MAP_ALT: MapData = {
   footholds: 1,
   ladderRopes: 0,
   footholdSegments: new Map([[32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }]]),
+};
+
+/**
+ * The town `STUB_MAP`'s `returnMap` names: the revive has a map to move a player to, and it is a map
+ * with nothing in it (a town in the shipped data is NPCs only, and this one does not even need those).
+ *
+ * Its own `returnMap` names a map the test does **not** register, which is the branch a town takes in
+ * the real data through `RETURN_MAP_NONE` (`test/map.test.ts`): whatever the reason, the answer is the
+ * same - re-enter the map the player is already in, because that field exists by definition.
+ */
+const STUB_MAP_TOWN: MapData = {
+  id: 1010000,
+  imagePath: "Map/Map/001010000.img",
+  name: "stub-town",
+  streetName: "stub",
+  bgm: "",
+  returnMapId: 1010001,
+  mobs: [],
+  npcs: [],
+  portals: [],
+  footholds: 0,
+  ladderRopes: 0,
 };
 
 test("the game server spawns the map's monsters and NPCs right after 0x16", { timeout: 20000 }, async (t) => {
@@ -1810,6 +1839,143 @@ test("a portal moves a player to another map, and the map they left hears about 
   assert.ok(
     log.some((line) => line.includes('"Alt" uses portal "west00" of map 1000000 -> 2000000')),
     log.join("\n"),
+  );
+});
+
+/**
+ * The revive dialog (`0x0D` with `kind = 0`, FINDINGS 4.32): the `CUIRevive` window - the one that
+ * appears 2.2 s after a death - answers its OK button and VK_RETURN with `sub_472590(0, nullptr)`, and
+ * the player is owed two things: HP back to full, and a `0x16` into the map `info/returnMap` names.
+ *
+ * The `0x16` *is* the revive, not just a move: it is what rebuilds the client's field and the local
+ * user with it (`sub_4C2780` -> `sub_51CBF0` -> `sub_511030`), so the corpse and the dead state
+ * belong to the field that is being replaced. That is also why no second packet carries the HP: the
+ * record inside that `0x16` is the one the client's HP bar draws (FINDINGS 4.21), so restoring HP
+ * before the map is entered is the whole of it - the test starts the character at 1 of 50 and reads
+ * 50 out of the packet that comes back.
+ *
+ * Both halves of "where do I come back" are here: a field whose `returnMap` is a map this server can
+ * read (a real map change, with the map they died in told they are gone) and a map whose `returnMap`
+ * it cannot (the same branch every town takes through `RETURN_MAP_NONE`: leave and re-enter, which
+ * the players standing there see as `0x1D` + `0x1C`).
+ */
+test("a revive restores HP and re-enters a field: the return map if it can be read, the same map otherwise", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) =>
+      mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  /** A record one hit from death, so the packet that comes back says whether HP was restored. */
+  const hurt = (id: number, name: string, mapId: number): CharacterData => {
+    const stats = zeroStats();
+    stats.id = id;
+    stats.name = name;
+    stats.level = 1;
+    stats.hp = 1;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 5;
+    stats.mapId = mapId;
+    return characterDataOf(stats, startingCharacterItems());
+  };
+
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: hurt(7, "Hero", 1000000) }),
+  });
+  const wounded = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+  assert.equal(wounded.character.stats.hp, 1, "the record enters the field as it is - a hurt 1/50");
+
+  const witness = await FakeClient.connect(gameInfo.port);
+  t.after(() => witness.close());
+  witness.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  await witness.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // The revive dialog's OK: the same `0x0D` a portal click uses, with `kind = 0` and no name.
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.interact,
+    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
+  });
+  const release = await hero.take(1);
+  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease, "the release byte answers a revive too");
+  const revived = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+  assert.equal(revived.character.stats.hp, 50, "a revive restores HP to full");
+  assert.equal(revived.character.stats.maxHp, 50, "and does not touch the maximum");
+  assert.equal(revived.character.stats.mapId, 1010000, "the map is the one info/returnMap names");
+  assert.ok(
+    log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1000000 -> 1010000')),
+    log.join("\n"),
+  );
+  assert.deepEqual(
+    (await witness.drainOpcodes()).filter(
+      (opcode) => opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
+    ),
+    [FIELD_OPCODE.userLeaveField],
+    "the map they died in hears them leave",
+  );
+
+  // A character whose own record says 1010000 finds them there: the revive joined the new field, it
+  // did not just send a packet.
+  const latecomer = await FakeClient.connect(gameInfo.port);
+  t.after(() => latecomer.close());
+  latecomer.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({
+      username: "admin",
+      characterId: 9,
+      characterName: "Other",
+      character: hurt(9, "Other", 1010000),
+    }),
+  });
+  await latecomer.takeOpcode(FIELD_OPCODE.setField);
+  const sawHero = await latecomer.takeOpcode(FIELD_OPCODE.userEnterField);
+  assert.equal(readUserEnterField(new PacketReader(sawHero[sawHero.length - 1]!, 1)).characterId, 7);
+
+  // The second revive happens in the town, whose `returnMap` is a map this server cannot read: the
+  // field is left and joined again, which everyone standing there sees.
+  await hero.drain(); // the latecomer's own 0x1C is already in this queue
+  hero.send({
+    kind: "unknown",
+    opcode: CLIENT_FIELD_OPCODE.interact,
+    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
+  });
+  const releaseAgain = await hero.take(1);
+  assert.equal(releaseAgain[0]![0], FIELD_OPCODE.requestRelease, "…and so does the second one");
+  const again = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+  assert.equal(again.character.stats.mapId, 1010000, "an unreadable return map re-enters the map they are in");
+  assert.equal(again.character.stats.hp, 50);
+  assert.ok(
+    log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1010000 -> 1010001')),
+    log.join("\n"),
+  );
+  assert.ok(log.some((line) => line.includes("map 1010001 has no Map/Map/*.img")), log.join("\n"));
+  assert.deepEqual(
+    (await latecomer.drainOpcodes()).filter(
+      (opcode) => opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
+    ),
+    [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField],
+    "the town sees them leave and arrive again",
   );
 });
 

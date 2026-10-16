@@ -32,7 +32,7 @@ import type { DropPolicy } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
 import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
 import { MesoWallet, pickUpDrop } from "../game/rewards.ts";
-import type { MapData } from "../game/map.ts";
+import { reviveMapId, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   CLIENT_FIELD_OPCODE,
@@ -43,6 +43,7 @@ import {
   encodeUserFindAnswer,
   encodeUserWhisperAnswer,
   INTERACT_KIND_CURSOR,
+  INTERACT_KIND_REVIVE,
   encodeFieldRequestRelease,
   encodeSetField,
   encodeUserEffect,
@@ -941,20 +942,17 @@ export class GameEntryServer {
   }
 
   /**
-   * The player used a portal (`0x0D`: `s32 kind` + `string name`, FINDINGS 4.11.6).
+   * `0x0D` - the one field request that carries a `kind` (`s32 kind` + `string name`, FINDINGS
+   * 4.11.6/4.32): a click on the object under the cursor (`INTERACT_KIND_CURSOR`) or the revive
+   * dialog's OK (`INTERACT_KIND_REVIVE`). The GM map command builds the same packet with a map id in
+   * `kind`; this server has no GM commands, so that one is a log line instead of a teleport.
    *
-   * `name` is what the client read out of the map file for the thing under the cursor; **where it
-   * leads comes from the same map data** (`portal.tm`), never from the packet - a name that is not
-   * this map's portal is a log line, not a teleport. The release byte is owed before anything else:
-   * `sub_472590` arms the client's interact gate when it sends `0x0D` and nothing clears it but an
-   * empty `0x19`, so a portal the server does not know still has to be answered or the player could
-   * never click anything again.
-   *
-   * A portal that leads to the map the player is already in is handled like any other: the field is
-   * left and joined again, which is what a client does when it walks through one (it rebuilds the
-   * field) - there is no special case here to get wrong.
+   * The release byte is owed before anything else, and before the packet is even read: `sub_472590`
+   * arms the client's interact gate when it sends `0x0D` and nothing clears it but an empty `0x19`,
+   * so a request this server does not understand still has to be answered or the player could never
+   * click anything again.
    */
-  private handlePortal(session: FieldSession, plain: Uint8Array): void {
+  private handleInteract(session: FieldSession, plain: Uint8Array): void {
     session.send(encodeFieldRequestRelease());
     let request: ClientInteract;
     try {
@@ -963,26 +961,76 @@ export class GameEntryServer {
       this.options.log?.(`game: 0x0D unreadable: ${(error as Error).message}`);
       return;
     }
-    if (request.kind !== INTERACT_KIND_CURSOR) {
-      // The GM map command builds the same packet; what it puts in `kind` is not located, so this
-      // handler only claims the value the click handlers are known to send.
-      this.options.log?.(`game: 0x0D kind ${request.kind} is not a portal click (only ${INTERACT_KIND_CURSOR} is), ignored`);
+    if (request.kind === INTERACT_KIND_CURSOR) {
+      this.usePortal(session, request.name);
       return;
     }
-    const portal = session.instance.portal(request.name);
-    if (portal === undefined) {
-      this.options.log?.(`game: 0x0D "${request.name}" is no portal of map ${session.instance.mapId}`);
-      return;
-    }
-    if (portal.toMapId === 0) {
-      this.options.log?.(`game: portal "${request.name}" of map ${session.instance.mapId} leads nowhere (tm = 0)`);
+    if (request.kind === INTERACT_KIND_REVIVE) {
+      this.revive(session);
       return;
     }
     this.options.log?.(
-      `game: "${session.name}" uses portal "${request.name}" of map ${session.instance.mapId} -> ${portal.toMapId}` +
+      `game: 0x0D kind ${request.kind} is neither a portal click (${INTERACT_KIND_CURSOR}) ` +
+        `nor a revive (${INTERACT_KIND_REVIVE}), ignored`,
+    );
+  }
+
+  /**
+   * A cursor click on the map's own portal.
+   *
+   * `name` is what the client read out of the map file for the thing under the cursor; **where it
+   * leads comes from the same map data** (`portal.tm`), never from the packet - a name that is not
+   * this map's portal is a log line, not a teleport.
+   *
+   * A portal that leads to the map the player is already in is handled like any other: the field is
+   * left and joined again, which is what a client does when it walks through one (it rebuilds the
+   * field) - there is no special case here to get wrong.
+   */
+  private usePortal(session: FieldSession, name: string): void {
+    const portal = session.instance.portal(name);
+    if (portal === undefined) {
+      this.options.log?.(`game: 0x0D "${name}" is no portal of map ${session.instance.mapId}`);
+      return;
+    }
+    if (portal.toMapId === 0) {
+      this.options.log?.(`game: portal "${name}" of map ${session.instance.mapId} leads nowhere (tm = 0)`);
+      return;
+    }
+    this.options.log?.(
+      `game: "${session.name}" uses portal "${name}" of map ${session.instance.mapId} -> ${portal.toMapId}` +
         (portal.toName === "" ? "" : ` (portal "${portal.toName}")`),
     );
     this.enterMap(session, portal.toMapId);
+  }
+
+  /**
+   * The revive dialog's OK (`0x0D` `kind = 0`, `sub_4E9E70`, FINDINGS 4.32): the player's HP goes back
+   * to full and they are moved to the map `info/returnMap` names - the client's own promise is "you
+   * will be moved to a safe town", and it asks the server to do both, because the client never reads
+   * `returnMap` itself.
+   *
+   * The `0x16` is what actually revives them, not just a move: it rebuilds the client's field and the
+   * local user with it (`sub_4C2780` -> `sub_51CBF0` -> `sub_511030`), so the dead state and the
+   * tombstone belong to the field that is being replaced. That is also why the HP is restored *before*
+   * the map is entered: the same `0x16` carries the whole `CharacterData`, and the record inside it is
+   * the one the client's HP bar draws (FINDINGS 4.21) - there is no second packet to send.
+   *
+   * A `returnMap` this server cannot read (it names a map with no `Map/Map/*.img`) falls back to the
+   * map the player is already in, which is a field that exists by definition - the alternative would
+   * be leaving them dead. The same fallback covers the case the shipped data makes common: a **town**
+   * carries `returnMap = RETURN_MAP_NONE` (암허스트 does, `test/map.test.ts`), so dying in a town
+   * re-enters the town.
+   */
+  private revive(session: FieldSession): void {
+    const stats = session.character.stats;
+    stats.hp = stats.maxHp;
+    const here = session.instance.mapId;
+    const target = reviveMapId(session.instance.map);
+    this.options.log?.(
+      `game: "${session.name}" revives - hp ${stats.hp}/${stats.maxHp}, map ${here} -> ${target}`,
+    );
+    if (target !== here && this.enterMap(session, target)) return;
+    this.enterMap(session, here);
   }
 
   /**
@@ -1453,7 +1501,7 @@ export class GameEntryServer {
         // Using a portal: `0x0D` with the name of the portal under the cursor, answered with the
         // release byte and a `0x16` for wherever that portal leads.
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.interact) {
-          this.handlePortal(session, event.plain);
+          this.handleInteract(session, event.plain);
           continue;
         }
         // Clicking an NPC: the server answers with the release byte, and with a shop if it has one.
