@@ -24,8 +24,8 @@
 | 地圖 id 與載入器 | ✅ 完成 | `CharacterData.mapId`（第 23 欄）就是地圖 id：`0x16` → `sub_468E00` → `sub_4694F0` 載入 `Map/Map/%09d.img`（FINDINGS §4.11.2b）；地圖載入器的全部 WZ 路徑已列表，`server/src/wz/paths.ts` 收錄伺服器要用的三個 |
 | 場地亂數種子 | ✅ 完成（含移植）| `0x16` 的三個 u32 是客戶端自訂亂數產生器的種子（FINDINGS §4.11.2：`sub_4C7930`→`sub_48A900`，反函式 `sub_4619F0` 就是 `Random()`）；伺服器可重算客戶端回報的傷害；`src/protocol/random.ts` 已逐位元移植並有 golden 測試 |
 | 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts`／`mob.ts`／`npc.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊**／**0x2F 怪物進場**／**0x33 怪物移動**／**0x30 死亡**／**0x31 收屍與重生**／**0x34 怪物 MP**／**0x35 怪物動畫**／**0x2C 怪物動作回報（頭 4 欄）**／**0x39 NPC 進場**／**0x3A／0x3B NPC 離場與第二狀態**／**0x0D 能力值差異**／**0x4A／0x4B 商店＋0x16／0x33 商店請求與物件點擊＋空的 0x19** 的逐 byte codec（`test/field.test.ts`／`test/mob.test.ts`／`test/mobs.test.ts`／`test/npc.test.ts`／`test/stat.test.ts`／`test/shops.test.ts` golden 覆蓋）；`src/game/{map,mobs,npcs}.ts` 已能把 `life` 變成出生點、沿腳踏點巡邏、把 client 報的傷害記在怪物 HP 上、並讓 NPC 進場（§4.15／§4.16／§4.17／§4.19）|
-| 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：54 列的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
-| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（272 個測試同時通過）|
+| 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：56 列的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
+| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（296 個測試同時通過）|
 | 打怪的閉環 | 🟡 | 傷害照 client 的數字記帳（ADR-006）、`0x34`／`0x30`／`0x31` 三個封包與收屍／重生計時（`--mob-respawn`），`Mob/<id>.img` 的 `maxHP`／`maxMP`／die 動畫長度都從 WZ 讀（FINDINGS §4.17）；假 client 逐欄驗證、真 `Data.wz` 實跑 45 隻怪（§4.17.5）；**尚未實機驗證**，且沒有怪物 AI |
 | 經驗值與升級（`0x0D`）| 🟡 | 能力值差異包**已完整解出**（§4.21）：`u8 ack` ＋ `u32 flags`（19 個 bit，`0x01`…`0x40000`，依旗標順序一個欄位）＋ `u32 panelFlags`（0 = 後面沒有東西）；⚠️ 三個欄位的**線上寬度與 `CharacterData` 不同**（`str`/`dex`/`int`/`luk` 是 1 byte、`unknown26`／`fame` 是 4 bytes）。經驗值表是**算出來的**（`sub_4C7110`：1–5 `n(n²/2+15)`、6–50 `q(q+19)`／`q=n²/3`、51–200 ×1.0548），與公開的 2003 表 **196/200 相同，四個差異是複本打字錯誤**。伺服器端 `protocol/stat.ts`（`diffStats` 只送有變的欄位）＋`game/exp.ts`（升級補滿 HP／MP），殺怪後先送 `0x0D` 再掉寶；21 個新測試，並在真 `Data.wz` 的 달팽이사냥터（地圖 40000）實跑：殺五隻 달팽이後客戶端收到 `flags=0x00010010 level=2` 的升級差異（§4.21.5）。**`panelFlags != 0` 的能力面板／buff 區塊未解**、升級的 `maxHp`／`ap`／`sp` 成長量是原伺服器的數字（目前不送）、被怪物打不會掉血 |
 | NPC 商店（`0x4A`／`0x4B`／`0x16`／`0x33`）| 🟡 | `0x49`–`0x4C` 只有 `0x4A`／`0x4B` 有 handler（§4.22）：`0x4A` 開 `CShopDlg` 並讀 `u32 shopId`＋`u16 count`＋每列 `u32 itemId`／`u32 price`／（207 家族多 8 bytes）／`u16 maxCount`；`0x4B` 只讀一個 `u8`（0 沉默、1/4 東西不夠、2 錢不夠、3 格子不夠、>4 錯誤），而且**只有在請求在途時才合法**（否則 client 自己丟 `CDisconnectException`）；client 端 `0x33`「點擊場地物件」＋`0x16` 的四個動作（買／賣／充電／關窗）。伺服器端 `protocol/shop.ts`＋`game/shops.ts`（價格一律讀 `info/price`，庫存與收購價是我們的選擇，ADR-010）＋`loginserver.ts` 的兩個 handler；真 socket 走完「點 NPC → 開窗 → 買 → 錢不夠 → 關窗」。**`0x49`／`0x4C` 沒有 handler、207 那 8 bytes 的內容未知（只攜帶不產生）、充電未實作、NPC 對話／任務（`0x46`–`0x48`）仍 OPEN** |
@@ -38,6 +38,12 @@
 
 ## Phase 1 — 資源管線與協定 schema（~3 週）
 
+- NPC 對話（`0x47`／`0x15`，FINDINGS §4.23）：`protocol/quest.ts`（五種 body 的 codec、
+  `askText` 的字串上限）＋ `game/dialogue.ts`（`Npc/<id>.img -> info/speak` 的台詞、`NpcTalk` 的逐句推進）
+  ＋ `protocol/cp949.ts`（送出前的字碼頁），伺服器端把「點 NPC → 第一句 → `0x15` → 下一句」接起來。
+  **仍然是純文字對話**：`info/quest` 的腳本名原樣帶著，沒有任務狀態機（client 也沒有任務 UI）。
+  測試：`test/quest.test.ts` 23 個（codec golden／CP949／台詞／一場對話）＋ `serve.test.ts` 的
+  `0x33`→`0x19`＋`0x47`、`0x15` 逐句與結束的端到端，共 24 個。
 - `server/src/wz/`（ADR-005）：`Data.wz` → `assets/`（PNG + 動畫 JSON + OGG + bitmap font + manifest）；
   目錄樹／值層／定位／PNG 已完成，剩下的動畫 JSON 與 OGG 是包裝層
 - `protocol/schema/`：從 Phase 0 的 opcode 表建立 schema；產生 TypeScript codec 與 **golden 測試向量**

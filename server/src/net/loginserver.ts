@@ -52,6 +52,13 @@ import {
   readClientShopRequest,
 } from "../protocol/shop.ts";
 import { shopResultCode, type ShopDef, type ShopKeeper } from "../game/shops.ts";
+import { NpcTalk, type NpcDialogue } from "../game/dialogue.ts";
+import {
+  QUEST_ANSWER,
+  describeQuestReply,
+  readQuestReply,
+  type QuestReply,
+} from "../protocol/quest.ts";
 import { awardExp } from "../game/exp.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
@@ -497,6 +504,16 @@ export interface GameEntryServerOptions {
    * loads the image on its own.
    */
   npcTemplate?: (templateId: number) => NpcTemplate | undefined;
+  /**
+   * What an NPC says (`Npc/<id>.img -> info/speak`). `npcDialogueProvider(WzArchive)` is the real
+   * one.
+   *
+   * With it, clicking an NPC this server keeps no shop for opens a `0x47` dialog with the NPC's own
+   * first line, and the client's `0x15` answer walks to the next one (`game/dialogue.ts`). Without
+   * it - or for an NPC whose image has no `speak` list - a click is answered with the release byte
+   * alone, which is what an NPC with nothing to say deserves.
+   */
+  npcDialogue?: (templateId: number) => NpcDialogue | undefined;
   /** Walking speed of a mob at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
   mobSpeedPxPerSecond?: number;
   /** How often the field hands out mob movement legs, in ms. Defaults to 250. */
@@ -544,6 +561,15 @@ interface FieldSession {
    * open would make the client throw (`sub_4B73A0` case 74), so this is also the guard for that.
    */
   shop?: ShopDef;
+  /**
+   * The NPC conversation this session is in the middle of, if any (`0x47` was sent and no answer
+   * has come back for the last line).
+   *
+   * Like `shop`, it is both the state a reply is validated against and the guard that keeps the
+   * server from sending a second `0x47` while the client's dialog is up - `CQuestMan+4` throws a
+   * `CDisconnectException` for that, the same way the shop dialog refuses a second `0x4A`.
+   */
+  talk?: NpcTalk;
 }
 
 export class GameEntryServer {
@@ -738,18 +764,25 @@ export class GameEntryServer {
   }
 
   /**
-   * The player clicked a field object (`0x33`) - for an NPC, the click that should open its shop.
+   * The player clicked a field object (`0x33`) - for an NPC, the click that opens its shop or starts
+   * a conversation.
    *
-   * Two things have to happen, in this order:
+   * The release byte comes first, always:
    *
    *   `0x19`  an empty packet that clears the client's "a field request is pending" gate. Every
    *           click arms it (`sub_55AF20`), and the client sends nothing else until it is cleared -
    *           so this is owed even when the answer is "nothing here".
-   *   `0x4A`  when the object is an NPC this server keeps a shop for: the window and its rows. The
-   *           price of every row is the item's own `info/price` (`game/shops.ts`), never a guess.
    *
-   * An object id the field does not have, or an NPC without a shop, gets the `0x19` alone - there is
-   * no dialogue system yet, and inventing one is not this packet's business.
+   * Then one of three things, or nothing:
+   *
+   *   `0x4A`  the object is an NPC this server keeps a shop for: the window and its rows, priced
+   *           from the item's own `info/price` (`game/shops.ts`), never a guess.
+   *   `0x47`  the object is an NPC with no shop but with something to say: the first line of its
+   *           `info/speak` list as a `say` dialog (`game/dialogue.ts`), which the client answers
+   *           with `0x15` and this session then walks line by line.
+   *   nothing an object id the field does not have, an NPC with neither a shop nor lines, or a
+   *           click while another dialog is already open - a second `0x4A`/`0x47` makes the client
+   *           throw, so that click is answered with the release byte and a log line instead.
    */
   private handleObjectClick(
     session: FieldSession,
@@ -771,26 +804,115 @@ export class GameEntryServer {
       this.options.log?.(`game: object click ${objectId} is not an NPC of this field - released only`);
       return;
     }
-    const shop = this.options.shops?.shopOfNpc(npc.templateId);
-    if (shop === undefined) {
-      this.options.log?.(
-        `game: NPC ${objectId} (template ${npc.templateId}) has no shop in this server's table - released only`,
-      );
-      return;
-    }
+    // A second 0x4A or 0x47 while a dialog is up is a `CDisconnectException` on the client, so a
+    // click that arrives anyway is answered with the release byte and nothing else.
     if (session.shop !== undefined) {
-      // A second 0x4A while a dialog is already open is a `CDisconnectException` on the client.
       this.options.log?.(
-        `game: NPC ${objectId} clicked while shop ${session.shop.shopId} is open - not re-sending 0x4A`,
+        `game: NPC ${objectId} clicked while shop ${session.shop.shopId} is open - nothing else sent`,
       );
       return;
     }
-    const items = this.options.shops?.linesOf(shop) ?? [];
-    session.shop = shop;
-    write(encodeShopOpen({ shopId: shop.shopId, items }));
+    if (session.talk !== undefined) {
+      this.options.log?.(
+        `game: NPC ${objectId} clicked while NPC ${session.talk.npcId} is still talking - nothing else sent`,
+      );
+      return;
+    }
+    const shop = this.options.shops?.shopOfNpc(npc.templateId);
+    if (shop !== undefined) {
+      const items = this.options.shops?.linesOf(shop) ?? [];
+      session.shop = shop;
+      write(encodeShopOpen({ shopId: shop.shopId, items }));
+      this.options.log?.(
+        `game: opened shop ${shop.shopId} for NPC ${objectId} (template ${npc.templateId}) with ${items.length} row(s)`,
+      );
+      return;
+    }
+    this.talkTo(session, write, objectId, npc.templateId);
+  }
+
+  /**
+   * Start a conversation with an NPC that keeps no shop: `0x47` with the first of its own lines.
+   *
+   * The words are the archive's (`Npc/<id>.img -> info/speak`); this server contributes nothing but
+   * the walking order. An NPC whose image has no `speak` list - `메이플운수 중형택시` is one in the
+   * shipped data - simply has nothing to say, and a click on it stays at the release byte.
+   */
+  private talkTo(
+    session: FieldSession,
+    write: (packet: Uint8Array) => void,
+    npcId: number,
+    templateId: number,
+  ): void {
+    const dialogue = this.options.npcDialogue?.(templateId);
+    if (dialogue === undefined) {
+      this.options.log?.(
+        `game: NPC ${npcId} (template ${templateId}) has no template to talk from - released only`,
+      );
+      return;
+    }
+    if (dialogue.lines.length === 0) {
+      this.options.log?.(
+        `game: NPC ${npcId} (template ${templateId}, "${dialogue.name}") has no info/speak lines - released only`,
+      );
+      return;
+    }
+    const talk = new NpcTalk(npcId, templateId, dialogue.lines);
+    session.talk = talk;
+    write(talk.packet());
     this.options.log?.(
-      `game: opened shop ${shop.shopId} for NPC ${objectId} (template ${npc.templateId}) with ${items.length} row(s)`,
+      `game: NPC ${npcId} ("${dialogue.name}") says line 1/${talk.lineCount}: "${dialogue.lines[0]}"`,
     );
+  }
+
+  /**
+   * One answer from the NPC dialog (`0x15`) - the other half of `talkTo`.
+   *
+   * The client runs its dialog modally inside the `0x47` handler, so a conversation is strict
+   * turn-taking: the primary answer walks to the next line, anything else (the second button, ESC,
+   * a closed window) ends it and the server says nothing more. The last line's primary answer ends
+   * it too - there is no line after it, which is exactly the client's own "the dialog is gone".
+   *
+   * A reply for a dialog this server never opened is logged and dropped: only the `say` shape is
+   * sent (sub-op 0), so a text/number answer here would mean the client's state and ours disagree.
+   */
+  private handleQuestReply(
+    session: FieldSession,
+    socket: net.Socket,
+    sendState: CipherState,
+    plain: Uint8Array,
+  ): void {
+    let reply: QuestReply;
+    try {
+      reply = readQuestReply(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x15 reply unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const talk = session.talk;
+    if (talk === undefined) {
+      this.options.log?.(`game: ${describeQuestReply(reply)} without a dialog open - dropped`);
+      return;
+    }
+    const stopped = `game: NPC ${talk.npcId} (template ${talk.templateId}) conversation ended (${describeQuestReply(reply)})`;
+    if (reply.kind !== "say") {
+      session.talk = undefined;
+      this.options.log?.(`${stopped}: this server only opens say dialogs`);
+      return;
+    }
+    if (reply.answer !== QUEST_ANSWER.primary) {
+      session.talk = undefined;
+      this.options.log?.(stopped);
+      return;
+    }
+    const next = talk.advance();
+    if (next === undefined) {
+      session.talk = undefined;
+      this.options.log?.(`${stopped}: the last line was read`);
+      return;
+    }
+    socket.write(encodeSessionPacket(next, sendState, "s2c"));
+    this.options.log?.(`game: NPC ${talk.npcId} says line ${talk.lineIndex + 1}/${talk.lineCount}`);
   }
 
   /**
@@ -1114,6 +1236,11 @@ export class GameEntryServer {
         // The shop window's buttons.
         if (session !== undefined && opcode === CLIENT_SHOP_OPCODE) {
           this.handleShopRequest(session, socket, sendState, event.plain);
+          continue;
+        }
+        // The NPC dialog's answer: the other half of the 0x47 the click sent.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.questReply) {
+          this.handleQuestReply(session, socket, sendState, event.plain);
           continue;
         }
         this.options.log?.(

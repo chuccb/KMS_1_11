@@ -21,6 +21,7 @@ import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
+import * as quest from "./quest.ts";
 import * as shop from "./shop.ts";
 import * as stat from "./stat.ts";
 import * as packet from "./packet.ts";
@@ -878,6 +879,44 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "objectId", type: "u32", note: "the field object's runtime id - for an NPC the id 0x39 gave it" },
     ],
   },
+  {
+    opcode: quest.QUEST_TALK_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "questTalk",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.23 (sub_4A5910, the CQuestMan branch of sub_472770; 0x46/0x48 have none)",
+    codecs: ["encodeQuestTalk", "readQuestTalk", "describeQuestTalk"],
+    fields: [
+      { name: "unknownA", type: "u8", note: "the packet opens with it; read by the client and never used again" },
+      { name: "npcId", type: "u32", note: "ignored by the client just like unknownA; this server puts the NPC's pool id here" },
+      { name: "subOp", type: "u8", note: "0 say, 1 confirm, 2 askText, 3 askNumber, 4 kind 4; >4 is dropped" },
+      { name: "message", type: "string", note: "every sub-op; CP949 bytes behind a u16 length" },
+      { name: "unknownA", type: "u8", note: "sub-op 0 only, stored by sub_535C60; meaning not decoded" },
+      { name: "unknownB", type: "u8", note: "sub-op 0 only, stored by sub_535C60; meaning not decoded" },
+      { name: "defaultText", type: "string", note: "sub-op 2 only: the edit box's initial text" },
+      { name: "minLength", type: "s16", note: "sub-op 2 only, with maxLength; the client's own caller passes (4, 12)" },
+      { name: "maxLength", type: "s16", note: "sub-op 2 only" },
+      { name: "defaultValue", type: "u32", note: "sub-op 3 only: the edit box's initial value, shown as %d" },
+      { name: "min", type: "u32", note: "sub-op 3 only, with max; the client's own mesos dialog passes (1, 1, mesos)" },
+      { name: "max", type: "u32", note: "sub-op 3 only" },
+    ],
+  },
+  {
+    opcode: quest.QUEST_REPLY_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "questReply",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.23 (the five sub_4A5A80..sub_4A65C0 senders, all with sub_4A1EA0(&buf, 21, 0))",
+    codecs: ["encodeQuestReply", "readQuestReply", "describeQuestReply"],
+    fields: [
+      { name: "subOp", type: "u8", note: "the sub-op the dialog was opened with, echoed back" },
+      { name: "answer", type: "u8", note: "1 primary button/Enter, 0 the other button, 0xff closed without an answer" },
+      { name: "text", type: "string", note: "sub-op 2 with answer 1: what the player typed" },
+      { name: "value", type: "u32", note: "sub-op 3/4 with answer 1: the entered number / the chosen entry" },
+    ],
+  },
 ];
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
@@ -891,6 +930,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   movepath,
   npc,
   packet,
+  quest,
   replies,
   shop,
   stat,

@@ -51,6 +51,12 @@ import {
   readShopOpen,
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
+import {
+  QUEST_REPLY_OPCODE,
+  QUEST_TALK_OPCODE,
+  encodeQuestReply,
+  readQuestTalk,
+} from "../src/protocol/quest.ts";
 import { WzArchive } from "../src/wz/archive.ts";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -940,5 +946,97 @@ test("clicking an NPC opens its shop, and buying moves the item and the mesos", 
   });
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.deepEqual(await client.take(0), [], "a close is not answered");
+  client.close();
+});
+
+test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by line", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const lines = ["one", "two", "three"];
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
+    npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
+    // The words are the archive's in production; a stub keeps this test archive-free.
+    npcDialogue: () => ({ templateId: 2003, name: "stub npc", lines }),
+    // No shops at all: the NPC has nothing to sell, so a click is a conversation.
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaa },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const client = await FakeClient.connect(gameInfo.port);
+  const characterId = handoffs.issue({ username: "admin", characterId: 31, characterName: "Talker" });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+  await client.take(4); // 0x16 + the two mobs + the NPC
+
+  // The click: release byte first, then the first line. The NPC pool gave it id 1.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_OBJECT_CLICK_OPCODE,
+    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+  });
+  const opened = await client.take(2);
+  assert.equal(opened[0]![0], FIELD_OPCODE.requestRelease, "0x19 comes first: a click arms the client's gate");
+  assert.equal(opened[1]![0], QUEST_TALK_OPCODE);
+  const first = readQuestTalk(new PacketReader(opened[1]!, 1));
+  assert.deepEqual(first, {
+    unknownA: 0,
+    npcId: 1,
+    body: { kind: "say", message: "one", unknownA: 0, unknownB: 0 },
+    }, "the pool id the client clicked, not the template id");
+  assert.equal(client.headersOk, true);
+
+  // A click while the dialog is up is refused: the client would throw on a second 0x47.
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_OBJECT_CLICK_OPCODE,
+    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+  });
+  const refused = await client.take(1);
+  assert.deepEqual([refused[0]![0]], [FIELD_OPCODE.requestRelease], "the release byte, and no second dialog");
+  assert.ok(log.some((line) => line.includes("still talking")), log.join("\n"));
+
+  // The primary answer walks to the next line; the second button ends the conversation.
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
+  const second = await client.take(1);
+  assert.equal(second[0]![0], QUEST_TALK_OPCODE);
+  assert.equal(readQuestTalk(new PacketReader(second[0]!, 1)).body.message, "two");
+
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
+  const third = await client.take(1);
+  assert.equal(readQuestTalk(new PacketReader(third[0]!, 1)).body.message, "three");
+
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(await client.take(0), [], "the last line's answer ends the talk: nothing follows");
+  assert.ok(log.some((line) => line.includes("the last line was read")), log.join("\n"));
+
+  // A reply with no dialog open is dropped, and a new click starts a fresh conversation.
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(await client.take(0), [], "an answer with no dialog is not answered");
+  assert.ok(log.some((line) => line.includes("without a dialog open")), log.join("\n"));
+
+  client.send({
+    kind: "unknown",
+    opcode: CLIENT_OBJECT_CLICK_OPCODE,
+    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+  });
+  const again = await client.take(2);
+  assert.equal(again[1]![0], QUEST_TALK_OPCODE);
+  assert.equal(readQuestTalk(new PacketReader(again[1]!, 1)).body.message, "one", "a new talk starts at the first line");
+
+  // The second button (answer 0) closes it without another packet.
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 0 }).slice(1) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(await client.take(0), [], "the secondary button ends the talk");
+  assert.ok(log.some((line) => line.includes("conversation ended")), log.join("\n"));
   client.close();
 });

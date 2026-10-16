@@ -43,6 +43,16 @@ import {
 } from "./drop.ts";
 import { INVENTORY_OPCODE, describeInventoryChange, readInventoryChange } from "./inventory.ts";
 import { STAT_OPCODE, describeStatUpdate, readStatUpdate } from "./stat.ts";
+// The NPC dialog (`0x47` server -> client, `0x15` back): `sub_4A58F0`, the third object of the
+// field's dispatch chain, next to the shop one.
+import {
+  QUEST_REPLY_OPCODE,
+  QUEST_TALK_OPCODE,
+  describeQuestReply,
+  describeQuestTalk,
+  readQuestReply,
+  readQuestTalk,
+} from "./quest.ts";
 // The NPC shop (`0x4A`/`0x4B` server -> client, `0x16`/`0x33` client -> server): dispatched by
 // `sub_4B73A0` / `sub_55AF20`, i.e. next to the field pool that carries them.
 import {
@@ -139,6 +149,12 @@ export const FIELD_OPCODE = {
    * "Effect/BasicEff.img/LevelUp" with the "LevelUp" sound, i.e. the level-up packet.
    */
   userLevelUpEffect: 0x29,
+  /**
+   * `CQuestMan` 0x47 (`sub_4A58F0` -> `sub_4A5910`): the NPC dialog. `0x46` and `0x48` are routed
+   * to the same object and have no branch, so `0x47` is the only opcode of the three that reads
+   * anything - `protocol/quest.ts` has the whole body (FINDINGS 4.23).
+   */
+  questTalk: QUEST_TALK_OPCODE,
 } as const;
 
 /**
@@ -355,6 +371,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_OBJECT_CLICK_OPCODE) {
       return describeClientObjectClick(readClientObjectClick(new PacketReader(plain, 1)));
     }
+    if (opcode === CLIENT_FIELD_OPCODE.questReply) {
+      return describeQuestReply(readQuestReply(new PacketReader(plain, 1)));
+    }
     if (opcode === CLIENT_FIELD_OPCODE.mobAttack) {
       const attack = readClientMobAttack(new PacketReader(plain, 1));
       const action =
@@ -508,6 +527,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  if (opcode === QUEST_TALK_OPCODE) {
+    try {
+      return `${name}: ${describeQuestTalk(readQuestTalk(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (opcode === NPC_OPCODE.enterField) {
     // No length guard: a 5-byte packet is either the refresh form or a cut-short body, and the
     // reader's own exception is what tells the two apart, so the catch reports it.
@@ -571,7 +597,8 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === DROP_OPCODE.appear) return "0x43 CRewardPool(drop appear)";
   if (opcode === DROP_OPCODE.remove) return "0x44 CRewardPool(drop gone)";
   if (opcode === 0x42 || opcode === 0x45) return `0x${opcode.toString(16)} CRewardPool(no handler)`;
-  if (opcode >= 0x46 && opcode <= 0x48) return `0x${opcode.toString(16)} CQuestMan`;
+  if (opcode === 0x47) return "0x47 CQuestMan(npc dialog)";
+  if (opcode === 0x46 || opcode === 0x48) return `0x${opcode.toString(16)} CQuestMan(no handler)`;
   if (opcode === SHOP_OPEN_OPCODE) return "0x4a CShopDlg(open)";
   if (opcode === SHOP_RESULT_OPCODE) return "0x4b CShopDlg(result)";
   if (opcode === 0x49 || opcode === 0x4c) return `0x${opcode.toString(16)} field dialogs(no handler)`;
@@ -617,6 +644,13 @@ export const CLIENT_FIELD_OPCODE = {
    * other direction, like `0x0D`/`0x0B`.
    */
   shop: CLIENT_SHOP_OPCODE,
+  /**
+   * The NPC dialog's answer (`protocol/quest.ts`): `[0x15][u8 sub-op][u8 answer]` plus, for the
+   * sub-ops that carry one, the text or the number. Sent by the five CQuestMan dialogs
+   * (`sub_4A5A80`..`sub_4A65C0`) with `sub_4A1EA0(&buf, 21, 0)`, i.e. the same opcode number the
+   * server uses for a *different* packet in the other direction (FINDINGS 4.6 / 4.23).
+   */
+  questReply: QUEST_REPLY_OPCODE,
   /**
    * The melee swing (`sub_512F90`):
    *

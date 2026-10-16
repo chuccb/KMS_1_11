@@ -4,9 +4,10 @@
  * This is the `CNpcPool` range of the field (`0x38`..`0x41`), the same shape as `CMobPool`
  * (`protocol/mob.ts`): an object pool with a ZMap keyed by the object id, and the enter packet
  * carrying the template id *only for an id the pool does not have yet*, followed by the body that
- * places the NPC. All of it is **server -> client**: a v1.11 client can click a portal (`0x0D`,
- * FINDINGS 4.11.5) but there is no "talk to this NPC" request in its opcode space, so an NPC exists
- * because the server said so.
+ * places the NPC. All of it is **server -> client**: an NPC exists because the server said so.
+ * What the client can say about one is a *click* (`0x33`, `sub_55AF20`; the same packet the shop
+ * opens on, FINDINGS 4.22) - the click carries the pool id this file hands out, and the server then
+ * answers with a shop (`0x4A`) or a dialog (`0x47`, FINDINGS 4.23).
  *
  * EVIDENCE (MapleStory.exe.c)
  * ---------------------------

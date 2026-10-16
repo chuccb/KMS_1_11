@@ -17,6 +17,7 @@ import { WzArchive } from "./wz/archive.ts";
 import { mapDataProvider, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
 import { npcTemplateProvider } from "./game/npcs.ts";
+import { npcDialogueProvider } from "./game/dialogue.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -249,6 +250,7 @@ async function runServe(rest: string[]): Promise<number> {
   let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
   let mobTemplate: ReturnType<typeof mobTemplateProvider> | undefined;
   let npcTemplate: ReturnType<typeof npcTemplateProvider> | undefined;
+  let npcDialogue: ReturnType<typeof npcDialogueProvider> | undefined;
   let shops: ShopKeeper | undefined;
   const shopWarnings: string[] = [];
   if (dataPath !== undefined) {
@@ -257,6 +259,7 @@ async function runServe(rest: string[]): Promise<number> {
       mapProvider = mapDataProvider(archive);
       mobTemplate = mobTemplateProvider(archive);
       npcTemplate = npcTemplateProvider(archive);
+      npcDialogue = npcDialogueProvider(archive);
       shops = shopKeeper(archive);
       // A shop row without a price cannot be sent (the client prints it), so it is collected here
       // and reported once the logger exists.
@@ -304,6 +307,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
       ...(npcTemplate !== undefined ? { npcTemplate } : {}),
+      ...(npcDialogue !== undefined ? { npcDialogue } : {}),
       ...(shops !== undefined ? { shops } : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
       ...(mobRespawn !== undefined ? { mobRespawnMs: mobRespawn } : {}),
