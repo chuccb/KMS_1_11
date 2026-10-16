@@ -3,10 +3,13 @@
  *
  *   node server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--out trace.jsonl]
  *   node server/src/cli.ts decode trace.jsonl [--recv-seed <n>] [--send-seed <n>] [--json]
+ *   node server/src/cli.ts serve --port 8484 [--account user:pass] [--game-port 8485]
  *
  * `capture` runs the harness from ADR-004: point the original client (or the rewritten
  * one) at this port and it writes a JSONL trace of everything received.
  * `decode` replays that trace through the session cipher so the packets are readable.
+ * `serve` is the login server: it answers the decoded login chain (0x01/0x02/0x03/0x05/0x06),
+ * so a client can log in, pick a world and see the character-select screen.
  */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -17,6 +20,7 @@ import {
   type CaptureServerOptions,
 } from "./net/capture.ts";
 import { decodeTrace, formatDecoded, type TraceRecord } from "./net/decode.ts";
+import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "./net/loginserver.ts";
 
 const USAGE = `kms111-rebuild
 
@@ -24,6 +28,9 @@ usage:
   capture --port <n> [--mode session|framed|raw] [--handshake auto|off|<sendSeed>:<recvSeed>]
           [--handshake-body <hex>] [--host <addr>] [--out <file>] [--quiet]
   decode <trace.jsonl> [--c2s-seed <n>] [--s2c-seed <n>] [--json]
+  serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
+        [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>]
+        [--seed <n>] [--handshake-body <hex>] [--quiet]
 
 notes:
   capture --mode session (default) is the real client model: a 211-byte handshake opens the
@@ -44,6 +51,14 @@ notes:
   adopted automatically; otherwise pass --c2s-seed/--s2c-seed (the client's send/receive states).
   Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
+
+  serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9: it opens with the
+  211-byte handshake, answers 0x01 with the world list, 0x02 with up to three character slots and
+  0x03 with the game server address plus a token; 0x06/0x04 handle name checks, 0x05 creates a
+  character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
+  them) and created characters are stat-only, because the CharacterData item block is not decoded
+  yet. With --game-port it also opens the game-server listener, which claims the token and then
+  holds the connection: the in-game packets (0x15-0x52) are not decoded yet, so nothing is invented.
 `;
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
@@ -144,6 +159,83 @@ function clamp(text: string, max = 160): string {
   return text.length <= max ? text : `${text.slice(0, max)}...`;
 }
 
+/** Parses `--account user:pass,user2:pass2` into the in-memory account table. */
+function parseAccounts(value: string | boolean | undefined): Map<string, AccountRecord> {
+  const accounts = new Map<string, AccountRecord>();
+  if (typeof value !== "string") {
+    accounts.set("admin", { password: "admin", characters: [] });
+    return accounts;
+  }
+  for (const entry of value.split(",")) {
+    const [user, pass] = entry.split(":");
+    if (!user || !pass) {
+      process.stderr.write(`invalid --account entry "${entry}" (expected user:pass)\n`);
+      process.exit(1);
+    }
+    accounts.set(user, { password: pass, characters: [] });
+  }
+  return accounts;
+}
+
+async function runServe(rest: string[]): Promise<number> {
+  const args = parseArgs(rest);
+  const port = Number(args.port ?? 8484);
+  const gamePort = args["game-port"] === undefined ? undefined : Number(args["game-port"]);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    process.stderr.write(`invalid --port: ${String(args.port)}\n`);
+    return 1;
+  }
+  if (gamePort !== undefined && (!Number.isInteger(gamePort) || gamePort < 0 || gamePort > 65535)) {
+    process.stderr.write(`invalid --game-port: ${String(args["game-port"])}\n`);
+    return 1;
+  }
+  const host = typeof args.host === "string" ? args.host : "0.0.0.0";
+  const quiet = args.quiet === true;
+  const seed = parseSeed(args.seed);
+  const accounts = parseAccounts(args.account);
+  const worldNames = typeof args.world === "string" ? args.world.split(",") : ["Scania"];
+  const worlds = worldNames.map((name, index) => ({ name, unknownId: index }));
+  const gameIp = typeof args["game-ip"] === "string" ? args["game-ip"] : "127.0.0.1";
+  const handshakeBody =
+    typeof args["handshake-body"] === "string" ? fromHexArg(String(args["handshake-body"])) : undefined;
+
+  const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
+  const handshake = seed === undefined ? { body: handshakeBody } : { clientSendSeed: seed, clientRecvSeed: seed ^ 0x5f3759df, body: handshakeBody };
+  const handoffs = new HandoffRegistry();
+  const login = new LoginServer({
+    accounts,
+    worlds,
+    gameServer: { ip: gameIp, port: gamePort ?? 0 },
+    handoffs,
+    ...(handshake ? { handshake } : {}),
+    ...(log ? { log } : {}),
+  });
+  let game: GameEntryServer | undefined;
+  if (gamePort !== undefined) {
+    game = new GameEntryServer({ handoffs, ...(handshake ? { handshake } : {}), ...(log ? { log } : {}) });
+    const info = await game.listen(gamePort, host);
+    log?.(`game entry (stub) listening on ${info.host}:${info.port}`);
+  }
+  const info = await login.listen(port, host);
+  process.stdout.write(
+    `login server listening on ${info.host}:${info.port}\n` +
+      `  accounts: ${[...accounts.keys()].map((name) => `${name}:${accounts.get(name)?.password}`).join(", ")}\n` +
+      `  worlds:   ${worlds.map((world) => world.name).join(", ")}\n` +
+      (gamePort === undefined
+        ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
+        : `  game:     ${gameIp}:${gamePort} (token handoff only; in-game packets are not decoded yet)\n`) +
+      `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n`,
+  );
+  await new Promise<void>((resolve) => {
+    const stop = () => resolve();
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+  await login.close();
+  await game?.close();
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -151,6 +243,7 @@ async function main(argv: string[]): Promise<number> {
     return command ? 0 : 1;
   }
   if (command === "decode") return runDecode(rest);
+  if (command === "serve") return runServe(rest);
   if (command !== "capture") {
     process.stderr.write(`unknown command: ${command}\n\n${USAGE}`);
     return 1;

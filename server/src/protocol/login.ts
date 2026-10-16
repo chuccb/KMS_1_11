@@ -165,6 +165,11 @@ export function encodeClientPacket(packet: ClientPacket): Uint8Array {
       writer.writeAsciiString(packet.name);
       break;
     case "check-name":
+      if (packet.appearance.length !== CHECK_NAME_APPEARANCE_WORDS) {
+        throw new RangeError(
+          `the 0x06 request always carries ${CHECK_NAME_APPEARANCE_WORDS} appearance words, got ${packet.appearance.length}`,
+        );
+      }
       writer.writeAsciiString(packet.name);
       for (const word of packet.appearance) writer.writeU32(word);
       break;

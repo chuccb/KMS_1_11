@@ -13,7 +13,8 @@
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址+token、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
 | `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
-| `src/cli.ts` | ✅ `capture` / `decode` 子命令 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色為**記憶體**狀態；另含遊戲伺服器端的 token 交接（只驗 token，遊戲內封包未解）。 |
+| `src/cli.ts` | ✅ `capture` / `decode` / `serve` 子命令 |
 | 遊戲邏輯（CField、移動、戰鬥…）| ❌ **尚未實作**；登入鏈以外的封包一律不猜（`decode` 仍會原封不動記錄它們） |
 
 ## 登入鏈（已解，`docs/protocol/FINDINGS.md` §4.7–§4.9）
@@ -90,7 +91,18 @@ node server/src/cli.ts help      # 用法
 node server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--handshake auto|off|S:R]
                               [--handshake-body <hex>] [--out trace.jsonl] [--quiet]
 node server/src/cli.ts decode trace.jsonl [--c2s-seed <n>] [--s2c-seed <n>] [--json]
+
+# 登入伺服器：把原 client（或重寫的 client）導到這個 port，就能走到選角畫面
+node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
+     --world Scania[,Bera] --game-ip 127.0.0.1
 ```
+
+`serve` 的行為：記憶體帳號（`--account user:pass,...`）、`--game-port` 會同時開遊戲伺服器端
+（只領取 token 並記錄「哪個角色到了」，因為遊戲內封包還沒解），角色建立後外觀取自**帳號第一個角色**
+或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們對應到 `CharacterData` 哪幾個欄位尚未證實）。
+
+`serve` 的已知限制（誠實聲明）：沒有持久化（重啟即忘）、沒有遊戲內階段、
+建立的角色的道具欄是空的（`CharacterData` 的 `flags = 1`，client 接受）。
 
 `capture` 的模式：
 

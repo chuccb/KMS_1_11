@@ -406,6 +406,11 @@ if (flags & 2) <30 個裝備格 + 4 個道具欄 …>    // 🟡 尚未逐欄解
 
 ## 7. 擷取工作流（ADR-004）
 
+> ✅ 除了被動擷取，現在也可以**主動走完登入鏈**：
+> `node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin`
+> （實作 §4.8；原 client 導向該 port 即可走到選角畫面。遊戲內階段尚未實作，因此進地圖後會停在
+> `GameEntryServer` 的 token 記錄上。）
+
 ```bash
 # 1. 接住原 client。session 模式會「先送」211-byte 握手（種子由我們選、寫進 trace），
 #    再即時解密 client 回送的封包。

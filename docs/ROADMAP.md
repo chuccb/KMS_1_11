@@ -15,6 +15,7 @@
 | 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
 | **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
 | 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
+| 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）；**待原 client 實機驗證** |
 | oracle 重現 | ⬜ | 原 client 能連上我們的 listener 並完成握手（不 crash） |
 
 **出口條件**：能回答「這個封包是什麼意思」，且每個答案都有 binary 或擷取證據。
