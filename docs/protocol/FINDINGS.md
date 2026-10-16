@@ -169,11 +169,66 @@ switch (opcode) {
 - ❌ `sub_43B6B0` 是 `ZRef<T>::operator=`（refcount），不是收包佇列的消費端。
 - ❌ `sub_449F30`（含 `jpt_449F68`、cases 112–123）是**UI 事件路由**，不是封包分派。
 
+### 4.4 封包欄位編碼（已解，寫／讀兩端都有證據）
+
+| 型別 | 線上格式 | 寫入端 | 讀取端 |
+|---|---|---|---|
+| byte | 1 byte 原樣 | `sub_4A1EA0(&buf, byte, 0)`（開包並塞入 opcode）或 `sub_431DE0(&buf, 1)` + 直接寫 | `sub_45DC40(&dst, ptr, avail)`（見下）|
+| u16 / u32 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, n)` 先保留 n bytes，呼叫端再直接寫入並自己把長度 +n | handler 內直接 `*(_DWORD*)(ptr + cursor)`（有邊界檢查，不足就丟 `ZException` code 38）|
+| 字串 | **`u16 長度` + 原始 bytes（無 NUL、無長度逃逸）** | `sub_430230(&buf, zstr)` → `sub_4303C0(dst, zstr)`：`*dst = len; memcpy(dst+1, data, len); return len + 2` | `sub_418610(&zstr, ptr, len)`（`len == -1` 時用 `strlen`）|
+
+傳送端 API（`sub_43AD50(buf)` 才是真正的送出）：
+
+```c
+sub_4A1EA0(&buf, OPCODE, 0);   // 建立送包緩衝，第一個 byte 就是 opcode
+sub_430230(&buf, zstr);        // 附加字串（u16 長度 + bytes）
+sub_431DE0(&buf, 4);           // 保留 4 bytes（u32），呼叫端自行寫入後把長度 +4
+sub_43AD50(this, &buf);        // 加標頭（0xD3 ^ HIWORD(sendState)）→ 加密 → 排入送出佇列
+sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；剩 0 bytes 時丟 ZException(38)；回傳消耗的 byte 數
+```
+
+> 讀取端的常見樣式是 `cursor += sub_45DC40(...)`（每次 1 byte），多 byte 欄位則直接記憶體存取；
+> 因此「handler 讀了幾個欄位、順序如何」就是該 opcode 的欄位定義。
+
+### 4.5 client → server opcode 目錄（抽取自 `sub_4A1EA0(&buf, N, 0)` 的所有呼叫點）
+
+共 **39 個** opcode 會被送出（同一 opcode 可能有多個呼叫點）。已解出欄位者：
+
+| opcode | 欄位 | 來源函式 / 類別 | 意義 |
+|---|---|---|---|
+| 0x01 | `u16 len id` + `u16 len pw` | `sub_4D0B20`（由 `sub_4D0000`/`CTitle` 呼叫）| **登入請求**（帳號、密碼）|
+| 0x02 | `u8 worldId` | `sub_54DFC0`（`CWorldSelect`）| **選世界** |
+| 0x04 | `u32 *(CWvsApp+0x14)` | `sub_43A410` | **握手回覆**（見 §2）|
+| 0x08 | `u32`（原封不動回傳）| `sub_43B280` | **echo/ping 回覆**（見 §4.2）|
+| 0x09 | `u32`（`*(this+300)`）| `sub_5545F0` | 世界伺服器相關請求 |
+| 0x0A | `u16 len str` + `u32`，送出後 `Sleep(300)×2` 並丟 `CTerminateException` | `sub_5545F0` | **要求遷移**：等伺服器切換連線（配合 §4.2 的 0x07）|
+| 0x0E | `u8 *(CStage+156)` | `sub_542C40`（`CVecCtrlUser`）| 意義未定（單 byte）|
+
+其餘 32 個（僅列 opcode 與 builder，欄位待解）：
+
+```
+0x03,0x06,0x07 → sub_431620（通用送包 helper，CUINewChar 呼叫）   0x05 → sub_42FD30（CUINewChar）
+0x0D → sub_472590                    0x0F..0x11 → sub_512F90/sub_513C80/sub_514D30
+0x12 → sub_470C70                    0x13,0x26 → sub_511E20 / sub_55C5E0 ...
+0x14 → sub_512700                    0x15 → sub_4A5A80/sub_4A5D00/sub_4A5F40/sub_4A6320/sub_4A65C0
+0x16 → sub_4B3C80/sub_4B6B40/sub_4B6E90/sub_4B7130   0x17..0x20 → sub_55ACB0..sub_55D7B0（登入階段區）
+0x22,0x27 → sub_470E10               0x23 → sub_4717D0 / sub_472910
+0x24 → sub_4DDFE0/sub_4DE280/sub_4DE490(CUIMessenger)/sub_4DEAF0/sub_4E24B0
+0x25 → sub_471A40/sub_481910/sub_4820E0/sub_4D31F0(CTradingRoomDlg)/sub_4D5C80/sub_4D5F50/sub_4D61F0
+0x26 → sub_471CD0/sub_471E90/sub_472050/sub_4722E0   0x2C → sub_4885D0
+0x2F → sub_49A3C0                    0x33 → sub_55AF20
+```
+
+> ⚠️ 兩方向的 opcode **沒有全域分區**（同一空間共用；例如 0x15/0x16/0x24–0x27 兩邊都出現）。
+> 但**登入階段**看起來是成對編號：client 送 `0x01/0x02/0x03/0x05/0x06/0x07/0x09/0x0A`，
+> 而 client 在該階段唯一會處理的是 `0x0B–0x13`（§4.2）。🟡 成對關係（哪個請求配哪個回應）**未證實**，
+> 必須靠真實伺服器或補丁過的 client 才會知道——不可當規格使用。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
-- 網路訊息中的字串編碼、長度前綴**尚未證實**（原 client 支援韓文 IME，字串很可能是長度前綴 + 位元組序列）→ `UNKNOWN`。
-  §6 待辦 2 的擷取會一併解出。
+- 網路訊息（封包）中的字串編碼**已解**：`u16 長度` + 原始 bytes，見 §4.4。
+  ⚠️ 注意與 WZ 檔內的字串編碼（位置遮罩）**完全不同**，不要混用。
 
 ## 6. 待辦（依重要性）
 
@@ -183,7 +238,9 @@ switch (opcode) {
 2. 逐區間解出欄位：先做 **0x0B–0x13（登入/選角）**——這是客戶端一連線就會走的路徑，且只有九個函式；
    再依 §4.1 的區間表往下做。每個 handler 讀取的欄位順序 = 該 opcode 的欄位定義。
 3. 由 §4.1／§4.2 的對照表產生 `protocol/schema/`（opcode 常數＋欄位），並用 `capture` 對照真實流量驗證。
-4. 反推字串編碼規則並補測試向量。
+4. 補測試向量：把 §4.4 的欄位編碼（byte / u16 / u32 / 字串）做成 `server/src/protocol/` 的
+   reader/writer 並加上單元測試——這是 schema 產生的前置工作。
+5. 逐 opcode 解欄位（§4.5 目錄 + §4.1 區間表）；每個 opcode 都以「handler 讀了哪些欄位」為準。
 5. `sub_43AFA0` 的 `-212` 檢查已解（= §3.1 的接收端標頭檢查），不再列為未知。
 
 ## 7. 擷取工作流（ADR-004）

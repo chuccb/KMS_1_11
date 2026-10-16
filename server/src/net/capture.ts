@@ -20,6 +20,7 @@
 import { createServer, type Server, type Socket } from "node:net";
 import { randomBytes } from "node:crypto";
 import { HeaderDeframer, U16LengthFramer, toHex } from "../protocol/frame.ts";
+import { describeClientPacket } from "../protocol/login.ts";
 import { CipherState, CLIENT_SEND_MAGIC } from "../protocol/cipher.ts";
 import {
   HANDSHAKE_BODY_BYTES,
@@ -59,6 +60,8 @@ export interface CaptureRecord {
   opcode?: number;
   /** decrypted body, lowercase hex (session mode only) */
   plainHex?: string;
+  /** decoded meaning of a decrypted client packet, when it is one we have mapped */
+  decoded?: string;
   /** true when the wire header matched 0xD3 ^ HIWORD(cipher state) */
   headerOk?: boolean;
   /** cipher seeds adopted from the handshake, lowercase hex without 0x */
@@ -208,6 +211,7 @@ export class CaptureServer {
               bodyLength: event.body.length,
               opcode: event.opcode,
               plainHex: toHex(event.plain),
+              decoded: describeClientPacket(event.plain),
               headerOk: event.headerOk,
               note: event.headerOk ? undefined : `header mismatch: expected 0x${event.expectedHeader.toString(16)}`,
             });

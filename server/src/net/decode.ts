@@ -16,6 +16,7 @@
 import { CipherState, headerMagicOf, magicFor, type Direction } from "../protocol/cipher.ts";
 import { HANDSHAKE_BODY_BYTES, HANDSHAKE_TOTAL_BYTES, decodeHandshake } from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
+import { describeClientPacket } from "../protocol/login.ts";
 
 /** The subset of a capture record this module needs; `CaptureRecord` satisfies it. */
 export interface TraceRecord {
@@ -53,6 +54,8 @@ export interface DecodedPacket {
   bodyHex: string;
   /** raw (still encrypted) bytes, for evidence dumps */
   rawHex: string;
+  /** decoded meaning when the opcode is mapped (client packets only) */
+  decoded?: string;
   note?: string;
 }
 
@@ -153,12 +156,14 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
     // The magic is direction-tied: the client writes 0xD3 and verifies 0xFF2C (cipher.ts).
     const expectedHeader = state.headerMagic(magicFor(record.dir));
     const plain = state.decrypt(raw.slice(4));
+    const decoded = record.dir === "c2s" ? describeClientPacket(plain) : undefined;
     packets.push({
       ...base,
       expectedHeader,
       headerOk: base.header === expectedHeader,
       opcode: plain.length > 0 ? plain[0] : undefined,
       bodyHex: toHex(plain),
+      ...(decoded ? { decoded } : {}),
     });
   }
 
@@ -183,6 +188,7 @@ export function formatDecoded(packets: DecodedPacket[]): string {
     lines.push(
       `conn=${packet.conn} ${packet.dir} len=${String(packet.len).padStart(5)} body=${String(packet.bodyLength).padStart(5)}${op}${check}`,
     );
+    if (packet.decoded) lines.push(`    -> ${packet.decoded}`);
     if (packet.bodyHex) lines.push(`    ${packet.bodyHex.slice(0, 240)}${packet.bodyHex.length > 240 ? "..." : ""}`);
     if (packet.note) lines.push(`    // ${packet.note}`);
   }
