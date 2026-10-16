@@ -19,3 +19,6 @@ generated/
 # local scratch
 *.tmp
 .DS_Store
+
+# capture traces (regenerate with server/src/cli.ts capture)
+traces/

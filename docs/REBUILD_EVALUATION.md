@@ -294,28 +294,32 @@ docs/    evidence/ protocol/ architecture/
 
 ---
 
-## 7. 需要你拍板的三個決策（會影響後續所有工作）
+## 7. 決策（已定案 2026-10-16）
 
-### 決策 1：目標形態
-| 選項 | 影響 |
-|---|---|
-| **(a) 單機／離線可玩重製**（本地 server in-process） | 最快看到成果；協定可以先用「合理設計」；但 2003 的線上行為（多人同步/頻道/交易）無法驗證 |
-| **(b) 完整 MMO（自建 server + 帳號 + DB）** | 最忠實；但協定 RE 與後端工作量最大，且沒有原始 server 可對照 |
-| (c) 研究／保存（以 oracle 重現行為與資料，不求可玩） | 學術/保存價值最高，但不產生遊戲 |
+三項決策已由使用者確認，完整 ADR 見 **`docs/DECISIONS.md`**：
 
-> 我的建議：**(a) 先做，架構保留 (b)**——把 server 寫成獨立行程、用同一份 core 協定庫，一開始只跑 localhost。這樣 (a)→(b) 不需要重構。
+| # | 決策 | 結果 |
+|---|---|---|
+| 1 | 目標形態 | **完整 MMO**（自建 login / world / channel / game + 持久化）→ ADR-001 |
+| 2 | 技術棧 | 使用者表示「都行」→ 本評估擇定 **schema-first 協定 + TypeScript 核心/server + Godot 4.x（GDScript）client** → ADR-002 |
+| 3 | 平台 | **盡可能跨平台**：Windows / macOS / Linux → Web → Android / iOS → ADR-003 |
 
-### 決策 2：技術棧
-| 選項 | 說明 |
-|---|---|
-| **(a) 建議：Godot 4.x（stable）+ C#，核心為引擎無關 .NET 類別庫** | 維護性/可測試性/可替換性最佳 |
-| (b) Godot + 純 GDScript（依現有 prompt） | 迭代最快、最簡單起步；但核心邏輯與協定會綁死在引擎內 |
-| (c) 其他（Unity / Web-TS / Bevy-Rust / 自研 C++） | 見 §5 評分 |
+### 為什麼不是 C#（雖然它是原始建議之一）
 
-### 決策 3：平台優先序
-- Windows 桌面優先？（原 client 的世界）
-- 要不要 **瀏覽器版**？（若是，GDScript 路線或「core 編 WASM + Web 前端」會比 Godot C# 更順）
-- 手機（Android/iOS）是否在計畫內？（影響 UI 縮放與輸入架構）
+實測與查證後改變了判斷，原因是**跨平台**這一項：
+
+- **Godot 4 的 C# 專案目前仍無法 export 到 Web**（官方文件明載；GDScript 可以）→ 若用 C#，瀏覽器版就等於放棄。
+- 本沙箱**沒有 .NET 且無法安裝**（dot.net / nuget.org 不在允許來源）→ C# 無法在這裡編譯測試。
+- TS + Node 22 可**零依賴**執行（原生 type stripping、內建 `node --test`）→ 全部邏輯都能在 CI 與沙箱內驗證。
+
+**但這個選擇不是單向門**：因為協定由 **schema 產生**，日後若確定放棄 Web、想改用 C# client，
+只需換掉 client 的 binding 與 Godot 專案，核心與 server 不動。
+
+### 這三項決策直接帶來的架構要求
+
+1. 協定必須有 schema 與 golden 測試向量（client/server 不可能各寫一份）。
+2. **先做 oracle**：原 client 必須能被我們「接住並解析」→ 已建立 `server/` 的 capture harness（ADR-004）。
+3. client 不得承擔權威邏輯；數值與規則以 server 為準。
 
 ### 7.5 開發環境限制（本沙箱實測，會影響語言選擇）
 
