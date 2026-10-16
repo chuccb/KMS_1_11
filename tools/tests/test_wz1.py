@@ -13,6 +13,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
 import wz1  # noqa: E402
+import wzdata  # noqa: E402
 
 DATA_WZ = os.path.join(REPO, "Data.wz")
 
@@ -120,13 +121,16 @@ class DataWzTest(unittest.TestCase):
         self.assertEqual(len(self.images), EXPECTED_IMAGE_COUNT)
         self.assertEqual(sum(e.size for e in self.images), EXPECTED_IMAGE_BYTES)
 
-    def test_image_offsets_are_contiguous_and_inside_the_file(self):
+    def test_declared_offsets_leave_exactly_the_unlisted_objects_unaccounted(self):
+        # Images start at tree_end and follow each other in tree order, so the
+        # cumulative offsets are a *hint*.  They are short by the objects in the
+        # tail of the archive that no directory entry points at: 172,999 bytes
+        # in 4 objects (WZ1_FORMAT.md §4.2, measured by tools/wzdata.py).
         cursor = self.wz._data_start
-        file_size = os.path.getsize(DATA_WZ)
         for image in self.images:
             self.assertEqual(image.data_offset, cursor, f"{image.path} offset drifted")
             cursor += image.size
-        self.assertEqual(cursor, file_size, "images must fill the file exactly")
+        self.assertEqual(os.path.getsize(DATA_WZ) - cursor, 172_999)
 
     def test_subtree_sizes_match_leaf_sums(self):
         for name, declared in SUBTREE_EXACT.items():
@@ -157,11 +161,17 @@ class DataWzTest(unittest.TestCase):
         self.assertTrue({"darkCave.img", "darkWood.img", "dryRock.img", "grassySoil.img"} <= back)
         self.assertTrue({"darkCave.img", "darkWood.img", "dryRock.img", "grassySoil.img"} <= tile)
 
-    def test_image_blob_peek(self):
+    def test_a_tail_image_needs_the_resolver_not_the_directory_offset(self):
+        # Mob/0100100.img sits behind the unlisted objects, so the offset the
+        # directory implies does not hold it.  tools/wzdata.py verifies each
+        # blob by parsing it and falls back to scanning (WZ1_FORMAT.md §4.6).
         entry = self.wz.find("Mob/0100100.img")
-        blob = self.wz.read_image_blob(entry)
+        wz = wzdata.DataWz(DATA_WZ)
+        resolved = {r.path: r for r in wz.resolve()}["Mob/0100100.img"]
+        self.assertEqual(resolved.source, "scanned")
+        blob = wz.blob("Mob/0100100.img")
         self.assertEqual(len(blob), entry.size)
-        # image header variant A: 0x73 + "Property" (docs/WZ1_FORMAT.md 4.5)
+        # image header variant A: 0x73 + "Property" (docs/WZ1_FORMAT.md §4.5)
         self.assertEqual(blob[0], 0x73)
         name_len = 256 - blob[1]
         self.assertEqual(

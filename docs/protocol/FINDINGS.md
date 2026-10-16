@@ -1019,4 +1019,6 @@ node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 | `tools/hexfunc.py <dump.c> <name> [--list\|--calls\|--globals]` | 從反編譯輸出抽出單一函式（或其呼叫／全域引用），是這一整份文件的證據來源 |
 | `tools/kstr.py <dump.c> <function> [--list\|--names]` | 把函式引用的字串以 **CP949** 解出來。`.c` 直接 `grep` 會看到亂碼，而 2003 年的 client 只有這些字串能替函式命名（§4.13）|
 | `server/src/protocol/random.ts` | 客戶端自訂亂數產生器的逐位元移植（種子遮罩 `sub_48A900`／步進 `sub_4619F0`）；golden 序列在 `server/test/random.test.ts`，伺服器用它重算客戶端回報的傷害（§4.11.2）|
+| `tools/wzimg.py` | `.img` 值層編解碼器：物件語法、名稱表、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、zlib 像素解碼。全檔 1,052 張 image 逐 byte 驗證（規格見 `docs/WZ1_FORMAT.md` §4） |
+| `tools/wzdata.py <Data.wz> [--census\|--manifest STEM\|--maps OUT\|--dump PATH]` | 讀 `Data.wz` 的**唯一支援入口**：解析樹、驗證／掃描定位每張 image、統計 canvas 與像素、輸出 manifest／地圖 metadata／單張屬性樹 |
 | `server/src/wz/paths.ts` | 客戶端自己的 WZ 路徑（`Map/Map/%09d.img` ＝ `mapImagePath`、`foothold`／`ladderRope`／`portal`、`MapHelper.img`）；地圖載入器的函式表在 §4.11.2b，golden 測試在 `server/test/paths.test.ts` |

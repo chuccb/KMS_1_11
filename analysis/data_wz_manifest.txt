@@ -1,1101 +1,1055 @@
-Data.wz (MapleStory KMS 1.11 beta, exe 2003-04-27)
-wz version field: 95   description: Package file v1.0 Copyright 2002 Wizet, ZMS
-tree: 31 blocks / 30 dirs / 1052 images  ; image bytes = 86,967,311
-
-subtree     images          bytes
-Map            142     40,355,273
-Sound           10     26,690,928
-Character      765     16,864,260
-UI               8      1,248,011
-Mob             28        521,226
-Npc             70        495,633
-Effect           2        299,381
-Skill            7        292,831
-Item            14        182,228
-Etc              4         13,803
-smap.img         1          2,039
-zmap.img         1          1,698
-
-per-directory image counts:
-                                         2
-  Character                              2
-  Character/Accessory                   13
-  Character/Afterimage                  10
-  Character/Cap                        143
-  Character/Clothes                    304
-  Character/Face                        11
-  Character/Glove                       32
-  Character/Hair                        91
-  Character/Shield                      18
-  Character/Shoes                       38
-  Character/Weapon                     103
-  Effect                                 2
-  Etc                                    4
-  Item/Book                              1
-  Item/Consume                           8
-  Item/Etc                               4
-  Item/Special                           1
-  Map                                    1
-  Map/Back                              11
-  Map/Map                              100
-  Map/Obj                               21
-  Map/Tile                               9
-  Mob                                   28
-  Npc                                   70
-  Skill                                  7
-  Sound                                 10
-  UI                                     8
-
-full image list (path, size, file offset):
-  smap.img                                          2,039  @0x00031935
-  zmap.img                                          1,698  @0x0003212c
-  Character/00002000.img                           68,179  @0x000327ce
-  Character/00012000.img                            5,559  @0x00043221
-  Character/Accessory/01010000.img                  2,901  @0x000447d8
-  Character/Accessory/01010001.img                  2,259  @0x0004532d
-  Character/Accessory/01012000.img                  1,782  @0x00045c00
-  Character/Accessory/01012001.img                  1,578  @0x000462f6
-  Character/Accessory/01012002.img                  2,608  @0x00046920
-  Character/Accessory/01022000.img                  4,989  @0x00047350
-  Character/Accessory/01022001.img                  5,006  @0x000486cd
-  Character/Accessory/01022002.img                  4,986  @0x00049a5b
-  Character/Accessory/01022003.img                  4,999  @0x0004add5
-  Character/Accessory/01022004.img                  6,960  @0x0004c15c
-  Character/Accessory/01032000.img                  5,271  @0x0004dc8c
-  Character/Accessory/01032001.img                  5,268  @0x0004f123
-  Character/Accessory/01032002.img                  5,363  @0x000505b7
-  Character/Afterimage/axe.img                    196,287  @0x00051aaa
-  Character/Afterimage/crossBow.img                62,814  @0x00081969
-  Character/Afterimage/hit.img                      8,034  @0x00090ec7
-  Character/Afterimage/mace.img                   157,451  @0x00092e29
-  Character/Afterimage/poleArm.img                253,036  @0x000b9534
-  Character/Afterimage/spear.img                  253,036  @0x000f71a0
-  Character/Afterimage/swordOL.img                164,033  @0x00134e0c
-  Character/Afterimage/swordOS.img                126,137  @0x0015cecd
-  Character/Afterimage/swordTL.img                253,928  @0x0017bb86
-  Character/Afterimage/swordTS.img                165,804  @0x001b9b6e
-  Character/Cap/01000000.img                       10,290  @0x001e231a
-  Character/Cap/01001000.img                       10,497  @0x001e4b4c
-  Character/Cap/01002000.img                        6,884  @0x001e744d
-  Character/Cap/01002001.img                        5,964  @0x001e8f31
-  Character/Cap/01002002.img                        7,784  @0x001ea67d
-  Character/Cap/01002003.img                        6,444  @0x001ec4e5
-  Character/Cap/01002004.img                        7,524  @0x001ede11
-  Character/Cap/01002005.img                        8,072  @0x001efb75
-  Character/Cap/01002006.img                        7,629  @0x001f1afd
-  Character/Cap/01002007.img                        7,257  @0x001f38ca
-  Character/Cap/01002008.img                        6,478  @0x001f5523
-  Character/Cap/01002009.img                        6,956  @0x001f6e71
-  Character/Cap/01002010.img                        6,975  @0x001f899d
-  Character/Cap/01002011.img                        8,074  @0x001fa4dc
-  Character/Cap/01002012.img                        5,904  @0x001fc466
-  Character/Cap/01002013.img                        5,706  @0x001fdb76
-  Character/Cap/01002014.img                        5,496  @0x001ff1c0
-  Character/Cap/01002015.img                        8,495  @0x00200738
-  Character/Cap/01002016.img                        7,441  @0x00202867
-  Character/Cap/01002017.img                        7,404  @0x00204578
-  Character/Cap/01002018.img                        6,360  @0x00206264
-  Character/Cap/01002019.img                        6,281  @0x00207b3c
-  Character/Cap/01002020.img                        6,343  @0x002093c5
-  Character/Cap/01002021.img                        6,713  @0x0020ac8c
-  Character/Cap/01002022.img                        7,595  @0x0020c6c5
-  Character/Cap/01002023.img                        8,277  @0x0020e470
-  Character/Cap/01002024.img                       10,845  @0x002104c5
-  Character/Cap/01002025.img                        7,663  @0x00212f22
-  Character/Cap/01002026.img                        7,974  @0x00214d11
-  Character/Cap/01002027.img                        6,884  @0x00216c37
-  Character/Cap/01002028.img                        9,229  @0x0021871b
-  Character/Cap/01002029.img                       11,051  @0x0021ab28
-  Character/Cap/01002030.img                       10,447  @0x0021d653
-  Character/Cap/01002031.img                        7,488  @0x0021ff22
-  Character/Cap/01002032.img                        7,016  @0x00221c62
-  Character/Cap/01002033.img                        8,805  @0x002237ca
-  Character/Cap/01002034.img                        6,697  @0x00225a2f
-  Character/Cap/01002035.img                        6,699  @0x00227458
-  Character/Cap/01002036.img                        6,692  @0x00228e83
-  Character/Cap/01002037.img                        6,606  @0x0022a8a7
-  Character/Cap/01002038.img                        6,705  @0x0022c275
-  Character/Cap/01002039.img                        6,630  @0x0022dca6
-  Character/Cap/01002040.img                        6,636  @0x0022f68c
-  Character/Cap/01002041.img                        5,966  @0x00231078
-  Character/Cap/01002042.img                        6,045  @0x002327c6
-  Character/Cap/01002043.img                        7,985  @0x00233f63
-  Character/Cap/01002044.img                        8,038  @0x00235e94
-  Character/Cap/01002045.img                        7,668  @0x00237dfa
-  Character/Cap/01002046.img                        7,587  @0x00239bee
-  Character/Cap/01002047.img                        7,462  @0x0023b991
-  Character/Cap/01002048.img                        7,501  @0x0023d6b7
-  Character/Cap/01002049.img                        8,107  @0x0023f404
-  Character/Cap/01002050.img                        8,176  @0x002413af
-  Character/Cap/01002051.img                        7,355  @0x0024339f
-  Character/Cap/01002052.img                        7,395  @0x0024505a
-  Character/Cap/01002053.img                        6,440  @0x00246d3d
-  Character/Cap/01002054.img                        6,411  @0x00248665
-  Character/Cap/01002055.img                        7,039  @0x00249f70
-  Character/Cap/01002056.img                        7,150  @0x0024baef
-  Character/Cap/01002057.img                        7,084  @0x0024d6dd
-  Character/Cap/01002058.img                        8,054  @0x0024f289
-  Character/Cap/01002059.img                        7,913  @0x002511ff
-  Character/Cap/01002060.img                        5,918  @0x002530e8
-  Character/Cap/01002061.img                        6,007  @0x00254806
-  Character/Cap/01002062.img                        6,009  @0x00255f7d
-  Character/Cap/01002063.img                        5,980  @0x002576f6
-  Character/Cap/01002064.img                        5,629  @0x00258e52
-  Character/Cap/01002065.img                        5,553  @0x0025a44f
-  Character/Cap/01002066.img                        5,442  @0x0025ba00
-  Character/Cap/01002067.img                        5,572  @0x0025cf42
-  Character/Cap/01002068.img                        5,624  @0x0025e506
-  Character/Cap/01002069.img                        5,567  @0x0025fafe
-  Character/Cap/01002070.img                        8,537  @0x002610bd
-  Character/Cap/01002071.img                        8,529  @0x00263216
-  Character/Cap/01002072.img                        7,661  @0x00265367
-  Character/Cap/01002073.img                        7,497  @0x00267154
-  Character/Cap/01002074.img                        7,271  @0x00268e9d
-  Character/Cap/01002075.img                        7,279  @0x0026ab04
-  Character/Cap/01002076.img                        6,932  @0x0026c773
-  Character/Cap/01002077.img                        6,962  @0x0026e287
-  Character/Cap/01002078.img                        6,348  @0x0026fdb9
-  Character/Cap/01002079.img                        6,322  @0x00271685
-  Character/Cap/01002080.img                        6,014  @0x00272f37
-  Character/Cap/01002081.img                        6,150  @0x002746b5
-  Character/Cap/01002082.img                        6,411  @0x00275ebb
-  Character/Cap/01002083.img                        5,938  @0x002777c6
-  Character/Cap/01002084.img                       11,134  @0x00278ef8
-  Character/Cap/01002085.img                        9,862  @0x0027ba76
-  Character/Cap/01002086.img                        9,593  @0x0027e0fc
-  Character/Cap/01002087.img                        7,293  @0x00280675
-  Character/Cap/01002088.img                        7,256  @0x002822f2
-  Character/Cap/01002089.img                        7,745  @0x00283f4a
-  Character/Cap/01002090.img                        7,725  @0x00285d8b
-  Character/Cap/01002091.img                       10,580  @0x00287bb8
-  Character/Cap/01002092.img                        7,791  @0x0028a50c
-  Character/Cap/01002093.img                        7,709  @0x0028c37b
-  Character/Cap/01002094.img                       10,527  @0x0028e198
-  Character/Cap/01002095.img                       10,591  @0x00290ab7
-  Character/Cap/01002096.img                        6,391  @0x00293416
-  Character/Cap/01002097.img                        6,405  @0x00294d0d
-  Character/Cap/01002098.img                        7,018  @0x00296612
-  Character/Cap/01002099.img                        6,911  @0x0029817c
-  Character/Cap/01002100.img                        7,525  @0x00299c7b
-  Character/Cap/01002101.img                        7,492  @0x0029b9e0
-  Character/Cap/01002102.img                        6,518  @0x0029d724
-  Character/Cap/01002103.img                        6,532  @0x0029f09a
-  Character/Cap/01002104.img                        6,483  @0x002a0a1e
-  Character/Cap/01002105.img                        6,598  @0x002a2371
-  Character/Cap/01002106.img                        6,526  @0x002a3d37
-  Character/Cap/01002107.img                        6,232  @0x002a56b5
-  Character/Cap/01002108.img                        6,438  @0x002a6f0d
-  Character/Cap/01002109.img                        6,482  @0x002a8833
-  Character/Cap/01002110.img                        6,250  @0x002aa185
-  Character/Cap/01002111.img                        6,583  @0x002ab9ef
-  Character/Cap/01002112.img                        6,226  @0x002ad3a6
-  Character/Cap/01002113.img                        6,303  @0x002aebf8
-  Character/Cap/01002114.img                        6,313  @0x002b0497
-  Character/Cap/01002115.img                        6,273  @0x002b1d40
-  Character/Cap/01002116.img                        6,312  @0x002b35c1
-  Character/Cap/01002117.img                        6,578  @0x002b4e69
-  Character/Cap/01002118.img                        6,645  @0x002b681b
-  Character/Cap/01002119.img                        6,648  @0x002b8210
-  Character/Cap/01002120.img                        6,627  @0x002b9c08
-  Character/Cap/01002121.img                        6,641  @0x002bb5eb
-  Character/Cap/01002122.img                        5,915  @0x002bcfdc
-  Character/Cap/01002123.img                        5,974  @0x002be6f7
-  Character/Cap/01002124.img                        6,045  @0x002bfe4d
-  Character/Cap/01002125.img                        5,975  @0x002c15ea
-  Character/Cap/01002126.img                        6,010  @0x002c2d41
-  Character/Cap/01002127.img                        6,283  @0x002c44bb
-  Character/Cap/01002128.img                        6,411  @0x002c5d46
-  Character/Cap/01002129.img                        6,421  @0x002c7651
-  Character/Cap/01002130.img                        6,449  @0x002c8f66
-  Character/Cap/01002131.img                        6,433  @0x002ca897
-  Character/Cap/01002132.img                        5,892  @0x002cc1b8
-  Character/Cap/01002133.img                        5,876  @0x002cd8bc
-  Character/Cap/01002134.img                        5,863  @0x002cefb0
-  Character/Cap/01002135.img                        6,547  @0x002d0697
-  Character/Cap/01002136.img                        6,557  @0x002d202a
-  Character/Cap/01002137.img                        6,538  @0x002d39c7
-  Character/Cap/01002138.img                        6,474  @0x002d5351
-  Character/Cap/01002139.img                        6,454  @0x002d6c9b
-  Character/Cap/01002140.img                        6,058  @0x002d85d1
-  Character/Clothes/01040000.img                   48,746  @0x002d9d7b
-  Character/Clothes/01040001.img                   30,217  @0x002e5be5
-  Character/Clothes/01040002.img                   29,489  @0x002ed1ee
-  Character/Clothes/01040003.img                   33,822  @0x002f451f
-  Character/Clothes/01040004.img                   32,558  @0x002fc93d
-  Character/Clothes/01040005.img                   35,945  @0x0030486b
-  Character/Clothes/01040006.img                   18,875  @0x0030d4d4
-  Character/Clothes/01040007.img                   42,645  @0x00311e8f
-  Character/Clothes/01040008.img                   40,311  @0x0031c524
-  Character/Clothes/01040009.img                   37,443  @0x0032629b
-  Character/Clothes/01040010.img                   29,969  @0x0032f4de
-  Character/Clothes/01040011.img                   45,554  @0x003369ef
-  Character/Clothes/01040012.img                   38,253  @0x00341be1
-  Character/Clothes/01040013.img                   31,152  @0x0034b14e
-  Character/Clothes/01040014.img                   30,986  @0x00352afe
-  Character/Clothes/01040015.img                   54,235  @0x0035a408
-  Character/Clothes/01040016.img                   38,966  @0x003677e3
-  Character/Clothes/01040017.img                   32,789  @0x00371019
-  Character/Clothes/01040018.img                   48,031  @0x0037902e
-  Character/Clothes/01040019.img                   48,402  @0x00384bcd
-  Character/Clothes/01040020.img                   48,699  @0x003908df
-  Character/Clothes/01040021.img                   38,265  @0x0039c71a
-  Character/Clothes/01040022.img                   46,964  @0x003a5c93
-  Character/Clothes/01040023.img                   46,484  @0x003b1407
-  Character/Clothes/01040024.img                   46,309  @0x003bc99b
-  Character/Clothes/01040025.img                   46,406  @0x003c7e80
-  Character/Clothes/01040026.img                   39,135  @0x003d33c6
-  Character/Clothes/01040027.img                   39,145  @0x003dcca5
-  Character/Clothes/01040028.img                   39,162  @0x003e658e
-  Character/Clothes/01040029.img                   36,574  @0x003efe88
-  Character/Clothes/01040030.img                   36,837  @0x003f8d66
-  Character/Clothes/01040031.img                   25,533  @0x00401d4b
-  Character/Clothes/01040032.img                   25,471  @0x00408108
-  Character/Clothes/01040033.img                   25,723  @0x0040e487
-  Character/Clothes/01040034.img                   29,079  @0x00414902
-  Character/Clothes/01040035.img                   29,661  @0x0041ba99
-  Character/Clothes/01040036.img                   19,883  @0x00422e76
-  Character/Clothes/01040037.img                   37,346  @0x00427c21
-  Character/Clothes/01040038.img                   52,074  @0x00430e03
-  Character/Clothes/01040039.img                   37,988  @0x0043d96d
-  Character/Clothes/01040040.img                   38,698  @0x00446dd1
-  Character/Clothes/01040041.img                   38,420  @0x004504fb
-  Character/Clothes/01040042.img                   33,857  @0x00459b0f
-  Character/Clothes/01040043.img                   33,329  @0x00461f50
-  Character/Clothes/01040044.img                   34,175  @0x0046a181
-  Character/Clothes/01040045.img                   35,611  @0x00472700
-  Character/Clothes/01040046.img                   35,633  @0x0047b21b
-  Character/Clothes/01040047.img                   36,354  @0x00483d4c
-  Character/Clothes/01040048.img                   33,676  @0x0048cb4e
-  Character/Clothes/01040049.img                   33,763  @0x00494eda
-  Character/Clothes/01040050.img                   32,953  @0x0049d2bd
-  Character/Clothes/01040051.img                   34,734  @0x004a5376
-  Character/Clothes/01040052.img                   34,120  @0x004adb24
-  Character/Clothes/01040053.img                   34,025  @0x004b606c
-  Character/Clothes/01040054.img                   36,049  @0x004be555
-  Character/Clothes/01040055.img                   35,900  @0x004c7226
-  Character/Clothes/01040056.img                   37,125  @0x004cfe62
-  Character/Clothes/01040057.img                   38,921  @0x004d8f67
-  Character/Clothes/01040058.img                   38,777  @0x004e2770
-  Character/Clothes/01040059.img                   37,574  @0x004ebee9
-  Character/Clothes/01040060.img                   38,131  @0x004f51af
-  Character/Clothes/01040061.img                   31,604  @0x004fe6a2
-  Character/Clothes/01040062.img                   31,687  @0x00506216
-  Character/Clothes/01040063.img                   32,005  @0x0050dddd
-  Character/Clothes/01040064.img                   33,681  @0x00515ae2
-  Character/Clothes/01040065.img                   34,024  @0x0051de73
-  Character/Clothes/01040066.img                   33,847  @0x0052635b
-  Character/Clothes/01040067.img                   41,562  @0x0052e792
-  Character/Clothes/01040068.img                   40,469  @0x005389ec
-  Character/Clothes/01040069.img                   40,501  @0x00542801
-  Character/Clothes/01040070.img                   41,249  @0x0054c636
-  Character/Clothes/01040071.img                   40,459  @0x00556757
-  Character/Clothes/01041000.img                   35,721  @0x00560562
-  Character/Clothes/01041001.img                   30,704  @0x005690eb
-  Character/Clothes/01041002.img                   15,543  @0x005708db
-  Character/Clothes/01041003.img                   32,146  @0x00574592
-  Character/Clothes/01041004.img                   32,151  @0x0057c324
-  Character/Clothes/01041005.img                   33,498  @0x005840bb
-  Character/Clothes/01041006.img                   30,051  @0x0058c395
-  Character/Clothes/01041007.img                   30,246  @0x005938f8
-  Character/Clothes/01041008.img                   35,024  @0x0059af1e
-  Character/Clothes/01041009.img                   30,152  @0x005a37ee
-  Character/Clothes/01041010.img                   30,778  @0x005aadb6
-  Character/Clothes/01041011.img                   17,571  @0x005b25f0
-  Character/Clothes/01041012.img                   36,776  @0x005b6a93
-  Character/Clothes/01041013.img                   35,549  @0x005bfa3b
-  Character/Clothes/01041014.img                   39,677  @0x005c8518
-  Character/Clothes/01041015.img                   17,692  @0x005d2015
-  Character/Clothes/01041016.img                   17,706  @0x005d6531
-  Character/Clothes/01041017.img                   17,688  @0x005daa5b
-  Character/Clothes/01041018.img                   17,706  @0x005def73
-  Character/Clothes/01041019.img                   37,457  @0x005e349d
-  Character/Clothes/01041020.img                   38,117  @0x005ec6ee
-  Character/Clothes/01041021.img                   38,076  @0x005f5bd3
-  Character/Clothes/01041022.img                   45,333  @0x005ff08f
-  Character/Clothes/01041023.img                   45,027  @0x0060a1a4
-  Character/Clothes/01041024.img                   45,166  @0x00615187
-  Character/Clothes/01041025.img                   18,017  @0x006201f5
-  Character/Clothes/01041026.img                   18,018  @0x00624856
-  Character/Clothes/01041027.img                   35,229  @0x00628eb8
-  Character/Clothes/01041028.img                   35,537  @0x00631855
-  Character/Clothes/01041029.img                   43,579  @0x0063a326
-  Character/Clothes/01041030.img                   44,656  @0x00644d61
-  Character/Clothes/01041031.img                   45,570  @0x0064fbd1
-  Character/Clothes/01041032.img                   46,137  @0x0065add3
-  Character/Clothes/01041033.img                   45,525  @0x0066620c
-  Character/Clothes/01041034.img                   45,710  @0x006713e1
-  Character/Clothes/01041035.img                   46,187  @0x0067c66f
-  Character/Clothes/01041036.img                   21,424  @0x00687ada
-  Character/Clothes/01041037.img                   21,953  @0x0068ce8a
-  Character/Clothes/01041038.img                   21,551  @0x0069244b
-  Character/Clothes/01041039.img                   31,861  @0x0069787a
-  Character/Clothes/01041040.img                   31,819  @0x0069f4ef
-  Character/Clothes/01041041.img                   40,279  @0x006a713a
-  Character/Clothes/01041042.img                   40,273  @0x006b0e91
-  Character/Clothes/01041043.img                   40,214  @0x006babe2
-  Character/Clothes/01041044.img                   30,840  @0x006c48f8
-  Character/Clothes/01041045.img                   31,411  @0x006cc170
-  Character/Clothes/01041046.img                   19,806  @0x006d3c23
-  Character/Clothes/01041047.img                   35,426  @0x006d8981
-  Character/Clothes/01041048.img                   35,374  @0x006e13e3
-  Character/Clothes/01041049.img                   35,819  @0x006e9e11
-  Character/Clothes/01041050.img                   36,234  @0x006f29fc
-  Character/Clothes/01041051.img                   38,906  @0x006fb786
-  Character/Clothes/01041052.img                   38,644  @0x00704f80
-  Character/Clothes/01041053.img                   38,855  @0x0070e674
-  Character/Clothes/01041054.img                   40,179  @0x00717e3b
-  Character/Clothes/01041055.img                   40,199  @0x00721b2e
-  Character/Clothes/01041056.img                   39,074  @0x0072b835
-  Character/Clothes/01041057.img                   33,631  @0x007350d7
-  Character/Clothes/01041058.img                   32,974  @0x0073d436
-  Character/Clothes/01041059.img                   35,296  @0x00745504
-  Character/Clothes/01041060.img                   35,846  @0x0074dee4
-  Character/Clothes/01042000.img                   42,036  @0x00756aea
-  Character/Clothes/01042001.img                   41,050  @0x00760f1e
-  Character/Clothes/01042003.img                   32,949  @0x0076af78
-  Character/Clothes/01050000.img                   46,847  @0x0077302d
-  Character/Clothes/01050001.img                   39,354  @0x0077e72c
-  Character/Clothes/01050002.img                   42,538  @0x007880e6
-  Character/Clothes/01050003.img                   41,887  @0x00792710
-  Character/Clothes/01050004.img                   49,121  @0x0079caaf
-  Character/Clothes/01050005.img                   39,568  @0x007a8a90
-  Character/Clothes/01050006.img                   39,380  @0x007b2520
-  Character/Clothes/01050007.img                   40,946  @0x007bbef4
-  Character/Clothes/01050008.img                   69,263  @0x007c5ee6
-  Character/Clothes/01050009.img                   69,618  @0x007d6d75
-  Character/Clothes/01050010.img                   68,941  @0x007e7d67
-  Character/Clothes/01050011.img                   42,424  @0x007f8ab4
-  Character/Clothes/01050012.img                   38,021  @0x0080306c
-  Character/Clothes/01050013.img                   37,777  @0x0080c4f1
-  Character/Clothes/01050014.img                   37,960  @0x00815882
-  Character/Clothes/01050015.img                   37,864  @0x0081ecca
-  Character/Clothes/01050016.img                   37,646  @0x008280b2
-  Character/Clothes/01050017.img                   39,935  @0x008313c0
-  Character/Clothes/01050018.img                   29,446  @0x0083afbf
-  Character/Clothes/01050019.img                   29,373  @0x008422c5
-  Character/Clothes/01050020.img                   29,261  @0x00849582
-  Character/Clothes/01050021.img                   47,424  @0x008507cf
-  Character/Clothes/01050022.img                   46,224  @0x0085c10f
-  Character/Clothes/01050023.img                   38,974  @0x0086759f
-  Character/Clothes/01050024.img                   39,216  @0x00870ddd
-  Character/Clothes/01050025.img                   38,810  @0x0087a70d
-  Character/Clothes/01050026.img                   42,357  @0x00883ea7
-  Character/Clothes/01050027.img                   42,397  @0x0088e41c
-  Character/Clothes/01050028.img                   42,744  @0x008989b9
-  Character/Clothes/01051000.img                   40,155  @0x008a30b1
-  Character/Clothes/01051001.img                   37,927  @0x008acd8c
-  Character/Clothes/01051002.img                   30,308  @0x008b61b3
-  Character/Clothes/01051003.img                   42,666  @0x008bd817
-  Character/Clothes/01051004.img                   42,789  @0x008c7ec1
-  Character/Clothes/01051005.img                   42,558  @0x008d25e6
-  Character/Clothes/01051006.img                   35,335  @0x008dcc24
-  Character/Clothes/01051007.img                   34,616  @0x008e562b
-  Character/Clothes/01051008.img                   36,912  @0x008edd63
-  Character/Clothes/01051009.img                   35,385  @0x008f6d93
-  Character/Clothes/01051010.img                   47,232  @0x008ff7cc
-  Character/Clothes/01051011.img                   46,499  @0x0090b04c
-  Character/Clothes/01051012.img                   46,881  @0x009165ef
-  Character/Clothes/01051013.img                   46,559  @0x00921d10
-  Character/Clothes/01060000.img                   21,883  @0x0092d2ef
-  Character/Clothes/01060001.img                   16,529  @0x0093286a
-  Character/Clothes/01060002.img                   20,226  @0x009368fb
-  Character/Clothes/01060003.img                   22,477  @0x0093b7fd
-  Character/Clothes/01060004.img                   21,810  @0x00940fca
-  Character/Clothes/01060005.img                   21,912  @0x009464fc
-  Character/Clothes/01060006.img                   20,155  @0x0094ba94
-  Character/Clothes/01060007.img                   21,441  @0x0095094f
-  Character/Clothes/01060008.img                   27,699  @0x00955d10
-  Character/Clothes/01060009.img                   21,179  @0x0095c943
-  Character/Clothes/01060010.img                   22,230  @0x00961bfe
-  Character/Clothes/01060011.img                   21,967  @0x009672d4
-  Character/Clothes/01060012.img                   24,497  @0x0096c8a3
-  Character/Clothes/01060013.img                   24,616  @0x00972854
-  Character/Clothes/01060014.img                   24,893  @0x0097887c
-  Character/Clothes/01060015.img                   24,808  @0x0097e9b9
-  Character/Clothes/01060016.img                   19,605  @0x00984aa1
-  Character/Clothes/01060017.img                   19,316  @0x00989736
-  Character/Clothes/01060018.img                   19,536  @0x0098e2aa
-  Character/Clothes/01060019.img                   19,509  @0x00992efa
-  Character/Clothes/01060020.img                   19,080  @0x00997b2f
-  Character/Clothes/01060021.img                   22,068  @0x0099c5b7
-  Character/Clothes/01060022.img                   21,668  @0x009a1beb
-  Character/Clothes/01060023.img                   21,940  @0x009a708f
-  Character/Clothes/01060024.img                   21,984  @0x009ac643
-  Character/Clothes/01060025.img                   21,843  @0x009b1c23
-  Character/Clothes/01060026.img                   16,670  @0x009b7176
-  Character/Clothes/01060027.img                   20,745  @0x009bb294
-  Character/Clothes/01060028.img                   26,439  @0x009c039d
-  Character/Clothes/01060029.img                   22,627  @0x009c6ae4
-  Character/Clothes/01060030.img                   22,280  @0x009cc347
-  Character/Clothes/01060031.img                   26,786  @0x009d1a4f
-  Character/Clothes/01060032.img                   26,084  @0x009d82f1
-  Character/Clothes/01060033.img                   26,945  @0x009de8d5
-  Character/Clothes/01060034.img                   20,079  @0x009e5216
-  Character/Clothes/01060035.img                   19,424  @0x009ea085
-  Character/Clothes/01060036.img                   20,244  @0x009eec65
-  Character/Clothes/01060037.img                   22,667  @0x009f3b79
-  Character/Clothes/01060038.img                   22,710  @0x009f9404
-  Character/Clothes/01060039.img                   22,673  @0x009fecba
-  Character/Clothes/01060040.img                   19,749  @0x00a0454b
-  Character/Clothes/01060041.img                   19,470  @0x00a09270
-  Character/Clothes/01060042.img                   18,570  @0x00a0de7e
-  Character/Clothes/01060043.img                   23,470  @0x00a12708
-  Character/Clothes/01060044.img                   23,018  @0x00a182b6
-  Character/Clothes/01060045.img                   22,852  @0x00a1dca0
-  Character/Clothes/01060046.img                   22,691  @0x00a235e4
-  Character/Clothes/01060047.img                   21,827  @0x00a28e87
-  Character/Clothes/01060048.img                   22,020  @0x00a2e3ca
-  Character/Clothes/01060049.img                   22,030  @0x00a339ce
-  Character/Clothes/01060050.img                   22,262  @0x00a38fdc
-  Character/Clothes/01060051.img                   22,466  @0x00a3e6d2
-  Character/Clothes/01060052.img                   22,626  @0x00a43e94
-  Character/Clothes/01060053.img                   20,847  @0x00a496f6
-  Character/Clothes/01060054.img                   20,281  @0x00a4e865
-  Character/Clothes/01060055.img                   20,466  @0x00a5379e
-  Character/Clothes/01060056.img                   24,722  @0x00a58790
-  Character/Clothes/01060057.img                   23,879  @0x00a5e822
-  Character/Clothes/01060058.img                   23,767  @0x00a64569
-  Character/Clothes/01060059.img                   24,799  @0x00a6a240
-  Character/Clothes/01061000.img                   26,242  @0x00a7031f
-  Character/Clothes/01061001.img                   16,902  @0x00a769a1
-  Character/Clothes/01061002.img                   16,389  @0x00a7aba7
-  Character/Clothes/01061003.img                   20,292  @0x00a7ebac
-  Character/Clothes/01061004.img                   21,597  @0x00a83af0
-  Character/Clothes/01061005.img                   24,660  @0x00a88f4d
-  Character/Clothes/01061006.img                   31,854  @0x00a8efa1
-  Character/Clothes/01061007.img                   17,069  @0x00a96c0f
-  Character/Clothes/01061008.img                   16,503  @0x00a9aebc
-  Character/Clothes/01061009.img                   22,547  @0x00a9ef33
-  Character/Clothes/01061010.img                   23,149  @0x00aa4746
-  Character/Clothes/01061011.img                   23,152  @0x00aaa1b3
-  Character/Clothes/01061012.img                   25,209  @0x00aafc23
-  Character/Clothes/01061013.img                   25,342  @0x00ab5e9c
-  Character/Clothes/01061014.img                   19,808  @0x00abc19a
-  Character/Clothes/01061015.img                   24,807  @0x00ac0efa
-  Character/Clothes/01061016.img                   25,909  @0x00ac6fe1
-  Character/Clothes/01061017.img                   26,819  @0x00acd516
-  Character/Clothes/01061018.img                   26,897  @0x00ad3dd9
-  Character/Clothes/01061019.img                   24,726  @0x00ada6ea
-  Character/Clothes/01061020.img                   24,584  @0x00ae0780
-  Character/Clothes/01061021.img                   25,323  @0x00ae6788
-  Character/Clothes/01061022.img                   25,234  @0x00aeca73
-  Character/Clothes/01061023.img                   21,650  @0x00af2d05
-  Character/Clothes/01061024.img                   21,043  @0x00af8197
-  Character/Clothes/01061025.img                   20,737  @0x00afd3ca
-  Character/Clothes/01061026.img                   21,098  @0x00b024cb
-  Character/Clothes/01061027.img                   25,480  @0x00b07735
-  Character/Clothes/01061028.img                   25,564  @0x00b0dabd
-  Character/Clothes/01061029.img                   17,968  @0x00b13e99
-  Character/Clothes/01061030.img                   18,245  @0x00b184c9
-  Character/Clothes/01061031.img                   18,215  @0x00b1cc0e
-  Character/Clothes/01061032.img                   20,742  @0x00b21335
-  Character/Clothes/01061033.img                   20,350  @0x00b2643b
-  Character/Clothes/01061034.img                   27,377  @0x00b2b3b9
-  Character/Clothes/01061035.img                   27,165  @0x00b31eaa
-  Character/Clothes/01061036.img                   27,004  @0x00b388c7
-  Character/Clothes/01061037.img                   19,379  @0x00b3f243
-  Character/Clothes/01061038.img                   19,362  @0x00b43df6
-  Character/Clothes/01061039.img                   16,430  @0x00b48998
-  Character/Clothes/01061040.img                   22,166  @0x00b4c9c6
-  Character/Clothes/01061041.img                   21,930  @0x00b5205c
-  Character/Clothes/01061042.img                   21,997  @0x00b57606
-  Character/Clothes/01061043.img                   21,992  @0x00b5cbf3
-  Character/Clothes/01061044.img                   21,601  @0x00b621db
-  Character/Clothes/01061045.img                   22,257  @0x00b6763c
-  Character/Clothes/01061046.img                   22,607  @0x00b6cd2d
-  Character/Clothes/01061047.img                   28,591  @0x00b7257c
-  Character/Clothes/01061048.img                   28,632  @0x00b7952b
-  Character/Clothes/01061049.img                   28,711  @0x00b80503
-  Character/Clothes/01061050.img                   26,768  @0x00b8752a
-  Character/Clothes/01061051.img                   26,326  @0x00b8ddba
-  Character/Clothes/01061052.img                   25,919  @0x00b94490
-  Character/Clothes/01061053.img                   22,825  @0x00b9a9cf
-  Character/Clothes/01061054.img                   22,488  @0x00ba02f8
-  Character/Clothes/01061055.img                   22,938  @0x00ba5ad0
-  Character/Clothes/01061056.img                   23,213  @0x00bab46a
-  Character/Clothes/01062000.img                   22,159  @0x00bb0f17
-  Character/Clothes/01062001.img                   25,518  @0x00bb65a6
-  Character/Clothes/01062002.img                   17,708  @0x00bbc954
-  Character/Clothes/01062003.img                   22,785  @0x00bc0e80
-  Character/Clothes/01062004.img                   23,832  @0x00bc6781
-  Character/Clothes/01062005.img                   31,083  @0x00bcc499
-  Character/Clothes/01062006.img                   21,545  @0x00bd3e04
-  Character/Clothes/01062007.img                   17,364  @0x00bd922d
-  Character/Face/00020000.img                       4,323  @0x00bdd601
-  Character/Face/00020001.img                       4,200  @0x00bde6e4
-  Character/Face/00020002.img                       3,622  @0x00bdf74c
-  Character/Face/00020003.img                       3,555  @0x00be0572
-  Character/Face/00020004.img                       3,727  @0x00be1355
-  Character/Face/00020005.img                       3,664  @0x00be21e4
-  Character/Face/00021000.img                       3,821  @0x00be3034
-  Character/Face/00021001.img                       3,497  @0x00be3f21
-  Character/Face/00021002.img                       3,534  @0x00be4cca
-  Character/Face/00021003.img                       3,580  @0x00be5a98
-  Character/Face/00021004.img                       3,439  @0x00be6894
-  Character/Glove/01082000.img                     23,234  @0x00be7603
-  Character/Glove/01082001.img                     24,105  @0x00bed0c5
-  Character/Glove/01082002.img                     24,907  @0x00bf2eee
-  Character/Glove/01082003.img                     27,100  @0x00bf9039
-  Character/Glove/01082004.img                     45,038  @0x00bffa15
-  Character/Glove/01082005.img                     45,690  @0x00c0aa03
-  Character/Glove/01082006.img                     45,738  @0x00c15c7d
-  Character/Glove/01082007.img                     45,580  @0x00c20f27
-  Character/Glove/01082008.img                     46,568  @0x00c2c133
-  Character/Glove/01082009.img                     47,708  @0x00c3771b
-  Character/Glove/01082010.img                     47,704  @0x00c43177
-  Character/Glove/01082011.img                     47,978  @0x00c4ebcf
-  Character/Glove/01082012.img                     14,521  @0x00c5a739
-  Character/Glove/01082013.img                     15,659  @0x00c5dff2
-  Character/Glove/01082014.img                     15,654  @0x00c61d1d
-  Character/Glove/01082015.img                     15,674  @0x00c65a43
-  Character/Glove/01082016.img                     15,418  @0x00c6977d
-  Character/Glove/01082017.img                     15,388  @0x00c6d3b7
-  Character/Glove/01082018.img                     15,424  @0x00c70fd3
-  Character/Glove/01082019.img                     26,639  @0x00c74c13
-  Character/Glove/01082020.img                     26,917  @0x00c7b422
-  Character/Glove/01082021.img                     26,938  @0x00c81d47
-  Character/Glove/01082022.img                     26,934  @0x00c88681
-  Character/Glove/01082023.img                     48,319  @0x00c8efb7
-  Character/Glove/01082024.img                     47,536  @0x00c9ac76
-  Character/Glove/01082025.img                     47,538  @0x00ca6626
-  Character/Glove/01082026.img                     24,975  @0x00cb1fd8
-  Character/Glove/01082027.img                     25,128  @0x00cb8167
-  Character/Glove/01082028.img                     24,954  @0x00cbe38f
-  Character/Glove/01082029.img                     26,743  @0x00cc4509
-  Character/Glove/01082030.img                     26,539  @0x00ccad80
-  Character/Glove/01082031.img                     26,509  @0x00cd152b
-  Character/Hair/00030000.img                      10,713  @0x00cd7cb8
-  Character/Hair/00030010.img                       9,409  @0x00cda691
-  Character/Hair/00030020.img                      15,117  @0x00cdcb52
-  Character/Hair/00030021.img                      15,248  @0x00ce065f
-  Character/Hair/00030022.img                      15,209  @0x00ce41ef
-  Character/Hair/00030023.img                      15,224  @0x00ce7d58
-  Character/Hair/00030024.img                      15,135  @0x00ceb8d0
-  Character/Hair/00030030.img                       5,615  @0x00cef3ef
-  Character/Hair/00030031.img                       5,869  @0x00cf09de
-  Character/Hair/00030032.img                       5,884  @0x00cf20cb
-  Character/Hair/00030033.img                       5,954  @0x00cf37c7
-  Character/Hair/00030034.img                       5,946  @0x00cf4f09
-  Character/Hair/00030040.img                      16,374  @0x00cf6643
-  Character/Hair/00030041.img                      16,417  @0x00cfa639
-  Character/Hair/00030042.img                      15,132  @0x00cfe65a
-  Character/Hair/00030043.img                      16,624  @0x00d02176
-  Character/Hair/00030044.img                      16,321  @0x00d06266
-  Character/Hair/00030050.img                      15,610  @0x00d0a227
-  Character/Hair/00030051.img                      15,701  @0x00d0df21
-  Character/Hair/00030052.img                      14,623  @0x00d11c76
-  Character/Hair/00030053.img                      15,659  @0x00d15595
-  Character/Hair/00030054.img                      15,696  @0x00d192c0
-  Character/Hair/00030060.img                      16,168  @0x00d1d010
-  Character/Hair/00030061.img                      16,014  @0x00d20f38
-  Character/Hair/00030062.img                      16,050  @0x00d24dc6
-  Character/Hair/00030063.img                      16,224  @0x00d28c78
-  Character/Hair/00030064.img                      16,135  @0x00d2cbd8
-  Character/Hair/00030070.img                      10,075  @0x00d30adf
-  Character/Hair/00030080.img                      10,507  @0x00d3323a
-  Character/Hair/00030090.img                      10,925  @0x00d35b45
-  Character/Hair/00030100.img                      17,130  @0x00d385f2
-  Character/Hair/00030101.img                      17,147  @0x00d3c8dc
-  Character/Hair/00030102.img                      17,092  @0x00d40bd7
-  Character/Hair/00030103.img                      17,074  @0x00d44e9b
-  Character/Hair/00030104.img                      16,932  @0x00d4914d
-  Character/Hair/00030110.img                      10,334  @0x00d4d371
-  Character/Hair/00030111.img                      10,578  @0x00d4fbcf
-  Character/Hair/00030112.img                      10,257  @0x00d52521
-  Character/Hair/00030113.img                      10,366  @0x00d54d32
-  Character/Hair/00030114.img                      10,192  @0x00d575b0
-  Character/Hair/00030120.img                       9,152  @0x00d59d80
-  Character/Hair/00030121.img                       9,348  @0x00d5c140
-  Character/Hair/00030122.img                       9,022  @0x00d5e5c4
-  Character/Hair/00030123.img                       9,196  @0x00d60902
-  Character/Hair/00030124.img                       9,140  @0x00d62cee
-  Character/Hair/00030130.img                       8,470  @0x00d650a2
-  Character/Hair/00030131.img                       8,671  @0x00d671b8
-  Character/Hair/00030132.img                       8,530  @0x00d69397
-  Character/Hair/00030133.img                       8,567  @0x00d6b4e9
-  Character/Hair/00030134.img                       8,529  @0x00d6d660
-  Character/Hair/00031000.img                      12,303  @0x00d6f7b1
-  Character/Hair/00031001.img                      12,000  @0x00d727c0
-  Character/Hair/00031002.img                      12,245  @0x00d756a0
-  Character/Hair/00031003.img                      12,151  @0x00d78675
-  Character/Hair/00031004.img                      12,426  @0x00d7b5ec
-  Character/Hair/00031010.img                      17,434  @0x00d7e676
-  Character/Hair/00031011.img                      17,543  @0x00d82a90
-  Character/Hair/00031012.img                      17,751  @0x00d86f17
-  Character/Hair/00031013.img                      17,514  @0x00d8b46e
-  Character/Hair/00031014.img                      17,477  @0x00d8f8d8
-  Character/Hair/00031020.img                      22,687  @0x00d93d1d
-  Character/Hair/00031021.img                      22,020  @0x00d995bc
-  Character/Hair/00031022.img                      22,195  @0x00d9ebc0
-  Character/Hair/00031023.img                      22,033  @0x00da4273
-  Character/Hair/00031024.img                      21,981  @0x00da9884
-  Character/Hair/00031030.img                      17,935  @0x00daee61
-  Character/Hair/00031031.img                      18,147  @0x00db3470
-  Character/Hair/00031032.img                      17,706  @0x00db7b53
-  Character/Hair/00031033.img                      17,738  @0x00dbc07d
-  Character/Hair/00031034.img                      17,659  @0x00dc05c7
-  Character/Hair/00031040.img                      16,543  @0x00dc4ac2
-  Character/Hair/00031041.img                      16,544  @0x00dc8b61
-  Character/Hair/00031042.img                      16,535  @0x00dccc01
-  Character/Hair/00031043.img                      16,848  @0x00dd0c98
-  Character/Hair/00031044.img                      16,534  @0x00dd4e68
-  Character/Hair/00031050.img                      16,301  @0x00dd8efe
-  Character/Hair/00031051.img                      16,207  @0x00ddceab
-  Character/Hair/00031052.img                      16,260  @0x00de0dfa
-  Character/Hair/00031053.img                      16,042  @0x00de4d7e
-  Character/Hair/00031054.img                      16,203  @0x00de8c28
-  Character/Hair/00031060.img                      16,120  @0x00decb73
-  Character/Hair/00031061.img                      16,326  @0x00df0a6b
-  Character/Hair/00031062.img                      16,265  @0x00df4a31
-  Character/Hair/00031063.img                      16,321  @0x00df89ba
-  Character/Hair/00031064.img                      16,138  @0x00dfc97b
-  Character/Hair/00031070.img                       8,142  @0x00e00885
-  Character/Hair/00031080.img                      15,203  @0x00e02853
-  Character/Hair/00031081.img                      15,265  @0x00e063b6
-  Character/Hair/00031082.img                      15,314  @0x00e09f57
-  Character/Hair/00031083.img                      15,345  @0x00e0db29
-  Character/Hair/00031084.img                      15,501  @0x00e1171a
-  Character/Shield/01092000.img                     9,708  @0x00e153a7
-  Character/Shield/01092001.img                    12,990  @0x00e17993
-  Character/Shield/01092002.img                    12,246  @0x00e1ac51
-  Character/Shield/01092003.img                    16,221  @0x00e1dc27
-  Character/Shield/01092004.img                    14,242  @0x00e21b84
-  Character/Shield/01092005.img                    10,914  @0x00e25326
-  Character/Shield/01092006.img                    14,341  @0x00e27dc8
-  Character/Shield/01092007.img                    14,091  @0x00e2b5cd
-  Character/Shield/01092008.img                    12,753  @0x00e2ecd8
-  Character/Shield/01092009.img                    18,781  @0x00e31ea9
-  Character/Shield/01092010.img                    18,619  @0x00e36806
-  Character/Shield/01092011.img                    17,226  @0x00e3b0c1
-  Character/Shield/01092012.img                    22,701  @0x00e3f40b
-  Character/Shield/01092013.img                    24,916  @0x00e44cb8
-  Character/Shield/01092014.img                    24,295  @0x00e4ae0c
-  Character/Shield/01092015.img                    25,919  @0x00e50cf3
-  Character/Shield/01092016.img                    28,034  @0x00e57232
-  Character/Shield/01092017.img                    30,057  @0x00e5dfb4
-  Character/Shoes/01071000.img                     18,205  @0x00e6551d
-  Character/Shoes/01072000.img                     19,529  @0x00e69c3a
-  Character/Shoes/01072001.img                     17,049  @0x00e6e883
-  Character/Shoes/01072002.img                     17,132  @0x00e72b1c
-  Character/Shoes/01072003.img                     20,484  @0x00e76e08
-  Character/Shoes/01072004.img                     15,347  @0x00e7be0c
-  Character/Shoes/01072005.img                     15,438  @0x00e7f9ff
-  Character/Shoes/01072006.img                     24,224  @0x00e8364d
-  Character/Shoes/01072007.img                     24,617  @0x00e894ed
-  Character/Shoes/01072008.img                     19,723  @0x00e8f516
-  Character/Shoes/01072009.img                     22,404  @0x00e94221
-  Character/Shoes/01072010.img                     14,388  @0x00e999a5
-  Character/Shoes/01072011.img                     25,057  @0x00e9d1d9
-  Character/Shoes/01072012.img                     18,760  @0x00ea33ba
-  Character/Shoes/01072013.img                     18,219  @0x00ea7d02
-  Character/Shoes/01072014.img                     19,303  @0x00eac42d
-  Character/Shoes/01072015.img                     18,961  @0x00eb0f94
-  Character/Shoes/01072016.img                     18,628  @0x00eb59a5
-  Character/Shoes/01072017.img                     16,672  @0x00eba269
-  Character/Shoes/01072018.img                     18,067  @0x00ebe389
-  Character/Shoes/01072019.img                     18,934  @0x00ec2a1c
-  Character/Shoes/01072020.img                     19,038  @0x00ec7412
-  Character/Shoes/01072021.img                     19,023  @0x00ecbe70
-  Character/Shoes/01072022.img                     20,772  @0x00ed08bf
-  Character/Shoes/01072023.img                     18,415  @0x00ed59e3
-  Character/Shoes/01072024.img                     18,473  @0x00eda1d2
-  Character/Shoes/01072025.img                     20,249  @0x00ede9fb
-  Character/Shoes/01072026.img                     20,104  @0x00ee3914
-  Character/Shoes/01072027.img                     19,557  @0x00ee879c
-  Character/Shoes/01072028.img                     17,352  @0x00eed401
-  Character/Shoes/01072029.img                     17,613  @0x00ef17c9
-  Character/Shoes/01072030.img                     17,507  @0x00ef5c96
-  Character/Shoes/01072031.img                     17,490  @0x00efa0f9
-  Character/Shoes/01072032.img                     19,341  @0x00efe54b
-  Character/Shoes/01072033.img                     19,084  @0x00f030d8
-  Character/Shoes/01072034.img                     19,084  @0x00f07b64
-  Character/Shoes/01072035.img                     18,981  @0x00f0c5f0
-  Character/Shoes/01072036.img                     19,229  @0x00f11015
-  Character/Weapon/01302000.img                     7,648  @0x00f15b32
-  Character/Weapon/01302001.img                     9,092  @0x00f17912
-  Character/Weapon/01302002.img                     9,507  @0x00f19c96
-  Character/Weapon/01302003.img                    11,357  @0x00f1c1b9
-  Character/Weapon/01302004.img                    10,753  @0x00f1ee16
-  Character/Weapon/01302005.img                    14,261  @0x00f21817
-  Character/Weapon/01302006.img                    11,805  @0x00f24fcc
-  Character/Weapon/01302007.img                     9,195  @0x00f27de9
-  Character/Weapon/01312000.img                    13,453  @0x00f2a1d4
-  Character/Weapon/01312001.img                    11,239  @0x00f2d661
-  Character/Weapon/01312002.img                     9,424  @0x00f30248
-  Character/Weapon/01312003.img                    16,696  @0x00f32718
-  Character/Weapon/01312004.img                    13,935  @0x00f36850
-  Character/Weapon/01322000.img                    14,710  @0x00f39ebf
-  Character/Weapon/01322001.img                     8,023  @0x00f3d835
-  Character/Weapon/01322002.img                     9,818  @0x00f3f78c
-  Character/Weapon/01322003.img                    14,572  @0x00f41de6
-  Character/Weapon/01322004.img                    13,638  @0x00f456d2
-  Character/Weapon/01322005.img                     8,501  @0x00f48c18
-  Character/Weapon/01322006.img                     8,610  @0x00f4ad4d
-  Character/Weapon/01322007.img                     8,711  @0x00f4ceef
-  Character/Weapon/01322008.img                     9,067  @0x00f4f0f6
-  Character/Weapon/01322009.img                     9,441  @0x00f51461
-  Character/Weapon/01322010.img                    11,375  @0x00f53942
-  Character/Weapon/01322011.img                    11,192  @0x00f565b1
-  Character/Weapon/01322012.img                     7,551  @0x00f59169
-  Character/Weapon/01322013.img                     9,503  @0x00f5aee8
-  Character/Weapon/01332000.img                     7,162  @0x00f5d407
-  Character/Weapon/01332001.img                     8,131  @0x00f5f001
-  Character/Weapon/01332002.img                     8,176  @0x00f60fc4
-  Character/Weapon/01332003.img                    11,291  @0x00f62fb4
-  Character/Weapon/01332004.img                     8,974  @0x00f65bcf
-  Character/Weapon/01332005.img                     8,278  @0x00f67edd
-  Character/Weapon/01332006.img                    10,554  @0x00f69f33
-  Character/Weapon/01332007.img                     7,891  @0x00f6c86d
-  Character/Weapon/01332008.img                     9,889  @0x00f6e740
-  Character/Weapon/01332009.img                    10,929  @0x00f70de1
-  Character/Weapon/01332010.img                     9,092  @0x00f73892
-  Character/Weapon/01332011.img                    11,385  @0x00f75c16
-  Character/Weapon/01332012.img                     9,272  @0x00f7888f
-  Character/Weapon/01372000.img                     7,897  @0x00f7acc7
-  Character/Weapon/01372001.img                     7,213  @0x00f7cba0
-  Character/Weapon/01372002.img                     5,923  @0x00f7e7cd
-  Character/Weapon/01372003.img                     6,315  @0x00f7fef0
-  Character/Weapon/01372004.img                     5,970  @0x00f8179b
-  Character/Weapon/01372005.img                     4,990  @0x00f82eed
-  Character/Weapon/01372006.img                     5,312  @0x00f8426b
-  Character/Weapon/01382000.img                     8,655  @0x00f8572b
-  Character/Weapon/01382001.img                    10,497  @0x00f878fa
-  Character/Weapon/01382002.img                     8,117  @0x00f8a1fb
-  Character/Weapon/01382003.img                     7,748  @0x00f8c1b0
-  Character/Weapon/01382004.img                    10,907  @0x00f8dff4
-  Character/Weapon/01382005.img                     7,727  @0x00f90a8f
-  Character/Weapon/01402000.img                    16,511  @0x00f928be
-  Character/Weapon/01402001.img                     7,910  @0x00f9693d
-  Character/Weapon/01402002.img                    24,631  @0x00f98823
-  Character/Weapon/01402003.img                    21,285  @0x00f9e85a
-  Character/Weapon/01402004.img                    19,204  @0x00fa3b7f
-  Character/Weapon/01402005.img                    34,413  @0x00fa8683
-  Character/Weapon/01412000.img                    20,580  @0x00fb0cf0
-  Character/Weapon/01412001.img                    16,696  @0x00fb5d54
-  Character/Weapon/01412002.img                    15,305  @0x00fb9e8c
-  Character/Weapon/01412003.img                    22,531  @0x00fbda55
-  Character/Weapon/01422000.img                    18,560  @0x00fc3258
-  Character/Weapon/01422001.img                    18,342  @0x00fc7ad8
-  Character/Weapon/01422002.img                    13,698  @0x00fcc27e
-  Character/Weapon/01422003.img                    10,361  @0x00fcf800
-  Character/Weapon/01422004.img                    12,606  @0x00fd2079
-  Character/Weapon/01422005.img                    23,712  @0x00fd51b7
-  Character/Weapon/01422006.img                    11,762  @0x00fdae57
-  Character/Weapon/01432000.img                    18,471  @0x00fddc49
-  Character/Weapon/01432001.img                    19,044  @0x00fe2470
-  Character/Weapon/01432002.img                    18,108  @0x00fe6ed4
-  Character/Weapon/01432003.img                    18,675  @0x00feb590
-  Character/Weapon/01432004.img                    17,932  @0x00fefe83
-  Character/Weapon/01442000.img                    27,299  @0x00ff448f
-  Character/Weapon/01442001.img                    30,054  @0x00ffaf32
-  Character/Weapon/01442002.img                    26,404  @0x01002498
-  Character/Weapon/01442003.img                    25,487  @0x01008bbc
-  Character/Weapon/01442004.img                    15,938  @0x0100ef4b
-  Character/Weapon/01452000.img                    11,057  @0x01012d8d
-  Character/Weapon/01452001.img                    12,716  @0x010158be
-  Character/Weapon/01452002.img                    12,952  @0x01018a6a
-  Character/Weapon/01452003.img                     7,964  @0x0101bd02
-  Character/Weapon/01452004.img                    12,701  @0x0101dc1e
-  Character/Weapon/01452005.img                    10,673  @0x01020dbb
-  Character/Weapon/01462000.img                     9,798  @0x0102376c
-  Character/Weapon/01462001.img                     8,378  @0x01025db2
-  Character/Weapon/01462002.img                     9,590  @0x01027e6c
-  Character/Weapon/01462003.img                     8,625  @0x0102a3e2
-  Character/Weapon/01462004.img                     8,989  @0x0102c593
-  Character/Weapon/01462005.img                     9,863  @0x0102e8b0
-  Character/Weapon/01472000.img                     6,947  @0x01030f37
-  Character/Weapon/01472001.img                     7,908  @0x01032a5a
-  Character/Weapon/01472002.img                     8,116  @0x0103493e
-  Character/Weapon/01472003.img                     7,842  @0x010368f2
-  Character/Weapon/01472004.img                     8,119  @0x01038794
-  Character/Weapon/01472005.img                     8,026  @0x0103a74b
-  Character/Weapon/01472006.img                     8,108  @0x0103c6a5
-  Character/Weapon/01472007.img                    12,372  @0x0103e651
-  Character/Weapon/01472008.img                     8,632  @0x010416a5
-  Character/Weapon/01472009.img                     8,634  @0x0104385d
-  Character/Weapon/01472010.img                     8,635  @0x01045a17
-  Effect/BasicEff.img                             278,637  @0x01047bd2
-  Effect/Tomb.img                                  20,744  @0x0108bc3f
-  Etc/Curse.img                                     7,085  @0x01090d47
-  Etc/ForbiddenName.img                             1,614  @0x010928f4
-  Etc/MakeCharInfo.img                                550  @0x01092f42
-  Etc/Tips.img                                      4,554  @0x01093168
-  Item/Book/0500.img                                4,218  @0x01094332
-  Item/Consume/0200.img                            12,121  @0x010953ac
-  Item/Consume/0201.img                            13,084  @0x01098305
-  Item/Consume/0202.img                            10,385  @0x0109b621
-  Item/Consume/0203.img                            10,238  @0x0109deb2
-  Item/Consume/0204.img                            20,469  @0x010a06b0
-  Item/Consume/0205.img                             3,278  @0x010a56a5
-  Item/Consume/0206.img                             2,609  @0x010a6373
-  Item/Consume/0207.img                            12,775  @0x010a6da4
-  Item/Etc/0400.img                                39,851  @0x010a9f8b
-  Item/Etc/0401.img                                15,159  @0x010b3b36
-  Item/Etc/0402.img                                17,683  @0x010b766d
-  Item/Etc/0403.img                                12,739  @0x010bbb80
-  Item/Special/0900.img                             7,619  @0x010bed43
-  Map/MapHelper.img                               187,026  @0x010c0b06
-  Map/Back/darkCave.img                           937,068  @0x010ee598
-  Map/Back/darkWood.img                           341,202  @0x011d3204
-  Map/Back/dryRock.img                          1,617,908  @0x012266d6
-  Map/Back/grassySoil.img                       1,534,917  @0x013b16ca
-  Map/Back/metroCity.img                        1,375,765  @0x0152828f
-  Map/Back/midForest.img                        1,090,741  @0x016780a4
-  Map/Back/portTown.img                           161,884  @0x01782559
-  Map/Back/shineWood.img                        1,849,196  @0x017a9db5
-  Map/Back/shineWood2.img                         438,581  @0x0196d521
-  Map/Back/sunsetCity.img                         504,997  @0x019d8656
-  Map/Back/vicportTown.img                        678,487  @0x01a53afb
-  Map/Map/000000000.img                            21,100  @0x01af9552
-  Map/Map/000010000.img                            12,902  @0x01afe7be
-  Map/Map/000020000.img                            15,381  @0x01b01a24
-  Map/Map/000020001.img                             8,595  @0x01b05639
-  Map/Map/000030000.img                            39,340  @0x01b077cc
-  Map/Map/000040000.img                            88,795  @0x01b11178
-  Map/Map/000050000.img                            64,824  @0x01b26c53
-  Map/Map/000060000.img                            74,497  @0x01b3698b
-  Map/Map/000060001.img                             4,883  @0x01b48c8c
-  Map/Map/001000000.img                            83,463  @0x01b49f9f
-  Map/Map/001000001.img                            61,657  @0x01b5e5a6
-  Map/Map/001000002.img                            49,604  @0x01b6d67f
-  Map/Map/001010000.img                            50,244  @0x01b79843
-  Map/Map/001010001.img                             4,886  @0x01b85c87
-  Map/Map/001010002.img                             9,274  @0x01b86f9d
-  Map/Map/001010003.img                             5,364  @0x01b893d7
-  Map/Map/001010004.img                            61,084  @0x01b8a8cb
-  Map/Map/001020000.img                            71,433  @0x01b99767
-  Map/Map/001020001.img                            49,105  @0x01baae70
-  Map/Map/100000000.img                           112,026  @0x01bb6e41
-  Map/Map/100000001.img                            13,897  @0x01bd23db
-  Map/Map/100000100.img                            91,362  @0x01bd5a24
-  Map/Map/100000101.img                             9,535  @0x01bebf06
-  Map/Map/100000102.img                             5,418  @0x01bee445
-  Map/Map/100000103.img                             4,084  @0x01bef96f
-  Map/Map/100000104.img                             4,927  @0x01bf0963
-  Map/Map/100000200.img                            68,810  @0x01bf1ca2
-  Map/Map/100000201.img                             5,305  @0x01c0296c
-  Map/Map/100010000.img                            61,875  @0x01c03e25
-  Map/Map/100020000.img                            31,339  @0x01c12fd8
-  Map/Map/100030000.img                           175,190  @0x01c1aa43
-  Map/Map/100030001.img                            40,556  @0x01c45699
-  Map/Map/100040000.img                           123,265  @0x01c4f505
-  Map/Map/100040001.img                            64,366  @0x01c6d686
-  Map/Map/100040002.img                            66,894  @0x01c7d1f4
-  Map/Map/100040003.img                            64,383  @0x01c8d742
-  Map/Map/100040004.img                            64,560  @0x01c9d2c1
-  Map/Map/100050000.img                            56,804  @0x01cacef1
-  Map/Map/101000000.img                           185,673  @0x01cbacd5
-  Map/Map/101000001.img                             5,116  @0x01ce821e
-  Map/Map/101000002.img                             5,603  @0x01ce961a
-  Map/Map/101000003.img                             7,284  @0x01ceabfd
-  Map/Map/101010000.img                            45,215  @0x01cec871
-  Map/Map/101020000.img                           161,573  @0x01cf7910
-  Map/Map/101020001.img                            82,533  @0x01d1f035
-  Map/Map/101020002.img                            78,472  @0x01d3329a
-  Map/Map/101020003.img                            68,864  @0x01d46522
-  Map/Map/101020004.img                            54,071  @0x01d57222
-  Map/Map/101020005.img                            56,820  @0x01d64559
-  Map/Map/101030000.img                           161,278  @0x01d7234d
-  Map/Map/101040000.img                            83,924  @0x01d9994b
-  Map/Map/101040001.img                            62,481  @0x01dae11f
-  Map/Map/101040002.img                            39,637  @0x01dbd530
-  Map/Map/102000000.img                           128,097  @0x01dc7005
-  Map/Map/102000001.img                             5,106  @0x01de6466
-  Map/Map/102000002.img                             4,766  @0x01de7858
-  Map/Map/102000003.img                             5,676  @0x01de8af6
-  Map/Map/102010000.img                            60,818  @0x01dea122
-  Map/Map/102020000.img                           120,413  @0x01df8eb4
-  Map/Map/102030000.img                           106,281  @0x01e16511
-  Map/Map/103000000.img                           158,122  @0x01e3043a
-  Map/Map/103000001.img                             4,884  @0x01e56de4
-  Map/Map/103000002.img                             4,081  @0x01e580f8
-  Map/Map/103000003.img                            11,247  @0x01e590e9
-  Map/Map/103000004.img                             4,069  @0x01e5bcd8
-  Map/Map/103000005.img                             4,439  @0x01e5ccbd
-  Map/Map/103010000.img                           147,725  @0x01e5de14
-  Map/Map/103020000.img                           110,478  @0x01e81f21
-  Map/Map/103030000.img                            78,078  @0x01e9ceaf
-  Map/Map/104000000.img                           176,487  @0x01eaffad
-  Map/Map/104000001.img                             5,107  @0x01edb114
-  Map/Map/104000002.img                             6,277  @0x01edc507
-  Map/Map/104010000.img                           249,845  @0x01eddd8c
-  Map/Map/104010001.img                            65,388  @0x01f1ad81
-  Map/Map/104010002.img                            89,198  @0x01f2aced
-  Map/Map/104020000.img                            96,773  @0x01f4095b
-  Map/Map/104030000.img                           118,833  @0x01f58360
-  Map/Map/104030001.img                            34,320  @0x01f75391
-  Map/Map/104040000.img                            53,580  @0x01f7d9a1
-  Map/Map/105030000.img                           147,740  @0x01f8aaed
-  Map/Map/105040000.img                           108,135  @0x01faec09
-  Map/Map/105040100.img                            86,514  @0x01fc9270
-  Map/Map/105040200.img                            68,682  @0x01fde462
-  Map/Map/105040300.img                            47,817  @0x01fef0ac
-  Map/Map/105040301.img                            30,041  @0x01ffab75
-  Map/Map/105050000.img                           131,768  @0x020020ce
-  Map/Map/105050100.img                           142,066  @0x02022386
-  Map/Map/105060000.img                           188,560  @0x02044e78
-  Map/Map/105070000.img                           178,774  @0x02072f08
-  Map/Map/105070001.img                           218,706  @0x0209e95e
-  Map/Map/105070100.img                           118,749  @0x020d3fb0
-  Map/Map/105070200.img                           110,866  @0x020f0f8d
-  Map/Map/105080000.img                            96,102  @0x0210c09f
-  Map/Map/106000000.img                            85,628  @0x02123805
-  Map/Map/106000001.img                            42,197  @0x02138681
-  Map/Map/106000100.img                            50,088  @0x02142b56
-  Map/Map/106000101.img                            53,764  @0x0214eefe
-  Map/Map/106010000.img                           121,129  @0x0215c102
-  Map/Map/106010100.img                            97,158  @0x02179a2b
-  Map/Map/106010101.img                            29,455  @0x021915b1
-  Map/Obj/acc1.img                              3,705,635  @0x021988c0
-  Map/Obj/acc2.img                              2,105,087  @0x025213e3
-  Map/Obj/connect.img                              50,899  @0x027232e2
-  Map/Obj/door.img                                284,843  @0x0272f9b5
-  Map/Obj/dungeon.img                           1,592,566  @0x02775260
-  Map/Obj/guide.img                                46,771  @0x028f9f56
-  Map/Obj/house.img                               160,070  @0x02905609
-  Map/Obj/houseDR.img                             685,974  @0x0292c74f
-  Map/Obj/houseDW.img                             466,095  @0x029d3ee5
-  Map/Obj/houseGS.img                           2,045,305  @0x02a45b94
-  Map/Obj/houseMC.img                           1,305,245  @0x02c3910d
-  Map/Obj/housePT.img                             388,173  @0x02d77baa
-  Map/Obj/houseSW.img                             826,342  @0x02dd67f7
-  Map/Obj/houseVPT.img                            707,875  @0x02ea03dd
-  Map/Obj/insideGS.img                          1,169,471  @0x02f4d100
-  Map/Obj/job.img                               1,816,326  @0x0306a93f
-  Map/Obj/prop.img                                 32,277  @0x03226045
-  Map/Obj/shop.img                              3,854,759  @0x0322de5a
-  Map/Obj/signboard.img                           108,347  @0x035db001
-  Map/Obj/trap.img                                 59,012  @0x035f573c
-  Map/Obj/vehicle.img                             806,671  @0x03603dc0
-  Map/Tile/brownBrick.img                          45,263  @0x036c8ccf
-  Map/Tile/coalMine.img                            70,611  @0x036d3d9e
-  Map/Tile/deepCave.img                            30,659  @0x036e5171
-  Map/Tile/dirtMine.img                            63,178  @0x036ec934
-  Map/Tile/holeBrick.img                           41,659  @0x036fbffe
-  Map/Tile/logMarble.img                           84,551  @0x037062b9
-  Map/Tile/wetWood.img                              6,021  @0x0371ad00
-  Map/Tile/whiteMarble.img                         49,842  @0x0371c485
-  Map/Tile/woodMarble.img                          84,376  @0x03728737
-  Mob/0100100.img                                  11,205  @0x0373d0cf
-  Mob/0100101.img                                   6,586  @0x0373fc94
-  Mob/0120100.img                                   6,779  @0x0374164e
-  Mob/0130100.img                                   8,950  @0x037430c9
-  Mob/0130101.img                                   6,606  @0x037453bf
-  Mob/0210100.img                                  22,122  @0x03746d8d
-  Mob/1110100.img                                  13,486  @0x0374c3f7
-  Mob/1110101.img                                   8,919  @0x0374f8a5
-  Mob/1120100.img                                  13,152  @0x03751b7c
-  Mob/1130100.img                                  12,743  @0x03754edc
-  Mob/1210100.img                                  11,912  @0x037580a3
-  Mob/1210101.img                                  13,833  @0x0375af2b
-  Mob/1210102.img                                  15,559  @0x0375e534
-  Mob/2110200.img                                  16,338  @0x037621fb
-  Mob/2130100.img                                  12,654  @0x037661cd
-  Mob/2220100.img                                  15,183  @0x0376933b
-  Mob/2230100.img                                  13,686  @0x0376ce8a
-  Mob/2230101.img                                  23,245  @0x03770400
-  Mob/2230102.img                                  11,664  @0x03775ecd
-  Mob/3210100.img                                  13,869  @0x03778c5d
-  Mob/3230100.img                                  16,664  @0x0377c28a
-  Mob/4130100.img                                  33,377  @0x037803a2
-  Mob/4230100.img                                  14,479  @0x03788603
-  Mob/5130100.img                                  32,770  @0x0378be92
-  Mob/5130101.img                                  70,328  @0x03793e94
-  Mob/9999997.img                                  31,418  @0x037a514c
-  Mob/9999998.img                                   2,989  @0x037acc06
-  Mob/9999999.img                                  60,710  @0x037ad7b3
-  Npc/0000070.img                                   1,851  @0x037bc4d9
-  Npc/0000090.img                                   1,424  @0x037bcc14
-  Npc/0000110.img                                   1,899  @0x037bd1a4
-  Npc/0000180.img                                   1,900  @0x037bd90f
-  Npc/0000220.img                                   7,334  @0x037be07b
-  Npc/0002000.img                                   6,027  @0x037bfd21
-  Npc/0002001.img                                   1,572  @0x037c14ac
-  Npc/0002002.img                                  15,637  @0x037c1ad0
-  Npc/0002003.img                                  15,635  @0x037c57e5
-  Npc/0002100.img                                  33,618  @0x037c94f8
-  Npc/0002101.img                                  17,660  @0x037d184a
-  Npc/0002102.img                                  15,828  @0x037d5d46
-  Npc/0002103.img                                  33,348  @0x037d9b1a
-  Npc/0010000.img                                   9,414  @0x037e1d5e
-  Npc/0011000.img                                   1,711  @0x037e4224
-  Npc/0011100.img                                   7,198  @0x037e48d3
-  Npc/0012000.img                                  19,234  @0x037e64f1
-  Npc/0012100.img                                   1,660  @0x037eb013
-  Npc/0012101.img                                  17,646  @0x037eb68f
-  Npc/0020000.img                                  29,878  @0x037efb7d
-  Npc/0020001.img                                  10,422  @0x037f7033
-  Npc/0020002.img                                   9,729  @0x037f98e9
-  Npc/0020100.img                                  15,772  @0x037fbeea
-  Npc/0021000.img                                   1,653  @0x037ffc86
-  Npc/0022000.img                                   2,189  @0x038002fb
-  Npc/1001000.img                                   6,894  @0x03800b88
-  Npc/1001001.img                                   8,217  @0x03802676
-  Npc/1001100.img                                   7,902  @0x0380468f
-  Npc/1002000.img                                   6,021  @0x0380656d
-  Npc/1002001.img                                   1,575  @0x03807cf2
-  Npc/1002100.img                                  15,866  @0x03808319
-  Npc/1010100.img                                  33,560  @0x0380c113
-  Npc/1011000.img                                   2,118  @0x0381442b
-  Npc/1011001.img                                   5,116  @0x03814c71
-  Npc/1011100.img                                   2,740  @0x0381606d
-  Npc/1012000.img                                   2,840  @0x03816b21
-  Npc/1012001.img                                   1,712  @0x03817639
-  Npc/1012002.img                                   3,272  @0x03817ce9
-  Npc/1012100.img                                   1,947  @0x038189b1
-  Npc/1012101.img                                   1,945  @0x0381914c
-  Npc/1012102.img                                   3,204  @0x038198e5
-  Npc/1012103.img                                   1,655  @0x0381a569
-  Npc/1012104.img                                   1,502  @0x0381abe0
-  Npc/1020000.img                                   2,313  @0x0381b1be
-  Npc/1021000.img                                   7,916  @0x0381bac7
-  Npc/1021001.img                                  10,087  @0x0381d9b3
-  Npc/1021100.img                                   4,400  @0x0382011a
-  Npc/1022000.img                                   2,934  @0x0382124a
-  Npc/1022001.img                                   2,840  @0x03821dc0
-  Npc/1022002.img                                   1,828  @0x038228d8
-  Npc/1022003.img                                   1,780  @0x03822ffc
-  Npc/1022004.img                                   1,524  @0x038236f0
-  Npc/1022100.img                                   7,415  @0x03823ce4
-  Npc/1031000.img                                   1,926  @0x038259db
-  Npc/1031001.img                                   4,474  @0x03826161
-  Npc/1031100.img                                   2,618  @0x038272db
-  Npc/1032000.img                                   2,840  @0x03827d15
-  Npc/1032001.img                                  10,374  @0x0382882d
-  Npc/1032002.img                                   2,658  @0x0382b0b3
-  Npc/1032100.img                                   1,424  @0x0382bb15
-  Npc/1040000.img                                   6,437  @0x0382c0a5
-  Npc/1040001.img                                   6,439  @0x0382d9ca
-  Npc/1051000.img                                   2,624  @0x0382f2f1
-  Npc/1051001.img                                   5,707  @0x0382fd31
-  Npc/1051002.img                                   2,795  @0x0383137c
-  Npc/1052000.img                                   1,344  @0x03831e67
-  Npc/1052001.img                                   3,841  @0x038323a7
-  Npc/1052002.img                                   1,595  @0x038332a8
-  Npc/1061000.img                                   1,870  @0x038338e3
-  Npc/1061001.img                                   5,305  @0x03834031
-  Skill/100.img                                    62,528  @0x038354ea
-  Skill/110.img                                    27,487  @0x0384492a
-  Skill/120.img                                    27,355  @0x0384b489
-  Skill/130.img                                    27,139  @0x03851f64
-  Skill/200.img                                    53,738  @0x03858967
-  Skill/300.img                                    43,455  @0x03865b51
-  Skill/400.img                                    51,129  @0x03870510
-  Sound/Bgm00.img                               7,430,599  @0x0387ccc9
-  Sound/Bgm01.img                              11,661,526  @0x03f92e90
-  Sound/Bgm02.img                               6,621,107  @0x04ab1f66
-  Sound/BgmUI.img                                 735,851  @0x05102719
-  Sound/Game.img                                   64,167  @0x051b6184
-  Sound/Item.img                                   22,675  @0x051c5c2b
-  Sound/Mob.img                                    59,866  @0x051cb4be
-  Sound/Skill.img                                  61,769  @0x051d9e98
-  Sound/UI.img                                     17,957  @0x051e8fe1
-  Sound/Weapon.img                                 15,411  @0x051ed606
-  UI/Basic.img                                     32,249  @0x051f1239
-  UI/CashShop.img                                 142,084  @0x051f9032
-  UI/ChatBalloon.img                                1,848  @0x0521bb36
-  UI/Login.img                                    675,818  @0x0521c26e
-  UI/Logo.img                                     261,751  @0x052c1258
-  UI/StatusBar.img                                 20,209  @0x053010cf
-  UI/ToolTipHelp.img                                9,031  @0x05305fc0
-  UI/UIWindow.img                                 105,021  @0x05308307
+Data.wz: v95 size=87,170,372 treeEnd=0x756e
+images: 1052  bytes: 86,967,311  resolved: {'declared': 922, 'scanned': 130}
+unlisted objects: 4  unlisted bytes: 172,999
+  smap.img                                 off=0x00000756e size=    2,039 check=0x0005ba82 declared
+  zmap.img                                 off=0x000007d65 size=    1,698 check=0x0004ca84 declared
+  Character/00002000.img                   off=0x000008407 size=   68,179 check=0x00673377 declared
+  Character/00012000.img                   off=0x000018e5a size=    5,559 check=0x00076337 declared
+  Character/Accessory/01010000.img         off=0x00001a411 size=    2,901 check=0x00044d1a declared
+  Character/Accessory/01010001.img         off=0x00001af66 size=    2,259 check=0x0002c50a declared
+  Character/Accessory/01012000.img         off=0x00001b839 size=    1,782 check=0x00027675 declared
+  Character/Accessory/01012001.img         off=0x00001bf2f size=    1,578 check=0x000237da declared
+  Character/Accessory/01012002.img         off=0x00001c559 size=    2,608 check=0x0004274e declared
+  Character/Accessory/01022000.img         off=0x00001cf89 size=    4,989 check=0x0004efec declared
+  Character/Accessory/01022001.img         off=0x00001e306 size=    5,006 check=0x0004fb4d declared
+  Character/Accessory/01022002.img         off=0x00001f694 size=    4,986 check=0x0004ded0 declared
+  Character/Accessory/01022003.img         off=0x000020a0e size=    4,999 check=0x0004f78e declared
+  Character/Accessory/01022004.img         off=0x000021d95 size=    6,960 check=0x00079ab0 declared
+  Character/Accessory/01032000.img         off=0x0000238c5 size=    5,271 check=0x0005a3fa declared
+  Character/Accessory/01032001.img         off=0x000024d5c size=    5,268 check=0x0005a140 declared
+  Character/Accessory/01032002.img         off=0x0000261f0 size=    5,363 check=0x00060c1e declared
+  Character/Afterimage/axe.img             off=0x0000276e3 size=  196,287 check=0x017b6c5f declared
+  Character/Afterimage/crossBow.img        off=0x0000575a2 size=   62,814 check=0x007331f2 declared
+  Character/Afterimage/hit.img             off=0x000066b00 size=    8,034 check=0x000e8e04 declared
+  Character/Afterimage/mace.img            off=0x000068a62 size=  157,451 check=0x0126d720 declared
+  Character/Afterimage/poleArm.img         off=0x00008f16d size=  253,036 check=0x01e717b8 declared
+  Character/Afterimage/spear.img           off=0x0000ccdd9 size=  253,036 check=0x01e717b8 declared
+  Character/Afterimage/swordOL.img         off=0x00010aa45 size=  164,033 check=0x013621a8 declared
+  Character/Afterimage/swordOS.img         off=0x000132b06 size=  126,137 check=0x00ebedea declared
+  Character/Afterimage/swordTL.img         off=0x0001517bf size=  253,928 check=0x01edd281 declared
+  Character/Afterimage/swordTS.img         off=0x00018f7a7 size=  165,804 check=0x013827aa declared
+  Character/Cap/01000000.img               off=0x0001b7f53 size=   10,290 check=0x000d36d2 declared
+  Character/Cap/01001000.img               off=0x0001ba785 size=   10,497 check=0x000dd0da declared
+  Character/Cap/01002000.img               off=0x0001bd086 size=    6,884 check=0x00085a5a declared
+  Character/Cap/01002001.img               off=0x0001beb6a size=    5,964 check=0x0006e3e8 declared
+  Character/Cap/01002002.img               off=0x0001c02b6 size=    7,784 check=0x000a50c3 declared
+  Character/Cap/01002003.img               off=0x0001c211e size=    6,444 check=0x0007bba0 declared
+  Character/Cap/01002004.img               off=0x0001c3a4a size=    7,524 check=0x00096320 declared
+  Character/Cap/01002005.img               off=0x0001c57ae size=    8,072 check=0x000af36e declared
+  Character/Cap/01002006.img               off=0x0001c7736 size=    7,629 check=0x0009d88d declared
+  Character/Cap/01002007.img               off=0x0001c9503 size=    7,257 check=0x000964fb declared
+  Character/Cap/01002008.img               off=0x0001cb15c size=    6,478 check=0x0007b506 declared
+  Character/Cap/01002009.img               off=0x0001ccaaa size=    6,956 check=0x0008cef0 declared
+  Character/Cap/01002010.img               off=0x0001ce5d6 size=    6,975 check=0x0008f711 declared
+  Character/Cap/01002011.img               off=0x0001d0115 size=    8,074 check=0x000ab7c2 declared
+  Character/Cap/01002012.img               off=0x0001d209f size=    5,904 check=0x00068fcc declared
+  Character/Cap/01002013.img               off=0x0001d37af size=    5,706 check=0x00066118 declared
+  Character/Cap/01002014.img               off=0x0001d4df9 size=    5,496 check=0x00057f12 declared
+  Character/Cap/01002015.img               off=0x0001d6371 size=    8,495 check=0x0009dfa5 declared
+  Character/Cap/01002016.img               off=0x0001d84a0 size=    7,441 check=0x0009ec9c declared
+  Character/Cap/01002017.img               off=0x0001da1b1 size=    7,404 check=0x0009b372 declared
+  Character/Cap/01002018.img               off=0x0001dbe9d size=    6,360 check=0x000757b2 declared
+  Character/Cap/01002019.img               off=0x0001dd775 size=    6,281 check=0x00076e84 declared
+  Character/Cap/01002020.img               off=0x0001deffe size=    6,343 check=0x000747a3 declared
+  Character/Cap/01002021.img               off=0x0001e08c5 size=    6,713 check=0x00085ad0 declared
+  Character/Cap/01002022.img               off=0x0001e22fe size=    7,595 check=0x000a05a4 declared
+  Character/Cap/01002023.img               off=0x0001e40a9 size=    8,277 check=0x000b4512 declared
+  Character/Cap/01002024.img               off=0x0001e60fe size=   10,845 check=0x000ec9f1 declared
+  Character/Cap/01002025.img               off=0x0001e8b5b size=    7,663 check=0x000a307f declared
+  Character/Cap/01002026.img               off=0x0001ea94a size=    7,974 check=0x000b02f8 declared
+  Character/Cap/01002027.img               off=0x0001ec870 size=    6,884 check=0x0008687a declared
+  Character/Cap/01002028.img               off=0x0001ee354 size=    9,229 check=0x000b86ad declared
+  Character/Cap/01002029.img               off=0x0001f0761 size=   11,051 check=0x000f0d1a declared
+  Character/Cap/01002030.img               off=0x0001f328c size=   10,447 check=0x000d53ab declared
+  Character/Cap/01002031.img               off=0x0001f5b5b size=    7,488 check=0x000a02c5 declared
+  Character/Cap/01002032.img               off=0x0001f789b size=    7,016 check=0x0008ab1e declared
+  Character/Cap/01002033.img               off=0x0001f9403 size=    8,805 check=0x000ae281 declared
+  Character/Cap/01002034.img               off=0x0001fb668 size=    6,697 check=0x00084123 declared
+  Character/Cap/01002035.img               off=0x0001fd091 size=    6,699 check=0x00083a4f declared
+  Character/Cap/01002036.img               off=0x0001feabc size=    6,692 check=0x00083702 declared
+  Character/Cap/01002037.img               off=0x0002004e0 size=    6,606 check=0x0007de4c declared
+  Character/Cap/01002038.img               off=0x000201eae size=    6,705 check=0x00084edf declared
+  Character/Cap/01002039.img               off=0x0002038df size=    6,630 check=0x0007e0d9 declared
+  Character/Cap/01002040.img               off=0x0002052c5 size=    6,636 check=0x00083dca declared
+  Character/Cap/01002041.img               off=0x000206cb1 size=    5,966 check=0x0006f64a declared
+  Character/Cap/01002042.img               off=0x0002083ff size=    6,045 check=0x0006e6f3 declared
+  Character/Cap/01002043.img               off=0x000209b9c size=    7,985 check=0x000afb5d declared
+  Character/Cap/01002044.img               off=0x00020bacd size=    8,038 check=0x000acb5b declared
+  Character/Cap/01002045.img               off=0x00020da33 size=    7,668 check=0x000a1441 declared
+  Character/Cap/01002046.img               off=0x00020f827 size=    7,587 check=0x0009d117 declared
+  Character/Cap/01002047.img               off=0x0002115ca size=    7,462 check=0x0009cd71 declared
+  Character/Cap/01002048.img               off=0x0002132f0 size=    7,501 check=0x000a0031 declared
+  Character/Cap/01002049.img               off=0x00021503d size=    8,107 check=0x000b2696 declared
+  Character/Cap/01002050.img               off=0x000216fe8 size=    8,176 check=0x000b02a7 declared
+  Character/Cap/01002051.img               off=0x000218fd8 size=    7,355 check=0x00097455 declared
+  Character/Cap/01002052.img               off=0x00021ac93 size=    7,395 check=0x00099d9f declared
+  Character/Cap/01002053.img               off=0x00021c976 size=    6,440 check=0x0007a7cd declared
+  Character/Cap/01002054.img               off=0x00021e29e size=    6,411 check=0x00077cd4 declared
+  Character/Cap/01002055.img               off=0x00021fba9 size=    7,039 check=0x0008c536 declared
+  Character/Cap/01002056.img               off=0x000221728 size=    7,150 check=0x00091fb9 declared
+  Character/Cap/01002057.img               off=0x000223316 size=    7,084 check=0x0008d114 declared
+  Character/Cap/01002058.img               off=0x000224ec2 size=    8,054 check=0x000a971c declared
+  Character/Cap/01002059.img               off=0x000226e38 size=    7,913 check=0x000aebd7 declared
+  Character/Cap/01002060.img               off=0x000228d21 size=    5,918 check=0x00068856 declared
+  Character/Cap/01002061.img               off=0x00022a43f size=    6,007 check=0x000699bc declared
+  Character/Cap/01002062.img               off=0x00022bbb6 size=    6,009 check=0x00069995 declared
+  Character/Cap/01002063.img               off=0x00022d32f size=    5,980 check=0x0006d863 declared
+  Character/Cap/01002064.img               off=0x00022ea8b size=    5,629 check=0x0005e364 declared
+  Character/Cap/01002065.img               off=0x000230088 size=    5,553 check=0x0005bcea declared
+  Character/Cap/01002066.img               off=0x000231639 size=    5,442 check=0x0005f04b declared
+  Character/Cap/01002067.img               off=0x000232b7b size=    5,572 check=0x0005d1c3 declared
+  Character/Cap/01002068.img               off=0x00023413f size=    5,624 check=0x0005f7fc declared
+  Character/Cap/01002069.img               off=0x000235737 size=    5,567 check=0x0005c586 declared
+  Character/Cap/01002070.img               off=0x000236cf6 size=    8,537 check=0x000985f2 declared
+  Character/Cap/01002071.img               off=0x000238e4f size=    8,529 check=0x0009c4b7 declared
+  Character/Cap/01002072.img               off=0x00023afa0 size=    7,661 check=0x0009f5d0 declared
+  Character/Cap/01002073.img               off=0x00023cd8d size=    7,497 check=0x0009ba68 declared
+  Character/Cap/01002074.img               off=0x00023ead6 size=    7,271 check=0x00093bf6 declared
+  Character/Cap/01002075.img               off=0x00024073d size=    7,279 check=0x00094585 declared
+  Character/Cap/01002076.img               off=0x0002423ac size=    6,932 check=0x000855ab declared
+  Character/Cap/01002077.img               off=0x000243ec0 size=    6,962 check=0x00087b81 declared
+  Character/Cap/01002078.img               off=0x0002459f2 size=    6,348 check=0x0007593e declared
+  Character/Cap/01002079.img               off=0x0002472be size=    6,322 check=0x00073030 declared
+  Character/Cap/01002080.img               off=0x000248b70 size=    6,014 check=0x00069eb5 declared
+  Character/Cap/01002081.img               off=0x00024a2ee size=    6,150 check=0x00072923 declared
+  Character/Cap/01002082.img               off=0x00024baf4 size=    6,411 check=0x0007e62d declared
+  Character/Cap/01002083.img               off=0x00024d3ff size=    5,938 check=0x0006c1a7 declared
+  Character/Cap/01002084.img               off=0x00024eb31 size=   11,134 check=0x000f91f6 declared
+  Character/Cap/01002085.img               off=0x0002516af size=    9,862 check=0x000ce106 declared
+  Character/Cap/01002086.img               off=0x000253d35 size=    9,593 check=0x000c3a94 declared
+  Character/Cap/01002087.img               off=0x0002562ae size=    7,293 check=0x000953d4 declared
+  Character/Cap/01002088.img               off=0x000257f2b size=    7,256 check=0x00098f46 declared
+  Character/Cap/01002089.img               off=0x000259b83 size=    7,745 check=0x000a52a4 declared
+  Character/Cap/01002090.img               off=0x00025b9c4 size=    7,725 check=0x000a747f declared
+  Character/Cap/01002091.img               off=0x00025d7f1 size=   10,580 check=0x000e6c6b declared
+  Character/Cap/01002092.img               off=0x000260145 size=    7,791 check=0x000a5ad2 declared
+  Character/Cap/01002093.img               off=0x000261fb4 size=    7,709 check=0x000a6dd9 declared
+  Character/Cap/01002094.img               off=0x000263dd1 size=   10,527 check=0x000dc545 declared
+  Character/Cap/01002095.img               off=0x0002666f0 size=   10,591 check=0x000e3380 declared
+  Character/Cap/01002096.img               off=0x00026904f size=    6,391 check=0x00077b85 declared
+  Character/Cap/01002097.img               off=0x00026a946 size=    6,405 check=0x00077f5c declared
+  Character/Cap/01002098.img               off=0x00026c24b size=    7,018 check=0x00089194 declared
+  Character/Cap/01002099.img               off=0x00026ddb5 size=    6,911 check=0x00086eae declared
+  Character/Cap/01002100.img               off=0x00026f8b4 size=    7,525 check=0x000995a5 declared
+  Character/Cap/01002101.img               off=0x000271619 size=    7,492 check=0x0009db8a declared
+  Character/Cap/01002102.img               off=0x00027335d size=    6,518 check=0x0007e2d4 declared
+  Character/Cap/01002103.img               off=0x000274cd3 size=    6,532 check=0x0007e607 declared
+  Character/Cap/01002104.img               off=0x000276657 size=    6,483 check=0x0007bda9 declared
+  Character/Cap/01002105.img               off=0x000277faa size=    6,598 check=0x0007becd declared
+  Character/Cap/01002106.img               off=0x000279970 size=    6,526 check=0x0007e662 declared
+  Character/Cap/01002107.img               off=0x00027b2ee size=    6,232 check=0x00078bea declared
+  Character/Cap/01002108.img               off=0x00027cb46 size=    6,438 check=0x0007e1cc declared
+  Character/Cap/01002109.img               off=0x00027e46c size=    6,482 check=0x00080c32 declared
+  Character/Cap/01002110.img               off=0x00027fdbe size=    6,250 check=0x00073c58 declared
+  Character/Cap/01002111.img               off=0x000281628 size=    6,583 check=0x0008100a declared
+  Character/Cap/01002112.img               off=0x000282fdf size=    6,226 check=0x00075ebb declared
+  Character/Cap/01002113.img               off=0x000284831 size=    6,303 check=0x000757a9 declared
+  Character/Cap/01002114.img               off=0x0002860d0 size=    6,313 check=0x00077029 declared
+  Character/Cap/01002115.img               off=0x000287979 size=    6,273 check=0x000738f5 declared
+  Character/Cap/01002116.img               off=0x0002891fa size=    6,312 check=0x00076945 declared
+  Character/Cap/01002117.img               off=0x00028aaa2 size=    6,578 check=0x0007bca3 declared
+  Character/Cap/01002118.img               off=0x00028c454 size=    6,645 check=0x00080f7c declared
+  Character/Cap/01002119.img               off=0x00028de49 size=    6,648 check=0x00080665 declared
+  Character/Cap/01002120.img               off=0x00028f841 size=    6,627 check=0x0007e5aa declared
+  Character/Cap/01002121.img               off=0x000291224 size=    6,641 check=0x0007f427 declared
+  Character/Cap/01002122.img               off=0x000292c15 size=    5,915 check=0x0006b03c declared
+  Character/Cap/01002123.img               off=0x000294330 size=    5,974 check=0x0006e581 declared
+  Character/Cap/01002124.img               off=0x000295a86 size=    6,045 check=0x0006d900 declared
+  Character/Cap/01002125.img               off=0x000297223 size=    5,975 check=0x0006edb7 declared
+  Character/Cap/01002126.img               off=0x00029897a size=    6,010 check=0x0006aa8c declared
+  Character/Cap/01002127.img               off=0x00029a0f4 size=    6,283 check=0x00076687 declared
+  Character/Cap/01002128.img               off=0x00029b97f size=    6,411 check=0x00078538 declared
+  Character/Cap/01002129.img               off=0x00029d28a size=    6,421 check=0x000790f5 declared
+  Character/Cap/01002130.img               off=0x00029eb9f size=    6,449 check=0x0007aaf5 declared
+  Character/Cap/01002131.img               off=0x0002a04d0 size=    6,433 check=0x00079a5c declared
+  Character/Cap/01002132.img               off=0x0002a1df1 size=    5,892 check=0x00068ad8 declared
+  Character/Cap/01002133.img               off=0x0002a34f5 size=    5,876 check=0x00067273 declared
+  Character/Cap/01002134.img               off=0x0002a4be9 size=    5,863 check=0x00067242 declared
+  Character/Cap/01002135.img               off=0x0002a62d0 size=    6,547 check=0x00080a3d declared
+  Character/Cap/01002136.img               off=0x0002a7c63 size=    6,557 check=0x0007beeb declared
+  Character/Cap/01002137.img               off=0x0002a9600 size=    6,538 check=0x000804d8 declared
+  Character/Cap/01002138.img               off=0x0002aaf8a size=    6,474 check=0x00080fb9 declared
+  Character/Cap/01002139.img               off=0x0002ac8d4 size=    6,454 check=0x0007f93f declared
+  Character/Cap/01002140.img               off=0x0002ae20a size=    6,058 check=0x000703a6 declared
+  Character/Clothes/01040000.img           off=0x0002af9b4 size=   48,746 check=0x0044e173 declared
+  Character/Clothes/01040001.img           off=0x0002bb81e size=   30,217 check=0x00216dd5 declared
+  Character/Clothes/01040002.img           off=0x0002c2e27 size=   29,489 check=0x0020b320 declared
+  Character/Clothes/01040003.img           off=0x0002ca158 size=   33,822 check=0x00281454 declared
+  Character/Clothes/01040004.img           off=0x0002d2576 size=   32,558 check=0x00263064 declared
+  Character/Clothes/01040005.img           off=0x0002da4a4 size=   35,945 check=0x002c490e declared
+  Character/Clothes/01040006.img           off=0x0002e310d size=   18,875 check=0x001730d3 declared
+  Character/Clothes/01040007.img           off=0x0002e7ac8 size=   42,645 check=0x0038c814 declared
+  Character/Clothes/01040008.img           off=0x0002f215d size=   40,311 check=0x00351663 declared
+  Character/Clothes/01040009.img           off=0x0002fbed4 size=   37,443 check=0x002f8f6b declared
+  Character/Clothes/01040010.img           off=0x000305117 size=   29,969 check=0x0020f3e0 declared
+  Character/Clothes/01040011.img           off=0x00030c628 size=   45,554 check=0x003ef893 declared
+  Character/Clothes/01040012.img           off=0x00031781a size=   38,253 check=0x00317a1c declared
+  Character/Clothes/01040013.img           off=0x000320d87 size=   31,152 check=0x00239a64 declared
+  Character/Clothes/01040014.img           off=0x000328737 size=   30,986 check=0x00230aa0 declared
+  Character/Clothes/01040015.img           off=0x000330041 size=   54,235 check=0x00507b46 declared
+  Character/Clothes/01040016.img           off=0x00033d41c size=   38,966 check=0x0032b861 declared
+  Character/Clothes/01040017.img           off=0x000346c52 size=   32,789 check=0x0026c371 declared
+  Character/Clothes/01040018.img           off=0x00034ec67 size=   48,031 check=0x004402d8 declared
+  Character/Clothes/01040019.img           off=0x00035a806 size=   48,402 check=0x0044b347 declared
+  Character/Clothes/01040020.img           off=0x000366518 size=   48,699 check=0x0045002c declared
+  Character/Clothes/01040021.img           off=0x000372353 size=   38,265 check=0x0031ce8c declared
+  Character/Clothes/01040022.img           off=0x00037b8cc size=   46,964 check=0x0041e85b declared
+  Character/Clothes/01040023.img           off=0x000387040 size=   46,484 check=0x0040b1bf declared
+  Character/Clothes/01040024.img           off=0x0003925d4 size=   46,309 check=0x0040b63b declared
+  Character/Clothes/01040025.img           off=0x00039dab9 size=   46,406 check=0x004100ca declared
+  Character/Clothes/01040026.img           off=0x0003a8fff size=   39,135 check=0x0033cd36 declared
+  Character/Clothes/01040027.img           off=0x0003b28de size=   39,145 check=0x00339936 declared
+  Character/Clothes/01040028.img           off=0x0003bc1c7 size=   39,162 check=0x00337d2a declared
+  Character/Clothes/01040029.img           off=0x0003c5ac1 size=   36,574 check=0x002e2d33 declared
+  Character/Clothes/01040030.img           off=0x0003ce99f size=   36,837 check=0x002e7ca5 declared
+  Character/Clothes/01040031.img           off=0x0003d7984 size=   25,533 check=0x001e6474 declared
+  Character/Clothes/01040032.img           off=0x0003ddd41 size=   25,471 check=0x001e34b5 declared
+  Character/Clothes/01040033.img           off=0x0003e40c0 size=   25,723 check=0x001e9c38 declared
+  Character/Clothes/01040034.img           off=0x0003ea53b size=   29,079 check=0x001eef19 declared
+  Character/Clothes/01040035.img           off=0x0003f16d2 size=   29,661 check=0x001ff6b4 declared
+  Character/Clothes/01040036.img           off=0x0003f8aaf size=   19,883 check=0x001959c3 declared
+  Character/Clothes/01040037.img           off=0x0003fd85a size=   37,346 check=0x002f2e90 declared
+  Character/Clothes/01040038.img           off=0x000406a3c size=   52,074 check=0x004c54f0 declared
+  Character/Clothes/01040039.img           off=0x0004135a6 size=   37,988 check=0x0030f2e1 declared
+  Character/Clothes/01040040.img           off=0x00041ca0a size=   38,698 check=0x0032a507 declared
+  Character/Clothes/01040041.img           off=0x000426134 size=   38,420 check=0x0031fab2 declared
+  Character/Clothes/01040042.img           off=0x00042f748 size=   33,857 check=0x0028d00e declared
+  Character/Clothes/01040043.img           off=0x000437b89 size=   33,329 check=0x0027e007 declared
+  Character/Clothes/01040044.img           off=0x00043fdba size=   34,175 check=0x0028b80e declared
+  Character/Clothes/01040045.img           off=0x000448339 size=   35,611 check=0x002cb7da declared
+  Character/Clothes/01040046.img           off=0x000450e54 size=   35,633 check=0x002c45bc declared
+  Character/Clothes/01040047.img           off=0x000459985 size=   36,354 check=0x002e1430 declared
+  Character/Clothes/01040048.img           off=0x000462787 size=   33,676 check=0x00282299 declared
+  Character/Clothes/01040049.img           off=0x00046ab13 size=   33,763 check=0x002851cc declared
+  Character/Clothes/01040050.img           off=0x000472ef6 size=   32,953 check=0x0026b42d declared
+  Character/Clothes/01040051.img           off=0x00047afaf size=   34,734 check=0x002aa2f2 declared
+  Character/Clothes/01040052.img           off=0x00048375d size=   34,120 check=0x00288e27 declared
+  Character/Clothes/01040053.img           off=0x00048bca5 size=   34,025 check=0x0028270c declared
+  Character/Clothes/01040054.img           off=0x00049418e size=   36,049 check=0x002cd791 declared
+  Character/Clothes/01040055.img           off=0x00049ce5f size=   35,900 check=0x002c6dd9 declared
+  Character/Clothes/01040056.img           off=0x0004a5a9b size=   37,125 check=0x002fbf2f declared
+  Character/Clothes/01040057.img           off=0x0004aeba0 size=   38,921 check=0x0032d955 declared
+  Character/Clothes/01040058.img           off=0x0004b83a9 size=   38,777 check=0x0032b5d6 declared
+  Character/Clothes/01040059.img           off=0x0004c1b22 size=   37,574 check=0x00307047 declared
+  Character/Clothes/01040060.img           off=0x0004cade8 size=   38,131 check=0x0030aeeb declared
+  Character/Clothes/01040061.img           off=0x0004d42db size=   31,604 check=0x00241943 declared
+  Character/Clothes/01040062.img           off=0x0004dbe4f size=   31,687 check=0x00247270 declared
+  Character/Clothes/01040063.img           off=0x0004e3a16 size=   32,005 check=0x0024a6bc declared
+  Character/Clothes/01040064.img           off=0x0004eb71b size=   33,681 check=0x00285333 declared
+  Character/Clothes/01040065.img           off=0x0004f3aac size=   34,024 check=0x00286685 declared
+  Character/Clothes/01040066.img           off=0x0004fbf94 size=   33,847 check=0x0028c208 declared
+  Character/Clothes/01040067.img           off=0x0005043cb size=   41,562 check=0x0037c4da declared
+  Character/Clothes/01040068.img           off=0x00050e625 size=   40,469 check=0x0035870a declared
+  Character/Clothes/01040069.img           off=0x00051843a size=   40,501 check=0x0035d866 declared
+  Character/Clothes/01040070.img           off=0x00052226f size=   41,249 check=0x0037c520 declared
+  Character/Clothes/01040071.img           off=0x00052c390 size=   40,459 check=0x003479c6 declared
+  Character/Clothes/01041000.img           off=0x00053619b size=   35,721 check=0x002bac29 declared
+  Character/Clothes/01041001.img           off=0x00053ed24 size=   30,704 check=0x0023ca43 declared
+  Character/Clothes/01041002.img           off=0x000546514 size=   15,543 check=0x0010aacf declared
+  Character/Clothes/01041003.img           off=0x00054a1cb size=   32,146 check=0x00256e23 declared
+  Character/Clothes/01041004.img           off=0x000551f5d size=   32,151 check=0x0025ca9f declared
+  Character/Clothes/01041005.img           off=0x000559cf4 size=   33,498 check=0x0027ceb5 declared
+  Character/Clothes/01041006.img           off=0x000561fce size=   30,051 check=0x0021bcf8 declared
+  Character/Clothes/01041007.img           off=0x000569531 size=   30,246 check=0x00216bc9 declared
+  Character/Clothes/01041008.img           off=0x000570b57 size=   35,024 check=0x002ad96c declared
+  Character/Clothes/01041009.img           off=0x000579427 size=   30,152 check=0x00227efe declared
+  Character/Clothes/01041010.img           off=0x0005809ef size=   30,778 check=0x00237665 declared
+  Character/Clothes/01041011.img           off=0x000588229 size=   17,571 check=0x0014990e declared
+  Character/Clothes/01041012.img           off=0x00058c6cc size=   36,776 check=0x002e38bc declared
+  Character/Clothes/01041013.img           off=0x000595674 size=   35,549 check=0x002ce325 declared
+  Character/Clothes/01041014.img           off=0x00059e151 size=   39,677 check=0x00332a89 declared
+  Character/Clothes/01041015.img           off=0x0005a7c4e size=   17,692 check=0x0013dd75 declared
+  Character/Clothes/01041016.img           off=0x0005ac16a size=   17,706 check=0x0013e77a declared
+  Character/Clothes/01041017.img           off=0x0005b0694 size=   17,688 check=0x0013ba16 declared
+  Character/Clothes/01041018.img           off=0x0005b4bac size=   17,706 check=0x0013e2a1 declared
+  Character/Clothes/01041019.img           off=0x0005b90d6 size=   37,457 check=0x002fb341 declared
+  Character/Clothes/01041020.img           off=0x0005c2327 size=   38,117 check=0x003083ee declared
+  Character/Clothes/01041021.img           off=0x0005cb80c size=   38,076 check=0x00307300 declared
+  Character/Clothes/01041022.img           off=0x0005d4cc8 size=   45,333 check=0x003ecc66 declared
+  Character/Clothes/01041023.img           off=0x0005dfddd size=   45,027 check=0x003e7edc declared
+  Character/Clothes/01041024.img           off=0x0005eadc0 size=   45,166 check=0x003e4b0d declared
+  Character/Clothes/01041025.img           off=0x0005f5e2e size=   18,017 check=0x00159f3a declared
+  Character/Clothes/01041026.img           off=0x0005fa48f size=   18,018 check=0x00158a2d declared
+  Character/Clothes/01041027.img           off=0x0005feaf1 size=   35,229 check=0x002bface declared
+  Character/Clothes/01041028.img           off=0x00060748e size=   35,537 check=0x002caf86 declared
+  Character/Clothes/01041029.img           off=0x00060ff5f size=   43,579 check=0x003c471d declared
+  Character/Clothes/01041030.img           off=0x00061a99a size=   44,656 check=0x003da393 declared
+  Character/Clothes/01041031.img           off=0x00062580a size=   45,570 check=0x0040232f declared
+  Character/Clothes/01041032.img           off=0x000630a0c size=   46,137 check=0x004088a0 declared
+  Character/Clothes/01041033.img           off=0x00063be45 size=   45,525 check=0x003f4f78 declared
+  Character/Clothes/01041034.img           off=0x00064701a size=   45,710 check=0x003fe42e declared
+  Character/Clothes/01041035.img           off=0x0006522a8 size=   46,187 check=0x0040dccd declared
+  Character/Clothes/01041036.img           off=0x00065d713 size=   21,424 check=0x001c20c4 declared
+  Character/Clothes/01041037.img           off=0x000662ac3 size=   21,953 check=0x001d4628 declared
+  Character/Clothes/01041038.img           off=0x000668084 size=   21,551 check=0x001c3f49 declared
+  Character/Clothes/01041039.img           off=0x00066d4b3 size=   31,861 check=0x002560aa declared
+  Character/Clothes/01041040.img           off=0x000675128 size=   31,819 check=0x0023d6a3 declared
+  Character/Clothes/01041041.img           off=0x00067cd73 size=   40,279 check=0x00345ade declared
+  Character/Clothes/01041042.img           off=0x000686aca size=   40,273 check=0x00344a05 declared
+  Character/Clothes/01041043.img           off=0x00069081b size=   40,214 check=0x00347eaa declared
+  Character/Clothes/01041044.img           off=0x00069a531 size=   30,840 check=0x002411d9 declared
+  Character/Clothes/01041045.img           off=0x0006a1da9 size=   31,411 check=0x0024cdf6 declared
+  Character/Clothes/01041046.img           off=0x0006a985c size=   19,806 check=0x00191f3f declared
+  Character/Clothes/01041047.img           off=0x0006ae5ba size=   35,426 check=0x002bad60 declared
+  Character/Clothes/01041048.img           off=0x0006b701c size=   35,374 check=0x002ba52d declared
+  Character/Clothes/01041049.img           off=0x0006bfa4a size=   35,819 check=0x002bf8e2 declared
+  Character/Clothes/01041050.img           off=0x0006c8635 size=   36,234 check=0x002d7a1a declared
+  Character/Clothes/01041051.img           off=0x0006d13bf size=   38,906 check=0x003221e7 declared
+  Character/Clothes/01041052.img           off=0x0006dabb9 size=   38,644 check=0x00314b15 declared
+  Character/Clothes/01041053.img           off=0x0006e42ad size=   38,855 check=0x003277a9 declared
+  Character/Clothes/01041054.img           off=0x0006eda74 size=   40,179 check=0x0034bae9 declared
+  Character/Clothes/01041055.img           off=0x0006f7767 size=   40,199 check=0x00352fac declared
+  Character/Clothes/01041056.img           off=0x00070146e size=   39,074 check=0x0032f1a5 declared
+  Character/Clothes/01041057.img           off=0x00070ad10 size=   33,631 check=0x002704aa declared
+  Character/Clothes/01041058.img           off=0x00071306f size=   32,974 check=0x00265cb2 declared
+  Character/Clothes/01041059.img           off=0x00071b13d size=   35,296 check=0x002aca87 declared
+  Character/Clothes/01041060.img           off=0x000723b1d size=   35,846 check=0x002be2a5 declared
+  Character/Clothes/01042000.img           off=0x00072c723 size=   42,036 check=0x00393335 declared
+  Character/Clothes/01042001.img           off=0x000736b57 size=   41,050 check=0x0036f3e7 declared
+  Character/Clothes/01042003.img           off=0x000740bb1 size=   32,949 check=0x0027d161 declared
+  Character/Clothes/01050000.img           off=0x000748c66 size=   46,847 check=0x0042613f declared
+  Character/Clothes/01050001.img           off=0x000754365 size=   39,354 check=0x00323ac5 declared
+  Character/Clothes/01050002.img           off=0x00075dd1f size=   42,538 check=0x0039945d declared
+  Character/Clothes/01050003.img           off=0x000768349 size=   41,887 check=0x0038a08f declared
+  Character/Clothes/01050004.img           off=0x0007726e8 size=   49,121 check=0x00468d50 declared
+  Character/Clothes/01050005.img           off=0x00077e6c9 size=   39,568 check=0x0034f7ad declared
+  Character/Clothes/01050006.img           off=0x000788159 size=   39,380 check=0x00341a35 declared
+  Character/Clothes/01050007.img           off=0x000791b2d size=   40,946 check=0x0038381f declared
+  Character/Clothes/01050008.img           off=0x00079bb1f size=   69,263 check=0x006ddd17 declared
+  Character/Clothes/01050009.img           off=0x0007ac9ae size=   69,618 check=0x006f3474 declared
+  Character/Clothes/01050010.img           off=0x0007bd9a0 size=   68,941 check=0x006e06c6 declared
+  Character/Clothes/01050011.img           off=0x0007ce6ed size=   42,424 check=0x00390be2 declared
+  Character/Clothes/01050012.img           off=0x0007d8ca5 size=   38,021 check=0x00301778 declared
+  Character/Clothes/01050013.img           off=0x0007e212a size=   37,777 check=0x002f7088 declared
+  Character/Clothes/01050014.img           off=0x0007eb4bb size=   37,960 check=0x0030136a declared
+  Character/Clothes/01050015.img           off=0x0007f4903 size=   37,864 check=0x002fa206 declared
+  Character/Clothes/01050016.img           off=0x0007fdceb size=   37,646 check=0x002f5986 declared
+  Character/Clothes/01050017.img           off=0x000806ff9 size=   39,935 check=0x0034c142 declared
+  Character/Clothes/01050018.img           off=0x000810bf8 size=   29,446 check=0x002ce6aa declared
+  Character/Clothes/01050019.img           off=0x000817efe size=   29,373 check=0x002cc5d5 declared
+  Character/Clothes/01050020.img           off=0x00081f1bb size=   29,261 check=0x002c6371 declared
+  Character/Clothes/01050021.img           off=0x000826408 size=   47,424 check=0x0042f8bb declared
+  Character/Clothes/01050022.img           off=0x000831d48 size=   46,224 check=0x00410d47 declared
+  Character/Clothes/01050023.img           off=0x00083d1d8 size=   38,974 check=0x0031576d declared
+  Character/Clothes/01050024.img           off=0x000846a16 size=   39,216 check=0x00320be1 declared
+  Character/Clothes/01050025.img           off=0x000850346 size=   38,810 check=0x0031edd5 declared
+  Character/Clothes/01050026.img           off=0x000859ae0 size=   42,357 check=0x00387c5e declared
+  Character/Clothes/01050027.img           off=0x000864055 size=   42,397 check=0x00395281 declared
+  Character/Clothes/01050028.img           off=0x00086e5f2 size=   42,744 check=0x003978db declared
+  Character/Clothes/01051000.img           off=0x000878cea size=   40,155 check=0x00363f7c declared
+  Character/Clothes/01051001.img           off=0x0008829c5 size=   37,927 check=0x003122bf declared
+  Character/Clothes/01051002.img           off=0x00088bdec size=   30,308 check=0x002da5ba declared
+  Character/Clothes/01051003.img           off=0x000893450 size=   42,666 check=0x00381466 declared
+  Character/Clothes/01051004.img           off=0x00089dafa size=   42,789 check=0x0038cc6b declared
+  Character/Clothes/01051005.img           off=0x0008a821f size=   42,558 check=0x0039084b declared
+  Character/Clothes/01051006.img           off=0x0008b285d size=   35,335 check=0x002da3c1 declared
+  Character/Clothes/01051007.img           off=0x0008bb264 size=   34,616 check=0x002c6ce1 declared
+  Character/Clothes/01051008.img           off=0x0008c399c size=   36,912 check=0x00301d5c declared
+  Character/Clothes/01051009.img           off=0x0008cc9cc size=   35,385 check=0x002dcfb5 declared
+  Character/Clothes/01051010.img           off=0x0008d5405 size=   47,232 check=0x0042ef82 declared
+  Character/Clothes/01051011.img           off=0x0008e0c85 size=   46,499 check=0x0040f8f7 declared
+  Character/Clothes/01051012.img           off=0x0008ec228 size=   46,881 check=0x0041f394 declared
+  Character/Clothes/01051013.img           off=0x0008f7949 size=   46,559 check=0x0041b9cb declared
+  Character/Clothes/01060000.img           off=0x000902f28 size=   21,883 check=0x001dcdcc declared
+  Character/Clothes/01060001.img           off=0x0009084a3 size=   16,529 check=0x001296df declared
+  Character/Clothes/01060002.img           off=0x00090c534 size=   20,226 check=0x001a1c7c declared
+  Character/Clothes/01060003.img           off=0x000911436 size=   22,477 check=0x001ee65e declared
+  Character/Clothes/01060004.img           off=0x000916c03 size=   21,810 check=0x001ced2e declared
+  Character/Clothes/01060005.img           off=0x00091c135 size=   21,912 check=0x001dd1df declared
+  Character/Clothes/01060006.img           off=0x0009216cd size=   20,155 check=0x001a040e declared
+  Character/Clothes/01060007.img           off=0x000926588 size=   21,441 check=0x001c35ed declared
+  Character/Clothes/01060008.img           off=0x00092b949 size=   27,699 check=0x002898da declared
+  Character/Clothes/01060009.img           off=0x00093257c size=   21,179 check=0x001bfae3 declared
+  Character/Clothes/01060010.img           off=0x000937837 size=   22,230 check=0x001e3165 declared
+  Character/Clothes/01060011.img           off=0x00093cf0d size=   21,967 check=0x001de34f declared
+  Character/Clothes/01060012.img           off=0x0009424dc size=   24,497 check=0x00223de0 declared
+  Character/Clothes/01060013.img           off=0x00094848d size=   24,616 check=0x002289ad declared
+  Character/Clothes/01060014.img           off=0x00094e4b5 size=   24,893 check=0x0022e85b declared
+  Character/Clothes/01060015.img           off=0x0009545f2 size=   24,808 check=0x0022bcd9 declared
+  Character/Clothes/01060016.img           off=0x00095a6da size=   19,605 check=0x0019484f declared
+  Character/Clothes/01060017.img           off=0x00095f36f size=   19,316 check=0x0018fe6a declared
+  Character/Clothes/01060018.img           off=0x000963ee3 size=   19,536 check=0x00196335 declared
+  Character/Clothes/01060019.img           off=0x000968b33 size=   19,509 check=0x00192d37 declared
+  Character/Clothes/01060020.img           off=0x00096d768 size=   19,080 check=0x00186da3 declared
+  Character/Clothes/01060021.img           off=0x0009721f0 size=   22,068 check=0x001d8146 declared
+  Character/Clothes/01060022.img           off=0x000977824 size=   21,668 check=0x001d1f22 declared
+  Character/Clothes/01060023.img           off=0x00097ccc8 size=   21,940 check=0x001d7b2b declared
+  Character/Clothes/01060024.img           off=0x00098227c size=   21,984 check=0x001e3edc declared
+  Character/Clothes/01060025.img           off=0x00098785c size=   21,843 check=0x001dcf4d declared
+  Character/Clothes/01060026.img           off=0x00098cdaf size=   16,670 check=0x0013d02d declared
+  Character/Clothes/01060027.img           off=0x000990ecd size=   20,745 check=0x001b5ffc declared
+  Character/Clothes/01060028.img           off=0x000995fd6 size=   26,439 check=0x002666cc declared
+  Character/Clothes/01060029.img           off=0x00099c71d size=   22,627 check=0x001ebbe0 declared
+  Character/Clothes/01060030.img           off=0x0009a1f80 size=   22,280 check=0x001df60d declared
+  Character/Clothes/01060031.img           off=0x0009a7688 size=   26,786 check=0x00275e85 declared
+  Character/Clothes/01060032.img           off=0x0009adf2a size=   26,084 check=0x00265873 declared
+  Character/Clothes/01060033.img           off=0x0009b450e size=   26,945 check=0x00279acb declared
+  Character/Clothes/01060034.img           off=0x0009bae4f size=   20,079 check=0x001a5e71 declared
+  Character/Clothes/01060035.img           off=0x0009bfcbe size=   19,424 check=0x0019227f declared
+  Character/Clothes/01060036.img           off=0x0009c489e size=   20,244 check=0x001aa9c4 declared
+  Character/Clothes/01060037.img           off=0x0009c97b2 size=   22,667 check=0x001eb66a declared
+  Character/Clothes/01060038.img           off=0x0009cf03d size=   22,710 check=0x001ec00c declared
+  Character/Clothes/01060039.img           off=0x0009d48f3 size=   22,673 check=0x001edb58 declared
+  Character/Clothes/01060040.img           off=0x0009da184 size=   19,749 check=0x001973ef declared
+  Character/Clothes/01060041.img           off=0x0009deea9 size=   19,470 check=0x0018fb17 declared
+  Character/Clothes/01060042.img           off=0x0009e3ab7 size=   18,570 check=0x0017124b declared
+  Character/Clothes/01060043.img           off=0x0009e8341 size=   23,470 check=0x00205323 declared
+  Character/Clothes/01060044.img           off=0x0009edeef size=   23,018 check=0x001f4f39 declared
+  Character/Clothes/01060045.img           off=0x0009f38d9 size=   22,852 check=0x001f83d4 declared
+  Character/Clothes/01060046.img           off=0x0009f921d size=   22,691 check=0x001f7f6f declared
+  Character/Clothes/01060047.img           off=0x0009feac0 size=   21,827 check=0x001e8bcb declared
+  Character/Clothes/01060048.img           off=0x000a04003 size=   22,020 check=0x001e3d20 declared
+  Character/Clothes/01060049.img           off=0x000a09607 size=   22,030 check=0x001e6676 declared
+  Character/Clothes/01060050.img           off=0x000a0ec15 size=   22,262 check=0x001f6d65 declared
+  Character/Clothes/01060051.img           off=0x000a1430b size=   22,466 check=0x001f5781 declared
+  Character/Clothes/01060052.img           off=0x000a19acd size=   22,626 check=0x001f4b8d declared
+  Character/Clothes/01060053.img           off=0x000a1f32f size=   20,847 check=0x001b627a declared
+  Character/Clothes/01060054.img           off=0x000a2449e size=   20,281 check=0x001a79bd declared
+  Character/Clothes/01060055.img           off=0x000a293d7 size=   20,466 check=0x001a8b2c declared
+  Character/Clothes/01060056.img           off=0x000a2e3c9 size=   24,722 check=0x0022bd7d declared
+  Character/Clothes/01060057.img           off=0x000a3445b size=   23,879 check=0x0021026c declared
+  Character/Clothes/01060058.img           off=0x000a3a1a2 size=   23,767 check=0x00211de5 declared
+  Character/Clothes/01060059.img           off=0x000a3fe79 size=   24,799 check=0x00229b67 declared
+  Character/Clothes/01061000.img           off=0x000a45f58 size=   26,242 check=0x0026da20 declared
+  Character/Clothes/01061001.img           off=0x000a4c5da size=   16,902 check=0x0013a77d declared
+  Character/Clothes/01061002.img           off=0x000a507e0 size=   16,389 check=0x00123e23 declared
+  Character/Clothes/01061003.img           off=0x000a547e5 size=   20,292 check=0x001a939b declared
+  Character/Clothes/01061004.img           off=0x000a59729 size=   21,597 check=0x001de29d declared
+  Character/Clothes/01061005.img           off=0x000a5eb86 size=   24,660 check=0x00225971 declared
+  Character/Clothes/01061006.img           off=0x000a64bda size=   31,854 check=0x00313292 declared
+  Character/Clothes/01061007.img           off=0x000a6c848 size=   17,069 check=0x00140c53 declared
+  Character/Clothes/01061008.img           off=0x000a70af5 size=   16,503 check=0x00123d69 declared
+  Character/Clothes/01061009.img           off=0x000a74b6c size=   22,547 check=0x001ef880 declared
+  Character/Clothes/01061010.img           off=0x000a7a37f size=   23,149 check=0x00207596 declared
+  Character/Clothes/01061011.img           off=0x000a7fdec size=   23,152 check=0x002089bb declared
+  Character/Clothes/01061012.img           off=0x000a8585c size=   25,209 check=0x00245fdc declared
+  Character/Clothes/01061013.img           off=0x000a8bad5 size=   25,342 check=0x00242952 declared
+  Character/Clothes/01061014.img           off=0x000a91dd3 size=   19,808 check=0x0019d2f5 declared
+  Character/Clothes/01061015.img           off=0x000a96b33 size=   24,807 check=0x002362fb declared
+  Character/Clothes/01061016.img           off=0x000a9cc1a size=   25,909 check=0x00259649 declared
+  Character/Clothes/01061017.img           off=0x000aa314f size=   26,819 check=0x0026d006 declared
+  Character/Clothes/01061018.img           off=0x000aa9a12 size=   26,897 check=0x0026a649 declared
+  Character/Clothes/01061019.img           off=0x000ab0323 size=   24,726 check=0x00238905 declared
+  Character/Clothes/01061020.img           off=0x000ab63b9 size=   24,584 check=0x00230790 declared
+  Character/Clothes/01061021.img           off=0x000abc3c1 size=   25,323 check=0x00245404 declared
+  Character/Clothes/01061022.img           off=0x000ac26ac size=   25,234 check=0x00240190 declared
+  Character/Clothes/01061023.img           off=0x000ac893e size=   21,650 check=0x001d08c6 declared
+  Character/Clothes/01061024.img           off=0x000acddd0 size=   21,043 check=0x001c39a7 declared
+  Character/Clothes/01061025.img           off=0x000ad3003 size=   20,737 check=0x001bb343 declared
+  Character/Clothes/01061026.img           off=0x000ad8104 size=   21,098 check=0x001c425d declared
+  Character/Clothes/01061027.img           off=0x000add36e size=   25,480 check=0x0025047a declared
+  Character/Clothes/01061028.img           off=0x000ae36f6 size=   25,564 check=0x0024f663 declared
+  Character/Clothes/01061029.img           off=0x000ae9ad2 size=   17,968 check=0x0015a284 declared
+  Character/Clothes/01061030.img           off=0x000aee102 size=   18,245 check=0x00160958 declared
+  Character/Clothes/01061031.img           off=0x000af2847 size=   18,215 check=0x00160634 declared
+  Character/Clothes/01061032.img           off=0x000af6f6e size=   20,742 check=0x001b7848 declared
+  Character/Clothes/01061033.img           off=0x000afc074 size=   20,350 check=0x001a9463 declared
+  Character/Clothes/01061034.img           off=0x000b00ff2 size=   27,377 check=0x00280d2e declared
+  Character/Clothes/01061035.img           off=0x000b07ae3 size=   27,165 check=0x00282e68 declared
+  Character/Clothes/01061036.img           off=0x000b0e500 size=   27,004 check=0x0027e72d declared
+  Character/Clothes/01061037.img           off=0x000b14e7c size=   19,379 check=0x00192859 declared
+  Character/Clothes/01061038.img           off=0x000b19a2f size=   19,362 check=0x0019188c declared
+  Character/Clothes/01061039.img           off=0x000b1e5d1 size=   16,430 check=0x0012fb44 declared
+  Character/Clothes/01061040.img           off=0x000b225ff size=   22,166 check=0x001e8797 declared
+  Character/Clothes/01061041.img           off=0x000b27c95 size=   21,930 check=0x001df425 declared
+  Character/Clothes/01061042.img           off=0x000b2d23f size=   21,997 check=0x001e878b declared
+  Character/Clothes/01061043.img           off=0x000b3282c size=   21,992 check=0x001deed6 declared
+  Character/Clothes/01061044.img           off=0x000b37e14 size=   21,601 check=0x001d4b96 declared
+  Character/Clothes/01061045.img           off=0x000b3d275 size=   22,257 check=0x001e3f1d declared
+  Character/Clothes/01061046.img           off=0x000b42966 size=   22,607 check=0x001eefe0 declared
+  Character/Clothes/01061047.img           off=0x000b481b5 size=   28,591 check=0x002ad8f4 declared
+  Character/Clothes/01061048.img           off=0x000b4f164 size=   28,632 check=0x002ad631 declared
+  Character/Clothes/01061049.img           off=0x000b5613c size=   28,711 check=0x002ae143 declared
+  Character/Clothes/01061050.img           off=0x000b5d163 size=   26,768 check=0x0026c591 declared
+  Character/Clothes/01061051.img           off=0x000b639f3 size=   26,326 check=0x00262542 declared
+  Character/Clothes/01061052.img           off=0x000b6a0c9 size=   25,919 check=0x0025c11c declared
+  Character/Clothes/01061053.img           off=0x000b70608 size=   22,825 check=0x001f5f73 declared
+  Character/Clothes/01061054.img           off=0x000b75f31 size=   22,488 check=0x001ef70f declared
+  Character/Clothes/01061055.img           off=0x000b7b709 size=   22,938 check=0x001f372b declared
+  Character/Clothes/01061056.img           off=0x000b810a3 size=   23,213 check=0x001fec10 declared
+  Character/Clothes/01062000.img           off=0x000b86b50 size=   22,159 check=0x001e5edd declared
+  Character/Clothes/01062001.img           off=0x000b8c1df size=   25,518 check=0x0023c97b declared
+  Character/Clothes/01062002.img           off=0x000b9258d size=   17,708 check=0x0014969d declared
+  Character/Clothes/01062003.img           off=0x000b96ab9 size=   22,785 check=0x001ff2c3 declared
+  Character/Clothes/01062004.img           off=0x000b9c3ba size=   23,832 check=0x0020e751 declared
+  Character/Clothes/01062005.img           off=0x000ba20d2 size=   31,083 check=0x002fe1de declared
+  Character/Clothes/01062006.img           off=0x000ba9a3d size=   21,545 check=0x001d314f declared
+  Character/Clothes/01062007.img           off=0x000baee66 size=   17,364 check=0x0014e303 declared
+  Character/Face/00020000.img              off=0x000bb323a size=    4,323 check=0x00067418 declared
+  Character/Face/00020001.img              off=0x000bb431d size=    4,200 check=0x00061245 declared
+  Character/Face/00020002.img              off=0x000bb5385 size=    3,622 check=0x00050270 declared
+  Character/Face/00020003.img              off=0x000bb61ab size=    3,555 check=0x0005056a declared
+  Character/Face/00020004.img              off=0x000bb6f8e size=    3,727 check=0x000567ce declared
+  Character/Face/00020005.img              off=0x000bb7e1d size=    3,664 check=0x00055a0b declared
+  Character/Face/00021000.img              off=0x000bb8c6d size=    3,821 check=0x0005a779 declared
+  Character/Face/00021001.img              off=0x000bb9b5a size=    3,497 check=0x0004f21d declared
+  Character/Face/00021002.img              off=0x000bba903 size=    3,534 check=0x00050ec4 declared
+  Character/Face/00021003.img              off=0x000bbb6d1 size=    3,580 check=0x00053923 declared
+  Character/Face/00021004.img              off=0x000bbc4cd size=    3,439 check=0x0004d9d3 declared
+  Character/Glove/01082000.img             off=0x000bbd23c size=   23,234 check=0x00161aea declared
+  Character/Glove/01082001.img             off=0x000bc2cfe size=   24,105 check=0x00187ab0 declared
+  Character/Glove/01082002.img             off=0x000bc8b27 size=   24,907 check=0x0019592e declared
+  Character/Glove/01082003.img             off=0x000bcec72 size=   27,100 check=0x001d2eaf declared
+  Character/Glove/01082004.img             off=0x000bd564e size=   45,038 check=0x002eed38 declared
+  Character/Glove/01082005.img             off=0x000be063c size=   45,690 check=0x00302ac0 declared
+  Character/Glove/01082006.img             off=0x000beb8b6 size=   45,738 check=0x00308887 declared
+  Character/Glove/01082007.img             off=0x000bf6b60 size=   45,580 check=0x002fdd4a declared
+  Character/Glove/01082008.img             off=0x000c01d6c size=   46,568 check=0x0033819f declared
+  Character/Glove/01082009.img             off=0x000c0d354 size=   47,708 check=0x003407b0 declared
+  Character/Glove/01082010.img             off=0x000c18db0 size=   47,704 check=0x0034a40a declared
+  Character/Glove/01082011.img             off=0x000c24808 size=   47,978 check=0x0034a989 declared
+  Character/Glove/01082012.img             off=0x000c30372 size=   14,521 check=0x000e0807 declared
+  Character/Glove/01082013.img             off=0x000c33c2b size=   15,659 check=0x00106203 declared
+  Character/Glove/01082014.img             off=0x000c37956 size=   15,654 check=0x00107fbf declared
+  Character/Glove/01082015.img             off=0x000c3b67c size=   15,674 check=0x001097b7 declared
+  Character/Glove/01082016.img             off=0x000c3f3b6 size=   15,418 check=0x001041f6 declared
+  Character/Glove/01082017.img             off=0x000c42ff0 size=   15,388 check=0x00106290 declared
+  Character/Glove/01082018.img             off=0x000c46c0c size=   15,424 check=0x001072a6 declared
+  Character/Glove/01082019.img             off=0x000c4a84c size=   26,639 check=0x001d1427 declared
+  Character/Glove/01082020.img             off=0x000c5105b size=   26,917 check=0x001d7a03 declared
+  Character/Glove/01082021.img             off=0x000c57980 size=   26,938 check=0x001d72b0 declared
+  Character/Glove/01082022.img             off=0x000c5e2ba size=   26,934 check=0x001dad89 declared
+  Character/Glove/01082023.img             off=0x000c64bf0 size=   48,319 check=0x0035459a declared
+  Character/Glove/01082024.img             off=0x000c708af size=   47,536 check=0x0032d2f1 declared
+  Character/Glove/01082025.img             off=0x000c7c25f size=   47,538 check=0x003289f9 declared
+  Character/Glove/01082026.img             off=0x000c87c11 size=   24,975 check=0x001a329f declared
+  Character/Glove/01082027.img             off=0x000c8dda0 size=   25,128 check=0x001a8964 declared
+  Character/Glove/01082028.img             off=0x000c93fc8 size=   24,954 check=0x001a29f7 declared
+  Character/Glove/01082029.img             off=0x000c9a142 size=   26,743 check=0x001ce3f3 declared
+  Character/Glove/01082030.img             off=0x000ca09b9 size=   26,539 check=0x001c7183 declared
+  Character/Glove/01082031.img             off=0x000ca7164 size=   26,509 check=0x001c655d declared
+  Character/Hair/00030000.img              off=0x000cad8f1 size=   10,713 check=0x000d6d42 declared
+  Character/Hair/00030010.img              off=0x000cb02ca size=    9,409 check=0x000c57a1 declared
+  Character/Hair/00030020.img              off=0x000cb278b size=   15,117 check=0x00141ddb declared
+  Character/Hair/00030021.img              off=0x000cb6298 size=   15,248 check=0x00146f4d declared
+  Character/Hair/00030022.img              off=0x000cb9e28 size=   15,209 check=0x001494d2 declared
+  Character/Hair/00030023.img              off=0x000cbd991 size=   15,224 check=0x00149aaf declared
+  Character/Hair/00030024.img              off=0x000cc1509 size=   15,135 check=0x00148d7c declared
+  Character/Hair/00030030.img              off=0x000cc5028 size=    5,615 check=0x0007324f declared
+  Character/Hair/00030031.img              off=0x000cc6617 size=    5,869 check=0x00079ffb declared
+  Character/Hair/00030032.img              off=0x000cc7d04 size=    5,884 check=0x0007c4b9 declared
+  Character/Hair/00030033.img              off=0x000cc9400 size=    5,954 check=0x0007f641 declared
+  Character/Hair/00030034.img              off=0x000ccab42 size=    5,946 check=0x0007e110 declared
+  Character/Hair/00030040.img              off=0x000ccc27c size=   16,374 check=0x0016aa16 declared
+  Character/Hair/00030041.img              off=0x000cd0272 size=   16,417 check=0x0016910d declared
+  Character/Hair/00030042.img              off=0x000cd4293 size=   15,132 check=0x0013b719 declared
+  Character/Hair/00030043.img              off=0x000cd7daf size=   16,624 check=0x00172b16 declared
+  Character/Hair/00030044.img              off=0x000cdbe9f size=   16,321 check=0x001637eb declared
+  Character/Hair/00030050.img              off=0x000cdfe60 size=   15,610 check=0x00151296 declared
+  Character/Hair/00030051.img              off=0x000ce3b5a size=   15,701 check=0x0015b8c9 declared
+  Character/Hair/00030052.img              off=0x000ce78af size=   14,623 check=0x00135848 declared
+  Character/Hair/00030053.img              off=0x000ceb1ce size=   15,659 check=0x00155cf0 declared
+  Character/Hair/00030054.img              off=0x000ceeef9 size=   15,696 check=0x0015b250 declared
+  Character/Hair/00030060.img              off=0x000cf2c49 size=   16,168 check=0x0015ec23 declared
+  Character/Hair/00030061.img              off=0x000cf6b71 size=   16,014 check=0x0015c99c declared
+  Character/Hair/00030062.img              off=0x000cfa9ff size=   16,050 check=0x0015cd6c declared
+  Character/Hair/00030063.img              off=0x000cfe8b1 size=   16,224 check=0x00161d1c declared
+  Character/Hair/00030064.img              off=0x000d02811 size=   16,135 check=0x0015c7e4 declared
+  Character/Hair/00030070.img              off=0x000d06718 size=   10,075 check=0x000e238d declared
+  Character/Hair/00030080.img              off=0x000d08e73 size=   10,507 check=0x000cffe1 declared
+  Character/Hair/00030090.img              off=0x000d0b77e size=   10,925 check=0x000e1c41 declared
+  Character/Hair/00030100.img              off=0x000d0e22b size=   17,130 check=0x0017bffb declared
+  Character/Hair/00030101.img              off=0x000d12515 size=   17,147 check=0x0017fecb declared
+  Character/Hair/00030102.img              off=0x000d16810 size=   17,092 check=0x0017fbc7 declared
+  Character/Hair/00030103.img              off=0x000d1aad4 size=   17,074 check=0x0017f771 declared
+  Character/Hair/00030104.img              off=0x000d1ed86 size=   16,932 check=0x001753e6 declared
+  Character/Hair/00030110.img              off=0x000d22faa size=   10,334 check=0x000ecfa6 declared
+  Character/Hair/00030111.img              off=0x000d25808 size=   10,578 check=0x000f2c7f declared
+  Character/Hair/00030112.img              off=0x000d2815a size=   10,257 check=0x000e6643 declared
+  Character/Hair/00030113.img              off=0x000d2a96b size=   10,366 check=0x000ef7ce declared
+  Character/Hair/00030114.img              off=0x000d2d1e9 size=   10,192 check=0x000e2f57 declared
+  Character/Hair/00030120.img              off=0x000d2f9b9 size=    9,152 check=0x000be4fa declared
+  Character/Hair/00030121.img              off=0x000d31d79 size=    9,348 check=0x000ce050 declared
+  Character/Hair/00030122.img              off=0x000d341fd size=    9,022 check=0x000c1214 declared
+  Character/Hair/00030123.img              off=0x000d3653b size=    9,196 check=0x000c214c declared
+  Character/Hair/00030124.img              off=0x000d38927 size=    9,140 check=0x000c316f declared
+  Character/Hair/00030130.img              off=0x000d3acdb size=    8,470 check=0x000ad749 declared
+  Character/Hair/00030131.img              off=0x000d3cdf1 size=    8,671 check=0x000b1661 declared
+  Character/Hair/00030132.img              off=0x000d3efd0 size=    8,530 check=0x000b2973 declared
+  Character/Hair/00030133.img              off=0x000d41122 size=    8,567 check=0x000b5620 declared
+  Character/Hair/00030134.img              off=0x000d43299 size=    8,529 check=0x000b3565 declared
+  Character/Hair/00031000.img              off=0x000d453ea size=   12,303 check=0x00105d39 declared
+  Character/Hair/00031001.img              off=0x000d483f9 size=   12,000 check=0x00101e33 declared
+  Character/Hair/00031002.img              off=0x000d4b2d9 size=   12,245 check=0x00106340 declared
+  Character/Hair/00031003.img              off=0x000d4e2ae size=   12,151 check=0x00109602 declared
+  Character/Hair/00031004.img              off=0x000d51225 size=   12,426 check=0x00110cad declared
+  Character/Hair/00031010.img              off=0x000d542af size=   17,434 check=0x0018a27c declared
+  Character/Hair/00031011.img              off=0x000d586c9 size=   17,543 check=0x001988db declared
+  Character/Hair/00031012.img              off=0x000d5cb50 size=   17,751 check=0x001942f7 declared
+  Character/Hair/00031013.img              off=0x000d610a7 size=   17,514 check=0x00190385 declared
+  Character/Hair/00031014.img              off=0x000d65511 size=   17,477 check=0x00188a31 declared
+  Character/Hair/00031020.img              off=0x000d69956 size=   22,687 check=0x002304e2 declared
+  Character/Hair/00031021.img              off=0x000d6f1f5 size=   22,020 check=0x00223738 declared
+  Character/Hair/00031022.img              off=0x000d747f9 size=   22,195 check=0x0021dba0 declared
+  Character/Hair/00031023.img              off=0x000d79eac size=   22,033 check=0x002247b9 declared
+  Character/Hair/00031024.img              off=0x000d7f4bd size=   21,981 check=0x002231b8 declared
+  Character/Hair/00031030.img              off=0x000d84a9a size=   17,935 check=0x001a008d declared
+  Character/Hair/00031031.img              off=0x000d890a9 size=   18,147 check=0x001a9ed9 declared
+  Character/Hair/00031032.img              off=0x000d8d78c size=   17,706 check=0x00191e1a declared
+  Character/Hair/00031033.img              off=0x000d91cb6 size=   17,738 check=0x00197722 declared
+  Character/Hair/00031034.img              off=0x000d96200 size=   17,659 check=0x00197ebb declared
+  Character/Hair/00031040.img              off=0x000d9a6fb size=   16,543 check=0x0016d0dc declared
+  Character/Hair/00031041.img              off=0x000d9e79a size=   16,544 check=0x0016a7b1 declared
+  Character/Hair/00031042.img              off=0x000da283a size=   16,535 check=0x00168e2a declared
+  Character/Hair/00031043.img              off=0x000da68d1 size=   16,848 check=0x00173265 declared
+  Character/Hair/00031044.img              off=0x000daaaa1 size=   16,534 check=0x0016ca22 declared
+  Character/Hair/00031050.img              off=0x000daeb37 size=   16,301 check=0x00166ed0 declared
+  Character/Hair/00031051.img              off=0x000db2ae4 size=   16,207 check=0x00160655 declared
+  Character/Hair/00031052.img              off=0x000db6a33 size=   16,260 check=0x001660d2 declared
+  Character/Hair/00031053.img              off=0x000dba9b7 size=   16,042 check=0x0015e80c declared
+  Character/Hair/00031054.img              off=0x000dbe861 size=   16,203 check=0x0015f803 declared
+  Character/Hair/00031060.img              off=0x000dc27ac size=   16,120 check=0x001617b8 declared
+  Character/Hair/00031061.img              off=0x000dc66a4 size=   16,326 check=0x00166e3f declared
+  Character/Hair/00031062.img              off=0x000dca66a size=   16,265 check=0x0016378e declared
+  Character/Hair/00031063.img              off=0x000dce5f3 size=   16,321 check=0x0016917a declared
+  Character/Hair/00031064.img              off=0x000dd25b4 size=   16,138 check=0x001612d2 declared
+  Character/Hair/00031070.img              off=0x000dd64be size=    8,142 check=0x000a7f1f declared
+  Character/Hair/00031080.img              off=0x000dd848c size=   15,203 check=0x0013d16b declared
+  Character/Hair/00031081.img              off=0x000ddbfef size=   15,265 check=0x00145f2e declared
+  Character/Hair/00031082.img              off=0x000ddfb90 size=   15,314 check=0x00145bad declared
+  Character/Hair/00031083.img              off=0x000de3762 size=   15,345 check=0x00147039 declared
+  Character/Hair/00031084.img              off=0x000de7353 size=   15,501 check=0x0014c7c8 declared
+  Character/Shield/01092000.img            off=0x000deafe0 size=    9,708 check=0x000d2465 declared
+  Character/Shield/01092001.img            off=0x000ded5cc size=   12,990 check=0x0013889e declared
+  Character/Shield/01092002.img            off=0x000df088a size=   12,246 check=0x0012695f declared
+  Character/Shield/01092003.img            off=0x000df3860 size=   16,221 check=0x001a199f declared
+  Character/Shield/01092004.img            off=0x000df77bd size=   14,242 check=0x00156f69 declared
+  Character/Shield/01092005.img            off=0x000dfaf5f size=   10,914 check=0x000f439a declared
+  Character/Shield/01092006.img            off=0x000dfda01 size=   14,341 check=0x0015e5e7 declared
+  Character/Shield/01092007.img            off=0x000e01206 size=   14,091 check=0x00142fdc declared
+  Character/Shield/01092008.img            off=0x000e04911 size=   12,753 check=0x0012c6bf declared
+  Character/Shield/01092009.img            off=0x000e07ae2 size=   18,781 check=0x001f1dbc declared
+  Character/Shield/01092010.img            off=0x000e0c43f size=   18,619 check=0x001eca15 declared
+  Character/Shield/01092011.img            off=0x000e10cfa size=   17,226 check=0x001bf6c5 declared
+  Character/Shield/01092012.img            off=0x000e15044 size=   22,701 check=0x00259324 declared
+  Character/Shield/01092013.img            off=0x000e1a8f1 size=   24,916 check=0x002a69c2 declared
+  Character/Shield/01092014.img            off=0x000e20a45 size=   24,295 check=0x002818e6 declared
+  Character/Shield/01092015.img            off=0x000e2692c size=   25,919 check=0x002cba34 declared
+  Character/Shield/01092016.img            off=0x000e2ce6b size=   28,034 check=0x00303855 declared
+  Character/Shield/01092017.img            off=0x000e33bed size=   30,057 check=0x0033a724 declared
+  Character/Shoes/01071000.img             off=0x000e3b156 size=   18,205 check=0x00168efc declared
+  Character/Shoes/01072000.img             off=0x000e3f873 size=   19,529 check=0x0017f503 declared
+  Character/Shoes/01072001.img             off=0x000e444bc size=   17,049 check=0x00139880 declared
+  Character/Shoes/01072002.img             off=0x000e48755 size=   17,132 check=0x00139725 declared
+  Character/Shoes/01072003.img             off=0x000e4ca41 size=   20,484 check=0x001ad6e3 declared
+  Character/Shoes/01072004.img             off=0x000e51a45 size=   15,347 check=0x001007be declared
+  Character/Shoes/01072005.img             off=0x000e55638 size=   15,438 check=0x0010204a declared
+  Character/Shoes/01072006.img             off=0x000e59286 size=   24,224 check=0x002161d3 declared
+  Character/Shoes/01072007.img             off=0x000e5f126 size=   24,617 check=0x00226f13 declared
+  Character/Shoes/01072008.img             off=0x000e6514f size=   19,723 check=0x00193085 declared
+  Character/Shoes/01072009.img             off=0x000e69e5a size=   22,404 check=0x001e54ac declared
+  Character/Shoes/01072010.img             off=0x000e6f5de size=   14,388 check=0x000dcdea declared
+  Character/Shoes/01072011.img             off=0x000e72e12 size=   25,057 check=0x0023674d declared
+  Character/Shoes/01072012.img             off=0x000e78ff3 size=   18,760 check=0x0017461b declared
+  Character/Shoes/01072013.img             off=0x000e7d93b size=   18,219 check=0x00169af4 declared
+  Character/Shoes/01072014.img             off=0x000e82066 size=   19,303 check=0x0018b830 declared
+  Character/Shoes/01072015.img             off=0x000e86bcd size=   18,961 check=0x00175766 declared
+  Character/Shoes/01072016.img             off=0x000e8b5de size=   18,628 check=0x0016a00e declared
+  Character/Shoes/01072017.img             off=0x000e8fea2 size=   16,672 check=0x00124570 declared
+  Character/Shoes/01072018.img             off=0x000e93fc2 size=   18,067 check=0x0015c67f declared
+  Character/Shoes/01072019.img             off=0x000e98655 size=   18,934 check=0x001785da declared
+  Character/Shoes/01072020.img             off=0x000e9d04b size=   19,038 check=0x0017f728 declared
+  Character/Shoes/01072021.img             off=0x000ea1aa9 size=   19,023 check=0x0017b429 declared
+  Character/Shoes/01072022.img             off=0x000ea64f8 size=   20,772 check=0x001b01ee declared
+  Character/Shoes/01072023.img             off=0x000eab61c size=   18,415 check=0x0016ee84 declared
+  Character/Shoes/01072024.img             off=0x000eafe0b size=   18,473 check=0x001575d6 declared
+  Character/Shoes/01072025.img             off=0x000eb4634 size=   20,249 check=0x0019dc94 declared
+  Character/Shoes/01072026.img             off=0x000eb954d size=   20,104 check=0x0019aa50 declared
+  Character/Shoes/01072027.img             off=0x000ebe3d5 size=   19,557 check=0x00184ff1 declared
+  Character/Shoes/01072028.img             off=0x000ec303a size=   17,352 check=0x00146a50 declared
+  Character/Shoes/01072029.img             off=0x000ec7402 size=   17,613 check=0x0014c19d declared
+  Character/Shoes/01072030.img             off=0x000ecb8cf size=   17,507 check=0x00149311 declared
+  Character/Shoes/01072031.img             off=0x000ecfd32 size=   17,490 check=0x00143c1e declared
+  Character/Shoes/01072032.img             off=0x000ed4184 size=   19,341 check=0x00180d30 declared
+  Character/Shoes/01072033.img             off=0x000ed8d11 size=   19,084 check=0x00174594 declared
+  Character/Shoes/01072034.img             off=0x000edd79d size=   19,084 check=0x00174594 declared
+  Character/Shoes/01072035.img             off=0x000ee2229 size=   18,981 check=0x0017f1b9 declared
+  Character/Shoes/01072036.img             off=0x000ee6c4e size=   19,229 check=0x0017ec77 declared
+  Character/Weapon/01302000.img            off=0x000eeb76b size=    7,648 check=0x0009a013 declared
+  Character/Weapon/01302001.img            off=0x000eed54b size=    9,092 check=0x000c3d87 declared
+  Character/Weapon/01302002.img            off=0x000eef8cf size=    9,507 check=0x000d2acd declared
+  Character/Weapon/01302003.img            off=0x000ef1df2 size=   11,357 check=0x0010e175 declared
+  Character/Weapon/01302004.img            off=0x000ef4a4f size=   10,753 check=0x000fc42b declared
+  Character/Weapon/01302005.img            off=0x000ef7450 size=   14,261 check=0x0016c9fa declared
+  Character/Weapon/01302006.img            off=0x000efac05 size=   11,805 check=0x001174a2 declared
+  Character/Weapon/01302007.img            off=0x000efda22 size=    9,195 check=0x000ca9b9 declared
+  Character/Weapon/01312000.img            off=0x000effe0d size=   13,453 check=0x0014f960 declared
+  Character/Weapon/01312001.img            off=0x000f0329a size=   11,239 check=0x00109d3e declared
+  Character/Weapon/01312002.img            off=0x000f05e81 size=    9,424 check=0x000cd5a7 declared
+  Character/Weapon/01312003.img            off=0x000f08351 size=   16,696 check=0x001b22cb declared
+  Character/Weapon/01312004.img            off=0x000f0c489 size=   13,935 check=0x0015eed5 declared
+  Character/Weapon/01322000.img            off=0x000f0faf8 size=   14,710 check=0x0017d1ca declared
+  Character/Weapon/01322001.img            off=0x000f1346e size=    8,023 check=0x000a2521 declared
+  Character/Weapon/01322002.img            off=0x000f153c5 size=    9,818 check=0x000db17f declared
+  Character/Weapon/01322003.img            off=0x000f17a1f size=   14,572 check=0x001715a1 declared
+  Character/Weapon/01322004.img            off=0x000f1b30b size=   13,638 check=0x00153d6f declared
+  Character/Weapon/01322005.img            off=0x000f1e851 size=    8,501 check=0x000b0d38 declared
+  Character/Weapon/01322006.img            off=0x000f20986 size=    8,610 check=0x000b6a86 declared
+  Character/Weapon/01322007.img            off=0x000f22b28 size=    8,711 check=0x000b8592 declared
+  Character/Weapon/01322008.img            off=0x000f24d2f size=    9,067 check=0x000c284d declared
+  Character/Weapon/01322009.img            off=0x000f2709a size=    9,441 check=0x000c96d0 declared
+  Character/Weapon/01322010.img            off=0x000f2957b size=   11,375 check=0x001048e4 declared
+  Character/Weapon/01322011.img            off=0x000f2c1ea size=   11,192 check=0x001016f5 declared
+  Character/Weapon/01322012.img            off=0x000f2eda2 size=    7,551 check=0x0008ba51 declared
+  Character/Weapon/01322013.img            off=0x000f30b21 size=    9,503 check=0x000cddd4 declared
+  Character/Weapon/01332000.img            off=0x000f33040 size=    7,162 check=0x000935bb declared
+  Character/Weapon/01332001.img            off=0x000f34c3a size=    8,131 check=0x000b4e18 declared
+  Character/Weapon/01332002.img            off=0x000f36bfd size=    8,176 check=0x000b49a2 declared
+  Character/Weapon/01332003.img            off=0x000f38bed size=   11,291 check=0x0010cffe declared
+  Character/Weapon/01332004.img            off=0x000f3b808 size=    8,974 check=0x000c155b declared
+  Character/Weapon/01332005.img            off=0x000f3db16 size=    8,278 check=0x000a6fd0 declared
+  Character/Weapon/01332006.img            off=0x000f3fb6c size=   10,554 check=0x000f2af2 declared
+  Character/Weapon/01332007.img            off=0x000f424a6 size=    7,891 check=0x0009cd1f declared
+  Character/Weapon/01332008.img            off=0x000f44379 size=    9,889 check=0x000d7164 declared
+  Character/Weapon/01332009.img            off=0x000f46a1a size=   10,929 check=0x00105604 declared
+  Character/Weapon/01332010.img            off=0x000f494cb size=    9,092 check=0x000c6335 declared
+  Character/Weapon/01332011.img            off=0x000f4b84f size=   11,385 check=0x00110593 declared
+  Character/Weapon/01332012.img            off=0x000f4e4c8 size=    9,272 check=0x000c73e6 declared
+  Character/Weapon/01372000.img            off=0x000f50900 size=    7,897 check=0x000b580d declared
+  Character/Weapon/01372001.img            off=0x000f527d9 size=    7,213 check=0x0009c5e3 declared
+  Character/Weapon/01372002.img            off=0x000f54406 size=    5,923 check=0x00075d5d declared
+  Character/Weapon/01372003.img            off=0x000f55b29 size=    6,315 check=0x00082d61 declared
+  Character/Weapon/01372004.img            off=0x000f573d4 size=    5,970 check=0x0007b662 declared
+  Character/Weapon/01372005.img            off=0x000f58b26 size=    4,990 check=0x00053c73 declared
+  Character/Weapon/01372006.img            off=0x000f59ea4 size=    5,312 check=0x0005eb7a declared
+  Character/Weapon/01382000.img            off=0x000f5b364 size=    8,655 check=0x000cb05f declared
+  Character/Weapon/01382001.img            off=0x000f5d533 size=   10,497 check=0x0010e046 declared
+  Character/Weapon/01382002.img            off=0x000f5fe34 size=    8,117 check=0x000be47b declared
+  Character/Weapon/01382003.img            off=0x000f61de9 size=    7,748 check=0x000b654e declared
+  Character/Weapon/01382004.img            off=0x000f63c2d size=   10,907 check=0x00118715 declared
+  Character/Weapon/01382005.img            off=0x000f666c8 size=    7,727 check=0x000b0ffe declared
+  Character/Weapon/01402000.img            off=0x000f684f7 size=   16,511 check=0x001a8c21 declared
+  Character/Weapon/01402001.img            off=0x000f6c576 size=    7,910 check=0x0009da3d declared
+  Character/Weapon/01402002.img            off=0x000f6e45c size=   24,631 check=0x002b5589 declared
+  Character/Weapon/01402003.img            off=0x000f74493 size=   21,285 check=0x00247bd8 declared
+  Character/Weapon/01402004.img            off=0x000f797b8 size=   19,204 check=0x00204630 declared
+  Character/Weapon/01402005.img            off=0x000f7e2bc size=   34,413 check=0x003f0869 declared
+  Character/Weapon/01412000.img            off=0x000f86929 size=   20,580 check=0x002331c5 declared
+  Character/Weapon/01412001.img            off=0x000f8b98d size=   16,696 check=0x001b4cc1 declared
+  Character/Weapon/01412002.img            off=0x000f8fac5 size=   15,305 check=0x00189553 declared
+  Character/Weapon/01412003.img            off=0x000f9368e size=   22,531 check=0x0027060c declared
+  Character/Weapon/01422000.img            off=0x000f98e91 size=   18,560 check=0x001f0208 declared
+  Character/Weapon/01422001.img            off=0x000f9d711 size=   18,342 check=0x001ebebc declared
+  Character/Weapon/01422002.img            off=0x000fa1eb7 size=   13,698 check=0x00150fac declared
+  Character/Weapon/01422003.img            off=0x000fa5439 size=   10,361 check=0x000ede56 declared
+  Character/Weapon/01422004.img            off=0x000fa7cb2 size=   12,606 check=0x00137842 declared
+  Character/Weapon/01422005.img            off=0x000faadf0 size=   23,712 check=0x002b60f7 declared
+  Character/Weapon/01422006.img            off=0x000fb0a90 size=   11,762 check=0x00117fd9 declared
+  Character/Weapon/01432000.img            off=0x000fb3882 size=   18,471 check=0x001ead45 declared
+  Character/Weapon/01432001.img            off=0x000fb80a9 size=   19,044 check=0x00208073 declared
+  Character/Weapon/01432002.img            off=0x000fbcb0d size=   18,108 check=0x001e96be declared
+  Character/Weapon/01432003.img            off=0x000fc11c9 size=   18,675 check=0x001f3a62 declared
+  Character/Weapon/01432004.img            off=0x000fc5abc size=   17,932 check=0x001db4b5 declared
+  Character/Weapon/01442000.img            off=0x000fca0c8 size=   27,299 check=0x00303504 declared
+  Character/Weapon/01442001.img            off=0x000fd0b6b size=   30,054 check=0x0035edda declared
+  Character/Weapon/01442002.img            off=0x000fd80d1 size=   26,404 check=0x002ed4fa declared
+  Character/Weapon/01442003.img            off=0x000fde7f5 size=   25,487 check=0x002c9a8a declared
+  Character/Weapon/01442004.img            off=0x000fe4b84 size=   15,938 check=0x0019ab35 declared
+  Character/Weapon/01452000.img            off=0x000fe89c6 size=   11,057 check=0x0011728e declared
+  Character/Weapon/01452001.img            off=0x000feb4f7 size=   12,716 check=0x00149a6d declared
+  Character/Weapon/01452002.img            off=0x000fee6a3 size=   12,952 check=0x00150216 declared
+  Character/Weapon/01452003.img            off=0x000ff193b size=    7,964 check=0x000b86f6 declared
+  Character/Weapon/01452004.img            off=0x000ff3857 size=   12,701 check=0x0014b9a0 declared
+  Character/Weapon/01452005.img            off=0x000ff69f4 size=   10,673 check=0x0010b59a declared
+  Character/Weapon/01462000.img            off=0x000ff93a5 size=    9,798 check=0x000f15cc declared
+  Character/Weapon/01462001.img            off=0x000ffb9eb size=    8,378 check=0x000c4cfe declared
+  Character/Weapon/01462002.img            off=0x000ffdaa5 size=    9,590 check=0x000f2b37 declared
+  Character/Weapon/01462003.img            off=0x00100001b size=    8,625 check=0x000d4597 declared
+  Character/Weapon/01462004.img            off=0x0010021cc size=    8,989 check=0x000dc808 declared
+  Character/Weapon/01462005.img            off=0x0010044e9 size=    9,863 check=0x000fbf74 declared
+  Character/Weapon/01472000.img            off=0x001006b70 size=    6,947 check=0x00084008 declared
+  Character/Weapon/01472001.img            off=0x001008693 size=    7,908 check=0x000a8058 declared
+  Character/Weapon/01472002.img            off=0x00100a577 size=    8,116 check=0x000aeae2 declared
+  Character/Weapon/01472003.img            off=0x00100c52b size=    7,842 check=0x000a44fe declared
+  Character/Weapon/01472004.img            off=0x00100e3cd size=    8,119 check=0x000ae057 declared
+  Character/Weapon/01472005.img            off=0x001010384 size=    8,026 check=0x000ac69c declared
+  Character/Weapon/01472006.img            off=0x0010122de size=    8,108 check=0x000ae271 declared
+  Character/Weapon/01472007.img            off=0x00101428a size=   12,372 check=0x000e9a6d declared
+  Character/Weapon/01472008.img            off=0x0010172de size=    8,632 check=0x000bfa83 declared
+  Character/Weapon/01472009.img            off=0x001019496 size=    8,634 check=0x000bf69d declared
+  Character/Weapon/01472010.img            off=0x00101b650 size=    8,635 check=0x000bc64f declared
+  Effect/BasicEff.img                      off=0x00101d80b size=  278,637 check=0x0232722d declared
+  Effect/Tomb.img                          off=0x001061878 size=   20,744 check=0x00282c74 declared
+  Etc/Curse.img                            off=0x001066980 size=    7,085 check=0x000b3513 declared
+  Etc/ForbiddenName.img                    off=0x00106852d size=    1,614 check=0x0002b7a7 declared
+  Etc/MakeCharInfo.img                     off=0x001068b7b size=      550 check=0x000092cd declared
+  Etc/Tips.img                             off=0x001068da1 size=    4,554 check=0x00080090 declared
+  Item/Book/0500.img                       off=0x001069f6b size=    4,218 check=0x00077d46 declared
+  Item/Consume/0200.img                    off=0x00106afe5 size=   12,121 check=0x0014aab6 declared
+  Item/Consume/0201.img                    off=0x00106df3e size=   13,084 check=0x00173ac3 declared
+  Item/Consume/0202.img                    off=0x00107125a size=   10,385 check=0x0011d9e7 declared
+  Item/Consume/0203.img                    off=0x001073aeb size=   10,238 check=0x00126bb1 declared
+  Item/Consume/0204.img                    off=0x0010762e9 size=   20,469 check=0x0020d271 declared
+  Item/Consume/0205.img                    off=0x00107b2de size=    3,278 check=0x0005d489 declared
+  Item/Consume/0206.img                    off=0x00107bfac size=    2,609 check=0x00049078 declared
+  Item/Consume/0207.img                    off=0x00107c9dd size=   12,775 check=0x001565fd declared
+  Item/Etc/0400.img                        off=0x00107fbc4 size=   39,851 check=0x0046e77e declared
+  Item/Etc/0401.img                        off=0x00108976f size=   15,159 check=0x001b3acc declared
+  Item/Etc/0402.img                        off=0x00108d2a6 size=   17,683 check=0x001ebbbe declared
+  Item/Etc/0403.img                        off=0x0010917b9 size=   12,739 check=0x001505d1 declared
+  Item/Special/0900.img                    off=0x00109497c size=    7,619 check=0x000d9b46 declared
+  Map/MapHelper.img                        off=0x00109673f size=  187,026 check=0x01793d25 declared
+  Map/Back/darkCave.img                    off=0x0010c41d1 size=  937,068 check=0x07604aa7 declared
+  Map/Back/darkWood.img                    off=0x0011a8e3d size=  341,202 check=0x02b65543 declared
+  Map/Back/dryRock.img                     off=0x0011fc30f size=1,617,908 check=0x0cd94ed8 declared
+  Map/Back/grassySoil.img                  off=0x001387303 size=1,534,917 check=0x0c668f1b declared
+  Map/Back/metroCity.img                   off=0x0014fdec8 size=1,375,765 check=0x0adbfef1 declared
+  Map/Back/midForest.img                   off=0x00164dcdd size=1,090,741 check=0x08aff0ba declared
+  Map/Back/portTown.img                    off=0x001758192 size=  161,884 check=0x0144f081 declared
+  Map/Back/shineWood.img                   off=0x00177f9ee size=1,849,196 check=0x0e8f6707 declared
+  Map/Back/shineWood2.img                  off=0x00194315a size=  438,581 check=0x03732278 declared
+  Map/Back/sunsetCity.img                  off=0x0019ae28f size=  504,997 check=0x03fda1f3 declared
+  Map/Back/vicportTown.img                 off=0x001a29734 size=  678,487 check=0x05659637 declared
+  Map/Map/000000000.img                    off=0x001acf18b size=   21,100 check=0x001eff2c declared
+  Map/Map/000010000.img                    off=0x001ad43f7 size=   12,902 check=0x001302c0 declared
+  Map/Map/000020000.img                    off=0x001ad765d size=   15,381 check=0x001714a8 declared
+  Map/Map/000020001.img                    off=0x001adb272 size=    8,595 check=0x000c5c8d declared
+  Map/Map/000030000.img                    off=0x001add405 size=   39,340 check=0x003ddccd declared
+  Map/Map/000040000.img                    off=0x001ae6db1 size=   88,795 check=0x008c8899 declared
+  Map/Map/000050000.img                    off=0x001afc88c size=   64,824 check=0x00600399 declared
+  Map/Map/000060000.img                    off=0x001b0c5c4 size=   74,497 check=0x0073ca08 declared
+  Map/Map/000060001.img                    off=0x001b1e8c5 size=    4,883 check=0x00075fbf declared
+  Map/Map/001000000.img                    off=0x001b1fbd8 size=   83,463 check=0x007ea12e declared
+  Map/Map/001000001.img                    off=0x001b341df size=   61,657 check=0x00614348 declared
+  Map/Map/001000002.img                    off=0x001b432b8 size=   49,604 check=0x00509ad2 declared
+  Map/Map/001010000.img                    off=0x001b4f47c size=   50,244 check=0x004c62bb declared
+  Map/Map/001010001.img                    off=0x001b5b8c0 size=    4,886 check=0x00075fa3 declared
+  Map/Map/001010002.img                    off=0x001b5cbd6 size=    9,274 check=0x000d7edb declared
+  Map/Map/001010003.img                    off=0x001b5f010 size=    5,364 check=0x00082dc2 declared
+  Map/Map/001010004.img                    off=0x001b60504 size=   61,084 check=0x00623ef4 declared
+  Map/Map/001020000.img                    off=0x001b6f3a0 size=   71,433 check=0x0070e0ee declared
+  Map/Map/001020001.img                    off=0x001b80aa9 size=   49,105 check=0x004c2663 declared
+  Map/Map/100000000.img                    off=0x001b8ca7a size=  112,026 check=0x00a90d05 declared
+  Map/Map/100000001.img                    off=0x001ba8014 size=   13,897 check=0x0015ada1 declared
+  Map/Map/100000100.img                    off=0x001bab65d size=   91,362 check=0x0088f19e declared
+  Map/Map/100000101.img                    off=0x001bc1b3f size=    9,535 check=0x0010f872 declared
+  Map/Map/100000102.img                    off=0x001bc407e size=    5,418 check=0x00084add declared
+  Map/Map/100000103.img                    off=0x001bc55a8 size=    4,084 check=0x0005f9d5 declared
+  Map/Map/100000104.img                    off=0x001bc659c size=    4,927 check=0x00074b53 declared
+  Map/Map/100000200.img                    off=0x001bc78db size=   68,810 check=0x00647829 declared
+  Map/Map/100000201.img                    off=0x001bd85a5 size=    5,305 check=0x00082699 declared
+  Map/Map/100010000.img                    off=0x001bd9a5e size=   61,875 check=0x005f3234 declared
+  Map/Map/100020000.img                    off=0x001be8c11 size=   31,339 check=0x00300308 declared
+  Map/Map/100030000.img                    off=0x001bf067c size=  175,190 check=0x013307a1 declared
+  Map/Map/100030001.img                    off=0x001c1b2d2 size=   40,556 check=0x004a4bb1 declared
+  Map/Map/100040000.img                    off=0x001c2513e size=  123,265 check=0x00c17769 declared
+  Map/Map/100040001.img                    off=0x001c432bf size=   64,366 check=0x006833bd declared
+  Map/Map/100040002.img                    off=0x001c52e2d size=   66,894 check=0x006ce9c7 declared
+  Map/Map/100040003.img                    off=0x001c6337b size=   64,383 check=0x006899ce declared
+  Map/Map/100040004.img                    off=0x001c72efa size=   64,560 check=0x0069b6b2 declared
+  Map/Map/100050000.img                    off=0x001c82b2a size=   56,804 check=0x005df956 declared
+  Map/Map/101000000.img                    off=0x001c9090e size=  185,673 check=0x013f7d3a declared
+  Map/Map/101000001.img                    off=0x001cbde57 size=    5,116 check=0x0007c290 declared
+  Map/Map/101000002.img                    off=0x001cbf253 size=    5,603 check=0x000899bc declared
+  Map/Map/101000003.img                    off=0x001cc0836 size=    7,284 check=0x000c9925 declared
+  Map/Map/101010000.img                    off=0x001cc24aa size=   45,215 check=0x004b6883 declared
+  Map/Map/101020000.img                    off=0x001ccd549 size=  161,573 check=0x010eb531 declared
+  Map/Map/101020001.img                    off=0x001cf4c6e size=   82,533 check=0x00873334 declared
+  Map/Map/101020002.img                    off=0x001d08ed3 size=   78,472 check=0x0080492b declared
+  Map/Map/101020003.img                    off=0x001d1c15b size=   68,864 check=0x007064a7 declared
+  Map/Map/101020004.img                    off=0x001d2ce5b size=   54,071 check=0x00597f4c declared
+  Map/Map/101020005.img                    off=0x001d3a192 size=   56,820 check=0x005e73fb declared
+  Map/Map/101030000.img                    off=0x001d47f86 size=  161,278 check=0x00eba26d declared
+  Map/Map/101040000.img                    off=0x001d6f584 size=   83,924 check=0x007fd981 declared
+  Map/Map/101040001.img                    off=0x001d83d58 size=   62,481 check=0x005afedc declared
+  Map/Map/101040002.img                    off=0x001d93169 size=   39,637 check=0x003a0cd6 declared
+  Map/Map/102000000.img                    off=0x001d9cc3e size=  128,097 check=0x00bc6f3a declared
+  Map/Map/102000001.img                    off=0x001dbc09f size=    5,106 check=0x0007bacb declared
+  Map/Map/102000002.img                    off=0x001dbd491 size=    4,766 check=0x000728b6 declared
+  Map/Map/102000003.img                    off=0x001dbe72f size=    5,676 check=0x000875ef declared
+  Map/Map/102010000.img                    off=0x001dbfd5b size=   60,818 check=0x005ceee9 declared
+  Map/Map/102020000.img                    off=0x001dceaed size=  120,413 check=0x00baf1bc declared
+  Map/Map/102030000.img                    off=0x001dec14a size=  106,281 check=0x00b02fdc declared
+  Map/Map/103000000.img                    off=0x001e06073 size=  158,122 check=0x00f8e251 declared
+  Map/Map/103000001.img                    off=0x001e2ca1d size=    4,884 check=0x000780c5 declared
+  Map/Map/103000002.img                    off=0x001e2dd31 size=    4,081 check=0x00063d35 declared
+  Map/Map/103000003.img                    off=0x001e2ed22 size=   11,247 check=0x001341bc declared
+  Map/Map/103000004.img                    off=0x001e31911 size=    4,069 check=0x000614b2 declared
+  Map/Map/103000005.img                    off=0x001e328f6 size=    4,439 check=0x00067c11 declared
+  Map/Map/103010000.img                    off=0x001e33a4d size=  147,725 check=0x00e2648c declared
+  Map/Map/103020000.img                    off=0x001e57b5a size=  110,478 check=0x00a7d9c3 declared
+  Map/Map/103030000.img                    off=0x001e72ae8 size=   78,078 check=0x007c9332 declared
+  Map/Map/104000000.img                    off=0x001e85be6 size=  176,487 check=0x010d3a17 declared
+  Map/Map/104000001.img                    off=0x001eb0d4d size=    5,107 check=0x0007bf81 declared
+  Map/Map/104000002.img                    off=0x001eb2140 size=    6,277 check=0x0009b5de declared
+  Map/Map/104010000.img                    off=0x001eb39c5 size=  249,845 check=0x019796d5 declared
+  Map/Map/104010001.img                    off=0x001ef09ba size=   65,388 check=0x0069662a declared
+  Map/Map/104010002.img                    off=0x001f00926 size=   89,198 check=0x008c8541 declared
+  Map/Map/104020000.img                    off=0x001f16594 size=   96,773 check=0x00a4ed70 declared
+  Map/Map/104030000.img                    off=0x001f2df99 size=  118,833 check=0x00cca7b1 declared
+  Map/Map/104030001.img                    off=0x001f4afca size=   34,320 check=0x00349fb9 declared
+  Map/Map/104040000.img                    off=0x001f535da size=   53,580 check=0x0054c601 declared
+  Map/Map/105030000.img                    off=0x001f60726 size=  147,740 check=0x010111a7 declared
+  Map/Map/105040000.img                    off=0x001f84842 size=  108,135 check=0x00b92e80 declared
+  Map/Map/105040100.img                    off=0x001f9eea9 size=   86,514 check=0x008d4474 declared
+  Map/Map/105040200.img                    off=0x001fb409b size=   68,682 check=0x006db2cb declared
+  Map/Map/105040300.img                    off=0x001fc4ce5 size=   47,817 check=0x004a095a declared
+  Map/Map/105040301.img                    off=0x001fd07ae size=   30,041 check=0x002d6d38 declared
+  Map/Map/105050000.img                    off=0x001fd7d07 size=  131,768 check=0x00bc838f declared
+  Map/Map/105050100.img                    off=0x001ff7fbf size=  142,066 check=0x00d1ba2d declared
+  Map/Map/105060000.img                    off=0x00201aab1 size=  188,560 check=0x01131f4e declared
+  Map/Map/105070000.img                    off=0x002048b41 size=  178,774 check=0x010c7d38 declared
+  Map/Map/105070001.img                    off=0x002074597 size=  218,706 check=0x0146ff44 declared
+  Map/Map/105070100.img                    off=0x0020a9be9 size=  118,749 check=0x00b1582c declared
+  Map/Map/105070200.img                    off=0x0020c6bc6 size=  110,866 check=0x00a7d0d4 declared
+  Map/Map/105080000.img                    off=0x0020e1cd8 size=   96,102 check=0x008e751a declared
+  Map/Map/106000000.img                    off=0x0020f943e size=   85,628 check=0x0081da41 declared
+  Map/Map/106000001.img                    off=0x00210e2ba size=   42,197 check=0x00411b70 declared
+  Map/Map/106000100.img                    off=0x00211878f size=   50,088 check=0x004d2e92 declared
+  Map/Map/106000101.img                    off=0x002124b37 size=   53,764 check=0x0051e724 declared
+  Map/Map/106010000.img                    off=0x002131d3b size=  121,129 check=0x00bd2133 declared
+  Map/Map/106010100.img                    off=0x00214f664 size=   97,158 check=0x00959342 declared
+  Map/Map/106010101.img                    off=0x0021671ea size=   29,455 check=0x002dc9d1 declared
+  Map/Obj/acc1.img                         off=0x00216e4f9 size=3,705,635 check=0x1d40fbeb declared
+  Map/Obj/acc2.img                         off=0x0024f701c size=2,105,087 check=0x1090d8f8 declared
+  Map/Obj/connect.img                      off=0x0026f8f1b size=   50,899 check=0x006063b5 declared
+  Map/Obj/door.img                         off=0x0027055ee size=  284,843 check=0x0238e618 declared
+  Map/Obj/dungeon.img                      off=0x00274ae99 size=1,592,566 check=0x0c8009da declared
+  Map/Obj/guide.img                        off=0x0028cfb8f size=   46,771 check=0x005d1ddc declared
+  Map/Obj/house.img                        off=0x0028db242 size=  160,070 check=0x013e07f8 declared
+  Map/Obj/houseDR.img                      off=0x002902388 size=  685,974 check=0x0574a272 declared
+  Map/Obj/houseDW.img                      off=0x0029a9b1e size=  466,095 check=0x03b571e5 declared
+  Map/Obj/houseGS.img                      off=0x002a1b7cd size=2,045,305 check=0x101bba28 declared
+  Map/Obj/houseMC.img                      off=0x002c0ed46 size=1,305,245 check=0x0a53e8d1 declared
+  Map/Obj/housePT.img                      off=0x002d4d7e3 size=  388,173 check=0x031a0f8d declared
+  Map/Obj/houseSW.img                      off=0x002dac430 size=  826,342 check=0x067918f4 declared
+  Map/Obj/houseVPT.img                     off=0x002e76016 size=  707,875 check=0x05af8504 declared
+  Map/Obj/insideGS.img                     off=0x002f22d39 size=1,169,471 check=0x094a61fb declared
+  Map/Obj/job.img                          off=0x003040578 size=1,816,326 check=0x0e75f871 declared
+  Map/Obj/prop.img                         off=0x0031fbc7e size=   32,277 check=0x0040847d declared
+  Map/Obj/shop.img                         off=0x003203a93 size=3,854,759 check=0x1e9eb982 declared
+  Map/Obj/signboard.img                    off=0x0035b0c3a size=  108,347 check=0x00d60e88 declared
+  Map/Obj/trap.img                         off=0x0035cb375 size=   59,012 check=0x007290a6 declared
+  Map/Obj/vehicle.img                      off=0x0035d99f9 size=  806,671 check=0x065c4700 declared
+  Map/Tile/brownBrick.img                  off=0x00369e908 size=   45,263 check=0x00592cab declared
+  Map/Tile/coalMine.img                    off=0x0036a99d7 size=   70,611 check=0x008b9f2b declared
+  Map/Tile/deepCave.img                    off=0x0036ca7be size=   30,659 check=0x003b8619 scanned
+  Map/Tile/dirtMine.img                    off=0x0036d1f81 size=   63,178 check=0x007dad97 scanned
+  Map/Tile/holeBrick.img                   off=0x0036fbffe size=   41,659 check=0x00520d80 scanned
+  Map/Tile/logMarble.img                   off=0x0037062b9 size=   84,551 check=0x00a7bbc6 scanned
+  Map/Tile/wetWood.img                     off=0x00371ad00 size=    6,021 check=0x000acdbf scanned
+  Map/Tile/whiteMarble.img                 off=0x00371c485 size=   49,842 check=0x0062b5b6 scanned
+  Map/Tile/woodMarble.img                  off=0x003728737 size=   84,376 check=0x00a7395c scanned
+  Mob/0100100.img                          off=0x00373d0cf size=   11,205 check=0x0014caa3 scanned
+  Mob/0100101.img                          off=0x00373fc94 size=    6,586 check=0x000c3a5d scanned
+  Mob/0120100.img                          off=0x00374164e size=    6,779 check=0x000c3e4b scanned
+  Mob/0130100.img                          off=0x0037430c9 size=    8,950 check=0x0011d250 scanned
+  Mob/0130101.img                          off=0x0037453bf size=    6,606 check=0x000c636c scanned
+  Mob/0210100.img                          off=0x003746d8d size=   22,122 check=0x002b43ab scanned
+  Mob/1110100.img                          off=0x00374c3f7 size=   13,486 check=0x0019f10f scanned
+  Mob/1110101.img                          off=0x00374f8a5 size=    8,919 check=0x0011aa65 scanned
+  Mob/1120100.img                          off=0x003751b7c size=   13,152 check=0x00193aef scanned
+  Mob/1130100.img                          off=0x003754edc size=   12,743 check=0x00193a5b scanned
+  Mob/1210100.img                          off=0x0037580a3 size=   11,912 check=0x0015f2e9 scanned
+  Mob/1210101.img                          off=0x00375af2b size=   13,833 check=0x001987a7 scanned
+  Mob/1210102.img                          off=0x00375e534 size=   15,559 check=0x001ee48c scanned
+  Mob/2110200.img                          off=0x0037621fb size=   16,338 check=0x001f5780 scanned
+  Mob/2130100.img                          off=0x0037661cd size=   12,654 check=0x00192796 scanned
+  Mob/2220100.img                          off=0x00376933b size=   15,183 check=0x001e3e43 scanned
+  Mob/2230100.img                          off=0x00376ce8a size=   13,686 check=0x001ad634 scanned
+  Mob/2230101.img                          off=0x003770400 size=   23,245 check=0x002e953c scanned
+  Mob/2230102.img                          off=0x003775ecd size=   11,664 check=0x0015cb84 scanned
+  Mob/3210100.img                          off=0x003778c5d size=   13,869 check=0x001a9d7d scanned
+  Mob/3230100.img                          off=0x00377c28a size=   16,664 check=0x0020a4b0 scanned
+  Mob/4130100.img                          off=0x0037803a2 size=   33,377 check=0x00433ad5 scanned
+  Mob/4230100.img                          off=0x003788603 size=   14,479 check=0x001c15d9 scanned
+  Mob/5130100.img                          off=0x00378be92 size=   32,770 check=0x00424a65 scanned
+  Mob/5130101.img                          off=0x003793e94 size=   70,328 check=0x008dafb8 scanned
+  Mob/9999997.img                          off=0x0037a514c size=   31,418 check=0x003cbf14 scanned
+  Mob/9999998.img                          off=0x0037acc06 size=    2,989 check=0x00056c0c scanned
+  Mob/9999999.img                          off=0x0037ad7b3 size=   60,710 check=0x00776903 scanned
+  Npc/0000070.img                          off=0x0037bc4d9 size=    1,851 check=0x0003a584 scanned
+  Npc/0000090.img                          off=0x0037bcc14 size=    1,424 check=0x0002c7fa scanned
+  Npc/0000110.img                          off=0x0037bd1a4 size=    1,899 check=0x000398f3 scanned
+  Npc/0000180.img                          off=0x0037bd90f size=    1,900 check=0x0003c3dc scanned
+  Npc/0000220.img                          off=0x0037be07b size=    7,334 check=0x000cd036 scanned
+  Npc/0002000.img                          off=0x0037bfd21 size=    6,027 check=0x000bdd8d scanned
+  Npc/0002001.img                          off=0x0037c14ac size=    1,572 check=0x00030a32 scanned
+  Npc/0002002.img                          off=0x0037c1ad0 size=   15,637 check=0x001db28a scanned
+  Npc/0002003.img                          off=0x0037c57e5 size=   15,635 check=0x001dc135 scanned
+  Npc/0002100.img                          off=0x0037c94f8 size=   33,618 check=0x0040c13b scanned
+  Npc/0002101.img                          off=0x0037d184a size=   17,660 check=0x0022562e scanned
+  Npc/0002102.img                          off=0x0037d5d46 size=   15,828 check=0x001db63f scanned
+  Npc/0002103.img                          off=0x0037d9b1a size=   33,348 check=0x004073b0 scanned
+  Npc/0010000.img                          off=0x0037e1d5e size=    9,414 check=0x0011babd scanned
+  Npc/0011000.img                          off=0x0037e4224 size=    1,711 check=0x00030968 scanned
+  Npc/0011100.img                          off=0x0037e48d3 size=    7,198 check=0x000e3660 scanned
+  Npc/0012000.img                          off=0x0037e64f1 size=   19,234 check=0x00253876 scanned
+  Npc/0012100.img                          off=0x0037eb013 size=    1,660 check=0x00035148 scanned
+  Npc/0012101.img                          off=0x0037eb68f size=   17,646 check=0x00225930 scanned
+  Npc/0020000.img                          off=0x0037efb7d size=   29,878 check=0x00376e82 scanned
+  Npc/0020001.img                          off=0x0037f7033 size=   10,422 check=0x0013f496 scanned
+  Npc/0020002.img                          off=0x0037f98e9 size=    9,729 check=0x0012eb8b scanned
+  Npc/0020100.img                          off=0x0037fbeea size=   15,772 check=0x001d999c scanned
+  Npc/0021000.img                          off=0x0037ffc86 size=    1,653 check=0x00025dea scanned
+  Npc/0022000.img                          off=0x0038002fb size=    2,189 check=0x00042f71 scanned
+  Npc/1001000.img                          off=0x003800b88 size=    6,894 check=0x000d4942 scanned
+  Npc/1001001.img                          off=0x003802676 size=    8,217 check=0x000e8b42 scanned
+  Npc/1001100.img                          off=0x00380468f size=    7,902 check=0x000ec95a scanned
+  Npc/1002000.img                          off=0x00380656d size=    6,021 check=0x000bdbf0 scanned
+  Npc/1002001.img                          off=0x003807cf2 size=    1,575 check=0x0002f645 scanned
+  Npc/1002100.img                          off=0x003808319 size=   15,866 check=0x001dc14d scanned
+  Npc/1010100.img                          off=0x00380c113 size=   33,560 check=0x0040a82e scanned
+  Npc/1011000.img                          off=0x00381442b size=    2,118 check=0x0003944d scanned
+  Npc/1011001.img                          off=0x003814c71 size=    5,116 check=0x00061b01 scanned
+  Npc/1011100.img                          off=0x00381606d size=    2,740 check=0x0003e5f5 scanned
+  Npc/1012000.img                          off=0x003816b21 size=    2,840 check=0x0005d454 scanned
+  Npc/1012001.img                          off=0x003817639 size=    1,712 check=0x00034173 scanned
+  Npc/1012002.img                          off=0x003817ce9 size=    3,272 check=0x00068e45 scanned
+  Npc/1012100.img                          off=0x0038189b1 size=    1,947 check=0x0003e9ac scanned
+  Npc/1012101.img                          off=0x00381914c size=    1,945 check=0x0003ddf7 scanned
+  Npc/1012102.img                          off=0x0038198e5 size=    3,204 check=0x000639c0 scanned
+  Npc/1012103.img                          off=0x00381a569 size=    1,655 check=0x00034203 scanned
+  Npc/1012104.img                          off=0x00381abe0 size=    1,502 check=0x0002fca3 scanned
+  Npc/1020000.img                          off=0x00381b1be size=    2,313 check=0x000499ce scanned
+  Npc/1021000.img                          off=0x00381bac7 size=    7,916 check=0x000e134b scanned
+  Npc/1021001.img                          off=0x00381d9b3 size=   10,087 check=0x000fb542 scanned
+  Npc/1021100.img                          off=0x00382011a size=    4,400 check=0x00072d54 scanned
+  Npc/1022000.img                          off=0x00382124a size=    2,934 check=0x0005c778 scanned
+  Npc/1022001.img                          off=0x003821dc0 size=    2,840 check=0x0005d454 scanned
+  Npc/1022002.img                          off=0x0038228d8 size=    1,828 check=0x00039c25 scanned
+  Npc/1022003.img                          off=0x003822ffc size=    1,780 check=0x00037429 scanned
+  Npc/1022004.img                          off=0x0038236f0 size=    1,524 check=0x0002e787 scanned
+  Npc/1022100.img                          off=0x003823ce4 size=    7,415 check=0x000e7851 scanned
+  Npc/1031000.img                          off=0x0038259db size=    1,926 check=0x000319e5 scanned
+  Npc/1031001.img                          off=0x003826161 size=    4,474 check=0x000542e8 scanned
+  Npc/1031100.img                          off=0x0038272db size=    2,618 check=0x0003c2f0 scanned
+  Npc/1032000.img                          off=0x003827d15 size=    2,840 check=0x0005d454 scanned
+  Npc/1032001.img                          off=0x00382882d size=   10,374 check=0x001474d5 scanned
+  Npc/1032002.img                          off=0x00382b0b3 size=    2,658 check=0x00052f63 scanned
+  Npc/1032100.img                          off=0x00382bb15 size=    1,424 check=0x0002b955 scanned
+  Npc/1040000.img                          off=0x00382c0a5 size=    6,437 check=0x000cfdfd scanned
+  Npc/1040001.img                          off=0x00382d9ca size=    6,439 check=0x000cff76 scanned
+  Npc/1051000.img                          off=0x00382f2f1 size=    2,624 check=0x000460ba scanned
+  Npc/1051001.img                          off=0x00382fd31 size=    5,707 check=0x00062785 scanned
+  Npc/1051002.img                          off=0x00383137c size=    2,795 check=0x0003e3b8 scanned
+  Npc/1052000.img                          off=0x003831e67 size=    1,344 check=0x0002bc9a scanned
+  Npc/1052001.img                          off=0x0038323a7 size=    3,841 check=0x00078c21 scanned
+  Npc/1052002.img                          off=0x0038332a8 size=    1,595 check=0x00030c11 scanned
+  Npc/1061000.img                          off=0x0038338e3 size=    1,870 check=0x00039df3 scanned
+  Npc/1061001.img                          off=0x003834031 size=    5,305 check=0x0009b92a scanned
+  Skill/100.img                            off=0x0038354ea size=   62,528 check=0x00771e86 scanned
+  Skill/110.img                            off=0x00384492a size=   27,487 check=0x002ed33a scanned
+  Skill/120.img                            off=0x00384b489 size=   27,355 check=0x002eb598 scanned
+  Skill/130.img                            off=0x003851f64 size=   27,139 check=0x002e8633 scanned
+  Skill/200.img                            off=0x003858967 size=   53,738 check=0x0063e05f scanned
+  Skill/300.img                            off=0x003865b51 size=   43,455 check=0x005029e0 scanned
+  Skill/400.img                            off=0x003870510 size=   51,129 check=0x005fd018 scanned
+  Sound/Bgm00.img                          off=0x00387ccc9 size=7,430,599 check=0x38bcfd46 scanned
+  Sound/Bgm01.img                          off=0x003f92e90 size=11,661,526 check=0x57ee4b7b scanned
+  Sound/Bgm02.img                          off=0x004ab1f66 size=6,621,107 check=0x332eaa3f scanned
+  Sound/BgmUI.img                          off=0x005102719 size=  735,851 check=0x057d1a5f scanned
+  Sound/Game.img                           off=0x0051b6184 size=   64,167 check=0x007fcdda scanned
+  Sound/Item.img                           off=0x0051c5c2b size=   22,675 check=0x002beebe scanned
+  Sound/Mob.img                            off=0x0051cb4be size=   59,866 check=0x0075a9c7 scanned
+  Sound/Skill.img                          off=0x0051d9e98 size=   61,769 check=0x007bc132 scanned
+  Sound/UI.img                             off=0x0051e8fe1 size=   17,957 check=0x0023d537 scanned
+  Sound/Weapon.img                         off=0x0051ed606 size=   15,411 check=0x001d89c7 scanned
+  UI/Basic.img                             off=0x0051f1239 size=   32,249 check=0x00366a2e scanned
+  UI/CashShop.img                          off=0x0051f9032 size=  142,084 check=0x012412fa scanned
+  UI/ChatBalloon.img                       off=0x00521bb36 size=    1,848 check=0x00020500 scanned
+  UI/Login.img                             off=0x00521c26e size=  675,818 check=0x0556f786 scanned
+  UI/Logo.img                              off=0x0052c1258 size=  261,751 check=0x020d5d2d scanned
+  UI/StatusBar.img                         off=0x0053010cf size=   20,209 check=0x0024bff9 scanned
+  UI/ToolTipHelp.img                       off=0x005305fc0 size=    9,031 check=0x0011054b scanned
+  UI/UIWindow.img                          off=0x005308307 size=  105,021 check=0x00bd8a4d scanned

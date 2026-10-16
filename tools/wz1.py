@@ -14,8 +14,13 @@ Format reconstructed from the original client binaries in this repo:
                    else                   -> UTF-16: length = len
                  ASCII payload: len bytes, plaintext[i] = byte[i] ^ ((i - 86) & 0xFF)
                  UTF-16 payload: 2*len bytes, word[i] ^= (i - 21846) & 0xFFFF
-  - image data : concatenated after all directory blocks, in tree order;
-                 total == sum(entry size); each image blob = u8 check byte (0x73/0x1B) + WZ property tree
+  - image data : the blobs start right after the directory tree (``tree_end``)
+                 and follow each other in tree order; the entry has **no offset
+                 field**, so ``data_offset`` is the cumulative sum the client
+                 derives the same way.  This archive carries unlisted objects
+                 between blobs, so treat ``data_offset`` as a hint and verify it
+                 (tools/wzdata.py DataWz.resolve does, and falls back to scanning
+                 the file for Property objects and matching by size).
 """
 from __future__ import annotations
 
@@ -139,17 +144,26 @@ class WzV1File:
         return entries
 
     def _assign_offsets(self) -> None:
-        """Image blobs are stored after all directory blocks, in tree order."""
-        import os
+        """Image blobs start at ``tree_end`` and follow each other in tree order.
 
-        total = os.path.getsize(self.path)
-        images = [e for e in self.walk() if e.type == TYPE_IMAGE]
-        payload = sum(e.size for e in images)
-        cursor = total - payload
-        for img in images:
+        The entry carries no offset, so this is the layout the client derives as
+        well.  It is only exact while nothing sits between the blobs; this repo's
+        ``Data.wz`` has 172,999 bytes of unlisted objects in there, hence the
+        verification in ``tools/wzdata.py`` (which resolves the remaining images
+        by scanning the file for Property objects and matching sizes).
+        """
+        cursor = self._tree_end
+        for img in self.walk():
+            if img.type != TYPE_IMAGE:
+                continue
             img.data_offset = cursor
             cursor += img.size
-        self._data_start = total - payload
+        self._data_start = self._tree_end
+
+    @property
+    def tree_end(self) -> int:
+        """Offset of the first image blob (end of the directory tree)."""
+        return self._tree_end
 
     # ---- helpers -------------------------------------------------------
     def walk(self, entries: list[WzEntry] | None = None) -> Iterator[WzEntry]:

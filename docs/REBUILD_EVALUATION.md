@@ -418,7 +418,7 @@ login/world/channel/game loop、角色持久化、地圖實例管理。
 | `analysis/rtti_classes.txt` | 去重複後的類別名清單（領域模型命名的依據） |
 | `docs/WZ1_FORMAT.md` | WZ v1 完整規格（容器/樹/字串/屬性項/型別表/canvas）＋每項的證據位址與驗證方式 |
 | `analysis/sample_Cap_01000000_properties.txt` | 由 `Data.wz` 還原的完整屬性樹（186 項：`info`/`walk1`/`swingO1`… 每個屬性的位移、型別、下一項位移）|
-| `tools/wzim.py` | `.img` 屬性讀取器（標記為 experimental：結構層可靠，值層待定案）|
+| `tools/wzimg.py`＋`tools/wzdata.py` | `.img` 值編解碼器（1,052/1,052 逐 byte 驗證）與 `Data.wz` 定位器；取代舊的 `tools/wzim.py` |
 
 ## 附錄 B：關鍵證據位址（重寫時直接查這裡，不要重新摸索）
 
