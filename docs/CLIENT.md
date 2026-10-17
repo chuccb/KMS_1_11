@@ -75,8 +75,8 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 怪物 | `/api/mob/<id>` ＋ `/api/png/<path>` | `move`／`stand`／`hit` 動作表，延遲是 WZ 的 `delay`；朝向來自 `0x2F`／`0x30`（`facing` 0＝右、1＝左） |
 | NPC | `/api/npc/<id>` ＋ `/api/png/<path>` | 站著不動（`0x3B` 的走動沒有畫）；朝向是地圖 `life/f` |
 | 名字與表情 | `0x16`／`0x1C`／`0x27` | 名字是白字黑邊；表情就是**臉**——`0x27` 的值換成 `Face/<id>.img` 的九個表情資料夾之一（`/api/avatar.png?...&emotion=smile`），跟 2003 client 一樣按下去先換自己的臉再送封包 |
-| HP／MP／EXP／mesos／地圖 | `0x16` 的角色紀錄 ＋ `0x0D` 的差異包 | 數字直接來自伺服器 |
-| 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來） |
+| 狀態列（HP／MP／EXP） | `UI/StatusBar.img` 的 `base/0`／`base/1`／`base/2` 與 `gauge/hp|mp|exp`（`/api/png`） | 完全是 2003 client 的版面：`CUIStatusBar` 是 (0,392) 的 800×208 視窗，左邊 243×208 面板、下面 446×27 聊天列、右邊 111×136 鍵盤圖；儀表是 1 px 條帶拉到 `163 × value / max`（`sub_4FA5E0`）。等級／職業／名字依 `sub_4FA170` 的 (54,116)／右對齊 136／(153,111) 畫。數字本身來自伺服器的 `self` 事件（`hp/maxHp/mp/maxMp/exp/expToNext`） |
+| 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來）；輸入框是 `base/1` 的白框上的一個透明 `<input>`，靠 `#game-ui` 跟畫布一起縮放 |
 | 商店視窗（點 NPC） | `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 買成功時是 `0x4B`＋`0x0B`＋`0x0D`；賣出沒有控制項 |
 | NPC 對話框 | `0x47` 的 `say` 台詞（`info/speak` 原文） | 「確定」送 `0x15` answer 1（下一句），「關閉」送 0（結束） |
 | 背包面板（`I`） | `0x16` 的角色紀錄 ＋ 每個 `0x0B` | 位置與數量是線路的；名字／價格／描述／圖示是 `/api/item/<id>` 從 `Data.wz` 讀的（ADR-037） |

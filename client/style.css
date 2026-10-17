@@ -207,84 +207,41 @@ body {
   display: none !important;
 }
 
-#hud {
+/*
+ * The game's UI is drawn on the 800x600 canvas, so the one part that has to be a real element - the
+ * chat input - lives in a layer placed and scaled exactly like the canvas (`main.js` `resize`). A
+ * child at (243, 573) therefore lands on the chat bar that `UI/StatusBar.img/base/1` draws.
+ */
+#game-ui {
   position: fixed;
-  left: 14px;
-  bottom: 14px;
-  width: 230px;
-  padding: 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--edge);
-  border-radius: 10px;
-  font-size: 12px;
+  left: 0;
+  top: 0;
+  width: 800px;
+  height: 600px;
+  transform-origin: 0 0;
+  pointer-events: none;
 }
 
-#hud .who {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  font-size: 13px;
-}
-
-#hud .who span:first-child {
-  color: var(--gold);
-}
-
-#hud .bar {
-  position: relative;
-  height: 12px;
-  margin-bottom: 5px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  overflow: hidden;
-}
-
-#hud .bar i {
-  position: absolute;
-  inset: 0;
-  width: 50%;
-  border-radius: 6px;
-  transition: width 160ms ease-out;
-}
-
-#hud .hp i {
-  background: linear-gradient(90deg, #8e2626, var(--hp));
-}
-
-#hud .mp i {
-  background: linear-gradient(90deg, #23406e, var(--mp));
-}
-
-#hud .bar b {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-
-#hud .stats {
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: 11px;
+#game-ui > * {
+  pointer-events: auto;
 }
 
 #chatbox {
-  position: fixed;
-  left: 14px;
-  bottom: 132px;
-  width: min(430px, calc(100vw - 28px));
+  position: absolute;
+  left: 243px;
+  top: 573px;
+  width: 446px;
+  height: 27px;
   font-size: 12px;
 }
 
 #chat-lines {
+  position: absolute;
+  left: 0;
+  bottom: 31px;
+  width: 446px;
   list-style: none;
-  margin: 0 0 6px;
+  margin: 0;
   padding: 0;
   max-height: 150px;
   overflow: hidden;
@@ -311,11 +268,24 @@ body {
   color: #9fd8ff;
 }
 
+/*
+ * The seven faces are a browser stand-in for the 2003 client's F1..F7, which a browser cannot take.
+ * They stay out of the picture unless the chat line is hovered or focused.
+ */
 #emotes {
+  position: absolute;
+  left: 0;
+  bottom: 186px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 6px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+#chatbox:hover #emotes,
+#chatbox:focus-within #emotes {
+  opacity: 0.85;
 }
 
 #emotes button {
@@ -334,21 +304,28 @@ body {
   color: var(--gold);
 }
 
+/* The white field `base/1` already draws: the input itself is only its dark text. */
 #say {
-  width: 100%;
-  padding: 7px 10px;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.55);
-  color: var(--ink);
-  font-size: 13px;
-  opacity: 0.75;
+  position: absolute;
+  left: 98px;
+  top: 4px;
+  width: 340px;
+  height: 19px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #1b2a44;
+  font-size: 12px;
+  opacity: 1;
 }
 
 #say:focus {
   outline: none;
-  border-color: var(--gold);
-  opacity: 1;
+}
+
+#say::placeholder {
+  color: rgba(27, 42, 68, 0.45);
 }
 
 #inventory {
@@ -683,10 +660,3 @@ body {
   opacity: 0.75;
 }
 
-/* The keys the 2003 client's own key map puts on the player (Ctrl is the attack). */
-#hud .keys {
-  margin-top: 7px;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  opacity: 0.55;
-}

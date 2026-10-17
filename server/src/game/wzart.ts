@@ -174,7 +174,14 @@ export function artReaderOf(source: ArtSource | undefined): ArtReader | undefine
       if (cache.has(canonical)) return cache.get(canonical);
       let art: CanvasArt | undefined;
       const canvas = node?.canvas;
-      if (canvas !== undefined) {
+      // A canvas whose pixel block is shorter than its surface is a truncated stream (this Data.wz
+      // has one: `Map/Back/midForest.img/back/0`, 128 bytes for a 128x128 565 surface). Drawing what
+      // did arrive paints a stray line and leaves the rest transparent, which is worse than the
+      // honest answer: the sheet is not in the archive. So a partial canvas is `undefined` here and
+      // every caller already knows how to skip one.
+      const needed = canvas === undefined ? 0 : canvas.width * canvas.height * (canvas.bpp ?? 0);
+      const complete = canvas !== undefined && canvas.pixels !== null && (needed === 0 || canvas.pixels.length >= needed);
+      if (canvas !== undefined && complete) {
         const rgba = canvasToRgba(canvas);
         if (rgba !== null) {
           let ox = 0;

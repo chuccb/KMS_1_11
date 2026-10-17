@@ -97,6 +97,7 @@ import {
 } from "../protocol/mob.ts";
 import { NPC_OPCODE, readNpcEnterField, readNpcId } from "../protocol/npc.ts";
 import { STAT_OPCODE, readStatUpdate, type StatDiff } from "../protocol/stat.ts";
+import { expToNextLevel } from "../game/exp.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 
 /** The ten appearance words the create dialog sends (`CHECK_NAME_APPEARANCE_WORDS`). */
@@ -112,7 +113,13 @@ export interface SelfView {
   maxHp: number;
   mp: number;
   maxMp: number;
+  /** Experience earned toward the next level (`0..expToNext`). */
   exp: number;
+  /**
+   * What the next level costs (`sub_4C7190`'s table). The 2003 client has that table compiled in, so
+   * it never rides the wire; a view that draws the EXP bar needs the number all the same.
+   */
+  expToNext: number;
   mesos: number;
   mapId: number;
   face: number;
@@ -468,6 +475,7 @@ function selfOf(character: CharacterData): SelfView {
     mp: stats.mp,
     maxMp: stats.maxMp,
     exp: stats.exp,
+    expToNext: expToNextLevel(stats.level),
     mesos: stats.mesos,
     mapId: stats.mapId,
     face: stats.appearanceA,

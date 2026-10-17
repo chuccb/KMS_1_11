@@ -72,18 +72,17 @@
       <ol id="log-lines"></ol>
     </aside>
 
-    <footer id="hud" class="hidden">
-      <div class="who"><span id="hud-name"></span> <span id="hud-level"></span></div>
-      <div class="bar hp"><i id="hud-hp"></i><b id="hud-hp-text"></b></div>
-      <div class="bar mp"><i id="hud-mp"></i><b id="hud-mp-text"></b></div>
-      <div class="stats"><span id="hud-exp"></span><span id="hud-mesos"></span><span id="hud-map"></span></div>
-      <div class="keys">Ctrl 攻擊 · I 背包 · Enter 聊天</div>
-    </footer>
-
-    <div id="chatbox" class="hidden">
-      <ol id="chat-lines"></ol>
-      <div id="emotes"></div>
-      <input id="say" placeholder="Enter 開始輸入，再按 Enter 送出（/w 名字 訊息、/f 名字）" maxlength="120" spellcheck="false" />
+    <!--
+      The game's own UI lives on the canvas; only the chat input has to be a real <input>. This layer
+      is placed and scaled exactly like `#view`, so its children can use the 2003 client's 800x600
+      coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
+    -->
+    <div id="game-ui">
+      <div id="chatbox" class="hidden">
+        <ol id="chat-lines"></ol>
+        <div id="emotes"></div>
+        <input id="say" placeholder="Enter 開始輸入，再按 Enter 送出（/w 名字 訊息、/f 名字）" maxlength="120" spellcheck="false" />
+      </div>
     </div>
 
     <script type="module" src="./main.js"></script>

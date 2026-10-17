@@ -28,16 +28,7 @@ const ui = {
   characterStatus: /** @type {HTMLElement} */ (document.getElementById("character-status")),
   newName: /** @type {HTMLInputElement} */ (document.getElementById("new-name")),
   create: /** @type {HTMLButtonElement} */ (document.getElementById("create")),
-  hud: /** @type {HTMLElement} */ (document.getElementById("hud")),
-  hudName: /** @type {HTMLElement} */ (document.getElementById("hud-name")),
-  hudLevel: /** @type {HTMLElement} */ (document.getElementById("hud-level")),
-  hudHp: /** @type {HTMLElement} */ (document.getElementById("hud-hp")),
-  hudHpText: /** @type {HTMLElement} */ (document.getElementById("hud-hp-text")),
-  hudMp: /** @type {HTMLElement} */ (document.getElementById("hud-mp")),
-  hudMpText: /** @type {HTMLElement} */ (document.getElementById("hud-mp-text")),
-  hudExp: /** @type {HTMLElement} */ (document.getElementById("hud-exp")),
-  hudMesos: /** @type {HTMLElement} */ (document.getElementById("hud-mesos")),
-  hudMap: /** @type {HTMLElement} */ (document.getElementById("hud-map")),
+  gameUi: /** @type {HTMLElement} */ (document.getElementById("game-ui")),
   chatbox: /** @type {HTMLElement} */ (document.getElementById("chatbox")),
   chatLines: /** @type {HTMLElement} */ (document.getElementById("chat-lines")),
   say: /** @type {HTMLInputElement} */ (document.getElementById("say")),
@@ -277,17 +268,14 @@ function handle(message) {
       // this side must not tell it to close something it already forgot.
       closeShop(false);
       closeDialogue(false);
-      ui.hud.classList.remove("hidden");
       ui.chatbox.classList.remove("hidden");
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
-      updateHud();
       void loadMap(message.mapId);
       logLine(`field ${message.mapId}`);
       return;
 
     case "self":
       selfView = message.self;
-      updateHud();
       return;
 
     case "inventory":
@@ -740,15 +728,33 @@ function npcAt(clientX, clientY) {
 
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
-  hoveredPortal = portalAt(point.x, point.y);
-  const npc = npcAt(point.x, point.y);
-  canvas.style.cursor = hoveredPortal || npc ? "pointer" : "default";
+  const button = statusButtonAt(point.x, point.y);
+  statusHover = button?.action;
+  hoveredPortal = button ? undefined : portalAt(point.x, point.y);
+  const npc = button ? undefined : npcAt(point.x, point.y);
+  canvas.style.cursor = button || hoveredPortal || npc ? "pointer" : "default";
+});
+
+canvas.addEventListener("mousedown", (event) => {
+  const point = viewPoint(event);
+  statusPressed = statusButtonAt(point.x, point.y)?.action;
+});
+
+canvas.addEventListener("mouseup", () => {
+  statusPressed = undefined;
 });
 
 canvas.addEventListener("click", (event) => {
+  // The status bar is drawn over the world, so its buttons win over anything behind them.
+  const point = viewPoint(event);
+  const button = statusButtonAt(point.x, point.y);
+  if (button) {
+    if (shop !== undefined || talkingNpc !== undefined) return;
+    statusButtonClick(button);
+    return;
+  }
   // An NPC first: its box stands on the ground where a door could also be, and the server can only
   // open one window at a time (`0x4A`/`0x47` while another is up is a disconnect in the client).
-  const point = viewPoint(event);
   const npc = npcAt(point.x, point.y);
   if (npc) {
     if (shop !== undefined || talkingNpc !== undefined) return;
@@ -859,6 +865,11 @@ function resize() {
   const scale = Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H);
   canvas.style.width = `${Math.floor(VIEW_W * scale)}px`;
   canvas.style.height = `${Math.floor(VIEW_H * scale)}px`;
+  // The canvas is centred with a transform, so its own rect is where the game UI layer belongs.
+  const rect = canvas.getBoundingClientRect();
+  ui.gameUi.style.left = `${rect.left}px`;
+  ui.gameUi.style.top = `${rect.top}px`;
+  ui.gameUi.style.transform = `scale(${rect.width / VIEW_W})`;
   ctx.imageSmoothingEnabled = false;
 }
 window.addEventListener("resize", resize);
@@ -1032,14 +1043,21 @@ function drawBack(back, cameraX, cameraY) {
   }
   const columns = horizontal ? Math.ceil(VIEW_W / stepX) + 3 : 1;
   const rows = vertical ? Math.ceil(VIEW_H / stepY) + 3 : 1;
+  // The sheet's own `origin` is the offset the 2003 client blits from (`TMapBack` takes it from the
+  // canvas): a copy anchored at (x, y) has its top-left at (x - ox, y - oy).
+  const ox = back.ox ?? 0;
+  const oy = back.oy ?? 0;
   ctx.globalAlpha = Math.max(0, Math.min(255, back.a ?? 255)) / 255;
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
-      const sx = Math.round(x + column * stepX);
-      const sy = Math.round(y + row * stepY);
+      const anchorX = Math.round(x + column * stepX);
+      const anchorY = Math.round(y + row * stepY);
+      const sx = anchorX - ox;
+      const sy = anchorY - oy;
       if (sx > VIEW_W || sy > VIEW_H || sx + w < 0 || sy + h < 0) continue;
-      // A flipped sheet mirrors in place: its right edge is drawn where the left one would be.
-      drawArchiveImage({ path: back.path, ox: 0, oy: 0 }, back.flip ? sx + (w - 1) : sx, sy, back.flip);
+      // A flipped sheet mirrors in place: source column `u` lands on `anchorX + ox - u`, so the same
+      // footprint needs the anchor moved by `w - 2*ox`.
+      drawArchiveImage({ path: back.path, ox, oy }, back.flip ? anchorX - 2 * ox + w - 1 : anchorX, anchorY, back.flip);
     }
   }
   ctx.globalAlpha = 1;
@@ -1203,6 +1221,126 @@ function drawEntitySprite(kind, templateId, x, y, facing, moving, now, corpseSin
   drawArchiveImage(frame, x, y, facing === 1);
 }
 
+/* --------------------------------------------------------------------------------------------
+ * The 2003 status bar (`UI/StatusBar.img`).
+ *
+ * `CUIStatusBar` is a window at (0, 392) of the 800x600 surface (`sub_545450(this, 0, 392, 800,
+ * 208)`), and it is not one picture: a 243x208 left panel, the 446x27 chat bar along the bottom and
+ * the 111x136 key pad at the right edge. HP/MP/EXP are 1-px gauge sheets stretched to the troughs
+ * the client fills - `v36 = 163 * hp` in `sub_4FA5E0` is the 163-px width, and `sub_4FA170`'s
+ * tooltip boxes name the same rectangles (HP 143..159, MP 162..178, EXP 190..198).
+ * ------------------------------------------------------------------------------------------ */
+const STATUS_BAR = {
+  y: 392,
+  panel: { path: "UI/StatusBar.img/base/0", x: 0, y: 392 },
+  chat: { path: "UI/StatusBar.img/base/1", x: 243, y: 573 },
+  keys: { path: "UI/StatusBar.img/base/2", x: 689, y: 464 },
+  gauges: {
+    hp: { x: 49, y: 143, w: 163, h: 16 },
+    mp: { x: 49, y: 162, w: 163, h: 16 },
+    exp: { x: 50, y: 190, w: 163, h: 8 },
+  },
+  // `base/0` carries the same pixels at these spots; the client still draws the button widgets on
+  // top of it so a hover or a press can swap the face (36x35, and `BtMenu` 38x17).
+  buttons: [
+    { name: "BtItem", x: 9, y: 7, w: 36, h: 35, action: "inventory" },
+    { name: "BtEquip", x: 9, y: 43, w: 36, h: 35, action: "equip" },
+    { name: "BtStat", x: 38, y: 67, w: 36, h: 35, action: "stat" },
+    { name: "BtSkill", x: 9, y: 91, w: 36, h: 35, action: "skill" },
+    { name: "BtMenu", x: 192, y: 91, w: 38, h: 17, action: "menu" },
+  ],
+};
+
+/** The `Bt*` action the cursor is over, and the one a press started on. */
+let statusHover;
+let statusPressed;
+
+/** The bar's button at a surface point, or `undefined`. */
+function statusButtonAt(x, y) {
+  if (!selfView) return undefined;
+  for (const button of STATUS_BAR.buttons) {
+    const by = STATUS_BAR.y + button.y;
+    if (x >= button.x && x < button.x + button.w && y >= by && y < by + button.h) return button;
+  }
+  return undefined;
+}
+
+/** The job names `CUIStatusBar` prints from its own table (this archive has no String.wz). */
+const JOB_NAMES = new Map([
+  [0, "초보자"],
+  [100, "전사"],
+  [110, "파이터"],
+  [120, "페이지"],
+  [130, "스피어맨"],
+  [200, "마법사"],
+  [210, "위자드"],
+  [220, "클레릭"],
+  [230, "위자드"],
+  [300, "궁수"],
+  [310, "헌터"],
+  [320, "사수"],
+  [400, "도적"],
+  [410, "어쌔신"],
+  [420, "시프"],
+]);
+
+function jobNameOf(job) {
+  return JOB_NAMES.get(job) ?? JOB_NAMES.get(Math.floor(job / 100) * 100) ?? "초보자";
+}
+
+/** One line of the bar's white boxes: white text with the dark edge its bitmap font draws. */
+function statusText(text, x, y, align = "left") {
+  ctx.font = "12px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+  ctx.textAlign = align;
+  ctx.textBaseline = "top";
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, x, y);
+}
+
+/** One gauge: the 1-px sheet stretched to `163 * value / max` (`sub_4FA5E0`). */
+function drawStatusGauge(key, value, max) {
+  const trough = STATUS_BAR.gauges[key];
+  const entry = artImage(`UI/StatusBar.img/gauge/${key}`);
+  if (!entry.ready || max <= 0) return;
+  const filled = Math.round(trough.w * Math.max(0, Math.min(1, value / max)));
+  if (filled <= 0) return;
+  ctx.drawImage(entry.img, 0, 0, 1, trough.h, trough.x, STATUS_BAR.y + trough.y, filled, trough.h);
+}
+
+function drawStatusBar() {
+  if (!selfView) return;
+  for (const piece of [STATUS_BAR.panel, STATUS_BAR.chat, STATUS_BAR.keys]) {
+    const entry = artImage(piece.path);
+    if (entry.ready) ctx.drawImage(entry.img, piece.x, piece.y);
+  }
+  drawStatusGauge("hp", selfView.hp, selfView.maxHp);
+  drawStatusGauge("mp", selfView.mp, selfView.maxMp);
+  drawStatusGauge("exp", selfView.exp, selfView.expToNext ?? 0);
+  for (const button of STATUS_BAR.buttons) {
+    let state = "normal";
+    if (statusPressed === button.action) state = "pressed";
+    else if (statusHover === button.action) state = "mouseOver";
+    const entry = artImage(`UI/StatusBar.img/${button.name}/${state}/0`);
+    if (entry.ready) ctx.drawImage(entry.img, button.x, STATUS_BAR.y + button.y);
+  }
+  statusText(`Lv.${selfView.level}`, 54, STATUS_BAR.y + 116);
+  statusText(jobNameOf(selfView.job), 136, STATUS_BAR.y + 116, "right");
+  statusText(selfView.name, 153, STATUS_BAR.y + 111);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+function statusButtonClick(button) {
+  if (button.action === "inventory") {
+    toggleInventory();
+    return;
+  }
+  logLine(`${button.name}：這個原版視窗還沒接上來。`);
+}
+
 function frame() {
   const now = performance.now();
   const target = cameraTarget();
@@ -1217,7 +1355,10 @@ function frame() {
   const cameraX = camera.x;
   const cameraY = camera.y;
 
-  ctx.fillStyle = "#000000";
+  // A map whose tile set this archive does not carry leaves holes where its ground should be; soil
+  // under them reads as ground, where black reads as a broken picture. Every other map fills black,
+  // which is what a missing corner of a background sheet should look like.
+  ctx.fillStyle = (mapArt?.missingTiles ?? 0) > 0 ? "#2a2118" : "#000000";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
   const backs = mapArt?.backs ?? [];
@@ -1280,6 +1421,7 @@ function frame() {
 
   for (const sprite of front) drawMapSprite(sprite, cameraX, cameraY, now, false);
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
+  drawStatusBar();
 
   requestAnimationFrame(frame);
 }
@@ -1461,21 +1603,6 @@ function drawPortals(cameraX, cameraY, now) {
 }
 
 // ---------------------------------------------------------------- hud & chat
-
-function updateHud() {
-  if (!selfView) return;
-  ui.hudName.textContent = selfView.name;
-  ui.hudLevel.textContent = `Lv.${selfView.level}`;
-  const hp = Math.max(0, Math.min(1, selfView.maxHp === 0 ? 0 : selfView.hp / selfView.maxHp));
-  const mp = Math.max(0, Math.min(1, selfView.maxMp === 0 ? 0 : selfView.mp / selfView.maxMp));
-  ui.hudHp.style.width = `${hp * 100}%`;
-  ui.hudMp.style.width = `${mp * 100}%`;
-  ui.hudHpText.textContent = `${selfView.hp} / ${selfView.maxHp}`;
-  ui.hudMpText.textContent = `${selfView.mp} / ${selfView.maxMp}`;
-  ui.hudExp.textContent = `EXP ${selfView.exp}`;
-  ui.hudMesos.textContent = `${selfView.mesos} mesos`;
-  ui.hudMap.textContent = `地圖 ${selfView.mapId}`;
-}
 
 function chatLine(name, text) {
   const line = document.createElement("li");

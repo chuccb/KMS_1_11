@@ -28,3 +28,6 @@ traces/
 
 # --- TypeScript dev tooling (typecheck only; runtime stays dependency-free) ---
 node_modules/
+
+# image search scratch (not part of the game)
+image-search/
