@@ -86,6 +86,14 @@ import {
   type PartyMember,
 } from "../protocol/party.ts";
 import { PartyRegistry, type PartyLeave } from "../game/parties.ts";
+import {
+  FAME_OPCODE,
+  describeClientFameRequest,
+  encodeFameResult,
+  readClientFameRequest,
+  type ClientFameRequest,
+} from "../protocol/fame.ts";
+import { FameLedgers, applyFame, fameClock } from "../game/fame.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -803,6 +811,11 @@ export class GameEntryServer {
    * 只有角色 id 與名字，隊員分散在兩張圖是合法的（ADR-030）。
    */
   private readonly parties = new PartyRegistry();
+  /**
+   * 人氣的配額（FINDINGS 4.38）：一天給一次、同一個對象一個月一次。**不進存檔** —— 它不是角色
+   * 狀態的一部分（`0x0D` 沒有它），重開伺服器就重新開始（ADR-031、§4.38 的 OPEN）。
+   */
+  private readonly fameLedgers = new FameLedgers();
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
   private listenPort = 0;
@@ -1964,6 +1977,11 @@ export class GameEntryServer {
           this.handlePartyRequest(session, event.plain);
           continue;
         }
+        // 人氣（角色右鍵選單的「인기도 +／-」）。跟著場地：client 只找得到同一張圖的人。
+        if (session !== undefined && opcode === FAME_OPCODE.request) {
+          this.handleFameRequest(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -2254,6 +2272,75 @@ export class GameEntryServer {
         return;
       }
     }
+  }
+
+  /**
+   * 一次「給人氣」（`0x20` → `0x12`，FINDINGS §4.38、ADR-031）。
+   *
+   * 目標用**場地**找（`session.instance.member`）：client 的選單只看得到同一張圖的人
+   * （`sub_55D7B0` 在 `CUserPool` 裡找），所以封包裡的角色 id 一定是同場地的；找不到就是過期的 id，
+   * 回 `type 1`（client 什麼都不顯示）而不是編一個訊息。
+   *
+   * 成功的三個收件者：**給的人**收到 `type 0`（顯示「'name'님의 인기도를 …」）、**被給的人**收到
+   * `type 5`（「'name'님께서 …」）＋ 一個 `0x0D`（`fame` 的 bit `0x20000`）讓他的能力視窗跟著動。
+   * 給的人**不會**收到 `0x0D` —— 自己的人氣沒變。
+   */
+  private handleFameRequest(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientFameRequest;
+    try {
+      request = readClientFameRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x20 fame unreadable: ${(error as Error).message}`);
+      return;
+    }
+    this.options.log?.(`game: ${describeClientFameRequest(request)}`);
+    const target = session.instance.member(request.targetId);
+    if (target === undefined) {
+      session.send(encodeFameResult({ kind: "ignored" }));
+      this.options.log?.(
+        `game: fame: "${session.name}" named ${request.targetId}, who is not in map ${session.character.stats.mapId}`,
+      );
+      return;
+    }
+    const outcome = applyFame({
+      giverId: session.characterId,
+      giverLevel: session.character.stats.level,
+      targetId: target.characterId,
+      up: request.up,
+      targetFame: target.character.stats.fame,
+      ledger: this.fameLedgers.ledgerOf(session.characterId),
+      clock: fameClock(Date.now()),
+    });
+    if (outcome.kind === "refused") {
+      switch (outcome.reason) {
+        case "self":
+          session.send(encodeFameResult({ kind: "ignored" }));
+          break;
+        case "beginner":
+          session.send(encodeFameResult({ kind: "beginner" }));
+          break;
+        case "alreadyToday":
+          session.send(encodeFameResult({ kind: "alreadyToday" }));
+          break;
+        case "alreadyThisMonth":
+          session.send(encodeFameResult({ kind: "alreadyThisMonth" }));
+          break;
+      }
+      this.options.log?.(
+        `game: fame: "${session.name}" -> "${target.name}" refused (${outcome.reason})`,
+      );
+      return;
+    }
+    this.fameLedgers.remember(session.characterId, outcome.ledger);
+    const before = { ...target.character.stats };
+    target.character.stats.fame = outcome.fame;
+    target.send(encodeFameResult({ kind: "received", name: session.name, up: request.up }));
+    const diff = diffStats(before, target.character.stats);
+    if (Object.keys(diff).length > 0) target.send(encodeStatUpdate({ diff }));
+    session.send(encodeFameResult({ kind: "changed", name: target.name, up: request.up }));
+    this.options.log?.(
+      `game: fame: "${session.name}" -> "${target.name}" ${request.up ? "up" : "down"} (now ${outcome.fame})`,
+    );
   }
 
   /**

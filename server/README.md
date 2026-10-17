@@ -16,7 +16,7 @@
 | `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
 | `src/net/online.ts` | ✅ **誰在線上**：`OnlineAccounts`（`account → 活著的 session`，一個帳號一個座位）＋ `SeatKeeper`（一條連線的座位與心跳一起拿、一起還）；座位由登入伺服器（`0x01` 成功）與遊戲伺服器（角色進場）**各拿一次**，兩半共用同一份（ADR-018）|
 | `src/net/heartbeat.ts` | ✅ **心跳**：對安靜的 session 送 `0x08`，client 的 `sub_43B280` 無條件回聲（任何階段都有效，FINDINGS §4.2／§4.30）；安靜超過三個間隔就 `destroy()`，於是座位歸還、`0x1D`、存檔都照既有的 close 路徑走。間隔與逾時是我們的選擇（預設 30 s／90 s，`--ping <ms\|off>`）|
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色的**唯一真相是一份記憶體表**（`LoginServerOptions.accounts`），寫進檔案由 `persist` 回呼負責（`src/game/save.ts`，ADR-017）：建立角色、刪除角色與 **session 結束**時各存一次；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），**並把 `0x0F` 轉播成 s2c `0x23` 給同場地的其他人**（`relayAttack`：只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`afterimage` 送 0，`0x24` 的投射物 id 用自己的分頁紀錄查（`projectileItemOf`，查不到＝0）；ADR-026／ADR-027／§4.11.7b／§4.11.7c），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**密語與找人**也會在這裡落地（`handleUserRequest` → `sessionNamed` 掃線上 session，跨圖用 `target.send`，§4.31）；**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。**組隊請求**（`0x26`）也落在這裡（`handlePartyRequest` → `game/parties.ts` → `0x10`；create／leave／accept／invite／kick，已在隊伍／不在隊伍／滿了／邀請失效各有自己的 `0x10`，ADR-030），而**下線＝退隊**（close handler 先從 `sessionsByCharacter` 移除、再走 `leaveParty`——不要對已經關掉的 socket 送包）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
+| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色的**唯一真相是一份記憶體表**（`LoginServerOptions.accounts`），寫進檔案由 `persist` 回呼負責（`src/game/save.ts`，ADR-017）：建立角色、刪除角色與 **session 結束**時各存一次；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），**並把 `0x0F` 轉播成 s2c `0x23` 給同場地的其他人**（`relayAttack`：只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`afterimage` 送 0，`0x24` 的投射物 id 用自己的分頁紀錄查（`projectileItemOf`，查不到＝0）；ADR-026／ADR-027／§4.11.7b／§4.11.7c），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**密語與找人**也會在這裡落地（`handleUserRequest` → `sessionNamed` 掃線上 session，跨圖用 `target.send`，§4.31）；**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。**組隊請求**（`0x26`）也落在這裡（`handlePartyRequest` → `game/parties.ts` → `0x10`；create／leave／accept／invite／kick，已在隊伍／不在隊伍／滿了／邀請失效各有自己的 `0x10`，ADR-030），而**下線＝退隊**（close handler 先從 `sessionsByCharacter` 移除、再走 `leaveParty`——不要對已經關掉的 socket 送包）。**人氣**（`0x20`）也在這裡（`handleFameRequest` → `applyFame` → `0x12`；成功時給的人收 `type 0`、被給的人收 `type 5` ＋ 一個 `0x0D` 的 `fame` 差值，拒絕是 `2`／`3`／`4`，過期的 id 是 `1`——什麼都不顯示，ADR-031）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場（**第一個 u32 ＝ 臉**，`face`）、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）、**0x27 表情**（`u32 characterId`＋`u32 emotion`，0..8 ＝ `EMOTION_NAMES`）；client 端的 0x0E（自己的移動）、**0x13 表情**與 0x0D（點擊傳送門／物件），以及 **0x1C 玩家自己的 HP／MP 變動回報**
 （`[u32 flags][s16 hpΔ][s16 mpΔ][u8 flag]`，旗標與 `0x0D` 共用 `statDiffFlag`；`readClientStatReport`／
@@ -31,6 +31,7 @@
 | `src/game/rewards.ts` | ✅ **獎勵與錢包**（`grantItem`／`MesoWallet`／`pickUpDrop`）：同 id 堆疊到 200、否則第一個空格、**裝備與現金道具永不堆疊**、背包滿就留在原地；`pickUpDrop` 回傳「該送哪幾個封包」的資料（地面知道那件道具時用 `grantItem` 的第四個參數 `template` 當模板，撿回來的捲軸武器不會變成新的）；`takeItem` 是商店收購那一半。**`MesoWallet` 是角色紀錄第 22 欄（`stats.mesos`）的視圖**，不是第二本帳 —— 撿到錢時 `0x0D` 的旗標 `0x40000` 會讓 client 的錢包跟著動（§4.22.5）。 |
 | `src/protocol/npc.ts` | ✅ **NPC 封包**：`0x39` 進場（`u32 npcId`；**已知 id 只有 5 bytes**，新 id 才接 `u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16`＋`s16 ×2`，共 20 bytes）、`0x3A` 離場（只有 `u32 npcId`）、`0x3B` **走動**（**`u8 flag` 在前**＋`u32 npcId`；flag 1 ＝「你自己走」，FINDINGS §4.28）；`0x3C`–`0x40` 只讀 id，只有 `0x3D` 再讀兩顆**動畫**索引＋（模板旗標非 0 時才有的）`CMovePath`（FINDINGS §4.19）。**沒有**怪物 `0x2F` 那個動畫旗標區塊。 |
 | `src/protocol/stat.ts` | ✅ **能力值差異包 `0x0D`（s2c）**：`u8 ack` ＋ `u32 flags`（19 個 bit，`0x01`…`0x40000`，**依旗標順序**）＋ `u32 panelFlags`（0 = 後面沒有東西）。`diffStats(舊, 新)` 只回報有變的欄位；`encodeStatUpdate`／`readStatUpdate`／`describeStatUpdate`。⚠️ 三個欄位的**線上寬度與 `CharacterData` 不同**（`str`/`dex`/`int`/`luk` **1 byte**、`unknown26`／`fame` **4 bytes**），超界值直接**拒絕**而不是靜默截斷（FINDINGS §4.21）。 |
+| `src/protocol/fame.ts` | ✅ **人氣封包**：c2s `0x20`（`sub_55D7B0`：`u32 目標角色 id` ＋ `u8 up`）與 s2c `0x12`（`sub_55C390`：`type 0` 成功（給送出者，`str name`＋`u8 up`）、`1` 什麼都不顯示、`2` 初學者、`3` 今天已經給過、`4` 這個月給過同一個人、`5` 通知被給的人（`str name`＋`u8 up`；第二個名字由 client 自己補））。`encode`／`read`／`describe` 三件套＋`test/fame.test.ts`（FINDINGS §4.38、ADR-031）。 |
 | `src/protocol/party.ts` | ✅ **組隊封包**：s2c `0x10`（`sub_55C5E0`，`CWvsApp` 層）與 c2s `0x26`（`sub_4A1EA0(..., 38, 0)`）。`0x10` 是 `u8 type` ＋ 依 type 的 payload：`3` 邀請（`u32 inviterId`＋`str`）、`5` 安靜同步、`6` 建立成功（`u32 partyId`；client 自己清空名冊並把自己寫進第 0 格）、`10` 退出／被踢／解散（`u32 partyId`＋`u32 characterId`＋`u8 flag`，`flag = 0` 是隊長退隊＝解散，`!= 0` 再 `u8 kicked`＋`str`＋名冊）、`13` 新成員（`u32 partyId`＋`str`＋名冊）、`7`／`8`／`11`／`14`／`15` 純訊息；`0x26` 是 `u8 type`（`0` 建立／`1` 退出／`2` 接受／`3` 邀請／`4` 踢人）。**102-byte 名冊**＝`u32 characterId[6]`＋`char name[6][13]`（`sub_45F5C0` 的 `qmemcpy(…, 0x66)`；讀的人是 `sub_55DB00` 與 `sub_55CC40`，名字與 `CharacterData` 那一個相同，直接沿用 `nameFieldBytes`）。**第 0 格是隊長**（client 用 `n3000[102] == n3000[5]` 判斷）。`encode`／`read`／`describe` 三件套＋`test/party.test.ts`（FINDINGS §4.37、ADR-030）。 |
 | `src/game/exp.ts` | ✅ **經驗值與升級**：`expToNextLevel` 是 client 自己的公式（`sub_4C7110`：1–5 `n(n²/2+15)`、6–50 `q(q+19)`／`q=n²/3`、51–200 ×1.0548、>200 封頂），與公開的 2003 表 196/200 相同（四個差異是複本打字錯誤）；`awardExp` 加經驗值、必要時連續升級、**升級且還活著就補滿 HP／MP**（client 就地升級 routine 的行為）。 |
 | `src/game/vitals.ts` | ✅ **玩家 HP／MP 的伺服器規則**（ADR-021、FINDINGS §4.33）：`applyVitalReport(紀錄, 差值)` 就地套用 c2s `0x1C` 的回報，回傳**只有真的動了的欄位**的 `StatDiff`（沒動就不送包）；夾在 `[0, max]`，且 **HP ＝ 0 時不接受正向 HP 差值**（client 的回復不擋死亡，補滿是復活那條路；MP 不受此限）。伺服器不驗算傷害（原 2003 server 也一樣）。 |
@@ -46,6 +47,7 @@
 | `src/game/items.ts` | ✅ **用掉道具的規則**（ADR-022、FINDINGS §4.34）：`consumeSpecOf` 讀 `Item/Consume/0XXX.img/<id>/spec`（**client 自己的效果表**，不是描述文字），`healsVitals`／`consumeDeltas` 把它換成 `0x0D` 要的差值（`hp`／`mp` 定值、`hpR`／`mpR` 是上限的百分比並**向下取整**）；沒定位的欄位收進 `ConsumeSpec.unapplied`（buff 家族 → 這次使用被拒絕，道具留在袋子裡）。 |
 | `src/game/inventory.ts` | ✅ **道具欄的拖放**（ADR-029、FINDINGS §4.36）：`applyChangeSlot` **先判後寫**，八個拒絕值（分頁／格數／空格／放錯分頁／放錯部位／被擠掉的放不回去／`count` 不是 `-1`／丟到地上還沒做）＋`{changes, lookChanged}`；唯一會動到穿戴格的地方，也是 `0x28` 的唯一觸發點。 |
 | `src/game/parties.ts` | ✅ **隊伍的狀態**（`PartyRegistry`，ADR-030）：`partyId → Party`（`leaderId`＋`members`，順序就是名冊的格子順序、**隊長一定在第 0 格**）＋`characterId → partyId` 的反查＋一目標一格的邀請。`create`／`join`／`invite`／`inviteOf`／`dropInvite`／`leave`；`leave` 回傳 `PartyLeave`（離開**之前**的名冊與留下來的名冊），**隊長離開或最後一個人離開＝解散**。這一層不知道封包也不知道 socket（跟 `game/mobs.ts` 一樣：規則可單獨測，byte 由 `protocol/party.ts` 的 golden 測試釘住）。 |
+| `src/game/fame.ts` | ✅ **人氣的規則**（ADR-031、FINDINGS §4.38）：`applyFame` 是純函式（自己 → 初學者（15 級）→ 這個月同一個人 → 今天；人氣夾在 `[0, 65535]`），`fameClock` 把時間換成 UTC 的日／月序號，`FameLedgers` 是世界層的配額表（**不進存檔**）。 |
 | `src/wz/paths.ts` | ✅ WZ 路徑：`mapImagePath`／`mobImagePath`／`npcImagePath`／`itemImagePath`（`Item/<kind>/<前四位>.img`，四種 kind 是這份 `Data.wz` 的實際目錄；**裝備在 `Character/<type>/`，不在 `Item/`**）|
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
 | 遊戲邏輯（地圖／怪物／NPC／戰鬥／掉落／商店／對話／道具欄伺服器端）| 🟡 地圖／怪物／NPC 進場／戰鬥／掉落／**NPC 商店**／**NPC 對話**／**組隊**都已實作（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts`／`game/drops.ts`／`game/rewards.ts`／`game/shops.ts`／`game/dialogue.ts`／`game/parties.ts`）；**尚未實作**的是怪物 AI 與攻擊（AI 在 client，§4.20）、真正的任務流程、NPC 的走動（`0x3D`）、以及**現金裝備**（`111xxxx`／`wornCash`，§4.36.5）。沒解的一律不猜（`decode` 仍會原封不動記錄它們）。 |
@@ -512,9 +514,27 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 - **拒收沒有實作**：`0x1A` sub-op `0x22`（`'name'님은 현재 귓속말이 거부되어 있습니다.`）的形狀已知，  但 client 端沒有任何輸入會設定「我拒收密語」（開關的封包還沒找到），沒有驅動者的 codec 是死碼。
 - **密語不進存檔**：沒有離線訊息，`--save` 的格式不動。
 
+### 人氣（ADR-031／FINDINGS §4.38）
+
+角色右鍵選單的「인기도 +／-」是 `0x20` ＝ `[u32 目標角色 id][u8 up]`（`up`：1 ＝ +、0 ＝ -）。
+client 自己先做兩件事：用名字在**同一張圖**的 `CUserPool` 裡找那個人（找不到就本地印「캐릭터를 찾을 수
+없습니다」，封包不出去）與 5 分鐘的本地冷卻；能給不能給是伺服器的事：
+
+| 事件 | 回什麼（`0x12`）|
+|---|---|
+| 成功 | 給的人 `type 0`（`str 被給的人`＋`u8 up`）→「'%s'님의 인기도를 …」；被給的人 `type 5`（`str 給的人`＋`u8 up`）→「'%s'님께서 …」＋一個 `0x0D` 的 `fame`（bit `0x20000`，他的人氣真的 +1／−1）|
+| 初學者（< 15 級）| `type 2` →「초보자는 인기도를 올리거나 내리지 못합니다.」|
+| 今天已經給過 | `type 3` →「오늘은 더 이상 …」|
+| 這個月給過同一個人 | `type 4` →「이번 달에는 더 이상 지정된 캐릭터의 …」|
+| 目標不在這張圖／自己給自己 | `type 1` → **什麼都不顯示** |
+
+- **順序**：自己 → 初學者 → 這個月 → 今天（同一個人、同一天再給一次時 client 顯示的是「這個月」那一句）。
+- **人氣是 u16**：往下給 0 分的人不會變成負數；配額用 UTC 的日／月序號算。
+- **配額不進存檔**：`FameLedgers` 只在記憶體裡，重開伺服器就重新開始（§4.38.2 寫了要加欄位時的形狀）。
+
 `scripts/whisper_probe.mjs` 是這幾節（攻擊轉播／密語／死亡與復活／外觀／表情／拖放／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
-「跨圖密語／找人／找不到／氣球不回應／**別人的揮擊與射擊與魔法**／被打掉血／復活／**別人的臉與頭髮與穿在身上的裝備**／**表情**／**脫下武器再穿回去（`0x0B` ＋`0x28`、被拒的拖放）**／**把武器丟到地上再走過去撿回來（`0x43` kind 2、站著不動與 80 px 外都不會撿、`0x44` ＋`0x0B` ＋`0x11`）**／**買卷軸並用掉**／**組隊（建立→邀請→接受→退出→隊長退出解散→沒有隊伍的退出）**」**85 個檢查** —— 其中兩條連線**真的在不同地圖上**：
+「跨圖密語／找人／找不到／氣球不回應／**別人的揮擊與射擊與魔法**／被打掉血／復活／**別人的臉與頭髮與穿在身上的裝備**／**表情**／**脫下武器再穿回去（`0x0B` ＋`0x28`、被拒的拖放）**／**把武器丟到地上再走過去撿回來（`0x43` kind 2、站著不動與 80 px 外都不會撿、`0x44` ＋`0x0B` ＋`0x11`）**／**買卷軸並用掉**／**組隊（建立→邀請→接受→退出→隊長退出解散→沒有隊伍的退出）**／**人氣（1 級的人被擋在門外，目標什麼都沒收到）**」**87 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
 報的是**對方**的地圖 id、密語也照樣送達（第二次跑同一份存檔會跳過那一步：角色的紀錄已經記得 `1010000`）；
 在復活之前它先送兩次 c2s `0x1C`（`sub_55B870(-damage, 0, 0)` 的位元組：`-30` 兩次），驗證第一次回來的
@@ -537,7 +557,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 ```bash
 node server/src/cli.ts serve --port 8495 --game-port 8496 \
      --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（85 個檢查）
+node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（87 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

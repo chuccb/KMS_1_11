@@ -76,6 +76,16 @@ import { NPC_OPCODE, readNpcEnterField, readNpcState } from "../src/protocol/npc
 import { npcWalkPolicy } from "../src/game/npcs.ts";
 import { STAT_OPCODE, readStatUpdate } from "../src/protocol/stat.ts";
 import {
+  PARTY_OPCODE,
+  encodeClientPartyRequest,
+  readPartyResult,
+} from "../src/protocol/party.ts";
+import {
+  FAME_OPCODE,
+  encodeClientFameRequest,
+  readFameResult,
+} from "../src/protocol/fame.ts";
+import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
   SHOP_OPEN_OPCODE,
@@ -3580,4 +3590,177 @@ test("a throw-away answers 0x0B and puts the item on the ground for the whole ma
     [],
     "and the refused throw-away leaves the ground as it was",
   );
+});
+
+/**
+ * The party, over two real sockets: create, invite, accept, leave, and the leader's leave that ends it.
+ *
+ * `0x26` is a `CWvsApp`-level request (FINDINGS 4.37) but only the game server can answer it: the
+ * roster is 6 x (u32 id + char name[13]) and the invitation is keyed by the *inviter's* id, so the
+ * server has to remember who invited whom. This test is the same walk the probe does with the real
+ * `Data.wz`; here the map is a stub, so nothing else is on the wire.
+ */
+test("a party is created, joined, left, and ended by its leader (0x26/0x10)", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const enter = async (id: number, name: string): Promise<FakeClient> => {
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: `user${id}`,
+        characterId: id,
+        characterName: name,
+        character: characterDataOf({ ...zeroStats(), id, name, level: 1, hp: 50, maxHp: 50 }, startingCharacterItems()),
+      }),
+    });
+    await client.takeOpcode(FIELD_OPCODE.setField);
+    return client;
+  };
+  const hero = await enter(61, "Hero");
+  const alt = await enter(62, "Alt");
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  const party = (client: FakeClient, request: Parameters<typeof encodeClientPartyRequest>[0]): void => {
+    client.send({
+      kind: "unknown",
+      opcode: PARTY_OPCODE.request,
+      body: encodeClientPartyRequest(request).slice(1),
+    });
+  };
+  const result = async (client: FakeClient): Promise<ReturnType<typeof readPartyResult>> => {
+    const packets = await client.takeOpcode(PARTY_OPCODE.result);
+    return readPartyResult(new PacketReader(packets[packets.length - 1]!, 1));
+  };
+
+  party(hero, { kind: "create" });
+  assert.deepEqual(await result(hero), { kind: "created", partyId: 1 });
+  assert.deepEqual(await alt.drainOpcodes(100), [], "nobody else hears about the creation");
+
+  party(hero, { kind: "invite", targetId: 62 });
+  assert.deepEqual(await result(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
+  assert.deepEqual(await hero.drainOpcodes(100), [], "the inviter is not told about its own invite");
+
+  party(alt, { kind: "accept", inviterId: 61 });
+  const joined = { kind: "joined", partyId: 1, name: "Alt", members: [
+    { characterId: 61, name: "Hero" },
+    { characterId: 62, name: "Alt" },
+  ] } as const;
+  assert.deepEqual(await result(hero), joined);
+  assert.deepEqual(await result(alt), joined, "the joiner hears it too, and prints its own name");
+
+  // Alt leaves: `flag 1`, `kicked 0`, the roster already without Alt - and the leaver hears it,
+  // because that packet (with its own id in it) is the only thing that clears its party id.
+  party(alt, { kind: "leave", unknown: 0 });
+  const left = { kind: "left", partyId: 1, characterId: 62, kicked: false, name: "Alt", members: [
+    { characterId: 61, name: "Hero" },
+  ] } as const;
+  assert.deepEqual(await result(alt), left);
+  assert.deepEqual(await result(hero), left);
+
+  // The last one out is the leader: `flag 0`, no roster - the party is gone.
+  party(hero, { kind: "leave", unknown: 0 });
+  assert.deepEqual(await result(hero), { kind: "ended", partyId: 1, leaderId: 61 });
+  assert.deepEqual(await alt.drainOpcodes(100), [], "Alt left already: it is not told about the disband");
+
+  party(alt, { kind: "leave", unknown: 0 });
+  assert.deepEqual(await result(alt), { kind: "notInParty" });
+  assert.ok(log.some((line) => line.includes('party: "Hero" created party 1')), log.join("\n"));
+});
+
+/**
+ * Fame (`0x20` -> `0x12`), which is the first social packet that changes *the other* player's record.
+ *
+ * The three receivers are the point: the giver is told what happened (`type 0`), the target is told
+ * who did it (`type 5`, with its *own* name added by the client) plus a `0x0D` fame diff, and the
+ * refusals are the same packet with no payload. The daily and monthly quotas are this server's own
+ * rules (ADR-031), so the second attempt against the same target is the monthly one.
+ */
+test("fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas refuse (3/4)", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x0c0c0c0c, clientRecvSeed: 0x0d0d0d0d },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const enter = async (id: number, name: string, level: number): Promise<FakeClient> => {
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: `user${id}`,
+        characterId: id,
+        characterName: name,
+        character: characterDataOf({ ...zeroStats(), id, name, level, hp: 50, maxHp: 50 }, startingCharacterItems()),
+      }),
+    });
+    await client.takeOpcode(FIELD_OPCODE.setField);
+    return client;
+  };
+  const hero = await enter(71, "Hero", 30);
+  // Alt is a beginner (level 14): old enough to be famed, too young to fame anybody.
+  const alt = await enter(72, "Alt", 14);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  const fame = (client: FakeClient, targetId: number, up: boolean): void => {
+    client.send({
+      kind: "unknown",
+      opcode: FAME_OPCODE.request,
+      body: encodeClientFameRequest({ targetId, up }).slice(1),
+    });
+  };
+  const answer = async (client: FakeClient): Promise<ReturnType<typeof readFameResult>> => {
+    const packets = await client.takeOpcode(FAME_OPCODE.result);
+    return readFameResult(new PacketReader(packets[packets.length - 1]!, 1));
+  };
+
+  fame(hero, 72, true);
+  assert.deepEqual(await answer(hero), { kind: "changed", name: "Alt", up: true });
+  assert.deepEqual(await answer(alt), { kind: "received", name: "Hero", up: true });
+  const stat = await alt.takeOpcode(STAT_OPCODE);
+  assert.deepEqual(readStatUpdate(new PacketReader(stat[stat.length - 1]!, 1)), { ack: false, diff: { fame: 1 } });
+  assert.deepEqual(await hero.drainOpcodes(150), [], "the giver's own record did not change");
+
+  // Same target, same month: `type 4` (the more specific message, and the client's own words).
+  fame(hero, 72, true);
+  assert.deepEqual(await answer(hero), { kind: "alreadyThisMonth" });
+  assert.deepEqual(await alt.drainOpcodes(100), [], "a refusal is not news for the target");
+
+  // Alt is level 14, so it cannot give fame: `type 2`, and Hero hears nothing.
+  fame(alt, 71, true);
+  assert.deepEqual(await answer(alt), { kind: "beginner" });
+  assert.deepEqual(await hero.drainOpcodes(100), []);
+
+  // An id that is not in this field is `type 1`: nothing at all is printed.
+  fame(hero, 999, true);
+  assert.deepEqual(await answer(hero), { kind: "ignored" });
+  assert.ok(log.some((line) => line.includes("fame: \"Hero\" -> \"Alt\" up (now 1)")), log.join("\n"));
 });

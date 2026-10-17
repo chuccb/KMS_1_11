@@ -69,6 +69,7 @@ import {
 } from "../src/protocol/drop.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import { encodeClientPartyRequest, readPartyResult } from "../src/protocol/party.ts";
+import { encodeClientFameRequest, readFameResult } from "../src/protocol/fame.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
@@ -807,6 +808,22 @@ if (!together) {
   alt.game.send(encodeClientPartyRequest({ kind: "leave", unknown: 0 }));
   const noParty = await partyOf(alt.game, false);
   expect(noParty.kind === "notInParty", `a leave with no party answers type 11 (${noParty.kind})`);
+
+  // --- fame: 0x20 out, 0x12 back (FINDINGS 4.38) ---------------------------------------------------
+  // Both characters are level 1-2 here and the rule is level 15 (`FAME_MIN_LEVEL`), so this pair can
+  // only exercise the refusal: `type 2` to the giver, and **nothing at all** for the target - a
+  // refused fame is not news for anybody else. The happy path (type 0 + type 5 + a `0x0D` fame diff)
+  // lives in `serve.test.ts`, where the records say level 30.
+  hero.game.send(encodeClientFameRequest({ targetId: alt.character.stats.id, up: true }));
+  const famous = readFameResult(new PacketReader(await takeKeeping(hero.game, 0x12), 1));
+  expect(
+    famous.kind === "beginner",
+    `a level-${hero.character.stats.level} giver is refused as a beginner (0x12 type 2)`,
+  );
+  expect(
+    (await alt.game.drain(300)).filter((packet) => packet[0] === 0x12).length === 0,
+    "and the target hears nothing about a refused fame",
+  );
 
 }
 

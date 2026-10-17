@@ -52,6 +52,14 @@ import {
   readClientPartyRequest,
   readPartyResult,
 } from "./party.ts";
+// The fame reply (`0x12`) and request (`0x20`): `CWvsApp`-level, like the party pair.
+import {
+  FAME_OPCODE,
+  describeClientFameRequest,
+  describeFameResult,
+  readClientFameRequest,
+  readFameResult,
+} from "./fame.ts";
 // The NPC dialog (`0x47` server -> client, `0x15` back): `sub_4A58F0`, the third object of the
 // field's dispatch chain, next to the shop one.
 import {
@@ -493,6 +501,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === PARTY_OPCODE.request) {
       return describeClientPartyRequest(readClientPartyRequest(new PacketReader(plain, 1)));
     }
+    if (opcode === FAME_OPCODE.request) {
+      return describeClientFameRequest(readClientFameRequest(new PacketReader(plain, 1)));
+    }
     if (opcode === CLIENT_FIELD_OPCODE.interact) {
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
@@ -565,6 +576,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `0x11 notice: ${describeLootNotice(readLootNotice(new PacketReader(plain, 1)))}`;
     } catch (error) {
       return `0x11 notice: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === FAME_OPCODE.result) {
+    try {
+      return describeFameResult(readFameResult(new PacketReader(plain, 1)));
+    } catch (error) {
+      return `0x12 fame: (truncated: ${(error as Error).message})`;
     }
   }
   if (opcode === PARTY_OPCODE.result) {

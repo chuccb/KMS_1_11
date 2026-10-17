@@ -21,6 +21,7 @@ import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
+import * as fame from "./fame.ts";
 import * as party from "./party.ts";
 import * as quest from "./quest.ts";
 import * as shop from "./shop.ts";
@@ -422,6 +423,24 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.13 (/교환, sub_471A40, and the trade dialogs)",
     codecs: [],
     fields: [],
+  },
+  {
+    opcode: fame.FAME_OPCODE.request,
+    direction: "c2s",
+    stage: "field",
+    name: "fame",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.38 (sub_55D7B0, the 인기도 +/− items of the character menu: u32 target id then u8 up; the 5-minute cooldown and the name lookup are the client's own)",
+    codecs: ["readClientFameRequest", "encodeClientFameRequest", "describeClientFameRequest"],
+    fields: [
+      {
+        name: "targetId",
+        type: "u32",
+        note: "a character in the sender's own field - the client's CUserPool lookup cannot produce anything else",
+      },
+      { name: "up", type: "u8", note: "1 = 인기도 +, 0 = 인기도 -" },
+    ],
   },
   {
     opcode: party.PARTY_OPCODE.request,
@@ -1043,6 +1062,25 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: fame.FAME_OPCODE.result,
+    direction: "s2c",
+    stage: "field",
+    name: "fameResult",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.38 (sub_55C390: types 0 and 5 carry a name and the up byte; 1 prints nothing; 2/3/4 are the beginner / today / this-month refusals)",
+    codecs: ["encodeFameResult", "readFameResult", "describeFameResult"],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "0 changed / 1 ignored / 2 beginner / 3 already today / 4 already this month / 5 received",
+      },
+      { name: "name", type: STRING, note: "type 0: the target; type 5: the giver (the client adds its own name)" },
+      { name: "up", type: "u8", note: "types 0 and 5 only" },
+    ],
+  },
+  {
     opcode: party.PARTY_OPCODE.result,
     direction: "s2c",
     stage: "field",
@@ -1217,6 +1255,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   login,
   mob,
   movepath,
+  fame,
   npc,
   packet,
   party,
