@@ -77,6 +77,15 @@ import {
   type SetField,
 } from "../protocol/field.ts";
 import { decodeCp949 } from "../protocol/cp949.ts";
+import {
+  PARTY_OPCODE,
+  describeClientPartyRequest,
+  encodePartyResult,
+  readClientPartyRequest,
+  type ClientPartyRequest,
+  type PartyMember,
+} from "../protocol/party.ts";
+import { PartyRegistry, type PartyLeave } from "../game/parties.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -789,6 +798,11 @@ export class GameEntryServer {
   private readonly fields: FieldRegistry<FieldSession>;
   /** One character, one session: the second connection for an id is refused (see `onConnection`). */
   private readonly sessionsByCharacter = new Map<number, FieldSession>();
+  /**
+   * 隊伍（FINDINGS 4.37）。世界層的狀態，跟 `sessionsByCharacter` 一樣不屬於任何一張場地：名冊裡
+   * 只有角色 id 與名字，隊員分散在兩張圖是合法的（ADR-030）。
+   */
+  private readonly parties = new PartyRegistry();
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
   private listenPort = 0;
@@ -1944,6 +1958,12 @@ export class GameEntryServer {
           this.handleUserRequest(session, event.plain);
           continue;
         }
+        // 隊伍的請求（`/파티만들기`…`/파티강퇴`、邀請的「是」）。世界層的狀態，不走場地廣播：
+        // 隊員可能在地圖的另一端（see `handlePartyRequest`）。
+        if (session !== undefined && opcode === PARTY_OPCODE.request) {
+          this.handlePartyRequest(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -1958,7 +1978,13 @@ export class GameEntryServer {
       // The seat and the character's place in the world go with the socket; both are idempotent, so a
       // connection that was refused before it ever entered is just released (nothing to release).
       this.seats.release(socket);
-      if (session !== undefined) this.sessionsByCharacter.delete(session.characterId);
+      if (session !== undefined) {
+        // Out of the roster *before* the party is told: the leaving session is gone, and a packet
+        // written to a closed socket is nothing anyone needs. Leaving the party is the same rule as
+        // the seat (ADR-030): the 2003 party has no offline members.
+        this.sessionsByCharacter.delete(session.characterId);
+        this.leaveParty(session.characterId, "disconnected");
+      }
       // And the character's record has to leave the process - this is the only place a session ends.
       if (session !== undefined) this.persist();
       this.sockets.delete(socket);
@@ -2102,6 +2128,177 @@ export class GameEntryServer {
   }
 
   /**
+   * 隊伍的請求（c2s `0x26`，FINDINGS 4.37／ADR-030）。
+   *
+   * 五個 type 各自對應 client 的一個指令（`/파티만들기`、`/파티탈퇴`、`/파티초대`、`/파티강퇴`、邀請的
+   * 「是」），而每個請求都一定有一個 `0x10` 回答——包括拒絕。原因跟 `0x0B`／`0x18` 一樣：client 的
+   * 邀請是**模態**對話框，它等的是伺服器的下一句話，不是自己的畫面。
+   *
+   * **隊伍在世界層**：名冊裡沒有地圖，所以隊員可以在不同的圖上；這裡用 `sessionsByCharacter` 找人，
+   * 不經 `FieldInstance`。**隊長退隊＝解散**（client 的 `0x10` type 10 `flag = 0` 只有這個意思，封包
+   * 裡也沒有「換隊長」的欄位），**下線＝退隊**——2003 的隊伍沒有離線隊員。
+   *
+   * 兩個「client 已經自己做過」的檢查仍然留在這裡：`sub_471CD0` 先看自己有沒有隊伍、
+   * `sub_472050`／`sub_4722E0` 先看自己是不是隊長，所以一個守規矩的 client 不會送出會被拒絕的
+   * 請求；伺服器仍然自己判斷，因為封包是別人可以偽造的。
+   */
+  private handlePartyRequest(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientPartyRequest;
+    try {
+      request = readClientPartyRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x26 unreadable: ${(error as Error).message}`);
+      return;
+    }
+    this.options.log?.(`game: ${describeClientPartyRequest(request)}`);
+    switch (request.kind) {
+      case "create": {
+        if (this.parties.partyOf(session.characterId) !== undefined) {
+          session.send(encodePartyResult({ kind: "alreadyInParty" }));
+          return;
+        }
+        const party = this.parties.create(partyMemberOf(session));
+        session.send(encodePartyResult({ kind: "created", partyId: party.id }));
+        this.options.log?.(`game: party: "${session.name}" created party ${party.id}`);
+        return;
+      }
+      case "leave": {
+        const leave = this.parties.leave(session.characterId);
+        if (leave === undefined) {
+          session.send(encodePartyResult({ kind: "notInParty" }));
+          return;
+        }
+        // The leaver is still connected here, and it is one of `leave.members`: the client clears its
+        // own party id only when it receives this packet with its own id in it (FINDINGS 4.37).
+        this.broadcastPartyLeave(leave, false, "left");
+        return;
+      }
+      case "accept": {
+        if (this.parties.partyOf(session.characterId) !== undefined) {
+          session.send(encodePartyResult({ kind: "alreadyInParty" }));
+          return;
+        }
+        const invite = this.parties.inviteOf(session.characterId);
+        const party = invite === undefined ? undefined : this.parties.partyOf(invite.inviterId);
+        if (invite === undefined || party === undefined || party.id !== invite.partyId) {
+          this.options.log?.(
+            `game: party: "${session.name}" accepted an invite from ${request.inviterId} that is no longer valid`,
+          );
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        const members = this.parties.join(party, partyMemberOf(session));
+        if (members === undefined) {
+          session.send(encodePartyResult({ kind: "full" }));
+          return;
+        }
+        // `type 13` carries the joiner's name *and* the whole roster: the joiner prints
+        // "파티에 가입되었습니다." because the name is its own, everyone else prints
+        // "'name'님이 파티에 가입하셨습니다", and every client replaces its table with the new one.
+        const joined = encodePartyResult({ kind: "joined", partyId: party.id, name: session.name, members });
+        for (const member of members) this.sessionsByCharacter.get(member.characterId)?.send(joined);
+        this.options.log?.(
+          `game: party: "${session.name}" joined ${party.id} [${members.map((member) => member.name).join(", ")}]`,
+        );
+        return;
+      }
+      case "invite": {
+        const party = this.parties.partyOf(session.characterId);
+        if (party === undefined) {
+          session.send(encodePartyResult({ kind: "notInParty" }));
+          return;
+        }
+        if (party.leaderId !== session.characterId) {
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        const target = this.sessionsByCharacter.get(request.targetId);
+        if (target === undefined) {
+          this.options.log?.(`game: party: "${session.name}" invited ${request.targetId}, who is not online`);
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        if (this.parties.partyOf(target.characterId) !== undefined) {
+          session.send(encodePartyResult({ kind: "alreadyInParty" }));
+          return;
+        }
+        this.parties.invite(party.id, session.characterId, target.characterId);
+        target.send(
+          encodePartyResult({ kind: "invite", inviterId: session.characterId, inviterName: session.name }),
+        );
+        this.options.log?.(
+          `game: party: "${session.name}" invited "${target.name}" to ${party.id} (waiting for the answer)`,
+        );
+        return;
+      }
+      case "kick": {
+        const party = this.parties.partyOf(session.characterId);
+        if (party === undefined) {
+          session.send(encodePartyResult({ kind: "notInParty" }));
+          return;
+        }
+        if (party.leaderId !== session.characterId || request.targetId === session.characterId) {
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        if (!party.members.some((member) => member.characterId === request.targetId)) {
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        const leave = this.parties.leave(request.targetId);
+        if (leave === undefined) {
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
+        this.broadcastPartyLeave(leave, true, "kicked");
+        return;
+      }
+    }
+  }
+
+  /**
+   * 把一次離開（退隊或被踢）變成 `0x10`，送給還連著的人。
+   *
+   * 兩種封包：隊長走了是 `flag = 0`（`partyId` + 隊長 id，client 自己把隊伍歸零），其他人走是
+   * `flag = 1` + `kicked` + 名字 + **更新後的名冊**。兩者都送給 `leave.members`（離開**之前**的
+   * 名冊）——退隊的人也要收到，否則它的 client 不會清掉自己的 `partyId`；下線的人不在
+   * `sessionsByCharacter` 裡，`?.send` 自然跳過。
+   */
+  private broadcastPartyLeave(leave: PartyLeave, kicked: boolean, why: string): void {
+    if (leave.leaderLeft) {
+      const ended = encodePartyResult({
+        kind: "ended",
+        partyId: leave.party.id,
+        leaderId: leave.member.characterId,
+      });
+      for (const member of leave.members) this.sessionsByCharacter.get(member.characterId)?.send(ended);
+      this.options.log?.(`game: party: ${leave.party.id} ended - "${leave.member.name}" was the leader (${why})`);
+      return;
+    }
+    const left = encodePartyResult({
+      kind: "left",
+      partyId: leave.party.id,
+      characterId: leave.member.characterId,
+      kicked,
+      name: leave.member.name,
+      members: leave.remaining,
+    });
+    for (const member of leave.members) this.sessionsByCharacter.get(member.characterId)?.send(left);
+    this.options.log?.(
+      `game: party: "${leave.member.name}" ${kicked ? "was kicked from" : "left"} ${leave.party.id} ` +
+        `[${leave.remaining.map((member) => member.name).join(", ")}] (${why})`,
+    );
+  }
+
+  /** 下線的路徑：先把邀請丟掉（沒有離線的邀請），再走跟 `/파티탈퇴` 一樣的離開。 */
+  private leaveParty(characterId: number, why: string): void {
+    this.parties.dropInvite(characterId);
+    const leave = this.parties.leave(characterId);
+    if (leave === undefined) return;
+    this.broadcastPartyLeave(leave, false, why);
+  }
+
+  /**
    * The live session of the character with that name, if anyone is playing them.
    *
    * Names are unique server-wide and checked case-insensitively when a character is created
@@ -2217,6 +2414,11 @@ function describeWorn(character: CharacterData): string {
   const entries = character.items === undefined ? [] : [...character.items.worn];
   const worn = entries.sort((a, b) => a[0] - b[0]).map(([slot, item]) => `${slot}:${item.itemId}`);
   return worn.length > 0 ? `wearing ${worn.join(" ")}` : "wearing nothing";
+}
+
+/** The two facts a party roster stores about a player (FINDINGS 4.37). */
+function partyMemberOf(session: FieldSession): PartyMember {
+  return { characterId: session.characterId, name: session.name };
 }
 
 /** A non-zero u32 for the handshake seeds. */

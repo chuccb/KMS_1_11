@@ -21,6 +21,7 @@ import * as login from "./login.ts";
 import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
+import * as party from "./party.ts";
 import * as quest from "./quest.ts";
 import * as shop from "./shop.ts";
 import * as stat from "./stat.ts";
@@ -423,15 +424,21 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [],
   },
   {
-    opcode: 0x26,
+    opcode: party.PARTY_OPCODE.request,
     direction: "c2s",
     stage: "field",
     name: "party",
-    status: "partial",
-    evidence: "FINDINGS 4.13 (party create/leave/invite/kick, sub_471CD0..sub_4722E0)",
-    codecs: [],
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.37 (sub_471CD0 create / sub_471E90 leave / sub_472050 invite / sub_4722E0 kick / sub_55C5E0 accept; type 1's second byte has no located meaning)",
+    codecs: ["readClientPartyRequest", "encodeClientPartyRequest", "describeClientPartyRequest"],
     fields: [
-      { name: "op", type: "u8", note: "which party action; the invite reply is `u8 2 + u32 inviterId`" },
+      { name: "op", type: "u8", note: "0 create / 1 leave / 2 accept / 3 invite / 4 kick" },
+      {
+        name: "payload",
+        type: "ClientPartyRequest",
+        note: "leave: one more u8 (always 0); accept/invite/kick: u32 character id",
+      },
     ],
   },
   {
@@ -1036,6 +1043,28 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: party.PARTY_OPCODE.result,
+    direction: "s2c",
+    stage: "field",
+    name: "partyResult",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.37 (sub_55C5E0: types 3/5/6/7/8/10/11/13/14/15; the roster is a qmemcpy(0x66) = u32 id[6] + char name[6][13])",
+    codecs: ["encodePartyResult", "readPartyResult", "describePartyResult"],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "3 invite / 5 sync / 6 created / 10 member left (flag 0 = the leader, disbanded) / 13 joined; 7, 8, 11, 14, 15 carry no payload",
+      },
+      {
+        name: "payload",
+        type: "PartyResult",
+        note: "u32 ids, u16-prefixed names, and the 102-byte roster (`u32 id[6]` then `char name[6][13]`)",
+      },
+    ],
+  },
+  {
     opcode: stat.STAT_OPCODE,
     direction: "s2c",
     stage: "field",
@@ -1190,6 +1219,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   movepath,
   npc,
   packet,
+  party,
   quest,
   replies,
   shop,

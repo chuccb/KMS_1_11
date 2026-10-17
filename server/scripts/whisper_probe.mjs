@@ -68,6 +68,7 @@ import {
   readLootNotice,
 } from "../src/protocol/drop.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
+import { encodeClientPartyRequest, readPartyResult } from "../src/protocol/party.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
@@ -512,8 +513,8 @@ expect(revived.stats.hp === revived.stats.maxHp, `and refilled the HP the report
 
 if (!together) {
   console.log(
-    `  ..   Hero is in ${revivedMap} and Alt in ${altMap}: the arrival, emotion and drag sections` +
-      " need one map, so they print this note instead",
+    `  ..   Hero is in ${revivedMap} and Alt in ${altMap}: the arrival, emotion, drag and party` +
+      " sections need one map, so they print this note instead",
   );
 } else {
   // The town Alt is standing in hears Hero come back: the revive joined the new field, it was not just
@@ -731,6 +732,81 @@ if (!together) {
     const dressedLook = readUserLook(new PacketReader(await alt.game.take(FIELD_OPCODE.userLook), 1));
     expect(dressedLook.avatarItems?.includes(wornWeapon) === true, "and the others see it worn again");
   }
+
+  // --- a party: 0x26 out, 0x10 back (FINDINGS 4.37) ------------------------------------------------
+  // The four commands are the only senders: `/파티만들기` (type 0) and `/파티탈퇴` (type 1) carry no
+  // target, `/파티초대 <name>` (3) and `/파티강퇴 <name>` (4) carry the target's character id, and the
+  // invite dialog's "yes" is type 2 with the id the `0x10` type 3 handed the client. The roster is a
+  // 102-byte table - `u32 characterId[6]` then `char name[6][13]` - which is what `sub_45F5C0` copies.
+  const partyOf = async (client, keep) =>
+    readPartyResult(new PacketReader(keep ? await takeKeeping(client, 0x10) : await client.take(0x10), 1));
+  const roster = (result) => (result.kind === "joined" ? result.members.map((member) => member.name).join(",") : result.kind);
+
+  hero.game.send(encodeClientPartyRequest({ kind: "create" }));
+  const created = await partyOf(hero.game, true);
+  expect(
+    created.kind === "created" && created.partyId > 0,
+    `Hero creates a party (0x10 type 6, id ${created.partyId})`,
+  );
+
+  hero.game.send(encodeClientPartyRequest({ kind: "invite", targetId: alt.character.stats.id }));
+  const invited = await partyOf(alt.game, false);
+  expect(
+    invited.kind === "invite" &&
+      invited.inviterId === hero.character.stats.id &&
+      invited.inviterName === hero.character.stats.name,
+    `Alt is invited by Hero (type 3, "${invited.inviterName}")`,
+  );
+
+  alt.game.send(
+    encodeClientPartyRequest({ kind: "accept", inviterId: invited.kind === "invite" ? invited.inviterId : 0 }),
+  );
+  const joinedHero = await partyOf(hero.game, true);
+  const joinedAlt = await partyOf(alt.game, false);
+  expect(
+    joinedHero.kind === "joined" && joinedHero.partyId === created.partyId && joinedHero.members.length === 2,
+    `the roster grows to two [${roster(joinedHero)}]`,
+  );
+  expect(
+    joinedAlt.kind === "joined" && joinedAlt.name === alt.character.stats.name,
+    `and the joiner is told with its own name ("${joinedAlt.kind === "joined" ? joinedAlt.name : joinedAlt.kind}")`,
+  );
+
+  // Alt leaves: `flag 1` means "somebody left", and the table is already the one without Alt. The
+  // leaver gets the same packet - that is the only thing that clears its own party id.
+  alt.game.send(encodeClientPartyRequest({ kind: "leave", unknown: 0 }));
+  const leftHero = await partyOf(hero.game, true);
+  const leftAlt = await partyOf(alt.game, false);
+  expect(
+    leftHero.kind === "left" && leftHero.kicked === false && leftHero.characterId === alt.character.stats.id,
+    `Alt's leave is a type 10 flag 1 (${leftHero.kind})`,
+  );
+  expect(
+    leftHero.kind === "left" &&
+      leftHero.members.length === 1 &&
+      leftHero.members[0].characterId === hero.character.stats.id,
+    "and the roster is already [Hero]",
+  );
+  expect(leftAlt.kind === "left" && leftAlt.characterId === alt.character.stats.id, "the leaver hears it too");
+
+  // The leader leaving is `flag 0`: no roster, no name, and every member clears its own party id.
+  hero.game.send(encodeClientPartyRequest({ kind: "leave", unknown: 0 }));
+  const endedHero = await partyOf(hero.game, true);
+  expect(
+    endedHero.kind === "ended" && endedHero.leaderId === hero.character.stats.id,
+    `Hero's leave ends the party (type 10 flag 0, leader ${endedHero.leaderId})`,
+  );
+  // Alt left the roster a moment ago, so the disband is not its business: only the leader's own last
+  // member gets the `flag 0` packet.
+  expect(
+    (await alt.game.drain(300)).filter((packet) => packet[0] === 0x10).length === 0,
+    "and Alt, who left before the disband, is not told about it",
+  );
+  // A leave with no party: `sub_471E90` refuses it locally, so this is the server's own guard - and it
+  // still answers, because a client that is waiting for an answer must not be left waiting.
+  alt.game.send(encodeClientPartyRequest({ kind: "leave", unknown: 0 }));
+  const noParty = await partyOf(alt.game, false);
+  expect(noParty.kind === "notInParty", `a leave with no party answers type 11 (${noParty.kind})`);
 
 }
 
