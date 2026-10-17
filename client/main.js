@@ -1,3 +1,5 @@
+import { animationFrame } from "./animation.mjs";
+import { deathEffects, deathPose } from "./death.mjs";
 import { reviveWindow } from "./revive.mjs";
 import {
   contactClock,
@@ -370,6 +372,9 @@ function connect() {
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
     resetContact();
+    deathFx.reset();
+    visualFieldActive = false;
+    ++mapGeneration;
     revivePanel.reset();
     selfSwing = undefined;
     projectiles.length = damageMarks.length = 0;
@@ -401,6 +406,9 @@ function handle(message) {
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
     resetContact();
+    deathFx.reset();
+    ++mapGeneration;
+    visualFieldActive = false;
     miniMapPanel.setMap(undefined);
     itemEpoch++;
     itemDialog.close(false);
@@ -527,11 +535,17 @@ function handle(message) {
       return;
 
     case "field":
+      visualFieldActive = true;
       contactField = message.contactField;
       void damageArt.preload();
+      void deathFx.preload();
+      selfDeathSettled = message.self.hp <= 0;
       portalPending = false;
       void audio.effect(self ? "Game/Portal" : "Game/GameIn");
       playerBody = undefined;
+      map = mapArt = undefined;
+      mapScene = [];
+      camera.ready = false;
       terrain = collisionWorld({});
       lastPhysicsAt = undefined;
       lastSentMotion = undefined;
@@ -549,8 +563,11 @@ function handle(message) {
       npcs.clear();
       drops.clear();
       dying.clear();
-      for (const user of message.users)
+      for (const user of message.users) {
+        user.facing = user.action & 1;
+        deathFx.observe(user.characterId, (user.action & ~1) === 18, user, performance.now(), true);
         users.set(String(user.characterId), user);
+      }
       for (const mob of message.mobs) mobs.set(String(mob.mobId), mob);
       for (const npc of message.npcs) npcs.set(String(npc.npcId), npc);
       hidePanels();
@@ -560,7 +577,7 @@ function handle(message) {
       closeDialogue(false);
       ui.chatbox.classList.remove("hidden");
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
-      void loadMap(message.mapId);
+      void loadMap(message.mapId, mapGeneration);
       logLine(`field ${message.mapId}`);
       return;
 
@@ -614,12 +631,15 @@ function handle(message) {
       if (selfView && message.self.level > selfView.level)
         void audio.effect("Game/LevelUp");
       if (selfView?.hp > 0 && message.self.hp <= 0) {
-        void audio.effect("Game/Tombstone");
+        selfDeathSettled = false;
+        if (playerBody && map?.id === self?.mapId)
+          deathFx.observe(message.self.characterId, true, self, performance.now());
         selfSwing = undefined;
         combatEpoch++;
         keys.clear();
       }
       selfView = selfView?.characterId === message.self.characterId ? { ...selfView, ...message.self } : message.self;
+      if (selfView.hp > 0) deathFx.remove(selfView.characterId);
       if (selfView.hp <= 0) {
         itemDialog.close(false);
         itemDrag = undefined;
@@ -670,6 +690,9 @@ function handle(message) {
       return;
 
     case "user-enter":
+      message.user.facing = message.user.action & 1;
+      deathFx.observe(message.user.characterId, (message.user.action & ~1) === 18,
+        message.user, performance.now(), true);
       users.set(String(message.user.characterId), message.user);
       logLine(
         `user enter ${message.user.name}@${message.user.x},${message.user.y}`,
@@ -686,6 +709,7 @@ function handle(message) {
     }
 
     case "user-leave":
+      deathFx.remove(message.characterId);
       users.delete(String(message.characterId));
       return;
 
@@ -693,7 +717,7 @@ function handle(message) {
       if (selfView && message.characterId === selfView.characterId) {
         if (message.local) return; // The bridge echoes what WE sent, not a server correction.
         if (self) {
-          if (message.x !== self.x) self.facing = message.x < self.x ? 1 : 0;
+          self.facing = message.action & 1;
           self.x = message.x;
           self.y = message.y;
           self.movedAt = performance.now();
@@ -710,8 +734,7 @@ function handle(message) {
       }
       const user = users.get(String(message.characterId));
       if (user) {
-        if (message.x !== user.x) user.facing = message.x < user.x ? 1 : 0;
-        user.action = message.action;
+        // The path's action bit is authoritative: moving backwards under force must not turn the face.
         beginPath(
           user,
           message.path ?? { elements: [{ ...message, duration: 100 }] },
@@ -986,13 +1009,14 @@ async function rememberMapName(mapId) {
   }
 }
 
-async function loadMap(mapId) {
+async function loadMap(mapId, generation) {
   try {
     const response = await fetch(`/api/map/${mapId}`);
     if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
     const loaded = await response.json();
-    if (self?.mapId !== mapId) return; // A slow previous map request must not replace a newer field.
+    if (self?.mapId !== mapId || generation !== mapGeneration) return; // Including same-map revive/re-entry.
     map = loaded;
+    mapAnimationStart = performance.now();
     audio.setBgm(map.bgm);
     terrain = collisionWorld(map);
     mapNames.set(map.id, map.name);
@@ -1008,7 +1032,7 @@ async function loadMap(mapId) {
       cameraMapId = mapId;
       camera.ready = false;
     }
-    void loadMapArt(mapId);
+    void loadMapArt(mapId, generation);
     for (const npc of map.npcs ?? []) ensureEntityArt("npc", npc.templateId);
     for (const mob of map.mobs ?? []) ensureEntityArt("mob", mob.templateId);
     if (self && selfView) {
@@ -1035,7 +1059,7 @@ async function loadMap(mapId) {
  * and the camera's own rectangle. The page starts drawing as soon as the JSON lands; a canvas whose
  * PNG is still on the wire is skipped for that frame and appears on the next.
  */
-async function loadMapArt(mapId) {
+async function loadMapArt(mapId, generation) {
   try {
     const response = await fetch(`/api/map/${mapId}/art`);
     if (!response.ok) {
@@ -1043,7 +1067,7 @@ async function loadMapArt(mapId) {
       return;
     }
     const art = await response.json();
-    if (map?.id !== mapId) return;
+    if (map?.id !== mapId || generation !== mapGeneration) return;
     mapArt = art;
     miniMapPanel.setMap(art.miniMap, map.portals);
     mapScene = prepareMapScene(art.sprites);
@@ -1593,6 +1617,7 @@ let mapArt;
 /** `archive path -> { img, ready }`; the page draws a sprite only once its PNG has arrived. */
 const artImages = new Map();
 let mapScene = [];
+let mapGeneration = 0, mapAnimationStart = 0;
 /** `look|stance|frame|flip -> { img, dx, dy, ready }` avatar frames. */
 const avatarFrames = new Map();
 /** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
@@ -2329,18 +2354,7 @@ function ensureEntityArt(kind, templateId) {
  * used until the table has arrived, so an NPC appears as soon as its pictures do.
  */
 function loopFrame(frames, now) {
-  if (!frames || frames.length === 0) return undefined;
-  if (frames.length === 1) return frames[0];
-  const total = frames.reduce(
-    (sum, frame) => sum + Math.max(1, frame.delay),
-    0,
-  );
-  let at = now % total;
-  for (const frame of frames) {
-    at -= Math.max(1, frame.delay);
-    if (at < 0) return frame;
-  }
-  return frames[frames.length - 1];
+  return animationFrame(frames, now);
 }
 
 /** Plays `action` from the table, falling back to the idle one. */
@@ -2362,6 +2376,8 @@ function drawArchiveImage(frame, x, y, flip) {
   const w = entry.img.naturalWidth;
   const h = entry.img.naturalHeight;
   if (!visibleSprite(x, y, w, h, ox, oy, flip, VIEW_W, VIEW_H)) return;
+  ctx.save();
+  ctx.globalAlpha *= frame.alpha ?? 1;
   if (flip) {
     // Mirror around the origin: source column u lands on `x + ox - u` (the same rule the server's
     // compositor uses), so the sprite stays anchored where it was drawn unflipped.
@@ -2373,6 +2389,7 @@ function drawArchiveImage(frame, x, y, flip) {
   } else {
     ctx.drawImage(entry.img, Math.round(x) - ox, Math.round(y) - oy, w, h);
   }
+  ctx.restore();
 }
 
 /**
@@ -2432,7 +2449,7 @@ function drawBack(back, cameraX, cameraY) {
 
 /** One tile/object, its animation frame picked from the map's clock. */
 function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
-  const frame = loopFrame(sprite.frames, now);
+  const frame = loopFrame(sprite.frames, now - mapAnimationStart);
   if (frame === undefined) return;
   const worldFlip = sprite.flip !== flipWorld;
   drawArchiveImage(frame, sprite.x - cameraX, sprite.y - cameraY, worldFlip);
@@ -2441,7 +2458,11 @@ function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
 /** The character's stance and frame from its movement, the way the page can see it. */
 function stanceOfEntity(entity, now) {
   const body = entity === selfView ? playerBody : undefined;
-  if (entity === selfView && entity.hp <= 0) return { stance: "dead", frame: 0 };
+  if ((entity === selfView && entity.hp <= 0) || (entity !== selfView && remoteStance(entity) === "dead")) {
+    if (entity === selfView) selfSwing = undefined;
+    else delete entity.swing;
+    return { stance: "dead", frame: 0 };
+  }
   if (body?.ladder) {
     selfSwing = undefined; // an old attack must never draw standing parts over a climbing pose
     return animationPose(entity, locomotion(body), Math.abs(body.vy) > 0, now);
@@ -2472,9 +2493,16 @@ function emotionFace(emotion, now) {
 
 /** An avatar drawn with its feet at `(screenX, screenY)`, mirrored while facing left. */
 function drawAvatarAt(entity, screenX, screenY, now, flip) {
-  const swing = entity === selfView ? selfSwing : entity.swing;
+  const dead = deathFx.get(entity.characterId);
+  const swing = dead ? undefined : entity === selfView ? selfSwing : entity.swing;
   const direction = swing ? !swing.facingLeft : flip;
   ctx.save();
+  if (dead) {
+    const pose = deathPose(dead, now), position = entity === selfView ? self : entity;
+    screenX += pose.x - position.x;
+    screenY += pose.y - position.y;
+    ctx.globalAlpha *= pose.alpha;
+  }
   // Native 0xff808080 is RGB multiplication, NOT a translucent/vanishing avatar.
   if (entity === selfView && selfView.hp > 0 && contact.tinted) ctx.filter = "brightness(0.5019607843137255)";
   drawAvatarBodyAt(entity, screenX, screenY, now, direction);
@@ -2542,14 +2570,7 @@ function currentMobFrame(mob, now) {
   const id = String(mob.mobId),
     actions = mobArts.get(mob.templateId);
   if (!actions) return undefined;
-  const once = (frames, elapsed) => {
-    if (!frames?.length) return undefined;
-    const duration = frames.reduce(
-      (sum, frame) => sum + Math.max(1, frame.delay),
-      0,
-    );
-    return loopFrame(frames, Math.min(Math.max(0, elapsed), duration - 1));
-  };
+  const once = (frames, elapsed) => animationFrame(frames, elapsed, false);
   const corpseSince = dying.get(id);
   if (corpseSince !== undefined) return once(actions.die1, now - corpseSince);
   const hitAt = mobHits.get(id);
@@ -2798,7 +2819,14 @@ function frame() {
       mob.actionSince = now;
     mob.walking = walking;
   }
-  for (const user of users.values()) sampleMotion(user, now, terrain);
+  for (const user of users.values()) {
+    sampleMotion(user, now, terrain);
+    const dead = remoteStance(user) === "dead";
+    if (dead) delete user.swing;
+    if (visualFieldActive) deathFx.observe(user.characterId, dead, user, now);
+  }
+  if (visualFieldActive && selfView && playerBody && self && map?.id === self.mapId)
+    deathFx.observe(selfView.characterId, selfView.hp <= 0, self, now, selfDeathSettled);
   updateContact(now);
   const target = cameraTarget();
   if (!camera.ready) {
@@ -2831,7 +2859,12 @@ function frame() {
   for (const actor of actors) {
     const entity =
       actor.kind === "self" ? (playerBody ?? self) : actor[actor.kind];
-    scene.push({ ...actor, z: actorDepth(entity, terrain, actor.kind) });
+    const z = actorDepth(entity, terrain, actor.kind);
+    scene.push({ ...actor, z });
+    if (actor.kind === "self" || actor.kind === "user") {
+      const view = actor.kind === "self" ? selfView : actor.user, death = deathFx.get(view.characterId);
+      if (death) scene.push({ kind: "tomb", deathId: view.characterId, y: death.y, z: z - 1 });
+    }
   }
   // Original CPortalList uses a fixed front-plane z; drops use their landing foothold's page/group.
   // Do not paint either before all the tiles: that hides them behind ordinary ground sprites.
@@ -2846,8 +2879,13 @@ function frame() {
     });
   }
   for (const actor of mergeScene(mapScene, scene)) {
+    if (actor.kind === "tomb") {
+      const tomb = deathFx.tomb(actor.deathId, now);
+      if (tomb?.frame) drawArchiveImage(tomb.frame, tomb.x - cameraX, tomb.y - cameraY, false);
+      continue;
+    }
     if (actor.kind === "portals") {
-      drawPortals(cameraX, cameraY, now);
+      drawPortals(cameraX, cameraY, now - mapAnimationStart);
       continue;
     }
     if (actor.kind === "drop") {
@@ -2877,6 +2915,8 @@ function frame() {
         actor.npc.facing ?? 0,
         false,
         now,
+        undefined,
+        mapAnimationStart,
       );
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
@@ -3166,7 +3206,7 @@ function drawProjectiles(cameraX, cameraY, now) {
 }
 async function receiveUserAttack(message, now) {
   const user = users.get(String(message.characterId));
-  if (!user) return;
+  if (!user || remoteStance(user) === "dead") return;
   const field = self,
     epoch = combatEpoch;
   const look = lookOf(user);
@@ -3174,7 +3214,8 @@ async function receiveUserAttack(message, now) {
   if (
     self !== field ||
     combatEpoch !== epoch ||
-    users.get(String(message.characterId)) !== user
+    users.get(String(message.characterId)) !== user ||
+    remoteStance(user) === "dead"
   )
     return;
   const action = (message.shoot ? profile?.shoot : profile?.melee)?.find(
@@ -5078,15 +5119,18 @@ setInterval(() => {
     t: "move",
     x: Math.round(self.x),
     y: Math.round(self.y),
-    foothold: playerBody.foothold,
+    foothold: playerBody.ladder ? -playerBody.ladder.id : playerBody.foothold,
     action: actionOf(playerBody),
+    attr: playerBody.moveAttr ?? 0,
     vx: Math.round(playerBody.vx),
     vy: Math.round(playerBody.vy),
   };
   const state = JSON.stringify(packet);
-  if (state === lastSentMotion) return;
+  if (state === lastSentMotion && !packet.attr) return;
+  if (socket?.readyState !== WebSocket.OPEN) return;
   lastSentMotion = state;
   send(packet);
+  playerBody.moveAttr = 0;
 }, MOVE_TICK_MS);
 window.addEventListener("blur", () => {
   recovery.reset();
@@ -5285,6 +5329,11 @@ const equipPanel = equipmentWindow({
   },
 });
 
+let selfDeathSettled = false, visualFieldActive = false;
+const deathFx = deathEffects({
+  image: artImage, log: logLine,
+  sound: point => void audio.effect("Game/Tombstone", spatialVolume(point.x, point.y, self)),
+});
 const damageArt = damageNumbers({image:artImage,log:logLine});
 void damageArt.preload();
 const buffs = temporaryStats();

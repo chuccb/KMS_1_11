@@ -59,9 +59,10 @@
  *
  * -> element = { attr u8, x s16, y s16, vx s16, vy s16, action u8, foothold u16, duration u16 }
  *
- * `attr` (offset 0) is the element kind. This build gives no table for it; the only value with a
- * located use is the synthetic "nothing left to do" element that `sub_4967C0` appends when the
- * whole path is out of date, which it marks with `attr = 1`. So the reader keeps it as a number.
+ * `attr` (offset 0) is a bit field: 537B00 stages external force with 495D60(attr=2), which ORs
+ * it into the current record. 4967C0 uses 1 for its synthetic stale-path record. The located
+ * playback reads do not turn bit2 into a damage/emotion event; do not invent such a broadcast.
+ * The browser retains bit2 until its existing 100ms snapshot is published (not native 30ms batching).
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 
@@ -73,7 +74,7 @@ export const MOVE_ELEMENT_LIMIT = 0xff;
 
 /** One element of a move path. All integers are signed where the client signs them. */
 export interface MoveElement {
-  /** Element kind (`attr`). Not enumerated in this build; 1 marks the synthetic "path stale" element. */
+  /** Attribute bits: 2 marks staged external force (537B00); 1 is the synthetic stale-path record. */
   attr: number;
   /**
    * Where this element starts. These four are `s16` on the wire in the sense that the client

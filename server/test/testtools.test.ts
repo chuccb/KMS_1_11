@@ -182,3 +182,14 @@ test("heal and nonlethal drain are explicit test-only plans; repeated operations
   );
   assert.equal(c.stats.hp, 0);
 });
+
+// Unexecuted addition: convenient death entry is explicit and nonfatal, never an automatic reset.
+test("near-death requires confirmation, preserves MP and does not mutate character until applied", () => {
+  const character = fixture(), before = structuredClone(character);
+  assert.throws(() => planTestTool(character,{kind:"near-death"},undefined,available),/確認/);
+  const plan=planTestTool(character,{kind:"near-death",confirmed:true},undefined,available);
+  assert.deepEqual(plan.diff,{hp:1});
+  assert.deepEqual(character,before);
+  character.stats.hp=0;
+  assert.throws(()=>planTestTool(character,{kind:"near-death",confirmed:true},undefined,available),/復活/);
+});

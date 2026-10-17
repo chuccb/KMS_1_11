@@ -1,6 +1,11 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未測試／未check／未typecheck／未browser／未probe**）：在有效能力／Detail／普通物理基礎上，補原目前格RECT碰撞、491FF0內縮、獨立stream2的4C8ED0、負HP回報、NoViolet數字／MISS、signed1500ms保護、pending外力擊退、hit表情與EVA藥水。另修canvas delay／表情URL遺漏，補dead姿勢與2.2秒原Notice復活窗。完整CVecCtrl／CShape2D、墓碑落地演出、主動技能／魔法仍未完成；舊PASS不作本輪驗證。本沙箱無前輪save，LIVE為明示新獨立檔。見 `NATIVE_CONTACT_REVIVE.md`／ADR-052。
+> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：接原Tomb／ghost／remote死亡、
+> canvas alpha繼承與one-shot、portal120ms、field clock與同圖重進guard；補HTTP bodyAttack重大漏接，
+> attr2原move relay、0ms record及facing；新增confirmed 1HP工具。仍非完整CVecCtrl／CShape2D／30ms同步。
+> 新LIVE為新的獨立進度。原檔證據／操作／未執行回歸見 `NATIVE_DEATH_ANIMATION.md`／ADR-053。
+
+> 前輪交付2026-10-18（**未測試／未check／未typecheck／未browser／未probe**）：在有效能力／Detail／普通物理基礎上，補原目前格RECT碰撞、491FF0內縮、獨立stream2的4C8ED0、負HP回報、NoViolet數字／MISS、signed1500ms保護、pending外力擊退、hit表情與EVA藥水。另修canvas delay／表情URL遺漏，補dead姿勢與2.2秒原Notice復活窗。完整CVecCtrl／CShape2D、墓碑落地演出、主動技能／魔法仍未完成；舊PASS不作本輪驗證。本沙箱無前輪save，LIVE為明示新獨立檔。見 `NATIVE_CONTACT_REVIVE.md`／ADR-052。
 
 > 前輪實作（**未測試／未typecheck／未browser／未probe**）：更正原0x0D暫時能力 duration→mask 的舊判讀，接十二欄s16與單一來源pair codec、同欄覆蓋／到期／原iconRaw圖示。原2002001加速藥水speed8／180000ms實際改移動；穿戴裝備實例speed/jump按原基底／temp兩階段clamp。工具可明確領3瓶並讀速度／剩餘秒數，不自動seed。其他戰鬥buff仍拒絕，技能施放／完整碰撞／傷害仍缺。見 `TEMPORARY_STATS.md`／ADR-050。
 

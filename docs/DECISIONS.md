@@ -2185,3 +2185,34 @@ PA/PD照exe欄名缺值default0，不因本WZ有PADamage/PDDamage就偷偷alias�
 本輪啟新獨立generated/preview-contact-20261018.json（repo根目錄相對路徑）；帳號原生建立角色，不自動改既存進度。
 遵使用者要求，不test/check/typecheck/browser/VM/probe，只新增未執行回歸來源、來源審閱與格式化，
 啟LIVE供自行操作；[skip ci]非force推送固定本分支。細節見NATIVE_CONTACT_REVIVE.md。
+
+
+---
+
+## ADR-053：原死亡／canvas alpha、外力 move 接線與 HTTP 前輪漏接更正
+
+**日期**：2026-10-18 ｜ **狀態**：已實作、未執行驗證；補充 ADR-052，取代其 Tomb／attr2 尚未接線的狀態。
+
+**依據**：509AF0／5084C0、PE、Shape2D 10011E30／10012070／1000E250，Gr2D 10015290／100167C0、
+46A9F0／4A3920、原 Effect/Tomb.img／MapHelper.img／Map/Obj/acc1.img。逐項在 NATIVE_DEATH_ANIMATION.md。
+新死fall排到至少800ms、land全1050ms、持末格；已死進場只land末圖。
+2000ms parent orbit、2500ms avatar fade；526CC0是音量，Tombstone新死立即發聲，不延到落地。
+Tomb入scene的avatar前layer z−1，不用最後overlay掩蓋場景深度。
+
+**共用動畫**：canvas.props讀delay/a0/a1，缺省−1保留alpha，loop跨輪保留terminal，one-shot持精確末端。
+portal無delay時用4A3920的120ms，不沿用既有100ms硬值；field動畫有自己的browser起點，非原Gr2D clock逐bit相同。
+同圖revive／re-entry也以generation排除舊map/art response。
+
+**修補漏接而非宣稱前輪已完成**：mob template有bodyAttack但HTTP沒傳，browser遂排除全部接觸怪物。
+本次才補序列化與未執行HTTP回歸。bridge-only回歸不能證明整條browser接線。
+
+**外力**：537B00→495D60的attr2透過原0x0E／0x22 relay；bit不是damage／hurt event，不造封包。
+原action低bit決定facing，zero-duration record即時消耗；publisher保留marker到送入開啟WebSocket才清。
+這不是native30ms batching，也不是server ack；仍有普通8ms physics與remote linear playback界線。
+
+**方便體驗**：新增明確確認後的near-death HP=1工具，只動活角色HP，不自動判死／改MP／給裝備／移圖。
+dead仍要求原Notice復活；自然恢復可以先回HP，工具不改原恢復政策。default-off帳號授權與checkpoint界線不變。
+
+**交付**：本輪全新獨立generated/preview-death-20261018.json；新帳號由使用者建角，不冒稱恢復前輪save。
+未執行test/check/typecheck/browser/VM/probe；新增回歸來源不是PASS。啟服與[skip ci]非force推送固定工作分支。
+完整CVecCtrl／CShape2D、active skill／magic及其餘未實作系統不在本輪冒稱完成。

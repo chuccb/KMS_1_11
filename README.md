@@ -5,10 +5,17 @@
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：原目前格 lt/rb／swept與內縮碰撞、第二RNG的迴避／受傷、
+- **本輪（2026-10-18，未測試）**：補原 Tomb 落下／落地／持末格、死亡 avatar 2000ms 繞行與 2500ms 淡出、
+  遠端／已死進場生命週期、立即 spatial Tombstone 音效；補原 canvas `a0/a1` 插值及繼承、portal 缺省120ms、field動畫clock。
+  修正 **`bodyAttack` 未進HTTP而使網頁排除全部接觸怪物** 的前輪漏接；補 attr2 外力原 move relay、0ms record與反向位移 facing。
+  新增需確認的 **「HP設為1」** 入口；未自動建角或改進度。地圖請求亦加同圖重進 generation guard。
+  [原檔證據、實作界線與操作](docs/NATIVE_DEATH_ANIMATION.md)。LIVE使用**全新獨立存檔**，不冒稱恢復舊角色。
+  未跑test／check／typecheck／browser／VM／probe；不宣稱完整CVecCtrl／CShape2D、30ms同步或全遊戲1:1。
+
+- **前輪（2026-10-18，未測試）**：原目前格 lt/rb／swept與內縮碰撞、第二RNG的迴避／受傷、
   原負HP報告、紫色數字／MISS、signed 1.5秒保護、外力擊退與hit表情；補EVA藥水及明示領藥。
   同時修正漏傳表情與canvas delay，補dead姿勢及原2.2秒Notice復活窗、OK／Enter→原returnMap流程。
-  不宣稱完整CVecCtrl／CShape2D、墓碑動畫、技能或魔法已完成。
+  當輪未接墓碑動畫；後續見上項。本輪仍不宣稱完整CVecCtrl／CShape2D、技能或魔法已完成。
   [證據、界線、方便操作](docs/NATIVE_CONTACT_REVIVE.md)。本沙箱沒有舊ignored進度，LIVE是**新的獨立存檔**，不冒稱恢復舊角色。
   未跑test／check／typecheck／browser／VM／probe，啟服非PASS。
 

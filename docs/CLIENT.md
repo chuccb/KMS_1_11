@@ -4,7 +4,18 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原怪物碰撞、受傷／MISS、外力與復活（2026-10-18，未測試）
+## 最新實作：Tomb／ghost、canvas alpha 與外力 relay（2026-10-18，未測試）
+
+補原fall前800ms→land全1050ms→持末格；avatar繞行2000ms、淡出2500ms，新死亡立即spatial音效，
+既死進場不重播。遠端action18優先於swing、leave／field／close清狀態；Tomb進原z-space scene。
+補canvas.props的a0/a1、缺省alpha繼承、one-shot精確終點；portal缺省120ms及field初始動畫clock。
+修正上一輪bodyAttack有讀卻沒進HTTP，導致網頁排除接觸怪物的漏接；未以舊bridge測試冒充網頁驗證。
+外力attr2沿原0x0E／0x22傳送，0ms record不延長、facing依action低bit，不按位移翻臉。
+工具增加confirmed 1HP入口，新LIVE為獨立新存檔。原檔來源、操作及明確未完成見
+[NATIVE_DEATH_ANIMATION.md](NATIVE_DEATH_ANIMATION.md)／ADR-053。
+未執行test/check/typecheck/browser/VM/probe，仍非完整CVecCtrl／CShape2D及原30ms同步。
+
+## 前輪實作：原怪物碰撞、受傷／MISS、外力與復活（2026-10-18，未測試）
 
 目前格lt/rb／swept／491FF0內縮、bodyAttack、獨立stream2的4C8ED0、原負0x1C回報→0x0D血量，
 紫色字圖／MISS、signed 1500ms保護、bounded外力、hit表情；EVA藥水已接實際迴避。
@@ -228,7 +239,8 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 
 | 端點 | 回什麼 |
 |---|---|
-| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/death` | `{fall[],land[]}`：原 Tomb queue／delay／origin；fall只排到至少800ms，land全格。原素材無法讀取時404，不生成替代圖 |
 | `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
 | `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |
 | `GET /api/npc/<id>`、`GET /api/mob/<id>` | `{templateId, actions}`，`actions` 是 `move`／`stand`／`hit` 各自的 `frames[]`；WZ 沒有的模板是 404 |

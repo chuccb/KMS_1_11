@@ -159,6 +159,7 @@ function step(body, input, world, dt) {
     body.ladder = undefined;
     body.vx = mergeImpulse(body.vx, impulse.x);
     body.vy = mergeImpulse(body.vy, impulse.y);
+    body.moveAttr = (body.moveAttr ?? 0) | 2; // 537B00 -> 495D60 attr2, retained until publication.
   }
   // CUserLocal 512400 updates CAttrShoe walkSpeed (+32) and jump (+56), not gravity.
   const speedScale = clamp(input.speedPercent ?? 100, 80, 130) / 100;
@@ -270,7 +271,7 @@ export function actionOf(body) {
 export function beginPath(entity, path, now, fallbackDuration = 100) {
   const elements = path?.elements?.length ? path.elements : [];
   if (!elements.length) return;
-  entity.motion = { start: now, x: entity.x, y: entity.y, elements: elements.map((e) => ({ ...e, duration: Math.max(1, e.duration || fallbackDuration) })) };
+  entity.motion = { start: now, x: entity.x, y: entity.y, elements: elements.map((e) => ({ ...e, duration: Number.isFinite(e.duration) ? Math.max(0, e.duration) : fallbackDuration })) };
 }
 export function sampleMotion(entity, now, world) {
   const motion = entity.motion;
@@ -278,12 +279,18 @@ export function sampleMotion(entity, now, world) {
   let remaining = Math.max(0, now - motion.start);
   let x = motion.x, y = motion.y;
   for (const e of motion.elements) {
-    if (remaining >= e.duration) { remaining -= e.duration; x = e.x; y = e.y; continue; }
+    if (remaining >= e.duration) {
+      remaining -= e.duration; x = e.x; y = e.y;
+      entity.action = e.action ?? entity.action; entity.facing = entity.action & 1;
+      entity.foothold = e.foothold; entity.vx = e.vx ?? 0; entity.vy = e.vy ?? 0;
+      continue;
+    }
     const fraction = remaining / e.duration;
     entity.x = x + (e.x - x) * fraction;
     entity.y = y + (e.y - y) * fraction;
     entity.foothold = e.foothold;
     entity.action = e.action ?? entity.action;
+    entity.facing = entity.action & 1; // The wire facing bit wins, not the position delta (knockback reverses it).
     entity.vx = e.vx ?? 0; entity.vy = e.vy ?? 0;
     // A walking monster follows its foothold polyline, not a chord through slopes or through sky.
     if (e.foothold) {
@@ -304,6 +311,7 @@ export function sampleMotion(entity, now, world) {
   entity.y = last.y;
   entity.foothold = last.foothold;
   entity.action = last.action ?? entity.action;
+  entity.facing = entity.action & 1;
   entity.vx = last.vx ?? 0; entity.vy = last.vy ?? 0;
   entity.motion = undefined;
   return false;

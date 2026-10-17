@@ -1,5 +1,8 @@
 # 怪物碰撞、受傷／MISS、擊退與復活（2026-10-18）
 
+> **歷史交付 `855cebd` 的來源紀錄。** 後續原Tomb／ghost／attr2與重大HTTP bodyAttack漏接修補，
+> 見 [NATIVE_DEATH_ANIMATION.md](NATIVE_DEATH_ANIMATION.md)。下述8495 LIVE／save是前輪紀錄，不代表本輪程序或存檔仍存在。
+
 **交付狀態：實作與靜態來源整理；依使用者要求，沒有執行 test／check／typecheck／browser／VM／probe。**
 下列回歸檔只是未執行的來源，啟動 LIVE 不代表功能 PASS，歷史測試數量也不適用本輪。
 
@@ -142,9 +145,9 @@ node src/cli.ts serve --host 0.0.0.0 --port 8496 --game-port 8497 --web-port 849
 ## 尚未完成／不宣稱
 
 - 原完整CVecCtrl force／斜坡／繩梯再抓取狀態與完整CShape2D；瀏覽器是現有普通物理＋已定位外力合併。
-  本輪沒有另造遠端受傷表情廣播；移動仍走既有普通path，原537B00產生的attr2外力記錄尚未單獨重建。
+  前輪尚未保留attr2；後續已接原move relay，仍未重建原30ms append/merge。沒有另造遠端受傷表情廣播。
 - `511C60`後半的4734A0環境固定10傷害分支、怪物主動攻擊／魔法／怪物temp與技能受傷路徑。
-- Tomb.img原墓碑整段落下／落地動畫：這輪接dead姿勢、既有Tombstone音效與復活，原落地發聲計時也未完整還原，不假稱整個墓碑演出已還原。
+- 前輪未接完整Tomb.img；後續已接原fall／land／ghost。另更正聲音為新死亡立即播放，不是延到落地；526CC0回傳的是音量。來源與界線見後續文件。
 - face/emotion仍為既有compositor的emotion/0；全原生臉部動畫、2張Gr2D layer內部狀態與字體metrics未完整。
   原視窗皮、座標及文字有證據；KMSCJK fallback不等於2003 Dotum逐像素相同。
 - 主動技能、魔法、快捷鍵拖放、自然AP/SP／轉職、卷軸、cash/pet、完整交易窗、自由拆疊等仍待完成。

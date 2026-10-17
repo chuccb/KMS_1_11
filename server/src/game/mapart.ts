@@ -24,7 +24,7 @@ import { miniMapArt, type MiniMapArt } from "./minimap.ts";
  */
 import type { WzArchive } from "../wz/archive.ts";
 import { entriesOf, propertyOf, asNumber, asText } from "../wz/props.ts";
-import { artReaderOf, frameDelay, frameNames, nodeRecord, type ArtReader } from "./wzart.ts";
+import { artReaderOf, frameDelay, frameNames, frameAlpha, nodeRecord, type ArtReader } from "./wzart.ts";
 import type { WzNode } from "../wz/img.ts";
 
 /** One entry of the map's `back` list, as the page needs it. */
@@ -55,6 +55,8 @@ export interface MapBack {
 /** One animated canvas of a tile or object: a path and how long it stays up. */
 export interface MapFrame {
   path: string;
+  a0?: number;
+  a1?: number;
   /** Milliseconds this frame is shown (`delay`); the archive's default when it does not say. */
   delay: number;
   /** The canvas' `origin` - the pixel that lands on the sprite's `(x, y)`. */
@@ -106,7 +108,7 @@ export function portalFrames(reader: ArtReader): MapFrame[] {
     const path = `Map/MapHelper.img/portal/game/pv/${frame}`;
     const art = reader.at(path);
     if (art === undefined) break;
-    out.push({ path, delay: 100, ox: art.ox, oy: art.oy });
+    out.push({ path, delay: frameDelay(reader.node(path), "", 120), ox: art.ox, oy: art.oy });
   }
   return out;
 }
@@ -153,7 +155,7 @@ function framesOf(reader: ArtReader, path: string): MapFrame[] {
     const framePath = name === "" ? path : `${path}/${name}`;
     const art = reader.at(framePath);
     if (art === undefined) continue;
-    out.push({ path: framePath, delay: frameDelay(node, name, 120), ox: art.ox, oy: art.oy });
+    out.push({ path: framePath, delay: frameDelay(reader.node(framePath), "", 120), ...frameAlpha(reader.node(framePath)), ox: art.ox, oy: art.oy });
   }
   return out;
 }

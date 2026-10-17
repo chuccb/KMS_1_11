@@ -1326,6 +1326,7 @@ export class ClientSession {
     action = 0,
     vx = 0,
     vy = 0,
+    attr = 0,
   ): Promise<void> {
     const link = this.gameLink;
     if (link === undefined)
@@ -1333,7 +1334,7 @@ export class ClientSession {
     const path: MovePath = {
       originX: x,
       originY: y,
-      elements: [{ attr: 0, x, y, vx, vy, action, foothold, duration }],
+      elements: [{ attr, x, y, vx, vy, action, foothold, duration }],
     };
     await link.send(encodeClientUserMove({ stageByte: 0, path }));
     this.lastPosition = { x, y };

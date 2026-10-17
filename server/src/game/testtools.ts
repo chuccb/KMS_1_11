@@ -120,6 +120,11 @@ export function planTestTool(
       stats.mp = caps.maxMp;
       message = "體驗補滿HP／MP；死亡時回本圖出生點。";
       break;
+    case "near-death":
+      if (character.stats.hp <= 0) throw new Error("請先以原復活窗復活。");
+      stats.hp = 1;
+      message = "非原版體驗：只將HP設為1，未直接觸發死亡，MP／道具／位置不變。關閉工具後碰怪，觀看原死亡→墓碑→復活；自然恢復可能先回HP。";
+      break;
     case "drain":
       if (character.stats.hp <= 0) throw new Error("請先復活或使用體驗補滿。");
       stats.hp = Math.max(1, Math.floor(caps.maxHp / 2));

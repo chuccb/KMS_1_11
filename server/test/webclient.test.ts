@@ -1308,3 +1308,32 @@ test(
     assert.equal(world.accounts.get("admin")!.characters[0]!.stats.hp, 50);
   },
 );
+
+/** Unexecuted end-to-end regression sources; do not claim an HTTP/browser PASS. */
+test("HTTP mob metadata must retain bodyAttack; original tomb metadata queues only 800ms of fall", {skip:ART_ARCHIVE===null,timeout:20000}, async t=>{
+  const world=await startWorld(t,{touch:"hit"});
+  const mob=await fetch(`http://127.0.0.1:${world.webPort}/api/mob/120100`);
+  const metadata=await mob.json() as {bodyAttack:boolean};
+  assert.equal(metadata.bodyAttack,true,"otherwise browser disables every contact despite bridge-only regressions");
+  const response=await fetch(`http://127.0.0.1:${world.webPort}/api/death`);
+  assert.equal(response.status,200);
+  const art=await response.json() as {fall:{delay:number}[];land:{delay:number}[]};
+  assert.equal(art.fall.length,10);assert.equal(art.fall.reduce((n,f)=>n+f.delay,0),800);
+  assert.equal(art.land.length,8);
+});
+
+test("browser external-force marker reaches native 0x0E/0x22 and arbitrary bits/fractional fields are refused", {timeout:20000},async t=>{
+  const world=await startWorld(t);
+  const {browser:admin}=await enterGame(world.webPort,"admin","admin");
+  const {browser:alt}=await enterGame(world.webPort,"alt","alt");
+  t.after(()=>admin.close());t.after(()=>alt.close());
+  admin.send({t:"move",x:100,y:20,vx:270,vy:-270,foothold:0,action:71,attr:2});
+  const event=await alt.nextKind("user-move");
+  assert.equal((event.path as {elements:{attr:number}[]}).elements[0]!.attr,2);
+  assert.equal(event.action,71);
+  admin.send({t:"move",x:100,y:20,foothold:-1,action:73});
+  const climbing=await alt.nextKind("user-move");
+  assert.equal((climbing.path as {elements:{foothold:number}[]}).elements[0]!.foothold,0xffff);
+  admin.send({t:"move",x:100,y:20,attr:128});await admin.nextKind("error");
+  admin.send({t:"move",x:100.5,y:20});await admin.nextKind("error");
+});

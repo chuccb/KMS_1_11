@@ -229,10 +229,25 @@ export function frameNames(node: WzNode | undefined): string[] {
   return names;
 }
 
-/** The `delay` of one frame's properties, or `fallback` when the archive does not say. */
+/** Canvas metadata lives in canvas.props, NOT WzNode.props. Preserve property frames too. */
+export function frameProperty(node: WzNode | undefined, name: string): unknown {
+  const props = node?.kind === "canvas" ? node.canvas?.props : node?.props;
+  return props?.find(entry => entry.name === name)?.value;
+}
+
+/** Read alpha endpoints only when present; -1 means retain, as in the native layer API. */
+export function frameAlpha(node: WzNode | undefined): { a0?: number; a1?: number } {
+  const result: { a0?: number; a1?: number } = {};
+  for (const name of ["a0", "a1"] as const) {
+    const value = frameProperty(node, name);
+    if (typeof value === "number" && Number.isFinite(value)) result[name] = Math.trunc(value);
+  }
+  return result;
+}
+
+/** The delay of a resolved canvas or a numbered child, including standalone canvases. */
 export function frameDelay(node: WzNode | undefined, name: string, fallback: number): number {
-  if (node === undefined || node.kind !== "props") return fallback;
-  const frame = node.props.find((entry) => entry.name === name)?.value;
-  const delay = nodeProperty(frame instanceof WzNodeClass ? frame : undefined, "delay");
-  return typeof delay === "number" && delay > 0 ? delay : fallback;
+  const frame = name === "" ? node : nodeProperty(node, name);
+  const delay = frameProperty(frame instanceof WzNodeClass ? frame : undefined, "delay");
+  return typeof delay === "number" && Number.isFinite(delay) && delay > 0 ? delay : fallback;
 }

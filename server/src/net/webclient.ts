@@ -43,6 +43,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deathArtOf } from "../game/deathart.ts";
 import { ClientSession, type ClientEvent } from "../client/session.ts";
 import { encodeCp949, decodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
@@ -549,6 +550,7 @@ class BrowserSession {
             Number(message.action ?? 0),
             Number(message.vx ?? 0),
             Number(message.vy ?? 0),
+            Number(message.attr ?? 0),
           );
         case "attack":
           return await this.attack(
@@ -1050,10 +1052,13 @@ class BrowserSession {
     action: number,
     vx: number,
     vy: number,
+    attr: number,
   ): Promise<void> {
-    if (![x, y, foothold, action, vx, vy].every(Number.isFinite))
-      throw new Error("non-finite movement");
-    await this.require().moveTo(x, y, foothold, 100, action, vx, vy);
+    if (![x, y, foothold, action, vx, vy, attr].every(Number.isInteger) ||
+        ![x, y, vx, vy].every(n => n >= -32768 && n <= 32767) ||
+        foothold < -32768 || foothold > 65535 || action < 0 || action > 255 ||
+        (attr !== 0 && attr !== 2)) throw new Error("invalid native movement fields");
+    await this.require().moveTo(x, y, foothold, 100, action, vx, vy, attr);
   }
 
   /**
@@ -1452,6 +1457,12 @@ export function startWebClient(
       );
       return;
     }
+    if (url.pathname === "/api/death") {
+      const art = options.art?.reader && deathArtOf(options.art.reader);
+      if (!art) return sendJson(response, 404, { error: "Original Effect/Tomb.img fall/land unavailable" });
+      sendJson(response, 200, art);
+      return;
+    }
     if (url.pathname === "/api/avatar.png") {
       if (options.art === undefined) {
         sendJson(response, 404, {
@@ -1484,6 +1495,7 @@ export function startWebClient(
       }
       sendJson(response, 200, {
         templateId: mob.templateId,
+        bodyAttack: mob.bodyAttack === true,
         actions: mob.actions,
       });
       return;

@@ -50,6 +50,7 @@ export function testTools({
       "qa-apply",
       "qa-heal",
       "qa-drain",
+      "qa-near-death",
       "qa-checkpoint",
       "qa-speed-potions",
       "qa-combat-potions",
@@ -177,6 +178,7 @@ export function testTools({
   for (const kind of [
     "heal",
     "drain",
+    "near-death",
     "checkpoint",
     "restore",
     "speed-potions",

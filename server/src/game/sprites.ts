@@ -12,12 +12,14 @@
  */
 import { entriesOf } from "../wz/props.ts";
 import type { WzArchive } from "../wz/archive.ts";
-import { artReaderOf, frameDelay, frameNames, type ArtReader, vectorOf, nodeRecord } from "./wzart.ts";
+import { artReaderOf, frameDelay, frameNames, frameAlpha, type ArtReader, vectorOf, nodeRecord } from "./wzart.ts";
 
 /** One frame of one action. */
 export interface SpriteFrame {
   path: string;
   delay: number;
+  a0?: number;
+  a1?: number;
   /** The canvas' `origin` - the pixel that lands on the entity's `(x, y)`. */
   ox: number;
   oy: number;
@@ -47,6 +49,7 @@ export function spriteFrames(
   image: string,
   action: string,
   fallbacks: readonly string[] = ["stand", "move"],
+  defaultDelay?: number,
 ): SpriteFrame[] {
   for (const candidate of [action, ...fallbacks]) {
     const node = reader.node(`${image}/${candidate}`);
@@ -67,14 +70,15 @@ export function spriteFrames(
           ? { bounds: { left: lt[0], top: lt[1], right: rb[0], bottom: rb[1] } }
           : {}),
         path,
+        ...frameAlpha(reader.node(path)),
         // Canvas properties are in node.value.props; nodeProperty(canvas, "delay") is empty.
         delay:
-          typeof delay === "number"
+          typeof delay === "number" && Number.isFinite(delay)
             ? Math.max(1, delay)
             : frameDelay(
                 node,
                 name,
-                image.startsWith("Mob/") || candidate === "move" ? 180 : 1000,
+                defaultDelay ?? (image.startsWith("Mob/") || candidate === "move" ? 180 : 1000),
               ),
         ox: art.ox,
         oy: art.oy,
