@@ -20,7 +20,7 @@
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場（**第一個 u32 ＝ 臉**，`face`）、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）、**0x27 表情**（`u32 characterId`＋`u32 emotion`，0..8 ＝ `EMOTION_NAMES`）；client 端的 0x0E（自己的移動）、**0x13 表情**與 0x0D（點擊傳送門／物件），以及 **0x1C 玩家自己的 HP／MP 變動回報**
 （`[u32 flags][s16 hpΔ][s16 mpΔ][u8 flag]`，旗標與 `0x0D` 共用 `statDiffFlag`；`readClientStatReport`／
-`encodeClientStatReport`，§4.33）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行；以及 **聊天**（client 的 `0x12` 說一句 → `0x1A` ＋ sub-op `0x12` ＋ 名字 ＋ 同一串 bytes，`readClientChat`／`encodeUserChat`／`readUserChat`）與 **密語／找人**（client 的 `0x23`（`u8 kind`＋名字＋〔訊息〕）→ `0x1A` sub-op `0x09`（名字＋地圖 id）／`0x0A`（名字＋成功旗標），`readClientUserRequest`／`encodeUserFindAnswer`／`encodeUserWhisperAnswer`，§4.31）；以及 **別人的攻擊**：s2c `0x23`／`0x24`／`0x25` 共用一個 reader（`u32 characterId` ＋ `u8 (hits\|筆數<<4)` ＋ `u8 技能等級` ＋〔`u32 技能 id`〕＋ `u8 面向\|動作` ＋ `u8 速度` ＋ `u8 afterimage` ＋ `u32`，再每筆 `u32 mobId` ＋ `u8 動畫` ＋ `hits × u16` 傷害；`readUserAttack`／`encodeUserAttack`／`describeUserAttack`，§4.11.7b），而 c2s `0x0F` 的第 4 byte 正名為 `speed`（揮擊速度，§4.13.1c），**第 2 欄那個 `u32` 也正名為 `skillId`**（＝這一擊的技能 id，0 ＝ 沒有技能；`dword_5C2038` 是 `CSkillInfo` 單例，見 FINDINGS §4.13.1／ADR-028）。**三支都轉播**（`ATTACK_RELAY_OPCODE`：`0x0F`→`0x23`、`0x10`→`0x24`、`0x11`→`0x25`，§4.11.7c／ADR-027）。 |
+`encodeClientStatReport`，§4.33）。另含 `0x2C`（client → server 的**怪物動作回報**，頭 4 欄＋未解的尾段；`readClientMobAttack`／`describeClientMobAttack`），以及 `describeFieldOpcode`：CField 每個子系統區間（含 `0x39`–`0x41` 的 CNpcPool）都有一行，**沒有 handler 的 opcode 會明說**；`0x0D`（能力值差異包）在 `CWvsApp` 層，由 `stat.ts` 解，`describeFieldPacket` 會把它印成一行；以及 **聊天**（client 的 `0x12` 說一句 → `0x1A` ＋ sub-op `0x12` ＋ 名字 ＋ 同一串 bytes，`readClientChat`／`encodeUserChat`／`readUserChat`）與 **密語／找人**（client 的 `0x23`（`u8 kind`＋名字＋〔訊息〕）→ `0x1A` sub-op `0x09`（名字＋地圖 id）／`0x0A`（名字＋成功旗標），`readClientUserRequest`／`encodeUserFindAnswer`／`encodeUserWhisperAnswer`，§4.31）；以及 **別人的攻擊**：s2c `0x23`／`0x24`／`0x25` 共用一個 reader（`u32 characterId` ＋ `u8 (hits\|筆數<<4)` ＋ `u8 技能等級` ＋〔`u32 技能 id`〕＋ `u8 面向\|動作` ＋ `u8 速度` ＋ `u8 afterimage` ＋ `u32`，再每筆 `u32 mobId` ＋ `u8 動畫` ＋ `hits × u16` 傷害；`readUserAttack`／`encodeUserAttack`／`describeUserAttack`，§4.11.7b），而 c2s `0x0F` 的第 4 byte 正名為 `speed`（揮擊速度，§4.13.1c），**第 2 欄那個 `u32` 也正名為 `skillId`**（＝這一擊的技能 id，0 ＝ 沒有技能；`dword_5C2038` 是 `CSkillInfo` 單例，見 FINDINGS §4.13.1／ADR-028）。**三支都轉播**（`ATTACK_RELAY_OPCODE`：`0x0F`→`0x23`、`0x10`→`0x24`、`0x11`→`0x25`，§4.11.7c／ADR-027）。**以及換裝**：client 的 `0x17`（`[u8 tab][s16 from][s16 to][s16 count]`；負格＝已穿戴、`to = 0` ＝地上、`count = -1` ＝整格；`readClientChangeSlot`／`encodeClientChangeSlot`／`describeClientChangeSlot`）與 s2c `0x28`（`u32 characterId`＋`u32 flags`＋〔bit 0 臉、bit 4／8 兩個讀了丟的字〕＋`u8`＋0 結尾的 id 清單；`UserLook`／`readUserLook`／`encodeUserLook`，§4.36／§4.11.8／ADR-029）。 |
 | `src/protocol/mob.ts` | ✅ **怪物封包**：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`（語意未解，送 0 走的是 client 會處理的查表失敗路徑）＋動畫旗標區塊）、`0x33` 移動（動作位元組 + `u32` + `CMovePath`）、`0x30` 開始死亡動畫（`s16 delayMs`）、`0x31` 收屍／重生（`u8 flag`＋`u32 mobId`，`flag != 0` 時再接 `templateId` 與**與 `0x2F` 逐 byte 相同**的身體）、`0x35` 怪物動畫（＝`0x2F` 尾巴那塊動畫區塊，同一份實作）、`0x34` 怪物 MP；另有 **16 筆動作索引表**（`MOB_ACTION`／`MOB_ACTION_NAMES`，證據：`CActionMan::MOBACTIONENTRY` + `.data:0x5B20FC`）；`encode`／`read`／`describe` 三件套＋`test/mob.test.ts`／`test/mobs.test.ts`（FINDINGS §4.12.1／§4.15／§4.16／§4.17）。 |
 | `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
 | `src/game/world.ts` | ✅ **每一張地圖的共享世界**（ADR-012）：`FieldRegistry`（`mapId → FieldInstance`，第一次有人進場才建立、之後留著）＋`FieldInstance`（`mobs`／`npcs`／`drops` ＋ 在場成員）。`join()` 把整張圖的快照送給新來的人（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個 `0x43`、每個已在場玩家 `0x1C`）並讓其他人收到他的 `0x1C`；`leave()` 送 `0x1D`；`reportMove()` 把別人走的路包成 `0x22`；`applyDamage`／`spawnFromDeath`／`pickUp` 的結果廣播全場；`tick()` 只有在**有人在看**的時候才派 `0x33`，但屍體、重生與掉落物過期照算；`portal(name)` 是「玩家用了哪個傳送門」的查詢（名字不分大小寫，查不到就是沒有）。`0x1C`／`0x1D`／`0x22` 的 sender 只在這裡（FINDINGS §4.24／§4.25）。 |
@@ -43,6 +43,7 @@
 | `src/game/save.ts` | ✅ **角色存檔**（ADR-017）：`SaveStore` 介面（`FileSaveStore` 原子寫入／`MemorySaveStore` 給測試）＋ JSON 格式（版本、帳號、角色、道具；`bigint` 的現金序號用十進位字串）、`loadAccounts`（**檔案勝過 `--account` 種子**）、`readSave` 的拒絕清單（版本不合／不是 JSON／缺 `id` 或 `name`／兩個角色同一個 id／紀錄送不出去）。`flags` **不入檔**（它是內容的函式，載入時由 `characterDataOf` 推導），載入時再用 `writeCharacterData` 驗一次「client 收得下」。FINDINGS §4.29 說明為什麼這整件事是我們的設計：**沒有任何 c2s 封包帶角色資料**。 |
 | `src/game/shops.ts` | ✅ **商店的規則**：價格一律讀 `Item/Consume/0XXX.img/<id>/info/price`（讀不到就不送那一列），庫存（`SHOPS`：리나／헤네시스、로빈／달팽이사냥터、**마이／암허스트**）、`DEFAULT_SHOP_MAX_COUNT`、`SELL_PRICE_RATIO` 是**這份 repo 的選擇**（ADR-010）；`buy`／`sell` 是完整驗證的交易（錢、格子、數量、哪一格），失敗回 `TradeFailure`→`shopResultCode`→`0x4B`。 |
 | `src/game/items.ts` | ✅ **用掉道具的規則**（ADR-022、FINDINGS §4.34）：`consumeSpecOf` 讀 `Item/Consume/0XXX.img/<id>/spec`（**client 自己的效果表**，不是描述文字），`healsVitals`／`consumeDeltas` 把它換成 `0x0D` 要的差值（`hp`／`mp` 定值、`hpR`／`mpR` 是上限的百分比並**向下取整**）；沒定位的欄位收進 `ConsumeSpec.unapplied`（buff 家族 → 這次使用被拒絕，道具留在袋子裡）。 |
+| `src/game/inventory.ts` | ✅ **道具欄的拖放**（ADR-029、FINDINGS §4.36）：`applyChangeSlot` **先判後寫**，八個拒絕值（分頁／格數／空格／放錯分頁／放錯部位／被擠掉的放不回去／`count` 不是 `-1`／丟到地上還沒做）＋`{changes, lookChanged}`；唯一會動到穿戴格的地方，也是 `0x28` 的唯一觸發點。 |
 | `src/wz/paths.ts` | ✅ WZ 路徑：`mapImagePath`／`mobImagePath`／`npcImagePath`／`itemImagePath`（`Item/<kind>/<前四位>.img`，四種 kind 是這份 `Data.wz` 的實際目錄；**裝備在 `Character/<type>/`，不在 `Item/`**）|
 | `src/cli.ts` | ✅ `capture` / `decode` / `serve` / `schema` / `wz` 子命令 |
 | 遊戲邏輯（地圖／怪物／NPC／戰鬥／掉落／商店／對話／道具欄伺服器端）| 🟡 地圖／怪物／NPC 進場／戰鬥／掉落／**NPC 商店**／**NPC 對話**都已實作（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts`／`game/drops.ts`／`game/rewards.ts`／`game/shops.ts`／`game/dialogue.ts`）；**尚未實作**的是怪物 AI 與攻擊（AI 在 client，§4.20）、真正的任務流程、NPC 的走動（`0x3D`）、組隊、以及道具的「使用」與裝備欄操作。沒解的一律不猜（`decode` 仍會原封不動記錄它們）。 |
@@ -237,7 +238,7 @@ client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）�
 
 `serve` 的已知限制（誠實聲明）：**有角色存檔但仍有限**（ADR-017：建立／刪除角色與下線時各存一次，所以**當掉的那場 session 的最後幾分鐘會不見**；
 **已在線上會被拒絕**（`result 7` ＋ `0x08` 心跳，ADR-018／FINDINGS §4.30）：一個帳號一條活著的 session、
-一個角色一條連線，無聲消失的連線最多 3 × `--ping`（預設 90 s）後被清掉）、**沒有頻道／分流**（一個 port 一個世界；世界現在有多張圖，但都在同一個 process 裡）、**傳送門沒有條件**（不分等級／道具／任務，`pt` 的種類也沒有語意證據）、**沒有密語／找人／GM 指令**（`0x1A` 家族只實作了聊天那一個 sub-op）、**沒有怪物 AI／技能**
+一個角色一條連線，無聲消失的連線最多 3 × `--ping`（預設 90 s）後被清掉）、**沒有頻道／分流**（一個 port 一個世界；世界現在有多張圖，但都在同一個 process 裡）、**傳送門沒有條件**（不分等級／道具／任務，`pt` 的種類也沒有語意證據）、**沒有 GM 指令**（`0x1A` 的聊天／密語／找人三種回答都實作了，§4.26／§4.31；氣球 `0x1F` 只記錄不回應）、**沒有怪物 AI／技能**
 （怪物會出現、會巡邏、會被打死、會重生、也會掉東西，但不會追人、不會攻擊；只有 `Mob/9999997.img`／
 `Mob/9999999.img` 兩張測試圖帶攻擊資料，見 FINDINGS §4.17.6 與 §6 第 5 項）、
 **建立的角色穿著他選的衣服**（`0x06` 的第 3–6 個 u32 → 穿戴格 5／6／7／11，`flags` 因此帶 `0x02`；
@@ -246,12 +247,12 @@ NPC 會出現、**有商店的可以交易**（點下去開窗，買賣送 `0x4B
 **沒有商店的會講話**（`0x47` 一句一句，台詞是 `info/speak`，`0x15` 走下一句），
 而且**可以走動**（`0x3B`：被點名的 NPC 由 client 自己走 —— `--npc-walk`，預設沒人走，§4.28），
 但**沒有真正的任務流程**（`info/quest` 的腳本名讀得到，但這個 client 沒有任務 UI），
-還有道具的「使用」與裝備欄操作。
+道具的「使用」（§4.34）與**裝備欄的拖放**（穿脫、搬移、互換；§4.36）也接上了，
+**丟到地上**仍是拒絕（§4.36.5）。
 怪物會巡邏、被打、掉東西，但**不會主動攻擊**：原 client 的 AI 會自己做（那是它自己的行為，
-伺服器不需要送任何東西就會發生），而且**被怪物打不會讓玩家的 HP 下降**——`0x0D` 雖然已解出並用於
-經驗值／升級（§4.21），但「收到 `0x2C` → 扣玩家的血 → 送 `0x0D`」這條路徑還沒接上，
-而且 §4.20.7 的修正說明了為什麼更難：`0x2C` 的尾段是**移動路徑**，不是 client 算出來的傷害，
-所以伺服器手上沒有「玩家該掉多少血」的數字。
+伺服器不需要送任何東西就會發生），而**「被怪物打掉血」的數字來自 client 自己**：c2s `0x1C` 回報
+差值、伺服器落帳再用 `0x0D` 回覆（§4.33／ADR-021）——`0x2C` 幫不上忙，因為它的尾段是**移動路徑**，
+不是傷害（§4.20.7）。
 （`0x0B` 的 `op 1`–`op 3` 已有 codec，但還沒有誰去用它們。）
 
 ## 一張地圖上的所有人（ADR-012）
@@ -356,6 +357,35 @@ client **宣稱**那個欄位裡有什麼，所以伺服器一定拿自己的紀
 **三間店、兩種卷軸**（ADR-010 的商店表延伸）：`1010100` 리나（헤네시스）、`2003` 로빈（달팽이사냥터）、
 `12100` 마이（**암허스트**，`--map` 的新角色與復活都會到的那個村）；三間都賣 마을 귀환 주문서（75），
 마이 還賣**指名一張圖**的 헤네시스 귀환 주문서（90）—— 後者讓「用道具換圖」是可以觀察、可以測試的。
+
+### 道具欄的拖放（ADR-029／FINDINGS §4.36）
+
+雙擊一件裝備、把東西拖到另一格、拖到已穿戴的部位、把東西丟到地上 —— 這四件事在 client 裡是**同一個
+送出者** `sub_55ACB0`，線上就是它的四個參數：
+
+| 欄位 | 意思 |
+|---|---|
+| `u8 tab` | 1 裝備／2 消耗／3 其他／4 現金（`CharacterData` 的同一套編號）|
+| `s16 fromSlot` | 來源格；**負數 ＝ 已穿戴**（`-1` 帽子、`-11` 武器，號碼與 itemId 的部位碼同一套，§4.11.3d）|
+| `s16 toSlot` | 目的格；`0` ＝地上 |
+| `s16 count` | 搬移一律是 `-1`（整格）；只有丟棄帶數量 |
+
+**client 從來沒有自己搬過東西**：它送完就把 `CWvsApp + 0x18` 設成 1（一個「有請求在途」的閘門，
+四個送出者開頭都檢查它），而能清掉那個閘門的**只有 `0x0B`**（`result != 0`，§4.6）。所以伺服器的回答是：
+
+- **做了** → `0x0B`：目的格 `put`、來源格 `clear`（兩格都有東西 ＝ 互換 ＝ 兩個 `put`）。穿到**負格**的
+  `put` 就是「穿上去」，client 收到就自己畫在角色身上（`0x0B` 的 `put` 可以指向裝備分頁的負格，§4.10）。
+- **沒做** → **空的 `0x0B`**（`result` 非 0、`count` 0）。沉默會把閘門永遠關著，玩家被拒一次之後整個道具欄
+  就再也不能互動 —— 和「用掉道具」是同一條規則（§4.34.2）。
+- **動到了已穿戴的東西** → 再送同圖其他人一個 `0x28`：`[u32 characterId][u32 flags][u8][id 清單]`，清單就是
+  `avatarItemsOf(紀錄)`（頭髮＋穿戴中的裝備）。`flags` 送 0（臉沒動，client 保留手上那一張），清單裡沒有
+  臉部裝飾 ⇒ 客戶端把那一格寫成 0，正是實際狀態。**不 echo 自己**（自己的 client 已經畫過了）。
+
+伺服器端只驗**結構**：分頁、格數、這一格能不能放這件東西（部位表與 client 自己用的是同一張 `sub_45F340`）、
+被擠掉的那件放不放得回來源格。**能力需求不驗** —— `reqSTR`／`reqJob`／等級那些是 client 自己的規則
+（`sub_4636B0` 送出前替自己比對），伺服器照抄只會多一份沒有人能驗的第二份規則（ADR-029）；
+**兩格都有東西就是互換**；**丟到地上先不做**（需要 field 的歸屬／壽命／可撿範圍三個選擇，§4.36.5）；
+現金裝備（`111xxxx`、部位 `12`／`13`）一律拒絕 —— 那張部位表對它回「沒有那一格」。
 
 ### 表情（ADR-023／FINDINGS §4.35）
 
@@ -480,9 +510,9 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 - **拒收沒有實作**：`0x1A` sub-op `0x22`（`'name'님은 현재 귓속말이 거부되어 있습니다.`）的形狀已知，  但 client 端沒有任何輸入會設定「我拒收密語」（開關的封包還沒找到），沒有驅動者的 codec 是死碼。
 - **密語不進存檔**：沒有離線訊息，`--save` 的格式不動。
 
-`scripts/whisper_probe.mjs` 是這幾節（密語／死亡與復活／表情／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
+`scripts/whisper_probe.mjs` 是這幾節（攻擊轉播／密語／死亡與復活／外觀／表情／拖放／用掉道具）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
-「跨圖密語／找人／找不到／氣球不回應／**別人的揮擊**／被打掉血／復活／**別人的臉與頭髮與穿在身上的裝備**／**表情**／**買卷軸並用掉**」**47 個檢查** —— 其中兩條連線**真的在不同地圖上**：
+「跨圖密語／找人／找不到／氣球不回應／**別人的揮擊與射擊與魔法**／被打掉血／復活／**別人的臉與頭髮與穿在身上的裝備**／**表情**／**脫下武器再穿回去（`0x0B` ＋`0x28`、被拒的拖放）**／**買卷軸並用掉**」**63 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
 報的是**對方**的地圖 id、密語也照樣送達（第二次跑同一份存檔會跳過那一步：角色的紀錄已經記得 `1010000`）；
 在復活之前它先送兩次 c2s `0x1C`（`sub_55B870(-damage, 0, 0)` 的位元組：`-30` 兩次），驗證第一次回來的
@@ -505,7 +535,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 ```bash
 node server/src/cli.ts serve --port 8495 --game-port 8496 \
      --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（47 個檢查）
+node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（63 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

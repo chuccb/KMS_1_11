@@ -197,6 +197,31 @@ export const FIELD_OPCODE = {
   /** `CUserPool` 0x25: same reader, `sub_521AD0`. */
   userMagicAttack: 0x25,
   /**
+   * `CUserPool` 0x28 (`sub_51D590` case `'('` -> `sub_5221A0`): **one user's look** - the packet
+   * that changes how everybody else draws somebody (FINDINGS 4.11.8).
+   *
+   * The range dispatcher reads the `u32 characterId` first and resolves it in the pool, so a look
+   * for an id nobody has is dropped whole, exactly like `0x23`/`0x27`/`0x29`. What is left for
+   * `sub_5221A0` is `u32 flags` + the words the flags announce + a `u8` + the avatar id list:
+   *
+   * | bit | field |
+   * |---|---|
+   * | `0x1` | `u32` face -> `CUser+68` (`sub_508260`) |
+   * | `0x4` | `u32` read and never stored |
+   * | `0x8` | `u32` read and never stored |
+   *
+   * then `u8`: non-zero means the id list follows (`sub_45F340` files it into the 15-slot look
+   * block), zero means the client keeps the copy it already has (`memcpy(src, this + 19, 0x3C)`).
+   * The tail is `sub_508260(this, face, faceAccessory)` + `sub_508290(this, src)` - the same two
+   * calls the `0x1C` of a joining player ends in (FINDINGS 4.11.3b), i.e. `0x28` is the "and now his
+   * equipment changed" of `0x1C`.
+   *
+   * The id list is the one `0x1C` carries and `avatarItemsOf` builds: hair first, then the worn
+   * equips, in any order (`sub_45F340` sorts by the id's own part code), and the `101xxxx` entry
+   * inside it is what the client pulls out as the face accessory.
+   */
+  userLook: 0x28,
+  /**
    * `CUserPool` 0x29 (`sub_51D590` case ')' -> `sub_522300`): an effect **on one user**. The range
    * dispatcher reads the `u32 characterId` first and resolves it in the pool (`sub_51CD30`); if the
    * id is not in the pool the packet is dropped, which is what makes this safe to broadcast. The body
@@ -451,6 +476,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       const use = readClientUseItem(new PacketReader(plain, 1), opcode);
       return `${hexOpcode(opcode)} use item: ${describeClientUseItem(use)}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.changeSlot) {
+      return `0x17 change slot: ${describeClientChangeSlot(readClientChangeSlot(new PacketReader(plain, 1)))}`;
+    }
     if (opcode === CLIENT_FIELD_OPCODE.userRequest) {
       return describeClientUserRequest(readClientUserRequest(new PacketReader(plain, 1)));
     }
@@ -599,6 +627,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
+  if (FIELD_OPCODE.userLook === opcode && plain.length >= 10) {
+    try {
+      return `${name}: ${describeUserLook(readUserLook(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
+  }
   if (USER_ATTACK_OPCODES.has(opcode) && plain.length >= 10) {
     try {
       return `${name}: ${describeUserAttack(readUserAttack(new PacketReader(plain, 1)))}`;
@@ -722,6 +757,7 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === FIELD_OPCODE.userMessage) return "0x1a CField(user message)";
   if (opcode === FIELD_OPCODE.userEffect) return "0x29 CUserPool(user effect)";
   if (opcode === FIELD_OPCODE.userEmotion) return "0x27 CUserPool(user emotion)";
+  if (opcode === FIELD_OPCODE.userLook) return "0x28 CUserPool(user look)";
   if (opcode === FIELD_OPCODE.userAttack) return "0x23 CUserPool(user attack)";
   if (opcode === FIELD_OPCODE.userShootAttack) return "0x24 CUserPool(user attack, shot)";
   if (opcode === FIELD_OPCODE.userMagicAttack) return "0x25 CUserPool(user attack, magic)";
@@ -817,6 +853,37 @@ export const CLIENT_FIELD_OPCODE = {
    * record**, not absolute numbers.
    */
   statReport: 0x1c,
+  /**
+   * `sub_55ACB0`: `[0x17][u8 tab][s16 fromSlot][s16 toSlot][s16 count]` - **the inventory window
+   * moved something** (FINDINGS 4.36).
+   *
+   * One sender serves every drag in the window, and its four arguments *are* the four fields, in
+   * that order:
+   *
+   * | sender | what it is | wire |
+   * |---|---|---|
+   * | `sub_4636B0` | equip by double-click: the caller passes the **body part under the cursor** (`sub_463490` -> `sub_4D9110(x, y)`) as its third argument | `1, slot, -part, -1` |
+   * | `sub_4630A0` | a drag inside the equip tab (either end may be a worn item) | `1, from, to, -1` |
+   * | `sub_463A50` | a drag in any tab (`from`/`to` from the mouse) | `tab, from, to, -1` |
+   * | `sub_463BE0` | throwing something away, after the "몇 개나 버리시겠습니까?" prompt | `tab, from, 0, count` |
+   *
+   * So `tab` is the window's tab (1 = equip, 2 = use, 3 = etc, 4 = cash - the numbering
+   * `INVENTORY_TAB` and `CharacterData` both use), `fromSlot`/`toSlot` are slots of that tab, and on
+   * tab 1 a **negative**
+   * slot is a *worn* item: `-part` with the same body-part numbering an item id encodes
+   * (`wornSlotOfItem`), `-1` = cap, `-11` = weapon. The client's cursor switch also allows a cash
+   * equip (`111xxxx`) at `-12`/`-13`; this server refuses it, because `sub_45F340` files no cash
+   * equip into the 15-slot block. `toSlot = 0`
+   * means the ground. `count` is `-1` for a move/equip/unequip - the whole slot - and the number to
+   * drop for a throw-away.
+   *
+   * The client validates and then does nothing itself: `sub_4636B0` compares the item's own
+   * requirements against the character's current stats, job and level (the `현재 능력치가 낮아서`
+   * dialog) before it calls the sender, and no sender writes the client's inventory. The window
+   * therefore follows the server's `0x0B` and nothing else - the same rule the use-item path has
+   * (FINDINGS 4.34).
+   */
+  changeSlot: 0x17,
   /**
    * `sub_55B2C0`: `[0x18][u16 slot][u32 itemId]` - **the player used a 200/201/202 item** (a potion
    * or a piece of food) out of the USE tab.
@@ -1935,4 +2002,130 @@ export function encodeUserEmotion(emotion: UserEmotion): Uint8Array {
 
 export function describeUserEmotion(emotion: UserEmotion): string {
   return `characterId=${emotion.characterId} emotion=${emotion.emotion} (${emotionName(emotion.emotion)})`;
+}
+
+/** `0x17` as it arrives from the client: one drag in the inventory window. */
+export interface ClientChangeSlot {
+  /** The window's tab: 1 equip, 2 use, 3 etc, 4 cash (`sub_463DF0` pins 2 for a USE item). */
+  tab: number;
+  /** The slot the item is in; negative on tab 1 means the worn item at that body part. */
+  fromSlot: number;
+  /** Where it goes: another slot, a negative worn part, or `0` for the ground. */
+  toSlot: number;
+  /** `-1` = the whole slot (a move/equip/unequip); otherwise how many to throw away. */
+  count: number;
+}
+
+export function readClientChangeSlot(reader: PacketReader): ClientChangeSlot {
+  return {
+    tab: reader.readByte(),
+    fromSlot: toS16(reader.readU16()),
+    toSlot: toS16(reader.readU16()),
+    count: toS16(reader.readU16()),
+  };
+}
+
+export function encodeClientChangeSlot(request: ClientChangeSlot): Uint8Array {
+  const writer = new PacketWriter(9);
+  writer.writeByte(CLIENT_FIELD_OPCODE.changeSlot);
+  writer.writeByte(request.tab & 0xff);
+  writer.writeU16(request.fromSlot & 0xffff);
+  writer.writeU16(request.toSlot & 0xffff);
+  writer.writeU16(request.count & 0xffff);
+  return writer.toBytes();
+}
+
+export function describeClientChangeSlot(request: ClientChangeSlot): string {
+  const where = (slot: number): string =>
+    slot === 0 ? "ground" : slot < 0 ? `worn ${-slot}` : `slot ${slot}`;
+  return `tab ${request.tab} ${where(request.fromSlot)} -> ${where(request.toSlot)} count=${request.count}`;
+}
+
+/** The bits of `0x28`'s flags word; each set bit is one word that follows. */
+export const LOOK_FLAG = {
+  /** `u32` face -> `CUser+68`. */
+  face: 0x1,
+  /** `u32` the client reads and drops. */
+  unknown4: 0x4,
+  /** `u32` the client reads and drops. */
+  unknown8: 0x8,
+} as const;
+
+/**
+ * `0x28` as it goes out: the look of one user, for everybody else.
+ *
+ * Every optional word is *absent* rather than zero when its flag is clear - the client reads a field
+ * only when the bit is set, so a writer that always wrote the face would shift the id list by four
+ * bytes. `avatarItems` left out is the client's own "and the `u8` was 0" branch: it keeps the copy
+ * it has, which is why a look can also be *partially* refreshed by sending only the face.
+ */
+export interface UserLook {
+  characterId: number;
+  /** A new face, or `undefined` to leave it. */
+  face?: number;
+  /** A word the client reads and does not store. Only sent when a real packet carried one. */
+  unknownA?: number;
+  /** The second such word. */
+  unknownB?: number;
+  /**
+   * The new avatar id list (hair + worn equips, in any order), or `undefined` for "keep the look".
+   * A 0 inside it would end the list early, so one is refused instead of written.
+   */
+  avatarItems?: number[];
+}
+
+export function readUserLook(reader: PacketReader): UserLook {
+  const characterId = reader.readU32();
+  const flags = reader.readU32();
+  const look: UserLook = { characterId };
+  if ((flags & LOOK_FLAG.face) !== 0) look.face = reader.readU32();
+  if ((flags & LOOK_FLAG.unknown4) !== 0) look.unknownA = reader.readU32();
+  if ((flags & LOOK_FLAG.unknown8) !== 0) look.unknownB = reader.readU32();
+  if (reader.readByte() !== 0) {
+    const items: number[] = [];
+    for (;;) {
+      const itemId = reader.readU32();
+      if (itemId === 0) break;
+      items.push(itemId);
+    }
+    look.avatarItems = items;
+  }
+  return look;
+}
+
+export function encodeUserLook(look: UserLook): Uint8Array {
+  const flags =
+    (look.face !== undefined ? LOOK_FLAG.face : 0) |
+    (look.unknownA !== undefined ? LOOK_FLAG.unknown4 : 0) |
+    (look.unknownB !== undefined ? LOOK_FLAG.unknown8 : 0);
+  const ids = look.avatarItems;
+  if (ids !== undefined && ids.some((itemId) => itemId === 0)) {
+    throw new RangeError("0x28's id list ends at the first 0, so it cannot carry one");
+  }
+  const writer = new PacketWriter(24 + (ids?.length ?? 0) * 4);
+  writer.writeByte(FIELD_OPCODE.userLook);
+  writer.writeU32(look.characterId >>> 0);
+  writer.writeU32(flags);
+  if (look.face !== undefined) writer.writeU32(look.face >>> 0);
+  if (look.unknownA !== undefined) writer.writeU32(look.unknownA >>> 0);
+  if (look.unknownB !== undefined) writer.writeU32(look.unknownB >>> 0);
+  if (ids === undefined) {
+    writer.writeByte(0);
+    return writer.toBytes();
+  }
+  writer.writeByte(1);
+  for (const itemId of ids) writer.writeU32(itemId >>> 0);
+  writer.writeU32(0);
+  return writer.toBytes();
+}
+
+export function describeUserLook(look: UserLook): string {
+  const parts = [`characterId=${look.characterId}`];
+  if (look.face !== undefined) parts.push(`face=${look.face}`);
+  if (look.unknownA !== undefined) parts.push(`unknownA=${look.unknownA}`);
+  if (look.unknownB !== undefined) parts.push(`unknownB=${look.unknownB}`);
+  parts.push(
+    look.avatarItems === undefined ? "avatar=keep" : `avatar=${look.avatarItems.length} items [${look.avatarItems.join(",")}]`,
+  );
+  return parts.join(" ");
 }

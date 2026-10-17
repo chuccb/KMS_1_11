@@ -32,6 +32,7 @@ import type { DropPolicy } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
 import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
 import { MesoWallet, pickUpDrop, takeItem } from "../game/rewards.ts";
+import { applyChangeSlot } from "../game/inventory.ts";
 import { reviveMapId, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
@@ -51,6 +52,10 @@ import {
   encodeUserAttack,
   encodeUserEffect,
   encodeUserEmotion,
+  encodeUserLook,
+  readClientChangeSlot,
+  describeClientChangeSlot,
+  type ClientChangeSlot,
   readClientEmotion,
   describeClientEmotion,
   type ClientEmotion,
@@ -1133,6 +1138,63 @@ export class GameEntryServer {
   }
 
   /**
+   * A drag in the inventory window: `0x17`, `[u8 tab][s16 from][s16 to][s16 count]` (FINDINGS 4.36,
+   * `game/inventory.ts`). Equipping, unequipping and moving a stack all arrive here.
+   *
+   * The client moved nothing itself, so the window follows this answer and only this answer:
+   *
+   *   `0x0B`  the item's new slot. An equip travels as a `put` at the **negative** slot of the equip
+   *           tab, which is the worn item itself - that is what puts it on the avatar.
+   *   `0x28`  when the worn set moved: everybody else's copy of this player's look, built from the
+   *           record the same way `0x1C` is (`avatarItemsOf`). The user's own client needs nothing
+   *           more than the `0x0B` - it draws itself from the record it holds.
+   *
+   * A refused drag is answered with an **empty** `0x0B` (`result = 1`, `count = 0`), the same refusal
+   * the use-item path sends, and for the same reason: `sub_55ACB0` arms the client's one-request gate
+   * right after it sends (`*(CWvsApp + 0x18) = 1`, `.text:0055AE70`) and only a `0x0B` whose `result`
+   * is non-zero clears it (`sub_55BAB0`, `.text:0055BB0C`; FINDINGS 4.6). Silence would leave that gate
+   * armed and the whole inventory window dead until something else sent a `0x0B`; an empty one is also
+   * exactly true - the client's inventory only ever changes on `0x0B`, so nothing moving *is* the
+   * refusal.
+   */
+  private handleChangeSlot(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientChangeSlot;
+    try {
+      request = readClientChangeSlot(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x17 change slot unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const label = `0x17 ${describeClientChangeSlot(request)}`;
+    // The record's item block is what the login server handed over, so a write here is a write to the
+    // character (ADR-017). A character without one gets an empty block rather than a crash: the
+    // session would have nothing to move anyway.
+    if (session.character.items === undefined) session.character.items = emptyCharacterItems();
+    const outcome = applyChangeSlot(session.character.items, request);
+    if (outcome.kind === "failed") {
+      session.send(encodeInventoryChange([]));
+      this.options.log?.(`game: ${label} by "${session.name}" refused (${outcome.reason})`);
+      return;
+    }
+    session.send(encodeInventoryChange(outcome.changes));
+    if (!outcome.lookChanged) {
+      this.options.log?.(`game: ${label} by "${session.name}"`);
+      return;
+    }
+    // The field's copy first: a player who enters *after* this has to be drawn with the new equip,
+    // and `enterPacket` reads the member's array.
+    session.avatarItems = avatarItemsOf(session.character);
+    session.instance.broadcast(
+      encodeUserLook({ characterId: session.characterId, avatarItems: session.avatarItems }),
+      session.characterId,
+    );
+    this.options.log?.(
+      `game: ${label} by "${session.name}" - look changed, ${session.avatarItems.length} item(s) sent to ` +
+        `the rest of map ${session.instance.mapId}`,
+    );
+  }
+
+  /**
    * The player used an item out of the USE tab: `0x18` for the 200/201/202 families (potions and
    * food) and `0x19` for 203 (the 귀환 주문서 line, `spec/moveTo`). FINDINGS 4.34, `game/items.ts`.
    *
@@ -1820,6 +1882,12 @@ export class GameEntryServer {
         // A swing is the other packet this server acts on: it is what moves a mob's HP here.
         if (session !== undefined && ATTACK_OPCODES.includes(opcode)) {
           this.applyAttack(session, event.plain);
+          continue;
+        }
+        // A drag in the inventory window: an equip, an unequip, or a move between slots. The window
+        // follows the `0x0B` this answers with, and the field hears a `0x28` when the worn set moved.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.changeSlot) {
+          this.handleChangeSlot(session, event.plain);
           continue;
         }
         // Using a portal: `0x0D` with the name of the portal under the cursor, answered with the

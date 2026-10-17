@@ -32,6 +32,7 @@ import {
   INTERACT_KIND_REVIVE,
   USER_EFFECT_LEVEL_UP,
   encodeClientAttack,
+  encodeClientChangeSlot,
   encodeClientChat,
   encodeClientStatReport,
   encodeClientUseItem,
@@ -43,6 +44,7 @@ import {
   USER_REQUEST_KIND,
   readSetField,
   readUserChat,
+  readUserLook,
   readUserFindAnswer,
   readUserWhisperAnswer,
   readUserEffect,
@@ -84,7 +86,7 @@ import {
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
-import { nonEquipSlot } from "../src/protocol/itemslot.ts";
+import { equipSlot, nonEquipSlot } from "../src/protocol/itemslot.ts";
 import {
   QUEST_REPLY_OPCODE,
   QUEST_TALK_OPCODE,
@@ -1752,6 +1754,119 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
  * observer's `0x24` wants the item id. The server has a record of that slot - the shop put the pile
  * there - so it relays the id; the two opcodes without a slot send the neutral 0.
  */
+/**
+ * A drag in the inventory window: c2s `0x17` (FINDINGS 4.34.1). The client moves nothing itself, so
+ * the two things worth pinning are its two answers - the `0x0B` that moves the item in this player's
+ * own window, and the `0x28` that puts it on everybody else's screen.
+ */
+test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 500, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [],
+    // Standing monsters: this test counts packets by opcode, and a walking one would only add noise.
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x99887766, clientRecvSeed: 0x55443322 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  // The cap is in the bag, not on the head: both the window and the avatar have something to change.
+  const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, startingCharacterItems());
+  heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: heroRecord }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
+  assert.deepEqual(aboutHero.avatarItems, [DEFAULT_HAIR_ID], "nothing on the head yet - the cap is in the bag");
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // A double-click on the cap: the four fields of `sub_4636B0` - tab 1, slot 2, the part its caller
+  // derived from the item id (1002000 -> cap -> 1, written the way a worn slot is written: negative).
+  const doubleClick = encodeClientChangeSlot({ tab: INVENTORY_TAB.equip, fromSlot: 2, toSlot: -1, count: -1 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: doubleClick.slice(1) });
+
+  // The wearer's own window: out of the tab slot, into the worn slot of part 1 - and nothing else,
+  // because the client's inventory only ever changes on `0x0B` (FINDINGS 4.6).
+  const heroSaw = await hero.takeOpcode(INVENTORY_OPCODE);
+  const change = readInventoryChange(new PacketReader(heroSaw[heroSaw.length - 1]!, 1));
+  assert.deepEqual(
+    change.changes.map((entry) => [entry.op, entry.inventory, entry.slot]),
+    [
+      [INVENTORY_OP.put, INVENTORY_TAB.equip, -1],
+      [INVENTORY_OP.clear, INVENTORY_TAB.equip, 2],
+    ],
+    "the cap is put at the negative slot - the worn item itself - and the old slot is cleared",
+  );
+  assert.equal(
+    change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
+    1002000,
+    "the put carries the item that was moved",
+  );
+  assert.equal(change.result, 1, "the result byte is the client's own timer flag, not a per-entry status");
+
+  // Everybody else: a `0x28` with the list a `0x1C` would have carried, and the face left alone
+  // (flags bit 0 clear, so no face word is on the wire at all - FINDINGS 4.11.8).
+  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userLook);
+  const look = readUserLook(new PacketReader(altSaw[altSaw.length - 1]!, 1));
+  assert.deepEqual(
+    [look.characterId, look.face, look.avatarItems],
+    [7, undefined, [DEFAULT_HAIR_ID, 1002000]],
+    "0x28 names the user, leaves the face and replaces the id list",
+  );
+  assert.ok(
+    log.some((line) => line.includes("tab 1 slot 2 -> worn 1 count=-1") && line.includes("look changed")),
+    log.join("\n"),
+  );
+  // The wearer is not sent their own look: their client draws them from the record it holds, the rule
+  // `0x27` and the attack relays follow too.
+  assert.deepEqual(
+    (await hero.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+    [],
+    "no 0x28 for the player who equipped it",
+  );
+
+  // The record itself moved, not a copy of it: this is the object the account table holds, so the
+  // worn cap is what a relog reads back (ADR-017).
+  assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000, "part 1 of the worn group is the cap");
+  assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
+
+  // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
+  // an empty one. `sub_55ACB0` arms the client's one-request gate (FINDINGS 4.6) and only a `0x0B`
+  // clears it, so a refusal that stayed silent would freeze the whole window.
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: doubleClick.slice(1) });
+  const refused = await hero.takeOpcode(INVENTORY_OPCODE);
+  const empty = readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1));
+  assert.deepEqual([empty.result, empty.changes], [1, []], "an empty 0x0B is this server's refusal");
+  assert.ok(log.some((line) => line.includes("refused (emptySlot)")), log.join("\n"));
+  assert.deepEqual(
+    (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+    [],
+    "and a refused drag tells the map nothing",
+  );
+});
+
 test("a shot goes out as 0x24 with the projectile id, and a cast as 0x25", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
   const handoffs = new HandoffRegistry();

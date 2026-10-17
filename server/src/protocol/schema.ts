@@ -481,6 +481,31 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: field.FIELD_OPCODE.userLook,
+    direction: "s2c",
+    stage: "field",
+    name: "userLook",
+    status: "partial",
+    evidence:
+      "FINDINGS 4.11.8 (CUserPool 0x28 -> the range dispatcher's case '(' -> sub_5221A0, which walks the flags word, " +
+      "files an id list into the 15-slot look block with sub_45F340 and installs it with sub_508260/sub_508290 - " +
+      "the same pair a joining player's 0x1C ends in). What is not located: the two words flags 0x4 / 0x8 carry.",
+    codecs: ["readUserLook", "encodeUserLook", "describeUserLook"],
+    fields: [
+      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      { name: "flags", type: "u32", note: "0x1 = a face word follows, 0x4 / 0x8 = a word the client reads and drops" },
+      { name: "face", type: "u32", note: "only with flag 0x1; stored at CUser+68 (sub_508260)" },
+      { name: "unknownA", type: "u32", note: "only with flag 0x4; read and never stored" },
+      { name: "unknownB", type: "u32", note: "only with flag 0x8; read and never stored" },
+      { name: "hasAvatar", type: "u8", note: "0 = the client keeps the look it has (sub_5221A0's memcpy branch)" },
+      {
+        name: "avatarItems",
+        type: "u32[] until 0",
+        note: "only when hasAvatar is non-zero; hair + worn equips, filed by part code (the 101xxxx entry becomes CUser+72)",
+      },
+    ],
+  },
+  {
     opcode: field.FIELD_OPCODE.userAttack,
     direction: "s2c",
     stage: "field",
@@ -792,6 +817,29 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "hpDelta", type: "s16", note: "signed change of the record's hp; negative is damage (sub_5114A0 sends -damage)" },
       { name: "mpDelta", type: "s16", note: "signed change of the record's mp; the map's regeneration sends +3 (sub_558950)" },
       { name: "flag", type: "u8", note: "role not located: 0 from the damage path, 1 from an item-driven recovery" },
+    ],
+  },
+  {
+    opcode: field.CLIENT_FIELD_OPCODE.changeSlot,
+    direction: "c2s",
+    stage: "field",
+    name: "changeSlot",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.36 (sub_55ACB0 packs its four arguments in this order - `push $0x17` at .text:0055AD01, " +
+      ".c 351477 - and every caller is a drag in the window: sub_4636B0 equips by double-click with the part its " +
+      "caller derived from the item id, sub_4630A0 is a drag inside the equip tab, sub_463A50 a drag in any tab, " +
+      "sub_463BE0 the throw-away prompt)",
+    codecs: ["readClientChangeSlot", "encodeClientChangeSlot", "describeClientChangeSlot"],
+    fields: [
+      { name: "tab", type: "u8", note: "1 = equip, 2 = use, 3 = etc, 4 = cash (sub_463DF0 insists on 2 for a USE item)" },
+      {
+        name: "fromSlot",
+        type: "s16",
+        note: "on tab 1 a negative number is the worn item: -1 cap .. -11 weapon (the client's cursor switch allows 111xxxx at -12/-13; this server refuses it)",
+      },
+      { name: "toSlot", type: "s16", note: "0 = the ground (sub_463BE0); otherwise where the item goes" },
+      { name: "count", type: "s16", note: "-1 = the whole slot (all three move senders); a throw-away carries the number to drop" },
     ],
   },
   {

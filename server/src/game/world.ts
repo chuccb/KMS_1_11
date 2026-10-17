@@ -77,8 +77,12 @@ export interface FieldMember {
   /**
    * The item ids the client draws the avatar from (`0x1C`'s list, terminated by 0 on the wire).
    * Zero never appears in it: the client stops reading at the first 0 (`sub_45F340`).
+   *
+   * Mutable, and *not* owned by the field: a player who equips something replaces it (`0x28`,
+   * `handleChangeSlot`), and the field reads it whenever it builds a `0x1C` - for the players who are
+   * already in the map as well as for a player who joins later.
    */
-  readonly avatarItems: number[];
+  avatarItems: number[];
   /** Where the player is. The field fills it in at spawn and updates it on every `0x22` it sends. */
   at?: FieldPosition;
   send(packet: Uint8Array): void;

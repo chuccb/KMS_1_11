@@ -75,6 +75,13 @@ import {
   readUserEmotion,
   describeUserEmotion,
   encodeUserAttack,
+  encodeClientChangeSlot,
+  readClientChangeSlot,
+  describeClientChangeSlot,
+  encodeUserLook,
+  readUserLook,
+  describeUserLook,
+  LOOK_FLAG,
   readUserAttack,
   describeUserAttack,
   type UserAttack,
@@ -884,4 +891,77 @@ test("a 0x23 target record with mobId 0 is refused, and hits must match the head
   );
   const many = Array.from({ length: 16 }, (_, i) => ({ mobId: i + 1, hitAnimation: 0, damages: [1, 2] }));
   assert.throws(() => encodeUserAttack({ ...base, targets: many }), /at most 15 targets/);
+});
+
+/**
+ * `0x17`: the inventory window moved something (FINDINGS 4.34.1). One sender (`sub_55ACB0`) packs its
+ * four arguments in order, so the golden bytes below are simply those arguments - the interesting half
+ * is the two conventions they carry: a negative slot on tab 1 is a *worn* item, and `toSlot = 0` is the
+ * ground. The client itself moves nothing: the window follows the `0x0B` the server answers with.
+ */
+test("change slot (0x17) is the window's four fields, signed and byte exact", () => {
+  assert.equal(CLIENT_FIELD_OPCODE.changeSlot, 0x17);
+  // What `sub_4636B0` sends for a double-clicked cap: tab 1, the equip tab's slot 2, the part the
+  // caller derived from the item id (1002000 -> cap -> 1, as a negative slot), and the literal -1.
+  const equip = { tab: 1, fromSlot: 2, toSlot: -1, count: -1 };
+  const bytes = encodeClientChangeSlot(equip);
+  assert.equal(toHex(bytes), "17010200ffffffff");
+  assert.deepEqual(readClientChangeSlot(new PacketReader(bytes, 1)), equip);
+  assert.equal(describeClientChangeSlot(equip), "tab 1 slot 2 -> worn 1 count=-1");
+  assert.equal(describeClientFieldPacket(bytes), "0x17 change slot: tab 1 slot 2 -> worn 1 count=-1");
+
+  // What `sub_463BE0` sends after "몇 개나 버리시겠습니까?": the ground is slot 0 and the count is how
+  // many of the stack to throw away.
+  const drop = { tab: 3, fromSlot: 4, toSlot: 0, count: 5 };
+  const dropBytes = encodeClientChangeSlot(drop);
+  assert.equal(toHex(dropBytes), "1703040000000500");
+  assert.deepEqual(readClientChangeSlot(new PacketReader(dropBytes, 1)), drop);
+  assert.equal(describeClientChangeSlot(drop), "tab 3 slot 4 -> ground count=5");
+  assert.equal(describeClientFieldPacket(dropBytes), "0x17 change slot: tab 3 slot 4 -> ground count=5");
+});
+
+/**
+ * `0x28`: one user's look, for everybody else (FINDINGS 4.11.8). `sub_5221A0` reads the flags word
+ * first and then only the words the bits announce - which is why an absent field is *no bytes* rather
+ * than a zero: writing the face unconditionally would shift the id list by four.
+ */
+test("user look (0x28) is a flags word, a face, and a keep-or-replace id list", () => {
+  assert.equal(FIELD_OPCODE.userLook, 0x28);
+  assert.deepEqual(LOOK_FLAG, { face: 0x1, unknown4: 0x4, unknown8: 0x8 });
+
+  // The form an equip sends: no face (nothing about the head changed), and the new list.
+  const worn = { characterId: 44, avatarItems: [30000, 1002000] };
+  const bytes = encodeUserLook(worn);
+  assert.equal(toHex(bytes), "282c000000000000000130750000104a0f0000000000");
+  assert.deepEqual(readUserLook(new PacketReader(bytes, 1)), worn);
+  assert.equal(describeUserLook(worn), "characterId=44 avatar=2 items [30000,1002000]");
+  assert.equal(
+    describeFieldPacket(bytes),
+    "0x28 CUserPool(user look): characterId=44 avatar=2 items [30000,1002000]",
+  );
+
+  // A face with no list is legal and partial: the `u8` is 0, which is `sub_5221A0`'s `memcpy` branch -
+  // the client keeps the worn items it already has and only the head changes.
+  const faceOnly = { characterId: 44, face: 20000 };
+  assert.equal(toHex(encodeUserLook(faceOnly)), "282c00000001000000204e000000");
+  assert.deepEqual(readUserLook(new PacketReader(encodeUserLook(faceOnly), 1)), faceOnly);
+  assert.equal(describeUserLook(faceOnly), "characterId=44 face=20000 avatar=keep");
+
+  // An empty list is not the same thing as "keep": the `u8` still says a list follows, so a client
+  // with this packet is drawn with a bare look (which is what a `0x1C` with no items means too).
+  const bare = { characterId: 7, avatarItems: [] };
+  assert.deepEqual(readUserLook(new PacketReader(encodeUserLook(bare), 1)), bare);
+  assert.equal(describeUserLook(bare), "characterId=7 avatar=0 items []");
+
+  // The two words the client reads and drops: they only ever go out when a caller learned one from a
+  // real packet, and their bits come from the same word as the face's.
+  const withUnknowns = { characterId: 7, unknownA: 1, unknownB: 2, avatarItems: [30000] };
+  const unknownBytes = encodeUserLook(withUnknowns);
+  assert.equal(toHex(unknownBytes), "28070000000c0000000100000002000000013075000000000000");
+  assert.deepEqual(readUserLook(new PacketReader(unknownBytes, 1)), withUnknowns);
+  assert.equal(describeUserLook(withUnknowns), "characterId=7 unknownA=1 unknownB=2 avatar=1 items [30000]");
+
+  // A 0 in the list would end it early, so the writer refuses instead of silently truncating.
+  assert.throws(() => encodeUserLook({ characterId: 1, avatarItems: [30000, 0] }), /ends at the first 0/);
+  assert.throws(() => encodeUserLook({ characterId: 1, avatarItems: [0] }), /ends at the first 0/);
 });
