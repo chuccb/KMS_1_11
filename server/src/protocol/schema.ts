@@ -420,7 +420,8 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "trade",
     status: "skeleton",
-    evidence: "FINDINGS 4.13 (/교환, sub_471A40, and the trade dialogs)",
+    evidence:
+      "FINDINGS 4.39 (not trade-only: one shared window request with seven senders; /교환 is [u8 0][u8 1][u32 target], the miniroom dialog's own types are still unread)",
     codecs: [],
     fields: [],
   },
