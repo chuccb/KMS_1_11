@@ -22,7 +22,15 @@ import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import type { ItemCatalog } from "../src/game/iteminfo.ts";
 import { grantItem } from "../src/game/rewards.ts";
+import { artProviderOf } from "../src/game/art.ts";
+import { WzArchive } from "../src/wz/archive.ts";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ShopDef, ShopKeeper } from "../src/game/shops.ts";
+
+/** The shipped archive, when it is checked out: the art endpoints need real canvases. */
+const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
+const ART_ARCHIVE: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
 
 const STUB_MAP: MapData = {
   id: 1000000,
@@ -275,6 +283,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     gameHost: "127.0.0.1",
     mapProvider,
     itemCatalog: STUB_CATALOG,
+    ...(ART_ARCHIVE !== null ? { art: artProviderOf(ART_ARCHIVE) } : {}),
   });
   t.after(async () => {
     await web.close();
@@ -333,6 +342,63 @@ test("the page, the map endpoint and the traversal guard are all served", { time
   }
   const health = await fetch(`http://127.0.0.1:${world.webPort}/healthz`);
   assert.equal(health.status, 200);
+});
+
+const artTest = ART_ARCHIVE === null ? test.skip : test;
+artTest("the map's art, its canvases and a composed avatar are served", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t);
+  // The stub maps are not in Data.wz, so the art endpoint answers for a real one instead - the
+  // stub `mapProvider` still owns `/api/map/1000000`, which is what the page asks first.
+  const art = await fetch(`http://127.0.0.1:${world.webPort}/api/map/100000000/art`);
+  assert.equal(art.status, 200, "Henesys is in the archive every shipped session reads");
+  const body = (await art.json()) as {
+    backs: { path: string; ox: number; oy: number; type: number }[];
+    sprites: { layer: number; z: number; frames: { path: string }[] }[];
+    bounds: { left: number; right: number };
+  };
+  assert.ok(body.backs.length > 0);
+  assert.ok(body.sprites.length > 0);
+  assert.ok(body.sprites.every((sprite) => Number.isInteger(sprite.layer) && sprite.layer >= 0 && sprite.layer <= 7));
+  assert.ok(body.bounds.right > body.bounds.left);
+
+  const back = body.backs[0]!;
+  const png = await fetch(`http://127.0.0.1:${world.webPort}/api/png/${encodeURIComponent(back.path)}`);
+  assert.equal(png.status, 200);
+  assert.equal(png.headers.get("content-type"), "image/png");
+  const bytes = new Uint8Array(await png.arrayBuffer());
+  assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  // Only the art folders, and only real paths: `..` and a server file are refused.
+  for (const path of [
+    `/api/png/${encodeURIComponent("../Data.wz")}`,
+    `/api/png/${encodeURIComponent("server/package.json")}`,
+  ]) {
+    const refused = await fetch(`http://127.0.0.1:${world.webPort}${path}`);
+    assert.equal(refused.status, 404, `${path} must not be served`);
+  }
+  assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/png/${encodeURIComponent("Map/Tile/nope.img/x/0")}`)).status, 404);
+
+  const avatar = await fetch(
+    `http://127.0.0.1:${world.webPort}/api/avatar.png?face=20000&hair=30000&items=1040001&stance=stand1&frame=0`,
+  );
+  assert.equal(avatar.status, 200);
+  assert.equal(avatar.headers.get("content-type"), "image/png");
+  // The offset of the picture relative to the character's feet is a header, because the pixels of a
+  // PNG cannot carry it.
+  assert.ok(Number(avatar.headers.get("x-frame-dx")) < 0);
+  assert.ok(Number(avatar.headers.get("x-frame-dy")) < 0);
+
+  const npc = await fetch(`http://127.0.0.1:${world.webPort}/api/npc/1010100`);
+  assert.equal(npc.status, 200);
+  const npcBody = (await npc.json()) as { actions: Record<string, { path: string; ox: number }[]> };
+  assert.ok((npcBody.actions.stand ?? []).length > 0);
+
+  const mob = await fetch(`http://127.0.0.1:${world.webPort}/api/mob/100100`);
+  assert.equal(mob.status, 200);
+  const mobBody = (await mob.json()) as { actions: Record<string, unknown[]> };
+  assert.ok((mobBody.actions.move ?? []).length >= 2, "a snail's walk is an animation");
+  const missingMob = await fetch(`http://127.0.0.1:${world.webPort}/api/mob/1234567`);
+  assert.equal(missingMob.status, 404, "a template the archive does not have is a 404, not an empty list");
 });
 
 test("a browser logs in, enters the field, talks and walks", { timeout: 20000 }, async (t) => {

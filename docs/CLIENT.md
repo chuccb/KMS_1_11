@@ -28,9 +28,10 @@ node src/cli.ts serve \
 
 在同一個伺服器上再開一個分頁、用 `alt:alt` 登入，兩個角色就會在同一個地圖看到彼此。
 
-看到藍色的菱形就是傳送門：滑鼠移上去會亮一圈、游標變成手指，**點一下**就換圖（頁面送 c2s `0x0D`，
+看到 `MapHelper` 的傳送門動畫就是門：滑鼠移上去游標變成手指，**點一下**就換圖（頁面送 c2s `0x0D`，
 伺服器用它自己的地圖資料查出目的地再送 `0x16`）。目的地永遠不是瀏覽器決定的，所以改頁面也指不動
-別張圖；`sp` 這種沒有身體的出生點不會被當成可點的門。
+別張圖；`sp` 這種沒有身體的出生點（`pt == 0`）不會被當成可點的門——但它的點擊框還在，方便你在
+沒有動畫的圖上找到出口。
 
 聊天框認得一個指令語法（**這是頁面自己的寫法**，2003 client 用的是 `/귓속말`／`/헉추적`，指令字串
 從來不上線路——它自己翻成 `0x23` 的 kind）：
@@ -59,21 +60,37 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 
 ## 畫面上有什麼
 
+畫面就是 2003 client 的 **800×600** 視野（`#view` 的內部尺寸固定，CSS 只把它等比放大、置中，
+`image-rendering: pixelated`）。所有圖片都是伺服器直接從 `Data.wz` 解出來的 PNG，頁面不做任何
+「用色塊代表角色」的替代。
+
 | 元素 | 來源 | 誠實說明 |
 |---|---|---|
-| 腳踏點（褐色線） | `GET /api/map/<id>` ← `MapData.footholdSegments` | 就是玩家能站的地面；**沒有**背景／物件／圖塊圖層 |
-| 傳送門（藍菱形＋名字） | 同上 ← `MapData.portals` | `tm > 0` 才是會換圖的門；名字是 WZ 的 `pn`；**滑鼠移上去會亮一圈、點下去就換圖** |
-| 自己（綠色）與其他玩家（金色） | `0x16`／`0x1C`／`0x22` | 身體與頭是**色塊**，不是 `Character/*` 的 sprite |
-| 怪物（橘色橢圓＋模板 id） | `0x2F`／`0x33`／`0x30`／`0x31` | 位置是**伺服器**的巡邏，不是 client AI |
-| NPC（綠色方塊＋模板 id） | `0x39`／`0x3A` | 站著不動（`0x3B` 的走動沒有畫） |
+| 背景（Back） | `GET /api/map/<id>/art` 的 `backs[]` ＋ `/api/png/<path>` | 依 WZ 的 `bS/no/x/y/rx/ry/type/cx/cy/a` 畫；`type` 1／3／4／6 橫向鋪、2／3／5／7 縱向鋪，`rx/ry` 是視差百分比，`cx/cy` 覆寫鋪貼間距 |
+| 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色畫在 layer 0–2 之後、layer 3 之前（`CHARACTER_LAYER`） |
+| 傳送門 | `MapHelper.img/portal/game/pv` 的動畫 | 只畫 `pt == 2` 的可見傳送門（`pt == 0` 是出生點、`pt == 1` 是隱藏通道，原版都不畫） |
+| 自己與其他玩家 | `/api/avatar.png?face&hair&items&stance&frame&flip` | 伺服器用 `Character/*` 的 canvas 依**身體的錨點**（`navel`／`neck`／`hand`／`brow`）組出一張 PNG，回傳的 `x-frame-dx`／`x-frame-dy` 是它相對腳底的位置 |
+| 怪物 | `/api/mob/<id>` ＋ `/api/png/<path>` | `move`／`stand`／`hit` 動作表，延遲是 WZ 的 `delay`；朝向來自 `0x2F`／`0x30`（`facing` 0＝右、1＝左） |
+| NPC | `/api/npc/<id>` ＋ `/api/png/<path>` | 站著不動（`0x3B` 的走動沒有畫）；朝向是地圖 `life/f` |
+| 名字與表情 | `0x16`／`0x1C`／`0x27` | 名字是白字黑邊；表情就是**臉**——`0x27` 的值換成 `Face/<id>.img` 的九個表情資料夾之一（`/api/avatar.png?...&emotion=smile`），跟 2003 client 一樣按下去先換自己的臉再送封包 |
 | HP／MP／EXP／mesos／地圖 | `0x16` 的角色紀錄 ＋ `0x0D` 的差異包 | 數字直接來自伺服器 |
 | 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來） |
-| 表情列（七顆按鈕） | c2s `0x13` → 別人收 `0x27`；自己那一張是頁面自己套用的 | 名字用的是 client 自己的表（`EMOTION_NAMES`），臉本身還沒畫（沒有 `Character/Face`） |
-| 新角色 | `0x04`（名字檢查）＋`0x05`（建立） | 外觀十個字固定，等於 `scripts/whisper_probe.mjs` 的那組 |
 | 商店視窗（點 NPC） | `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 買成功時是 `0x4B`＋`0x0B`＋`0x0D`；賣出沒有控制項 |
 | NPC 對話框 | `0x47` 的 `say` 台詞（`info/speak` 原文） | 「確定」送 `0x15` answer 1（下一句），「關閉」送 0（結束） |
 | 背包面板（`I`） | `0x16` 的角色紀錄 ＋ 每個 `0x0B` | 位置與數量是線路的；名字／價格／描述／圖示是 `/api/item/<id>` 從 `Data.wz` 讀的（ADR-037） |
 | 右上「日誌」 | 所有事件 | 沒實作的封包會以 `unhandled packet 0x..` 出現 |
+
+### 畫圖用到的端點
+
+| 端點 | 回什麼 |
+|---|---|
+| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
+| `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |
+| `GET /api/npc/<id>`、`GET /api/mob/<id>` | `{templateId, actions}`，`actions` 是 `move`／`stand`／`hit` 各自的 `frames[]`；WZ 沒有的模板是 404 |
+
+這些端點都只**讀** `Data.wz`；`--data` 沒給就沒有圖，頁面記一行 `no art` 並只畫幾何（`/api/map/<id>`
+仍然可用）。
 
 ## 操作的封包對照
 
@@ -149,8 +166,9 @@ error        { message }
 - **背包的拖放與裝備**：面板只**看**背包（與雙擊用消耗品）。拖放是 `0x17`、穿戴是它的負 slot
   目的地，頁面還沒接——所以 worn 欄只會在伺服器送負 slot 時才有東西。
 - **卷軸（204）**：`0x1A` 需要點一件裝備當目標，面板沒有拖放就沒有目標，頁面不送它。
-- **WZ 圖層與 sprite**：`Map/Map/*.img` 的 Back／Obj／Tile 與 `Character/*` 都還沒有畫；那是下一個
-  切片（也是 Phase 1 資產管線的出口）。
+- **小地圖／天氣／霧**：`Map/MapHelper.img` 的 `mark`、`weather` 讀得到，但頁面還沒有小地圖與天氣層。
+- **角色動作**：只有 `stand1`／`walk1`（移動與否決定），沒有攻擊、跳躍、繩索與坐下——那些動作的
+  canvas 都在，等有對應的封包再畫。
 - **實體碰撞**：走過去不會撞牆、不會掉下去，位置由瀏覽器自己算。傳送門是**用點的**（見下），
   不是走上去觸發——那正好是 2003 client 自己的 `0x0D` 觸發方式（ADR-035）。
 
@@ -170,7 +188,11 @@ node --test test/websocket.test.ts test/webclient.test.ts
 以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
 兩句台詞用 `0x15` 走完）。
 
-頁面的**繪圖**沒有自動測試——它需要眼睛。這一頁就是那個「眼睛」的說明書。
+頁面的**繪圖**本身仍然只有眼睛能驗，但把它切開的那幾層有測試：`test/art.test.ts`（17 則）釘住
+compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM` 的深度、背景的 origin 與
+「缺 canvas 就跳過」、`Character/*` 的槽位對應、avatar 的錨點合成（用真的 `Data.wz` 驗尺寸與
+`dx/dy`），以及 NPC／mob 的圖檔名與 frame 表；`test/webclient.test.ts` 另外對**真的** HTTP 伺服器
+驗 `/api/map/<id>/art`、`/api/png`（含 `..` 的拒絕）、`/api/avatar.png` 的標頭、`/api/npc`、`/api/mob`。
 
 ## 預覽環境
 

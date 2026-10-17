@@ -25,6 +25,8 @@ import { startWebClient } from "./net/webclient.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { consumeSpecProvider } from "./game/items.ts";
 import { itemCatalogOf, type ItemCatalog } from "./game/iteminfo.ts";
+import { artProviderOf } from "./game/art.ts";
+import type { ArtProvider } from "./net/webclient.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
@@ -311,6 +313,7 @@ async function runServe(rest: string[]): Promise<number> {
   let shops: ShopKeeper | undefined;
   let consumeSpec: ReturnType<typeof consumeSpecProvider> | undefined;
   let itemCatalog: ItemCatalog | undefined;
+  let art: ArtProvider | undefined;
   const shopWarnings: string[] = [];
   if (dataPath !== undefined) {
     try {
@@ -322,6 +325,7 @@ async function runServe(rest: string[]): Promise<number> {
       shops = shopKeeper(archive);
       consumeSpec = consumeSpecProvider(archive);
       itemCatalog = itemCatalogOf(archive);
+      art = artProviderOf(archive);
       // A shop row without a price cannot be sent (the client prints it), so it is collected here
       // and reported once the logger exists.
       for (const shop of SHOPS) {
@@ -455,6 +459,7 @@ async function runServe(rest: string[]): Promise<number> {
         gameHost: "127.0.0.1",
         ...(mapProvider !== undefined ? { mapProvider } : {}),
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
+        ...(art !== undefined ? { art } : {}),
         ...(log ? { log } : {}),
       });
     } catch (error) {

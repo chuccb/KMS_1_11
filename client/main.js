@@ -310,16 +310,20 @@ function handle(message) {
     case "user-move": {
       if (selfView && message.characterId === selfView.characterId) {
         if (self) {
+          if (message.x !== self.x) self.facing = message.x < self.x ? 1 : 0;
           self.x = message.x;
           self.y = message.y;
+          self.movedAt = performance.now();
         }
         return;
       }
       const user = users.get(String(message.characterId));
       if (user) {
+        if (message.x !== user.x) user.facing = message.x < user.x ? 1 : 0;
         user.x = message.x;
         user.y = message.y;
         user.action = message.action;
+        user.movedAt = performance.now();
       }
       return;
     }
@@ -330,6 +334,7 @@ function handle(message) {
       // what it just sent - the same reason `user-move` for `self` is applied without an event.
       if (selfView && message.characterId === selfView.characterId) {
         selfEmotion = { value: message.emotion, until };
+        selfView.emotion = selfEmotion;
         return;
       }
       const user = users.get(String(message.characterId));
@@ -389,8 +394,12 @@ function handle(message) {
     case "mob-move": {
       const mob = mobs.get(String(message.mobId));
       if (mob) {
+        // A mob that is walking faces the way it goes; the frame loop uses that to pick the walk
+        // animation, which is what the 2003 client does when it plays the 0x33 leg.
+        if (message.x !== mob.x) mob.facing = message.x < mob.x ? 1 : 0;
         mob.x = message.x;
         mob.y = message.y;
+        mob.movedAt = performance.now();
       }
       return;
     }
@@ -457,6 +466,20 @@ async function loadMap(mapId) {
     map = await response.json();
     mapNames.set(map.id, map.name);
     hoveredPortal = undefined;
+    // The map reset: the art of the previous map must not be drawn under the new one.
+    mapArt = undefined;
+    artImages.clear();
+    avatarFrames.clear();
+    npcArts.clear();
+    mobArts.clear();
+    artMissing.clear();
+    if (cameraMapId !== mapId) {
+      cameraMapId = mapId;
+      camera.ready = false;
+    }
+    void loadMapArt(mapId);
+    for (const npc of map.npcs ?? []) ensureEntityArt("npc", npc.templateId);
+    for (const mob of map.mobs ?? []) ensureEntityArt("mob", mob.templateId);
     if (self && selfView) {
       // Where the server put this character: `0x16` carries no position, and the 2003 client spawns
       // on the map's `sp` portal (the same portal `FieldInstance` uses). The first foothold is only a
@@ -474,6 +497,34 @@ async function loadMap(mapId) {
   }
 }
 
+/**
+ * The map's pictures: the background stack, every tile and object with its position and draw depth,
+ * and the camera's own rectangle. The page starts drawing as soon as the JSON lands; a canvas whose
+ * PNG is still on the wire is skipped for that frame and appears on the next.
+ */
+async function loadMapArt(mapId) {
+  try {
+    const response = await fetch(`/api/map/${mapId}/art`);
+    if (!response.ok) {
+      logLine(`map ${mapId}: no art (${response.status}) - drawing the geometry only`);
+      return;
+    }
+    const art = await response.json();
+    if (map?.id !== mapId) return;
+    mapArt = art;
+    camera.ready = false;
+    for (const back of art.backs) artImage(back.path);
+    for (const frame of art.portalFrames ?? []) artImage(frame.path);
+    // Only the canvases the map actually places: a 1000-sprite map is a few hundred distinct files.
+    const wanted = new Set();
+    for (const sprite of art.sprites) for (const frame of sprite.frames) wanted.add(frame.path);
+    for (const path of wanted) artImage(path);
+    logLine(`art ${mapId}: ${art.backs.length} back(s), ${art.sprites.length} sprite(s)`);
+  } catch (error) {
+    logLine(`art ${mapId}: ${String(error)}`);
+  }
+}
+
 // ---------------------------------------------------------------- portals
 
 /** The diamond is 14 px tall and its name sits 20 px below it; the click box is that plus slack. */
@@ -482,6 +533,19 @@ const PORTAL_BOX = { left: 18, right: 18, up: 11, down: 26 };
 const PORTAL_GUARD_MS = 600;
 /** `RETURN_MAP_NONE` (`game/map.ts`): a portal that leads to no map at all. */
 const RETURN_MAP_NONE = 999999999;
+
+/**
+ * A pointer event as a point of the 800x600 view (the canvas is scaled to the window by CSS).
+ *
+ * @param {MouseEvent} event
+ */
+function viewPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((event.clientX - rect.left) / Math.max(1, rect.width)) * VIEW_W,
+    y: ((event.clientY - rect.top) / Math.max(1, rect.height)) * VIEW_H,
+  };
+}
 
 /**
  * The portal under a screen point.
@@ -495,10 +559,8 @@ const RETURN_MAP_NONE = 999999999;
  */
 function portalAt(clientX, clientY) {
   if (!map || !self) return undefined;
-  const cameraX = self.x - window.innerWidth * 0.45;
-  const cameraY = self.y - window.innerHeight * 0.62;
-  const x = clientX + cameraX;
-  const y = clientY + cameraY;
+  const x = clientX + camera.x;
+  const y = clientY + camera.y;
   let found;
   let best = Infinity;
   for (const portal of map.portals) {
@@ -519,8 +581,12 @@ function portalAt(clientX, clientY) {
 
 // ---------------------------------------------------------------- NPCs
 
-/** `drawNpc` draws an 18x34 box from `y-34` to `y`; the click box adds a few pixels of slack. */
-const NPC_BOX = { left: 12, right: 12, up: 38, down: 4 };
+/**
+ * The click box around an NPC: wide enough for the widest shipped `Npc/*` sprite (~70 px) and tall
+ * enough for the tallest, measured up from the feet. It is only a click target - the picture itself
+ * comes from the archive.
+ */
+const NPC_BOX = { left: 36, right: 36, up: 96, down: 8 };
 
 /**
  * The NPC under a screen point, or undefined.
@@ -531,10 +597,8 @@ const NPC_BOX = { left: 12, right: 12, up: 38, down: 4 };
  */
 function npcAt(clientX, clientY) {
   if (!self) return undefined;
-  const cameraX = self.x - window.innerWidth * 0.45;
-  const cameraY = self.y - window.innerHeight * 0.62;
-  const x = clientX + cameraX;
-  const y = clientY + cameraY;
+  const x = clientX + camera.x;
+  const y = clientY + camera.y;
   let found;
   let best = Infinity;
   for (const npc of npcs.values()) {
@@ -552,22 +616,24 @@ function npcAt(clientX, clientY) {
 }
 
 canvas.addEventListener("mousemove", (event) => {
-  hoveredPortal = portalAt(event.clientX, event.clientY);
-  const npc = npcAt(event.clientX, event.clientY);
+  const point = viewPoint(event);
+  hoveredPortal = portalAt(point.x, point.y);
+  const npc = npcAt(point.x, point.y);
   canvas.style.cursor = hoveredPortal || npc ? "pointer" : "default";
 });
 
 canvas.addEventListener("click", (event) => {
   // An NPC first: its box stands on the ground where a door could also be, and the server can only
   // open one window at a time (`0x4A`/`0x47` while another is up is a disconnect in the client).
-  const npc = npcAt(event.clientX, event.clientY);
+  const point = viewPoint(event);
+  const npc = npcAt(point.x, point.y);
   if (npc) {
     if (shop !== undefined || talkingNpc !== undefined) return;
     logLine(`click NPC ${npc.npcId} (template ${npc.templateId})`);
     send({ t: "click", objectId: npc.npcId });
     return;
   }
-  const portal = portalAt(event.clientX, event.clientY);
+  const portal = portalAt(point.x, point.y);
   if (!portal) return;
   const now = performance.now();
   if (now - lastPortalAt < PORTAL_GUARD_MS) return;
@@ -577,189 +643,402 @@ canvas.addEventListener("click", (event) => {
 });
 
 // ---------------------------------------------------------------- rendering
+//
+// The view is the 2003 client's own 800x600, scaled to whatever the window is: every sprite in
+// `Data.wz` is drawn at its own pixel size, so a bigger canvas would zoom the art, not show more of
+// it. `image-rendering: pixelated` (style.css) keeps the scale crisp, like the original's D3D blit.
+//
+// The layers, back to front (`MapleStory.exe.c` `sub_469980`/`sub_46A1C0`/`sub_46A9F0`):
+//
+//   back (front = 0)   the sky, the far hills, the grass banks - each with its own parallax
+//   layer 0..2 tiles   ground and the objects standing on it
+//   characters         NPCs, mobs, other players and you, sorted by y
+//   layer 3 tiles      foreground decorations that draw over the characters
+//   back (front = 1)   the map's foreground sheets
+//
+// The map's own art is served by `/api/map/<id>/art` (positions and draw depths) and
+// `/api/png/<path>` (the canvases); a character is composed on the server (`/api/avatar.png`) from
+// the same `Character/*` images the 2003 client draws.
 
+/** The original client's view size. */
+const VIEW_W = 800;
+const VIEW_H = 600;
+
+/** How long the camera takes to catch up: the 2003 client eases over ~0.2 s, not instantly. */
+const CAMERA_EASE = 0.18;
+
+/** The background image stack of the current map (`/api/map/<id>/art`), or undefined. */
+let mapArt;
+/** `archive path -> { img, ready }`; the page draws a sprite only once its PNG has arrived. */
+const artImages = new Map();
+/** `look|stance|frame|flip -> { img, dx, dy, ready }` avatar frames. */
+const avatarFrames = new Map();
+/** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
+const npcArts = new Map();
+const mobArts = new Map();
+/** Template ids whose art endpoint said 404 - stop asking. */
+const artMissing = new Set();
+/** The camera: world coordinate shown at the top-left of the 800x600 view. */
+let camera = { x: 0, y: 0, ready: false };
+/** The map the view was last set up for, so a re-entry resets the camera. */
+let cameraMapId = 0;
+
+/** Where the camera wants to be: the player at the centre, clamped to the map's `VR` box. */
+function cameraTarget(width = VIEW_W, height = VIEW_H) {
+  const px = self?.x ?? 0;
+  const py = self?.y ?? 0;
+  let x = px - width / 2;
+  let y = py - height / 2;
+  const bounds = mapArt?.bounds;
+  if (bounds) {
+    // The client's own clamp (`sub_469980`): never show past the map's rectangle; if the map is
+    // smaller than the view, centre it instead of sliding it around.
+    if (bounds.right - bounds.left <= width) x = (bounds.left + bounds.right) / 2 - width / 2;
+    else x = Math.max(bounds.left, Math.min(bounds.right - width, x));
+    if (bounds.bottom - bounds.top <= height) y = (bounds.top + bounds.bottom) / 2 - height / 2;
+    else y = Math.max(bounds.top, Math.min(bounds.bottom - height, y));
+  }
+  return { x, y };
+}
+
+/** The canvas fills its box at an integer-friendly scale; the drawing itself stays 800x600. */
 function resize() {
-  const ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(window.innerWidth * ratio);
-  canvas.height = Math.floor(window.innerHeight * ratio);
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  canvas.width = VIEW_W;
+  canvas.height = VIEW_H;
+  const scale = Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H);
+  canvas.style.width = `${Math.floor(VIEW_W * scale)}px`;
+  canvas.style.height = `${Math.floor(VIEW_H * scale)}px`;
+  ctx.imageSmoothingEnabled = false;
 }
 window.addEventListener("resize", resize);
 resize();
 
+/** One PNG of the archive, by its own path; `src` is encoded as a single segment. */
+function artImage(path) {
+  let entry = artImages.get(path);
+  if (entry) return entry;
+  entry = { img: new Image(), ready: false };
+  entry.img.onload = () => {
+    entry.ready = true;
+  };
+  entry.img.onerror = () => {
+    entry.ready = false;
+  };
+  entry.img.src = `/api/png/${encodeURIComponent(path)}`;
+  artImages.set(path, entry);
+  return entry;
+}
+
+/** `{ face, hair, items }` for the local character or another user of the field. */
+function lookOf(entity) {
+  if (!entity) return { face: 20000, hair: 30000, items: [] };
+  if (typeof entity.hair === "number" && entity.hair !== 0) {
+    return { face: entity.face || 20000, hair: entity.hair, items: entity.avatarItems ?? [] };
+  }
+  // Another user's `0x1C` list starts with the hair (`avatarItemsOf`) and carries no separate
+  // hair field, so the first id is the hair and the rest are the worn equips.
+  const list = entity.avatarItems ?? [];
+  return { face: entity.face || 20000, hair: list[0] || 30000, items: list.slice(1) };
+}
+
+/**
+ * Asks the server for one composed frame.
+ *
+ * `dx`/`dy` say where the PNG's top-left corner goes relative to the character's feet; the server
+ * composes at the WZ origins, so the page never adds anchors of its own.
+ */
+function avatarFrame(look, stance, frame, flip) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "l" : "r"}`;
+  let entry = avatarFrames.get(key);
+  if (entry) return entry;
+  entry = { img: new Image(), dx: 0, dy: 0, ready: false, requested: false };
+  avatarFrames.set(key, entry);
+  const query =
+    `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}`;
+  entry.requested = true;
+  fetch(`/api/avatar.png${query}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`avatar ${response.status}`);
+      entry.dx = Number(response.headers.get("x-frame-dx") ?? 0);
+      entry.dy = Number(response.headers.get("x-frame-dy") ?? 0);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      entry.img = img;
+      entry.ready = true;
+    })
+    .catch(() => {
+      entry.requested = false;
+    });
+  return entry;
+}
+
+/** Warms the frames a look needs: idle (3) and the two walk cycles (4 each), both ways. */
+function preloadAvatar(look) {
+  for (let frame = 0; frame < 3; frame++) {
+    avatarFrame(look, "stand1", frame, false);
+    avatarFrame(look, "stand1", frame, true);
+  }
+  for (let frame = 0; frame < 4; frame++) {
+    avatarFrame(look, "walk1", frame, false);
+    avatarFrame(look, "walk1", frame, true);
+  }
+}
+
+/** Fetches one NPC's or mob's frame table, once per template. */
+function ensureEntityArt(kind, templateId) {
+  const table = kind === "npc" ? npcArts : mobArts;
+  if (table.has(templateId) || artMissing.has(`${kind}:${templateId}`)) return;
+  table.set(templateId, undefined);
+  fetch(`/api/${kind}/${templateId}`)
+    .then((response) => (response.ok ? response.json() : Promise.reject(new Error(String(response.status)))))
+    .then((data) => {
+      table.set(templateId, data.actions ?? {});
+      for (const frames of Object.values(data.actions ?? {})) {
+        for (const frame of frames) artImage(frame.path);
+      }
+    })
+    .catch(() => {
+      table.delete(templateId);
+      artMissing.add(`${kind}:${templateId}`);
+    });
+}
+
+/**
+ * The frame of `action` to show at `now`: the archive's own delays, looping. The first frame is
+ * used until the table has arrived, so an NPC appears as soon as its pictures do.
+ */
+function loopFrame(frames, now) {
+  if (!frames || frames.length === 0) return undefined;
+  if (frames.length === 1) return frames[0];
+  const total = frames.reduce((sum, frame) => sum + Math.max(1, frame.delay), 0);
+  let at = now % total;
+  for (const frame of frames) {
+    at -= Math.max(1, frame.delay);
+    if (at < 0) return frame;
+  }
+  return frames[frames.length - 1];
+}
+
+/** Plays `action` from the table, falling back to the idle one. */
+function playAction(actions, action, now) {
+  if (!actions) return undefined;
+  return loopFrame(actions[action], now) ?? loopFrame(actions.stand, now) ?? loopFrame(actions.move, now);
+}
+
+/** One image at `(x, y)` with the canvas' origin at that point. */
+function drawArchiveImage(frame, x, y, flip) {
+  const entry = artImage(frame.path);
+  if (!entry.ready) return;
+  const ox = frame.ox ?? 0;
+  const oy = frame.oy ?? 0;
+  const w = entry.img.naturalWidth;
+  const h = entry.img.naturalHeight;
+  if (flip) {
+    // Mirror around the origin: source column u lands on `x + ox - u` (the same rule the server's
+    // compositor uses), so the sprite stays anchored where it was drawn unflipped.
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    ctx.scale(-1, 1);
+    ctx.drawImage(entry.img, -ox, -oy, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(entry.img, Math.round(x) - ox, Math.round(y) - oy, w, h);
+  }
+}
+
+/**
+ * One background sheet, exactly as the 2003 client tiles it (`sub_46A9F0` and the Journey client's
+ * reimplementation of it): the offset is the WZ `x/y` plus the parallax
+ * `rx * (halfWidth + camera) / 100 + halfWidth`, the sheet is repeated `view/cx + 3` times when the
+ * type tiles, and the strip is normalised so the first copy starts just off the left/top edge.
+ */
+function drawBack(back, cameraX, cameraY) {
+  const entry = artImage(back.path);
+  if (!entry.ready) return;
+  const w = entry.img.naturalWidth;
+  const h = entry.img.naturalHeight;
+  if (w === 0 || h === 0) return;
+  const stepX = back.cx > 0 ? back.cx : w;
+  const stepY = back.cy > 0 ? back.cy : h;
+  let x = back.x + (back.rx * (VIEW_W / 2 + cameraX)) / 100 + VIEW_W / 2;
+  let y = back.y + (back.ry * (VIEW_H / 2 + cameraY)) / 100 + VIEW_H / 2;
+  const horizontal = back.type === 1 || back.type === 3 || back.type === 4 || back.type === 6;
+  const vertical = back.type === 2 || back.type === 3 || back.type === 5 || back.type === 7;
+  if (horizontal) {
+    while (x > 0) x -= stepX;
+    while (x < -stepX) x += stepX;
+  }
+  if (vertical) {
+    while (y > 0) y -= stepY;
+    while (y < -stepY) y += stepY;
+  }
+  const columns = horizontal ? Math.ceil(VIEW_W / stepX) + 3 : 1;
+  const rows = vertical ? Math.ceil(VIEW_H / stepY) + 3 : 1;
+  ctx.globalAlpha = Math.max(0, Math.min(255, back.a ?? 255)) / 255;
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const sx = Math.round(x + column * stepX);
+      const sy = Math.round(y + row * stepY);
+      if (sx > VIEW_W || sy > VIEW_H || sx + w < 0 || sy + h < 0) continue;
+      // A flipped sheet mirrors in place: its right edge is drawn where the left one would be.
+      drawArchiveImage({ path: back.path, ox: 0, oy: 0 }, back.flip ? sx + (w - 1) : sx, sy, back.flip);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** One tile/object, its animation frame picked from the map's clock. */
+function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
+  const frame = loopFrame(sprite.frames, now);
+  if (frame === undefined) return;
+  const worldFlip = sprite.flip !== flipWorld;
+  drawArchiveImage(frame, sprite.x - cameraX, sprite.y - cameraY, worldFlip);
+}
+
+/** The character's stance and frame from its movement, the way the page can see it. */
+function stanceOfEntity(entity, now) {
+  // The wire only says where a character is, so "walking" is "a move arrived recently"; the body
+  // image's own delays are 180 ms for `walk1`'s four frames and 500 ms for `stand1`'s three.
+  const moving = now - (entity.movedAt ?? 0) < 360;
+  return {
+    stance: moving ? "walk1" : "stand1",
+    frame: moving ? Math.floor(now / 180) % 4 : Math.floor(now / 500) % 3,
+  };
+}
+
+/** The face folder an active emotion names, or undefined when it has expired. */
+function emotionFace(emotion, now) {
+  if (!emotion || emotion.until <= now) return undefined;
+  return EMOTE_NAMES[emotion.value];
+}
+
+/** An avatar drawn with its feet at `(screenX, screenY)`, mirrored while facing left. */
+function drawAvatarAt(entity, screenX, screenY, now, flip) {
+  const look = lookOf(entity);
+  preloadAvatar(look);
+  const state = stanceOfEntity(entity, now);
+  const frame = avatarFrame(look, state.stance, state.frame, flip, emotionFace(entity.emotion, now));
+  if (frame.ready) {
+    // The server composed this frame facing the requested way and reported where its top-left
+    // corner goes relative to the feet, so the page adds `dx`/`dy` and nothing else.
+    ctx.drawImage(frame.img, Math.round(screenX + frame.dx), Math.round(screenY + frame.dy));
+    return;
+  }
+  // Before the composed PNG arrives (or if the archive is off): a neutral placeholder at the same
+  // spot, so the field is not empty while the first pictures load.
+  ctx.fillStyle = "rgba(120, 170, 210, 0.35)";
+  ctx.fillRect(Math.round(screenX) - 9, Math.round(screenY) - 42, 18, 42);
+}
+
+/** The NPC/mob sprite at `(x, y)`, with its own animation. */
+function drawEntitySprite(kind, templateId, x, y, facing, moving, now) {
+  ensureEntityArt(kind, templateId);
+  const actions = (kind === "npc" ? npcArts : mobArts).get(templateId);
+  const action = kind === "npc" ? "stand" : moving ? "move" : "stand";
+  const frame = playAction(actions, action, now);
+  if (frame === undefined) return;
+  drawArchiveImage(frame, x, y, facing === 1);
+}
+
 function frame() {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  // The camera keeps the local player a little left of centre, like the 2003 client does.
-  const cameraX = (self?.x ?? 0) - width * 0.45;
-  const cameraY = (self?.y ?? 0) - height * 0.62;
-
-  ctx.fillStyle = "#10131a";
-  ctx.fillRect(0, 0, width, height);
-  drawGrid(cameraX, cameraY, width, height);
-
-  if (map) {
-    drawFootholds(map, cameraX, cameraY);
-    drawPortals(map, cameraX, cameraY);
+  const now = performance.now();
+  const target = cameraTarget();
+  if (!camera.ready) {
+    camera.x = target.x;
+    camera.y = target.y;
+    camera.ready = true;
+  } else {
+    camera.x += (target.x - camera.x) * CAMERA_EASE;
+    camera.y += (target.y - camera.y) * CAMERA_EASE;
   }
-  if (selfView) drawSelf(cameraX, cameraY);
+  const cameraX = camera.x;
+  const cameraY = camera.y;
 
-  const order = [
-    ...[...npcs.values()].map((npc) => ({ kind: "npc", y: npc.y, npc })),
-    ...[...mobs.values()].map((mob) => ({ kind: "mob", y: mob.y, mob })),
-    ...[...users.values()].map((user) => ({ kind: "user", y: user.y, user })),
-  ].sort((a, b) => a.y - b.y);
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  for (const item of order) {
-    if (item.kind === "npc") drawNpc(item.npc, cameraX, cameraY);
-    else if (item.kind === "mob") drawMob(item.mob, cameraX, cameraY);
-    else drawUser(item.user, cameraX, cameraY);
+  const backs = mapArt?.backs ?? [];
+  for (const back of backs) if (!back.front) drawBack(back, cameraX, cameraY);
+
+  const sprites = mapArt?.sprites ?? [];
+  const behind = sprites.filter((sprite) => (sprite.layer ?? 0) < CHARACTER_LAYER);
+  const front = sprites.filter((sprite) => (sprite.layer ?? 0) >= CHARACTER_LAYER);
+  for (const sprite of behind) drawMapSprite(sprite, cameraX, cameraY, now, false);
+  drawPortals(cameraX, cameraY, now);
+
+  // Characters, back to front by their feet.
+  const actors = [];
+  for (const npc of npcs.values()) actors.push({ kind: "npc", y: npc.y, npc });
+  for (const mob of mobs.values()) actors.push({ kind: "mob", y: mob.y, mob });
+  for (const user of users.values()) actors.push({ kind: "user", y: user.y, user });
+  if (self && selfView) actors.push({ kind: "self", y: self.y, self });
+  actors.sort((left, right) => left.y - right.y);
+  for (const actor of actors) {
+    const x = actor.kind === "self" ? self.x - cameraX : actor.kind === "mob" ? actor.mob.x - cameraX : actor.kind === "npc" ? actor.npc.x - cameraX : actor.user.x - cameraX;
+    const y = actor.y - cameraY;
+    if (x < -200 || x > VIEW_W + 200 || y < -300 || y > VIEW_H + 300) continue;
+    if (actor.kind === "npc") {
+      drawEntitySprite("npc", actor.npc.templateId, x, y, actor.npc.facing ?? 0, false, now);
+    } else if (actor.kind === "mob") {
+      const moved = now - (actor.mob.movedAt ?? 0) < 400;
+      drawEntitySprite("mob", actor.mob.templateId, x, y, actor.mob.facing ?? 0, moved, now);
+    } else if (actor.kind === "self") {
+      drawAvatarAt(selfView, x, y, now, selfView.facing === 1);
+      drawName(selfView.name, x, y - 62);
+    } else {
+      drawAvatarAt(actor.user, x, y, now, actor.user.facing === 1);
+      drawName(actor.user.name, x, y - 62);
+    }
   }
+
+  for (const sprite of front) drawMapSprite(sprite, cameraX, cameraY, now, false);
+  for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
 
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-function drawGrid(cameraX, cameraY, width, height) {
-  const step = 100;
-  const startX = -(cameraX % step);
-  const startY = -(cameraY % step);
-  ctx.strokeStyle = "rgba(255,255,255,0.045)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = startX; x < width; x += step) {
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-  }
-  for (let y = startY; y < height; y += step) {
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-  }
-  ctx.stroke();
-}
+/** The layer the characters are drawn in: after layers 0-2, before layer 3 and the front backs. */
+const CHARACTER_LAYER = 3;
 
-function drawFootholds(currentMap, cameraX, cameraY) {
-  ctx.strokeStyle = "rgba(220, 200, 150, 0.55)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (const segment of currentMap.footholds) {
-    ctx.moveTo(segment.x1 - cameraX, segment.y1 - cameraY);
-    ctx.lineTo(segment.x2 - cameraX, segment.y2 - cameraY);
-  }
-  ctx.stroke();
-}
-
-function drawPortals(currentMap, cameraX, cameraY) {
-  ctx.font = "11px system-ui, sans-serif";
+/** A name tag above a character, white with a soft shadow - the 2003 client's look. */
+function drawName(name, x, y) {
+  if (!name) return;
+  ctx.font = "12px 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif";
   ctx.textAlign = "center";
-  for (const portal of currentMap.portals) {
-    if (!portal.name) continue;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
+  ctx.strokeText(name, x, y);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(name, x, y);
+}
+
+/**
+ * The portal swirls, exactly where the original draws them: `pt == 2` warps (`pt == 0` is a spawn
+ * point and `pt == 1` a hidden passage, neither of which has a picture), using the shared
+ * `MapHelper.img/portal/game/pv` animation. They belong to the field, so they are drawn behind the
+ * characters - the page calls this before the actors.
+ */
+function drawPortals(cameraX, cameraY, now) {
+  if (!map || !mapArt) return;
+  const frames = mapArt.portalFrames ?? [];
+  const frame = loopFrame(frames, now);
+  if (frame === undefined) return;
+  for (const portal of map.portals) {
+    if (portal.type !== 2) continue;
     const x = portal.x - cameraX;
     const y = portal.y - cameraY;
-    if (portal === hoveredPortal) {
-      ctx.strokeStyle = "rgba(190, 235, 255, 0.95)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, y + 2, 15, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.fillStyle = portal.toMapId > 0 ? "rgba(120, 190, 255, 0.85)" : "rgba(180, 180, 180, 0.5)";
-    ctx.beginPath();
-    ctx.moveTo(x, y - 7);
-    ctx.lineTo(x + 6, y);
-    ctx.lineTo(x, y + 7);
-    ctx.lineTo(x - 6, y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "rgba(200, 220, 255, 0.75)";
-    ctx.fillText(portal.name, x, y + 20);
+    const width = 120;
+    if (x < -width || x > VIEW_W + width || y < -width || y > VIEW_H + width) continue;
+    drawArchiveImage(frame, x, y, false);
   }
-}
-
-function drawSelf(cameraX, cameraY) {
-  const x = (self?.x ?? 0) - cameraX;
-  const y = (self?.y ?? 0) - cameraY;
-  drawAvatar(x, y, selfView, "#7fd1a0");
-  if (selfEmotion && selfEmotion.until > performance.now()) {
-    ctx.font = "14px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(190, 235, 205, 0.95)";
-    ctx.fillText(EMOTE_NAMES[selfEmotion.value] ?? "?", x, y - 62);
-  }
-}
-
-function drawUser(user, cameraX, cameraY) {
-  const x = user.x - cameraX;
-  const y = user.y - cameraY;
-  drawAvatar(x, y, user, "#d8c48a");
-  if (user.emotion && user.emotion.until > performance.now()) {
-    ctx.font = "14px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255, 240, 200, 0.95)";
-    ctx.fillText(EMOTE_NAMES[user.emotion.value] ?? "?", x, y - 56);
-  }
-  if (user.levelUpAt && performance.now() - user.levelUpAt < 1200) {
-    ctx.strokeStyle = "rgba(255, 230, 140, 0.9)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(x, y - 18, 26 + (performance.now() - user.levelUpAt) / 18, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-}
-
-function drawAvatar(x, y, view, tint) {
-  // A stand-in for `Character/*`: a body, a head in the face's own id colour and the name above it.
-  const height = 44;
-  ctx.fillStyle = tint;
-  roundRect(x - 11, y - height + 12, 22, height - 12, 6);
-  ctx.fill();
-  ctx.fillStyle = view ? tintFor(view.face || view.appearanceA || 20000) : tint;
-  ctx.beginPath();
-  ctx.arc(x, y - height + 6, 10, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.88)";
-  ctx.font = "12px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(view?.name ?? "", x, y - height - 8);
-}
-
-function drawMob(mob, cameraX, cameraY) {
-  const x = mob.x - cameraX;
-  const y = mob.y - cameraY;
-  ctx.fillStyle = "rgba(226, 140, 92, 0.9)";
-  ctx.beginPath();
-  ctx.ellipse(x, y - 12, 15, 13, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(20, 12, 10, 0.85)";
-  ctx.font = "10px ui-monospace, monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(String(mob.templateId), x, y - 8);
-}
-
-function drawNpc(npc, cameraX, cameraY) {
-  const x = npc.x - cameraX;
-  const y = npc.y - cameraY;
-  ctx.fillStyle = "rgba(120, 200, 150, 0.85)";
-  roundRect(x - 9, y - 34, 18, 34, 4);
-  ctx.fill();
-  ctx.fillStyle = "rgba(220, 255, 230, 0.8)";
-  ctx.font = "10px ui-monospace, monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(String(npc.templateId), x, y - 40);
-}
-
-function tintFor(face) {
-  return `hsl(${((face ?? 20000) * 7) % 360}, 45%, 62%)`;
-}
-
-function roundRect(x, y, width, height, radius) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, radius);
-  ctx.arcTo(x + width, y + height, x, y + height, radius);
-  ctx.arcTo(x, y + height, x, y, radius);
-  ctx.arcTo(x, y, x + width, y, radius);
-  ctx.closePath();
 }
 
 // ---------------------------------------------------------------- hud & chat
@@ -1076,7 +1355,13 @@ ui.emotes.replaceChildren(
     button.type = "button";
     button.textContent = EMOTE_NAMES[value];
     button.title = `表情 ${value}：${EMOTE_NAMES[value]}`;
-    button.addEventListener("click", () => send({ t: "emotion", value }));
+    button.addEventListener("click", () => {
+      // The 2003 client paints the face before it sends (`.text:00511FD8` precedes `push 0x13`), and
+      // the server does not echo `0x27` to the sender - so the page does the same and keeps it.
+      selfEmotion = { value, until: performance.now() + 2500 };
+      if (selfView) selfView.emotion = selfEmotion;
+      send({ t: "emotion", value });
+    });
     return button;
   }),
 );
@@ -1126,6 +1411,8 @@ setInterval(() => {
   if (keys.has("arrowup") || keys.has("w")) dy -= 1;
   if (keys.has("arrowdown") || keys.has("s")) dy += 1;
   if (dx === 0 && dy === 0) return;
+  if (dx !== 0) self.facing = dx < 0 ? 1 : 0;
+  self.movedAt = performance.now();
   self.x += dx * MOVE_PX_PER_TICK;
   self.y += dy * MOVE_PX_PER_TICK;
   if (performance.now() - lastMoveSent < MOVE_TICK_MS) return;

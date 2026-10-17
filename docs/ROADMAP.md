@@ -109,9 +109,22 @@
   - **實測（同日，真的瀏覽器）**：預覽 proxy 會轉發 `wss` 的 upgrade，`https://8495-<sandbox>/`
     上完成登入→空白帳號建立角色（`0x06`＋`0x05`）→選角→進地圖（헤네시스）→聊天。所以「代理可能不
     轉發 upgrade」的風險不成立，HTTP 輪詢的備案不用做。
-  - **還沒做的**：WZ 圖層與 sprite、UI 視窗（交易／組隊；背包與商店已做）、傷害與怪物 AI（那是 2003
-    client 的工作，§4.20）、鍵盤以外的輸入、音訊。細節與「有與沒有」的清單在 `docs/CLIENT.md`。
-- 地圖繪製（Back/Obj/Tile 分層 + z-order）、角色/怪物動畫、UI（Login/CharSelect/HUD/Item/Skill）、音訊
+  - **第二刀（同日，ADR-039）：WZ 圖層與 sprite——畫面 1:1** ✅
+    - 伺服器把 WZ 的 canvas 解成 PNG：`game/raster.ts`（RGBA compositor）、`game/wzart.ts`（UOL 解析
+      ＋ canvas 快取）、`game/mapart.ts`（`backs`／`sprites`／`bounds`／`portalFrames`）、
+      `game/sprites.ts`（NPC／mob 動作表）、`game/avatar.ts`（用身體錨點合成角色）、`game/art.ts`
+      （process 級的 provider）。
+    - 新端點：`/api/map/<id>/art`、`/api/png/<path>`、`/api/avatar.png`、`/api/npc/<id>`、`/api/mob/<id>`。
+    - 頁面：`#view` 固定 800×600（CSS 等比縮放、`pixelated`）；背景依 `rx/ry` 視差與 `type` 鋪貼、
+      layer 0–2 → 角色（依腳底 y 排序）→ layer 3–7 → `front` 背景；傳送門換成 `MapHelper` 的動畫；
+      相機夾在 `bounds` 裡；NPC 點擊框依 sprite 放大。
+    - 驗證：`render_map`／`render_view`／`render_scene` 三個離線 renderer（用和 `main.js` 同一套規則）
+      對真 `Data.wz` 目視比對；`test/art.test.ts` 17 則＋`webclient.test.ts` 的 art 端點一則。
+  - **還沒做的**：UI 視窗（交易／組隊；背包與商店已做）、角色動作（只有 stand1／walk1）、小地圖／
+    天氣、傷害與怪物 AI（那是 2003 client 的工作，§4.20）、鍵盤以外的輸入、音訊。細節與「有與沒有」
+    的清單在 `docs/CLIENT.md`。
+- 地圖繪製（Back/Obj/Tile 分層 + z-order）✅、角色／怪物動畫 🟡（stand1／walk1／move／stand）、
+  UI（Login/CharSelect/HUD/Item/Skill）、音訊
 - 輸入：鍵盤 + 手把；韓文輸入以平台層 fallback（不重寫 IMM32）
 - 出口條件：能在 Windows / macOS / Linux 上開發與遊玩；**同一份專案可 export web 並能登入**
 

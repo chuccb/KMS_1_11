@@ -34,6 +34,10 @@ import { encodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import type { MapData } from "../game/map.ts";
+import type { MapArt } from "../game/mapart.ts";
+import type { AvatarFrame } from "../game/avatar.ts";
+import type { MobArt, NpcArt } from "../game/sprites.ts";
+import type { ArtReader } from "../game/wzart.ts";
 import { WebSocket, upgradeResponse } from "./websocket.ts";
 
 /** Where `client/` lives when no root is given: the repository root, one level above `server/`. */
@@ -73,7 +77,35 @@ export interface WebClientOptions {
    * really carried.
    */
   itemCatalog?: ItemCatalog;
+  /**
+   * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
+   * frames (`game/sprites.ts`). Without them the page still draws the geometry, in flat colours -
+   * `--data off` is a protocol session, not a screenshot.
+   */
+  art?: ArtProvider;
   log?(line: string): void;
+}
+
+/**
+ * Everything the page's renderer asks the server for, in one object.
+ *
+ * One provider per process, because all three parts share one `ArtReader` and that reader's cache is
+ * what keeps the first field of a session from decoding every tile twice. `reader` is also what
+ * `/api/png/...` decodes through, so a canvas the page already has costs nothing the second time.
+ */
+export interface ArtProvider {
+  /** `Map/Map/%09d.img` as a flat sprite list, or `undefined` when the map is not in the archive. */
+  mapArt(mapId: number): MapArt | undefined;
+  npc(templateId: number): NpcArt | undefined;
+  mob(templateId: number): MobArt | undefined;
+  avatar(look: { face: number; hair: number; items: number[] }, options: {
+    stance?: string;
+    frame?: number;
+    emotion?: string;
+    flip?: boolean;
+  }): AvatarFrame | undefined;
+  /** The canvas at a `Map/Tile/...` style archive path, as `CanvasArt`. */
+  reader: ArtReader | undefined;
 }
 
 export interface WebClientServer {
@@ -161,6 +193,116 @@ function mapJson(map: MapData): unknown {
     mobs: map.mobs.map((mob) => ({ templateId: mob.templateId, x: mob.x, y: mob.y, foothold: mob.foothold })),
     npcs: map.npcs.map((npc) => ({ templateId: npc.templateId, x: npc.x, y: npc.y, foothold: npc.foothold })),
   };
+}
+
+/** `/api/map/<id>/art`: the background stack, the tiles/objects and the camera's own bounds. */
+function artJson(art: MapArt): unknown {
+  return {
+    portalFrames: art.portalFrames,
+    backs: art.backs.map((back) => ({
+      path: back.path,
+      ox: back.ox,
+      oy: back.oy,
+      x: back.x,
+      y: back.y,
+      rx: back.rx,
+      ry: back.ry,
+      type: back.type,
+      cx: back.cx,
+      cy: back.cy,
+      a: back.a,
+      front: back.front,
+      flip: back.flip,
+    })),
+    sprites: art.sprites.map((sprite) => ({
+      kind: sprite.kind,
+      layer: sprite.layer,
+      x: sprite.x,
+      y: sprite.y,
+      z: sprite.z,
+      flip: sprite.flip,
+      frames: sprite.frames,
+    })),
+    bounds: art.bounds,
+  };
+}
+
+/**
+ * `/api/png/<archive path>`: one canvas, exactly as `Data.wz` stores it.
+ *
+ * The page draws tiles, objects and backgrounds by URL, so the browser's own image cache does the
+ * memoising; this side keeps the decoded canvas in the `ArtReader` cache. Only the folders a field
+ * can reference are served - an arbitrary path would turn the endpoint into an archive browser.
+ */
+const ART_ROOTS = ["Map/", "Character/", "Mob/", "Npc/", "Effect/", "Item/", "UI/"];
+
+function servePng(art: ArtProvider | undefined, rest: string, response: ServerResponse): void {
+  if (art?.reader === undefined) {
+    sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
+    return;
+  }
+  // The path is percent-encoded as one segment; `decodeURIComponent` turns it back into slashes.
+  let path: string;
+  try {
+    path = decodeURIComponent(rest);
+  } catch {
+    sendJson(response, 400, { error: "the path is not valid percent-encoding" });
+    return;
+  }
+  if (path.includes("..") || !ART_ROOTS.some((root) => path.startsWith(root)) || !path.includes(".img")) {
+    sendJson(response, 404, { error: `"${path}" is not inside the art folders` });
+    return;
+  }
+  const canvas = art.reader.at(path);
+  if (canvas === undefined) {
+    sendJson(response, 404, { error: `no canvas at ${path}` });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": "image/png",
+    "content-length": canvas.png.length,
+    // The archive does not change under a running server, so the browser may keep every tile.
+    "cache-control": "public, max-age=86400",
+  });
+  response.end(Buffer.from(canvas.png));
+}
+
+/** `/api/avatar.png?face=&hair=&items=&stance=&frame=&flip=&emotion=`: one composed frame. */
+function serveAvatar(art: ArtProvider, url: URL, response: ServerResponse): void {
+  const number = (name: string, fallback: number): number => {
+    const raw = url.searchParams.get(name);
+    if (raw === null || raw === "") return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  };
+  const look = {
+    face: number("face", 20000),
+    hair: number("hair", 30000),
+    items: (url.searchParams.get("items") ?? "")
+      .split(",")
+      .map((piece) => Number(piece))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  };
+  const frame = art.avatar(look, {
+    stance: url.searchParams.get("stance") ?? "stand1",
+    frame: number("frame", 0),
+    flip: url.searchParams.get("flip") === "1",
+    ...(url.searchParams.get("emotion") !== null ? { emotion: String(url.searchParams.get("emotion")) } : {}),
+  });
+  if (frame === undefined) {
+    sendJson(response, 404, { error: "the archive cannot compose this look" });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": "image/png",
+    "content-length": frame.png.length,
+    // Where the picture goes, relative to the character's feet.
+    "x-frame-dx": String(frame.dx),
+    "x-frame-dy": String(frame.dy),
+    "access-control-expose-headers": "x-frame-dx, x-frame-dy",
+    "cache-control": "public, max-age=3600",
+  });
+  response.end(Buffer.from(frame.png));
 }
 
 /**
@@ -532,13 +674,62 @@ export function startWebClient(options: WebClientOptions): Promise<WebClientServ
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname.startsWith("/api/map/")) {
-      const id = Number(url.pathname.slice("/api/map/".length));
-      const map = Number.isFinite(id) ? options.mapProvider?.(id) : undefined;
+      const rest = url.pathname.slice("/api/map/".length);
+      const artSuffix = rest.endsWith("/art") ? "/art" : "";
+      const id = Number(artSuffix === "" ? rest : rest.slice(0, -artSuffix.length));
+      if (!Number.isFinite(id)) {
+        sendJson(response, 404, { error: `map ${rest} is not a map id` });
+        return;
+      }
+      if (artSuffix === "/art") {
+        // The art is the archive's answer, not the running game's: a session that is standing in a
+        // stub map (the tests) can still ask for the pictures of a real one.
+        const art = options.art?.mapArt(id);
+        if (art === undefined) {
+          sendJson(response, 404, { error: `map ${id} has no art in this archive` });
+          return;
+        }
+        sendJson(response, 200, artJson(art));
+        return;
+      }
+      const map = options.mapProvider?.(id);
       if (map === undefined) {
-        sendJson(response, 404, { error: `map ${url.pathname.slice("/api/map/".length)} is not known` });
+        sendJson(response, 404, { error: `map ${rest} is not known` });
         return;
       }
       sendJson(response, 200, mapJson(map));
+      return;
+    }
+    if (url.pathname.startsWith("/api/png/")) {
+      servePng(options.art, url.pathname.slice("/api/png/".length), response);
+      return;
+    }
+    if (url.pathname === "/api/avatar.png") {
+      if (options.art === undefined) {
+        sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
+        return;
+      }
+      serveAvatar(options.art, url, response);
+      return;
+    }
+    if (url.pathname.startsWith("/api/npc/")) {
+      const id = Number(url.pathname.slice("/api/npc/".length));
+      const npc = Number.isFinite(id) ? options.art?.npc(id) : undefined;
+      if (npc === undefined) {
+        sendJson(response, 404, { error: `Npc/${id} is not in this archive` });
+        return;
+      }
+      sendJson(response, 200, { templateId: npc.templateId, actions: npc.actions });
+      return;
+    }
+    if (url.pathname.startsWith("/api/mob/")) {
+      const id = Number(url.pathname.slice("/api/mob/".length));
+      const mob = Number.isFinite(id) ? options.art?.mob(id) : undefined;
+      if (mob === undefined) {
+        sendJson(response, 404, { error: `Mob/${id} is not in this archive` });
+        return;
+      }
+      sendJson(response, 200, { templateId: mob.templateId, actions: mob.actions });
       return;
     }
     if (url.pathname.startsWith("/api/item/")) {

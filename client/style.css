@@ -23,13 +23,21 @@ body {
   font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
 }
 
+/*
+ * The game view is the 2003 client's 800x600 surface, scaled up by CSS and letterboxed inside the
+ * window (`main.js` `resize` sets the exact size). `pixelated` keeps the WZ sprites crisp at 2x and
+ * 3x, which is what the original's untextured blit looked like.
+ */
 #view {
   position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
   touch-action: none;
+  background: #000;
 }
 
 #bar {

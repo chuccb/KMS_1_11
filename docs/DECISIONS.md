@@ -1811,3 +1811,68 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
   close 不回包；`0x47` 兩句台詞用 `0x15` 走完、次要按鈕結束），總數 **486**。
 - 實跑（`--save` 指向副本、헤네시스）：`npc 2 (1010100) shop 1010100: 2000000@25 … 2030000@75`，
   `buy 2: result 0 shop result 0 (silent) | use tab 5→7 | mesos 80→30`，`closed (no answer expected)`。
+
+
+## ADR-039：畫面的每個像素都從 `Data.wz` 來，伺服器組圖、瀏覽器只貼圖
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（實作在 `server/src/game/{raster,wzart,mapart,sprites,avatar,art}.ts`、
+`server/src/net/webclient.ts`、`client/main.js`、`client/style.css`、`server/test/art.test.ts`）。
+
+**決策**：頁面的場地**不再畫幾何代替圖**。伺服器把 `Data.wz` 的 canvas 解成 PNG 交給頁面，頁面用
+**和 2003 client 一樣的順序**把它們貼上去：
+
+1. `GET /api/map/<id>/art` 回一整張地圖的畫法：`backs[]`（`bS/no/x/y/rx/ry/type/cx/cy/a/front`）、
+   `sprites[]`（`kind/x/y/z/layer/flip/frames[]`）與 `bounds`；`sprites` 已經照
+   `30000*layer - 10*zM + z` 排好（圖塊是 `30000*layer - 10*zM + canvasZ`）。
+2. 頁面先畫背面背景（`drawBack`：`x + rx*(400+cameraX)/100 + 400`，`type` 1／3／4／6 橫鋪、
+   2／3／5／7 直鋪、鋪貼前先歸一化到 `(-step, 0]`），再畫 layer 0–2 的圖塊與物件。
+3. 角色（玩家、NPC、怪物）畫在 layer 2 與 layer 3 之間，彼此依腳底 `y` 排序。
+4. layer 3–7、`front` 背景與傳送門動畫最後畫。
+
+角色不是頁面拼的：`GET /api/avatar.png` 由伺服器用 `Character/*` 的 canvas 依**身體發佈的錨點**
+（body 的 `navel`／`neck`、arm 的 `hand`、head 的 `brow`）一層層掛上去，回傳 PNG 加上
+`x-frame-dx`／`x-frame-dy`（圖片左上角相對腳底）。NPC 與怪物用 `/api/npc|mob/<id>` 的動作表，
+frame 的 `delay` 是 WZ 自己的。
+
+**理由**：
+
+1. **畫法是證據，不是設計。** 深度公式、背景視差、貼圖層的切點、翻轉的支點，全部是
+   `MapleStory.exe` 與 `Map/Map/*.img` 的欄位語意（FINDINGS 4.11）。用色塊代替等於把「不確定」
+   藏起來；照 WZ 畫，錯了就看得見（這也是為什麼這一個切片跑了 `render_map`／`render_view`／
+   `render_scene` 三次離線比對，而不是「看起來差不多」）。
+2. **組圖留在伺服器，因為那裡才有 WZ。** 瀏覽器不該下載 87 MB 的 `Data.wz`，也不該實作 WZ 解碼。
+   代價是 PNG 的請求數：一張地圖幾百到一千多個 canvas，頁面只在**進圖時**預抓用得到的那一批，
+   `archive` 端有 process 級的 canvas 快取（`wzart` 的 reader）與 avatar PNG 快取（512 張）。
+3. **翻轉繞原點，不是繞圖片中心。** `drawCanvas` 的規則是「來源第 `u` 行畫到 `x + ox - u`」；角色的
+   左臉是**整個人**鏡射（部件座標也乘 -1），所以刀會換手、`dx` 也會跟著變號。這一點由
+   `art.test.ts` 的「flipped avatar 是未翻轉的鏡像」釘住。
+4. **缺圖要降級，不能中斷。** `Map/Tile` 在這個版本只有 7 組（`brownBrick`／`deepCave`／`holeBrick`／
+   `logMarble`／`wetWood`／`whiteMarble`／`woodMarble`），地圖引用了不存在的 tile 或 back 時，
+   `mapBacks`／`mapSprites` 直接跳過那一筆，頁面就少一塊而不是整個黑掉；`--data` 沒給時
+   `/api/map/<id>/art` 回 404，頁面記一行 `no art` 並回到只有幾何的模式。
+
+**被否決的選項**：
+
+- **在頁面上用 canvas 2D 自己拼角色**：形同把 `avatar.ts` 的錨點邏輯寫第二份，而且 `z` 排序表
+  （`zmap`，113 個鍵、`index` 越小越前面）要一起搬。
+- **把整張地圖事先合成成一張大 PNG**：一張圖 6000×2000 以上（헤네시스 `bounds` 是 6328×682，含
+  天空更高），背景要視差、圖塊要依 `layer` 與角色交錯，合成一張就不可能把角色畫在中間。
+- **只回 `Map/Tile` 與 `Map/Obj` 的路徑、讓頁面自己算深度**：`zM` 是十倍數的 `z`，這個「10」是
+  client 的常數；放進頁面等於把證據複製一份到瀏覽器。
+- **用 `<img>` 直接指 `/api/png/...` 並讓瀏覽器快取**：拿不到 canvas 的 `origin`，也拿不到
+  `delay`；而且 `archive` 的 reader 快取是 process 的，HTTP 快取反而多一層要對齊。
+
+**後果**：
+
+- 新模組：`game/raster.ts`（RGBA compositor：`drawCanvas`／`boundsOf`／`cropBitmap`）、
+  `game/wzart.ts`（`artReaderOf`：UOL 解析、canvas 快取）、`game/mapart.ts`（`mapBacks`／
+  `mapSprites`／`mapBounds`／`portalFrames`）、`game/sprites.ts`（NPC／mob 的動作表）、
+  `game/avatar.ts`（錨點合成的 avatar）、`game/art.ts`（把上面包成一個 process 級的 `ArtProvider`）。
+- 新端點：`/api/map/<id>/art`、`/api/png/<path>`、`/api/avatar.png`、`/api/npc/<id>`、`/api/mob/<id>`。
+  `/api/map/<id>` 仍然是伺服器自己的視角（腳踏點、傳送門、出生點），兩者不互相取代。
+- 頁面：`#view` 固定 800×600（CSS 只做等比縮放），`viewPoint()` 把滑鼠座標換算回視野座標，
+  相機是「玩家在中央、夾在 `bounds` 裡、以 0.18 緩動」；NPC 的點擊框放大到 36/36/96（最寬的
+  NPC 圖約 70 px、最高約 96 px）。
+- 測試：`test/art.test.ts` 17 則 + `webclient.test.ts` 的 art 端點一則，總數 **504**（從 486 增加 18）。
+- 誠實的缺口：小地圖與天氣（`MapHelper` 的 `mark`／`weather`）還沒畫；角色只有 `stand1`／`walk1`；
+  表情還是文字。都寫在 `docs/CLIENT.md` 的「刻意沒有的東西」。
