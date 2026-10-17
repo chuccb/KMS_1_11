@@ -40,7 +40,7 @@
  *    change is worse than a no-op the player can repeat, and the wire cannot say "refused" -
  *    `0x18`/`0x19` have no result byte (unlike the shop's `0x4B`).
  *
- * Speed items now use the native temporary-stat tail, with WZ time in milliseconds.
+ * Speed/PAD/ACC items use the native temporary-stat tail, with WZ time in milliseconds.
  * Other timed effects stay all-or-nothing refused until their actual mechanics are implemented.
  */
 import { recordOf, propertyOf } from "../wz/props.ts";
@@ -70,11 +70,13 @@ export interface ConsumeSpec {
   mpR?: number;
   /** Destination of a 203-family item; `-1` is "the nearest town" (`spec/moveTo`). */
   moveTo?: number;
-  /** Native movement bonus and duration; only this timed item mechanic is enabled. */
+  /** Implemented timed mechanics: movement and basic physical attack/accuracy. */
+  pad?: number;
+  acc?: number;
   speed?: number;
   time?: number;
   /**
-   * `spec` field names that exist on this item but are **not** applied (`pad`, `mad`,
+   * `spec` field names that exist on this item but are **not** applied (`pdd`, `mad`,
    * `eva`, …: the buff line). A use of one of these is refused, so nothing is lost silently.
    */
   unapplied: string[];
@@ -87,7 +89,10 @@ export interface ConsumeSpec {
  * (a 표창 is a 207 item with none), and for an id outside the four USE-tab families the senders
  * cover - i.e. exactly the items the client would not send `0x18`/`0x19` for either.
  */
-export function consumeSpecOf(archive: WzArchive | undefined, itemId: number): ConsumeSpec | undefined {
+export function consumeSpecOf(
+  archive: WzArchive | undefined,
+  itemId: number,
+): ConsumeSpec | undefined {
   if (archive === undefined) return undefined;
   let path: string;
   try {
@@ -107,16 +112,37 @@ export function consumeSpecOf(archive: WzArchive | undefined, itemId: number): C
   const fields = new Set(Object.keys(spec));
   const read = (name: string): number | undefined => {
     const value = spec[name];
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : undefined;
   };
   const applied = new Set<string>([...APPLIED_SPEC_FIELDS, MOVE_TO_FIELD]);
-  // Recognizing a duration is not implementing every timed effect. Unknown fields still refuse
-  // the entire item, including an item mixing speed with a not-yet-functional combat effect.
-  const speed = read("speed"), time = read("time");
-  if (speed !== undefined && Number.isInteger(speed) && speed !== 0 && speed >= -32768 && speed <= 32767
-      && time !== undefined && Number.isInteger(time) && time > 0 && time <= 0x7fffffff) {
-    applied.add("speed");
-    applied.add("time");
+  // Only mechanics with a live consumer are accepted. EVA/MAD/PDD/etc still refuse whole items.
+  const time = read("time");
+  const timed: Pick<ConsumeSpec, "speed" | "pad" | "acc" | "time"> = {};
+  if (
+    time !== undefined &&
+    Number.isInteger(time) &&
+    time > 0 &&
+    time <= 0x7fffffff
+  ) {
+    for (const key of ["speed", "pad", "acc"] as const) {
+      const n = read(key);
+      if (
+        n !== undefined &&
+        Number.isInteger(n) &&
+        n !== 0 &&
+        n >= -32768 &&
+        n <= 32767
+      ) {
+        timed[key] = n;
+        applied.add(key);
+      }
+    }
+    if (Object.keys(timed).length) {
+      timed.time = time;
+      applied.add("time");
+    }
   }
   return {
     hp: read("hp"),
@@ -124,8 +150,10 @@ export function consumeSpecOf(archive: WzArchive | undefined, itemId: number): C
     hpR: read("hpR"),
     mpR: read("mpR"),
     moveTo: read(MOVE_TO_FIELD),
-    ...(applied.has("speed") ? { speed, time } : {}),
-    unapplied: [...fields].filter((name) => !applied.has(name) && typeof spec[name] === "number"),
+    ...timed,
+    unapplied: [...fields].filter(
+      (name) => !applied.has(name) && typeof spec[name] === "number",
+    ),
   };
 }
 
@@ -143,7 +171,12 @@ export function consumeSpecProvider(
 
 /** `true` when the item restores a vital - the two families `0x18` carries. */
 export function healsVitals(spec: ConsumeSpec): boolean {
-  return spec.hp !== undefined || spec.mp !== undefined || spec.hpR !== undefined || spec.mpR !== undefined;
+  return (
+    spec.hp !== undefined ||
+    spec.mp !== undefined ||
+    spec.hpR !== undefined ||
+    spec.mpR !== undefined
+  );
 }
 
 /**
@@ -153,9 +186,16 @@ export function healsVitals(spec: ConsumeSpec): boolean {
  * does not divide is a partial point the client's bar cannot show anyway (a choice: the 2003
  * server's rounding is not in the binary).
  */
-export function consumeDeltas(spec: ConsumeSpec, stats: CharacterStats): VitalReport {
+export function consumeDeltas(
+  spec: ConsumeSpec,
+  stats: CharacterStats,
+): VitalReport {
   const percent = (rate: number | undefined, max: number): number =>
-    rate === undefined ? 0 : Math.floor((Math.max(0, Math.trunc(max)) * Math.max(0, Math.trunc(rate))) / 100);
+    rate === undefined
+      ? 0
+      : Math.floor(
+          (Math.max(0, Math.trunc(max)) * Math.max(0, Math.trunc(rate))) / 100,
+        );
   const hpDelta = (spec.hp ?? 0) + percent(spec.hpR, stats.maxHp);
   const mpDelta = (spec.mp ?? 0) + percent(spec.mpR, stats.maxMp);
   const report: VitalReport = {};

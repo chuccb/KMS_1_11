@@ -1,5 +1,7 @@
 # 基本武器攻擊、選彈與投射物（2026-10-17；未測試）
 
+> **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新範圍與未完成碰撞／技能界線見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
+
 > **依使用者指示，未執行 unit／socket／browser／VM／probe／check／typecheck。**
 > 本輪僅靜態閱讀反編譯／PE、解析原 Data.wz、編輯／格式化來源與整理 Git。
 > 新增回歸測試來源亦未執行。舊文件的570等PASS不能代表本次改動；沒有啟動服務或改動存檔。

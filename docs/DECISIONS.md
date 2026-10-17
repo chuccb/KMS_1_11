@@ -2129,3 +2129,31 @@ MP活人條件；4BE790依職業查1000002／4100001／4200001的time×1000；�
 
 **交付**：新增／更新回歸來源但依使用者指示全部不執行，不跑typecheck/browser/VM/probe；
 保留原體驗save及ignored冷備份、啟LIVE、[skip ci]提交推送本分支。詳見 `TEMPORARY_STATS.md`。
+
+---
+
+## ADR-051：有效能力閉環、原 Detail 與新定位的普通物理公式（2026-10-18）
+
+**更正證據**：4C7960 才是物理攻擊；4C8ED0 是碰撞受傷；515CB0 是外觀匯出。
+移除 live combat.ts 近似路徑，保留舊 helpers 作歷史 fixture，不再寫「binary 沒有公式」。
+4C5020／5420／5740、4F0940／30A0／13B0 與 WZ 交叉後，採用有效裝備→Basic/Secondary→Detail／移動／攻擊共同基底。
+3000000.x、4000000.x/y 從真技能與已學 map32 取值；signed 實例值不能換回模板 inc*。
+
+**實作選擇**：共享 mjs 純運算、typed server adapter 與 bridge stat-basis view，不新增 native opcode。
+HP/MP 分母、自然恢復／補藥／復活／升級補滿、成長 INT 一併接有效裝備；base maxima 不覆寫。
+原4C7960普通物理使用第一 ClientRandom stream、七預抽樣、ACC/EVA、武器動作、PD與mastery；
+保留經 PE 確認的早期特殊暴擊分支，不拿後期 Critical Shot 規則修飾。
+原41E610／41F200與真 NoRed0/1 素材取代白色字型傷害，含MISS、首字大小、overlap與淡出上升。
+
+**藥水與體驗**：PAD/ACC 有實際攻擊消費者後才接受2002004／2002005；其餘EVA/MAD/PDD等仍整筆拒絕。
+既有default-off帳號授權工具加勾選後各領3瓶，兩組先clone／preflight／encode才提交，背包不足整批不發。
+還原點不包含道具，不自動重seed或重寫目前角色；補滿／半血半魔採effective cap。
+
+**政策與界線**：脫下上限裝備／工具還原後current vitals超有效上限時clamp，是本server政策。
+換圖保留、斷線清除temp政策沿ADR-050。bridge/browser以各自封包到達時計時，並非完全時鐘同步。
+動作選擇未和原全域RNG完全同步；JS/x87未作實機逐輸入比對。怪物碰撞受傷／實際迴避、
+主動技能／魔法、怪物暫時能力、完整CShape2D選敵仍未完成，不把定位／顯示當效果完成。
+
+**交付狀態**：只新增／更新未執行回歸來源、靜態審閱與格式化；不跑test/check/typecheck/browser/VM/probe。
+同體驗save停止服務後冷備份，再啟LIVE供使用者自行操作；[skip ci]提交並非force推送本分支。
+詳見 `NATIVE_STATS_COMBAT.md`；歷史PASS、whitespace檢查、啟服都不代表這輪功能PASS。

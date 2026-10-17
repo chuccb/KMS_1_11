@@ -580,6 +580,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(consumeSpec !== undefined ? { consumeSpec } : {}),
       ...(growthSkill !== undefined ? { growthSkill } : {}),
       ...(skills !== undefined ? { skills } : {}),
+      ...(itemCatalog !== undefined ? { itemCatalog } : {}),
       ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
       ...(itemCatalog !== undefined
         ? {
@@ -622,6 +623,7 @@ async function runServe(rest: string[]): Promise<number> {
         ...(mapCatalog !== undefined ? { mapCatalog } : {}),
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
         ...(skills !== undefined ? { skills } : {}),
+        ...(mobTemplate !== undefined ? { mobTemplate } : {}),
         ...(game ? {testTools:(username:string,id:number,request:unknown)=>game!.testTools(username,id,request)} : {}),
         ...(art !== undefined ? { art } : {}),
         ...(audio !== undefined ? { audio } : {}),

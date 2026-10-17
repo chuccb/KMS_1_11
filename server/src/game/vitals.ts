@@ -51,19 +51,24 @@ export interface VitalReport {
  * The record is mutated because that is the object the server sent in `0x16` and the one the next
  * report is applied to; it is also what a save writes.
  */
-export function applyVitalReport(stats: CharacterStats, report: VitalReport): StatDiff {
+export function applyVitalReport(
+  stats: CharacterStats,
+  report: VitalReport,
+  caps: Pick<CharacterStats, "maxHp" | "maxMp"> = stats,
+): StatDiff {
   const diff: StatDiff = {};
   if (report.hpDelta !== undefined) {
     // The death rule: at 0 HP the only way up is the revive path, not the regen tick.
-    const delta = report.hpDelta > 0 && stats.hp === 0 ? 0 : whole(report.hpDelta);
-    const next = clampVital(stats.hp + delta, stats.maxHp);
+    const delta =
+      report.hpDelta > 0 && stats.hp === 0 ? 0 : whole(report.hpDelta);
+    const next = clampVital(stats.hp + delta, caps.maxHp);
     if (next !== stats.hp) {
       stats.hp = next;
       diff.hp = next;
     }
   }
   if (report.mpDelta !== undefined) {
-    const next = clampVital(stats.mp + whole(report.mpDelta), stats.maxMp);
+    const next = clampVital(stats.mp + whole(report.mpDelta), caps.maxMp);
     if (next !== stats.mp) {
       stats.mp = next;
       diff.mp = next;

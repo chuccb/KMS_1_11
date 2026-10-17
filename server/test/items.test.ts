@@ -160,3 +160,13 @@ test("native speed potion reads milliseconds, while mixed unknown mechanics refu
     assert.ok(bad.unapplied.includes("time"));
   }
 });
+
+// Added as unexecuted regression sources: PAD/ACC have real physical-attack consumers now.
+test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still refuses whole use",()=>{
+  for(const key of ["pad","acc"] as const) {
+    const spec=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000}}})),2002004)!;
+    assert.equal(spec[key],5);assert.equal(spec.time,180000);assert.deepEqual(spec.unapplied,[]);
+    const mixed=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000,mad:10}}})),2002004)!;
+    assert.deepEqual(mixed.unapplied,["mad"]);
+  }
+});

@@ -4,13 +4,20 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
+## 最新實作：有效能力、原 Detail 與普通物理攻擊（2026-10-18，未測試）
+
+S→Detail 啟用原176×192面板，主窗／詳情／實際攻擊／移動共用有效裝備集合；裝備HP/MP上限接恢復與補藥。
+普通物理改用新定位4C7960的命中、武器動作、PD與mastery，傷害／MISS改用原NoRed圖；不再走舊近似式。
+PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。EVA被動只有合計／顯示，瀏覽器怪物碰撞受傷仍未接。
+不是全技能／全域RNG逐步一致；未執行測試／typecheck／browser／probe。詳見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
+
 ## 最新實作：原加速藥水／暫時能力與裝備移動值（未測試）
 
 - 原0x0D tail實為duration／mask／s16 values／來源，已更正舊誤判並接上client；原iconRaw、32px右排、y45、alpha210。
 - `2002001` 原speed8／180000ms改實際移動，重喝覆蓋／刷新、換圖保留deadline，到期清掉；
   穿戴裝備實例speed/jump依原兩階段clamp，非cash外觀／非WZ模板覆蓋。
 - 體驗工具勾選後可明確發3瓶（會存檔，能力還原不回收），另有唯讀速度與剩餘秒數。
-- 其他戰鬥buff道具仍整筆拒絕，原完整碰撞／傷害／技能施放未完成；不宣稱全buff系統完成。
+- 本輪另接 PAD/ACC；其餘無消費者的戰鬥buff仍整筆拒絕，完整碰撞／技能施放未完成。
 - 不執行測試，只啟服務。來源、斷線政策與步驟見 [TEMPORARY_STATS.md](TEMPORARY_STATS.md)。
 
 ## 最新實作：自然恢復與方便體驗的獨立工具（未測試）
@@ -86,7 +93,7 @@
 - 靜態 scene 預排序／可見像素裁切／lazy PNG／跨圖快取及 blob 釋放；短樣本 drawImage 約 794→130/frame。
 - 修正合併到達的進圖／pool／stat 順序，及升級 EXP 分母和戰鬥能力 snapshot 同步。
 - **本次新接（未測試）**：原表自然 HP／MP 成長、已學被動 x/y、HP／MP AP 與立即保存；完整來源、更正與隔離帳號見 [STAT_GROWTH.md](STAT_GROWTH.md)。
-- **未完成**：自然 AP/SP 發放量、Detail／完整裝備與 buff 總值、SP 操作／技能學習與轉職；不自動猜點數、不宣稱全遊戲完成。
+- **後續更新**：技能學習／SP、Detail／有效裝備與部分buff已接（均未測）；自然AP/SP發放量、轉職、完整技能buff仍未完成。
   S 不再兼作向下移動，下繩索用 ArrowDown。來源、實測與差異見 [SMOOTH_STAT_VALIDATION.md](SMOOTH_STAT_VALIDATION.md)。
 
 ## 怎麼跑
@@ -274,6 +281,7 @@ mob-leave    { mobId }
 user-attack  { characterId, facingLeft, targets[] }       ← 0x23（別人的揮擊，含他們骰的數字）
 drop-enter   { drop }                                    ← 0x43（money/value/x/y/mobId）
 drop-leave   { dropId, reason, characterId? }             ← 0x44（taken 時 page 把圖示飛向那個人）
+stat-basis   { basis, wornFacts, ammoPad }                 ← 原WZ計算資料，不是新增native封包
 hit          { mobId, damage }                            ← 橋自己回的：這一下的數字（線路上沒有）
 npc-enter    { npc }         npc-leave { npcId }
 unknown      { opcode, bytes }                            ← 這個殼沒讀的封包
@@ -312,8 +320,8 @@ error        { message }
 - **怪物 AI 與怪物打你**：2003 client 自己跑怪的 AI（FINDINGS §4.20／ADR-008），頁面只畫伺服器
   送來的 `0x30`／`0x31`，怪不會主動攻擊、玩家不會掉血。衝擊（`0x1C`）與死亡／復活是伺服器側
   已有的路徑（ADR-021），頁面沒有接。
-- **技能的傷害公式**：`0x1B` 的數字是頁面骰的（ADR-040）：`(主屬*4+副屬)*watk/100`、下限十分之一，
-  mastery／防禦／暴擊都不建模。這是選擇，不是證據。
+- **主動技能／魔法傷害**：尚未接；普通物理的近似公式已由4C7960取代（ADR-051），不是所有技能已完成。
+  動作選擇與全域RNG仍未完全同步、CShape2D選敵／怪物暫時能力仍缺。
 - **密語的「對方是不是在密你」**：線路上分不出來——送達的密語就是 `0x1A` 的 `0x12`，跟場地聊天同一包
   （FINDINGS 4.31）。頁面照實顯示，不假裝知道。
 - **交易／組隊／郵件**：伺服器都有（`0x25`／`0x26`／`0x24`），頁面沒有介面；它們的封包測試在

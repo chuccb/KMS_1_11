@@ -62,7 +62,7 @@ export interface ItemInfo {
   desc?: string;
   /** `info/iconRaw` (or `info/icon`), the node `sub_47CE40` draws for a drop. */
   iconRaw?: ItemIcon;
-  /** `info/incPAD` - a weapon's or glove's attack. The only number a damage roll needs. */
+  /** `info/incPAD`: template metadata (including ammunition); worn attack uses instance PAD. */
   incPAD?: number;
   /** Original weapon sound family (info/sfx), e.g. swordL. */
   sfx?: string;

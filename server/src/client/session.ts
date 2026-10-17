@@ -1,3 +1,4 @@
+import { ClientRandom } from "../protocol/random.ts";
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
 import { SKILL_UPDATE_OPCODE, encodeSkillRequest, readSkillUpdate, type SkillChange } from "../protocol/skills.ts";
@@ -898,6 +899,9 @@ export class ClientSession {
     return { ...this.lastPosition };
   }
 
+  /** First native stream (CWvsApp+632); reseeded by 0x16. */
+  attackRandom: ClientRandom | undefined;
+
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
     return this.latest;
@@ -906,7 +910,7 @@ export class ClientSession {
   /**
    * One basic melee (`0x0F`) or shot (`0x10`), including empty attacks: one target record per mob, one hit
    * per target, the damage the caller already rolled (the field takes it on trust - see
-   * `game/combat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
+   * `game/nativecombat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
    */
   async attack(
     targets: {
@@ -1396,6 +1400,7 @@ export class ClientSession {
           this.slotPending = false;
           this.shopPending = false;
           this.nextSlotAt = 0;
+          this.attackRandom = new ClientRandom(field.randomSeedA, field.randomSeedB, field.randomSeedC);
           this.latest = field.character;
           this.self = selfOf(field.character);
           this.mapId = field.character.stats.mapId;

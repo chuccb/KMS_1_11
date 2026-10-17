@@ -47,7 +47,10 @@ import { ClientSession, type ClientEvent } from "../client/session.ts";
 import { encodeCp949, decodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
-import { damageRangeFor, rollDamage } from "../game/combat.ts";
+import { characterStatBasis, statTotals } from "../game/characterstats.ts";
+import { rollNativePhysical } from "../game/nativecombat.ts";
+import type { MobTemplate } from "../game/mobs.ts";
+import { temporaryStats } from "../../../client/temporarystats.mjs";
 import type { AudioProvider } from "../game/audio.ts";
 import type { MapData, MapDestination } from "../game/map.ts";
 import type { MapArt } from "../game/mapart.ts";
@@ -97,6 +100,7 @@ export interface WebClientOptions {
    */
   itemCatalog?: ItemCatalog;
   skills?: SkillCatalog;
+  mobTemplate?(id:number):MobTemplate|undefined;
   testTools?(username:string, characterId:number, request:unknown): TestToolResult;
   /**
    * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
@@ -457,6 +461,7 @@ class BrowserSession {
   private session: ClientSession | undefined;
   private unsubscribe: (() => void) | undefined;
   private username: string | undefined;
+  private readonly buffs = temporaryStats();
 
   constructor(socket: WebSocket, options: WebClientOptions) {
     this.socket = socket;
@@ -659,16 +664,18 @@ class BrowserSession {
           };
     // A target can leave while the browser's command is in flight. Still send an empty shot:
     // the native client fires/consumes a round even without a target (513C80).
-    const worn = [...(character.items?.worn.values() ?? [])].map(
-      (slot) => slot.itemId,
-    );
-    const range = damageRangeFor(
-      character.stats,
-      worn,
-      this.options.itemCatalog,
-      ammo?.itemId,
-    );
-    const damage = mob === undefined ? 0 : rollDamage(range);
+    const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
+    const temporary=this.buffs.values(performance.now());
+    const totals=statTotals(basis,temporary);
+    // 4C7960 clamps base PAD + temporary PAD + ammo together, only once.
+    totals.pad=basis.secondary.pad!+(temporary.pad??0);
+    const template=mob ? this.options.mobTemplate?.(mob.templateId) : undefined;
+    if(mob && (!template || !session.attackRandom)) return; // No invented monster defence.
+    const damage=mob && template && session.attackRandom ? rollNativePhysical(
+      character,basis,totals,template,action?.action??5,
+      ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0,ammo?.itemId??0,
+      this.options.skills,()=>session.attackRandom!.next(),
+    ) : 0;
     await session.attack(
       mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage }],
       facingLeft,
@@ -718,9 +725,18 @@ class BrowserSession {
         : {}),
       ...(this.options.log !== undefined ? { log: this.options.log } : {}),
     });
-    this.unsubscribe = session.onEvent((event) =>
-      this.send(this.eventJson(event)),
-    );
+    this.buffs.clear();
+    this.unsubscribe = session.onEvent((event) => {
+      if(event.kind==="temporary-stat") this.buffs.apply(event.update,performance.now());
+      if(event.kind==="disconnect") this.buffs.clear();
+      this.send(this.eventJson(event));
+      if(["field","self","inventory","skills"].includes(event.kind) && session.character) {
+        const character=session.character;
+        const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
+        const ammo=firstBasicAmmo(character.items);
+        this.send({t:"stat-basis",basis,wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:Object.fromEntries(["str","dex","int","luk"].map(k=>[k,item[k as "str"|"dex"|"int"|"luk"]])),requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
+      }
+    });
     this.session = session;
     return session;
   }

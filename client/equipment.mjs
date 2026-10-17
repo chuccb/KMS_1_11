@@ -1,3 +1,4 @@
+import { effectiveWorn, signedEquipStat } from "./characterstats.mjs";
 /** CUIEquip: 4D89F0 / 4D9110. Coordinates read from PE VA 005BC368, fourteen (s32 x,s32 y). */
 export const EQUIP_WINDOW = {
   width: 176,
@@ -69,13 +70,14 @@ export function firstBagSlot(inventory, tab) {
 }
 /** sub_4636B0/sub_4658E0: exclude replaced/conflicting equips BEFORE checking the new item.
  * Base stats and per-instance wire stats, never the WZ template's incSTR as a substitute.
- * No buff system exists yet; this is not a claim of complete buff/stat dependency reconstruction. */
+ * 4C5020 repeatedly filters the remaining worn set; the candidate cannot qualify itself. */
 export function canWear(
   item,
   facts,
   self,
   inventory,
   part = bodyPart(item.itemId),
+  wornFacts = inventory?.worn ?? [],
 ) {
   if (!self || self.hp <= 0) return "角色死亡時不能穿戴裝備。";
   if (!part || part !== bodyPart(item.itemId) || facts?.cash || item.cash)
@@ -105,9 +107,15 @@ export function canWear(
   if (conflict && replaced && !firstBagSlot(inventory, 1))
     return "裝備欄沒有空位放置衝突的裝備。";
   const total = { str: self.str, dex: self.dex, int: self.int, luk: self.luk };
-  for (const worn of inventory?.worn ?? [])
-    if (worn.slot !== part && worn.slot !== conflict)
-      for (const k of Object.keys(total)) total[k] += worn.stats?.[k] ?? 0;
+  if (
+    wornFacts.some(
+      (i) => i.slot !== part && i.slot !== conflict && !i.requirements,
+    )
+  )
+    return "正在讀取已穿裝備的原始需求，請稍後再試。";
+  for (const worn of effectiveWorn(self, wornFacts, [part, conflict]))
+    for (const k of Object.keys(total))
+      total[k] += signedEquipStat(worn.stats?.[k]);
   if (
     self.level < req.level ||
     Object.keys(total).some((k) => total[k] < req[k])

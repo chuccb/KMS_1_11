@@ -1,6 +1,8 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新實作（**未測試／未typecheck／未browser／未probe**）：更正原0x0D暫時能力 duration→mask 的舊判讀，接十二欄s16與單一來源pair codec、同欄覆蓋／到期／原iconRaw圖示。原2002001加速藥水speed8／180000ms實際改移動；穿戴裝備實例speed/jump按原基底／temp兩階段clamp。工具可明確領3瓶並讀速度／剩餘秒數，不自動seed。其他戰鬥buff仍拒絕，技能施放／完整碰撞／傷害仍缺。見 `TEMPORARY_STATS.md`／ADR-050。
+> 最新交付2026-10-18（**未測試／未check／未typecheck／未browser／未probe**）：4C5020有效裝備、Basic/Secondary總值、Amazon/Nimble能力、原Detail、有效HP/MP及成長INT閉環；4C7960普通物理攻擊、命中／武器動作／PD／mastery與原紅色傷害／MISS；PAD/ACC藥水及明示領藥入口。怪物碰撞受傷／實際迴避、主動技能／魔法／完整CShape2D仍未完成。舊「binary沒有傷害公式」已被新定位取代，不把算式移植當全域RNG或實機驗證。見 `NATIVE_STATS_COMBAT.md`／ADR-051；不重seed原體驗進度。
+
+> 前輪實作（**未測試／未typecheck／未browser／未probe**）：更正原0x0D暫時能力 duration→mask 的舊判讀，接十二欄s16與單一來源pair codec、同欄覆蓋／到期／原iconRaw圖示。原2002001加速藥水speed8／180000ms實際改移動；穿戴裝備實例speed/jump按原基底／temp兩階段clamp。工具可明確領3瓶並讀速度／剩餘秒數，不自動seed。其他戰鬥buff仍拒絕，技能施放／完整碰撞／傷害仍缺。見 `TEMPORARY_STATS.md`／ADR-050。
 
 > 最新實作（**未測試／未typecheck／未browser**）：原30ms自然HP／MP恢復、回血／回魔／繩梯被動、map recovery與0x1C→0x0D；另加明示非原版的帳號授權體驗面板（職業／AP SP／vitals／地圖／能力技能還原點），不重seed、不自動改角色。還原點僅服務記憶體、升級保護，不回溯EXP／道具／金錢。見 `RECOVERY_TEST_TOOLS.md`／ADR-049。主動施放／其他被動buff／轉職自然發點仍缺。
 

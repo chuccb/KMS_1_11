@@ -1,3 +1,6 @@
+import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
+import { characterStatBasis } from "../game/characterstats.ts";
+import type { ItemCatalog } from "../game/iteminfo.ts";
 import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
 import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
@@ -162,7 +165,7 @@ import {
 } from "../protocol/messenger.ts";
 import { MessengerRegistry, type MessengerRoom } from "../game/messenger.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
-import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
+import { INVENTORY_TAB, encodeInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
@@ -935,6 +938,7 @@ export interface GameEntryServerOptions {
   /** Actual learned HP/MP passive x/y values from Skill/100.img and Skill/200.img. */
   growthSkill?: GrowthSkillProvider;
   skills?: SkillCatalog;
+  itemCatalog?:ItemCatalog;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -1217,19 +1221,32 @@ export class GameEntryServer {
     let message=enabled?"體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
     if(enabled && kind!=="state") {
       if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
-      if(kind==="speed-potions") {
+      if(kind==="speed-potions" || kind==="combat-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
-        const spec=this.options.consumeSpec?.(2002001);
-        if(!spec || spec.unapplied.length || spec.speed===undefined || spec.time===undefined) throw new Error("原 WZ 的加速藥水效果不可用，未發放道具。");
+        const ids=kind==="speed-potions"?[2002001]:[2002004,2002005];
         const items=structuredClone(session.character.items??emptyCharacterItems());
-        const grant=grantItem(items,2002001,3);
-        if(!grant) throw new Error("消耗欄沒有可放三瓶加速藥水的空間，未變更背包。");
-        const packet=encodeInventoryChange([grant.change]);
+        const changes:InventoryChange[]=[];
+        for(const id of ids) {
+          const spec=this.options.consumeSpec?.(id);
+          const expected=id===2002001?"speed":id===2002004?"pad":"acc";
+          if(!spec || spec.unapplied.length || spec[expected]===undefined || spec.time===undefined) throw new Error("原 WZ 的藥水效果不可用，未發放道具。");
+          const grant=grantItem(items,id,3);
+          if(!grant) throw new Error("消耗欄空間不足以放入全部體驗藥水；背包完全未變更。");
+          changes.push(grant.change);
+        }
+        const packet=encodeInventoryChange(changes);
         session.character.items=items;session.character.flags|=CHAR_FLAG_INVENTORY_2;
         session.send(packet);this.persist();
-        message="已明確領取 3 瓶 속도향상의 물약（2002001）；這是非原版體驗發放，會存檔且能力還原點不會回收道具。開啟道具窗，選消耗欄並連點使用。";
+        message=kind==="speed-potions"
+          ? "已明確領取 3 瓶 속도향상의 물약（2002001）。"
+          : "已明確領取 2002004 攻擊藥水、2002005 命中藥水各 3 瓶；原 WZ 分別 PAD+5／180秒、ACC+5／300秒。";
+        message+="這是非原版體驗發放，會存檔且還原點不回收道具。開啟 I 道具窗，選消耗欄並連點使用；S→Detail 看目前能力。";
       } else {
-        const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available);
+        const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available,characterStatBasis(session.character,this.options.itemCatalog).basic);
+        const future={...session.character,stats:{...session.character.stats,...plan.diff}};
+        const caps=characterStatBasis(future,this.options.itemCatalog).basic;
+        if(future.stats.hp>caps.maxHp) plan.diff.hp=Math.max(0,caps.maxHp);
+        if(future.stats.mp>caps.maxMp) plan.diff.mp=Math.max(0,caps.maxMp);
         const statPacket=encodeStatUpdate({ack:false,diff:plan.diff});
         const skillPacket=encodeSkillUpdate({ack:false,changes:plan.changes});
         const wasDead=session.character.stats.hp<=0;
@@ -1528,7 +1545,7 @@ export class GameEntryServer {
    */
   private revive(session: FieldSession): void {
     const stats = session.character.stats;
-    stats.hp = stats.maxHp;
+    stats.hp = characterStatBasis(session.character,this.options.itemCatalog).basic.maxHp;
     const here = session.instance.mapId;
     const target = reviveMapId(session.instance.map);
     this.options.log?.(
@@ -1591,7 +1608,7 @@ export class GameEntryServer {
         diff = spendAbility(
           session.character.stats,
           mask,
-          characterGrowthContext(session.character, this.options.growthSkill),
+          characterGrowthContext(session.character, this.options.growthSkill,this.options.itemCatalog),
         );
       }
     } catch (error) {
@@ -1642,7 +1659,7 @@ export class GameEntryServer {
     try {
       const report = readClientStatReport(new PacketReader(plain, 1));
       const stats = session.character.stats;
-      const diff = applyVitalReport(stats, report);
+      const diff = applyVitalReport(stats, report, characterStatBasis(session.character,this.options.itemCatalog).basic);
       if (Object.keys(diff).length > 0)
         session.send(encodeStatUpdate({ diff }));
       this.options.log?.(
@@ -1723,6 +1740,11 @@ export class GameEntryServer {
       return;
     }
     session.send(encodeInventoryChange(outcome.changes));
+    if(outcome.lookChanged) {
+      // Server policy: removing max-vital equipment cannot leave current vitals above the ceiling.
+      const diff=applyVitalReport(session.character.stats,{hpDelta:0,mpDelta:0},characterStatBasis(session.character,this.options.itemCatalog).basic);
+      if(Object.keys(diff).length) session.send(encodeStatUpdate({diff}));
+    }
     // A throw-away leaves the bag here and lands in the field: the ground half belongs to
     // `game/drops.ts`, exactly like a monster's loot (`FieldInstance.dropItem`), and the whole map -
     // the thrower included - is told with the `0x43` that carries no monster (FINDINGS 4.36).
@@ -1824,9 +1846,10 @@ export class GameEntryServer {
       this.useMapItem(session, request, spec, refuse);
       return;
     }
-    const temporary = spec.speed !== undefined && spec.time !== undefined
-      ? { durationMs: spec.time, values: { speed: spec.speed }, sourceIsSkill: false, sourceId: request.itemId }
-      : undefined;
+    const values:TemporaryStatUpdate["values"]={};
+    for(const key of ["speed","pad","acc"] as const) if(spec[key]!==undefined) values[key]=spec[key];
+    const temporary:TemporaryStatUpdate|undefined=Object.keys(values).length && spec.time!==undefined
+      ? {durationMs:spec.time,values,sourceIsSkill:false,sourceId:request.itemId} : undefined;
     if (!healsVitals(spec) && !temporary) {
       refuse("no implemented vital or temporary effect in its spec");
       return;
@@ -1834,7 +1857,8 @@ export class GameEntryServer {
     // The rules are `game/vitals.ts`'s, and the copy is how "would anything move?" is asked without
     // applying twice: a potion used at full HP changes nothing, and nothing is what it should cost.
     const probe: CharacterStats = { ...stats };
-    const diff = applyVitalReport(probe, consumeDeltas(spec, stats));
+    const caps=characterStatBasis(session.character,this.options.itemCatalog).basic;
+    const diff = applyVitalReport(probe, consumeDeltas(spec, {...stats,...caps}),caps);
     if (stats.hp <= 0 || (Object.keys(diff).length === 0 && !temporary)) {
       refuse(
         `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}: dead or already restored`,
@@ -2483,10 +2507,14 @@ export class GameEntryServer {
       session.character.stats,
       amount,
       undefined,
-      characterGrowthContext(session.character, this.options.growthSkill),
+      characterGrowthContext(session.character, this.options.growthSkill,this.options.itemCatalog),
     );
     if (!gain.changed) return;
     const stats = session.character.stats;
+    if(gain.levels>0 && stats.hp>0) {
+      const caps=characterStatBasis(session.character,this.options.itemCatalog).basic;
+      stats.hp=caps.maxHp; stats.mp=caps.maxMp;
+    }
     session.send(encodeStatUpdate({ diff: diffStats(before, stats) }));
     this.persist(); // Persist EXP/maxima now, including delayed projectile kills.
     if (gain.levels > 0) {

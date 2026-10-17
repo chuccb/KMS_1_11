@@ -4433,3 +4433,27 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 - 本輪另加明示非原版的--test-tools面板；它不是新找到的GM封包／轉職規則，不加入native opcode catalogue。
   帳號owner驗證、confirm、記憶體還原點與升級保護是開發工具政策，不是原client證據。
 - 沒有執行任何測試／typecheck／browser／probe；回歸來源未執行，啟服務不代表PASS。見ADR-049。
+
+## 補充：有效裝備、Detail、普通物理與原傷害字圖（2026-10-18；實作未測試）
+
+- **更正「尚未定位原傷害公式」**：4C7960是普通物理（741行）；4C89D0另為魔法路徑；
+  4C8ED0是碰撞受傷，515CB0只匯出look。普通物理已接新路徑，魔法／碰撞未接受傷迴圈。
+- 4C5020會從normal1..14加四屬性，再逐件扣掉自身加值檢查需求，第一件失格移除後重掃；
+  包含原gender/job bit/mage weapon whitelist，不是把所有worn無條件加上。
+- 4C5420／5740實例WORD為signed，基底MAD/MDD=INT，ACC依職業，EVA=truncDEX/4+truncLUK/2，
+  hands=DEX+INT+LUK且未加equip craft；3000000.x及4000000.x/y直接加ACC/EVA。
+- Detail原背景在 `UI/UIWindow.img/Stat/backgrnd2`，不是StatDetail；176×192，parent+(176,123)，
+  x80、y12+18i九列。攻擊列不是傷害range：弓DEX+PAD、賊LUK+(STR+DEX)/4+PAD，其餘STR+PAD。
+- 4C7960預抽7次第一stream，ACC命中、武器／動作係數、mastery與等差、物理屬性、PD0.5..0.6；
+  成功結果trunc/clamp1..9999、失手0。48D080怪物欄是PA/PD/acc/eva，不能套後期欄名。
+- 原特殊射擊分支 `roll > 3*level` 時乘 `5*level%` 雖反直覺，PE4C88B5..4C88CE也一致，
+  本輪不擅自換成後期暴擊公式。4BE270是level/mastery，並非x；其修改ACC發生在本函數命中基準算完之後。
+- 0x16 seeds已接第一ClientRandom到普通物理；動作selector仍未共用該序列，不宣稱全域逐步相同。
+- 41AF20載NoRed0/1；41E610首字bank1、餘字bank0、依canvas origin及width的3/5 overlap、
+  50px組圖；41F200用NoRed0/Miss raw center。400ms opaque＋600ms fade、1000ms上升30px。
+  字圖來自原WZ，不是CSS白字；mob anchor取485C20當前canvas originY。
+- 2002004 pad5/time180000、2002005 acc5/time300000已接消費者；EVA/MAD/PDD等道具仍拒用。
+- 裝備effective maxHP/MP接補藥／自然恢復／升級補滿；移除裝備後clamp current vitals是server重建政策，
+  非取得原server規則。bridge stat-basis只是WZ計算view message，不是新nativeopcode。
+- 完整來源、範圍、操作及未執行回歸來源：`NATIVE_STATS_COMBAT.md`／ADR-051。
+  沒有執行test/check/typecheck/browser/VM/probe，不以啟服或歷史PASS宣稱驗證。

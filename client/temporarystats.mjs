@@ -79,7 +79,8 @@ export function temporaryStats() {
   };
 }
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-/** 4C5740: equipment/base clamp first; 512400: add temporary value and clamp again.
+/** Legacy isolated movement fixture helper. Live movement uses the effective stat-basis pipeline.
+ * 4C5740: equipment/base clamp first; 512400: add temporary value and clamp again.
  * Read the actual equip instances, NOT WZ template stats, and never cash appearance slots.
  */
 export function movementStats(worn = [], temporary = {}) {

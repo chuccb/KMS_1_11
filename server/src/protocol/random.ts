@@ -75,8 +75,8 @@ export function randomRange(state: RandomState, lo: number, span: number): numbe
 
 /**
  * A generator with its own state - the server side needs one per field (the client seeds two with
- * the same parts, `CWvsApp+632` and `+652`; which rolls use which is not located, so this class
- * exposes one and lets the caller keep a second).
+ * the same parts, `CWvsApp+632` and `+652`: physical attack 4C7960 uses the first,
+ * touch damage 4C8ED0 the second). Attack-action selection is not yet synchronized with the browser.
  */
 export class ClientRandom {
   readonly state: RandomState;

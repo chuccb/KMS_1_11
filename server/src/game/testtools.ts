@@ -63,6 +63,7 @@ export function planTestTool(
   value: unknown,
   checkpoint: TestCheckpoint | undefined,
   jobAvailable: (job: number) => boolean,
+  caps: Pick<CharacterStats, "maxHp" | "maxMp"> = character.stats,
 ) {
   const kind = testToolKind(value),
     request = value as Record<string, unknown>;
@@ -115,14 +116,14 @@ export function planTestTool(
       break;
     }
     case "heal":
-      stats.hp = stats.maxHp;
-      stats.mp = stats.maxMp;
+      stats.hp = caps.maxHp;
+      stats.mp = caps.maxMp;
       message = "體驗補滿HP／MP；死亡時回本圖出生點。";
       break;
     case "drain":
       if (character.stats.hp <= 0) throw new Error("請先復活或使用體驗補滿。");
-      stats.hp = Math.max(1, Math.floor(stats.maxHp / 2));
-      stats.mp = Math.floor(stats.maxMp / 2);
+      stats.hp = Math.max(1, Math.floor(caps.maxHp / 2));
+      stats.mp = Math.floor(caps.maxMp / 2);
       message = "體驗HP／MP已降至上限的一半，保留至少1HP；可觀察自然恢復。";
       break;
     case "restore":

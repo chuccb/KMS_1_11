@@ -1,3 +1,4 @@
+// Updated native worn-requirement fixtures; not executed for the 2026-10-18 delivery.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -98,14 +99,14 @@ test("requirements use instance stats, excluding replaced/conflicting gear and n
   assert.equal(
     canWear(item, req, self, {
       ...inv,
-      worn: [{ slot: 5, itemId: 1040001, stats: { str: 8 } }],
+      worn: [{ slot: 5, itemId: 1040001, stats: { str: 8 }, requirements:facts.requirements }],
     }),
     undefined,
   );
   assert.match(
     canWear(item, req, self, {
       ...inv,
-      worn: [{ slot: 1, itemId: 1002001, stats: { str: 8 } }],
+      worn: [{ slot: 1, itemId: 1002001, stats: { str: 8 }, requirements:facts.requirements }],
     }),
     /能力/,
   );
@@ -113,7 +114,7 @@ test("requirements use instance stats, excluding replaced/conflicting gear and n
   assert.match(
     canWear(sword, req, self, {
       ...inv,
-      worn: [{ slot: 10, itemId: 1092000, stats: { str: 8 } }],
+      worn: [{ slot: 10, itemId: 1092000, stats: { str: 8 }, requirements:facts.requirements }],
     }),
     /能力/,
   );

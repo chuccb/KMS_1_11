@@ -45,6 +45,7 @@ export function testTools({
       "qa-drain",
       "qa-checkpoint",
       "qa-speed-potions",
+      "qa-combat-potions",
     ])
       el(id).disabled = !ready;
     el("qa-restore").disabled = !ready || !restoreAvailable;
@@ -170,6 +171,7 @@ export function testTools({
     "checkpoint",
     "restore",
     "speed-potions",
+    "combat-potions",
   ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));
   el("qa-map-filter").addEventListener("input", filterMaps);

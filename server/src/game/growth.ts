@@ -1,3 +1,5 @@
+import { characterStatBasis } from "./characterstats.ts";
+import type { ItemCatalog } from "./iteminfo.ts";
 /** HP/MP growth from sub_4C7450 and PE .data:005BB344; see docs/STAT_GROWTH.md.
  * This is not the damage formula. Natural growth uses row 2*floor(job/100), AP uses the next row.
  * RNG is server-owned: reproduce rand()%width, not the original process's hidden random seed.
@@ -81,12 +83,15 @@ export function growthSkillProvider(
 }
 
 /** sub_4C5420 adds the normal worn set to BasicStat INT; the cash array is appearance only.
- * Existing equipment eligibility is not reimplemented here; see the documented wear/total gap.
+ * With archive metadata, 4C5020 filters invalid dependencies before INT is summed.
+ * The metadata-free legacy fixture path below is not the live Data.wz path.
  */
 export function characterGrowthContext(
   character: CharacterData,
   skill?: GrowthSkillProvider,
+  catalog?:ItemCatalog,
 ): GrowthContext {
+  if(catalog) return {intelligence:characterStatBasis(character,catalog).basic.int,skills:character.items?.map32,skill};
   let intelligence = character.stats.int;
   for (const [slot, item] of character.items?.worn ?? []) {
     if (slot < 1 || slot > 14 || item.kind !== "equip") continue;

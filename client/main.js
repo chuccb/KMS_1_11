@@ -1,4 +1,6 @@
-import { temporaryStats, movementStats, drawTemporaryStats } from "./temporarystats.mjs";
+import { damageNumbers } from "./damage-render.mjs";
+import { statTotals } from "./characterstats.mjs";
+import { temporaryStats, drawTemporaryStats } from "./temporarystats.mjs";
 import { naturalRecovery } from "./recovery.mjs";
 import { testTools } from "./testtools.mjs";
 import { skillWindow } from "./skills.mjs";
@@ -254,7 +256,14 @@ let pendingUse;
  * the first tab that has anything at all. After that the choice is the player's and never moves.
  */
 let inventoryTab = 0;
-/** `itemId -> { id, name, price, desc }` from `/api/item/<id>`; absent until the fetch lands. */
+/** Native WZ-derived base; temporary values stay in the client timer model. */
+let nativeBasis, nativeAmmoPad = 0, nativeWornFacts = [];
+const effectiveSelf = () => selfView && nativeBasis ? {...selfView,maxHp:nativeBasis.basic.maxHp,maxMp:nativeBasis.basic.maxMp} : selfView;
+function effectiveMovement(now) {
+  const totals=nativeBasis && statTotals(nativeBasis,buffs.values(now));
+  return totals ? {speedPercent:totals.speed,jumpPercent:totals.jump} : {speedPercent:100,jumpPercent:100};
+}
+/** `itemId -> { id, name, price, desc }` from `/api/item/<id>`. */
 const itemInfo = new Map();
 /** Ids a lookup is already in flight for, so a re-render does not ask twice. */
 const itemInfoPending = new Map();
@@ -317,7 +326,7 @@ function setLoginPending(pending) {
 
 function connect() {
   if (loginPending) return;
-  buffs.clear();
+  buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
   showPanel(ui.connect);
   setLoginPending(true);
   ui.status.textContent = "連線中…";
@@ -355,7 +364,7 @@ function connect() {
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
-    buffs.clear();
+    buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
     logLine("websocket closed");
   });
   connection.addEventListener("message", (event) => {
@@ -383,7 +392,7 @@ function handle(message) {
     itemDialog.close(false);
     inventoryScrollDrag = undefined;
     shopPending = false;
-    if (message.t !== "field") { inventoryScroll.fill(0); buffs.clear(); }
+    if (message.t !== "field") { inventoryScroll.fill(0); buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[]; }
     itemDrag = undefined;
     slotPending = mesoPending = false;
     mesoNextAt = 0;
@@ -504,6 +513,7 @@ function handle(message) {
       return;
 
     case "field":
+      void damageArt.preload();
       portalPending = false;
       void audio.effect(self ? "Game/Portal" : "Game/GameIn");
       playerBody = undefined;
@@ -537,6 +547,10 @@ function handle(message) {
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
       void loadMap(message.mapId);
       logLine(`field ${message.mapId}`);
+      return;
+
+    case "stat-basis":
+      nativeBasis=message.basis; nativeAmmoPad=message.ammoPad; nativeWornFacts=message.wornFacts??[];
       return;
 
     case "temporary-stat":
@@ -1646,7 +1660,7 @@ function artImage(path) {
   if (artImages.size >= 1024) {
     let drop = 256;
     for (const key of artImages.keys()) {
-      if (key.startsWith("UI/")) continue;
+      if (key.startsWith("UI/") || key.startsWith("Effect/BasicEff.img/NoRed")) continue;
       artImages.delete(key);
       if (--drop === 0) break;
     }
@@ -2520,8 +2534,8 @@ function drawStatusBar() {
     const entry = artImage(piece.path);
     if (entry.ready) ctx.drawImage(entry.img, piece.x, piece.y);
   }
-  drawStatusGauge("hp", selfView.hp, selfView.maxHp);
-  drawStatusGauge("mp", selfView.mp, selfView.maxMp);
+  drawStatusGauge("hp", selfView.hp, effectiveSelf().maxHp);
+  drawStatusGauge("mp", selfView.mp, effectiveSelf().maxMp);
   drawStatusGauge("exp", selfView.exp, selfView.expToNext ?? 0);
   for (const button of STATUS_BAR.buttons) {
     let state = "normal";
@@ -2595,7 +2609,7 @@ function frame() {
             : Number(keys.has("arrowdown")) -
               Number(keys.has("arrowup") || keys.has("w")),
         jump: !blocked && !attackLocked && (keys.has("alt") || keys.has(" ")),
-        ...movementStats(inventory?.worn, buffs.values(now)),
+        ...effectiveMovement(now),
       },
       terrain,
       elapsed,
@@ -2730,24 +2744,11 @@ function frame() {
 
   drawProjectiles(cameraX, cameraY, now);
 
-  // The numbers a swing rolled, over the mobs they landed on (white with a dark edge, rising).
-  for (let i = damageMarks.length - 1; i >= 0; i--) {
-    const mark = damageMarks[i];
-    const t = (now - mark.start) / 800;
-    if (t >= 1) {
-      damageMarks.splice(i, 1);
-      continue;
-    }
-    const x = mark.x - cameraX;
-    const y = mark.y - cameraY - 34 - t * 38;
-    ctx.font =
-      "bold 14px 'Malgun Gothic', 'Apple SD Gothic Neo', 'KMSCJK', system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-    ctx.strokeText(String(mark.value), x, y);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(String(mark.value), x, y);
+  // Native WZ glyphs and MISS, not browser-font stand-ins.
+  for (let i=damageMarks.length-1;i>=0;i--) {
+    const mark=damageMarks[i];
+    if(now-mark.start>=1000) {damageMarks.splice(i,1);continue;}
+    damageArt.draw(ctx,mark,cameraX,cameraY,now);
   }
 
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
@@ -2960,9 +2961,11 @@ function scheduleAttackHit(mobId, damage, at) {
       `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
       spatialVolume(mob.x, mob.y, self),
     );
-    mobHits.set(String(mobId), now);
-    if (damage > 0)
-      damageMarks.push({ x: mob.x, y: mob.y, value: damage, start: now });
+    if(damage>0) mobHits.set(String(mobId),now);
+    const actions=mobArts.get(mob.templateId);
+    const frame=playAction(actions,mob.walking?"move":"stand",now-(mob.actionSince??0));
+    if(frame) damageMarks.push({x:mob.x,y:mob.y-Math.max(0,frame.oy??0),value:damage,start:now,
+      jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))});
   };
   const delay = at - performance.now();
   if (delay > 0) setTimeout(show, delay);
@@ -3325,7 +3328,7 @@ async function wearItem(item, slot, part = bodyPart(item.itemId)) {
     JSON.stringify(sourceItem(1, slot)) !== JSON.stringify(item)
   )
     return;
-  const reason = canWear(item, facts, selfView, inventory, part);
+  const reason = canWear(item, facts, selfView, inventory, part, nativeWornFacts);
   if (reason) {
     chatLine("系統", reason);
     return;
@@ -5095,6 +5098,7 @@ const statPanel = statWindow({
   isInGame: () => loginStage === "game",
   point: viewPoint,
   jobName: jobNameOf,
+  getBasis:()=>nativeBasis, getTemporary:()=>buffs.values(performance.now()), getAmmoPad:()=>nativeAmmoPad,
   log: logLine,
 });
 
@@ -5136,10 +5140,12 @@ const equipPanel = equipmentWindow({
   },
 });
 
+const damageArt = damageNumbers({image:artImage,log:logLine});
+void damageArt.preload();
 const buffs = temporaryStats();
 
 const recovery = naturalRecovery({
-  getSelf:()=>selfView, getBody:()=>playerBody, getMap:()=>map,
+  getSelf:effectiveSelf, getBody:()=>playerBody, getMap:()=>map,
   getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
@@ -5148,7 +5154,7 @@ const testToolsPanel = testTools({
     if (loginStage!=="game") return;
     const now=performance.now();
     const active=buffs.icons(now).find(entry=>entry.values.speed!==undefined);
-    return {...movementStats(inventory?.worn,buffs.values(now)),
+    return {...effectiveMovement(now),
       secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
   },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,

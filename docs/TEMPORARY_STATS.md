@@ -1,5 +1,7 @@
 # 暫時能力封包、原加速藥水與裝備移動能力
 
+> **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新範圍與未完成碰撞／技能界線見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
+
 2026-10-17。**本輪未跑 test／check／typecheck／browser／VM／probe**；新增的回歸來源不是 PASS。
 此輪補「加速藥水的完整可操作鏈」及穿戴移動值，不代表所有 buff 或完整 CVecCtrl 已完成。
 

@@ -76,6 +76,8 @@ export interface MobTemplate {
   maxHP: number;
   /** `info.maxMP`. What `0x34` carries (`mob+132` is the MP the attack picker spends). */
   maxMP: number;
+  /** Native info PA/PD/acc/eva (NOT later-version PADamage/PDDamage names). */
+  pa?:number; pd?:number; acc?:number; eva?:number; physicalAttribute?:number;
   exp: number;
   /**
    * Walking speed as a percentage: `clamp(0, 100 + info.speed, 130)`, the client's own formula
@@ -162,6 +164,14 @@ function dieAnimationMs(root: unknown): number {
   return longest;
 }
 
+/** Physical slot of 4BE150's case-insensitive element parser; missing digits mean 999. */
+function physicalAttributeOf(value:unknown):number {
+  if(typeof value!=="string") return 0;
+  let physical=0;
+  for(const match of value.matchAll(/([A-Za-z])(\d*)/g)) if(match[1]!.toLowerCase()==="p") physical=Number(match[2])||999;
+  return physical;
+}
+
 /** `Mob/<id>.img -> info`, or `undefined` when the archive has no such mob. */
 export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemplate | undefined {
   const path = mobImagePath(templateId);
@@ -177,6 +187,11 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     maxHP: asNumber(props.maxHP),
     maxMP: asNumber(props.maxMP),
     exp: asNumber(props.exp),
+    pa:Math.max(0,Math.min(999,asNumber(props.PA))),
+    pd:Math.max(0,Math.min(999,asNumber(props.PD))),
+    acc:Math.max(0,Math.min(999,asNumber(props.acc))),
+    eva:Math.max(0,Math.min(999,asNumber(props.eva))),
+    physicalAttribute:physicalAttributeOf(props.elemAttr),
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
     dieMs: dieAnimationMs(root),
   };
@@ -348,7 +363,8 @@ export class MobField {
    *
    * The damage is the attacking client's own number: a 2003 client rolls, applies and draws its
    * damage before reporting it (FINDINGS 4.13.1), so this server records what it is told - it does
-   * not recompute a formula it has no evidence for.
+   * not recompute it. The browser bridge uses the located native 4C7960 basic-attack formula;
+   * the field retains the original packet trust contract rather than rolling a second time.
    */
   applyDamage(mobId: number, damage: number, now: number): MobDamage | undefined {
     const mob = this.mob(mobId);

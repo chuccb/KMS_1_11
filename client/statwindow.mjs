@@ -1,3 +1,4 @@
+import { detailRows } from "./characterstats.mjs";
 /** CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D. */
 export const STAT_WINDOW = {
   width: 176,
@@ -23,11 +24,15 @@ export function statWindow({
   isInGame,
   point,
   jobName,
+  getBasis = () => undefined,
+  getTemporary = () => ({}),
+  getAmmoPad = () => 0,
   log,
 }) {
   const el = (id) => document.getElementById(id),
     root = el("stat-window");
   let opened = false,
+    detail = false,
     pending = false,
     nextAt = 0,
     hover,
@@ -80,6 +85,8 @@ export function statWindow({
         self?.ap,
         self?.hp,
         self?.job,
+        !!getBasis(),
+        detail,
         ...AP_BUTTONS.map((b) => self?.[b.field]),
       ].join("|");
     if (key === signature) return;
@@ -87,10 +94,12 @@ export function statWindow({
     root.classList.toggle("hidden", !opened);
     box(root, at.x, at.y, 176, 315);
     for (const b of AP_BUTTONS) el(`ap-${b.field}`).disabled = disabled(b);
-    el("stat-detail").disabled = true; // Exact panel stats/buffs not yet reconstructed: don't invent combat figures.
+    el("stat-detail").disabled = !getBasis();
+    el("stat-detail").setAttribute("aria-expanded", String(detail));
   }
   function toggle(value) {
     opened = value ?? !opened;
+    if (!opened) detail = false;
     signature = "";
     sync();
     if (opened) {
@@ -133,6 +142,13 @@ export function statWindow({
       pressed = undefined;
     });
   }
+  el("stat-detail").addEventListener("click", () => {
+    if (!getBasis()) return;
+    detail = !detail;
+    signature = "";
+    sync();
+    audio.effect("UI/BtMouseClick");
+  });
   el("stat-close").addEventListener("click", () => toggle(false));
   el("stat-body").addEventListener("mousedown", (e) => {
     if (!opened) return;
@@ -189,7 +205,10 @@ export function statWindow({
         pending = false;
         nextAt = 0;
         signature = "";
-        if (message.t === "disconnect" || message.t === "login") toggle(false);
+        if (message.t === "disconnect" || message.t === "login") {
+          detail = false;
+          toggle(false);
+        }
       }
       if (message.t === "error" && pending) {
         pending = false;
@@ -218,8 +237,10 @@ export function statWindow({
       text(self.name, 45, 61);
       text(jobName(self.job), 45, 79);
       text("내커뮤니티", 68, 97);
-      text(`${self.hp} / ${self.maxHp}`, 38, 113);
-      text(`${self.mp} / ${self.maxMp}`, 38, 131);
+      const basis = getBasis(),
+        b = basis?.basic;
+      text(`${self.hp} / ${b?.maxHp ?? self.maxHp}`, 38, 113);
+      text(`${self.mp} / ${b?.maxMp ?? self.maxMp}`, 38, 131);
       text(
         `${self.exp} (${self.expToNext > 0 ? Math.trunc((100 * self.exp) / self.expToNext) : 0}%)`,
         57,
@@ -227,7 +248,13 @@ export function statWindow({
       );
       text(self.fame, 57, 167);
       ["str", "dex", "int", "luk"].forEach((field, i) =>
-        text(self[field], 45, 203 + 18 * i),
+        text(
+          b && b[field] !== self[field]
+            ? `${b[field]} (${self[field]}+${b[field] - self[field]})`
+            : self[field],
+          45,
+          203 + 18 * i,
+        ),
       );
       text(self.ap, 77, 282);
       ctx.restore();
@@ -249,9 +276,56 @@ export function statWindow({
             ? "mouseOver"
             : "normal";
       stamp(`UI/UIWindow.img/BtUIClose/${state}/0`, at.x + 128, at.y + 9);
-      stamp("UI/UIWindow.img/Stat/BtDetail/disabled/0", at.x + 122, at.y + 280);
+      const detailState = !basis
+        ? "disabled"
+        : pressed === "stat-detail"
+          ? "pressed"
+          : hover === "stat-detail"
+            ? "mouseOver"
+            : "normal";
+      stamp(
+        `UI/UIWindow.img/Stat/BtDetail/${detailState}/0`,
+        at.x + 122,
+        at.y + 280,
+      );
+      const rows =
+        detail && basis ? detailRows(basis, getTemporary(), getAmmoPad()) : [];
+      if (rows.length) {
+        // CUIStatDetail is attached at parent +(176,123), 176x192; no invented title/close art.
+        stamp("UI/UIWindow.img/Stat/backgrnd2", at.x + 176, at.y + 123);
+        ctx.save();
+        ctx.font = "12px 'Dotum','돋움','KMSCJK',sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "#000";
+        rows.forEach((value, i) =>
+          ctx.fillText(
+            value,
+            Math.round(at.x + 176 + 80),
+            Math.round(at.y + 123 + 12 + 18 * i),
+          ),
+        );
+        ctx.restore();
+      }
       // Accessible, non-visible mirror of canvas numbers; don't rebuild DOM per animation frame.
-      const description = `${self.name} HP ${self.hp}/${self.maxHp} MP ${self.mp}/${self.maxMp} STR ${self.str} DEX ${self.dex} INT ${self.int} LUK ${self.luk} AP ${self.ap}`;
+      const description =
+        `${self.name} HP ${self.hp}/${b?.maxHp ?? self.maxHp} MP ${self.mp}/${b?.maxMp ?? self.maxMp} STR ${b?.str ?? self.str} DEX ${b?.dex ?? self.dex} INT ${b?.int ?? self.int} LUK ${b?.luk ?? self.luk} AP ${self.ap}` +
+        (rows.length
+          ? " · " +
+            [
+              "攻擊",
+              "物防",
+              "魔攻",
+              "魔防",
+              "命中",
+              "迴避",
+              "手技",
+              "移動速度",
+              "跳躍",
+            ]
+              .map((name, i) => `${name} ${rows[i]}`)
+              .join(" · ")
+          : "");
       if (el("stat-values").textContent !== description)
         el("stat-values").textContent = description;
     },
