@@ -55,10 +55,11 @@ test("0x24 round-trips every request type", () => {
     text: "/invite Alt",
   });
   // chat: [opcode][5][u16 len][bytes].
-  assert.equal(hex(encodeClientMessengerRequest({ kind: "chat", text: "hi" })), "240502006869");
-  assert.deepEqual(parse(encodeClientMessengerRequest({ kind: "chat", text: "hi" })), {
+  // The client composes "name : text" itself before sending (sub_4DE490).
+  assert.equal(hex(encodeClientMessengerRequest({ kind: "chat", line: "Hero : hi" })), "240509004865726f203a206869");
+  assert.deepEqual(parse(encodeClientMessengerRequest({ kind: "chat", line: "Hero : hi" })), {
     kind: "chat",
-    text: "hi",
+    line: "Hero : hi",
   });
 });
 
@@ -71,23 +72,23 @@ test("0x24 rejects the types the client never sends", () => {
 
 test("0x4d type 0 carries slot, level, face, the look list and the announce flag", () => {
   const bytes = encodeMessengerParticipant(
-    { room: 0, slot: 1, name: "Alt", face: 20000, look: [30000, 1040001] },
+    { slot: 1, name: "Alt", level: 12, face: 20000, look: [30000, 1040001] },
     true,
   );
-  // [opcode][0][room 0][slot 1][characterId 62=0x3e] look (little endian, 0-terminated) [name][announce 1]
+  // [opcode][0][slot 1][level 12][face 20000=0x4e20] look (little endian, 0-terminated) [name][announce 1]
   assert.equal(
     hex(bytes),
-    "4d00" + "00" + "01" + "204e0000" + "30750000" + "81de0f00" + "00000000" + "0300416c74" + "01",
+    "4d00" + "01" + "0c" + "204e0000" + "30750000" + "81de0f00" + "00000000" + "0300416c74" + "01",
   );
   assert.deepEqual(event(bytes), {
     kind: "participant",
-    participant: { room: 0, slot: 1, face: 20000, look: [30000, 1040001], name: "Alt" },
+    participant: { slot: 1, level: 12, face: 20000, look: [30000, 1040001], name: "Alt" },
     announce: true,
   });
 });
 
 test("0x4d type 0 refuses a slot the client cannot address", () => {
-  const participant = { room: 0, slot: 3, name: "Third", face: 20000, look: [] };
+  const participant = { slot: 3, name: "Third", level: 1, face: 20000, look: [] };
   assert.throws(() => encodeMessengerParticipant(participant, false), RangeError);
   assert.equal(MESSENGER_ROOM_SIZE, 3);
 });

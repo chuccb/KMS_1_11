@@ -2684,7 +2684,7 @@ export class GameEntryServer {
         this.inviteToMessenger(session, request.text);
         return;
       case "chat":
-        this.sayInMessenger(session, request.text);
+        this.sayInMessenger(session, request.line);
         return;
     }
   }
@@ -2763,21 +2763,31 @@ export class GameEntryServer {
   }
 
   /**
-   * `0x24 type 5`：一行聊天。`0x4D type 5` 的字串**自己帶「說話者 : 內容」**（client 用
-   * `strstr(line, " : ")` 拆名字），所以伺服器組的字串就是畫面上那一行。
+   * `0x24 type 5`：一行聊天。
    *
-   * 送給**所有成員，包括說話的人**：跟場地聊天同一個理由——client 的輸入框只送包，不自己回顯。
+   * **client 自己組好整行**：`sub_4DE490` 先用 `sub_418610(自己的名字)` ＋ `" : "` ＋ 輸入的文字
+   * 組成一個字串，**先印在自己的訊息區**（`sub_4DEE50`）才送包。所以：
+   *
+   * 1. 伺服器收到的是 `"名字 : 內容"`，不是純文字；
+   * 2. **不能回送給說話的人**——他已經在自己的畫面上看到了，再送一次會變成兩行。
+   *
+   * 名字的部分仍然以**伺服器認識的**那個名字為準：前綴被換掉，內容原樣保留（封包可以偽造）。
    */
-  private sayInMessenger(session: FieldSession, text: string): void {
+  private sayInMessenger(session: FieldSession, line: string): void {
     const room = this.messenger.roomOf(session.characterId);
     if (room === undefined) {
-      this.options.log?.(`game: messenger: "${session.name}" said "${text}" outside a room`);
+      this.options.log?.(`game: messenger: "${session.name}" said "${line}" outside a room`);
       return;
     }
-    const line = `${session.name} : ${text}`;
-    const packet = encodeMessengerChat(line);
-    for (const entry of room.members) this.sessionsByCharacter.get(entry.characterId)?.send(packet);
-    this.options.log?.(`game: messenger: room ${room.id} "${line}"`);
+    const separator = line.indexOf(" : ");
+    const text = separator < 0 ? line : line.slice(separator + 3);
+    const composed = `${session.name} : ${text}`;
+    const packet = encodeMessengerChat(composed);
+    for (const entry of room.members) {
+      if (entry.characterId === session.characterId) continue;
+      this.sessionsByCharacter.get(entry.characterId)?.send(packet);
+    }
+    this.options.log?.(`game: messenger: room ${room.id} "${composed}"`);
   }
 
   /**
@@ -2810,9 +2820,9 @@ export class GameEntryServer {
   private messengerParticipant(characterId: number, name: string, slot: number): MessengerParticipant {
     const target = this.sessionsByCharacter.get(characterId);
     return {
-      room: 0,
       slot,
       name,
+      level: target?.character.stats.level ?? 1,
       face: target?.face ?? 0,
       look: target?.avatarItems ?? [],
     };

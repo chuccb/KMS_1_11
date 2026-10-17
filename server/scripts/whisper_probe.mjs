@@ -981,15 +981,20 @@ if (!together) {
     "both windows hold both entries, and Alt's own is the announced one",
   );
 
-  hero.game.send(encodeClientMessengerRequest({ kind: "chat", text: "hello" }));
-  const heroLine = await messenger(hero.game);
+  // The window prints the line itself before sending it (`sub_4DE490` → `sub_4DEE50`, then the
+  // packet), so what the server relays is already "name : text" and only the *other* window gets it.
+  hero.game.send(
+    encodeClientMessengerRequest({ kind: "chat", line: `${hero.character.stats.name} : hello` }),
+  );
   const altLine = await messenger(alt.game);
   expect(
-    heroLine.kind === "chat" &&
-      heroLine.line === `${hero.character.stats.name} : hello` &&
-      altLine.kind === "chat" &&
-      altLine.line === heroLine.line,
-    `one chat line reaches both sides, already formatted ("${heroLine.line}")`,
+    altLine.kind === "chat" && altLine.line === `${hero.character.stats.name} : hello`,
+    `the other window gets the line already formatted ("${altLine.line}")`,
+  );
+  // Look at the queue without draining it: the sections below own the packets that are still in it.
+  expect(
+    hero.game.queue.filter((packet) => packet[0] === MESSENGER_OPCODE.result).length === 0,
+    "and the speaker's own window does not get it back",
   );
 
   alt.game.send(encodeClientMessengerRequest({ kind: "leave" }));

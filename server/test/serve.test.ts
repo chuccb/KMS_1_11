@@ -4099,11 +4099,11 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   );
 
   // 4. Chat: one 0x4d type 5 line, already formatted, to everybody including the speaker.
-  request(hero, { kind: "chat", text: "hello" });
-  const heroLine = (await answers(hero, 1))[0];
+  // The client has already printed the line locally, so only the *other* window receives it.
+  request(hero, { kind: "chat", line: "Hero : hello" });
   const altLine = (await answers(alt, 1))[0];
-  assert.deepEqual(heroLine, { kind: "chat", line: "Hero : hello" });
   assert.deepEqual(altLine, { kind: "chat", line: "Hero : hello" });
+  assert.deepEqual(await hero.drainOpcodes(120), [], "the speaker does not get its own line back");
 
   // 5. A name nobody is playing: the inviter is told, and no packet goes to the room.
   request(hero, { kind: "command", text: "/invite Nobody" });
@@ -4115,7 +4115,7 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   assert.deepEqual(await alt.drainOpcodes(120), [], "the leaving window is already closed - nothing to send it");
 
   // 7. Talking with no room is dropped, and coming back needs a fresh invitation.
-  request(alt, { kind: "chat", text: "still there?" });
+  request(alt, { kind: "chat", line: "Alt : still there?" });
   assert.deepEqual(await alt.drainOpcodes(120), []);
   assert.deepEqual(await hero.drainOpcodes(120), []);
   request(alt, { kind: "enter", roomId });

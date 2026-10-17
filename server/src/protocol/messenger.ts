@@ -82,7 +82,11 @@ export type ClientMessengerRequest =
   | { kind: "leave" }
   /** `/` 開頭的文字（`/q` 不會送到這裡，client 自己吃掉）。 */
   | { kind: "command"; text: string }
-  | { kind: "chat"; text: string };
+  /**
+   * 一行聊天，**client 已經組好 `"名字 : 內容"`**（`sub_4DE490` 先在本機印出來、再送包），
+   * 所以伺服器收到的是完整的一行，不是純文字。
+   */
+  | { kind: "chat"; line: string };
 
 /** 讀一個 `0x24`（不含 opcode）。未知的 type 丟 `RangeError`。 */
 export function readClientMessengerRequest(reader: PacketReader): ClientMessengerRequest {
@@ -95,7 +99,7 @@ export function readClientMessengerRequest(reader: PacketReader): ClientMessenge
     case MESSENGER_REQUEST_TYPE.command:
       return { kind: "command", text: reader.readAsciiString() };
     case MESSENGER_REQUEST_TYPE.chat:
-      return { kind: "chat", text: reader.readAsciiString() };
+      return { kind: "chat", line: reader.readAsciiString() };
     default:
       throw new RangeError(`0x24 type 0x${type.toString(16)} is not a messenger request`);
   }
@@ -112,7 +116,7 @@ export function encodeClientMessengerRequest(request: ClientMessengerRequest): U
     case "command":
       return writer.writeByte(MESSENGER_REQUEST_TYPE.command).writeAsciiString(request.text).toBytes();
     case "chat":
-      return writer.writeByte(MESSENGER_REQUEST_TYPE.chat).writeAsciiString(request.text).toBytes();
+      return writer.writeByte(MESSENGER_REQUEST_TYPE.chat).writeAsciiString(request.line).toBytes();
   }
 }
 
@@ -126,17 +130,17 @@ export function describeClientMessengerRequest(request: ClientMessengerRequest):
     case "command":
       return `0x24 messenger: command "${request.text}"`;
     case "chat":
-      return `0x24 messenger: chat "${request.text}"`;
+      return `0x24 messenger: chat "${request.line}"`;
   }
 }
 
 /** 房間裡的一格。 */
 export interface MessengerParticipant {
-  /** client 的三個房間之一（`this + 25 * room + 31`）；本伺服器一次只開一間，永遠送 0。 */
-  room: number;
-  /** 0..2（`sub_4DF3E0` 的上限）。 */
+  /** 0..2：`this + 25 * slot + 31` 的那一格（`sub_4DF3E0` 只認 `<= 2`）。 */
   slot: number;
   name: string;
+  /** 🟡 第二個 byte：與交易 participant 的第一個 byte 同一個位置（推論為等級）。 */
+  level: number;
   /** 臉（`CharacterData.appearanceA`）：`sub_4DF3E0` 把它存進 `v9[7]`，與 `0x1C` 的第一個 `u32` 同一個值。 */
   face: number;
   /** `0x1C` 的外觀清單：頭髮在最前面，寫入時自動補結尾的 0。 */
@@ -161,12 +165,9 @@ export function encodeMessengerParticipant(
   if (participant.slot < 0 || participant.slot >= MESSENGER_ROOM_SIZE) {
     throw new RangeError(`messenger slot ${participant.slot} is outside the client's 0..2`);
   }
-  if (participant.room < 0 || participant.room >= MESSENGER_ROOM_SIZE) {
-    throw new RangeError(`messenger room ${participant.room} is outside the client's 0..2`);
-  }
   const writer = resultWriter(MESSENGER_RESULT_TYPE.participant)
-    .writeByte(participant.room)
     .writeByte(participant.slot)
+    .writeByte(participant.level & 0xff)
     .writeU32(participant.face >>> 0);
   for (const itemId of participant.look) writer.writeU32(itemId >>> 0);
   return writer
@@ -224,8 +225,8 @@ export function readMessengerResult(reader: PacketReader): MessengerEvent {
   const type = reader.readByte();
   switch (type) {
     case MESSENGER_RESULT_TYPE.participant: {
-      const room = reader.readByte();
       const slot = reader.readByte();
+      const level = reader.readByte();
       const face = reader.readU32();
       const look: number[] = [];
       for (;;) {
@@ -235,7 +236,7 @@ export function readMessengerResult(reader: PacketReader): MessengerEvent {
       }
       const name = reader.readAsciiString();
       const announce = reader.readByte() !== 0;
-      return { kind: "participant", participant: { room, slot, face, look, name }, announce };
+      return { kind: "participant", participant: { slot, level, face, look, name }, announce };
     }
     case MESSENGER_RESULT_TYPE.joinFailed:
       return { kind: "joinFailed", code: reader.readByte() };
