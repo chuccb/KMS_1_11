@@ -9,6 +9,7 @@ export function damageGlyphLayout(
   value: number,
   glyphs: Map<string, DamageGlyph>,
   jitter?: number[],
+  palette?: "NoRed" | "NoViolet",
 ): (DamageGlyph & { x: number; y: number })[];
 export function damageNumbers(options: {
   image: (path: string) => unknown;

@@ -99,6 +99,7 @@ import {
   encodeClientChangeSlot,
   type ClientChangeSlot,
   INTERACT_KIND_CURSOR,
+  INTERACT_KIND_REVIVE,
   readSetField,
   readUserChat,
   readUserEffect,
@@ -901,6 +902,9 @@ export class ClientSession {
 
   /** First native stream (CWvsApp+632); reseeded by 0x16. */
   attackRandom: ClientRandom | undefined;
+  /** CWvsApp+652, seeded alongside +632 but advanced independently. */
+  touchRandom: ClientRandom | undefined;
+  private nextReviveAt = 0;
 
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
@@ -1077,6 +1081,17 @@ export class ClientSession {
     if(!this.gameLink || !this.self || this.self.hp<=0) return;
     if(![report.hpDelta??0,report.mpDelta??0].every(n=>Number.isInteger(n)&&n>=0&&n<=32767) || ![0,1].includes(report.flag)) throw new Error("Invalid recovery report");
     await this.gameLink.send(encodeClientStatReport({hpDelta:report.hpDelta??0,mpDelta:report.mpDelta??0,flag:report.flag}));
+  }
+
+  /** Bridge-derived contact damage only. No JSON endpoint accepts an arbitrary negative delta. */
+  async reportTouchDamage(damage: number): Promise<void> {
+    if (!Number.isInteger(damage) || damage < 1 || damage > 9999)
+      throw new Error("Invalid native touch damage");
+    if (!this.gameLink || !this.self || this.self.hp <= 0)
+      throw new Error("Touch report requires a living field session");
+    await this.gameLink.send(
+      encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }),
+    );
   }
 
   async increaseSkill(skillId: number): Promise<void> {
@@ -1356,6 +1371,23 @@ export class ClientSession {
     await link.send(encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name }));
   }
 
+  /** 4E9E70: native revive OK, not the privileged map command. HP moves only on the field reply. */
+  async revive(): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp > 0)
+      throw new Error("Revive requires a dead field character");
+    if (performance.now() < this.nextReviveAt)
+      throw new Error("Revive request is already pending");
+    this.nextReviveAt = performance.now() + 5000;
+    try {
+      await this.gameLink.send(
+        encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }),
+      );
+    } catch (error) {
+      this.nextReviveAt = 0;
+      throw error;
+    }
+  }
+
   /** Original /헉맵 sender: c2s 0x0D, s32 mapId and an empty name. Server permission is authoritative. */
   async warpTo(mapId: number): Promise<void> {
     if (
@@ -1392,6 +1424,7 @@ export class ClientSession {
       switch (opcode) {
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
+          this.nextReviveAt = 0;
           this.abilityPending = false;
           this.skillPending = false;
           this.nextSkillAt = 0;
@@ -1401,6 +1434,7 @@ export class ClientSession {
           this.shopPending = false;
           this.nextSlotAt = 0;
           this.attackRandom = new ClientRandom(field.randomSeedA, field.randomSeedB, field.randomSeedC);
+          this.touchRandom = new ClientRandom(field.randomSeedA, field.randomSeedB, field.randomSeedC);
           this.latest = field.character;
           this.self = selfOf(field.character);
           this.mapId = field.character.stats.mapId;

@@ -73,6 +73,8 @@ export interface MobTemplate {
   /** `info.name` (the WZ string is the Korean name, e.g. 스포아). */
   name: string;
   level: number;
+  /** 48D080 info.bodyAttack; missing/zero means no contact damage. */
+  bodyAttack?: boolean;
   maxHP: number;
   /** `info.maxMP`. What `0x34` carries (`mob+132` is the MP the attack picker spends). */
   maxMP: number;
@@ -184,6 +186,7 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     templateId,
     name: typeof props.name === "string" ? props.name : "",
     level: asNumber(props.level),
+    bodyAttack: asNumber(props.bodyAttack) !== 0,
     maxHP: asNumber(props.maxHP),
     maxMP: asNumber(props.maxMP),
     exp: asNumber(props.exp),

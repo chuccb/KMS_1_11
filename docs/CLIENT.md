@@ -4,11 +4,21 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：有效能力、原 Detail 與普通物理攻擊（2026-10-18，未測試）
+## 最新實作：原怪物碰撞、受傷／MISS、外力與復活（2026-10-18，未測試）
+
+目前格lt/rb／swept／491FF0內縮、bodyAttack、獨立stream2的4C8ED0、原負0x1C回報→0x0D血量，
+紫色字圖／MISS、signed 1500ms保護、bounded外力、hit表情；EVA藥水已接實際迴避。
+修正表情未進URL/cache與canvas delay漏讀；死怪動畫優先，碰撞與普通矩形篩選改共用當前格。
+死亡使用dead格／18|facing，>2200ms原Notice窗，OK／Enter送kind0、等原field復活。
+工具有明示迴避領藥、盜賊填值與唯讀EVA／PDD／保護tick，不自動改角色。
+本輪新獨立save，不冒稱恢復不在沙箱的舊進度。完整來源／政策／未完成與未執行回歸見
+[NATIVE_CONTACT_REVIVE.md](NATIVE_CONTACT_REVIVE.md)。沒有執行任何測試、typecheck或瀏覽器驗證。
+
+## 前輪實作：有效能力、原 Detail 與普通物理攻擊（2026-10-18，未測試）
 
 S→Detail 啟用原176×192面板，主窗／詳情／實際攻擊／移動共用有效裝備集合；裝備HP/MP上限接恢復與補藥。
 普通物理改用新定位4C7960的命中、武器動作、PD與mastery，傷害／MISS改用原NoRed圖；不再走舊近似式。
-PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。EVA被動只有合計／顯示，瀏覽器怪物碰撞受傷仍未接。
+PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有合計；本輪碰撞與迴避已接，見上節。
 不是全技能／全域RNG逐步一致；未執行測試／typecheck／browser／probe。詳見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
 
 ## 最新實作：原加速藥水／暫時能力與裝備移動值（未測試）
@@ -17,7 +27,7 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。EVA被動只有
 - `2002001` 原speed8／180000ms改實際移動，重喝覆蓋／刷新、換圖保留deadline，到期清掉；
   穿戴裝備實例speed/jump依原兩階段clamp，非cash外觀／非WZ模板覆蓋。
 - 體驗工具勾選後可明確發3瓶（會存檔，能力還原不回收），另有唯讀速度與剩餘秒數。
-- 本輪另接 PAD/ACC；其餘無消費者的戰鬥buff仍整筆拒絕，完整碰撞／技能施放未完成。
+- 本輪另接 PAD/ACC；其餘無消費者的戰鬥buff仍整筆拒絕，完整CVecCtrl／CShape2D與技能施放未完成；本輪另接矩形碰撞受傷。
 - 不執行測試，只啟服務。來源、斷線政策與步驟見 [TEMPORARY_STATS.md](TEMPORARY_STATS.md)。
 
 ## 最新實作：自然恢復與方便體驗的獨立工具（未測試）

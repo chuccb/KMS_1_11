@@ -144,3 +144,37 @@ export function rollNativePhysical(
   if (level > 0 && uniform(0, 100) > 3 * level) damage *= 5 * level * 0.01;
   return Math.trunc(clamp(damage, 1, 9999));
 }
+
+/** Touch damage, 4C8ED0. Independent second RNG stream; MISS consumes only the EVA draw.
+ * Mob temporary stats are not implemented. PA/acc here are the original loader fields,
+ * deliberately not aliases for later PADamage/PDDamage properties in some archive images.
+ */
+export function rollNativeTouch(
+  basic: StatBasis["basic"],
+  totals: Record<string, number>,
+  mob: { level: number; pa?: number; acc?: number },
+  random: () => number,
+): number {
+  let eva = clamp(totals.eva ?? 0);
+  if (basic.level < mob.level)
+    eva = Math.max(0, eva - Math.trunc((mob.level - basic.level) / 2));
+  if (nativeUniform(random(), eva * 0.1, eva) >= clamp(mob.acc ?? 0)) return 0;
+  const pa = clamp(mob.pa ?? 0),
+    pdd = clamp(totals.pdd ?? 0);
+  let damage = nativeUniform(random(), pa * 0.7, pa * 0.8) * pa * 0.01;
+  switch (Math.trunc(basic.job / 100)) {
+    case 1:
+      damage -=
+        ((basic.str * 0.15 + basic.dex * 0.1) * pdd) / (basic.level * 2.5);
+      break;
+    case 2:
+      damage -= ((basic.dex + basic.str) * 0.5 * pdd) / (basic.level * 2.2);
+      break;
+    case 3:
+    case 4:
+      damage -=
+        ((basic.str * 0.2 + basic.dex * 0.1) * pdd) / (basic.level * 2.5);
+      break;
+  }
+  return Math.trunc(clamp(damage, 1, 9999));
+}

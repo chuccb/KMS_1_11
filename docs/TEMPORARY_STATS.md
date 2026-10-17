@@ -1,6 +1,6 @@
 # 暫時能力封包、原加速藥水與裝備移動能力
 
-> **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新範圍與未完成碰撞／技能界線見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
+> **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新碰撞／EVA消費者與尚未完成的完整物理／技能界線見 [NATIVE_CONTACT_REVIVE.md](NATIVE_CONTACT_REVIVE.md)。
 
 2026-10-17。**本輪未跑 test／check／typecheck／browser／VM／probe**；新增的回歸來源不是 PASS。
 此輪補「加速藥水的完整可操作鏈」及穿戴移動值，不代表所有 buff 或完整 CVecCtrl 已完成。
@@ -92,7 +92,7 @@ reader 對未知 mask／截斷尾段直接拒絕。這是 codec 的安全限制�
 
 `time` **已經是毫秒**，不是180000秒，也不再乘1000。
 `game/items.ts` 僅把有效 speed＋time 列為已支援 timed mechanic。
-包含 EVA／PAD／MAD／其他未實作效果的道具（即使也有 speed）仍拒絕整筆，不先耗道具再說沒有作用。
+當輪只接受speed；後續已補PAD／ACC／EVA／PDD的實際消費者。包含MAD／MDD／未知未實作效果的混合道具仍拒絕整筆，不先耗道具再說沒有作用。
 只有 time 沒有實作效果、無效時間／speed、空 spec，也不放行。
 伺服器安全政策也拒絕商店／對話／交易中的使用，避免消耗正在交易的堆疊；不聲稱這是已取得的原server限制。
 

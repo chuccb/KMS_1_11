@@ -70,14 +70,15 @@ export interface ConsumeSpec {
   mpR?: number;
   /** Destination of a 203-family item; `-1` is "the nearest town" (`spec/moveTo`). */
   moveTo?: number;
-  /** Implemented timed mechanics: movement and basic physical attack/accuracy. */
+  /** Implemented timed mechanics: movement, basic physical attack/accuracy and contact evasion/defence. */
   pad?: number;
   acc?: number;
+  eva?: number;
+  pdd?: number;
   speed?: number;
   time?: number;
   /**
-   * `spec` field names that exist on this item but are **not** applied (`pdd`, `mad`,
-   * `eva`, …: the buff line). A use of one of these is refused, so nothing is lost silently.
+   * `spec` field names that exist on this item but are **not** applied (`mad`, `mdd`, …: the buff line). A use of one of these is refused, so nothing is lost silently.
    */
   unapplied: string[];
 }
@@ -117,16 +118,16 @@ export function consumeSpecOf(
       : undefined;
   };
   const applied = new Set<string>([...APPLIED_SPEC_FIELDS, MOVE_TO_FIELD]);
-  // Only mechanics with a live consumer are accepted. EVA/MAD/PDD/etc still refuse whole items.
+  // Only mechanics with a live consumer are accepted. MAD/MDD/etc still refuse whole items.
   const time = read("time");
-  const timed: Pick<ConsumeSpec, "speed" | "pad" | "acc" | "time"> = {};
+  const timed: Pick<ConsumeSpec, "speed" | "pad" | "acc" | "eva" | "pdd" | "time"> = {};
   if (
     time !== undefined &&
     Number.isInteger(time) &&
     time > 0 &&
     time <= 0x7fffffff
   ) {
-    for (const key of ["speed", "pad", "acc"] as const) {
+    for (const key of ["speed", "pad", "acc", "eva", "pdd"] as const) {
       const n = read(key);
       if (
         n !== undefined &&

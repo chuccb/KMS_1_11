@@ -3,8 +3,16 @@
  * Baseline constants from CVecCtrl: sub_5378D0 (-555 jump), sub_537CA0
  * (140000 force, 125 walk speed, 80000 drag / CAttrShoe mass=100), and
  * sub_5382F0 (2000 gravity, 670 terminal fall speed). Default shoe friction is .9.
- * This implements ordinary ground/air/ladder movement, not water, flight, knockback or skills.
+ * This implements ordinary ground/air/ladder movement, not water, flight or skill-specific physics. Contact impulse staging follows 5114A0/537B00.
  */
+import { mergeImpulse } from "./contact.mjs";
+
+/** Stage external force; do not overwrite walk velocity or apply a second impulse on receipt. */
+export function queueKnockback(body, x, y) {
+  const pending = body.knockback ?? { x: 0, y: 0 };
+  body.knockback = { x: mergeImpulse(pending.x, x), y: mergeImpulse(pending.y, y) };
+}
+
 export const PHYSICS = Object.freeze({ stepMs: 8, walkSpeed: 125, acceleration: 1400,
   friction: 720, airAcceleration: 200, airDrag: 100, airControlSpeed: 10000 * 0.0008928571428571428,
   gravity: 2000, terminalSpeed: 670, jumpSpeed: 555, climbSpeed: 100 });
@@ -141,6 +149,17 @@ function sweepWalls(body, oldX, oldY, world) {
   if (wall) { body.x = wall.x1 - Math.sign(body.x - oldX) * 0.001; body.vx = 0; }
 }
 function step(body, input, world, dt) {
+  const knocked = body.knockback !== undefined;
+  if (knocked) {
+    // 537B00 first releases ground/ladder, then combines each pending component with velocity.
+    const impulse = body.knockback;
+    body.knockback = undefined;
+    body.grounded = false;
+    body.foothold = 0;
+    body.ladder = undefined;
+    body.vx = mergeImpulse(body.vx, impulse.x);
+    body.vy = mergeImpulse(body.vy, impulse.y);
+  }
   // CUserLocal 512400 updates CAttrShoe walkSpeed (+32) and jump (+56), not gravity.
   const speedScale = clamp(input.speedPercent ?? 100, 80, 130) / 100;
   const jumpScale = clamp(input.jumpPercent ?? 100, 80, 123) / 100;
@@ -153,7 +172,7 @@ function step(body, input, world, dt) {
   if (horizontal) body.facing = horizontal < 0 ? 1 : 0;
   body.ignoreMs -= dt * 1000;
   if (body.ignoreMs <= 0) body.ignored.clear();
-  if (!body.ladder && vertical && !input.jump) {
+  if (!knocked && !body.ladder && vertical && !input.jump) {
     const ladder = world.ladders.find((l) => Math.abs(body.x - l.x) <= 8
       && body.y >= l.y1 - (body.grounded && vertical > 0 ? 5 : 0) && body.y <= l.y2 + (body.grounded && vertical < 0 ? 5 : 0)
       && !(body.grounded && vertical > 0 && body.y >= l.y2 - 1));
@@ -237,13 +256,14 @@ export function advancePlayer(body, input, world, elapsedMs) {
   return body;
 }
 export function locomotion(body) {
+  if (body.dead) return "dead";
   if (body.ladder) return body.ladder.ladder ? "ladder" : "rope";
   if (!body.grounded) return "jump";
   return Math.abs(body.vx) > 1 ? "walk1" : "stand1";
 }
 export function actionOf(body) {
   // sub_43FC80's action-name table, doubled because bit 0 is facing.
-  return ({ walk1: 0, stand1: 4, jump: 70, ladder: 72, rope: 74 }[locomotion(body)]) | body.facing;
+  return ({ walk1: 0, stand1: 4, dead: 18, jump: 70, ladder: 72, rope: 74 }[locomotion(body)]) | body.facing;
 }
 
 /** Preserve path duration end-to-end. New paths start from what was drawn, avoiding tiny jitter. */
@@ -309,11 +329,11 @@ export function animationPose(entity, stance, moving, now) {
   if (!climbing || moving) state.elapsed += Math.max(0, Math.min(250, now - state.last));
   state.last = now;
   const delay = climbing ? 250 : stance === 'walk1' ? 180 : 500;
-  const count = climbing ? 2 : stance === 'walk1' ? 4 : stance === 'jump' ? 1 : 3;
+  const count = climbing ? 2 : stance === 'walk1' ? 4 : stance === 'jump' || stance === 'dead' ? 1 : 3;
   return { stance, frame: Math.floor(state.elapsed / delay) % count };
 }
 export function remoteStance(entity) {
-  return ({ 0: 'walk1', 4: 'stand1', 70: 'jump', 72: 'ladder', 74: 'rope' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
+  return ({ 0: 'walk1', 4: 'stand1', 70: 'jump', 72: 'ladder', 74: 'rope', 18: 'dead' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
     ?? (entity.motion ? 'walk1' : 'stand1');
 }
 

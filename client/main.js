@@ -1,3 +1,12 @@
+import { reviveWindow } from "./revive.mjs";
+import {
+  contactClock,
+  contactImpulse,
+  mobRect,
+  mobContactRect,
+  playerContactRect,
+  intersects,
+} from "./contact.mjs";
 import { damageNumbers } from "./damage-render.mjs";
 import { statTotals } from "./characterstats.mjs";
 import { temporaryStats, drawTemporaryStats } from "./temporarystats.mjs";
@@ -34,6 +43,7 @@ import {
   collisionWorld,
   createPlayer,
   advancePlayer,
+  queueKnockback,
   locomotion,
   actionOf,
   beginPath,
@@ -359,6 +369,8 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
+    resetContact();
+    revivePanel.reset();
     selfSwing = undefined;
     projectiles.length = damageMarks.length = 0;
     ui.where.textContent = "斷線";
@@ -382,11 +394,13 @@ function connect() {
 /** @param {any} message */
 function handle(message) {
   recovery.receive(message);
+  revivePanel.receive(message);
   if (testToolsPanel.receive(message)) return;
   if (creationDialogs.receive(message)) return;
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
+    resetContact();
     miniMapPanel.setMap(undefined);
     itemEpoch++;
     itemDialog.close(false);
@@ -513,6 +527,7 @@ function handle(message) {
       return;
 
     case "field":
+      contactField = message.contactField;
       void damageArt.preload();
       portalPending = false;
       void audio.effect(self ? "Game/Portal" : "Game/GameIn");
@@ -553,6 +568,44 @@ function handle(message) {
       nativeBasis=message.basis; nativeAmmoPad=message.ammoPad; nativeWornFacts=message.wornFacts??[];
       return;
 
+    case "touch-result": {
+      const pending = contactPending;
+      if (
+        !pending ||
+        message.contactId !== pending.contactId ||
+        message.contactField !== contactField
+      )
+        return;
+      contactPending = undefined;
+      if (!message.accepted) {
+        contactRetryAt =
+          performance.now() +
+          (Number.isFinite(message.retryAfterMs)
+            ? Math.max(30, Math.min(1500, message.retryAfterMs))
+            : 250);
+        if (message.message) logLine(`contact: ${message.message}`);
+        return;
+      }
+      const damage = message.damage;
+      if (!Number.isInteger(damage) || damage < 0 || damage > 9999) return;
+      const now = performance.now();
+      contact.accept(damage);
+      damageMarks.push({
+        x: pending.player.x,
+        y: pending.player.y,
+        avatar: pending.avatar,
+        value: damage,
+        palette: "NoViolet",
+        start: now,
+        jitter: Array.from(String(damage), () => Math.floor(Math.random() * 2)),
+      });
+      if (damage > 0 && playerBody && selfView) {
+        queueKnockback(playerBody, pending.impulse.x, pending.impulse.y);
+        selfView.emotion = { value: 1, until: now + 1500 };
+      }
+      return;
+    }
+
     case "temporary-stat":
       buffs.apply(message.update, performance.now());
       return;
@@ -560,9 +613,13 @@ function handle(message) {
     case "self":
       if (selfView && message.self.level > selfView.level)
         void audio.effect("Game/LevelUp");
-      if (selfView?.hp > 0 && message.self.hp <= 0)
+      if (selfView?.hp > 0 && message.self.hp <= 0) {
         void audio.effect("Game/Tombstone");
-      selfView = message.self;
+        selfSwing = undefined;
+        combatEpoch++;
+        keys.clear();
+      }
+      selfView = selfView?.characterId === message.self.characterId ? { ...selfView, ...message.self } : message.self;
       if (selfView.hp <= 0) {
         itemDialog.close(false);
         itemDrag = undefined;
@@ -732,6 +789,9 @@ function handle(message) {
     }
 
     case "mob-enter":
+      dying.delete(String(message.mob.mobId));
+      mobHits.delete(String(message.mob.mobId));
+      previousContactMobs.delete(String(message.mob.mobId));
       mobs.set(String(message.mob.mobId), message.mob);
       return;
 
@@ -771,6 +831,8 @@ function handle(message) {
     }
 
     case "mob-leave":
+      mobHits.delete(String(message.mobId));
+      previousContactMobs.delete(String(message.mobId));
       mobs.delete(String(message.mobId));
       dying.delete(String(message.mobId));
       return;
@@ -1220,7 +1282,7 @@ canvas.addEventListener("mousemove", (event) => {
 });
 
 canvas.addEventListener("mousedown", (event) => {
-  if (itemDialog.open || event.button > 0) return;
+  if (revivePanel.open || itemDialog.open || event.button > 0) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1361,7 +1423,7 @@ canvas.addEventListener("dblclick", (event) => {
 });
 
 canvas.addEventListener("click", (event) => {
-  if (itemDialog.open) return;
+  if (revivePanel.open || itemDialog.open) return;
   // The status bar is drawn over the world, so its buttons win over anything behind them - and the
   // inventory window is above both.
   const point = viewPoint(event);
@@ -1554,6 +1616,94 @@ let swingCounter = 0;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
 const damageMarks = [];
 const mobHits = new Map();
+const mobBodyAttack = new Map();
+const contact = contactClock();
+let contactField, contactPending, previousContactPlayer;
+let contactSerial = 0,
+  contactRetryAt = 0,
+  lastContactAt;
+let previousContactMobs = new Map();
+function resetContact() {
+  contact.reset();
+  contactField = contactPending = previousContactPlayer = undefined;
+  previousContactMobs.clear();
+  contactRetryAt = 0;
+  lastContactAt = undefined;
+}
+/** Snapshots on the 30ms contact clock, independent of UI input locks. Windows aren't invulnerability.
+ * Field changes/closed sockets, dead users and dead mobs cannot initiate another touch request.
+ */
+function updateContact(now) {
+  const elapsed = Math.max(0, now - (lastContactAt ?? now));
+  lastContactAt = now;
+  if (!contact.step(elapsed)) return;
+  if (!self || !playerBody || map?.id !== self.mapId) {
+    previousContactPlayer = undefined;
+    previousContactMobs.clear();
+    return;
+  }
+  const point = (entity) => ({
+    x: Math.trunc(entity.x),
+    y: Math.trunc(entity.y),
+  });
+  const player = point(self),
+    previousPlayer = previousContactPlayer ?? player;
+  const prior = previousContactMobs;
+  previousContactPlayer = player;
+  previousContactMobs = new Map([...mobs].map(([id, mob]) => [id, point(mob)]));
+  if (
+    document.hidden ||
+    portalPending ||
+    selfView?.hp <= 0 ||
+    contactField === undefined ||
+    !contact.ready ||
+    contactPending ||
+    now < contactRetryAt ||
+    socket?.readyState !== WebSocket.OPEN
+  )
+    return;
+  const playerRect = playerContactRect(player, previousPlayer);
+  for (const [id, mob] of mobs) {
+    if (dying.has(id) || mobBodyAttack.get(mob.templateId) !== true) continue;
+    const frame = currentMobFrame(mob, now),
+      current = point(mob),
+      previousMob = prior.get(id) ?? current;
+    if (
+      !intersects(
+        playerRect,
+        mobContactRect(frame, current, facingFlip(mob.facing), previousMob),
+      )
+    )
+      continue;
+    const state = stanceOfEntity(selfView, now);
+    const avatar = avatarFrame(
+      lookOf(selfView),
+      state.stance,
+      state.frame,
+      facingFlip(selfView.facing),
+      emotionFace(selfView.emotion, now),
+    );
+    contactPending = {
+      contactId: ++contactSerial,
+      player,
+      avatar,
+      impulse: contactImpulse(player, previousPlayer, current, previousMob),
+    };
+    send({
+      t: "touch",
+      contactId: contactPending.contactId,
+      contactField,
+      mobId: mob.mobId,
+      frame: frame.path,
+      facing: mob.facing & 1,
+      player,
+      previousPlayer,
+      mob: current,
+      previousMob,
+    });
+    break; // 491FF0 takes the first intersecting live body-attacker in pool order.
+  }
+}
 
 /** No-WZ/unarmed fallback only; real weapon actions and delays come from /api/attack. */
 const SWING_COOLDOWN_MS = 480;
@@ -1660,7 +1810,7 @@ function artImage(path) {
   if (artImages.size >= 1024) {
     let drop = 256;
     for (const key of artImages.keys()) {
-      if (key.startsWith("UI/") || key.startsWith("Effect/BasicEff.img/NoRed")) continue;
+      if (key.startsWith("UI/") || /^Effect\/BasicEff\.img\/No(?:Red|Violet)/.test(key)) continue;
       artImages.delete(key);
       if (--drop === 0) break;
     }
@@ -2065,8 +2215,8 @@ function lookOf(entity) {
  * `dx`/`dy` say where the PNG's top-left corner goes relative to the character's feet; the server
  * composes at the WZ origins, so the page never adds anchors of its own.
  */
-function avatarFrame(look, stance, frame, flip) {
-  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}`;
+function avatarFrame(look, stance, frame, flip, emotion) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}`;
   let entry = avatarFrames.get(key);
   if (entry) return entry;
   if (avatarFrames.size >= 256) {
@@ -2080,13 +2230,15 @@ function avatarFrame(look, stance, frame, flip) {
   avatarFrames.set(key, entry);
   const query =
     `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&v=20261017-back-pose`;
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&v=20261018-contact-face`;
   entry.requested = true;
   fetch(`/api/avatar.png${query}`)
     .then(async (response) => {
       if (!response.ok) throw new Error(`avatar ${response.status}`);
       entry.dx = Number(response.headers.get("x-frame-dx") ?? 0);
       entry.dy = Number(response.headers.get("x-frame-dy") ?? 0);
+      const damageAnchor = response.headers.get("x-frame-damage-origin-y");
+      if (damageAnchor !== null && Number.isFinite(Number(damageAnchor))) entry.damageOriginY = Number(damageAnchor);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const img = new Image();
@@ -2126,14 +2278,18 @@ function preloadAvatar(look) {
       }
     });
   }
+  for (const stance of ["stand1", "jump"]) {
+    avatarFrame(look, stance, 0, false, "hit");
+    avatarFrame(look, stance, 0, true, "hit");
+  }
   for (const item of look.items)
     if (item >= 1300000 && item < 2000000) describeItem(item);
   for (let frame = 0; frame < 3; frame++) {
     avatarFrame(look, "stand1", frame, false);
     avatarFrame(look, "stand1", frame, true);
   }
-  for (const stance of ["jump", "ladder", "rope"]) {
-    for (let frame = 0; frame < (stance === "jump" ? 1 : 2); frame++) {
+  for (const stance of ["jump", "ladder", "rope", "dead"]) {
+    for (let frame = 0; frame < (stance === "jump" || stance === "dead" ? 1 : 2); frame++) {
       avatarFrame(look, stance, frame, false);
       avatarFrame(look, stance, frame, true);
     }
@@ -2157,6 +2313,7 @@ function ensureEntityArt(kind, templateId) {
     )
     .then((data) => {
       table.set(templateId, data.actions ?? {});
+      if (kind === "mob") mobBodyAttack.set(templateId, data.bodyAttack === true);
       for (const frames of Object.values(data.actions ?? {})) {
         for (const frame of frames) artImage(frame.path);
       }
@@ -2284,6 +2441,7 @@ function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
 /** The character's stance and frame from its movement, the way the page can see it. */
 function stanceOfEntity(entity, now) {
   const body = entity === selfView ? playerBody : undefined;
+  if (entity === selfView && entity.hp <= 0) return { stance: "dead", frame: 0 };
   if (body?.ladder) {
     selfSwing = undefined; // an old attack must never draw standing parts over a climbing pose
     return animationPose(entity, locomotion(body), Math.abs(body.vy) > 0, now);
@@ -2316,7 +2474,11 @@ function emotionFace(emotion, now) {
 function drawAvatarAt(entity, screenX, screenY, now, flip) {
   const swing = entity === selfView ? selfSwing : entity.swing;
   const direction = swing ? !swing.facingLeft : flip;
+  ctx.save();
+  // Native 0xff808080 is RGB multiplication, NOT a translucent/vanishing avatar.
+  if (entity === selfView && selfView.hp > 0 && contact.tinted) ctx.filter = "brightness(0.5019607843137255)";
   drawAvatarBodyAt(entity, screenX, screenY, now, direction);
+  ctx.restore();
   if (!swing) return;
   const index = attackFrame(swing, now);
   const frames = swing.effects?.[String(index)];
@@ -2375,6 +2537,37 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
   ctx.fillRect(Math.round(screenX) - 9, Math.round(screenY) - 42, 18, 42);
 }
 
+/** Actual current WZ frame. Corpse wins over hit1, which plays ONCE for its true total delay. */
+function currentMobFrame(mob, now) {
+  const id = String(mob.mobId),
+    actions = mobArts.get(mob.templateId);
+  if (!actions) return undefined;
+  const once = (frames, elapsed) => {
+    if (!frames?.length) return undefined;
+    const duration = frames.reduce(
+      (sum, frame) => sum + Math.max(1, frame.delay),
+      0,
+    );
+    return loopFrame(frames, Math.min(Math.max(0, elapsed), duration - 1));
+  };
+  const corpseSince = dying.get(id);
+  if (corpseSince !== undefined) return once(actions.die1, now - corpseSince);
+  const hitAt = mobHits.get(id);
+  if (hitAt !== undefined && actions.hit1?.length) {
+    const duration = actions.hit1.reduce(
+      (sum, frame) => sum + Math.max(1, frame.delay),
+      0,
+    );
+    if (now - hitAt < duration) return once(actions.hit1, now - hitAt);
+    mobHits.delete(id);
+  }
+  return playAction(
+    actions,
+    mob.walking ? "move" : "stand",
+    now - (mob.actionSince ?? 0),
+  );
+}
+
 /** The NPC/mob sprite at `(x, y)`, with its own animation. */
 function drawEntitySprite(
   kind,
@@ -2384,52 +2577,16 @@ function drawEntitySprite(
   facing,
   moving,
   now,
-  corpseSince,
   entityKey,
   actionSince = 0,
 ) {
   ensureEntityArt(kind, templateId);
   const actions = (kind === "npc" ? npcArts : mobArts).get(templateId);
   const action = kind === "npc" ? "stand" : moving ? "move" : "stand";
-  // A hit flashes the monster's own `hit1` for a moment - the same frame the 2003 client plays when
-  // the damage it just dealt is applied (`sub_4882F0`, FINDINGS 4.13.1).
-  if (kind === "mob" && actions?.hit1 !== undefined) {
-    const hitAt = mobHits.get(entityKey);
-    if (hitAt !== undefined) {
-      const elapsed = now - hitAt;
-      if (elapsed < 240) {
-        const frame =
-          actions.hit1[
-            Math.min(actions.hit1.length - 1, Math.floor(elapsed / 120))
-          ];
-        if (frame !== undefined)
-          drawArchiveImage(frame, x, y, facingFlip(facing));
-        return;
-      }
-      mobHits.delete(entityKey);
-    }
-  }
-  // A monster that was hit (`0x30`) plays `die1` once and then holds its last frame until `0x31`:
-  // the 2003 client's corpse is the end of that animation, not a picture the server has to send.
-  if (corpseSince !== undefined && actions?.die1 !== undefined) {
-    // The frames' own delays, exactly like every other action: the field's `dieMs` is their sum, so
-    // the corpse lasts as long as the server keeps the monster in its pool.
-    const frames = actions.die1;
-    const total = frames.reduce(
-      (sum, frame) => sum + Math.max(1, frame.delay),
-      0,
-    );
-    let at = Math.min(Math.max(0, now - corpseSince), Math.max(0, total - 1));
-    let index = frames.length - 1;
-    for (let i = 0; i < frames.length; i++) {
-      at -= Math.max(1, frames[i].delay);
-      if (at < 0) {
-        index = i;
-        break;
-      }
-    }
-    const frame = frames[index];
-    if (frame !== undefined) drawArchiveImage(frame, x, y, facingFlip(facing));
+  if (kind === "mob") {
+    const mob = mobs.get(entityKey);
+    const frame = mob && currentMobFrame(mob, now);
+    if (frame) drawArchiveImage(frame, x, y, facingFlip(facing));
     return;
   }
   const frame = playAction(actions, action, now - actionSince);
@@ -2584,6 +2741,7 @@ function frame() {
   const elapsed = Math.max(0, Math.min(250, now - (lastPhysicsAt ?? now)));
   lastPhysicsAt = now;
   if (playerBody && self && map?.id === self.mapId) {
+    playerBody.dead = selfView?.hp <= 0;
     const blocked =
       portalPending ||
       itemDialog.open ||
@@ -2595,6 +2753,7 @@ function frame() {
     const attackLocked =
       selfSwing && attackFrame(selfSwing, now) >= 0 && playerBody.grounded;
     const wasGrounded = playerBody.grounded;
+    const wasKnocked = playerBody.knockback !== undefined;
     advancePlayer(
       playerBody,
       {
@@ -2614,7 +2773,7 @@ function frame() {
       terrain,
       elapsed,
     );
-    if (wasGrounded && !playerBody.grounded && playerBody.vy < 0)
+    if (!wasKnocked && wasGrounded && !playerBody.grounded && playerBody.vy < 0)
       void audio.effect("Game/Jump");
     self.x = playerBody.x;
     self.y = playerBody.y;
@@ -2640,6 +2799,7 @@ function frame() {
     mob.walking = walking;
   }
   for (const user of users.values()) sampleMotion(user, now, terrain);
+  updateContact(now);
   const target = cameraTarget();
   if (!camera.ready) {
     camera.x = target.x;
@@ -2720,7 +2880,6 @@ function frame() {
       );
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
-      const doomed = dying.get(String(actor.mob.mobId));
       drawEntitySprite(
         "mob",
         actor.mob.templateId,
@@ -2729,7 +2888,6 @@ function frame() {
         actor.mob.facing ?? 0,
         moved,
         now,
-        doomed,
         String(actor.mob.mobId),
         actor.mob.actionSince,
       );
@@ -2773,6 +2931,7 @@ function frame() {
 
   drawDraggedItem();
   itemDialog.draw();
+  revivePanel.draw(now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -2961,9 +3120,8 @@ function scheduleAttackHit(mobId, damage, at) {
       `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
       spatialVolume(mob.x, mob.y, self),
     );
+    const frame=currentMobFrame(mob,now);
     if(damage>0) mobHits.set(String(mobId),now);
-    const actions=mobArts.get(mob.templateId);
-    const frame=playAction(actions,mob.walking?"move":"stand",now-(mob.actionSince??0));
     if(frame) damageMarks.push({x:mob.x,y:mob.y-Math.max(0,frame.oy??0),value:damage,start:now,
       jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))});
   };
@@ -3070,23 +3228,9 @@ function mobInAttackRect(bounds, facingLeft, clampNear = false) {
   const x1 = self.x + (facingLeft ? right : -left);
   for (const mob of mobs.values()) {
     if (dying.has(String(mob.mobId))) continue;
-    const actions = mobArts.get(mob.templateId);
-    const frame =
-      (mob.walking ? actions?.move : actions?.stand)?.[0] ??
-      actions?.stand?.[0];
-    const width = frame?.width ?? 20,
-      height = frame?.height ?? 30;
-    const ox = frame?.ox ?? 10,
-      oy = frame?.oy ?? 30;
-    const ml = mob.x + (facingFlip(mob.facing) ? ox - width : -ox);
-    const mt = mob.y - oy;
-    if (
-      ml + width < x0 ||
-      ml > x1 ||
-      mt + height < self.y + bounds.top ||
-      mt > self.y + bounds.bottom
-    )
-      continue;
+    const frame = currentMobFrame(mob, performance.now());
+    const target = mobRect(frame, mob, facingFlip(mob.facing));
+    if (!intersects(target, { left: x0, right: x1, top: self.y + bounds.top, bottom: self.y + bounds.bottom })) continue;
     const distance = Math.abs(mob.x - self.x);
     if (distance < best) {
       found = mob;
@@ -4823,7 +4967,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
     return;
   }
-  if (itemDialog.open || testToolsPanel.open) return;
+  if (revivePanel.open || itemDialog.open || testToolsPanel.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     document.activeElement instanceof HTMLInputElement &&
@@ -4946,6 +5090,7 @@ setInterval(() => {
 }, MOVE_TICK_MS);
 window.addEventListener("blur", () => {
   recovery.reset();
+  previousContactPlayer = undefined; previousContactMobs.clear();
   keys.clear();
   lastPhysicsAt = undefined;
 });
@@ -5144,6 +5289,29 @@ const damageArt = damageNumbers({image:artImage,log:logLine});
 void damageArt.preload();
 const buffs = temporaryStats();
 
+const revivePanel = reviveWindow({
+  ctx,
+  image: artImage,
+  send,
+  isInGame: () =>
+    loginStage === "game" && socket?.readyState === WebSocket.OPEN,
+  onOpen() {
+    itemDialog.close(false);
+    testToolsPanel.close();
+    keys.clear();
+    closeShop(false);
+    closeDialogue(false);
+    itemDrag =
+      inventoryDrag =
+      inventoryScrollDrag =
+      shopDrag =
+      shopScrollDrag =
+        undefined;
+    // The next field owns NPC-session cleanup; do not fabricate a vital mutation here.
+    ui.say.blur();
+  },
+});
+
 const recovery = naturalRecovery({
   getSelf:effectiveSelf, getBody:()=>playerBody, getMap:()=>map,
   getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
@@ -5154,13 +5322,14 @@ const testToolsPanel = testTools({
     if (loginStage!=="game") return;
     const now=performance.now();
     const active=buffs.icons(now).find(entry=>entry.values.speed!==undefined);
-    return {...effectiveMovement(now),
+    const totals=statTotals(nativeBasis,buffs.values(now));
+    return {...effectiveMovement(now), eva:totals?.eva,pdd:totals?.pdd,contactRemaining:contact.remaining, contactPending:!!contactPending,
       secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
   },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
   onOpen(){itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
 });
-document.addEventListener?.("visibilitychange",()=>recovery.reset());
+document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();});
 
 const itemDialog = itemDialogs({
   ctx,

@@ -249,6 +249,8 @@ interface WorldOptions {
    * shortest path from a swing to a drop on the ground.
    */
   combat?: boolean;
+  /** Unexecuted contact regressions: deterministic PA=0 hit, or ACC=0 MISS. */
+  touch?: "hit" | "miss";
 }
 
 /** A world with two accounts, one character each, and a browser bridge in front of it. */
@@ -271,7 +273,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     // A beginner's own numbers, so a swing has something to roll with (`game/combat.ts`).
     stats.str = 12;
     stats.dex = 5;
-    stats.hp = 50;
+    stats.hp = options.touch === "hit" && user === "admin" ? 1 : 50;
     stats.maxHp = 50;
     stats.mp = 30;
     stats.maxMp = 30;
@@ -293,6 +295,11 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
   const mapProvider = (mapId: number) =>
     mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? TOWN_MAP : undefined;
   const store = new MemorySaveStore();
+  const stubMobTemplate = () => ({
+    templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0,
+    pa: 0, pd: 0, acc: options.touch === "miss" ? 0 : 999, eva: 0,
+    bodyAttack: !!options.touch, exp: 1, speedPercent: 0, dieMs: 40,
+  });
   const game = new GameEntryServer({
     persist:()=>store.save(accounts),
     ...(options.testTools ? {allowTestTools:(username:string)=>username==="admin"} : {}),
@@ -305,18 +312,9 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
     // The archive's `Item/Consume/0200.img/02000000/spec` in one line: a flat 50 HP.
     ...(options.damaged === true ? { consumeSpec: () => ({ hp: 50, unapplied: [] }) } : {}),
-    ...(options.combat === true
+    ...(options.combat === true || options.touch
       ? {
-          mobTemplate: () => ({
-            templateId: 120100,
-            name: "stub",
-            level: 1,
-            maxHP: 10,
-            maxMP: 0,
-            exp: 1,
-            speedPercent: 0,
-            dieMs: 40,
-          }),
+          mobTemplate: stubMobTemplate,
           mobTickMs: 20,
           mobRespawnMs: 5000,
           dropPolicy: () => [{ money: 25 }],
@@ -348,9 +346,18 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     mapProvider,
     mapCatalog:()=>[STUB_MAP,TOWN_MAP].map(({id,name,streetName})=>({id,name,streetName})),
     itemCatalog: STUB_CATALOG,
+    ...(options.combat || options.touch ? { mobTemplate: stubMobTemplate } : {}),
     ...(options.testTools ? {testTools:(username:string,id:number,request:unknown)=>game.testTools(username,id,request)} : {}),
     ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
     ...(ART_ARCHIVE !== null ? { art: artProviderOf(ART_ARCHIVE), audio: audioProviderOf(ART_ARCHIVE) } : {}),
+    ...(options.touch && ART_ARCHIVE ? { art: {
+      ...artProviderOf(ART_ARCHIVE),
+      // Synthetic animation fixture for bridge policy, not evidence of original WZ dimensions.
+      mob: () => ({ templateId: 120100, bodyAttack: true, actions: { stand: [{
+        path: "Mob/0120100.img/stand/0", delay: 180, ox: 20, oy: 30,
+        bounds: { left: -20, top: -30, right: 20, bottom: 0 },
+      }] } }),
+    } } : {}),
   });
   t.after(async () => {
     await web.close();
@@ -1160,3 +1167,144 @@ test("recovery reports traverse ClientSession native 0x1C and return the server 
   browser.send({t:"recovery",hpDelta:-10,flag:0});await browser.nextKind("error");
   assert.equal(world.accounts.get("admin")!.characters[0]!.stats.hp,33);
 });
+
+
+/** New regression sources ONLY; no socket/browser test was run for this delivery. */
+test(
+  "bridge contact derives its own damage, validates frame/field, releases duplicates and revives via kind=0",
+  { skip: ART_ARCHIVE === null, timeout: 20000 },
+  async (t) => {
+    const world = await startWorld(t, { touch: "hit" });
+    const { browser, field } = await enterGame(world.webPort, "admin", "admin");
+    t.after(async () => browser.close());
+    const mob = (await browser.nextKind("mob-enter")).mob as {
+      mobId: number;
+      x: number;
+      y: number;
+    };
+    const point = { x: mob.x, y: mob.y };
+    browser.send({
+      t: "move",
+      ...point,
+      foothold: 32,
+      action: 4,
+      vx: 0,
+      vy: 0,
+    });
+    await browser.next((m) => m.t === "user-move" && m.local === true);
+    const snapshot = {
+      t: "touch",
+      contactField: field.contactField,
+      mobId: mob.mobId,
+      player: point,
+      previousPlayer: point,
+      mob: point,
+      previousMob: point,
+      facing: 1,
+      frame: "Mob/0120100.img/stand/0",
+      damage: 9999,
+    };
+    browser.send({
+      ...snapshot,
+      contactId: 1,
+      frame: "Mob/9999999.img/stand/0",
+    });
+    assert.equal(
+      (await browser.nextKind("touch-result")).accepted,
+      false,
+      "not an arbitrary canvas/damage API",
+    );
+    browser.send({ ...snapshot, contactId: 2 });
+    const hit = await browser.nextKind("touch-result");
+    assert.equal(hit.accepted, true);
+    assert.equal(hit.damage, 1, "client-supplied damage is ignored");
+    const dead = await browser.next(
+      (m) => m.t === "self" && (m.self as { hp: number }).hp === 0,
+    );
+    assert.equal(
+      (dead.self as { hp: number }).hp,
+      0,
+      "negative native report reaches the authoritative stat update",
+    );
+    assert.equal(
+      readSave(world.store.saved!).get("admin")!.characters[0]!.stats.hp,
+      0,
+      "vital diff persists without logout",
+    );
+    browser.send({ ...snapshot, contactId: 2 });
+    assert.equal(
+      (await browser.nextKind("touch-result")).accepted,
+      false,
+      "duplicate ID cannot roll/report again",
+    );
+    browser.send({ t: "revive" });
+    const alive = await browser.nextKind("field");
+    assert.equal(alive.mapId, 2000000);
+    assert.equal((alive.self as { hp: number }).hp, 50);
+    assert.notEqual(alive.contactField, field.contactField);
+    browser.send({ ...snapshot, contactId: 3 });
+    assert.equal(
+      (await browser.nextKind("touch-result")).accepted,
+      false,
+      "old field's collision is obsolete",
+    );
+    browser.send({ t: "revive" });
+    assert.match(
+      String((await browser.nextKind("error")).message),
+      /dead field character/,
+    );
+  },
+);
+
+test(
+  "bridge MISS locks contact without a vital mutation, tint/knockback packet or arbitrary negative recovery",
+  { skip: ART_ARCHIVE === null, timeout: 20000 },
+  async (t) => {
+    const world = await startWorld(t, { touch: "miss" });
+    const { browser, field } = await enterGame(world.webPort, "admin", "admin");
+    t.after(async () => browser.close());
+    const mob = (await browser.nextKind("mob-enter")).mob as {
+      mobId: number;
+      x: number;
+      y: number;
+    };
+    const point = { x: mob.x, y: mob.y };
+    browser.send({
+      t: "move",
+      ...point,
+      foothold: 32,
+      action: 4,
+      vx: 0,
+      vy: 0,
+    });
+    await browser.next((m) => m.t === "user-move" && m.local === true);
+    const snapshot = {
+      t: "touch",
+      contactField: field.contactField,
+      mobId: mob.mobId,
+      player: point,
+      previousPlayer: point,
+      mob: point,
+      previousMob: point,
+      facing: 1,
+      frame: "Mob/0120100.img/stand/0",
+    };
+    browser.send({ ...snapshot, contactId: 1 });
+    const miss = await browser.nextKind("touch-result");
+    assert.equal(miss.accepted, true);
+    assert.equal(miss.damage, 0);
+    browser.send({ ...snapshot, contactId: 2 });
+    assert.equal(
+      (await browser.nextKind("touch-result")).accepted,
+      false,
+      "MISS also arms the protection gate",
+    );
+    assert.equal(world.accounts.get("admin")!.characters[0]!.stats.hp, 50);
+    browser.send({ t: "recovery", hpDelta: -100, mpDelta: 0, flag: 0 });
+    assert.match(
+      String((await browser.nextKind("error")).message),
+      /Invalid recovery/,
+    );
+    assert.equal(world.accounts.get("admin")!.characters[0]!.stats.hp, 50);
+  },
+);

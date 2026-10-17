@@ -1221,14 +1221,14 @@ export class GameEntryServer {
     let message=enabled?"體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
     if(enabled && kind!=="state") {
       if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
-      if(kind==="speed-potions" || kind==="combat-potions") {
+      if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
-        const ids=kind==="speed-potions"?[2002001]:[2002004,2002005];
+        const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:[2002004,2002005];
         const items=structuredClone(session.character.items??emptyCharacterItems());
         const changes:InventoryChange[]=[];
         for(const id of ids) {
           const spec=this.options.consumeSpec?.(id);
-          const expected=id===2002001?"speed":id===2002004?"pad":"acc";
+          const expected=id===2002000?"eva":id===2002001?"speed":id===2002004?"pad":"acc";
           if(!spec || spec.unapplied.length || spec[expected]===undefined || spec.time===undefined) throw new Error("原 WZ 的藥水效果不可用，未發放道具。");
           const grant=grantItem(items,id,3);
           if(!grant) throw new Error("消耗欄空間不足以放入全部體驗藥水；背包完全未變更。");
@@ -1239,6 +1239,7 @@ export class GameEntryServer {
         session.send(packet);this.persist();
         message=kind==="speed-potions"
           ? "已明確領取 3 瓶 속도향상의 물약（2002001）。"
+          : kind==="evasion-potions" ? "已明確領取 3 瓶 민첩함의 물약（2002000）；原 WZ EVA+5／180秒，已接碰撞迴避。"
           : "已明確領取 2002004 攻擊藥水、2002005 命中藥水各 3 瓶；原 WZ 分別 PAD+5／180秒、ACC+5／300秒。";
         message+="這是非原版體驗發放，會存檔且還原點不回收道具。開啟 I 道具窗，選消耗欄並連點使用；S→Detail 看目前能力。";
       } else {
@@ -1551,8 +1552,8 @@ export class GameEntryServer {
     this.options.log?.(
       `game: "${session.name}" revives - hp ${stats.hp}/${stats.maxHp}, map ${here} -> ${target}`,
     );
-    if (target !== here && this.enterMap(session, target)) return;
-    this.enterMap(session, here);
+    if (target !== here && this.enterMap(session, target)) { this.persist(); return; }
+    if (this.enterMap(session, here)) this.persist();
   }
 
   private readonly abilityTimes = new WeakMap<FieldSession, number>();
@@ -1660,8 +1661,10 @@ export class GameEntryServer {
       const report = readClientStatReport(new PacketReader(plain, 1));
       const stats = session.character.stats;
       const diff = applyVitalReport(stats, report, characterStatBasis(session.character,this.options.itemCatalog).basic);
-      if (Object.keys(diff).length > 0)
+      if (Object.keys(diff).length > 0) {
         session.send(encodeStatUpdate({ diff }));
+        this.persist(); // Legitimate native vital changes must survive a restart, not just logout.
+      }
       this.options.log?.(
         `game: "${session.name}" 0x1c stat report: ${describeClientStatReport(report)} - hp ` +
           `${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}` +

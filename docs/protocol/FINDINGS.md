@@ -4457,3 +4457,23 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
   非取得原server規則。bridge stat-basis只是WZ計算view message，不是新nativeopcode。
 - 完整來源、範圍、操作及未執行回歸來源：`NATIVE_STATS_COMBAT.md`／ADR-051。
   沒有執行test/check/typecheck/browser/VM/probe，不以啟服或歷史PASS宣稱驗證。
+
+
+## 補充：碰撞／受傷／復活接線與原來源修訂（2026-10-18；實作未測試）
+
+- 40B530每frame讀lt/rb，缺值SetRectEmpty；486260更新當前／鏡像框，485AA0碰撞時Union前後位置。
+  5085E0玩家框(-22,-65,22,0)；491FF0另做左右25／上30下10與centre±1的內縮，不能漏這一層。
+- 4C8ED0是stream2，MISS只抽EVA，hit才再抽PA；等差用C整除。詳式見NATIVE_CONTACT_REVIVE.md。
+  48D080讀PA/PD，這份WZ某些mob只有PADamage/PDDamage，所以原default0導向min1；不是缺素材，不能暗中alias。
+- 5114A0先0x1C負HP、signed1500ms、pending外力22/23，再由537B00釋放地面／繩梯並有界併入速度；
+  水平sign來自相對位移，不是中心左右。MISS負1500ms但不新套受傷tint／hit表情／外力。
+- 509860／485C20的canvas vtable+132是originY，不是PNG height。41AF20 offset25/26為NoViolet0/1；
+  508450受傷與MISS的palette2用它。palette1是NoBlue，不能由正數分支誤稱打怪紅字。
+- **修訂§6第18項**：509AF0不是無條件進場hook。local user、a2非零、CField+680仍0時，
+  PE509B1A..509B3C明確寫遊戲時間到+0x2a8；5084C0在動作18/19變更時呼此路徑，558CF0差>2200建CUIRevive。
+  瀏覽器本輪從原stat回覆HP0接dead／delay／原Notice視窗／kind0復活；完整墓碑落地與原HP→CVecCtrl全鏈仍非全數移植。
+- 4E94E0窗268,104／264×132；4E9750用UI/Basic.img/Notice/backgrnd與BtOK，按鈕相對100,92；
+  4E99C0兩行14px、12px黑字／白色+1影。4E9E30 Enter確認／Escape吃掉，4E9E70原0x0D kind0空name。
+- 同輪修canvas delay與avatarFrame少接emotion參數；現在EVA/PDD有消費者才接受temp spec，2002000可喝。
+- JSON contactField／touch-result／rate gate／snapshot容差皆browser bridge政策，不加native opcode、不宣稱原server規則。
+- 沒有執行任何test/check/typecheck/browser/VM/probe；新回歸來源未執行，LIVE非PASS。見ADR-052及NATIVE_CONTACT_REVIVE.md。

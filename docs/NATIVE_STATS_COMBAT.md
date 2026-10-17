@@ -1,5 +1,8 @@
 # 有效裝備、能力詳情與普通物理攻擊（2026-10-18）
 
+> **後續更新**：本輪已接怪物碰撞／實際EVA、紫色字圖、外力及復活；最新主線見
+> [NATIVE_CONTACT_REVIVE.md](NATIVE_CONTACT_REVIVE.md)。仍未執行測試。前輪save不在新沙箱，本輪LIVE使用新獨立檔。
+
 **交付狀態：實作／靜態原碼、PE 與 WZ 交叉研究；沒有執行 test、check、typecheck、browser、VM 或 probe。**
 啟動 LIVE 只代表服務啟動，不代表功能通過。原 `combat.ts` 的「binary 未定位公式」說法已過時；
 舊近似 helpers 只保留給歷史 fixture，瀏覽器不再使用。
@@ -15,8 +18,7 @@
    成長 INT 也改用有效裝備。基礎 record 的 maxHp/maxMp 不被裝備值覆寫。
 7. 傷害與 MISS → 真 `Effect/BasicEff.img/NoRed*`，不用瀏覽器白色字型冒充原數字。
 
-**EVA 已合計／顯示，但還沒有瀏覽器怪物碰撞受傷迴圈，故不宣稱可實際閃避。**
-2002000 EVA、MAD、PDD/MDD 等尚無完整消費者的藥水仍整筆拒絕，不先消耗再顯示一個無效 buff。
+後續已將EVA／PDD接入原4C8ED0，2002000迴避藥水可實際使用；MAD/MDD與未知效果仍整筆拒絕。
 主動技能、魔法傷害、原 CShape2D 逐幀選敵、怪物暫時能力等也未完成。
 
 ## 原來源與交叉結果
@@ -35,8 +37,8 @@
 | 4F0940 / 4F30A0 / 4F13B0 | Detail 176×192、parent+(176,123)、Stat/backgrnd2、x80／y12+18i、九列與格式 |
 | 41AF20 / 41E610 / 41F200 / 4882F0 / 485C20 | 傷害第一字 NoRed1、其餘 NoRed0、NoRed0/Miss；origin-aware overlap、50px 組圖、400/600ms alpha、1000ms 上升30px；以 mob 當前 canvas originY 當頂端 |
 
-本輪也定位到 **4C8ED0** 碰撞傷害，並讀到 5085E0／491FF0 的角色 swept rect 與怪物縮框。
-這是後續可用的原證據，**本輪未接受傷迴圈，不把定位公式當成完成碰撞**。
+前輪定位的 **4C8ED0**／5085E0／491FF0 已在後續輪次接到實際碰撞；
+其中當前格、491FF0內縮與PA欄名／default0界線詳見新的contact文件，不等於完整CShape2D。
 
 ### SecondaryStat 基底
 
@@ -105,7 +107,7 @@ JS double／原 x87 暫存精度也未作逐輸入實機比對。原 field 仍�
    這是明示開發發放：2002004×3＋2002005×3，會保存；背包不足整批不發，不自動修改角色。
 5. **I → 消耗** 連點使用。Detail 的攻擊／命中與右上原圖示會變動；Ctrl 普通攻擊採用同一暫時值。
 6. 若要學弓／賊能力，可在工具表單選原有書職業、明確給 SP，再到 **K** 點原被動。
-   這不是轉職、不發原版自然 AP/SP；4000000 的 EVA 只能確認數值合計，不能測尚未接上的碰撞閃避。
+   這不是轉職、不發原版自然 AP/SP；後續輪已將4000000的EVA接到實際碰撞判定。
 7. 原補滿／半血半魔工具、地圖搜尋與獵場入口仍保留；還原點只含能力／技能，
    不回收領到或喝掉的藥水，不回溯 EXP／金錢／位置，不跨服務重啟。
 
@@ -114,7 +116,7 @@ JS double／原 x87 暫存精度也未作逐輸入實機比對。原 field 仍�
 - `test/native-stats.test.ts`：自身資格／連鎖失格／互相支持、signed 實例、基底 clamp、Detail、有效 vital cap、
   native 七抽樣／MISS／PD、真 WZ 被動與 PAD/ACC 藥水。
 - `test/native-damage-render.test.ts`：首字 bank、origin-aware overlap、jitter、MISS raw centering、不補 CSS font。
-- `test/items.test.ts`：新增 PAD/ACC timed spec、未支援 MAD 混合整筆拒絕；保留 EVA 拒用案例。
+- `test/items.test.ts`：新增 PAD/ACC timed spec、未支援 MAD 混合整筆拒絕；後續輪改為EVA接受、MAD混合仍拒用。
 - `scripts/equipment_probe.mjs`：更新 worn requirements fixture 對應有效裝備篩選；僅來源調整，未執行。
 
 沒有用歷史570/570、舊 PASS、格式化、git whitespace 檢查或服務啟動來宣稱新功能驗證通過。

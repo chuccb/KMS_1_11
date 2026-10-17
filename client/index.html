@@ -44,6 +44,10 @@
       coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
     -->
     <div id="game-ui">
+      <section id="revive-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="revive-text">
+        <p id="revive-text" class="accessible-only">확인을 누르시면 부활하게 됩니다. 부활을 하시면 안전한 마을로 이동됩니다.</p>
+        <button id="revive-ok" class="sprite-hit" type="button" aria-label="부활 확인 / 確定復活；Enter">OK</button>
+      </section>
       <section
         id="item-dialog"
         class="hidden"
@@ -494,7 +498,7 @@
         </fieldset>
         <fieldset><legend>2 · 明確同意後才修改</legend>
           <label><input id="qa-confirm" type="checkbox" /> 我了解這不是原版規則，並同意修改目前角色及保存。</label>
-          <div class="qa-buttons"><button id="qa-warrior" type="button">填入戰士體驗配置</button><button id="qa-magician" type="button">填入法師體驗配置</button></div>
+          <div class="qa-buttons"><button id="qa-warrior" type="button">填入戰士體驗配置</button><button id="qa-magician" type="button">填入法師體驗配置</button><button id="qa-thief" type="button">填入盜賊體驗配置</button></div>
           <label>職業（有原技能書） <select id="qa-job"></select></label>
           <div class="qa-numbers"><label>AP <input id="qa-ap" type="number" min="0" max="32767" step="1" value="20" /></label><label>SP <input id="qa-sp" type="number" min="0" max="32767" step="1" value="40" /></label></div>
           <label><input id="qa-reset-skills" type="checkbox" /> 套用時清除已學技能（原紀錄保留於還原點）</label>
@@ -502,13 +506,14 @@
           <button id="qa-apply" type="button" disabled>套用體驗配置（不是原版轉職）</button>
           <div class="qa-buttons"><button id="qa-heal" type="button" disabled>補滿 HP／MP</button><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button></div>
           <button id="qa-speed-potions" type="button" disabled>領取 3 瓶原 WZ 加速藥水（會存檔）</button>
+          <button id="qa-evasion-potions" type="button" disabled>領取 3 瓶原 WZ 迴避藥水（會存檔）</button>
           <button id="qa-combat-potions" type="button" disabled>領取攻擊／命中藥水各 3 瓶（會存檔）</button>
-          <p>藥水發放是非原版工具，需勾選確認；能力還原不會回收道具。I 開背包 → 消耗欄 → 連點藥水。原效果：速度 +8，持續 180 秒；重喝刷新、不疊加。</p>
+          <p>藥水發放是非原版工具，需勾選確認；能力還原不會回收道具。I 開背包 → 消耗欄 → 連點藥水。原效果：速度 +8／180秒；迴避 +5／180秒，重喝刷新、不疊加。低 EVA 加5仍可能不足以閃避；可明確配置盜賊後到 K 學 님블 바디，或用 S 分配 LUK 比較。此處不保證／強造 MISS。</p>
           <div class="qa-buttons"><button id="qa-checkpoint" type="button" disabled>建立能力／技能還原點</button><button id="qa-restore" type="button" disabled>還原能力／技能</button></div>
         </fieldset>
         <fieldset><legend>3 · 操作提示</legend>
           <p id="qa-movement" aria-live="off">移動狀態讀取中…</p>
-          <ol><li>先去無怪城鎮，再套用戰士／法師配置；初心者原本沒有技能書。</li><li>用技能窗的 SP 按鈕學習；前置與最高等級仍由伺服器依原 WZ 檢查。</li><li>戰士 HP 회복력 향상：提高站立回血；學到前置後，인듀어 可在繩梯靜止回血。</li><li>法師 MP 회복력 향상：提高回魔。站立回血約10秒，回魔不要求站立；不是吃藥。</li><li>用「降至半血／半魔」觀察；S 配 AP、K 技能、I 背包、E 裝備、M 小地圖、↑ 進門、Ctrl 基本攻擊。</li><li>S→Detail 可看有效裝備能力、命中／迴避、速度；弓手 아마존의 축복、盜賊 님블 바디 已接能力合計。攻擊／命中藥水已接普通物理攻擊。迴避數值已合計，但瀏覽器的怪物碰撞受傷仍未接上，不能宣稱已有閃避效果。主動施放、快捷鍵拖放、其他未列被動與技能 buff 仍未完成。</li><li>還原只涵蓋能力／已學技能；角色升級後拒絕套回舊點。還原點不跨服務重啟。</li></ol>
+          <ol><li>先去無怪城鎮，再套用戰士／法師配置；初心者原本沒有技能書。</li><li>用技能窗的 SP 按鈕學習；前置與最高等級仍由伺服器依原 WZ 檢查。</li><li>戰士 HP 회복력 향상：提高站立回血；學到前置後，인듀어 可在繩梯靜止回血。</li><li>法師 MP 회복력 향상：提高回魔。站立回血約10秒，回魔不要求站立；不是吃藥。</li><li>用「降至半血／半魔」觀察；S 配 AP、K 技能、I 背包、E 裝備、M 小地圖、↑ 進門、Ctrl 基本攻擊。</li><li>S→Detail 可看有效裝備能力、命中／迴避、速度；弓手 아마존의 축복、盜賊 님블 바디 已接能力合計。攻擊／命中藥水已接普通物理攻擊。怪物碰撞已接迴避／受傷、紫色數字與 MISS、擊退及 1.5 秒保護；迴避藥水 EVA+5／180秒。原傷害依此版 PA 欄位，不套後期 PADamage。死亡後約2.2秒出現原復活視窗，Enter／OK 返回原 returnMap。主動施放、快捷鍵拖放、其他未列被動與技能 buff 仍未完成。</li><li>還原只涵蓋能力／已學技能；角色升級後拒絕套回舊點。還原點不跨服務重啟。</li></ol>
           <button id="qa-skills" type="button">關閉工具並開啟技能窗</button>
         </fieldset>
       </aside>

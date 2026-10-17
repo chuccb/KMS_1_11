@@ -10,8 +10,9 @@
  * (the client picks the action from the packets it gets). The web view has no client-side mob AI, so
  * it asks this module for the frames to loop and draws them itself.
  */
+import { entriesOf } from "../wz/props.ts";
 import type { WzArchive } from "../wz/archive.ts";
-import { artReaderOf, frameDelay, frameNames, type ArtReader } from "./wzart.ts";
+import { artReaderOf, frameDelay, frameNames, type ArtReader, vectorOf, nodeRecord } from "./wzart.ts";
 
 /** One frame of one action. */
 export interface SpriteFrame {
@@ -20,9 +21,11 @@ export interface SpriteFrame {
   /** The canvas' `origin` - the pixel that lands on the entity's `(x, y)`. */
   ox: number;
   oy: number;
-  /** Native canvas extent, for browser target rectangles (not a full native CShape2D). */
+  /** Canvas metadata, NOT the collision rectangle. */
   width?: number;
   height?: number;
+  /** 40B530 frame lt/rb -> 486260. Absence means SetRectEmpty, not canvas-sized fallback. */
+  bounds?: { left: number; top: number; right: number; bottom: number };
 }
 
 /** An animated set of frames, e.g. a mob's `move` action. */
@@ -39,19 +42,40 @@ export type SpriteAction = string;
  * entity does not have the one asked for. An empty list is a real answer: the image has no such
  * action and the caller has to draw something else.
  */
-export function spriteFrames(reader: ArtReader, image: string, action: string, fallbacks: readonly string[] = ["stand", "move"]): SpriteFrame[] {
+export function spriteFrames(
+  reader: ArtReader,
+  image: string,
+  action: string,
+  fallbacks: readonly string[] = ["stand", "move"],
+): SpriteFrame[] {
   for (const candidate of [action, ...fallbacks]) {
     const node = reader.node(`${image}/${candidate}`);
     if (node === undefined) continue;
     const names = frameNames(node);
     const out: SpriteFrame[] = [];
     for (const name of names) {
-      const path = name === "" ? `${image}/${candidate}` : `${image}/${candidate}/${name}`;
+      const path =
+        name === "" ? `${image}/${candidate}` : `${image}/${candidate}/${name}`;
       const art = reader.at(path);
       if (art === undefined) continue;
+      const props = entriesOf(reader.node(path)?.value);
+      const lt = vectorOf(props.find((p) => p.name === "lt")?.value);
+      const rb = vectorOf(props.find((p) => p.name === "rb")?.value);
+      const delay = props.find((p) => p.name === "delay")?.value;
       out.push({
+        ...(lt && rb
+          ? { bounds: { left: lt[0], top: lt[1], right: rb[0], bottom: rb[1] } }
+          : {}),
         path,
-        delay: frameDelay(node, name, candidate === "move" ? 180 : 1000),
+        // Canvas properties are in node.value.props; nodeProperty(canvas, "delay") is empty.
+        delay:
+          typeof delay === "number"
+            ? Math.max(1, delay)
+            : frameDelay(
+                node,
+                name,
+                image.startsWith("Mob/") || candidate === "move" ? 180 : 1000,
+              ),
         ox: art.ox,
         oy: art.oy,
         width: art.width,
@@ -100,13 +124,21 @@ export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefi
 /** What the page needs to draw one mob: its id and its frames by action. */
 export interface MobArt {
   templateId: number;
+  bodyAttack?: boolean;
   actions: Record<string, SpriteFrame[]>;
 }
 
-export function mobArtOf(templateId: number, reader: ArtReader): MobArt | undefined {
+export function mobArtOf(
+  templateId: number,
+  reader: ArtReader,
+): MobArt | undefined {
   const image = mobImagePath(templateId);
   const actions = spriteActions(reader, image);
-  return Object.keys(actions).length === 0 ? undefined : { templateId, actions };
+  const bodyAttack =
+    Number(nodeRecord(reader.node(`${image}/info`)).bodyAttack ?? 0) !== 0;
+  return Object.keys(actions).length === 0
+    ? undefined
+    : { templateId, actions, bodyAttack };
 }
 
 /** A cached `templateId -> art` reader for the web endpoint (`--data off` has none). */

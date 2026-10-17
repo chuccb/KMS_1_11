@@ -27,10 +27,17 @@ export function testTools({
   function movementStatus() {
     const state = getMovement();
     el("qa-movement").textContent = state
-      ? `移動快照（非原版工具）：速度 ${state.speedPercent}%／跳躍 ${state.jumpPercent}%` +
+      ? `唯讀快照（非原版工具）：速度 ${state.speedPercent}%／跳躍 ${state.jumpPercent}%／EVA ${state.eva ?? "—"}／PDD ${state.pdd ?? "—"}` +
         (state.secondsLeft === undefined
           ? "；沒有加速藥水效果。"
-          : `；加速效果剩約 ${state.secondsLeft} 秒。`)
+          : `；加速效果剩約 ${state.secondsLeft} 秒。`) +
+        (state.contactPending
+          ? "；碰撞回報中。"
+          : state.contactRemaining > 0
+            ? `；受傷保護 ${Math.ceil(state.contactRemaining / 30)} tick。`
+            : state.contactRemaining < 0
+              ? `；MISS 保護 ${Math.ceil(-state.contactRemaining / 30)} tick（不變色）。`
+              : "；碰撞判定可用。")
       : "尚未進入地圖。";
   }
   function sync() {
@@ -46,6 +53,7 @@ export function testTools({
       "qa-checkpoint",
       "qa-speed-potions",
       "qa-combat-potions",
+      "qa-evasion-potions",
     ])
       el(id).disabled = !ready;
     el("qa-restore").disabled = !ready || !restoreAvailable;
@@ -153,6 +161,7 @@ export function testTools({
   el("qa-confirm").addEventListener("change", sync);
   el("qa-warrior").addEventListener("click", () => preset(100));
   el("qa-magician").addEventListener("click", () => preset(200));
+  el("qa-thief").addEventListener("click", () => preset(400));
   el("qa-apply").addEventListener("click", () => {
     if (["qa-job", "qa-ap", "qa-sp"].some((id) => el(id).value.trim() === "")) {
       status("請選擇職業並填入AP／SP；空白不會當成0套用。");
@@ -172,6 +181,7 @@ export function testTools({
     "restore",
     "speed-potions",
     "combat-potions",
+    "evasion-potions",
   ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));
   el("qa-map-filter").addEventListener("input", filterMaps);

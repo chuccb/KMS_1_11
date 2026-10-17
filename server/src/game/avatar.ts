@@ -49,6 +49,8 @@ export interface AvatarBitmap {
   dx: number;
   /** The top edge of the bitmap, negative because it hangs above the feet. */
   dy: number;
+  /** 509860 reads canvas originY (+132), NOT height. Preserve the untrimmed composite anchor. */
+  damageOriginY?: number;
 }
 
 export interface AvatarFrame {
@@ -58,6 +60,8 @@ export interface AvatarFrame {
   /** Where the picture's top-left goes, relative to the character's position. */
   dx: number;
   dy: number;
+  /** 509860 reads canvas originY (+132), NOT height. Preserve the untrimmed composite anchor. */
+  damageOriginY?: number;
 }
 
 /** `1040001` -> `Clothes` - the folder under `Character/` that holds the item's image. */
@@ -417,7 +421,7 @@ export function composeAvatarBitmap(
     );
   }
   const trimmed = trimTransparent(canvas);
-  return { bitmap: trimmed.image, dx: trimmed.left + minX, dy: trimmed.top + minY };
+  return { bitmap: trimmed.image, dx: trimmed.left + minX, dy: trimmed.top + minY, damageOriginY: Math.max(0, -minY) };
 }
 
 /** The same frame as a PNG, plus the offsets the browser needs to place it. */
@@ -441,6 +445,7 @@ export function composeAvatar(
     height: composed.bitmap.height,
     dx: composed.dx,
     dy: composed.dy,
+    damageOriginY: composed.damageOriginY,
   };
 }
 

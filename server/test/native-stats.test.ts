@@ -165,14 +165,12 @@ test("shipped WZ: instance PAD overrides template; Nimble/ Amazon and actual pot
   for (const [id, key, value, time] of [
     [2002004, "pad", 5, 180000],
     [2002005, "acc", 5, 300000],
+    [2002000, "eva", 5, 180000],
   ] as const) {
     const spec = consumeSpecOf(archive, id)!;
     assert.equal(spec[key], value);
     assert.equal(spec.time, time);
     assert.deepEqual(spec.unapplied, []);
   }
-  assert.ok(
-    consumeSpecOf(archive, 2002000)!.unapplied.includes("eva"),
-    "no incoming contact loop yet: EVA potions remain unconsumed",
-  );
+  assert.deepEqual(consumeSpecOf(archive, 2002000)!.unapplied, [], "stream 2 contact now consumes EVA");
 });

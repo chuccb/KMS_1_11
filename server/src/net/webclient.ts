@@ -48,7 +48,8 @@ import { encodeCp949, decodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import { characterStatBasis, statTotals } from "../game/characterstats.ts";
-import { rollNativePhysical } from "../game/nativecombat.ts";
+import { intersects, playerContactRect, mobContactRect, type ContactPoint } from "../../../client/contact.mjs";
+import { rollNativePhysical, rollNativeTouch } from "../game/nativecombat.ts";
 import type { MobTemplate } from "../game/mobs.ts";
 import { temporaryStats } from "../../../client/temporarystats.mjs";
 import type { AudioProvider } from "../game/audio.ts";
@@ -445,7 +446,8 @@ function serveAvatar(
     // Where the picture goes, relative to the character's feet.
     "x-frame-dx": String(frame.dx),
     "x-frame-dy": String(frame.dy),
-    "access-control-expose-headers": "x-frame-dx, x-frame-dy",
+    "x-frame-damage-origin-y": String(frame.damageOriginY ?? Math.max(0, -frame.dy)),
+    "access-control-expose-headers": "x-frame-dx, x-frame-dy, x-frame-damage-origin-y",
     "cache-control": "public, max-age=3600",
   });
   response.end(Buffer.from(frame.png));
@@ -462,6 +464,11 @@ class BrowserSession {
   private unsubscribe: (() => void) | undefined;
   private username: string | undefined;
   private readonly buffs = temporaryStats();
+  private contactField = 0;
+  private lastContactId = 0;
+  private touchReadyAt = 0;
+  private touchBusy = false;
+  private readonly dyingMobs = new Set<number>();
 
   constructor(socket: WebSocket, options: WebClientOptions) {
     this.socket = socket;
@@ -495,6 +502,8 @@ class BrowserSession {
     } catch {
       return this.send({ t: "error", message: "the message is not JSON" });
     }
+    if (message === null || typeof message !== "object" || Array.isArray(message))
+      return this.send({ t: "error", message: "message must be a JSON object" });
     try {
       switch (message.t) {
         case "login":
@@ -562,6 +571,10 @@ class BrowserSession {
             ?? {enabled:false,message:"此服務未開啟體驗工具。",checkpoint:false,restoreAvailable:false,canMap:false,jobs:[]};
           this.send({t:"test-tools",...result}); return;
         }
+        case "revive":
+          return await this.require().revive();
+        case "touch":
+          return await this.touch(message);
         case "recovery":
           return await this.require().recover({
             ...(message.hpDelta===undefined?{}:{hpDelta:Number(message.hpDelta)}),
@@ -611,7 +624,10 @@ class BrowserSession {
           });
       }
     } catch (error) {
-      this.fail(error);
+      if (message.t === "touch") this.send({ t: "touch-result", contactId: Number(message.contactId),
+        contactField: Number(message.contactField), accepted: false,
+        message: error instanceof Error ? error.message : String(error) });
+      else this.fail(error);
     }
   }
 
@@ -711,6 +727,121 @@ class BrowserSession {
     }
   }
 
+  /** Browser sends a collision snapshot, never damage. This client bridge validates the real
+   * live template/frame, native RECT and bounded positions, then rolls stream 2 and reports 0x1C.
+   * Position snapshots remain client-supplied, like movement/attack; this is not authoritative AI.
+   */
+  private async touch(message: Record<string, unknown>): Promise<void> {
+    const contactId = Number(message.contactId),
+      field = Number(message.contactField);
+    const reply = (accepted: boolean, extra: Record<string, unknown> = {}) =>
+      this.send({
+        t: "touch-result",
+        contactId,
+        contactField: field,
+        accepted,
+        ...extra,
+      });
+    if (
+      !Number.isSafeInteger(contactId) ||
+      contactId < 1 ||
+      field !== this.contactField ||
+      contactId <= this.lastContactId
+    )
+      return reply(false);
+    this.lastContactId = contactId;
+    const session = this.session,
+      character = session?.character;
+    const mobId = Number(message.mobId),
+      facing = Number(message.facing);
+    const mob = Number.isInteger(mobId) ? session?.mob(mobId) : undefined;
+    const template = mob
+      ? this.options.mobTemplate?.(mob.templateId)
+      : undefined;
+    const now = performance.now();
+    if (
+      !session ||
+      !character ||
+      character.stats.hp <= 0 ||
+      !session.touchRandom ||
+      !mob ||
+      !template?.bodyAttack ||
+      this.dyingMobs.has(mobId) ||
+      (facing !== 0 && facing !== 1)
+    )
+      return reply(false);
+    if (this.touchBusy || now < this.touchReadyAt)
+      return reply(false, {
+        retryAfterMs: Math.max(30, Math.ceil(this.touchReadyAt - now)),
+      });
+    const point = (value: unknown): ContactPoint | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const p = value as { x?: unknown; y?: unknown };
+      return [p.x, p.y].every(
+        (n) =>
+          typeof n === "number" &&
+          Number.isInteger(n) &&
+          n >= -32768 &&
+          n <= 32767,
+      )
+        ? { x: p.x as number, y: p.y as number }
+        : undefined;
+    };
+    const player = point(message.player),
+      previousPlayer = point(message.previousPlayer);
+    const currentMob = point(message.mob),
+      previousMob = point(message.previousMob);
+    if (!player || !previousPlayer || !currentMob || !previousMob)
+      return reply(false);
+    const near = (a: ContactPoint, b: ContactPoint, limit: number) =>
+      Math.abs(a.x - b.x) <= limit && Math.abs(a.y - b.y) <= limit;
+    // Session movement is sampled at 100ms; mob records keep a future leg endpoint (<=3s).
+    if (
+      !near(player, session.selfPosition, 256) ||
+      !near(player, previousPlayer, 192) ||
+      !near(currentMob, mob, 1024) ||
+      !near(currentMob, previousMob, 192)
+    )
+      return reply(false);
+    const actions = this.options.art?.mob(mob.templateId)?.actions;
+    const frame = ["stand", "move", "hit1"]
+      .flatMap((action) => actions?.[action] ?? [])
+      .find((frame) => frame.path === message.frame);
+    if (
+      !frame ||
+      !intersects(
+        playerContactRect(player, previousPlayer),
+        mobContactRect(frame, currentMob, facing === 0, previousMob),
+      )
+    )
+      return reply(false);
+    const basis = characterStatBasis(
+      character,
+      this.options.itemCatalog,
+      this.options.skills,
+    );
+    const damage = rollNativeTouch(
+      basis.basic,
+      statTotals(basis, this.buffs.values(now)),
+      template,
+      () => session.touchRandom!.next(),
+    );
+    this.touchBusy = true;
+    this.touchReadyAt = now + 1500; // Bridge anti-duplicate policy; browser visuals tick the native signed clock.
+    try {
+      if (damage > 0) await session.reportTouchDamage(damage);
+      if (this.session === session && this.contactField === field)
+        reply(true, { damage });
+    } catch (error) {
+      if (this.session === session && this.contactField === field)
+        reply(false, {
+          message: error instanceof Error ? error.message : String(error),
+        });
+    } finally {
+      if (this.contactField === field) this.touchBusy = false;
+    }
+  }
+
   private newSession(): ClientSession {
     this.username=undefined;
     this.unsubscribe?.();
@@ -726,7 +857,20 @@ class BrowserSession {
       ...(this.options.log !== undefined ? { log: this.options.log } : {}),
     });
     this.buffs.clear();
+    this.contactField++;
+    this.lastContactId = this.touchReadyAt = 0;
+    this.touchBusy = false;
+    this.dyingMobs.clear();
     this.unsubscribe = session.onEvent((event) => {
+      if (event.kind === "field" || event.kind === "disconnect") {
+        this.contactField++;
+        this.lastContactId = this.touchReadyAt = 0;
+        this.touchBusy = false;
+        this.dyingMobs.clear();
+      }
+      if (event.kind === "mob-die") this.dyingMobs.add(event.mobId);
+      if (event.kind === "mob-leave") this.dyingMobs.delete(event.mobId);
+      if (event.kind === "mob-enter") this.dyingMobs.delete(event.mob.mobId);
       if(event.kind==="temporary-stat") this.buffs.apply(event.update,performance.now());
       if(event.kind==="disconnect") this.buffs.clear();
       this.send(this.eventJson(event));
@@ -1044,7 +1188,7 @@ class BrowserSession {
 
   private eventJson(event: ClientEvent): unknown {
     const { kind, ...rest } = event;
-    return { t: kind, ...rest };
+    return { t: kind, ...rest, ...(kind === "field" ? { contactField: this.contactField } : {}) };
   }
 
   close(): void {

@@ -728,3 +728,7 @@ body {
 #test-tools-panel ol { padding-left:21px; }
 
 @media (max-width: 800px) { #bar { flex-wrap:wrap; gap:6px; } }
+
+/* Original CUIRevive coordinates; the modal hit shield shares the 800x600 canvas transform. */
+#revive-dialog { position: absolute; inset: 0; z-index: 60; pointer-events: auto; }
+#revive-ok { left: 368px; top: 196px; width: 65px; height: 24px; }

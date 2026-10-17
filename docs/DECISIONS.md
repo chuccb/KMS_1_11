@@ -2157,3 +2157,31 @@ HP/MP 分母、自然恢復／補藥／復活／升級補滿、成長 INT 一併
 **交付狀態**：只新增／更新未執行回歸來源、靜態審閱與格式化；不跑test/check/typecheck/browser/VM/probe。
 同體驗save停止服務後冷備份，再啟LIVE供使用者自行操作；[skip ci]提交並非force推送本分支。
 詳見 `NATIVE_STATS_COMBAT.md`；歷史PASS、whitespace檢查、啟服都不代表這輪功能PASS。
+
+
+## ADR-052：原目前格碰撞、第二RNG受傷、外力與復活（2026-10-18）
+
+**決定**：沿原511C60主線接bodyAttack、40B530每格lt/rb、485AA0 swept、5085E0玩家框與491FF0內縮。
+不再以第一PNG尺寸假造怪物碰撞；繪圖／普通矩形選敵共用當前格。修正canvas.value.props的delay漏讀。
+獨立stream2由0x16相同seeds初始化，4C8ED0依EVA條件抽一／兩次、PA及各職業PDD扣防。
+PA/PD照exe欄名缺值default0，不因本WZ有PADamage/PDDamage就偷偷alias。
+
+**傳輸**：browser只送collision snapshot，bridge驗證field token／ID／live template／frame／RECT與有界座標，
+自行roll，命中才發原0x1C負HP，HP等原0x0D；MISS不送無效負報告。
+1500ms gate、座標容差及帶ID的拒絕回覆是bridge防卡／防重複政策，不是原TCPack或完整authoritative AI。
+原負/正1500ms clock、NoViolet、hit表情及5114A0→537B00 pending外力移植到瀏覽器；
+普通8ms物理仍非完整原CVecCtrl。修復emotion未進avatar URL/cache、stat更新抹掉本機表情的接線遺漏。
+
+**死亡閉環**：dead原格／18|facing，>2200ms建立原Notice窗、原韓文與按鈕座標；OK/Enter原kind0空名字，
+等0x16按server既有returnMap及effective maxHP復活，不借工具加血。Escape不可取消。
+509AF0的local user／a2非零寫CField+680已由PE509B1A..509B3C確認；browser以authoritative HP0起算。
+完整Tomb.img落下落地、全部face動畫仍未完成；原皮座標不代表fallback字體metrics已逐像素相同。
+
+**道具／方便體驗**：EVA/PDD現在有真消費者才接受，MAD/MDD/未知仍整筆拒絕。
+--test-tools仍default-off、owner授權、confirmed後才發2002000三瓶；盜賊preset只填表。
+唯讀EVA/PDD／signed保護tick不放進原UI。還原點不回收領到／喝掉的道具。
+
+**保存／驗證界線**：環境重建，前輪ignored save／冷備份／程序均不存在，不能冒稱恢復舊兩角色。
+本輪啟新獨立generated/preview-contact-20261018.json（repo根目錄相對路徑）；帳號原生建立角色，不自動改既存進度。
+遵使用者要求，不test/check/typecheck/browser/VM/probe，只新增未執行回歸來源、來源審閱與格式化，
+啟LIVE供自行操作；[skip ci]非force推送固定本分支。細節見NATIVE_CONTACT_REVIVE.md。

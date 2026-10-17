@@ -86,14 +86,15 @@ test("the percentage fields are percentages of the maxima, rounded down", () => 
   assert.deepEqual(consumeDeltas(odd!, record()), { hpDelta: 16 });
 });
 
-test("an evasion buff is refused until its actual mechanic is implemented", () => {
-  // Item/Consume/0200.img/02002000 (민첩함의 물약): the unimplemented combat mechanic is
-  // `eva`; recognizing the wire format alone does not make this potion functional - so the item stays in the bag (FINDINGS 4.21.6).
+test("evasion potion has a real incoming contact consumer and is not a fake heal", () => {
+  // Item/Consume/0200.img/02002000, now consumed by 4C8ED0 through the bridge's stream 2.
   const potion = consumeSpecOf(
     fakeArchive("Item/Consume/0200.img", image({ "02002000": { spec: { eva: 5, time: 180000 } } })),
     2002000,
   );
-  assert.deepEqual(potion?.unapplied, ["eva", "time"]);
+  assert.deepEqual(potion?.unapplied, []);
+  assert.equal(potion?.eva, 5);
+  assert.equal(potion?.time, 180000);
   assert.equal(healsVitals(potion!), false);
   assert.deepEqual(consumeDeltas(potion!, record()), {}, "nothing is restored, so nothing is sent");
 });
@@ -149,9 +150,9 @@ test("native speed potion reads milliseconds, while mixed unknown mechanics refu
   assert.deepEqual(spec.unapplied, []);
   assert.equal(healsVitals(spec), false, "speed is not a fake HP/MP restoration");
   const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002001": { spec: { speed: 8, time: 180000, eva: 5 } },
+    "02002001": { spec: { speed: 8, time: 180000, mad: 5 } },
   })), 2002001)!;
-  assert.deepEqual(mixed.unapplied, ["eva"]);
+  assert.deepEqual(mixed.unapplied, ["mad"]);
   for (const time of [0, -1, 1.5, 0x80000000]) {
     const bad = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
       "02002001": { spec: { speed: 8, time } },
@@ -169,4 +170,17 @@ test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still
     const mixed=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000,mad:10}}})),2002004)!;
     assert.deepEqual(mixed.unapplied,["mad"]);
   }
+});
+
+
+// Unexecuted source: defensive specs are accepted only now that 4C8ED0 consumes PDD/EVA.
+test("timed PDD and EVA feed contact; an unimplemented MAD still refuses a mixed item", () => {
+  const spec = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
+    "02002000": { spec: { pdd: 10, eva: 5, time: 180000 } },
+  })), 2002000)!;
+  assert.equal(spec.pdd, 10); assert.equal(spec.eva, 5); assert.deepEqual(spec.unapplied, []);
+  const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
+    "02002000": { spec: { pdd: 10, eva: 5, mad: 3, time: 180000 } },
+  })), 2002000)!;
+  assert.deepEqual(mixed.unapplied, ["mad"]);
 });
