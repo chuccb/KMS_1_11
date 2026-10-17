@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 // Offline DOM/canvas shim: does client/main.js run, and do its handlers survive real event shapes?
 class El {
   constructor(tag = "div") {
@@ -39,10 +40,11 @@ class El {
 }
 const canvasEl = new El("canvas");
 let drawImageCalls = 0;
+const drawn = [];
 const ctxStub = new Proxy({}, {
   get(target, prop) {
     if (prop === "canvas") return canvasEl;
-    if (prop === "drawImage") return () => { drawImageCalls += 1; };
+    if (prop === "drawImage") return (image, ...coordinates) => { drawImageCalls += 1; drawn.push([image.src, ...coordinates]); };
     if (!(prop in target)) target[prop] = () => {};
     return target[prop];
   },
@@ -125,12 +127,56 @@ runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), 
   get picked() { return shopSellPick; },
   get dragging() { return shopDrag !== undefined || shopScrollDrag !== undefined; },
   get pressed() { return shopPressed; },
+  get stage() { return loginStage; },
+  get dialog() { return titleDialogOpen; },
+  get inventoryOpen() { return inventoryOpen; },
   setFacts(id, facts) { itemInfo.set(id, facts); },
 };`, { filename: "client/main.js" });
 await new Promise((r) => setTimeout(r, 10));
+// Title and modal are drawn at original coordinates, and use the WZ button state sprites.
+const render = async () => {
+  frameCallback?.(performance.now());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  frameCallback?.(performance.now());
+};
+assert.equal(clientProbe.stage, "title");
+assert.equal(clientProbe.dialog, false);
+await render();
+const stamp = (path, x, y) => drawn.some(([src, atX, atY]) => decodeURIComponent(src ?? "").endsWith(path) && atX === x && atY === y);
+assert.ok(stamp("UI/Login.img/Title/backgrnd", 0, 0));
+assert.ok(stamp("UI/Login.img/Title/menu", 302, 358));
+assert.ok(stamp("UI/Login.img/Title/BtContinue/normal/0", 356, 423));
+elements.get("title-continue").fire("mouseenter");
+await render();
+assert.ok(stamp("UI/Login.img/Title/BtContinue/mouseOver/0", 356, 423));
+elements.get("title-continue").fire("mousedown");
+await render();
+assert.ok(stamp("UI/Login.img/Title/BtContinue/pressed/0", 356, 423));
+elements.get("title-continue").fire("click");
+assert.equal(clientProbe.dialog, true);
+assert.equal(elements.get("title-menu").classList.contains("hidden"), true);
+await render();
+assert.ok(stamp("UI/Login.img/Title/loginDlg", 247, 215));
+assert.ok(stamp("UI/Basic.img/BtOK/normal/0", 373, 342));
+elements.get("pass").value = "must-clear";
+for (const handler of windowListeners.keydown) handler({ key: "Escape" });
+assert.equal(clientProbe.dialog, false);
+assert.equal(elements.get("pass").value, "");
+elements.get("title-continue").fire("click");
+// A focused login field owns Enter and I; they must not activate chat or the inventory.
+document.activeElement = elements.get("user");
+for (const handler of windowListeners.keydown) handler({ key: "i" });
+assert.equal(clientProbe.inventoryOpen, false);
+document.activeElement = null;
+elements.get("remember-user").checked = true;
 elements.get("user").value = "admin";
 elements.get("pass").value = "admin";
 elements.get("login").fire("click");
+elements.get("login").fire("click"); // duplicate press is ignored while pending
+assert.equal(sockets.length, 1);
+assert.equal(elements.get("user").disabled, true);
+await render();
+assert.ok(stamp("UI/Basic.img/BtOK/disabled/0", 373, 342));
 await new Promise((r) => setTimeout(r, 10));
 const ws = sockets[0];
 if (!ws) throw new Error("main.js did not open a socket");
@@ -159,6 +205,11 @@ const messages = [
   { t: "error", message: "boom" },
 ];
 for (const message of messages) ws.push(message);
+assert.equal(elements.get("pass").value, "");
+assert.equal(storage.get("kms111.loginUser"), "admin");
+assert.equal(clientProbe.stage, "game");
+assert.equal(elements.get("title-ui").classList.contains("hidden"), true);
+assert.ok(![...storage.values()].some((value) => value.includes("password")));
 await new Promise((r) => setTimeout(r, 50));
 for (const fn of windowListeners.keydown ?? []) fn({ key: "ArrowRight", preventDefault() {} });
 intervals.at(-1)();
@@ -348,7 +399,6 @@ console.log("handled", messages.length, "messages; sent", sent.length, "->", JSO
 console.log("SMOKE OK");
 
 // ---------------------------------------------------------------- shop regression cases
-const assert = (await import("node:assert/strict")).default;
 const stock = Array.from({ length: 12 }, (_, index) => ({ itemId: 2000000 + index, price: 25, maxCount: 200 }));
 const items = Array.from({ length: 8 }, (_, index) => ({ slot: index + 1, itemId: 2000000 + index, quantity: 3 }));
 const inventoryMessage = (rows) => ({ t: "inventory", inventory: { worn: [], wornCash: [], tabs: [
@@ -402,3 +452,27 @@ assert.deepEqual(JSON.parse(storage.get("kms111.shopAt")), { x: 206, y: 164 });
 clientProbe.setFacts(2000000, { name: "Potion", desc: "First\\nSecond\nThird\r\nFourth" });
 assert.deepEqual(clientProbe.itemTooltipLines({ itemId: 2000000 }), ["Potion", "First", "Second", "Third", "Fourth"]);
 console.log("SHOP REGRESSIONS OK");
+
+// ---------------------------------------------------------------- failed login and retry
+// Isolated at the end so switching the test's stage does not affect the field/Shop assertions above.
+elements.get("title-continue").fire("click");
+elements.get("user").value = "admin";
+elements.get("pass").value = "wrong";
+elements.get("login").fire("click");
+await new Promise((resolve) => setTimeout(resolve, 5));
+sockets.at(-1).push({ t: "login", result: 4, worlds: [] });
+assert.equal(elements.get("login").disabled, false);
+assert.match(elements.get("status").textContent, /登入失敗/);
+assert.equal(clientProbe.dialog, true);
+elements.get("pass").value = "admin";
+elements.get("login").fire("click");
+await new Promise((resolve) => setTimeout(resolve, 5));
+const activeSocket = sockets.at(-1);
+// Late events from the old socket must not overwrite the retry's state.
+sockets[0].emit("close");
+assert.equal(elements.get("login").disabled, true);
+activeSocket.push({ t: "login", result: 0, worlds: [] });
+assert.equal(clientProbe.stage, "worlds");
+assert.equal(elements.get("pass").value, "");
+assert.equal(elements.get("login").disabled, false);
+console.log("TITLE REGRESSIONS OK");

@@ -431,3 +431,81 @@ body {
   opacity: 0.75;
 }
 
+
+/* Title's metal panels and buttons are painted from WZ by drawTitleScreen. Only native input,
+   focus and click targets overlay them, using the same 800x600 coordinates as the canvas. */
+#game-ui > #title-ui { pointer-events: none; }
+#title-menu { position: absolute; inset: 0; pointer-events: none; }
+.sprite-hit {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.sprite-hit:focus-visible { opacity: 1; outline: 1px dotted #000; outline-offset: -2px; }
+.sprite-hit:disabled { cursor: default; }
+#title-menu button { left: 356px; width: 88px; height: 24px; }
+#title-new { top: 394px; }
+#title-continue { top: 423px; }
+#title-homepage { top: 452px; }
+#title-quit { top: 481px; }
+#connect {
+  position: absolute;
+  left: 247px;
+  top: 215px;
+  width: 306px;
+  height: 169px;
+  pointer-events: auto;
+}
+#connect input:not([type="checkbox"]) {
+  position: absolute;
+  left: 85px;
+  width: 176px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font: 12px "Dotum", "돋움", sans-serif;
+}
+#user { top: 37px; }
+#pass { top: 63px; }
+#remember-user { appearance: none; left: 84px; top: 84px; width: 110px; height: 14px; }
+#login-lost { left: 40px; top: 116px; width: 65px; height: 35px; }
+#login { left: 126px; top: 127px; width: 65px; height: 24px; }
+#login-cancel { left: 198px; top: 127px; width: 65px; height: 24px; }
+#connect .status {
+  position: absolute;
+  top: 171px;
+  left: 0;
+  width: 306px;
+  margin: 0;
+  padding: 4px;
+  color: #fff;
+  background: rgba(0, 0, 0, .85);
+  font: 12px sans-serif;
+}
+#connect .status:empty { display: none; }
+#title-notice {
+  position: absolute;
+  left: 200px;
+  top: 530px;
+  width: 400px;
+  margin: 0;
+  padding: 5px;
+  background: rgba(0, 0, 0, .85);
+  color: #fff;
+  text-align: center;
+  font: 12px sans-serif;
+}
+#title-notice:empty { display: none; }

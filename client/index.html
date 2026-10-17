@@ -16,15 +16,6 @@
       <button id="log-toggle" type="button">日誌</button>
     </header>
 
-    <section id="connect" class="panel">
-      <h1>KMS 1.11</h1>
-      <p class="sub">2003 年客戶端協定的瀏覽器視圖：<br />伺服器端真的用 TCP 跑完整條登入鏈。</p>
-      <label>帳號 <input id="user" autocomplete="username" spellcheck="false" /></label>
-      <label>密碼 <input id="pass" type="password" autocomplete="current-password" /></label>
-      <button id="login" type="button">登入</button>
-      <p id="status" class="status"></p>
-    </section>
-
     <section id="worlds" class="panel hidden">
       <h2>選世界</h2>
       <div id="world-list" class="choices"></div>
@@ -59,6 +50,25 @@
       coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
     -->
     <div id="game-ui">
+      <div id="title-ui">
+        <nav id="title-menu" aria-label="主選單">
+          <button id="title-new" class="sprite-hit" type="button" aria-label="新帳號">새로하기</button>
+          <button id="title-continue" class="sprite-hit" type="button" aria-label="登入遊戲">이어하기</button>
+          <button id="title-homepage" class="sprite-hit" type="button" aria-label="官方網站">홈페이지</button>
+          <button id="title-quit" class="sprite-hit" type="button" aria-label="結束遊戲">끝내기</button>
+        </nav>
+        <section id="connect" class="hidden" role="dialog" aria-modal="true" aria-label="登入">
+          <input id="user" aria-label="帳號" autocomplete="username" maxlength="64" spellcheck="false" />
+          <input id="pass" aria-label="密碼" type="password" autocomplete="current-password" maxlength="12" />
+          <input id="remember-user" class="sprite-hit" aria-label="記住帳號（不儲存密碼）" type="checkbox" />
+          <button id="login-lost" class="sprite-hit" type="button" aria-label="忘記帳號或密碼">帳密查詢</button>
+          <button id="login" class="sprite-hit" type="button" aria-label="登入">確定</button>
+          <button id="login-cancel" class="sprite-hit" type="button" aria-label="取消登入">取消</button>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+        </section>
+        <p id="title-notice" role="status" aria-live="polite"></p>
+      </div>
+
       <div id="chatbox" class="hidden">
         <ol id="chat-lines"></ol>
         <div id="emotes"></div>

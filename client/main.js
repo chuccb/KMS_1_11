@@ -42,6 +42,33 @@ const ui = {
   dialogueClose: /** @type {HTMLButtonElement} */ (document.getElementById("dialogue-close")),
 };
 
+// Title is a real 800x600 WZ scene. World/character selection still use their existing HTML lists.
+const titleUi = document.getElementById("title-ui");
+const titleMenu = document.getElementById("title-menu");
+const titleNotice = document.getElementById("title-notice");
+const rememberUser = document.getElementById("remember-user");
+const pageBar = document.getElementById("bar");
+let loginStage = "title";
+let titleDialogOpen = false;
+let titleHover;
+let titlePressed;
+let loginPending = false;
+const TITLE_BUTTONS = [
+  { id: "title-new", path: "UI/Login.img/Title/BtNew", x: 356, y: 394, dialog: false },
+  { id: "title-continue", path: "UI/Login.img/Title/BtContinue", x: 356, y: 423, dialog: false },
+  { id: "title-homepage", path: "UI/Login.img/Title/BtHomepage", x: 356, y: 452, dialog: false },
+  { id: "title-quit", path: "UI/Login.img/Title/BtQuit", x: 356, y: 481, dialog: false },
+  { id: "login-lost", path: "UI/Login.img/Title/BtIdPasswdLost", x: 287, y: 331, dialog: true },
+  { id: "login", path: "UI/Basic.img/BtOK", x: 373, y: 342, dialog: true },
+  { id: "login-cancel", path: "UI/Basic.img/BtCancel", x: 445, y: 342, dialog: true },
+];
+try {
+  const saved = localStorage.getItem("kms111.loginUser");
+  if (saved) { ui.user.value = saved; rememberUser.checked = true; }
+} catch {
+  // Browser privacy settings may disable persistence. Never store a password.
+}
+
 /** @type {WebSocket | undefined} */
 let socket;
 /** @type {{ x: number, y: number, mapId: number } | undefined} */
@@ -128,29 +155,51 @@ function send(message) {
   socket.send(JSON.stringify(message));
 }
 
+function setLoginPending(pending) {
+  loginPending = pending;
+  ui.login.disabled = pending;
+  ui.user.disabled = pending;
+  ui.pass.disabled = pending;
+  document.getElementById("login-cancel").disabled = pending;
+}
+
 function connect() {
+  if (loginPending) return;
+  showPanel(ui.connect);
+  setLoginPending(true);
+  ui.status.textContent = "連線中…";
+  ui.status.classList.remove("bad");
+  const previous = socket;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(`${scheme}://${location.host}/ws`);
-  socket.addEventListener("open", () => {
+  const connection = new WebSocket(`${scheme}://${location.host}/ws`);
+  socket = connection;
+  previous?.close();
+  connection.addEventListener("open", () => {
+    if (socket !== connection) return;
     ui.status.textContent = "已連線，送出登入…";
     ui.status.classList.remove("bad");
     send({ t: "login", user: ui.user.value, password: ui.pass.value });
   });
-  socket.addEventListener("error", () => {
+  connection.addEventListener("error", () => {
+    if (socket !== connection) return;
+    setLoginPending(false);
     // The usual cause is a proxy that does not forward the upgrade (an https page whose proxy
     // refuses `wss`). Saying so beats a page that silently does nothing.
     ui.status.textContent =
-      "WebSocket 連線失敗：這個網址的代理可能不轉發 upgrade。請在本機開 http://127.0.0.1:8500/。";
+      "WebSocket 連線失敗：請確認服務可用，且此網址的代理支援 WebSocket upgrade。";
     ui.status.classList.add("bad");
     logLine("websocket error");
   });
-  socket.addEventListener("close", () => {
+  connection.addEventListener("close", () => {
+    if (socket !== connection) return;
+    setLoginPending(false);
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
     logLine("websocket closed");
   });
-  socket.addEventListener("message", (event) => {
+  connection.addEventListener("message", (event) => {
+    if (socket !== connection) return;
     let message;
     try {
       message = JSON.parse(String(event.data));
@@ -165,11 +214,16 @@ function connect() {
 function handle(message) {
   switch (message.t) {
     case "login":
+      setLoginPending(false);
       if (message.result !== 0) {
         ui.status.textContent = `登入失敗（結果 ${message.result}）`;
         ui.status.classList.add("bad");
         return;
       }
+      try {
+        localStorage.setItem("kms111.loginUser", rememberUser.checked ? ui.user.value : "");
+      } catch { /* Only the account name is optional persistence. */ }
+      ui.pass.value = "";
       ui.status.textContent = "";
       showPanel(ui.worlds);
       ui.worldList.replaceChildren(
@@ -508,6 +562,7 @@ function handle(message) {
       return;
 
     case "disconnect":
+      setLoginPending(false);
       ui.status.textContent = `伺服器斷線：${message.reason}`;
       ui.status.classList.add("bad");
       logLine(`disconnect: ${message.reason}`);
@@ -522,6 +577,7 @@ function handle(message) {
         : message.message;
       if (self) chatLine("系統", text);
       else {
+        setLoginPending(false);
         ui.status.textContent = text;
         ui.status.classList.add("bad");
       }
@@ -1099,6 +1155,49 @@ function artImage(path) {
   return entry;
 }
 
+/** Title positions are CUITitle/sub_4D05A0 and CUILogin/sub_4CEEC0's control coordinates. */
+function drawTitleScreen() {
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const stamp = (path, x, y) => {
+    const art = artImage(path);
+    if (art.ready) ctx.drawImage(art.img, x, y);
+  };
+  stamp("UI/Login.img/Title/backgrnd", 0, 0);
+  if (loginStage === "title") {
+    stamp("UI/Login.img/Title/menu", 302, 358);
+    // Modal login sits above the still-visible title menu, centred by sub_461C50.
+    for (const button of TITLE_BUTTONS.filter((entry) => !entry.dialog)) {
+      const state = !titleDialogOpen && titlePressed === button.id ? "pressed"
+        : !titleDialogOpen && titleHover === button.id ? "mouseOver" : "normal";
+      stamp(`${button.path}/${state}/0`, button.x, button.y);
+    }
+    if (titleDialogOpen) {
+      stamp("UI/Login.img/Title/loginDlg", 247, 215);
+      stamp(`UI/Basic.img/CheckBox/${rememberUser.checked ? 1 : 0}`, 331, 299);
+      ctx.font = "12px 'Dotum', '돋움', sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "#000000";
+      ctx.fillText("메일주소 저장", 347, 299);
+      for (const button of TITLE_BUTTONS.filter((entry) => entry.dialog)) {
+        const disabled = document.getElementById(button.id).disabled;
+        const state = disabled ? "disabled" : titlePressed === button.id ? "pressed"
+          : titleHover === button.id ? "mouseOver" : "normal";
+        stamp(`${button.path}/${state}/0`, button.x, button.y);
+      }
+    }
+  }
+  // CTitle/sub_4D0000 prints Ver. 1.11 at right=796, top=584.
+  ctx.font = "11px 'Dotum', '돋움', sans-serif";
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText("Ver. 1.11", 796, 584);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
 /** `{ face, hair, items }` for the local character or another user of the field. */
 function lookOf(entity) {
   if (!entity) return { face: 20000, hair: 30000, items: [] };
@@ -1550,6 +1649,11 @@ function statusButtonClick(button) {
 }
 
 function frame() {
+  if (loginStage !== "game") {
+    drawTitleScreen();
+    requestAnimationFrame(frame);
+    return;
+  }
   const now = performance.now();
   const target = cameraTarget();
   if (!camera.ready) {
@@ -2518,16 +2622,79 @@ function toggleInventory(force) {
 }
 
 function showPanel(panel) {
+  loginStage = panel === ui.connect ? "title" : panel === ui.worlds ? "worlds" : "characters";
+  titleDialogOpen = panel === ui.connect;
+  titleHover = undefined;
+  titlePressed = undefined;
+  titleUi.classList.toggle("hidden", loginStage !== "title");
+  titleMenu.classList.toggle("hidden", titleDialogOpen);
+  pageBar.classList.add("hidden");
   for (const element of [ui.connect, ui.worlds, ui.characters]) element.classList.add("hidden");
   panel.classList.remove("hidden");
 }
 
 function hidePanels() {
+  loginStage = "game";
+  titleUi.classList.add("hidden");
+  pageBar.classList.remove("hidden");
   for (const element of [ui.connect, ui.worlds, ui.characters]) element.classList.add("hidden");
 }
 
 // ---------------------------------------------------------------- input
 
+function closeTitleLogin() {
+  if (loginPending) return;
+  titleDialogOpen = false;
+  titleHover = undefined;
+  titlePressed = undefined;
+  ui.connect.classList.add("hidden");
+  titleMenu.classList.remove("hidden");
+  ui.pass.value = "";
+  ui.status.textContent = "";
+  document.getElementById("title-continue").focus();
+}
+for (const button of TITLE_BUTTONS) {
+  const element = document.getElementById(button.id);
+  element.addEventListener("mouseenter", () => { titleHover = button.id; });
+  element.addEventListener("mouseleave", () => { titleHover = undefined; titlePressed = undefined; });
+  element.addEventListener("focus", () => { titleHover = button.id; });
+  element.addEventListener("blur", () => { titleHover = undefined; titlePressed = undefined; });
+  element.addEventListener("mousedown", () => { titlePressed = button.id; });
+  element.addEventListener("mouseup", () => { titlePressed = undefined; });
+  element.addEventListener("keydown", (event) => {
+    if (event.key === " " || event.key === "Enter") titlePressed = button.id;
+  });
+  element.addEventListener("keyup", () => { titlePressed = undefined; });
+}
+window.addEventListener("mouseup", () => { titlePressed = undefined; });
+window.addEventListener("blur", () => { titlePressed = undefined; titleHover = undefined; });
+document.getElementById("title-continue").addEventListener("click", () => {
+  titleNotice.textContent = "";
+  showPanel(ui.connect);
+  (rememberUser.checked && ui.user.value ? ui.pass : ui.user).focus();
+});
+document.getElementById("login-cancel").addEventListener("click", closeTitleLogin);
+document.getElementById("title-new").addEventListener("click", () => {
+  titleNotice.textContent = "此重建伺服器的帳號由管理員設定；登入後可建立角色，未提供網站註冊。";
+});
+document.getElementById("title-homepage").addEventListener("click", () => {
+  titleNotice.textContent = "原版按鈕連至 MapleStory 官網；此重建版未連接官方帳號服務。";
+});
+document.getElementById("title-quit").addEventListener("click", () => {
+  titleNotice.textContent = "遊戲尚未連線；可直接關閉此瀏覽器分頁離開。";
+});
+document.getElementById("login-lost").addEventListener("click", () => {
+  ui.status.textContent = "帳號及密碼由此重建伺服器的管理員管理，未連接官方帳密查詢服務。";
+});
+// Keep keyboard focus in the modal; the title menu is hidden from tab order while it is open.
+ui.connect.addEventListener("keydown", (event) => {
+  if (event.key !== "Tab") return;
+  const controls = [ui.user, ui.pass, rememberUser, document.getElementById("login-lost"), ui.login, document.getElementById("login-cancel")]
+    .filter((element) => !element.disabled);
+  const index = controls.indexOf(document.activeElement);
+  if (event.shiftKey && index <= 0) { event.preventDefault(); controls.at(-1)?.focus(); }
+  else if (!event.shiftKey && index === controls.length - 1) { event.preventDefault(); controls[0]?.focus(); }
+});
 ui.login.addEventListener("click", connect);
 
 ui.create.addEventListener("click", () => {
@@ -2573,6 +2740,12 @@ ui.emotes.replaceChildren(
 // straight-line step and lets the server relay it, which is the honest subset until the movement
 // codec's per-element actions are used by something that draws them.
 window.addEventListener("keydown", (event) => {
+  if (loginStage !== "game") {
+    if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
+    return;
+  }
+  // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
+  if (document.activeElement instanceof HTMLInputElement && document.activeElement !== ui.say) return;
   if (document.activeElement === ui.say) {
     if (event.key === "Escape") ui.say.blur();
     return;
@@ -2682,5 +2855,7 @@ ui.say.addEventListener("blur", () => {
 });
 
 /** The first thing a user sees; also what a refresh returns to. */
-showPanel(ui.connect);
+pageBar.classList.add("hidden");
+ui.connect.classList.add("hidden");
+document.getElementById("title-continue").focus();
 logLine(`page loaded; ws target ${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);

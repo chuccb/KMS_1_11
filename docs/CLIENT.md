@@ -74,6 +74,24 @@ etc 順序）。圖上第一格分頁是「亮起」的版本，頁面把同一�
 `GET /api/item/<id>/icon.png` 問，伺服器讀的是同一份 `Data.wz`（ADR-037）。查不到就只印 id——
 不猜名字。
 
+## 原版登入主畫面
+
+進站先畫 `UI/Login.img/Title/backgrnd`（800×600），不是黑底 HTML 登入卡片。
+`CTitle`／`sub_4D0000` 建立的 197×169 金屬選單在 **(302,358)**；`CUITitle`／`sub_4D05A0`
+的四顆按鈕是選單內 (54,36／65／94／123)，直接使用 `BtNew`／`BtContinue`／`BtHomepage`／
+`BtQuit` 的 normal／mouseOver／pressed 圖。版本字樣 `Ver. 1.11` 右對齊 (796,584)。
+
+**이어하기** 打開 `Title/loginDlg`（306×169），`sub_461C50` 置中為 **(247,215)**。
+`CUILogin`／`sub_4CEEC0` 的帳號與密碼輸入框分別在視窗內 (85,37)／(85,63)，176×14。
+輸入框是真正的透明 HTML input，以 `#game-ui` 跟畫布等比縮放；金屬面板、查詢／確定／取消按鈕與
+CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳號移至密碼並登入，Escape／取消
+回到主選單，Tab 焦點留在登入視窗。連線中鎖定重複提交，失敗後可重試，舊連線的遲到事件不能覆蓋
+新連線狀態。「記住帳號」只存 `kms111.loginUser`，**從不儲存密碼**；登入成功／取消時清空密碼欄。
+
+這個重建伺服器沒有官方註冊／帳密查詢服務，這些按鈕會明確說明；瀏覽器也不能關閉不是由程式開啟的
+分頁，所以「結束」提示直接關閉分頁，不假裝已結束程式。登入後的**世界／角色清單仍是 HTML**，
+尚未宣稱為原版 `WorldSelect`／`CharSelect` 版面。
+
 ## 畫面上有什麼
 
 畫面就是 2003 client 的 **800×600** 視野（`#view` 的內部尺寸固定，CSS 只把它等比放大、置中，
@@ -261,6 +279,7 @@ found」之外的另一種空白。
 ### 離線 UI 回歸
 
 `node server/scripts/client_probe.mjs` 不需要伺服器、瀏覽器或外部套件：用 DOM／canvas shim 執行真正的
-`client/main.js`，注入與 WebSocket 相同的事件，驗證原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
+`client/main.js`，注入與 WebSocket 相同的事件，驗證登入面板與按鈕的素材路徑／座標／狀態、登入
+取消／重試／防重送與密碼清理，以及原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
 拖曳滑塊、背包減少後捲動與選取清理、視窗拖曳在畫布外放開、位置儲存，以及 WZ 說明的字面 `\n`
 換行。`server/test/client-ui.test.ts` 將它納入 `npm test`。這是互動回歸，不代替真 canvas 的像素檢查。
