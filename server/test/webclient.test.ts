@@ -141,6 +141,13 @@ class Browser {
   close(): void {
     this.socket.close();
   }
+
+  /** Drops the connection the way a killed browser does: no close handshake at all. */
+  destroy(): void {
+    const raw = (this.socket as unknown as { _socket?: { destroy(): void } })._socket;
+    raw?.destroy();
+    this.socket.close();
+  }
 }
 
 /**
@@ -690,6 +697,25 @@ test("two browsers in one map see each other: enter, move and chat", { timeout: 
   assert.equal(left.characterId, (hero.field.self as { characterId: number }).characterId);
 
   alt.browser.close();
+});
+
+test("a browser that disappears releases its account, so the next login is not refused", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t);
+  const first = await enterGame(world.webPort, "admin", "admin");
+  // The login chain hands the character to the game server; the account's seat is the game
+  // session's now. Killing the page without a close frame must still give it back - a socket from
+  // `http.Server`'s upgrade is half-open, so the server only sees `end`.
+  first.browser.destroy();
+  let second: Browser | undefined;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    second?.close();
+    second = await Browser.open(world.webPort);
+    second.send({ t: "login", user: "admin", password: "admin" });
+    const answer = await second.nextKind("login");
+    if (answer.result === 0) return; // released
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("the account stayed online after the browser vanished");
 });
 
 test("a wrong password is answered with a result, not a socket error", { timeout: 20000 }, async (t) => {

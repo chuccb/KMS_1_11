@@ -8,6 +8,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { connect } from "node:net";
 import type { IncomingMessage } from "node:http";
 import {
   WS_MAX_MESSAGE_BYTES,
@@ -18,6 +20,7 @@ import {
   encodeServerFrame,
   isWebSocketUpgrade,
   upgradeResponse,
+  WebSocket,
 } from "../src/net/websocket.ts";
 
 /** A client frame, masked the way a browser masks it (RFC 6455 5.3). */
@@ -134,4 +137,33 @@ test("a server frame is never masked and uses the smallest length form", () => {
 
 test("the frame size cap is the message cap, not an arbitrary number", () => {
   assert.equal(WS_MAX_MESSAGE_BYTES, 1 << 20);
+});
+
+test("a peer that vanishes without a closing handshake still closes the socket", { timeout: 10000 }, async () => {
+  // The upgrade event hands out a socket with `allowHalfOpen = true`, so a browser that is killed
+  // (or a tab that is closed hard) only produces `end`. If that is not treated as a close, the
+  // session behind it - and the account's seat - is never released: the next login is answered with
+  // "already online" until the server restarts.
+  const server = createServer();
+  const closed: string[] = [];
+  server.on("upgrade", (_request, socket) => {
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n");
+    const ws = new WebSocket(socket, {});
+    ws.onClose = (reason) => closed.push(reason);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const client = connect(port, "127.0.0.1");
+  await new Promise<void>((resolve) => client.on("connect", resolve));
+  client.write(
+    "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+  );
+  client.end(); // half-close: FIN without a close frame
+  for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(closed.length, 1, "the server saw the connection go away");
+  assert.match(closed[0]!, /peer closed|socket closed/);
+  client.destroy();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 });

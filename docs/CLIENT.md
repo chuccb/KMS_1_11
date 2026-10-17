@@ -179,8 +179,10 @@ cd server
 node --test test/websocket.test.ts test/webclient.test.ts
 ```
 
-`websocket.test.ts`（8 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
-一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（10 則）用 Node 內建的 `WebSocket` 當瀏覽器，
+`websocket.test.ts`（9 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
+一定要遮罩、server 訊框一定不遮罩。（第 9 則是「半關閉」：升級後的 socket 是 `allowHalfOpen`，瀏覽器被硬關只會送 FIN，
+所以 `end` 也必須當成關閉，否則帳號的座位永遠不會放掉。）
+`webclient.test.ts`（12 則）用 Node 內建的 `WebSocket` 當瀏覽器，
 對**真的** `LoginServer`／`GameEntryServer` 走完登入→選角→進圖→說話→走路，外加靜態檔、
 `/api/map/<id>` 與 `..` 的拒絕、一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩，以及點一扇門
 換到另一張圖再走回來，一張臉、一通韓文密語（CP949 來回）、一次找不到人的密語與兩種 `/f` 答案，

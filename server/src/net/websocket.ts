@@ -212,6 +212,11 @@ export class WebSocket {
     socket.on("data", (chunk) => this.receive(new Uint8Array(chunk)));
     socket.on("error", (error) => this.finish((error as Error).message));
     socket.on("close", () => this.finish(this.closeReason ?? "the socket closed"));
+    // A socket handed over by `http.Server`'s upgrade event has `allowHalfOpen = true`, so a browser
+    // that vanishes without a closing handshake (a closed tab, a killed process) only produces
+    // `end` - never `close`. Without this line the session behind it lives forever, and with it the
+    // account's seat: the next login would be refused as "already online".
+    socket.on("end", () => this.finish(this.closeReason ?? "the peer closed the connection"));
   }
 
   get isClosed(): boolean {

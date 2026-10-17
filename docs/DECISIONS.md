@@ -1874,5 +1874,10 @@ frame 的 `delay` 是 WZ 自己的。
   相機是「玩家在中央、夾在 `bounds` 裡、以 0.18 緩動」；NPC 的點擊框放大到 36/36/96（最寬的
   NPC 圖約 70 px、最高約 96 px）。
 - 測試：`test/art.test.ts` 17 則 + `webclient.test.ts` 的 art 端點一則，總數 **504**（從 486 增加 18）。
+  **追記**：同一輪還修掉一個會讓整台伺服器「卡住帳號」的 bug——`http.Server` 的 upgrade socket 是
+  `allowHalfOpen`，瀏覽器被硬關（分頁關掉、行程被殺）時只會送 FIN，`WebSocket` 原本只聽 `close`
+  所以永遠不釋放 `BrowserSession`，帳號的座位（`net/online.ts`）就跟著被佔住，下一個人登入只會拿到
+  「already online」。現在 `end` 也當成關閉（`src/net/websocket.ts`），並有兩則測試釘住
+  （`websocket.test.ts` 的半關閉、`webclient.test.ts` 的「消失的分頁要放掉帳號」），總數 **506**。
 - 誠實的缺口：小地圖與天氣（`MapHelper` 的 `mark`／`weather`）還沒畫；角色只有 `stand1`／`walk1`；
   表情還是文字。都寫在 `docs/CLIENT.md` 的「刻意沒有的東西」。
