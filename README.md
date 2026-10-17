@@ -5,7 +5,15 @@
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：用原版截圖與 C／PE／WZ 交叉核對，修 EXP條151px／整除／百分比、人物欄黑字，
+- **本輪（2026-10-18，未測試）**：原48D080動作子樹能力分類、53DAA0無目標跳躍、重力／swept落地路徑，
+  連接0x33／browser jump動畫／中途進場／戰鬥位置／死亡重生；補info.link動作來源與靜止類分流。
+  修攻擊arm身份與hand錨點、冷圖跳站姿、未知／無武器假480ms攻擊，以及待機0→1→2→1。
+  508FC0另定位movement/body action混表，修jump6／ladder14／rope16的本機、遠端與繩梯深度接線。
+  依46BDA0＋Shape2D修type4雲層時間位移（非後期4～7通則）、重複origin；體驗工具可直接前往104040000。
+  [原始證據、完整界線與操作](docs/NATIVE_JUMP_ATTACK_BACKGROUNDS.md)／ADR-056。
+  沿用現有save，冷備份後重啟；**未跑test/check/typecheck/browser/VM/probe**，不聲稱完整aggro／飛行／CVecCtrl或全遊戲1:1。
+
+- **前輪（2026-10-18，未測試）**：用原版截圖與 C／PE／WZ 交叉核對，修 EXP條151px／整除／百分比、人物欄黑字，
   確認本輪來源字體 **Gulim**；接右上動態街名／地圖名／原徽章、數值hover，原尺寸聊天記錄與可操作原圖捲軸。
   補七格200/201/202消耗品拖入、數量合計、原icon／ItemNo點陣字、按鍵使用與本機分角色設定。
   沿用現有save，不seed／不自動修裝備；**未跑test/check/typecheck/browser/VM/probe**。

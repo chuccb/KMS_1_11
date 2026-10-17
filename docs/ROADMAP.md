@@ -1,6 +1,12 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：交叉核對原版截圖／C／PE／WZ，
+> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：補動作子樹能力／普通跳躍怪重力路徑、
+> 0x33與browser jump／落地／late join／戰鬥位置／死亡重生；補linked action來源，靜止／飛行不冒用地面巡邏。
+> 修攻擊arm身份／hand、冷載入跳站姿、無武器假480ms／未知action替換、待機ping-pong；依原46BDA0＋Shape2D接type4移動雲層。
+> 另修movement/body action混表：jump6／ladder14／rope16，本機發送／遠端／繩梯深度一起修。加104040000授權捷徑、補聊天70。沿用save，冷備份重啟；aggro／飛行／完整CVecCtrl仍未完成。
+> 來源與界線見 `NATIVE_JUMP_ATTACK_BACKGROUNDS.md`／ADR-056。
+
+> 前輪交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：交叉核對原版截圖／C／PE／WZ，
 > 修 EXP151／整除／百分比／人物欄黑字，來源字體確認為Gulim；補vitals hover、動態地圖標題與原mark HTTP接線、
 > 原尺寸聊天記錄與可操作VScr、七格200/201/202消耗品綁定／合計／原圖與點陣數量／按鍵使用。
 > 沿用原save、不seed、不自動修角色。技能施放／完整快捷格拖放／BtChat與Menu原窗仍缺。見 `NATIVE_HUD_CHAT_QUICKSLOTS.md`／ADR-055。

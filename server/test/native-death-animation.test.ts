@@ -76,12 +76,12 @@ test("canvas duration + inherited alpha: missing/-1 endpoints retain, looping re
 
 test("zero-duration path records are instantaneous; native action facing survives opposite displacement", () => {
   const user={x:0,y:0,action:4,facing:0}, world=collisionWorld({});
-  beginPath(user,{elements:[{x:10,y:20,vx:100,vy:-270,action:71,foothold:0,attr:2,duration:0},
-    {x:20,y:30,vx:100,vy:0,action:71,foothold:0,attr:0,duration:100}]},0);
+  beginPath(user,{elements:[{x:10,y:20,vx:100,vy:-270,action:7,foothold:0,attr:2,duration:0},
+    {x:20,y:30,vx:100,vy:0,action:7,foothold:0,attr:0,duration:100}]},0);
   sampleMotion(user,0,world);
   assert.equal(user.x,10); assert.equal(user.y,20); assert.equal(user.facing,1);
   sampleMotion(user,50,world);assert.equal(user.x,15);assert.equal(user.facing,1);
-  sampleMotion(user,100,world);assert.equal(user.x,20);assert.equal(user.action,71);
+  sampleMotion(user,100,world);assert.equal(user.x,20);assert.equal(user.action,7);
   const body=createPlayer(0,0,world,0,false);
   queueKnockback(body,270,-270);advancePlayer(body,{},world,8);
   assert.equal(body.moveAttr,2,"retain native force marker until publisher clears it");

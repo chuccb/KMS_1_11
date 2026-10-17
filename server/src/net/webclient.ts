@@ -657,8 +657,10 @@ class BrowserSession {
     const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
     const profile = this.options.art?.attackProfile?.(weaponId);
     const actions = shoot ? profile?.shoot : profile?.melee;
-    const action =
-      actions?.find((entry) => entry.action === actionId) ?? actions?.[0];
+    const action = actions?.find((entry) => entry.action === actionId);
+    // 512F90/427F60 rejects unsupported weapon groups/actions. Never translate a browser pose
+    // silently to a different attack or a fabricated 480ms bare-hand sword swing.
+    if (!profile || !action) return;
     const ammo = shoot ? firstBasicAmmo(character.items) : undefined;
     if (shoot && (!ammo || !action)) return;
     const knownMob = mobId === 0 ? undefined : session.mob(mobId);
@@ -693,7 +695,7 @@ class BrowserSession {
     const attackField = this.contactField;
     let trace: PhysicalAttackTrace | undefined;
     const damage=mob && template && session.attackRandom ? rollNativePhysical(
-      character,basis,totals,template,action?.action??5,
+      character,basis,totals,template,action.action,
       ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0,ammo?.itemId??0,
       this.options.skills,()=>session.attackRandom!.next(), value => { trace = value; },
     ) : 0;
@@ -702,8 +704,8 @@ class BrowserSession {
       facingLeft,
       {
         shoot,
-        action: action?.action ?? 5,
-        speed: profile?.speed ?? 1,
+        action: action.action,
+        speed: profile.speed,
         ...(ammo === undefined ? {} : { projectileSlot: ammo.slot }),
       },
     );

@@ -4,7 +4,18 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原版截圖交叉核對 HUD／地圖名／聊天／快捷格（2026-10-18，未測試）
+## 最新實作：跳躍怪／攻擊姿勢／移動雲層（2026-10-18，未測試）
+
+補原動作子樹能力分類、無目標roam起跳與server ordinary air路徑、0x33 jump／0ms落地、
+browser動作／中途進場／戰鬥位置／死亡重生；link動作圖與原模板數值分離。飛行／追擊仍未完整實作。
+攻擊按實際arm身份求hand、等待所選原圖／afterimage decode，不任意改攻速；移除無武器假480ms劍姿勢與bridge未知action替換。
+修movement/body action混表：jump6／ladder14／rope16，含發送、remote、繩梯深度；dead18不變。
+修待機0→1→2→1、type4按field clock水平移動與大origin重複；聊天輸入上限補70。
+體驗面板新增104040000跳躍怪／雲層捷徑，只在既有權限下點擊才移圖，不自動改進度。
+沿用同save，停服冷備份後重啟；不跑test/check/typecheck/browser/VM/probe。
+見 [NATIVE_JUMP_ATTACK_BACKGROUNDS.md](NATIVE_JUMP_ATTACK_BACKGROUNDS.md)／ADR-056；非完整CVecCtrl／CShape2D／全遊戲1:1。
+
+## 前輪實作：原版截圖交叉核對 HUD／地圖名／聊天／快捷格（2026-10-18，未測試）
 
 以原800×600遊戲內容而非 Windows 外框比對。補 EXP151px／整除／百分比、人物欄黑字；
 PE 5B3A00 確認本輪來源字體為 **Gulim（굴림）**，不是舊註解的 Dotum。補 HP/MP/EXP hover數值。

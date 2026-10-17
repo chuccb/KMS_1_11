@@ -1,3 +1,6 @@
+> 2026-10-18後續：攻擊arm身份／冷圖／無武器fallback與idle動畫修補見 [NATIVE_JUMP_ATTACK_BACKGROUNDS.md](NATIVE_JUMP_ATTACK_BACKGROUNDS.md)。
+> 此文件較早的 combat.ts 舊公式敘述已由 NATIVE_STATS_COMBAT.md／NATIVE_EQUIPMENT_DAMAGE_FIX.md 後續實作取代。
+
 # 基本武器攻擊、選彈與投射物（2026-10-17；未測試）
 
 > **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新範圍與未完成碰撞／技能界線見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
@@ -110,8 +113,8 @@ WZ2070000兩幀delay30ms、origin(9,9)/(8,8)；2060000／2061000有各自箭形�
    武器係數、熟練度、命中／迴避、防禦、技能、完整instance裝備／buff總值未還原。
    因此**不宣稱射手／盜賊傷害已1:1，也不宣稱完整職業玩法完成**。
 6. afterimage使用第0子節點與稀疏幀附件；缺少delay時沿用sprite reader的1000ms通用預設。
-   全部原effect z／混色／技能afterimage等級與音效時序尚未移植。無武器保留既有480ms近身fallback政策；
-   有武器卻無法取得原動作資料時拒絕假造其他武器動作，並顯示提示。
+   全部原effect z／混色／技能afterimage等級與音效時序尚未移植。後續ADR-056依512F90／427F60
+   移除無武器假480ms fallback；有武器卻無法取得原動作資料時拒絕假造其他武器動作，並顯示提示。
 7. Soul Arrow、技能多發／消耗、技能容量／射程／攻速buff、完整技能UI仍未實作。
    飛鏢購買／補充政策沿用`MESO_RECHARGE.md`；本輪沒有改商店stock或贈送／改寫角色裝備。
 

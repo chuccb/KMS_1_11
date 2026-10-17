@@ -63,7 +63,7 @@ export function testTools({
     el("qa-repair-starters").disabled = !ready || repairCount === 0;
     el("qa-repair-starters").textContent = `修復舊全零起始裝備（${repairCount}件；原WZ值）`;
     el("qa-restore").disabled = !ready || !restoreAvailable;
-    for (const id of ["qa-map-go", "qa-town", "qa-hunt"])
+    for (const id of ["qa-map-go", "qa-town", "qa-hunt", "qa-jump-cloud"])
       el(id).disabled = !enabled || busy || !canMap;
     el("qa-checkpoint").textContent = checkpoint
       ? "更新還原點（取代舊點）"
@@ -198,6 +198,7 @@ export function testTools({
   });
   el("qa-town").addEventListener("click", () => warp(101000000));
   el("qa-hunt").addEventListener("click", () => warp(40000));
+  el("qa-jump-cloud").addEventListener("click", () => warp(104040000));
   el("qa-skills").addEventListener("click", () => {
     close();
     openSkills();

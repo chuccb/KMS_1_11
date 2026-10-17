@@ -136,10 +136,22 @@ export function mobArtOf(
   templateId: number,
   reader: ArtReader,
 ): MobArt | undefined {
-  const image = mobImagePath(templateId);
+  let image = mobImagePath(templateId);
+  const info = nodeRecord(reader.node(`${image}/info`));
+  // 40AE20 recursively loads action art via _wtoi(info.link); original info still owns contact.
+  // Bound malformed/cyclic archives instead of recursing indefinitely.
+  const seen = new Set<string>();
+  for (;;) {
+    if (seen.has(image) || seen.size >= 16) return undefined;
+    seen.add(image);
+    const link = nodeRecord(reader.node(`${image}/info`)).link;
+    if (typeof link !== "string") break;
+    const id = Number.parseInt(link, 10);
+    if (!Number.isSafeInteger(id) || id < 0) return undefined;
+    image = mobImagePath(id);
+  }
   const actions = spriteActions(reader, image);
-  const bodyAttack =
-    Number(nodeRecord(reader.node(`${image}/info`)).bodyAttack ?? 0) !== 0;
+  const bodyAttack = Number(info.bodyAttack ?? 0) !== 0;
   return Object.keys(actions).length === 0
     ? undefined
     : { templateId, actions, bodyAttack };

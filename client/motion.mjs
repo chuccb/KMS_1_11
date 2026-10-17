@@ -148,7 +148,7 @@ function sweepWalls(body, oldX, oldY, world) {
   }
   if (wall) { body.x = wall.x1 - Math.sign(body.x - oldX) * 0.001; body.vx = 0; }
 }
-function step(body, input, world, dt) {
+function step(body, input, world, dt, mob = false) {
   const knocked = body.knockback !== undefined;
   if (knocked) {
     // 537B00 first releases ground/ladder, then combines each pending component with velocity.
@@ -162,7 +162,8 @@ function step(body, input, world, dt) {
     body.moveAttr = (body.moveAttr ?? 0) | 2; // 537B00 -> 495D60 attr2, retained until publication.
   }
   // CUserLocal 512400 updates CAttrShoe walkSpeed (+32) and jump (+56), not gravity.
-  const speedScale = clamp(input.speedPercent ?? 100, 80, 130) / 100;
+  // Mob CAttrShoe uses template speed 0..130, NOT CUserLocal's 80% minimum.
+  const speedScale = clamp(input.speedPercent ?? 100, mob ? 0 : 80, 130) / 100;
   const jumpScale = clamp(input.jumpPercent ?? 100, 80, 123) / 100;
   const walkSpeed = PHYSICS.walkSpeed * speedScale;
   const jumpSpeed = PHYSICS.jumpSpeed * jumpScale;
@@ -256,6 +257,17 @@ export function advancePlayer(body, input, world, elapsedMs) {
   }
   return body;
 }
+/** Mob trajectory planning uses the native <=30ms subdivision (53D3F0), not RAF/player catch-up.
+ * Reuses ordinary ground/air sweeps only; not the entire CVecCtrlMob controller or field physics.
+ */
+export function advanceMob(body, input, world, elapsedMs) {
+  for (let left = Math.max(0, elapsedMs); left > 0;) {
+    const ms = Math.min(30, left);
+    step(body, input, world, ms / 1000, true);
+    left -= ms;
+  }
+  return body;
+}
 export function locomotion(body) {
   if (body.dead) return "dead";
   if (body.ladder) return body.ladder.ladder ? "ladder" : "rope";
@@ -263,8 +275,10 @@ export function locomotion(body) {
   return Math.abs(body.vx) > 1 ? "walk1" : "stand1";
 }
 export function actionOf(body) {
-  // sub_43FC80's action-name table, doubled because bit 0 is facing.
-  return ({ walk1: 0, stand1: 4, dead: 18, jump: 70, ladder: 72, rope: 74 }[locomotion(body)]) | body.facing;
+  // 508FC0 decodes the MOVEMENT state, then selects an avatar action. Those are two tables:
+  // y>>1: walk=1, stand=2, jump=3, alert=4, ladder=7, rope=8, dead=9.
+  // 35/36/37 (body jump/ladder/rope action ids) must NOT be doubled onto the movement wire.
+  return ({ walk1: 2, stand1: 4, dead: 18, jump: 6, ladder: 14, rope: 16 }[locomotion(body)]) | body.facing;
 }
 
 /** Preserve path duration end-to-end. New paths start from what was drawn, avoiding tiny jitter. */
@@ -321,7 +335,9 @@ export function sampleMotion(entity, now, world) {
  * sub_4861F0/sub_509A80: 30000*page - 2*group + 10008; sub_499BA0: NPC +10009; sub_4A88A0: drop +10011.
  */
 export function actorDepth(entity, world, kind = "self") {
-  const climbing = entity.ladder ?? ((entity.action & ~1) === 72 || (entity.action & ~1) === 74
+  const userClimbing = (kind === "self" || kind === "user")
+    && ((entity.action & ~1) === 14 || (entity.action & ~1) === 16);
+  const climbing = entity.ladder ?? (userClimbing
     ? world.ladders.find((l) => Math.abs(l.x - entity.x) < 1 && entity.y >= l.y1 && entity.y <= l.y2) : undefined);
   if (climbing) { entity.layer = climbing.page ?? entity.layer; entity.group = 0; }
   const floor = world.byId.get(entity.foothold) ?? floorBelow(world, entity.x, entity.y - 2, 4)?.foothold;
@@ -336,12 +352,16 @@ export function animationPose(entity, stance, moving, now) {
   const state = entity.animation;
   if (!climbing || moving) state.elapsed += Math.max(0, Math.min(250, now - state.last));
   state.last = now;
-  const delay = climbing ? 250 : stance === 'walk1' ? 180 : 500;
-  const count = climbing ? 2 : stance === 'walk1' ? 4 : stance === 'jump' || stance === 'dead' ? 1 : 3;
-  return { stance, frame: Math.floor(state.elapsed / delay) % count };
+  const walking = stance === 'walk1' || stance === 'walk2';
+  const delay = climbing ? 250 : walking ? 180 : 500;
+  const count = climbing ? 2 : walking ? 4 : stance === 'jump' || stance === 'dead' ? 1 : 3;
+  // 427BF0 sets ping-pong for stand1/stand2/alert; 40D950 expands N to 2N-2.
+  const pingPong = stance === 'stand1' || stance === 'stand2' || stance === 'alert';
+  const index = Math.floor(state.elapsed / delay) % (pingPong ? 2 * count - 2 : count);
+  return { stance, frame: pingPong && index >= count ? 2 * count - 2 - index : index };
 }
 export function remoteStance(entity) {
-  return ({ 0: 'walk1', 4: 'stand1', 70: 'jump', 72: 'ladder', 74: 'rope', 18: 'dead' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
+  return ({ 0: 'walk1', 2: 'walk1', 4: 'stand1', 6: 'jump', 8: 'alert', 14: 'ladder', 16: 'rope', 18: 'dead' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
     ?? (entity.motion ? 'walk1' : 'stand1');
 }
 

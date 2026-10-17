@@ -32,6 +32,13 @@ export function mobImagePath(templateId: number): string {
   return `Mob/${String(templateId).padStart(7, "0")}.img`;
 }
 
+/** 48D080: info.link replaces the ACTION image, not the original template's stats.
+ * The native format is Mob/%s.img, so preserve the WZ string's padding. No recursive inheritance.
+ */
+export function mobActionImagePath(templateId: number, link: unknown): string {
+  return typeof link === "string" ? `Mob/${link}.img` : mobImagePath(templateId);
+}
+
 /**
  * `L"Npc/%07d.img"` (`sub_411E50(&buf, "Npc/%07d.img", id)`, 20269) - the NPC image for a template
  * id, the same zero padding the mob path uses. `sub_49CB30` caches the template built from it.

@@ -2271,3 +2271,34 @@ BtWhisper僅先提供明示browser `/w`捷徑，不冒稱4F8940收件人原窗�
 沿用現有save，停服冷備份再重啟，不建角／seed／自動repair。新增純函數、WZ normal/raw與HTTP欄位回歸來源，
 但遵使用者要求不執行test/check/typecheck/browser/VM/probe；啟服與diff --check不作功能PASS。
 來源表、實作接線與操作見NATIVE_HUD_CHAT_QUICKSLOTS.md；[skip ci]非force推送固定工作分支。
+
+
+---
+
+## ADR-056：跳躍怪／攻擊組圖／移動背景依原控制器與Shape2D接全鏈，不用視覺假動作
+
+**日期**：2026-10-18 ｜ **狀態**：已實作，未執行驗證。
+
+48D080以fly／jump／move動作子樹分類，不是info.jump；53DAA0無target在地面決策到期先1/5起跳，
+不重設timer。補server ordinary air路徑，使用共用foothold／wall sweeps、普通-555／2000／670常數及最多30ms規劃。
+0x33每段保留mob jump action2／vx vy／foothold0，末端0ms才切地面，避免下降整段被貼地。
+combat／late join／死亡重生共用sampled位置；resume不再硬編move。靜止／飛行類不套地面巡邏；
+info.link action圖與原info數值分離。未冒稱原完整aggro、飛行、水、field/shoe、fixed-point或全世界30ms同步。
+
+攻擊armOverHair／armBelowHead仍是arm身份；按實際part求hand但保留原z，不改資料掩蓋錯誤。
+武器可能使用navel，不能把手臂修正當作全武器已逐像素驗證。本機等待所選PNG／afterimage後才開始WZ時鐘，
+允許正常stat clone，但換場／look／方向／死亡／彈藥變更會取消。保留同動作neutral臉而非站姿，修active frame LRU與舊圖URL。
+512F90／427F60證明group0返回-1，移除無武器假480ms劍姿勢；bridge未知action不偷換第一招，原TCP信任契約未全面改造。
+508FC0另證明movement state與body action是兩張表；先前把jump35／ladder36／rope37加倍送70／72／74是錯的。
+本機發送與遠端解讀改為walk2／stand4／jump6／ladder14／rope16／dead18加facing。
+深度只對user/self解攀爬state，mob hit1同值14不當梯子。427BF0／40D950的stand1/2／alert擴2N-2，補0→1→2→1；
+攻擊回idle重置時鐘，walk動畫仍四格。
+
+背景來源更正為46BDA0（46A9F0是obj）。type4水平±100px／abs(trunc(20000/rx))ms，
+Shape2D10010C40旗標0x10000000是累加重複，不是來回；x ratio0、y ratio ry、水平tile。
+其他type用低位bit，不能移植後期4..7表。front/back同field clock，footprint正規化保留大origin覆蓋。
+原104040000 back/1 rx=-5為每4秒右移100px；原1210102有jump，0120100스포아不是此跳菇。
+
+增加既有工具／map-command授權下的104040000按鈕，不自動warp或變更角色；補上輪遺漏聊天maxlength70。
+新增回歸來源但依使用者要求不執行test/check/typecheck/browser/VM/probe。
+沿用同save停服冷備份、重啟LIVE、[skip ci]非force推送；完整證據與尚未完成項見NATIVE_JUMP_ATTACK_BACKGROUNDS.md。

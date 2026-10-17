@@ -1348,11 +1348,11 @@ test("browser external-force marker reaches native 0x0E/0x22 and arbitrary bits/
   const {browser:admin}=await enterGame(world.webPort,"admin","admin");
   const {browser:alt}=await enterGame(world.webPort,"alt","alt");
   t.after(()=>admin.close());t.after(()=>alt.close());
-  admin.send({t:"move",x:100,y:20,vx:270,vy:-270,foothold:0,action:71,attr:2});
+  admin.send({t:"move",x:100,y:20,vx:270,vy:-270,foothold:0,action:7,attr:2});
   const event=await alt.nextKind("user-move");
   assert.equal((event.path as {elements:{attr:number}[]}).elements[0]!.attr,2);
-  assert.equal(event.action,71);
-  admin.send({t:"move",x:100,y:20,foothold:-1,action:73});
+  assert.equal(event.action,7);
+  admin.send({t:"move",x:100,y:20,foothold:-1,action:15});
   const climbing=await alt.nextKind("user-move");
   assert.equal((climbing.path as {elements:{foothold:number}[]}).elements[0]!.foothold,0xffff);
   admin.send({t:"move",x:100,y:20,attr:128});await admin.nextKind("error");

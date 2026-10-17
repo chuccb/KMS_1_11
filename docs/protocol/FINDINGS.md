@@ -4477,3 +4477,27 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 - 同輪修canvas delay與avatarFrame少接emotion參數；現在EVA/PDD有消費者才接受temp spec，2002000可喝。
 - JSON contactField／touch-result／rate gate／snapshot容差皆browser bridge政策，不加native opcode、不宣稱原server規則。
 - 沒有執行任何test/check/typecheck/browser/VM/probe；新回歸來源未執行，LIVE非PASS。見ADR-052及NATIVE_CONTACT_REVIVE.md。
+
+
+### 2026-10-18 更正：movement state 不是 body action index×2（508FC0）
+
+本輪靜態讀 `sub_508FC0`（原C L269834–269874），再比對508700的呼叫：
+先 `switch(y>>1)`，再選Character body action；facing是y&1。
+
+| movement base（不含facing） | 508FC0 case | body action |
+| --- | --- | --- |
+| 2 | 1 | walk1／walk2，依武器walk型 |
+| 4 | 2 | stand1／stand2，依武器stand型 |
+| 6 | 3 | 35 jump |
+| 8 | 4 | 4 alert |
+| 10 | 5 | 33 prone |
+| 12 | 6 | 34 proneStab |
+| 14 | 7 | 36 ladder |
+| 16 | 8 | 37 rope |
+| 18 | 9 | 38 dead |
+| 其他（含0） | default | 0 walk1 |
+
+先前browser把body jump35／ladder36／rope37直接乘2送70／72／74，是錯的。
+`client/motion.mjs`的actionOf／remoteStance／actorDepth已改；mob仍用自己的16項表，mob hit1同值14不是角色ladder。
+目前不藉此新增prone施放或完整alert計時；本輪不執行test/check/typecheck/browser/VM/probe。
+原來源、跳躍怪／背景等接線及界線見 `NATIVE_JUMP_ATTACK_BACKGROUNDS.md`／ADR-056。

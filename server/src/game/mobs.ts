@@ -23,7 +23,8 @@
  * Normal ground roaming: sub_53D980 chooses -1/0/+1 and holds the decision for
  * (rand()%2000+1000)/90 ticks. World fields use that idle/walk policy; deterministic patrol remains
  * available for fixtures. Base walking speed is CVecCtrl's 125 px/s, multiplied by info.speed.
- * Aggro, jumping and flying AI are not reproduced by this ground-roaming policy.
+ * Jump-capable roam adds 53DAA0's unprovoked 1/5 jump decision, with swept air paths.
+ * Aggro, flying, water and custom field/shoe physics remain outside this controller.
  *
  * ONE OBJECT PER FIELD (`game/world.ts`, ADR-012): the ids, the positions and the hit points belong
  * to the map, not to a connection, so two players in the same map hit the same monster and see the
@@ -64,8 +65,21 @@ import {
   type MobEnterField,
 } from "../protocol/mob.ts";
 import { asNumber, entriesOf, infoOf } from "../wz/props.ts";
-import { mobImagePath } from "../wz/paths.ts";
+import { mobImagePath, mobActionImagePath } from "../wz/paths.ts";
 import type { LifeSpawn, MapData } from "./map.ts";
+import type { MoveElement } from "../protocol/movepath.ts";
+import { planMobAirPath } from "../../../client/mobmotion.mjs";
+
+type MobMotionPoint = Pick<MoveElement, "x" | "y" | "foothold" | "duration">
+  & Partial<Pick<MoveElement, "vx" | "vy" | "action">>;
+
+/** 48D080 tests action subtrees. A jump-only/non-moving template fails native loading. */
+export function mobMoveAbility(root: unknown): 0 | 1 | 2 | 3 | undefined {
+  const names = new Set(entriesOf(root).map((entry) => entry.name));
+  if (names.has("fly")) return 3;
+  if (names.has("jump")) return names.has("move") ? 2 : undefined;
+  return names.has("move") ? 1 : 0;
+}
 
 /** What the server needs to know about a mob kind, straight out of `Mob/<id>.img -> info`. */
 export interface MobTemplate {
@@ -86,6 +100,8 @@ export interface MobTemplate {
    * (`sub_48D080`, `n130 = clamp(v72 + 100, 0, 130)`). 100 = normal, 130 = the cap, 0 = never moves.
    */
   speedPercent: number;
+  /** Root fly=3; jump+move=2; move=1; neither=0. Optional only for legacy fixtures. */
+  moveAbility?: 0 | 1 | 2 | 3;
   /**
    * How long the mob's death animation lasts, in ms: the sum of the frames of the longest of its
    * `die1`/`die2`/`dieF` actions (`sub_486180` does the same sum on the client). `0` when the image
@@ -181,6 +197,12 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
   const root = archive.objects(path)[0];
   if (root === undefined) return undefined;
   const props = infoOf(root);
+  const actionPath = mobActionImagePath(templateId, props.link);
+  if (!archive.has(actionPath)) return undefined;
+  const actionRoot = actionPath === path ? root : archive.objects(actionPath)[0];
+  if (!actionRoot) return undefined;
+  const moveAbility = mobMoveAbility(actionRoot);
+  if (moveAbility === undefined) return undefined;
   const speed = asNumber(props.speed, 0);
   return {
     templateId,
@@ -196,7 +218,8 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     eva:Math.max(0,Math.min(999,asNumber(props.eva))),
     physicalAttribute:physicalAttributeOf(props.elemAttr),
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
-    dieMs: dieAnimationMs(root),
+    moveAbility,
+    dieMs: dieAnimationMs(actionRoot),
   };
 }
 
@@ -229,7 +252,8 @@ export interface FieldMob {
   direction: 1 | -1;
   /** ms timestamp the current leg ends at; 0 means "no leg in flight". */
   legEndsAt: number;
-  motion?: { x: number; y: number; targetX: number; targetY: number; startedAt: number; endsAt: number; sampledAt: number; points: { x: number; y: number; foothold: number; duration: number }[] } | undefined;
+  motion?: { x: number; y: number; targetX: number; targetY: number; startedAt: number; endsAt: number; sampledAt: number; points: MobMotionPoint[] } | undefined;
+  velocity?: { vx: number; vy: number };
   decisionAt?: number;
   intent?: -1 | 0 | 1;
   /** The x range this mob may walk in: its foothold chain clipped by the spawn's `rx0`/`rx1`. */
@@ -446,6 +470,8 @@ export class MobField {
     mob.direction = mob.facing === 1 ? -1 : 1;
     mob.legEndsAt = now;
     mob.motion = undefined;
+    delete mob.velocity;
+    mob.range = this.rangeOn(mob.spawn.foothold, mob.spawn);
     delete mob.decisionAt;
     delete mob.intent;
     mob.hp = mob.maxHp;
@@ -473,7 +499,17 @@ export class MobField {
     return chain === undefined || chain.length === 0 ? undefined : chain;
   }
 
+  private rangeOn(foothold: number, spawn: LifeSpawn): FieldMob["range"] {
+    const chain = this.chainOf(foothold);
+    const bounds = chain && footholdRange(chain);
+    if (!bounds) return undefined;
+    const x0 = Math.max(bounds.x0, spawn.rx0), x1 = Math.min(bounds.x1, spawn.rx1);
+    return x1 - x0 >= 2 ? { x0, x1 } : undefined;
+  }
+
   private speedOf(mob: FieldMob): number {
+    const ability = mob.template?.moveAbility ?? 1;
+    if (ability === 0 || ability === 3) return 0;
     // No template means no `info.speed`, i.e. an unknown mob: walk at the normal rate.
     const percent = mob.template?.speedPercent ?? 100;
     return (this.speed * percent) / 100;
@@ -515,9 +551,15 @@ export class MobField {
     for (const mob of this.mobs) {
       if (!mob.alive) continue;
       this.samplePosition(mob, now);
-      if (mob.range === undefined || now < mob.legEndsAt) continue;
+      if (now < mob.legEndsAt) continue;
+      const ability = mob.template?.moveAbility ?? 1;
+      if (ability === 0 || ability === 3) continue;
       const speed = this.speedOf(mob);
-      if (speed <= 0) continue;
+      if (ability === 2 && mob.foothold === 0) {
+        const packet = this.airPacket(mob, now, false, speed);
+        if (packet) packets.push(packet);
+        continue;
+      }
       const chain = this.chainOf(mob.foothold);
       if (chain === undefined) continue;
 
@@ -525,6 +567,11 @@ export class MobField {
       if (this.options.behavior === "roam") {
         const random = this.options.random ?? Math.random;
         if (mob.decisionAt === undefined || now >= mob.decisionAt) {
+          // 53DAA0: jump BEFORE timer/direction draws; a jump does not reset the decision timer.
+          if (ability === 2 && Math.floor(random() * 5) === 0) {
+            const packet = this.airPacket(mob, now, true, speed);
+            if (packet) { packets.push(packet); continue; }
+          }
           // Separate timer and direction draws, in the original order (sub_53D980).
           decisionMs = 90 * Math.floor((1000 + Math.floor(random() * 2000)) / 90);
           mob.decisionAt = now + decisionMs;
@@ -532,8 +579,8 @@ export class MobField {
         }
         decisionMs = Math.max(1, mob.decisionAt - now);
         if (mob.intent) mob.direction = mob.intent;
-        const edge = mob.direction > 0 ? mob.range.x1 : mob.range.x0;
-        if (mob.intent === 0 || Math.abs(edge - mob.x) < 1) {
+        const edge = mob.direction > 0 ? mob.range?.x1 : mob.range?.x0;
+        if (edge === undefined || mob.intent === 0 || Math.abs(edge - mob.x) < 1) {
           if (mob.intent) mob.facing = mob.intent < 0 ? 1 : 0;
           mob.legEndsAt = now + decisionMs;
           packets.push(encodeMobMove(mob.mobId, {
@@ -546,6 +593,7 @@ export class MobField {
           continue;
         }
       }
+      if (mob.range === undefined || speed <= 0) continue;
       const leg = this.planLeg(mob, chain, speed, Math.min(this.maxLegMs, decisionMs));
       if (leg === undefined) continue;
       mob.motion = { x: mob.x, y: mob.y, targetX: leg.targetX, targetY: leg.targetY,
@@ -561,13 +609,35 @@ export class MobField {
           path: {
             originX: leg.fromX,
             originY: leg.fromY,
-            elements: leg.points.map((point) => ({ attr: 0, ...point, vx: 0, vy: 0,
+            elements: leg.points.map((point) => ({ attr: 0, vx: 0, vy: 0, ...point,
               action: mobActionByte(MOB_ACTION.move, leg.facing) })),
           },
         }),
       );
     }
     return packets;
+  }
+
+  private airPacket(mob: FieldMob, now: number, launch: boolean, speed: number): Uint8Array | undefined {
+    if (!this.options.footholds) return undefined;
+    const direction = mob.intent ?? 0;
+    if (direction) mob.facing = direction < 0 ? 1 : 0;
+    const points = planMobAirPath({ x: mob.x, y: mob.y, facing: mob.facing, foothold: mob.foothold,
+      vx: launch ? direction * speed : mob.velocity?.vx ?? 0,
+      vy: launch ? 0 : mob.velocity?.vy ?? 0 }, [...this.options.footholds.values()], {
+      direction, speedPxPerSecond: speed, launch,
+    });
+    const last = points.at(-1);
+    if (!last) return undefined;
+    const duration = points.reduce((sum, point) => sum + point.duration, 0);
+    mob.motion = { x: mob.x, y: mob.y, targetX: last.x, targetY: last.y,
+      startedAt: now, sampledAt: now, endsAt: now + duration, points };
+    mob.legEndsAt = now + duration;
+    return encodeMobMove(mob.mobId, {
+      actionByte: mobActionByte(MOB_ACTION.jump, mob.facing), value: 0,
+      path: { originX: Math.round(mob.x), originY: Math.round(mob.y),
+        elements: points.map((point) => ({ attr: 0, ...point })) },
+    });
   }
 
   /** Keep combat/late-join spawn coordinates on the same timed path the browser sees. */
@@ -578,15 +648,17 @@ export class MobField {
     let elapsed = Math.max(0, now - motion.startedAt);
     let x = motion.x, y = motion.y;
     for (const point of motion.points) {
-      const fraction = Math.min(1, elapsed / point.duration);
+      const fraction = point.duration === 0 ? 1 : Math.min(1, elapsed / point.duration);
       mob.x = x + (point.x - x) * fraction;
       mob.y = y + (point.y - y) * fraction;
       const chain = this.chainOf(point.foothold);
       mob.foothold = (chain && footholdSegmentAt(chain, mob.x))?.id ?? point.foothold;
+      mob.velocity = { vx: point.vx ?? 0, vy: point.vy ?? 0 };
       if (fraction < 1) return;
       elapsed -= point.duration; x = point.x; y = point.y;
     }
     mob.motion = undefined;
+    if (mob.foothold) mob.range = this.rangeOn(mob.foothold, mob.spawn);
   }
 
   /** A late joiner must also receive the unfinished part of each already-moving mob's path. */
@@ -596,15 +668,17 @@ export class MobField {
       const motion = mob.motion;
       if (!mob.alive || !motion) continue;
       let elapsed = Math.max(0, motion.sampledAt - motion.startedAt);
-      const points = [];
+      const points: MoveElement[] = [];
+      let trimming = true;
       for (const point of motion.points) {
-        if (elapsed >= point.duration) { elapsed -= point.duration; continue; }
-        points.push({ ...point, duration: Math.max(1, Math.round(point.duration - elapsed)),
-          attr: 0, vx: 0, vy: 0, action: mobActionByte(MOB_ACTION.move, mob.facing) });
+        if (trimming && elapsed >= point.duration) { elapsed -= point.duration; continue; }
+        points.push({ attr: 0, vx: 0, vy: 0, action: mobActionByte(MOB_ACTION.move, mob.facing),
+          ...point, duration: point.duration === 0 ? 0 : Math.max(1, Math.round(point.duration - elapsed)) });
         elapsed = 0;
+        trimming = false;
       }
       if (points.length) packets.push(encodeMobMove(mob.mobId, {
-        actionByte: mobActionByte(MOB_ACTION.move, mob.facing), value: 0,
+        actionByte: points[0]!.action, value: 0,
         path: { originX: Math.round(mob.x), originY: Math.round(mob.y), elements: points },
       }));
     }
@@ -626,7 +700,7 @@ export class MobField {
     facing: number;
     direction: 1 | -1;
     duration: number;
-    points: { x: number; y: number; foothold: number; duration: number }[];
+    points: MobMotionPoint[];
   } | undefined {
     const range = mob.range;
     if (range === undefined) return undefined;
@@ -645,7 +719,7 @@ export class MobField {
       .sort((a, b) => direction * (a - b));
     let remaining = speed * maxLegMs / 1000;
     let x = Math.round(mob.x), y = Math.round(mob.y);
-    const points: { x: number; y: number; foothold: number; duration: number }[] = [];
+    const points: MobMotionPoint[] = [];
     for (const knot of knots) {
       const knotY = footholdYAt(chain, knot);
       if (knotY === undefined) break;
@@ -657,7 +731,9 @@ export class MobField {
       const segment = footholdSegmentAt(chain, targetX);
       if (targetY === undefined || !segment || targetX === x) break;
       const step = Math.hypot(targetX - x, targetY - y);
-      points.push({ x: targetX, y: targetY, foothold: segment.id, duration: Math.max(1, Math.round(step * 1000 / speed)) });
+      const duration = Math.max(1, Math.round(step * 1000 / speed));
+      points.push({ x: targetX, y: targetY, foothold: segment.id, duration,
+        vx: Math.round((targetX - x) * 1000 / duration), vy: Math.round((targetY - y) * 1000 / duration) });
       remaining -= step; x = targetX; y = targetY;
       if (fraction < 1 || remaining < 1 || points.length >= 200) break;
     }

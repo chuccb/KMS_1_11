@@ -15,9 +15,9 @@
  *   `Character/<Folder>/<id>`  one image per worn item, parts named after the slot
  *                              (`mail`/`mailArm` for a top, `pants`, `shoes`, `weapon`, …)
  *
- * Every canvas is already in the character's own coordinate system: its `origin` is the point that
- * sits on the character's position (the feet), so the compositor never solves an anchor chain - it
- * adds the pictures in `z` order.
+ * Origins locate pixels within each part, NOT every part at the feet. Solve the frame's neck,
+ * navel, hand and brow anchors first, then sort by the original z names (including armOverHair
+ * and armBelowHead during attacks). Part identity must never be inferred from that draw depth.
  *
  * THE `z` ORDER
  * -------------
@@ -269,7 +269,7 @@ export function stanceOf(action: number, moving: boolean): string {
  * Composes one frame of an avatar at its own origin (`0,0` = the character's feet).
  *
  * `emotion` is one of `FACE_EMOTIONS`; `undefined` uses the face's neutral canvas. `flip` mirrors
- * the finished picture, because every WZ canvas is drawn facing right.
+ * the finished picture; the original WZ canvases face left.
  */
 /**
  * The composed pixels of one avatar frame.
@@ -342,14 +342,12 @@ export function composeAvatarBitmap(
 
   // -- the rest of the body frame: the bare arm, and the hand it publishes --
   if (bodyFrame !== undefined) addFrameParts(reader, layers, bodyFrame, ranks, order, body, { skip: "body" });
-  const armLayer = layers.find((layer) => layer.rank === (ranks.get("arm") ?? 0));
-  const hand: Parent | undefined = armLayer === undefined
-    ? undefined
-    : {
-        x: armLayer.x,
-        y: armLayer.y,
-        anchors: anchorsOf(armLayer.x, armLayer.y, reader, `${bodyFrame}/arm`),
-      };
+  // The arm's z changes during swing/stab. Finding rank=="arm" loses the hand precisely in
+  // those attack frames; it also confuses identity with draw order. Keep the original z and
+  // locate the actual arm against the same body anchor used by addFrameParts.
+  const armPath = bodyFrame === undefined ? undefined : `${bodyFrame}/arm`;
+  const hand: Parent | undefined = armPath === undefined || reader.at(armPath) === undefined
+    ? undefined : placePart(reader, armPath, [body]);
 
   // -- worn items ---------------------------------------------------------
   for (const itemId of look.items) {
@@ -394,8 +392,8 @@ export function composeAvatarBitmap(
   let maxY = Number.NEGATIVE_INFINITY;
   for (const layer of layers) {
     const { art } = layer;
-    // A left-facing character is the mirror of the right-facing one: the part positions flip around
-    // x = 0 as well, not only the pictures, or the sword would stay in the same hand.
+    // Mirror part positions around x=0 as well as the pixels, or the sword stays in the old hand.
+    // Native WZ faces left; flip=true is the right-facing composition.
     const x = flip ? -layer.x : layer.x;
     const left = flip ? x + art.ox - (art.width - 1) : x - art.ox;
     minX = Math.min(minX, left);

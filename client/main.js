@@ -1,3 +1,5 @@
+import { backgroundLayout } from "./background.mjs";
+import { mobLocomotion } from "./mobmotion.mjs";
 import { chatHistory } from "./chatlog.mjs";
 import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile } from "./quickslots.mjs";
@@ -1642,7 +1644,6 @@ const drops = new Map();
 const mesoArt = new Map();
 /** The local character's current swing (`{stance, start}`), and the three the client cycles. */
 let selfSwing;
-let swingCounter = 0;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
 const damageMarks = [];
 const mobHits = new Map();
@@ -1736,8 +1737,6 @@ function updateContact(now) {
 }
 
 /** No-WZ/unarmed fallback only; real weapon actions and delays come from /api/attack. */
-const SWING_COOLDOWN_MS = 480;
-const SWING_STANCES = ["swingO1", "swingO2", "swingO3"];
 /** Legacy fallback reach, NOT a claimed native rectangle. WZ-equipped actions use lt/rb below. */
 const SWING_REACH_X = 90;
 const SWING_REACH_UP = 72;
@@ -1846,12 +1845,14 @@ function artImage(path) {
     }
   }
   entry = { img: new Image(), ready: false };
-  entry.img.onload = () => {
-    entry.ready = true;
-  };
-  entry.img.onerror = () => {
-    entry.ready = false;
-  };
+  entry.loading = new Promise((resolve) => {
+    entry.img.onload = () => { entry.ready = true; resolve(); };
+    entry.img.onerror = () => {
+      entry.ready = false;
+      if (artImages.get(path) === entry) artImages.delete(path);
+      resolve();
+    };
+  });
   entry.img.src = `/api/png/${encodeURIComponent(path)}`;
   artImages.set(path, entry);
   return entry;
@@ -2248,7 +2249,11 @@ function lookOf(entity) {
 function avatarFrame(look, stance, frame, flip, emotion) {
   const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}`;
   let entry = avatarFrames.get(key);
-  if (entry) return entry;
+  if (entry) {
+    avatarFrames.delete(key);
+    avatarFrames.set(key, entry); // Active attack frames must survive unrelated look preloads.
+    return entry;
+  }
   if (avatarFrames.size >= 256) {
     let drop = 64;
     for (const key of avatarFrames.keys()) {
@@ -2260,9 +2265,9 @@ function avatarFrame(look, stance, frame, flip, emotion) {
   avatarFrames.set(key, entry);
   const query =
     `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&v=20261018-contact-face`;
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&v=20261018-attack-hand`;
   entry.requested = true;
-  fetch(`/api/avatar.png${query}`)
+  entry.loading = fetch(`/api/avatar.png${query}`)
     .then(async (response) => {
       if (!response.ok) throw new Error(`avatar ${response.status}`);
       entry.dx = Number(response.headers.get("x-frame-dx") ?? 0);
@@ -2286,6 +2291,7 @@ function avatarFrame(look, stance, frame, flip, emotion) {
     })
     .catch(() => {
       entry.requested = false;
+      if (avatarFrames.get(key) === entry) avatarFrames.delete(key);
     });
   return entry;
 }
@@ -2397,36 +2403,15 @@ function drawArchiveImage(frame, x, y, flip) {
   ctx.restore();
 }
 
-/**
- * One background sheet, exactly as the 2003 client tiles it (`sub_46A9F0` and the Journey client's
- * reimplementation of it): the offset is the WZ `x/y` plus the parallax
- * `rx * (halfWidth + camera) / 100 + halfWidth`, the sheet is repeated `view/cx + 3` times when the
- * type tiles, and the strip is normalised so the first copy starts just off the left/top edge.
- */
-function drawBack(back, cameraX, cameraY) {
+/** Background phase is field-relative and shared by front/back layers, never advanced per draw. */
+function drawBack(back, cameraX, cameraY, now) {
   const entry = artImage(back.path);
   if (!entry.ready) return;
   const w = entry.img.naturalWidth;
   const h = entry.img.naturalHeight;
   if (w === 0 || h === 0) return;
-  const stepX = back.cx > 0 ? back.cx : w;
-  const stepY = back.cy > 0 ? back.cy : h;
-  let x = back.x + (back.rx * (VIEW_W / 2 + cameraX)) / 100 + VIEW_W / 2;
-  let y = back.y + (back.ry * (VIEW_H / 2 + cameraY)) / 100 + VIEW_H / 2;
-  const horizontal =
-    back.type === 1 || back.type === 3 || back.type === 4 || back.type === 6;
-  const vertical =
-    back.type === 2 || back.type === 3 || back.type === 5 || back.type === 7;
-  if (horizontal) {
-    while (x > 0) x -= stepX;
-    while (x < -stepX) x += stepX;
-  }
-  if (vertical) {
-    while (y > 0) y -= stepY;
-    while (y < -stepY) y += stepY;
-  }
-  const columns = horizontal ? Math.ceil(VIEW_W / stepX) + 3 : 1;
-  const rows = vertical ? Math.ceil(VIEW_H / stepY) + 3 : 1;
+  const { x, y, stepX, stepY, columns, rows } = backgroundLayout(
+    back, w, h, cameraX, cameraY, now - mapAnimationStart, VIEW_W, VIEW_H);
   // The sheet's own `origin` is the offset the 2003 client blits from (`TMapBack` takes it from the
   // canvas): a copy anchored at (x, y) has its top-left at (x - ox, y - oy).
   const ox = back.ox ?? 0;
@@ -2477,7 +2462,10 @@ function stanceOfEntity(entity, now) {
   const swing = entity === selfView ? selfSwing : entity.swing;
   if (swing !== undefined) {
     const frame = attackFrame(swing, now);
-    if (frame >= 0) return { stance: swing.stance, frame };
+    if (frame >= 0) {
+      delete entity.animation; // 508700 changes actions; returning to idle starts its first frame.
+      return { stance: swing.stance, frame };
+    }
     if (entity === selfView) selfSwing = undefined;
     else delete entity.swing;
   }
@@ -2496,10 +2484,11 @@ function emotionFace(emotion, now) {
   return EMOTE_NAMES[emotion.value];
 }
 
-/** An avatar drawn with its feet at `(screenX, screenY)`, mirrored while facing left. */
+/** An avatar at `(screenX, screenY)`; native WZ faces left, right-facing pictures are mirrored. */
 function drawAvatarAt(entity, screenX, screenY, now, flip) {
   const dead = deathFx.get(entity.characterId);
-  const swing = dead ? undefined : entity === selfView ? selfSwing : entity.swing;
+  const pendingSwing = dead ? undefined : entity === selfView ? selfSwing : entity.swing;
+  const swing = pendingSwing && attackFrame(pendingSwing, now) >= 0 ? pendingSwing : undefined;
   const direction = swing ? !swing.facingLeft : flip;
   ctx.save();
   if (dead) {
@@ -2528,13 +2517,17 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
   const look = lookOf(entity);
   preloadAvatar(look);
   const state = stanceOfEntity(entity, now);
-  const frame = avatarFrame(
+  let frame = avatarFrame(
     look,
     state.stance,
     state.frame,
     flip,
     emotionFace(entity.emotion, now),
   );
+  const attackPose = /^(swing|stab|shoot)/.test(state.stance);
+  // Hit/emote PNGs may be cold even though the attack itself was predecoded. Keep the SAME
+  // body frame with a neutral face rather than replacing a swing with standing (or blanking it).
+  if (!frame.ready && attackPose) frame = avatarFrame(look, state.stance, state.frame, flip);
   if (frame.ready) {
     // The server composed this frame facing the requested way and reported where its top-left
     // corner goes relative to the feet, so the page adds `dx`/`dy` and nothing else.
@@ -2545,9 +2538,8 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
     );
     return;
   }
-  if (state.stance !== "stand1") {
-    // A stance the archive cannot compose for this look (`swingO1` while the weapon's own PNG is
-    // still on the wire) falls back to standing rather than to a grey box.
+  if (state.stance !== "stand1" && !attackPose) {
+    // Non-attack cold poses may use idle until loaded; an attack must not change its body action.
     const stand = avatarFrame(
       look,
       "stand1",
@@ -2589,7 +2581,7 @@ function currentMobFrame(mob, now) {
   }
   return playAction(
     actions,
-    mob.walking ? "move" : "stand",
+    mobLocomotion(mob, actions),
     now - (mob.actionSince ?? 0),
   );
 }
@@ -2852,14 +2844,11 @@ function frame() {
   }
   if (!portalPending) recovery.step(elapsed);
   for (const mob of mobs.values()) {
-    const active = sampleMotion(mob, now, terrain);
-    const motion = mob.motion;
-    const walking =
-      active &&
-      motion.elements.some((e) => e.x !== motion.x || e.y !== motion.y);
-    if (mob.walking !== walking || mob.actionSince === undefined)
-      mob.actionSince = now;
-    mob.walking = walking;
+    sampleMotion(mob, now, terrain);
+    const action = mobLocomotion(mob, mobArts.get(mob.templateId) ?? {});
+    if (mob.locomotion !== action || mob.actionSince === undefined) mob.actionSince = now;
+    mob.locomotion = action;
+    mob.walking = action === "move";
   }
   for (const user of users.values()) {
     sampleMotion(user, now, terrain);
@@ -2887,7 +2876,7 @@ function frame() {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
   const backs = mapArt?.backs ?? [];
-  for (const back of backs) if (!back.front) drawBack(back, cameraX, cameraY);
+  for (const back of backs) if (!back.front) drawBack(back, cameraX, cameraY, now);
 
   // Characters, back to front by their feet.
   const actors = [];
@@ -2991,7 +2980,7 @@ function frame() {
     damageArt.draw(ctx,mark,cameraX,cameraY,now);
   }
 
-  for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
+  for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY, now);
   drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
@@ -3171,6 +3160,7 @@ function ensureAttackProfile(look) {
       fetch(`/api/attack/${id}`)
         .then((response) => (response.ok ? response.json() : undefined))
         .then((profile) => {
+          if (!profile) { attackProfiles.delete(id); return undefined; }
           for (const action of [
             ...(profile?.melee ?? []),
             ...(profile?.shoot ?? []),
@@ -3179,7 +3169,7 @@ function ensureAttackProfile(look) {
               for (const frame of frames) artImage(frame.path);
           return profile;
         })
-        .catch(() => undefined),
+        .catch(() => { attackProfiles.delete(id); return undefined; }),
     );
   }
   return attackProfiles.get(id);
@@ -3352,15 +3342,19 @@ async function swing() {
   )
     return;
   swingLoading = true;
-  const field = self,
-    entity = selfView,
-    epoch = combatEpoch;
+  const field = self, epoch = combatEpoch, characterId = selfView.characterId;
+  let entity = selfView;
+  const lookKey = JSON.stringify(lookOf(entity));
   try {
+    // 512F90 -> 427F60: group outside 1..7 returns -1. No fake bare-hand sword cycle.
+    if (!weaponIdOf(lookOf(entity))) return;
     const profile = await ensureAttackProfile(lookOf(entity));
+    entity = selfView;
     if (
       self !== field ||
       combatEpoch !== epoch ||
-      selfView !== entity ||
+      entity?.characterId !== characterId ||
+      JSON.stringify(lookOf(entity)) !== lookKey ||
       entity.hp <= 0 ||
       !playerBody ||
       map?.id !== self.mapId ||
@@ -3378,12 +3372,11 @@ async function swing() {
       logLine("無法取得此武器的原始攻擊資料；暫不以其他武器動作替代。");
       return;
     }
-    const now = performance.now();
-    if (now < nextSwingAt) return;
+    if (performance.now() < nextSwingAt) return;
     const pick = (actions) =>
       actions?.[Math.floor(Math.random() * actions.length)];
     let action = pick(profile?.melee);
-    const ammo = basicAmmo(inventory, weaponIdOf(lookOf(entity)));
+    let ammo = basicAmmo(inventory, weaponIdOf(lookOf(entity)));
     let mob = action?.bounds
       ? mobInAttackRect(action.bounds, entity.facing === 1, !!ammo)
       : mobInReach();
@@ -3397,15 +3390,34 @@ async function swing() {
         entity.facing === 1,
       );
     }
-    const fallback = {
-      action: 5 + (swingCounter++ % 3),
-      stance: SWING_STANCES[(swingCounter - 1) % 3],
-      delays: [160, 160, 160],
-      effects: {},
-    };
-    const motion = action ?? fallback;
-    selfSwing = { ...motion, start: now, facingLeft: entity.facing === 1 };
-    nextSwingAt = now + (action ? attackDuration(action) : SWING_COOLDOWN_MS);
+    if (!action) return;
+    const motion = action;
+    const look = lookOf(entity), facingLeft = entity.facing === 1;
+    const frames = motion.delays.map((_, frame) => avatarFrame(
+      look, motion.stance, frame, facingFlip(entity.facing)));
+    const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
+    await Promise.all([...frames, ...effects].map((frame) => frame.loading));
+    entity = selfView;
+    if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch
+      || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
+      || !playerBody || playerBody.ladder || map?.id !== self.mapId || portalPending
+      || shop || shopPending || talkingNpc || itemDialog.open || slotPending || mesoPending
+      || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt) return;
+    if ([...frames, ...effects].some((frame) => !frame.ready)) {
+      logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
+      return;
+    }
+    if (shoot) {
+      const readyAmmo = basicAmmo(inventory, weaponIdOf(look));
+      if (!readyAmmo || readyAmmo.slot !== ammo.slot || readyAmmo.itemId !== ammo.itemId) return;
+      ammo = readyAmmo;
+    }
+    // Loading may take time on a cold look: choose the target again from current sampled positions.
+    mob = shoot ? mobInAttackRect({left:-200,right:-near,top:-25,bottom:-24}, facingLeft)
+      : action?.bounds ? mobInAttackRect(action.bounds, facingLeft, !!ammo) : mobInReach();
+    const now = performance.now();
+    selfSwing = { ...motion, start: now, facingLeft };
+    nextSwingAt = now + attackDuration(motion);
     playWeaponSound(entity);
     if (shoot) launchProjectile(entity, ammo.itemId, selfSwing, mob, now, near);
     send({
