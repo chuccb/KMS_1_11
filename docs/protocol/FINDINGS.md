@@ -2261,8 +2261,8 @@ u16 count           // 列數，0 是合法的空商店
 count × {
   u32 itemId
   u32 price         // client 自己顯示、自己拿它算總價
-  if itemId / 10000 == 207: u8[8]   // sub_45DD00 原封不動複製，client 不看內容
-  u16 maxCount      // 買入對話框的預設值與上限（sub_4B6B40 讀列結構的 +32）
+  if itemId / 10000 == 207: f64le unitPrice // 4B3780複製到+24，4B4AD0作double使用（後續追查更正）
+  u16 maxCount      // 一般買入上限（預設1）；207為整組容量，sub_4B6B40讀+32
 }
 ```
 
@@ -2270,8 +2270,8 @@ count × {
   `+0 itemId`、`+4 ..`、`+16 price`（`sub_4B6B40` 的 `v4[4]`）、`+24` 那 8 bytes（只有 207）、
   `+32 maxCount`（`v4[8]`）。**線上的順序**才是上面那個。
 - `207` 是這份檔案裡唯一會多帶 8 bytes 的家族（`sub_45DD00(dst, 8, …)`，判別用魔法乘法除以 10000）。
-  那 8 bytes 的**長度**確定、**內容**沒有證據，所以 `protocol/shop.ts` 原封不動帶著它們，
-  而**拒絕**自己組一列（發明內容會是無聲的錯）。
+  **後續追查更正**：4B4AD0讀同一+24為double，算缺少發數×每發費率，內容已證實；
+  `protocol/shop.ts`保留raw `cash`欄名相容trace，新增float64 LE helper，不再誤認為cash serial。
 - ⚠️ **開窗前 client 已經有別的 modeless 視窗時，`sub_4B73A0` 直接丟 `CDisconnectException`**
   （`if (this_15 != 0) throw ...`）—— 所以伺服器不能在已經開著商店時再送一次 `0x4A`。
   這支伺服器用 `FieldSession.shop` 記著自己開過哪個窗，第二次點同一個 NPC 只記一行 log。
@@ -2365,10 +2365,10 @@ u8 3 close     （沒有了）                                  // 關窗
 
 #### 4.22.8 還不能宣稱的部分
 
-1. **207 那 8 bytes 的內容**：長度與位置確定，意義未知；本伺服器只攜帶、不產生。
+1. ~~207那8 bytes內容未知~~ → 後續由4B3780→4B4AD0證實為補充每發單價double，見本文件末尾補充及ADR-045。
 2. **`0x4B` 的 1 與 4**：client 顯示同一句話，差別沒有字串或分支能區分；本伺服器用 1 表示
    「你沒有那個東西」、4 表示「這間店不收」。
-3. **充電（`0x16` op 2）沒有實作**：本伺服器開的商店沒有任何 207 商品，一律回 `0x4B` code 1。
+3. ~~充電未實作~~ → 0x16 op2補充成功、WZ容量／費率與0發組已接（未測試），見 `../MESO_RECHARGE.md`。完整遠距扣彈玩法尚未接通。
 4. **`0x49`／`0x4C` 沒有 handler**：`sub_4B73A0` 只認 74／75，所以真正的「對話框文字」不在這個
    區間 —— 2003 的 NPC 對話與任務共用 `0x46`–`0x48`（`CQuestMan`）與 client 的 `0x15` 回答，
    那條線還沒解。
@@ -4345,3 +4345,21 @@ WZ facts與wire instance stats分開；套服／褲、雙手／盾原子卸下�
   (16,textHeight+38)、OK(w-119,h-42)、Cancel(w-65,h-42)。531110使用真UtilDlgEx Border/0..7。
 - 本輪只讀CP949反編譯及WZ原樹／尺寸，沒有執行原Windows client動態oracle，亦沒有測試結果。
   實作、持久化／地面暫存界線與瀏覽器政策見 [`../INVENTORY_OPERATIONS.md`](../INVENTORY_OPERATIONS.md)。
+
+
+## 補充：楓幣丟棄0x1F與207補充費率double（2026-10-17；未測試）
+
+- 4DA440金幣按鈕2002=(8,294)，WZ BtCoin四態17×17。
+- 4DAF70的原韓文「얼마를 버리시겠습니까?」，535C90(10,10,min(wallet,50000))；
+  55D5F0建立opcode31，接u32 amount，檢查pending／HP／200ms。schema、describer、session、WS、browser、
+  server及共享地面錢幣已接；0x0D非零ack釋放成功／拒絕請求。勿與s2c0x1F氣球混淆。
+- §4.22的舊「207的8 bytes未知」結論更正：4B3780複製到row+24，4B4AD0讀為double，
+  以(補充列+32容量-實物發數)*該double算補充費；47A1D0讀WZ unitPrice也是double。
+- 4B3780把207列放到補充列表；只有price非零的列進可購買列表。瀏覽器與server買入row都按後者計數。
+- 4B7130的原確認「정말로 충전하시겠습니까?」已CP949逐字核對；確認後重查格物件，再送action2+u16slot。
+- 4B4AD0的右側售出列基數為info/price+ceil(quantity*info/unitPrice)，不是quantity*info/price。
+- 464000交易拖放的207直接傳整組quantity，4D5C80排除一般count0但允許207 count0；
+  新整組／空組在buy/recharge/sell/drop/pickup/既有server trade之間保留獨立物件。
+- WZ八種207的基礎容量為500/500/700/500/400/600/800/600，費率0.3/0.4/0.5/0.6/0.6/0.7/0.8/1。
+  stock、ceil整數補充費及50%回收仍是server政策，不是找到原服腳本。完整遠距扣彈仍未接，見ADR-045。
+- 未執行任何測試、typecheck或browser；只解析原資料及靜態閱讀原碼。新增golden測試來源未執行。

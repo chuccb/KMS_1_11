@@ -326,6 +326,20 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     return entry;
   }
 
+  /** c2s0x1F: debit/persistence belong to the caller, appearance belongs to this shared field. */
+  dropMesos(member: M, amount: number, now: number): DropEntry {
+    const at = member.at ?? this.spawnAt();
+    const entry = this.drops.dropMesosFromPlayer(
+      { amount, x: at.x, y: at.y },
+      now,
+    );
+    this.broadcast(this.drops.appearPacket(entry));
+    this.log?.(
+      `world: "${member.name}" dropped ${amount} mesos in map ${this.mapId} (drop ${entry.dropId})`,
+    );
+    return entry;
+  }
+
   /** The `0x44` that takes a drop off the ground: `kind 2`, with the id of whoever took it. */
   broadcastDropTaken(dropId: number, characterId: number): void {
     this.broadcast(encodeDropRemove({ dropId, kind: DROP_REMOVE_KIND.taken, characterId }));

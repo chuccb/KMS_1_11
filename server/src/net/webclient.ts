@@ -545,6 +545,8 @@ class BrowserSession {
           );
         case "find":
           return await this.find(String(message.name ?? ""));
+        case "drop-mesos":
+          return await this.require().dropMesos(Number(message.amount));
         case "change-slot":
           return await this.require().changeSlot({
             tab: Number(message.tab),
@@ -888,8 +890,17 @@ class BrowserSession {
     const count = Number(message.count ?? 0);
     if (!Number.isInteger(itemId) || itemId <= 0)
       return this.send({ t: "error", message: "shop needs an item id" });
-    if (!Number.isInteger(count) || count <= 0)
-      return this.send({ t: "error", message: "shop needs a count above 0" });
+    if (
+      !Number.isInteger(count) ||
+      count < 0 ||
+      (count === 0 &&
+        !(action === "sell" && Math.floor(itemId / 10000) === 207))
+    )
+      return this.send({
+        t: "error",
+        message:
+          "shop needs a positive quantity (zero only for a depleted star set sale)",
+      });
     if (action === "buy") {
       const row = Number(message.row ?? 0);
       if (!Number.isInteger(row) || row < 0)

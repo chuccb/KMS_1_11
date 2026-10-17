@@ -1,3 +1,4 @@
+import { encodeMesoDrop, MESO_DROP_INTERVAL_MS } from "../protocol/mesodrop.ts";
 import { encodeAbilityRequest, type BaseAbility } from "../protocol/ability.ts";
 /**
  * The client half of the 2003 protocol, running in Node.
@@ -61,6 +62,7 @@ import {
   encodeClientObjectClick,
   encodeClientShopRequest,
   readShopOpen,
+  shopRechargeUnitPrice,
   readShopResult,
   type ClientShopRequest,
 } from "../protocol/shop.ts";
@@ -306,6 +308,7 @@ export interface ShopItemView {
 export interface ShopView {
   shopId: number;
   items: ShopItemView[];
+  rechargeables?: { itemId: number; unitPrice: number; maxCount: number }[];
 }
 
 /** Another player in the field. */
@@ -371,6 +374,7 @@ export type ClientEvent =
   | { kind: "user-emotion"; characterId: number; emotion: number }
   | { kind: "request-release" }
   | { kind: "ability-result"; changed: boolean }
+  | { kind: "meso-drop-result"; changed: boolean }
   | { kind: "chat"; name: string; text: string }
   | { kind: "inventory"; inventory: InventoryView; ack?: boolean }
   | { kind: "shop-open"; shop: ShopView }
@@ -651,6 +655,8 @@ export class ClientSession {
   /** `0x0F`'s per-swing `sequence`: it only has to differ between swings. */
   private attackSequence = 0;
   private abilityPending = false;
+  private mesoPending = false;
+  private nextMesoAt = 0;
   private slotPending = false;
   private shopPending = false;
   private nextSlotAt = 0;
@@ -969,10 +975,35 @@ export class ClientSession {
    * earlier, `.text:00511FD8` vs `00511FDF`) and the server's `0x27` excludes the mover - so this
    * emits `user-emotion` for the local character itself, the same way `moveTo` echoes its own step.
    */
+  /** 4DAF70/55D5F0: money request, completed only by nonzero stat ack. */
+  async dropMesos(amount: number): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0)
+      throw new Error("meso drop requires a living character in a field");
+    if (
+      this.mesoPending ||
+      this.abilityPending ||
+      this.slotPending ||
+      this.shopPending ||
+      performance.now() < this.nextMesoAt
+    )
+      throw new Error("meso request pending or too soon");
+    if (amount > this.self.mesos) throw new RangeError("not enough mesos");
+    const packet = encodeMesoDrop(amount);
+    this.mesoPending = true;
+    this.nextMesoAt = performance.now() + MESO_DROP_INTERVAL_MS;
+    try {
+      await this.gameLink.send(packet);
+    } catch (error) {
+      this.mesoPending = false;
+      throw error;
+    }
+  }
+
   async increaseAbility(field: BaseAbility): Promise<void> {
     if (!this.gameLink || !this.self)
       throw new Error("AP requires an active field");
-    if (this.abilityPending) throw new Error("AP request already pending");
+    if (this.abilityPending || this.mesoPending)
+      throw new Error("AP request already pending");
     const packet = encodeAbilityRequest(field);
     this.abilityPending = true;
     try {
@@ -1023,11 +1054,20 @@ export class ClientSession {
       toSlot < -14 ||
       toSlot > 32767 ||
       ((fromSlot < 0 || toSlot < 0) && tab !== 1) ||
-      (toSlot === 0 ? count < 1 || count > 32767 : count !== -1)
+      (toSlot === 0
+        ? count < 0 ||
+          count > 32767 ||
+          (count === 0 &&
+            Math.floor(
+              (this.latest?.items?.inventories[tab - 1]?.items.get(fromSlot)
+                ?.itemId ?? 0) / 10000,
+            ) !== 207)
+        : count !== -1)
     )
       throw new Error("invalid change-slot fields");
     if (
       this.slotPending ||
+      this.mesoPending ||
       this.shopPending ||
       performance.now() < this.nextSlotAt
     )
@@ -1043,6 +1083,7 @@ export class ClientSession {
   }
 
   async useItem(slot: number, itemId: number): Promise<void> {
+    if (this.mesoPending) throw new Error("meso request pending");
     const link = this.gameLink;
     if (link === undefined)
       throw new Error("useItem() needs a session in a field");
@@ -1089,7 +1130,7 @@ export class ClientSession {
     }
     if (!this.self || this.self.hp <= 0)
       throw new Error("shop trade needs a living character in a field");
-    if (this.shopPending || this.slotPending)
+    if (this.shopPending || this.slotPending || this.mesoPending)
       throw new Error("inventory or shop request pending");
     const position = request.kind === "buy" ? request.row : request.slot;
     if (
@@ -1101,7 +1142,10 @@ export class ClientSession {
     if (
       request.kind !== "recharge" &&
       (!Number.isInteger(request.count) ||
-        request.count < 1 ||
+        request.count <
+          (request.kind === "sell" && Math.floor(request.itemId / 10000) === 207
+            ? 0
+            : 1) ||
         request.count > 65535 ||
         !Number.isInteger(request.itemId) ||
         request.itemId <= 0 ||
@@ -1254,7 +1298,11 @@ export class ClientSession {
     this.link?.close();
     this.gameLink = undefined;
     this.link = undefined;
-    this.slotPending = this.shopPending = false;
+    this.slotPending =
+      this.shopPending =
+      this.mesoPending =
+      this.abilityPending =
+        false;
   }
 
   private handleFieldPacket(plain: Uint8Array): void {
@@ -1265,6 +1313,8 @@ export class ClientSession {
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
           this.abilityPending = false;
+          this.mesoPending = false;
+          this.nextMesoAt = 0;
           this.slotPending = false;
           this.shopPending = false;
           this.nextSlotAt = 0;
@@ -1325,11 +1375,31 @@ export class ClientSession {
             kind: "shop-open",
             shop: {
               shopId: opened.shopId,
-              items: opened.items.map((line) => ({
-                itemId: line.itemId,
-                price: line.price,
-                maxCount: line.maxCount,
-              })),
+              ...(opened.items.some(
+                (line) => shopRechargeUnitPrice(line) !== undefined,
+              )
+                ? {
+                    rechargeables: opened.items.flatMap((line) => {
+                      const unitPrice = shopRechargeUnitPrice(line);
+                      return unitPrice === undefined
+                        ? []
+                        : [
+                            {
+                              itemId: line.itemId,
+                              unitPrice,
+                              maxCount: line.maxCount,
+                            },
+                          ];
+                    }),
+                  }
+                : {}),
+              items: opened.items
+                .filter((line) => line.price !== 0)
+                .map((line) => ({
+                  itemId: line.itemId,
+                  price: line.price,
+                  maxCount: line.maxCount,
+                })),
             },
           });
           return;
@@ -1482,6 +1552,14 @@ export class ClientSession {
         case STAT_OPCODE: {
           const update = readStatUpdate(new PacketReader(plain, 1));
           this.applyStats(update.diff);
+          if (update.ack && this.mesoPending) {
+            this.mesoPending = false;
+            this.nextMesoAt = performance.now() + MESO_DROP_INTERVAL_MS;
+            this.emit({
+              kind: "meso-drop-result",
+              changed: update.diff.mesos !== undefined,
+            });
+          }
           if (update.ack && this.abilityPending) {
             this.abilityPending = false;
             this.emit({
@@ -1664,6 +1742,7 @@ export const CLIENT_EVENT_KINDS = [
   "request-release",
   "self",
   "ability-result",
+  "meso-drop-result",
   "user-enter",
   "user-leave",
   "user-move",

@@ -312,12 +312,35 @@ export class DropField {
       money: false,
       amount: 0,
       itemId: source.slot.itemId,
-      count: Math.max(1, source.count),
+      count: source.count, // zero is a real depleted 207 set, not one free charge
       slot: { ...source.slot },
       x: source.x,
       y: source.y,
       // No monster block is written for this kind, so the three fields are only here to keep the
       // record's shape the same for every drop.
+      mobId: 0,
+      mobX: source.x,
+      mobY: source.y,
+      bornAt: now,
+    };
+    this.drops.push(entry);
+    return entry;
+  }
+
+  /** Player money is a placed reward too, not a fake item or a character-specific visual. */
+  dropMesosFromPlayer(
+    source: { amount: number; x: number; y: number },
+    now: number,
+  ): DropEntry {
+    const entry: DropEntry = {
+      dropId: this.nextDropId++,
+      kind: DROP_KIND.placed,
+      money: true,
+      amount: source.amount,
+      itemId: 0,
+      count: 1,
+      x: source.x,
+      y: source.y,
       mobId: 0,
       mobX: source.x,
       mobY: source.y,

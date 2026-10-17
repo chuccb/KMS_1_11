@@ -22,13 +22,18 @@
  * this table and the archive would show up on screen - `shopLines` therefore refuses to build a row
  * whose price it cannot read, instead of sending 0.
  */
-import { infoOf, propertyOf } from "../wz/props.ts";
+import { entriesOf, infoOf, propertyOf } from "../wz/props.ts";
 import { itemImagePath } from "../wz/paths.ts";
 import type { WzArchive } from "../wz/archive.ts";
 import type { CharacterItems } from "../protocol/chardata.ts";
 import { grantItem, takeItem, type MesoWallet } from "./rewards.ts";
 import type { InventoryChange } from "../protocol/inventory.ts";
-import { SHOP_RESULT, type ShopLine } from "../protocol/shop.ts";
+import { INVENTORY_OP } from "../protocol/inventory.ts";
+import {
+  SHOP_RESULT,
+  encodeRechargeUnitPrice,
+  type ShopLine,
+} from "../protocol/shop.ts";
 
 /**
  * The most of one item a single purchase may take - the upper bound of the client's buy dialog
@@ -113,6 +118,7 @@ export const SHOPS: readonly ShopDef[] = [
       { itemId: 2000003 }, // 파란 포션 (100)
       { itemId: 2030000 }, // 마을 귀환 주문서 (75)
       { itemId: 2030004 }, // 헤네시스 귀환 주문서 (90)
+      { itemId: 2070000 }, // reconstructed merchant stock: one complete basic star set
     ],
   },
 ];
@@ -128,10 +134,10 @@ export type TradeFailure =
 
 /** A trade that happened, in the terms the three packets need. */
 export interface TradeDone {
-  kind: "bought" | "sold";
+  kind: "bought" | "sold" | "recharged";
   itemId: number;
   count: number;
-  /** Per unit, as the shop window showed it. */
+  /** Ordinary purchase/sale unit basis; a recharge uses its WZ per-charge rate. Total is authoritative for a set sale. */
   unitPrice: number;
   total: number;
   /** Tab and slot whose state changed - the `0x0B` change below says what to send. */
@@ -142,7 +148,7 @@ export interface TradeDone {
   mesos: number;
 }
 
-/** The result of a buy or a sell. */
+/** The result of a purchase, sale, or recharge. */
 export type TradeOutcome = TradeDone | { kind: "failed"; reason: TradeFailure };
 
 /** What a field session needs from the shop module, with the archive's prices already wired in. */
@@ -161,6 +167,13 @@ export interface ShopKeeper {
     shop: ShopDef,
     itemId: number,
     count: number,
+  ): TradeOutcome;
+  /** Optional for embedders with a custom keeper; real WZ shops implement this service. */
+  recharge?(
+    items: CharacterItems,
+    wallet: MesoWallet,
+    shop: ShopDef,
+    slot: number,
   ): TradeOutcome;
   sell(
     items: CharacterItems,
@@ -196,17 +209,76 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
     if (price === undefined) return undefined;
     return Math.floor(price * SELL_PRICE_RATIO);
   };
+  // No fixed/fallback 200-stack limit for stars. The archive owns capacity and unit price.
+  const rechargeInfo = (
+    itemId: number,
+  ):
+    | { itemId: number; maxCount: number; unitPrice: number; price: number }
+    | undefined => {
+    if (
+      !archive ||
+      Math.floor(itemId / 10000) !== 207 ||
+      !archive.has(itemImagePath(itemId))
+    )
+      return undefined;
+    const info = infoOf(
+      propertyOf(
+        archive.objects(itemImagePath(itemId))[0],
+        String(itemId).padStart(8, "0"),
+      ),
+    );
+    const { slotMax, unitPrice, price } = info;
+    if (
+      typeof slotMax !== "number" ||
+      !Number.isInteger(slotMax) ||
+      slotMax <= 0 ||
+      slotMax > 32767 ||
+      typeof unitPrice !== "number" ||
+      !Number.isFinite(unitPrice) ||
+      unitPrice <= 0 ||
+      typeof price !== "number" ||
+      !Number.isSafeInteger(price) ||
+      price < 0
+    )
+      return undefined;
+    return { itemId, maxCount: slotMax, unitPrice, price };
+  };
+  const rechargeables = new Map<
+    number,
+    NonNullable<ReturnType<typeof rechargeInfo>>
+  >();
+  const starPath = itemImagePath(2070000);
+  if (archive?.has(starPath))
+    for (const entry of entriesOf(archive.objects(starPath)[0])) {
+      const info = rechargeInfo(Number(entry.name));
+      if (info) rechargeables.set(info.itemId, info);
+    }
   const linesOf = (shop: ShopDef): ShopLine[] => {
     const lines: ShopLine[] = [];
     for (const entry of shop.items) {
       const price = priceOf(entry.itemId);
       if (price === undefined) continue; // no price, no row - never a 0 the client would print
+      const recharge = rechargeables.get(entry.itemId);
+      if (Math.floor(entry.itemId / 10000) === 207 && !recharge) continue;
       lines.push({
+        ...(recharge
+          ? { cash: encodeRechargeUnitPrice(recharge.unitPrice) }
+          : {}),
         itemId: entry.itemId,
         price,
-        maxCount: entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT,
+        maxCount:
+          recharge?.maxCount ?? entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT,
       });
     }
+    // 4B3780: every 207 row enters the recharge list; only nonzero-price rows enter the buy list.
+    for (const recharge of rechargeables.values())
+      if (!lines.some((row) => row.itemId === recharge.itemId))
+        lines.push({
+          itemId: recharge.itemId,
+          price: 0,
+          cash: encodeRechargeUnitPrice(recharge.unitPrice),
+          maxCount: recharge.maxCount,
+        });
     return lines;
   };
   return {
@@ -220,14 +292,20 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       if (entry === undefined) return { kind: "failed", reason: "notInShop" };
       const price = priceOf(itemId);
       if (price === undefined) return { kind: "failed", reason: "notInShop" };
-      const maxCount = entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT;
+      const recharge = rechargeables.get(itemId);
+      if (Math.floor(itemId / 10000) === 207 && !recharge)
+        return { kind: "failed", reason: "notInShop" };
+      const maxCount = recharge
+        ? 1
+        : (entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT);
       if (!Number.isInteger(count) || count <= 0)
         return { kind: "failed", reason: "badRequest" };
       if (count > maxCount) return { kind: "failed", reason: "badRequest" };
       const total = price * count;
       if (wallet.balance < total)
         return { kind: "failed", reason: "notEnoughMesos" };
-      const granted = grantItem(items, itemId, count);
+      const grantedCount = recharge?.maxCount ?? count;
+      const granted = grantItem(items, itemId, grantedCount);
       if (granted === undefined)
         return { kind: "failed", reason: "notEnoughSlots" };
       // The balance was checked above, so this cannot fail; if it ever did, the grant would have to
@@ -236,7 +314,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       return {
         kind: "bought",
         itemId,
-        count,
+        count: grantedCount,
         unitPrice: price,
         total,
         inventory: granted.inventory,
@@ -245,16 +323,75 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
         mesos: wallet.balance,
       };
     },
+    recharge: (items, wallet, shop, slot) => {
+      const tab = items.inventories[1],
+        item = tab?.items.get(slot);
+      if (
+        !Number.isInteger(slot) ||
+        slot <= 0 ||
+        !item ||
+        item.kind !== "nonequip" ||
+        item.cash !== null
+      )
+        return { kind: "failed", reason: "notEnoughItems" };
+      const info = rechargeables.get(item.itemId);
+      if (!info || !linesOf(shop).some((row) => row.itemId === item.itemId))
+        return { kind: "failed", reason: "notInShop" };
+      const missing = info.maxCount - item.quantity;
+      if (!Number.isInteger(item.quantity) || item.quantity < 0 || missing <= 0)
+        return { kind: "failed", reason: "badRequest" };
+      // Native UI calculates the raw double; server rounding is an explicit reconstruction policy.
+      const total = Math.ceil(missing * info.unitPrice);
+      if (!Number.isSafeInteger(total) || total <= 0)
+        return { kind: "failed", reason: "badRequest" };
+      if (!wallet.spend(total))
+        return { kind: "failed", reason: "notEnoughMesos" };
+      const next = { ...item, quantity: info.maxCount };
+      tab!.items.set(slot, next);
+      return {
+        kind: "recharged",
+        itemId: item.itemId,
+        count: missing,
+        unitPrice: info.unitPrice,
+        total,
+        inventory: 2,
+        slot,
+        change: { op: INVENTORY_OP.put, inventory: 2, slot, item: next },
+        mesos: wallet.balance,
+      };
+    },
     sell: (items, wallet, slot, itemId, count) => {
-      if (!Number.isInteger(count) || count <= 0)
+      const recharge = rechargeables.get(itemId);
+      if (!Number.isInteger(count) || count < 0 || (count === 0 && !recharge))
         return { kind: "failed", reason: "badRequest" };
       const unitPrice = sellPriceOf(itemId);
       if (unitPrice === undefined)
         return { kind: "failed", reason: "unsellable" };
+      // A star set is a single object, including at zero charges. Never multiply the base set price
+      // by its charge count or allow partial sales (either would create money/charges).
+      const held = items.inventories[1]?.items.get(slot);
+      if (
+        Math.floor(itemId / 10000) === 207 &&
+        (!recharge ||
+          !held ||
+          held.itemId !== itemId ||
+          held.kind !== "nonequip" ||
+          held.cash !== null ||
+          held.quantity !== count ||
+          count > recharge.maxCount)
+      )
+        return { kind: "failed", reason: "badRequest" };
+      const total = recharge
+        ? Math.floor(
+            (recharge.price + Math.ceil(count * recharge.unitPrice)) *
+              SELL_PRICE_RATIO,
+          )
+        : unitPrice * count;
+      if (!Number.isSafeInteger(total) || wallet.balance + total > 0xffffffff)
+        return { kind: "failed", reason: "badRequest" };
       const taken = takeItem(items, itemId, slot, count);
       if (taken === undefined)
         return { kind: "failed", reason: "notEnoughItems" };
-      const total = unitPrice * count;
       wallet.earn(total);
       return {
         kind: "sold",

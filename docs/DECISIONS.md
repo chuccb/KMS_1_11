@@ -1990,3 +1990,26 @@ Yes/No初始焦點No防誤確認；字型度量與換行非Windows逐像素oracl
 
 **驗證狀態**：依使用者要求，本輪未執行unit／VM／Chromium／typecheck；更新probe來源但不執行。
 提交附[skip ci]以避免本次push自動測試。完整來源與操作見 `INVENTORY_OPERATIONS.md`。
+
+
+## ADR-045：原金幣按鈕／0x1F與207補充double、整組及零發數（2026-10-17）
+
+**取證**：4DA440 button2002=(8,294)，BtCoin17×17；4DAF70的type2數量框為10/10/min(wallet,50000)，
+55D5F0送opcode31+u32、alive/pending/200ms。4B3780把207額外8 bytes存到+24，4B4AD0用同址double
+計算缺發數費用；47A1D0讀WZ price/unitPrice。price0進補充列表而不進buy列表。
+464000的207交易拖放直接取整組，4D5C80明確允許207 count0。
+
+**決定**：端到端接通金幣按鈕→WS→原wire→wallet／共享地面池→0x0D非零ack（成功及拒絕），
+丟棄與拾取成功立即persist。207 raw欄名cash保留相容trace，但內容按float64 LE產生／解讀，
+家族判斷使用Math.floor，避免2070001以後錯讀。所有shop有WZ補充列，馬依販售基本滿組；
+新組／拾取／交易不合併，丟棄／出售／交易拒絕拆組；空組0發不轉成1發。補充以原0x16 op2，
+服務端算費、查格、回0x4B／0x0B／0x0D再保存。不改save schema或私造角色道具。
+
+**政策界線**：商店stock／補充範圍、滿組購買、ceil補充費、50%回收屬重建server政策。
+服務只用WZ基礎slotMax；完整瀏覽器射擊選彈／扣彈、技能容量及交易UI未完成。
+地面不持久化，停服前未撿的錢／物品會消失；wallet放不下整筆時不吞掉地面餘額。
+ADR044所列meso丟棄及recharge成功缺口由此補上，但CWvsApp全域gate仍未全面完成。
+
+**驗證**：使用者要求不測試，本輪未跑unit/socket/VM/browser/typecheck。新增golden來源未執行，
+不把570項歷史PASS當本輪證據。提交使用[skip ci]；未登入角色、未改正式或隔離save、未重啟預覽。
+詳細來源及Data.wz八種單價／容量見 `MESO_RECHARGE.md`。

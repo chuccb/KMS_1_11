@@ -45,20 +45,23 @@ login／game TCP與web HTTP是不同port；遠端瀏覽器使用web的網址，W
 | I／E／S／M | 背包／裝備／能力／小地圖 |
 | 背包道具雙擊 | 一般裝備穿戴或支援的消耗品使用 |
 | 拖放道具 | 背包換位、穿脫；拖到真正場景為丟棄，狀態列／瀏覽器外取消 |
+| 背包左下金幣按鈕 | 丟10–50,000楓幣，數量窗確認後由服務端落帳 |
+| 商店충전 | 對未滿的207飛鏢整組補充，確認後按WZ單價收費 |
 | 商店左列／右列 | 選擇後按買／賣，或雙擊開數量框 |
 | Enter | 聊天；對話框內確認 |
 | Escape | 取消拖曳／數量框，或關閉已接的視窗 |
 
 **丟棄前注意**：單件裝備拖到場景會直接丟1件；堆疊道具詢問數量。地面掉落物只在記憶體中，
 尚未拾回就停服會消失；請用非重要物品自行確認最新未測試功能。
-背包捲動遵守原capacity，不會自動擴包。既有SHOPS沒有飛鏢庫存，recharge成功分支尚未完成。
+背包捲動遵守原capacity，不會自動擴包。最新已接原金幣按鈕／0x1F楓幣丟棄，以及207飛鏢整組購買、補充與空組處理（均未測試）；詳見[交付範圍與限制](docs/MESO_RECHARGE.md)。
 
 聊天 `/help`列出命令；`/map ID`需服務端明確開啟 `--map-command 帳號,...`，預設禁止。
 地圖ID、名稱、原圖、腳踏點來自Data.wz，不以人工平台或「缺素材」fallback掩蓋reader問題。
 
 ## 文件索引
 
-- [最新背包／丟棄／商店數量交付（未測試）](docs/INVENTORY_OPERATIONS.md)
+- [最新楓幣丟棄／飛鏢補充交付（未測試）](docs/MESO_RECHARGE.md)
+- [背包／丟棄／商店數量交付（未測試）](docs/INVENTORY_OPERATIONS.md)
 - [客戶端使用與限制](docs/CLIENT.md)
 - [背包／裝備前輪驗證紀錄](docs/EQUIPMENT_VALIDATION.md)
 - [傳送／繩頂／地圖命令](docs/PORTAL_CLIMB_VALIDATION.md)
@@ -71,4 +74,4 @@ login／game TCP與web HTTP是不同port；遠端瀏覽器使用web的網址，W
 - [伺服器](server/README.md) · [字型來源與授權](client/fonts/README.md)
 
 卷軸強化、完整技能／怪物攻擊與受擊、裝備／buff總值／Detail、自然升級AP/SP與HPMP成長、
-完整交易／組隊等瀏覽器UI、現金／寵物、meso丟棄仍有未完成範圍；既有server的etc/cash分頁映射與原UI標籤亦尚待存檔遷移。各文件區分原版證據、重建政策與歷史驗證。
+完整交易／組隊等瀏覽器UI、現金／寵物、遠距攻擊選彈／射擊扣彈仍有未完成範圍；既有server的etc/cash分頁映射與原UI標籤亦尚待存檔遷移。各文件區分原版證據、重建政策與歷史驗證。

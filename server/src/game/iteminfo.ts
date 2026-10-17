@@ -55,6 +55,9 @@ export interface ItemInfo {
   name?: string;
   /** `info/price` - the number the shop window prints (`game/shops.ts` reads the same field). */
   price?: number;
+  /** Native rechargeable metadata (also exposed for other items when present). */
+  unitPrice?: number;
+  slotMax?: number;
   /** `info/desc` - the multi-line tooltip body, with the archive's own `\n` escapes. */
   desc?: string;
   /** `info/iconRaw` (or `info/icon`), the node `sub_47CE40` draws for a drop. */
@@ -277,6 +280,15 @@ export function itemCatalogOf(
         cash: asNumber(info.cash) !== 0,
         ...(name === "" ? {} : { name }),
         ...(Number.isFinite(price) ? { price } : {}),
+        ...(typeof info.unitPrice === "number" &&
+        Number.isFinite(info.unitPrice)
+          ? { unitPrice: info.unitPrice }
+          : {}),
+        ...(typeof info.slotMax === "number" &&
+        Number.isInteger(info.slotMax) &&
+        info.slotMax > 0
+          ? { slotMax: info.slotMax }
+          : {}),
         ...(desc === "" ? {} : { desc }),
         ...(Number.isFinite(incPAD) ? { incPAD } : {}),
         ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),

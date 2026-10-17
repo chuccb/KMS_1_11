@@ -1,3 +1,4 @@
+import { MESO_DROP_OPCODE, readMesoDrop, describeMesoDrop } from "./mesodrop.ts";
 import { ABILITY_REQUEST_OPCODE, readAbilityRequest, describeAbilityRequest } from "./ability.ts";
 /**
  * The in-game (`CField`) packets: entering a map, seeing other players, their movement.
@@ -500,6 +501,7 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.emotion) {
       return `0x13 emotion: ${describeClientEmotion(readClientEmotion(new PacketReader(plain, 1)))}`;
     }
+    if (opcode === MESO_DROP_OPCODE) return describeMesoDrop(readMesoDrop(new PacketReader(plain, 1)));
     if (opcode === ABILITY_REQUEST_OPCODE) {
       return describeAbilityRequest(readAbilityRequest(new PacketReader(plain, 1)));
     }

@@ -13,6 +13,7 @@
  * Rule for adding a row (same as everywhere in this repo): only list what has evidence. A packet
  * whose fields are not located gets `status: "skeleton"` and a `fields: []`, never invented names.
  */
+import * as mesodrop from "./mesodrop.ts";
 import * as ability from "./ability.ts";
 import * as chardata from "./chardata.ts";
 import * as drop from "./drop.ts";
@@ -266,6 +267,17 @@ export const PACKETS: readonly PacketSchema[] = [
   },
 
   // ---------------------------------------------------------------- field stage, client -> server
+  {
+    opcode: mesodrop.MESO_DROP_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "dropMesos",
+    status: "byte-exact",
+    evidence:
+      "4DAF70 / 55D5F0: opcode31, u32 amount; golden source added, not executed",
+    codecs: ["encodeMesoDrop", "readMesoDrop"],
+    fields: [{ name: "amount", type: "u32" }],
+  },
   {
     opcode: field.CLIENT_FIELD_OPCODE.userMove,
     direction: "c2s",
@@ -1376,6 +1388,7 @@ export const PACKETS: readonly PacketSchema[] = [
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
 const CODEC_MODULES: readonly Record<string, unknown>[] = [
+  mesodrop,
   ability,
   chardata,
   drop,

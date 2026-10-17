@@ -15,13 +15,13 @@
  *                    u32 itemId
  *                    u32 price           // what the client charges *itself* when you press buy
  *                    if itemId / 10000 == 207:  u8[8]   // copied verbatim (`sub_45DD00`)
- *                    u16 maxCount        // the quantity the buy dialog offers by default and caps at
+ *                    u16 maxCount        // ordinary buy upper bound; for207, the set capacity
  *                  }
  *
  *                (The 207 case is the only item family in this build that carries the extra 8 bytes.
- *                The client never looks inside them - `sub_45DD00` copies them into the row's +24 -
+ *                The open reader copies them verbatim to +24; 4B4AD0 later reads them as a double -
  *                so this codec carries them verbatim as `cash` and refuses to *build* a row that
- *                has none: what goes in there is not known, and a guess would be invisible.)
+ *                has none: the legacy property name is retained for capture/codec compatibility.)
  *   `0x4B` (75)  reads one `u8` and shows a message for it, from the client's own string table:
  *                  0  nothing at all (it only drops the "a request is in flight" flag)
  *                  1  "물품이 부족합니다"              (not enough items)
@@ -51,8 +51,8 @@
  *                  u8  3 close     (nothing else; the window is torn down)   (`sub_4B3C80`)
  *
  *           `itemId` is what makes a request usable: the row index is the client's own index into
- *           the list it built, and the client builds two of them (priceable rows and the 207 rows),
- *           so a server should treat the id as the truth and the index as a hint. Sell carries the
+ *           the list it built, and the client builds two of them (nonzero-price rows and the 207 rows),
+ *           so the server validates the id against the nonzero-price buy list, not the recharge-only rows. Sell carries the
  *           *inventory* slot instead, which is how the server finds the stack to take from.
  *
  * Note the opcode reuse: `0x16` is `setField` in the other direction and `0x33` is the mob's move in
@@ -112,7 +112,8 @@ export interface ShopLine {
    * stock level: the client never decrements it and the server owns the real inventory of the shop.
    */
   maxCount: number;
-  /** The 8 bytes an `itemId / 10000 == 207` row carries; copied, never interpreted. */
+  /** Legacy field name for the 207 row's LE float64 recharge unit price, NOT a cash serial.
+   * 4B3780 copies these to +24; 4B4AD0 multiplies that double by missing charges. */
   cash?: Uint8Array;
 }
 
@@ -136,10 +137,10 @@ export function encodeShopOpen(shop: ShopOpen): Uint8Array {
   writer.writeU32(shop.shopId);
   writer.writeU16(shop.items.length);
   for (const line of shop.items) {
-    if (line.itemId / 10000 === CASH_ITEM_CATEGORY) {
+    if (Math.floor(line.itemId / 10000) === CASH_ITEM_CATEGORY) {
       if (line.cash === undefined || line.cash.length !== CASH_BLOCK_BYTES) {
         throw new RangeError(
-          `0x4a: item ${line.itemId} is a 207 item, which carries ${CASH_BLOCK_BYTES} bytes this codec does not know how to build (FINDINGS 4.22)`,
+          `0x4a: item ${line.itemId} is a 207 item, which carries ${CASH_BLOCK_BYTES} bytes: supply encodeRechargeUnitPrice(info.unitPrice) or a captured raw block`,
         );
       }
     } else if (line.cash !== undefined) {
@@ -164,7 +165,7 @@ export function readShopOpen(reader: PacketReader): ShopOpen {
     const itemId = reader.readU32();
     const price = reader.readU32();
     const cash =
-      itemId / 10000 === CASH_ITEM_CATEGORY
+      Math.floor(itemId / 10000) === CASH_ITEM_CATEGORY
         ? reader.readBytes(CASH_BLOCK_BYTES)
         : undefined;
     const maxCount = reader.readU16();
@@ -297,4 +298,24 @@ export function readClientObjectClick(reader: PacketReader): ClientObjectClick {
 /** One line for the `decode` tool. */
 export function describeClientObjectClick(click: ClientObjectClick): string {
   return `33 object click: id=${click.objectId}`;
+}
+
+/** The once-opaque 207 block: `4B4AD0` reads the exact +24 copied by `4B3780` as double.
+ * Keep the raw `cash` property for old trace consumers, but never interpret it as a cash serial. */
+export function encodeRechargeUnitPrice(price: number): Uint8Array {
+  if (!Number.isFinite(price) || price <= 0)
+    throw new RangeError("invalid recharge unit price");
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setFloat64(0, price, true);
+  return bytes;
+}
+export function shopRechargeUnitPrice(line: ShopLine): number | undefined {
+  if (Math.floor(line.itemId / 10000) !== 207 || line.cash?.length !== 8)
+    return undefined;
+  const price = new DataView(
+    line.cash.buffer,
+    line.cash.byteOffset,
+    8,
+  ).getFloat64(0, true);
+  return Number.isFinite(price) && price > 0 ? price : undefined;
 }

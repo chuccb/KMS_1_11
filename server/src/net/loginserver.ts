@@ -1,4 +1,11 @@
 import {
+  MESO_DROP_OPCODE,
+  MESO_DROP_MIN,
+  MESO_DROP_MAX,
+  MESO_DROP_INTERVAL_MS,
+  readMesoDrop,
+} from "../protocol/mesodrop.ts";
+import {
   ABILITY_REQUEST_OPCODE,
   readAbilityRequest,
 } from "../protocol/ability.ts";
@@ -1434,6 +1441,46 @@ export class GameEntryServer {
   }
 
   private readonly abilityTimes = new WeakMap<FieldSession, number>();
+  private readonly mesoDropAt = new WeakMap<FieldSession, number>();
+  /** Native input bounds + a server-owned rate limit. A nonzero 0x0D ack releases the request
+   * on success AND refusal, unlike an unsolicited ack0 wallet update. */
+  private handleMesoDrop(session: FieldSession, plain: Uint8Array): void {
+    const refuse = () =>
+      session.send(encodeStatUpdate({ ack: true, diff: {} }));
+    let amount: number;
+    try {
+      amount = readMesoDrop(new PacketReader(plain, 1));
+    } catch {
+      refuse();
+      return;
+    }
+    const now = Date.now();
+    if (
+      !Number.isInteger(amount) ||
+      amount < MESO_DROP_MIN ||
+      amount > MESO_DROP_MAX ||
+      session.character.stats.hp <= 0 ||
+      session.shop !== undefined ||
+      session.talk !== undefined ||
+      this.trades.roomOf(session.characterId) !== undefined ||
+      now < (this.mesoDropAt.get(session) ?? 0) + MESO_DROP_INTERVAL_MS ||
+      session.wallet.balance < amount
+    ) {
+      refuse();
+      return;
+    }
+    this.mesoDropAt.set(session, now);
+    if (!session.wallet.spend(amount)) {
+      refuse();
+      return;
+    }
+    session.send(
+      encodeStatUpdate({ ack: true, diff: { mesos: session.wallet.balance } }),
+    );
+    session.instance.dropMesos(session, amount, now);
+    this.persist();
+  }
+
   /** sub_55CF60 arms the shared request gate and enforces 500ms between AP requests. */
   private handleAbility(session: FieldSession, plain: Uint8Array): void {
     let diff = {};
@@ -1923,37 +1970,41 @@ export class GameEntryServer {
       return;
     }
     if (request.kind === "buy") {
-      const row = keeper.linesOf(shop)[request.row];
+      const row = keeper.linesOf(shop).filter((line) => line.price !== 0)[
+        request.row
+      ];
       if (!row || row.itemId !== request.itemId) {
         write(encodeShopResult(SHOP_RESULT.error));
         return;
       }
     }
-    if (request.kind === "recharge") {
-      // No row of any shop this server opens is a rechargeable (the 207 family), so there is
-      // nothing to charge: the client gets the "not enough items" line and its window is freed.
-      write(encodeShopResult(SHOP_RESULT.notEnoughItems));
-      this.options.log?.(
-        `game: shop ${shop.shopId} recharge of slot ${request.slot} refused (not stocked)`,
-      );
-      return;
-    }
     const items = session.character.items ?? emptyCharacterItems();
     const before = { ...session.character.stats };
     const outcome =
-      request.kind === "buy"
-        ? keeper.buy(items, session.wallet, shop, request.itemId, request.count)
-        : keeper.sell(
-            items,
-            session.wallet,
-            request.slot,
-            request.itemId,
-            request.count,
-          );
+      request.kind === "recharge"
+        ? (keeper.recharge?.(items, session.wallet, shop, request.slot) ?? {
+            kind: "failed" as const,
+            reason: "notInShop" as const,
+          })
+        : request.kind === "buy"
+          ? keeper.buy(
+              items,
+              session.wallet,
+              shop,
+              request.itemId,
+              request.count,
+            )
+          : keeper.sell(
+              items,
+              session.wallet,
+              request.slot,
+              request.itemId,
+              request.count,
+            );
     if (outcome.kind === "failed") {
       write(encodeShopResult(shopResultCode(outcome.reason)));
       this.options.log?.(
-        `game: shop ${shop.shopId} ${request.kind} of ${request.itemId} x${request.count} refused (${outcome.reason})`,
+        `game: shop ${shop.shopId} ${request.kind} refused (${outcome.reason})`,
       );
       return;
     }
@@ -2012,7 +2063,7 @@ export class GameEntryServer {
     if (outcome.kind === "no-room") {
       this.options.log?.(
         `game: drop ${drop.dropId} (item ${drop.itemId}) is under ${session.characterId} but the ` +
-          `inventory has no room - it stays on the ground`,
+          `inventory/wallet has no room - it stays on the ground`,
       );
       return;
     }
@@ -2022,6 +2073,7 @@ export class GameEntryServer {
     if (outcome.kind === "item") {
       session.send(encodeInventoryChange([outcome.change]));
       session.send(encodeLootNotice(outcome.notice));
+      this.persist();
       this.options.log?.(
         `game: ${session.characterId} took item ${outcome.itemId} x${outcome.count} ` +
           `(drop ${drop.dropId}, tab ${outcome.inventory} slot ${outcome.slot})`,
@@ -2034,6 +2086,7 @@ export class GameEntryServer {
     const diff = diffStats(before, session.character.stats);
     if (Object.keys(diff).length > 0) session.send(encodeStatUpdate({ diff }));
     session.send(encodeLootNotice(outcome.notice));
+    this.persist();
     this.options.log?.(
       `game: ${session.characterId} took ${outcome.amount} mesos (drop ${drop.dropId}, wallet ${outcome.total})`,
     );
@@ -2348,6 +2401,10 @@ export class GameEntryServer {
         }
         // The player's own HP/MP, changing: a monster's hit or the map's regeneration, both rolled by
         // the client and answered with the `0x0D` that moves the bar (see `handleStatReport`).
+        if (session !== undefined && opcode === MESO_DROP_OPCODE) {
+          this.handleMesoDrop(session, event.plain);
+          continue;
+        }
         if (session !== undefined && opcode === ABILITY_REQUEST_OPCODE) {
           this.handleAbility(session, event.plain);
           continue;
@@ -3070,13 +3127,28 @@ export class GameEntryServer {
     }
     const count = request.count ?? 1;
     if (
-      item.kind === "equip" ? count !== 1 : count < 1 || item.quantity < count
+      !Number.isInteger(count) ||
+      (item.kind === "equip"
+        ? count !== 1
+        : Math.floor(item.itemId / 10000) === 207
+          ? count !== item.quantity
+          : count < 1 || item.quantity < count)
     ) {
       this.options.log?.(
         `game: trade: "${session.name}" offered ${count} of ${item.itemId}, which it does not have`,
       );
       return;
     }
+    if (
+      Math.floor(item.itemId / 10000) === 207 &&
+      [...side.offers.values()].some(
+        (offer) =>
+          offer.tab === request.tab &&
+          offer.slot === request.slot &&
+          offer.roomSlot !== request.roomSlot,
+      )
+    )
+      return;
     const shown = item.kind === "equip" ? item : { ...item, quantity: count };
     side.offers.set(request.roomSlot, {
       roomSlot: request.roomSlot,

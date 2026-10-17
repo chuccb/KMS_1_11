@@ -333,7 +333,7 @@ function connect() {
     setLoginPending(false);
     itemDialog.close(false);
     itemDrag = undefined;
-    slotPending = shopPending = false;
+    slotPending = shopPending = mesoPending = false;
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
@@ -363,13 +363,14 @@ function handle(message) {
     shopPending = false;
     if (message.t !== "field") inventoryScroll.fill(0);
     itemDrag = undefined;
-    slotPending = false;
+    slotPending = mesoPending = false;
+    mesoNextAt = 0;
     slotNextAt = 0;
     equipHover = undefined;
     if (message.t !== "field") equipPanel.toggle(false);
   }
   if (message.t === "error") {
-    slotPending = shopPending = false;
+    slotPending = shopPending = mesoPending = false;
     itemDialog.close(false);
   }
   switch (message.t) {
@@ -468,6 +469,12 @@ function handle(message) {
           ? `created ${message.name} (id ${message.id})`
           : `create failed: ${message.reason}`,
       );
+      return;
+
+    case "meso-drop-result":
+      mesoPending = false;
+      mesoNextAt = performance.now() + 200;
+      if (!message.changed) chatLine("系統", "無法丟棄這個數量的楓幣。");
       return;
 
     case "request-release":
@@ -1187,6 +1194,7 @@ canvas.addEventListener("mousemove", (event) => {
     hoveredPortal = undefined;
     const pointer =
       inventoryHover.kind === "close" ||
+      inventoryHover.kind === "coin" ||
       inventoryHover.kind === "tab" ||
       (inventoryHover.kind === "slot" && inventoryHover.item !== undefined);
     canvas.style.cursor = pointer ? "pointer" : "default";
@@ -1231,6 +1239,11 @@ canvas.addEventListener("mousedown", (event) => {
   }
   const hit =
     shopHit === undefined ? inventoryWindowAt(point.x, point.y) : undefined;
+  if (hit?.kind === "coin") {
+    coinPressed = true;
+    event.preventDefault();
+    return;
+  }
   if (hit?.kind === "scrollbar") {
     const g = inventoryScrollbarGeometry();
     if (hit.part === "thumb" && g.max > 0) {
@@ -1259,6 +1272,7 @@ canvas.addEventListener("mousedown", (event) => {
 });
 
 function finishWindowPress(event) {
+  coinPressed = false;
   if (inventoryDrag?.moved === true) {
     // A drag is not a click: the window moved, so the sheet under the press must not act.
     inventorySuppressClick = event?.target === canvas;
@@ -1300,7 +1314,7 @@ canvas.addEventListener("mouseleave", () => {
 let inventorySuppressClick = false;
 
 canvas.addEventListener("dblclick", (event) => {
-  if (itemDialog.open || shopPending || slotPending) return;
+  if (itemDialog.open || shopPending || slotPending || mesoPending) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1360,7 +1374,7 @@ canvas.addEventListener("click", (event) => {
         shopSellPick !== undefined &&
         Math.floor(shopSellPick.itemId / 10000) === 207
       ) {
-        shopRequest({ t: "shop", action: "recharge", slot: shopSellPick.slot });
+        rechargeShopItem(shopSellPick);
       }
     } else if (shopHit.kind === "scrollbar") {
       const side = shopHit.side;
@@ -1392,7 +1406,9 @@ canvas.addEventListener("click", (event) => {
   if (equipPanel.hit(point.x, point.y)) return;
   const hit = inventoryWindowAt(point.x, point.y);
   if (hit !== undefined) {
-    if (hit.kind === "close") {
+    if (hit.kind === "coin") {
+      dropMesosDialog(point);
+    } else if (hit.kind === "close") {
       toggleInventory(false);
     } else if (hit.kind === "tab") {
       inventoryTab = hit.tab;
@@ -2972,11 +2988,15 @@ function escapeHtml(text) {
 let itemDrag,
   equipHover,
   slotPending = false,
+  mesoPending = false,
+  mesoNextAt = 0,
+  coinPressed = false,
   slotNextAt = 0,
   itemEpoch = 0;
 function beginItemDrag(source, p) {
   if (
     slotPending ||
+    mesoPending ||
     shopPending ||
     itemDialog.open ||
     shop ||
@@ -2999,6 +3019,7 @@ function slotRequest(tab, fromSlot, toSlot, count = -1) {
   if (
     fromSlot === toSlot ||
     slotPending ||
+    mesoPending ||
     shopPending ||
     shop !== undefined ||
     talkingNpc !== undefined ||
@@ -3133,7 +3154,12 @@ async function dropInventoryItem(d, at) {
         at,
         accept: sendDrop,
       });
-    else if (quantity >= 1 && quantity <= 32767) sendDrop(quantity);
+    else if (
+      (quantity >= 1 ||
+        (quantity === 0 && Math.floor(d.item.itemId / 10000) === 207)) &&
+      quantity <= 32767
+    )
+      sendDrop(quantity);
     else chatLine("系統", "此整組數量超出原0x17可傳送範圍，已取消丟棄。");
   };
   if (Math.floor(d.item.itemId / 1000) === 4031) {
@@ -3175,6 +3201,8 @@ const INVENTORY = {
   grid: { x: 6, y: 80, columns: 4, rows: 6, size: 32, pitch: 35 },
   /** 4DA440: CCtrlScrollBar id2001, (147,80), height208. */
   scrollbar: { x: 147, y: 80, width: 12, height: 208 },
+  /** 4DA440: button2002 at (8,294); WZ BtCoin canvases are 17x17. */
+  coin: { x: 8, y: 294, width: 17, height: 17 },
   /** The meso field, ending where the sheet's own `메소` label starts. */
   mesos: { x: 9, y: 296, width: 116, height: 13 },
   /** Tab boxes, measured from the separators the sheet draws at x=35/69/104/139. */
@@ -3336,6 +3364,7 @@ function inventoryWindowAt(x, y) {
     localY >= INVENTORY.height
   )
     return undefined;
+  if (insideBox(INVENTORY.coin, localX, localY)) return { kind: "coin" };
   const { close } = INVENTORY;
   if (
     localX >= close.x &&
@@ -3459,7 +3488,8 @@ function drawInventoryWindow() {
         );
       }
       const count =
-        item.quantity !== undefined && item.quantity > 1
+        item.quantity !== undefined &&
+        (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207)
           ? item.quantity
           : item.ruc !== undefined && item.ruc > 0
             ? item.ruc
@@ -3501,6 +3531,21 @@ function drawInventoryWindow() {
   }
 
   drawInventoryScrollbar(x, y);
+  const coinState =
+    selfView.hp <= 0 ||
+    selfView.mesos < 10 ||
+    mesoPending ||
+    slotPending ||
+    shopPending
+      ? "disabled"
+      : coinPressed && inventoryHover?.kind === "coin"
+        ? "pressed"
+        : inventoryHover?.kind === "coin"
+          ? "mouseOver"
+          : "normal";
+  const coin = artImage(`UI/UIWindow.img/Item/BtCoin/${coinState}/0`);
+  if (coin.ready)
+    ctx.drawImage(coin.img, x + INVENTORY.coin.x, y + INVENTORY.coin.y);
 
   // Mesos, right-aligned inside the dark field.
   statusText(
@@ -3513,12 +3558,60 @@ function drawInventoryWindow() {
   ctx.textBaseline = "alphabetic";
 }
 
+/** 4DAF70 -> 55D5F0. The native field request is not an inventory move. */
+function dropMesosDialog(at) {
+  const epoch = itemEpoch,
+    characterId = selfView?.characterId;
+  const valid = () =>
+    epoch === itemEpoch &&
+    characterId === selfView?.characterId &&
+    loginStage === "game" &&
+    selfView?.hp > 0 &&
+    !shop &&
+    talkingNpc === undefined &&
+    !slotPending &&
+    !shopPending &&
+    !mesoPending;
+  if (
+    !valid() ||
+    itemDialog.open ||
+    performance.now() < mesoNextAt ||
+    selfView.mesos < 10
+  )
+    return;
+  itemDialog.quantity({
+    text: "얼마를 버리시겠습니까?",
+    initial: 10,
+    min: 10,
+    max: Math.min(50000, selfView.mesos),
+    at,
+    accept: (amount) => {
+      if (
+        !valid() ||
+        !socket ||
+        socket.readyState !== WebSocket.OPEN ||
+        !Number.isInteger(amount) ||
+        amount < 10 ||
+        amount > Math.min(50000, selfView.mesos) ||
+        performance.now() < mesoNextAt
+      )
+        return;
+      mesoPending = true;
+      mesoNextAt = performance.now() + 200;
+      send({ t: "drop-mesos", amount });
+    },
+  });
+}
+
 /** Item facts as tooltip lines: the archive's name, its description, and the stack's count. */
 function itemTooltipLines(item) {
   const facts = itemInfo.get(item.itemId);
   const lines = [facts?.name ?? `Item ${item.itemId}`];
   if (item.price !== undefined) lines.push(`價格 ${item.price} 메소`);
-  if (item.quantity !== undefined && item.quantity > 1)
+  if (
+    item.quantity !== undefined &&
+    (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207)
+  )
     lines.push(`數量 ${item.quantity}`);
   if (item.ruc !== undefined && item.ruc > 0)
     lines.push(`可升級次數 ${item.ruc}`);
@@ -3874,10 +3967,12 @@ function drawShopList(side, originX, originY) {
       nameWidth,
     );
     // The second line is mesos in both panes: the shelf price on the left, the stack's value on the
-    // right (`ceil(count x info/price)`, the number `sub_4B4AD0` puts in the row).
+    // right (`info/price + ceil(count x info/unitPrice)`, 4B4AD0). This is the native display basis,
+    // not a promise of the reconstructed server's 50% resale policy.
     let price = side === "buy" ? item.price : undefined;
     if (side === "sell" && facts?.price !== undefined)
-      price = Math.ceil((item.quantity ?? 1) * facts.price);
+      price =
+        facts.price + Math.ceil((item.quantity ?? 1) * (facts.unitPrice ?? 0));
     if (price !== undefined)
       drawShopText(
         `${price} 메소`,
@@ -4008,7 +4103,15 @@ function drawShopButton(name, originX, originY) {
     shopHover?.kind === "button" &&
     shopHover.button === name;
   const hovered = shopHover?.kind === "button" && shopHover.button === name;
-  const state = pressed ? "pressed" : hovered ? "mouseOver" : "normal";
+  const disabled =
+    name === "recharge" && (!rechargeQuote(shopSellPick) || shopPending);
+  const state = disabled
+    ? "disabled"
+    : pressed
+      ? "pressed"
+      : hovered
+        ? "mouseOver"
+        : "normal";
   const entry = artImage(
     `UI/UIWindow.img/Shop/Bt${name[0].toUpperCase()}${name.slice(1)}/${state}/0`,
   );
@@ -4062,6 +4165,7 @@ function shopRequest(request) {
     !shop ||
     shopPending ||
     slotPending ||
+    mesoPending ||
     selfView?.hp <= 0 ||
     !socket ||
     socket.readyState !== WebSocket.OPEN
@@ -4080,6 +4184,7 @@ function buyShopRow(index) {
     !row ||
     shopPending ||
     slotPending ||
+    mesoPending ||
     itemDialog.open ||
     selfView?.hp <= 0
   )
@@ -4120,6 +4225,64 @@ function buyShopRow(index) {
     });
 }
 
+/** 4B4AD0: find a matching 207 service row, then missingCharges * rowDouble. */
+function rechargeQuote(item) {
+  if (
+    !shop ||
+    shopTab !== 2 ||
+    !item ||
+    Math.floor(item.itemId / 10000) !== 207 ||
+    item.cash
+  )
+    return undefined;
+  const row = shop.rechargeables?.find((r) => r.itemId === item.itemId);
+  const quantity = item.quantity ?? 0;
+  if (
+    !row ||
+    !Number.isInteger(quantity) ||
+    quantity < 0 ||
+    quantity >= row.maxCount
+  )
+    return undefined;
+  const total = Math.ceil((row.maxCount - quantity) * row.unitPrice);
+  return Number.isSafeInteger(total) && total > 0
+    ? { total, maxCount: row.maxCount }
+    : undefined;
+}
+function rechargeShopItem(item) {
+  const quote = rechargeQuote(item),
+    opened = shop,
+    epoch = itemEpoch;
+  if (
+    !quote ||
+    shopPending ||
+    slotPending ||
+    mesoPending ||
+    itemDialog.open ||
+    selfView?.hp <= 0
+  )
+    return;
+  const snapshot = JSON.stringify(sourceItem(2, item.slot));
+  itemDialog.confirm({
+    text: "정말로 충전하시겠습니까?",
+    accept: () => {
+      if (
+        shop !== opened ||
+        epoch !== itemEpoch ||
+        JSON.stringify(sourceItem(2, item.slot)) !== snapshot ||
+        shopTab !== 2 ||
+        !rechargeQuote(item)
+      )
+        return;
+      if (selfView.mesos < quote.total) {
+        chatLine("系統", "현금이 부족합니다");
+        return;
+      }
+      shopRequest({ t: "shop", action: "recharge", slot: item.slot });
+    },
+  });
+}
+
 /** 4B6E90: sale defaults to the whole stack, then revalidates the actual slot after dialog. */
 function sellShopItem(item) {
   if (
@@ -4127,6 +4290,7 @@ function sellShopItem(item) {
     !shop ||
     shopPending ||
     slotPending ||
+    mesoPending ||
     itemDialog.open ||
     selfView?.hp <= 0
   )

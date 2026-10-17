@@ -153,7 +153,14 @@ export function applyChangeSlot(
   if (toSlot === 0) {
     if (source.cash !== null) return fail("cashItem");
     const stack = "quantity" in source ? source.quantity : 1;
-    if (!Number.isInteger(count) || count <= 0 || count > stack)
+    const rechargeable = Math.floor(source.itemId / 10000) === 207;
+    if (
+      !Number.isInteger(count) ||
+      count < 0 ||
+      (count === 0 && !rechargeable) ||
+      count > stack ||
+      (rechargeable && count !== stack)
+    )
       return fail("badCount");
     const changes: InventoryChange[] = [];
     if (count === stack) {

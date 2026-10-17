@@ -189,7 +189,18 @@ function takeOffers(
     if (inventory === undefined) return undefined;
     const current = inventory.items.get(offer.slot);
     if (current === undefined || current.itemId !== offer.item.itemId) return undefined;
-    if (offer.count < 1) return undefined;
+    const rechargeable = Math.floor(current.itemId / 10000) === 207;
+    if (
+      !Number.isInteger(offer.count) ||
+      offer.count < 0 ||
+      (offer.count === 0 && !rechargeable)
+    )
+      return undefined;
+    if (
+      rechargeable &&
+      (current.kind !== "nonequip" || offer.count !== current.quantity)
+    )
+      return undefined;
     if (current.kind === "equip") {
       if (offer.count !== 1) return undefined;
       inventory.items.delete(offer.slot);

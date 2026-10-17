@@ -64,8 +64,8 @@ export function freeSlot(inventory: Inventory): number | undefined {
 
 /** The slot that already holds this item with room for `count` more, if there is one. */
 function stackableSlot(inventory: Inventory, itemId: number, count: number): number | undefined {
-  // An equip is never a pile: two of them are two slots, even when they are the same item id.
-  if (isEquipItemId(itemId)) return undefined;
+  // Equips and rechargeable sets are separate objects even when the item id matches.
+  if (isEquipItemId(itemId) || Math.floor(itemId / 10000) === 207) return undefined;
   for (const [slot, item] of inventory.items) {
     if (item.kind !== "nonequip") continue;
     if (item.itemId !== itemId) continue;
@@ -198,6 +198,7 @@ export interface Pickup {
  */
 export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWallet): PickupResult {
   if (drop.money) {
+    if (wallet.balance + drop.amount > 0xffffffff) return { kind: "no-room", notice: { kind: "rejected" }, itemId: 0 };
     const total = wallet.earn(drop.amount);
     return { kind: "mesos", notice: { kind: "mesos", amount: drop.amount }, amount: drop.amount, total };
   }
@@ -244,7 +245,7 @@ export function takeItem(
   slot: number,
   count: number,
 ): TakenItem | undefined {
-  if (!Number.isInteger(count) || count <= 0) return undefined;
+  if (!Number.isInteger(count) || count < 0 || (count === 0 && Math.floor(itemId / 10000) !== 207)) return undefined;
   const inventory = inventoryTabOfItemId(itemId);
   const tab = items.inventories[inventory - 1]!;
   const item = tab.items.get(slot);
@@ -255,6 +256,7 @@ export function takeItem(
     return { inventory, slot, count: 1, remaining: 0, change: { op: INVENTORY_OP.clear, inventory, slot } };
   }
   const quantity = "quantity" in item ? item.quantity : 0;
+  if (Math.floor(itemId / 10000) === 207 && count !== quantity) return undefined;
   if (quantity < count) return undefined;
   const remaining = quantity - count;
   if (remaining === 0) {
