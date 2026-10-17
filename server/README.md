@@ -503,7 +503,7 @@ client 用同一個封包問兩種問題：`0x23` ＝ `u8 kind` ＋ `str name` �
 | 找人（`0x05`）| 找得到 → `0x1A` sub-op `0x09`（`name` ＋ `u32 mapId`，client 自己用地圖 id 查地名）；找不到 → 同一個封包帶 `0xFFFFFFFF`（client 顯示「找不到 'x'」）|
 | 密語（`0x06`）| 送達 → **收件者**收到 `0x1A` sub-op `0x12`（跟聊天同一個封包：`sender` ＋ `text`），**寄件者**收到 sub-op `0x0A`（`name` ＋ `u8 flag`，client 用自己保留的那份文字顯示 `name<< text`）|
 | 密語給不在線上的人 | `0x0A` 帶 flag 0（同一句「找不到 'x'」）|
-| 氣球請求（`kind 0x22`）| 只記一行日誌。畫氣球的那個 s2c **已定位**（`0x1F` → `sub_50B320`：`[u32 characterId][string text]`，5 秒，畫面是「名字 : 文字」，FINDINGS §4.35.5），但請求裡的第二個字串來源還沒定位 —— 那格是 `CWvsApp + 36` 的字串欄位（`sub_4732C0(sub_4337A0())`），不是剛收到的訊息，所以先不實作 |
+| 氣球請求（`kind 0x22`）| 只記一行日誌。請求是 `[str 講話的人的名字][str 自己的名字]` —— 第二個字串是 `CWvsApp + 36` ＝ 本機角色的名字（`sub_4732C0(sub_4337A0())`；同一個字串在 `0x10 type 13` 用來判斷「名字是不是我」，§4.37.4），**不是剛收到的訊息**。畫氣球的那個 s2c **已定位**（`0x1F` → `sub_50B320`：`[u32 characterId][string text]`，5 秒，畫面是「名字 : 文字」，FINDINGS §4.35.5），但請求裡沒有訊息本體，所以先不實作 |
 
 - **目標是名字，不是 id**：封包裡只有名字（`sub_4717D0` 的第三個參數，`sub_524A00` 驗證過的字串），  所以這是第一個**用名字找人**的路徑，也是第一個**離開寄件者所在場地**的封包（`target.send`，  不經 `FieldInstance.broadcast`）。
 - **只有線上算數**：查找掃 `sessionsByCharacter`（線上 session 的唯一真相，ADR-018），沒有 session 的角色  沒有「現在的位置」，`0x09` 回 `0xFFFFFFFF`、`0x0A` 回 flag 0。**不回存檔裡的地圖**：那是「上次下線的地方」。
