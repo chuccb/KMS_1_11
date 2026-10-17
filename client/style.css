@@ -426,9 +426,15 @@ body {
 }
 
 .inv-cell.filled {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.18);
+  /* Lighter than an empty slot: most item icons are dark artwork (검은 정장, 검은 정장 바지) and a
+     near-black tile turns them into a smudge. */
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.24);
   cursor: pointer;
+}
+
+.inv-cell.no-icon {
+  border-style: dashed;
 }
 
 .inv-cell.filled:hover {

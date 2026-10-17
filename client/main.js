@@ -88,8 +88,14 @@ let pendingWhisper;
 
 /** The inventory the server last described (`0x16` and every `0x0B` since); null before a map. */
 let inventory;
-/** The tab the panel shows: 1 equip, 2 use, 3 etc, 4 cash (`0x0B`'s `u8 inventory`). */
-let inventoryTab = 2;
+/**
+ * The tab the panel shows: 1 equip, 2 use, 3 etc, 4 cash (`0x0B`'s `u8 inventory`).
+ *
+ * 0 means "the player has not picked one yet": the first render then opens USE if it holds
+ * something (that is where a potion is, which is what a panel is usually opened for) and otherwise
+ * the first tab that has anything at all. After that the choice is the player's and never moves.
+ */
+let inventoryTab = 0;
 /** `itemId -> { id, name, price, desc }` from `/api/item/<id>`; absent until the fetch lands. */
 const itemInfo = new Map();
 /** Ids a lookup is already in flight for, so a re-render does not ask twice. */
@@ -745,6 +751,11 @@ function renderInventory() {
     ui.invInfo.textContent = "尚未進入地圖。";
     return;
   }
+  if (inventoryTab === 0) {
+    const use = inventory.tabs.find((entry) => entry.tab === 2);
+    const firstFull = inventory.tabs.find((entry) => entry.items.length > 0);
+    inventoryTab = (use !== undefined && use.items.length > 0 ? use : firstFull)?.tab ?? 2;
+  }
   ui.invTabs.replaceChildren(
     ...INVENTORY_TABS.map(({ tab, label }) => {
       const button = document.createElement("button");
@@ -753,6 +764,7 @@ function renderInventory() {
       if (tab === inventoryTab) button.classList.add("active");
       button.addEventListener("click", () => {
         inventoryTab = tab;
+        showInventoryHint();
         renderInventory();
       });
       return button;
@@ -775,6 +787,11 @@ function renderInventory() {
   if (cells.length === 0) ui.invInfo.textContent = "這個伺服器沒有回報背包內容。";
 }
 
+/** The line the panel shows before (or instead of) an item: what a cell does is not obvious. */
+function showInventoryHint() {
+  ui.invInfo.textContent = "點一下看資訊；雙擊消耗品使用。";
+}
+
 /** One square. `item` undefined is an empty slot; a worn square never sends `use`. */
 function inventoryCell(item, worn) {
   const cell = document.createElement("div");
@@ -792,25 +809,29 @@ function inventoryCell(item, worn) {
 
   if (!iconMissing.has(item.itemId)) {
     const image = document.createElement("img");
-    image.src = `/api/item/${item.itemId}/icon.png`;
-    image.alt = "";
+    // The listener first: a 404 that is already in the cache fires `error` before a listener
+    // attached after `src` would exist, and the cell would keep a broken image for good.
     image.addEventListener("error", () => {
       iconMissing.add(item.itemId);
       image.remove();
+      cell.classList.add("no-icon");
     });
+    image.alt = "";
+    image.src = `/api/item/${item.itemId}/icon.png`;
     cell.append(image);
   }
-  if (item.quantity !== undefined && item.quantity > 1) {
-    const count = document.createElement("span");
-    count.className = "count";
-    count.textContent = String(item.quantity);
-    cell.append(count);
-  }
-  if (item.ruc !== undefined) {
-    const count = document.createElement("span");
-    count.className = "count";
-    count.textContent = `${item.ruc}`;
-    cell.append(count);
+  // A stack's count, and an equip's remaining upgrades - but a fresh item's `ruc` is 0 on every
+  // single piece of starter gear, and a `0` under every icon reads as noise rather than as a fact.
+  const count = item.quantity !== undefined && item.quantity > 1
+    ? String(item.quantity)
+    : item.ruc !== undefined && item.ruc > 0
+      ? String(item.ruc)
+      : undefined;
+  if (count !== undefined) {
+    const label = document.createElement("span");
+    label.className = "count";
+    label.textContent = count;
+    cell.append(label);
   }
 
   // A double-click uses a USE-tab item, which is what `sub_462DC0` does with the same click.
@@ -827,7 +848,7 @@ function showItemInfo(item) {
   const facts = itemInfo.get(item.itemId);
   const lines = [`${slotName(item.slot)} · ${item.itemId}${facts?.name ? ` · ${facts.name}` : ""}`];
   if (item.quantity !== undefined) lines.push(`數量 ${item.quantity}`);
-  if (item.ruc !== undefined) lines.push(`可升級次數 ${item.ruc}`);
+  if (item.ruc !== undefined && item.ruc > 0) lines.push(`可升級次數 ${item.ruc}`);
   if (facts?.desc) lines.push(facts.desc);
   else if (facts !== undefined && facts.name === undefined) lines.push("（Data.wz 查不到這個道具）");
   ui.invInfo.textContent = lines.join("\n");
@@ -853,7 +874,10 @@ function describeItem(itemId) {
 function toggleInventory(force) {
   const show = force ?? ui.inventory.classList.contains("hidden");
   ui.inventory.classList.toggle("hidden", !show);
-  if (show) renderInventory();
+  if (show) {
+    renderInventory();
+    if (ui.invInfo.textContent === "") showInventoryHint();
+  }
 }
 
 function showPanel(panel) {
