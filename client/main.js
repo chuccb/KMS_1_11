@@ -730,7 +730,11 @@ canvas.addEventListener("mousemove", (event) => {
       inventoryDrag.moved = true;
     }
     if (inventoryDrag.moved) {
-      inventoryAt = { x: Math.round(point.x - inventoryDrag.dx), y: Math.round(point.y - inventoryDrag.dy) };
+      // Keep a strip of the window on screen: a window dragged fully out could never be grabbed again.
+      inventoryAt = {
+        x: Math.max(-INVENTORY.width + 48, Math.min(VIEW_W - 48, Math.round(point.x - inventoryDrag.dx))),
+        y: Math.max(0, Math.min(VIEW_H - 32, Math.round(point.y - inventoryDrag.dy))),
+      };
       canvas.style.cursor = "move";
       return;
     }
@@ -1923,8 +1927,12 @@ function itemTooltipLines(item) {
   const lines = [facts?.name ?? `Item ${item.itemId}`];
   if (item.quantity !== undefined && item.quantity > 1) lines.push(`數量 ${item.quantity}`);
   if (item.ruc !== undefined && item.ruc > 0) lines.push(`可升級次數 ${item.ruc}`);
-  if (facts?.desc) lines.push(facts.desc);
-  else if (facts !== undefined && facts.name === undefined) lines.push("（Data.wz 查不到這個道具）");
+  if (facts?.desc) {
+    // The archive stores the description with `\n` line breaks; the tooltip keeps them.
+    for (const line of String(facts.desc).split(/\r?\n/)) if (line !== "") lines.push(line);
+  } else if (facts !== undefined && facts.name === undefined) {
+    lines.push("（Data.wz 查不到這個道具）");
+  }
   return lines;
 }
 
