@@ -1608,3 +1608,7 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
 - **後續（同日）**：選角頁補了「建立角色」——一個空帳號原本根本進不去，現在它自己送 `0x06`＋`0x05`
   建第一個角色（JSON 多一種 `create`／`created`，`webclient.test.ts` 因此變 5 則、總數 **481**）。
   沒有另開後門：走的就是 2003 client 建立角色的那兩包。
+- **風險解除（同日）**：原本列為「只能由瀏覽器驗」的兩件事都驗了——預覽 proxy **會**轉發 `wss`
+  upgrade，頁面也真的在 `https://8495-<sandbox>/` 上完成登入→建立角色→選角→進地圖→聊天。因此本
+  ADR 沒有「代理不支援 WebSocket」這個殘留風險，HTTP 輪詢的備案不做。另一個教訓寫進 `docs/CLIENT.md`：
+  預覽網址只認 `--web-port`，login／game 放錯號碼時預覽會是一片空白（或 proxy 的 "Sandbox not found"）。

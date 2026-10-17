@@ -99,6 +99,9 @@
   - 做到的：登入→選世界→選角→進地圖、別人的進出場與移動、聊天、HP/MP/EXP/mesos 的即時顯示、
     怪物與 NPC 的位置（伺服器驅動）、腳踏點與傳送門的地形圖、走一步（`0x0E` 一個元素的
     `CMovePath`）。
+  - **實測（同日，真的瀏覽器）**：預覽 proxy 會轉發 `wss` 的 upgrade，`https://8495-<sandbox>/`
+    上完成登入→空白帳號建立角色（`0x06`＋`0x05`）→選角→進地圖（헤네시스）→聊天。所以「代理可能不
+    轉發 upgrade」的風險不成立，HTTP 輪詢的備案不用做。
   - **還沒做的**：WZ 圖層與 sprite、UI 視窗（背包／商店／交易／組隊）、傷害與怪物 AI（那是 2003
     client 的工作，§4.20）、鍵盤以外的輸入、音訊。細節與「有與沒有」的清單在 `docs/CLIENT.md`。
 - 地圖繪製（Back/Obj/Tile 分層 + z-order）、角色/怪物動畫、UI（Login/CharSelect/HUD/Item/Skill）、音訊
