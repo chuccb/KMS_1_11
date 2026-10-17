@@ -36,13 +36,6 @@ const ui = {
   log: /** @type {HTMLElement} */ (document.getElementById("log")),
   logLines: /** @type {HTMLElement} */ (document.getElementById("log-lines")),
   logToggle: /** @type {HTMLButtonElement} */ (document.getElementById("log-toggle")),
-  inventory: /** @type {HTMLElement} */ (document.getElementById("inventory")),
-  invToggle: /** @type {HTMLButtonElement} */ (document.getElementById("inv-toggle")),
-  invClose: /** @type {HTMLButtonElement} */ (document.getElementById("inv-close")),
-  invTabs: /** @type {HTMLElement} */ (document.getElementById("inv-tabs")),
-  invWorn: /** @type {HTMLElement} */ (document.getElementById("inv-worn")),
-  invGrid: /** @type {HTMLElement} */ (document.getElementById("inv-grid")),
-  invInfo: /** @type {HTMLElement} */ (document.getElementById("inv-info")),
   shop: /** @type {HTMLElement} */ (document.getElementById("shop")),
   shopTitle: /** @type {HTMLElement} */ (document.getElementById("shop-title")),
   shopRows: /** @type {HTMLElement} */ (document.getElementById("shop-rows")),
@@ -100,19 +93,17 @@ let inventoryTab = 0;
 const itemInfo = new Map();
 /** Ids a lookup is already in flight for, so a re-render does not ask twice. */
 const itemInfoPending = new Set();
-/** Ids the archive has no icon for - the page stops asking. */
-const iconMissing = new Set();
 /** The shop `0x4A` opened, or undefined when no NPC's window is up. */
 let shop;
 /** The NPC whose `0x47` line is on screen, or undefined when the dialog is closed. */
 let talkingNpc;
 
-/** The four tabs, named the way a player says them; the numbers are the wire's. */
+/** The four tabs of the sheet, in the order `sub_4DA440` adds them to its `CCtrlTab`. */
 const INVENTORY_TABS = [
-  { tab: 1, label: "裝備" },
-  { tab: 2, label: "消耗" },
-  { tab: 3, label: "其他" },
-  { tab: 4, label: "現金" },
+  { tab: 1, label: "장비" },
+  { tab: 2, label: "소비" },
+  { tab: 3, label: "설치" },
+  { tab: 4, label: "기타" },
 ];
 
 /** A tab slot, or a worn slot when `slot` is negative (`-1` is the first of the group). */
@@ -279,8 +270,8 @@ function handle(message) {
       return;
 
     case "inventory":
+      // The window draws from this on the next frame; `0x0B` also changes the stack counts.
       inventory = message.inventory;
-      renderInventory();
       return;
 
     case "shop-open":
@@ -726,8 +717,34 @@ function npcAt(clientX, clientY) {
   return found;
 }
 
+/** Where the pointer is (surface pixels), so the item tooltip can follow it. */
+let pointerAt;
+
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
+  pointerAt = point;
+  if (inventoryDrag !== undefined) {
+    // Four pixels of slop: a click that wobbles on a slot still selects it instead of moving the
+    // window. Past that, the press becomes the window drag the original has.
+    if (Math.abs(point.x - inventoryDrag.startX) + Math.abs(point.y - inventoryDrag.startY) > 3) {
+      inventoryDrag.moved = true;
+    }
+    if (inventoryDrag.moved) {
+      inventoryAt = { x: Math.round(point.x - inventoryDrag.dx), y: Math.round(point.y - inventoryDrag.dy) };
+      canvas.style.cursor = "move";
+      return;
+    }
+  }
+  inventoryHover = inventoryWindowAt(point.x, point.y);
+  if (inventoryHover !== undefined) {
+    statusHover = undefined;
+    hoveredPortal = undefined;
+    const pointer = inventoryHover.kind === "close"
+      || inventoryHover.kind === "tab"
+      || (inventoryHover.kind === "slot" && inventoryHover.item !== undefined);
+    canvas.style.cursor = pointer ? "pointer" : "default";
+    return;
+  }
   const button = statusButtonAt(point.x, point.y);
   statusHover = button?.action;
   hoveredPortal = button ? undefined : portalAt(point.x, point.y);
@@ -737,16 +754,67 @@ canvas.addEventListener("mousemove", (event) => {
 
 canvas.addEventListener("mousedown", (event) => {
   const point = viewPoint(event);
+  const hit = inventoryWindowAt(point.x, point.y);
+  if (hit !== undefined && hit.kind !== "close" && hit.kind !== "tab") {
+    inventoryDrag = {
+      dx: point.x - inventoryAt.x,
+      dy: point.y - inventoryAt.y,
+      startX: point.x,
+      startY: point.y,
+      moved: false,
+    };
+  }
   statusPressed = statusButtonAt(point.x, point.y)?.action;
 });
 
 canvas.addEventListener("mouseup", () => {
+  if (inventoryDrag?.moved === true) {
+    // A drag is not a click: the window moved, so the sheet under the press must not act.
+    inventorySuppressClick = true;
+    try {
+      localStorage.setItem("kms111.inventoryAt", JSON.stringify(inventoryAt));
+    } catch {
+      // A blocked localStorage only costs the position.
+    }
+  }
+  inventoryDrag = undefined;
   statusPressed = undefined;
 });
 
-canvas.addEventListener("click", (event) => {
-  // The status bar is drawn over the world, so its buttons win over anything behind them.
+/** Set by a finished window drag so the `click` that follows does not also hit a slot. */
+let inventorySuppressClick = false;
+
+canvas.addEventListener("dblclick", (event) => {
   const point = viewPoint(event);
+  const hit = inventoryWindowAt(point.x, point.y);
+  if (hit?.kind !== "slot" || hit.item === undefined) return;
+  // `sub_462DC0` uses a USE-tab item on a double click; the family is the first three digits.
+  const family = Math.floor(hit.item.itemId / 10000);
+  if (inventoryTab !== 2 || family < 200 || family > 203) return;
+  send({ t: "use", slot: hit.item.slot, itemId: hit.item.itemId });
+});
+
+canvas.addEventListener("click", (event) => {
+  // The status bar is drawn over the world, so its buttons win over anything behind them - and the
+  // inventory window is above both.
+  const point = viewPoint(event);
+  if (inventorySuppressClick) {
+    inventorySuppressClick = false;
+    return;
+  }
+  const hit = inventoryWindowAt(point.x, point.y);
+  if (hit !== undefined) {
+    if (hit.kind === "close") {
+      toggleInventory(false);
+    } else if (hit.kind === "tab") {
+      inventoryTab = hit.tab;
+      inventoryPick = undefined;
+    } else if (hit.kind === "slot") {
+      inventoryPick = hit.item;
+      if (hit.item !== undefined) describeItem(hit.item.itemId);
+    }
+    return;
+  }
   const button = statusButtonAt(point.x, point.y);
   if (button) {
     if (shop !== undefined || talkingNpc !== undefined) return;
@@ -1422,6 +1490,8 @@ function frame() {
   for (const sprite of front) drawMapSprite(sprite, cameraX, cameraY, now, false);
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
   drawStatusBar();
+  drawInventoryWindow();
+  if (pointerAt !== undefined) drawItemTooltip(pointerAt.x, pointerAt.y);
 
   requestAnimationFrame(frame);
 }
@@ -1637,124 +1707,252 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] ?? character);
 }
 
-// ---------------------------------------------------------------- inventory panel
+// ---------------------------------------------------------------- inventory window
+//
+// `CUIItem` (`sub_4DA1C0`) is the 2003 inventory: a 162x315 sheet at (114, 9) - `sub_506440(this,
+// 0, 114, 9, 1)` - and the sheet itself already carries the title, the four tabs, the 4x6 slot grid
+// and the meso row (`UI/UIWindow.img/Item/backgrnd`). What the page adds is the contents.
+//
+// The sheet's strip is painted with the first tab lit. The original repaints the strip through
+// `CCtrlTab` (`UI/Basic.img/Tab/*`), so this page lifts the two states out of the same sheet - the
+// lit tab from x=2 and an idle one from x=36 - and stamps them back over whichever tab is open.
+
+const INVENTORY = {
+  path: "UI/UIWindow.img/Item/backgrnd",
+  width: 162,
+  height: 315,
+  /** `sub_506440(this, 0, 114, 9, 1)`'s box; the layout table replaces it once a player moves it. */
+  home: { x: 114, y: 9 },
+  /** The slot grid: 32 px cells at a 35 px pitch, four across and six down (24 slots). */
+  grid: { x: 6, y: 80, columns: 4, rows: 6, size: 32, pitch: 35 },
+  /** The meso field, ending where the sheet's own `메소` label starts. */
+  mesos: { x: 9, y: 296, width: 116, height: 13 },
+  /** Tab boxes, measured from the separators the sheet draws at x=35/69/104/139. */
+  tabs: [
+    { x: 2, y: 52, width: 34 },
+    { x: 36, y: 52, width: 34 },
+    { x: 70, y: 52, width: 34 },
+    { x: 104, y: 52, width: 36 },
+  ],
+  /** The CLOSE button's pentagon, top right of the sheet. */
+  close: { x: 112, y: 0, width: 48, height: 28 },
+  /** The lit and idle tab faces, both taken out of the sheet's own strip. */
+  litTab: { x: 2, y: 52, width: 34, height: 24 },
+  idleTab: { x: 36, y: 52, width: 34, height: 24 },
+};
+
+/** Whether the inventory is up, and where - `sub_545450` puts it at (114, 9) until it is dragged. */
+let inventoryOpen = false;
+let inventoryAt = { ...INVENTORY.home };
+/** The window the pointer is over, or the piece it is dragging. */
+let inventoryHover;
+let inventoryDrag;
+/** The item a click last picked (its tooltip stays up while it is set). */
+let inventoryPick;
+
+// The 2003 client keeps a window's place in the registry; a page can only keep it locally.
+try {
+  const saved = JSON.parse(localStorage.getItem("kms111.inventoryAt") ?? "null");
+  if (saved !== null && Number.isFinite(saved.x) && Number.isFinite(saved.y)) inventoryAt = { x: saved.x, y: saved.y };
+} catch {
+  // A blocked localStorage is not worth an error: the window just opens at its default spot.
+}
+
+/** `itemId -> {img, ready}`; the same `/api/item/<id>/icon.png` the shop asks for. */
+const itemIcons = new Map();
+
+/** The icon of one item, asked for once. */
+function itemIcon(itemId) {
+  let entry = itemIcons.get(itemId);
+  if (entry !== undefined) return entry;
+  const img = new Image();
+  entry = { img, ready: false };
+  img.onload = () => {
+    entry.ready = true;
+  };
+  img.onerror = () => {
+    entry.ready = false;
+  };
+  img.src = `/api/item/${itemId}/icon.png`;
+  itemIcons.set(itemId, entry);
+  return entry;
+}
 
 /**
- * Draws the panel from `inventory`.
- *
- * Everything but the numbers on the cells is *not* from the wire: `0x0B` carries an id, a count and
- * (for an equip) its upgrade slots, so the name and the icon come from `/api/item/<id>`, which reads
- * the same `Data.wz` the 2003 client read. A fetch that fails leaves the id showing - the panel never
- * invents a name.
+ * The tab the window shows, picked the first time it has data to pick from: the USE tab if it holds
+ * anything (that is where a potion is), otherwise the first tab that does. After that the player's
+ * choice stands - the original remembers the last tab, too.
  */
-function renderInventory() {
-  if (inventory === undefined || inventory === null) {
-    ui.invGrid.replaceChildren();
-    ui.invWorn.replaceChildren();
-    ui.invInfo.textContent = "尚未進入地圖。";
-    return;
-  }
-  if (inventoryTab === 0) {
-    const use = inventory.tabs.find((entry) => entry.tab === 2);
-    const firstFull = inventory.tabs.find((entry) => entry.items.length > 0);
-    inventoryTab = (use !== undefined && use.items.length > 0 ? use : firstFull)?.tab ?? 2;
-  }
-  ui.invTabs.replaceChildren(
-    ...INVENTORY_TABS.map(({ tab, label }) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = label;
-      if (tab === inventoryTab) button.classList.add("active");
-      button.addEventListener("click", () => {
-        inventoryTab = tab;
-        showInventoryHint();
-        renderInventory();
-      });
-      return button;
-    }),
-  );
-
-  // The worn group: `worn` is the 14 equipment slots, `wornCash` the 14 cash ones. Both are drawn
-  // above the grid, the way the 2003 window has them; a tab with no such slots keeps the row hidden.
-  const worn = inventoryTab === 4 ? inventory.wornCash : inventory.worn;
-  ui.invWorn.replaceChildren(...worn.map((item) => inventoryCell(item, true)));
-  ui.invWorn.classList.toggle("hidden", worn.length === 0);
-
-  const active = inventory.tabs.find((entry) => entry.tab === inventoryTab);
-  const cells = [];
-  for (let slot = 1; slot <= (active?.capacity ?? 0); slot += 1) {
-    const item = active?.items.find((entry) => entry.slot === slot);
-    cells.push(item === undefined ? inventoryCell(undefined, false) : inventoryCell(item, false));
-  }
-  ui.invGrid.replaceChildren(...cells);
-  if (cells.length === 0) ui.invInfo.textContent = "這個伺服器沒有回報背包內容。";
+function ensureInventoryTab() {
+  if (inventoryTab !== 0 || inventory === undefined) return;
+  const use = inventory.tabs.find((entry) => entry.tab === 2);
+  const firstFull = inventory.tabs.find((entry) => entry.items.length > 0);
+  inventoryTab = (use !== undefined && use.items.length > 0 ? use : firstFull)?.tab ?? 1;
 }
 
-/** The line the panel shows before (or instead of) an item: what a cell does is not obvious. */
-function showInventoryHint() {
-  ui.invInfo.textContent = "點一下看資訊；雙擊消耗品使用。";
+/** The inventory tab the window shows (a `0x0B` inventory number). */
+function inventoryTabView() {
+  ensureInventoryTab();
+  return inventory?.tabs.find((tab) => tab.tab === inventoryTab);
 }
 
-/** One square. `item` undefined is an empty slot; a worn square never sends `use`. */
-function inventoryCell(item, worn) {
-  const cell = document.createElement("div");
-  cell.className = "inv-cell";
-  if (item === undefined) return cell;
-  // 200..203 are the four families `0x18`/`0x19` carry (204 is a scroll, `0x1A`, which this page
-  // has no target slot for).
-  const family = Math.floor(item.itemId / 10000);
-  const usable = !worn && inventoryTab === 2 && family >= 200 && family <= 203;
-  cell.classList.add("filled");
-  if (usable) cell.classList.add("usable");
-  cell.title = `${slotName(item.slot)} · ${item.itemId}`;
-  cell.dataset.itemId = String(item.itemId);
-  cell.dataset.slot = String(item.slot);
-
-  if (!iconMissing.has(item.itemId)) {
-    const image = document.createElement("img");
-    // The listener first: a 404 that is already in the cache fires `error` before a listener
-    // attached after `src` would exist, and the cell would keep a broken image for good.
-    image.addEventListener("error", () => {
-      iconMissing.add(item.itemId);
-      image.remove();
-      cell.classList.add("no-icon");
-    });
-    image.alt = "";
-    image.src = `/api/item/${item.itemId}/icon.png`;
-    cell.append(image);
-  }
-  // A stack's count, and an equip's remaining upgrades - but a fresh item's `ruc` is 0 on every
-  // single piece of starter gear, and a `0` under every icon reads as noise rather than as a fact.
-  const count = item.quantity !== undefined && item.quantity > 1
-    ? String(item.quantity)
-    : item.ruc !== undefined && item.ruc > 0
-      ? String(item.ruc)
-      : undefined;
-  if (count !== undefined) {
-    const label = document.createElement("span");
-    label.className = "count";
-    label.textContent = count;
-    cell.append(label);
-  }
-
-  // A double-click uses a USE-tab item, which is what `sub_462DC0` does with the same click.
-  if (usable) {
-    cell.addEventListener("dblclick", () => send({ t: "use", slot: item.slot, itemId: item.itemId }));
-  }
-  cell.addEventListener("click", () => showItemInfo(item));
-  describeItem(item.itemId);
-  return cell;
+/** The slot number under a grid point, or 0 when the point is not on a cell. */
+function inventorySlotAt(localX, localY) {
+  const { grid } = INVENTORY;
+  const column = Math.floor((localX - grid.x) / grid.pitch);
+  const row = Math.floor((localY - grid.y) / grid.pitch);
+  if (column < 0 || column >= grid.columns || row < 0 || row >= grid.rows) return 0;
+  // Inside the 32-px face, not the 3-px gap between cells.
+  if (localX - grid.x - column * grid.pitch >= grid.size) return 0;
+  if (localY - grid.y - row * grid.pitch >= grid.size) return 0;
+  return row * grid.columns + column + 1;
 }
 
-/** Puts the last-clicked item in the info line, if its facts have arrived. */
-function showItemInfo(item) {
+/**
+ * What of the window is at a surface point. `kind` is `close`, `tab`, `slot` (with `slot`) or
+ * `body`; a point outside is `undefined`.
+ */
+function inventoryWindowAt(x, y) {
+  if (!inventoryOpen || !selfView) return undefined;
+  const localX = x - inventoryAt.x;
+  const localY = y - inventoryAt.y;
+  if (localX < 0 || localY < 0 || localX >= INVENTORY.width || localY >= INVENTORY.height) return undefined;
+  const { close } = INVENTORY;
+  if (localX >= close.x && localX < close.x + close.width && localY >= close.y && localY < close.y + close.height) {
+    return { kind: "close" };
+  }
+  const tab = INVENTORY.tabs.findIndex((box) => localX >= box.x && localX < box.x + box.width && localY >= box.y && localY < box.y + 24);
+  if (tab >= 0) return { kind: "tab", index: tab, tab: INVENTORY_TABS[tab].tab };
+  const slot = inventorySlotAt(localX, localY);
+  if (slot > 0) {
+    const item = inventoryTabView()?.items.find((entry) => entry.slot === slot);
+    return { kind: "slot", slot, item };
+  }
+  return { kind: "body" };
+}
+
+/** One tab label, in the sheet's own colours: black on the lit tab, slate on the idle ones. */
+function drawInventoryLabel(label, centerX, baselineY, lit) {
+  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = lit ? "#000000" : "#44586e";
+  ctx.fillText(label, centerX, baselineY);
+}
+
+/**
+ * Paints the window and its contents. The slots are the sheet's own; the icons, the counts and the
+ * mesos are what the page knows from `0x16`/`0x0B` and `/api/item/<id>`.
+ */
+function drawInventoryWindow() {
+  if (!inventoryOpen || !selfView) return;
+  const entry = artImage(INVENTORY.path);
+  if (!entry.ready) return;
+  const x = Math.round(inventoryAt.x);
+  const y = Math.round(inventoryAt.y);
+  ctx.drawImage(entry.img, x, y);
+
+  // Stamp the tab faces: the lit one over the open tab, an idle one over the sheet's own lit tab.
+  const lit = INVENTORY_TABS.findIndex((tab) => tab.tab === inventoryTab);
+  const litIndex = lit < 0 ? 0 : lit;
+  for (let index = 0; index < INVENTORY.tabs.length; index++) {
+    const box = INVENTORY.tabs[index];
+    const stamp = index === litIndex ? INVENTORY.litTab : INVENTORY.idleTab;
+    if (index === litIndex || index === 0) {
+      ctx.drawImage(entry.img, stamp.x, stamp.y, stamp.width, stamp.height, x + box.x, y + box.y, box.width, stamp.height);
+    }
+    // The stamp carries the sheet's own Korean label; cover it and draw the right one.
+    ctx.fillStyle = index === litIndex ? "#ffffff" : "#ccddee";
+    ctx.fillRect(x + box.x + 6, y + box.y + 5, 22, 13);
+    drawInventoryLabel(INVENTORY_TABS[index].label, x + box.x + box.width / 2, y + box.y + 12, index === litIndex);
+  }
+
+  // The items of the open tab.
+  const view = inventoryTabView();
+  const { grid } = INVENTORY;
+  if (view !== undefined) {
+    for (const item of view.items) {
+      const index = item.slot - 1;
+      const column = index % grid.columns;
+      const row = Math.floor(index / grid.columns);
+      if (row >= grid.rows) continue;
+      const cellX = x + grid.x + column * grid.pitch;
+      const cellY = y + grid.y + row * grid.pitch;
+      const icon = itemIcon(item.itemId);
+      if (icon.ready) {
+        const width = icon.img.naturalWidth;
+        const height = icon.img.naturalHeight;
+        ctx.drawImage(icon.img, cellX + Math.floor((grid.size - width) / 2), cellY + Math.floor((grid.size - height) / 2));
+      }
+      const count = item.quantity !== undefined && item.quantity > 1 ? item.quantity : item.ruc !== undefined && item.ruc > 0 ? item.ruc : undefined;
+      if (count !== undefined) {
+        ctx.font = "10px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "bottom";
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.strokeText(String(count), cellX + grid.size - 1, cellY + grid.size + 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(String(count), cellX + grid.size - 1, cellY + grid.size + 2);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      }
+    }
+  }
+
+  // The hovered cell wears `activeIcon`: a 36x36 frame two pixels larger than the slot.
+  if (inventoryHover?.kind === "slot") {
+    const active = artImage("UI/UIWindow.img/Item/activeIcon");
+    if (active.ready) {
+      const index = inventoryHover.slot - 1;
+      const cellX = x + grid.x + (index % grid.columns) * grid.pitch;
+      const cellY = y + grid.y + Math.floor(index / grid.columns) * grid.pitch;
+      ctx.drawImage(active.img, cellX - 2, cellY - 2);
+    }
+  }
+
+  // Mesos, right-aligned inside the dark field.
+  statusText(String(selfView.mesos), x + INVENTORY.mesos.x + INVENTORY.mesos.width - 3, y + INVENTORY.mesos.y + 1, "right");
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+/** Item facts as tooltip lines: the archive's name, its description, and the stack's count. */
+function itemTooltipLines(item) {
   const facts = itemInfo.get(item.itemId);
-  const lines = [`${slotName(item.slot)} · ${item.itemId}${facts?.name ? ` · ${facts.name}` : ""}`];
-  if (item.quantity !== undefined) lines.push(`數量 ${item.quantity}`);
+  const lines = [facts?.name ?? `Item ${item.itemId}`];
+  if (item.quantity !== undefined && item.quantity > 1) lines.push(`數量 ${item.quantity}`);
   if (item.ruc !== undefined && item.ruc > 0) lines.push(`可升級次數 ${item.ruc}`);
   if (facts?.desc) lines.push(facts.desc);
   else if (facts !== undefined && facts.name === undefined) lines.push("（Data.wz 查不到這個道具）");
-  ui.invInfo.textContent = lines.join("\n");
+  return lines;
+}
+
+/** A dark tooltip beside the pointer, the way the client's item box sits next to the cursor. */
+function drawItemTooltip(x, y) {
+  const item = inventoryPick ?? inventoryHover?.item;
+  if (item === undefined || !inventoryOpen) return;
+  const lines = itemTooltipLines(item);
+  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+  ctx.textBaseline = "top";
+  let width = 0;
+  for (const line of lines) width = Math.max(width, ctx.measureText(line).width);
+  const height = lines.length * 14 + 6;
+  let left = x + 16;
+  let top = y + 18;
+  if (left + width + 8 > VIEW_W) left = VIEW_W - width - 12;
+  if (top + height > VIEW_H) top = VIEW_H - height - 4;
+  ctx.fillStyle = "rgba(8, 14, 24, 0.9)";
+  ctx.fillRect(left, top, width + 8, height);
+  ctx.strokeStyle = "rgba(136, 170, 204, 0.8)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, width + 7, height - 1);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  for (let index = 0; index < lines.length; index++) {
+    ctx.fillText(lines[index], left + 4, top + 3 + index * 14);
+  }
+  ctx.textBaseline = "alphabetic";
 }
 
 /** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
@@ -1766,7 +1964,6 @@ function describeItem(itemId) {
     .then((facts) => {
       itemInfo.set(itemId, facts);
       itemInfoPending.delete(itemId);
-      renderInventory();
       if (shop !== undefined) renderShop();
     })
     .catch(() => {
@@ -1851,12 +2048,17 @@ function closeDialogue(notify = true, answer = 0) {
   if (notify) send({ t: "talk", answer });
 }
 
+/**
+ * `I`, the ITEM button and the sheet's own CLOSE all land here. No packet is involved: the window
+ * is drawn from state the page already has (`sub_4DA1C0` keeps it in the client too).
+ */
 function toggleInventory(force) {
-  const show = force ?? ui.inventory.classList.contains("hidden");
-  ui.inventory.classList.toggle("hidden", !show);
-  if (show) {
-    renderInventory();
-    if (ui.invInfo.textContent === "") showInventoryHint();
+  const show = force ?? !inventoryOpen;
+  inventoryOpen = show;
+  if (!show) {
+    inventoryHover = undefined;
+    inventoryPick = undefined;
+    inventoryDrag = undefined;
   }
 }
 
@@ -1888,8 +2090,8 @@ ui.user.addEventListener("keydown", (event) => {
   if (event.key === "Enter") ui.pass.focus();
 });
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
-ui.invToggle.addEventListener("click", () => toggleInventory());
-ui.invClose.addEventListener("click", () => toggleInventory(false));
+// The page's own header keeps a button for the same window the ITEM button opens.
+document.getElementById("inv-toggle")?.addEventListener("click", () => toggleInventory());
 ui.shopClose.addEventListener("click", () => closeShop());
 ui.dialogueOk.addEventListener("click", () => closeDialogue(true, 1));
 ui.dialogueClose.addEventListener("click", () => closeDialogue(true, 0));
