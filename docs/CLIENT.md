@@ -28,12 +28,16 @@ node src/cli.ts serve \
 
 在同一個伺服器上再開一個分頁、用 `alt:alt` 登入，兩個角色就會在同一個地圖看到彼此。
 
+看到藍色的菱形就是傳送門：滑鼠移上去會亮一圈、游標變成手指，**點一下**就換圖（頁面送 c2s `0x0D`，
+伺服器用它自己的地圖資料查出目的地再送 `0x16`）。目的地永遠不是瀏覽器決定的，所以改頁面也指不動
+別張圖；`sp` 這種沒有身體的出生點不會被當成可點的門。
+
 ## 畫面上有什麼
 
 | 元素 | 來源 | 誠實說明 |
 |---|---|---|
 | 腳踏點（褐色線） | `GET /api/map/<id>` ← `MapData.footholdSegments` | 就是玩家能站的地面；**沒有**背景／物件／圖塊圖層 |
-| 傳送門（藍菱形＋名字） | 同上 ← `MapData.portals` | `tm > 0` 才是會換圖的門；名字是 WZ 的 `pn` |
+| 傳送門（藍菱形＋名字） | 同上 ← `MapData.portals` | `tm > 0` 才是會換圖的門；名字是 WZ 的 `pn`；**滑鼠移上去會亮一圈、點下去就換圖** |
 | 自己（綠色）與其他玩家（金色） | `0x16`／`0x1C`／`0x22` | 身體與頭是**色塊**，不是 `Character/*` 的 sprite |
 | 怪物（橘色橢圓＋模板 id） | `0x2F`／`0x33`／`0x30`／`0x31` | 位置是**伺服器**的巡邏，不是 client AI |
 | NPC（綠色方塊＋模板 id） | `0x39`／`0x3A` | 站著不動（`0x3B` 的走動沒有畫） |
@@ -53,6 +57,7 @@ node src/cli.ts serve \
 | 進地圖 | — | s2c `0x16`（＋ `0x2F`／`0x39`／`0x1C` 快照） |
 | 說話 | `{t:"say",text}` | c2s `0x12` → s2c `0x1A`/`0x12` |
 | 走一步 | `{t:"move",x,y,foothold}` | c2s `0x0E` ＋ 一個元素的 `CMovePath` → 其他人收 s2c `0x22` |
+| 點傳送門換圖 | `{t:"portal",name}` | c2s `0x0D`（`kind=-1`＋門名）→ s2c `0x16` 進新圖 |
 | 表情（別人的） | — | s2c `0x27` |
 | 升級特效（別人的） | — | s2c `0x29` |
 
@@ -77,7 +82,7 @@ disconnect   { reason }
 error        { message }
 ```
 
-頁面 → 伺服器只有六種：`login`／`world`／`character`／`create`／`say`／`move`（上表）。
+頁面 → 伺服器只有七種：`login`／`world`／`character`／`create`／`say`／`move`／`portal`（上表）。
 
 ## 刻意沒有的東西
 
@@ -87,7 +92,8 @@ error        { message }
   `test/messenger.test.ts`。
 - **WZ 圖層與 sprite**：`Map/Map/*.img` 的 Back／Obj／Tile 與 `Character/*` 都還沒有畫；那是下一個
   切片（也是 Phase 1 資產管線的出口）。
-- **實體碰撞**：走過去不會撞牆、不會踩到傳送門，位置由瀏覽器自己算。
+- **實體碰撞**：走過去不會撞牆、不會掉下去，位置由瀏覽器自己算。傳送門是**用點的**（見下），
+  不是走上去觸發——那正好是 2003 client 自己的 `0x0D` 觸發方式（ADR-035）。
 
 ## 測試
 
@@ -97,9 +103,10 @@ node --test test/websocket.test.ts test/webclient.test.ts
 ```
 
 `websocket.test.ts`（8 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
-一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（5 則）用 Node 內建的 `WebSocket` 當瀏覽器，
+一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（6 則）用 Node 內建的 `WebSocket` 當瀏覽器，
 對**真的** `LoginServer`／`GameEntryServer` 走完登入→選角→進圖→說話→走路，外加靜態檔、
-`/api/map/<id>` 與 `..` 的拒絕，以及一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩。
+`/api/map/<id>` 與 `..` 的拒絕、一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩，以及點一扇門
+換到另一張圖再走回來。
 
 頁面的**繪圖**沒有自動測試——它需要眼睛。這一頁就是那個「眼睛」的說明書。
 

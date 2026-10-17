@@ -39,6 +39,25 @@ const STUB_MAP: MapData = {
   footholdSegments: new Map([[32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }]]),
 };
 
+/** The map `west00` leads to: one foothold, one door back, nothing alive. */
+const TOWN_MAP: MapData = {
+  id: 2000000,
+  imagePath: "Map/Map/002000000.img",
+  name: "stub-town",
+  streetName: "stub",
+  bgm: "",
+  returnMapId: 1000000,
+  mobs: [],
+  npcs: [],
+  portals: [
+    { name: "sp", type: 0, x: 200, y: 300, toMapId: 0, toName: "" },
+    { name: "east00", type: 2, x: 400, y: 300, toMapId: 1000000, toName: "west00" },
+  ],
+  footholds: 1,
+  ladderRopes: 0,
+  footholdSegments: new Map([[1, { id: 1, x1: 0, y1: 300, x2: 900, y2: 300, prev: 0, next: 0 }]]),
+};
+
 /** A GET with the path sent byte for byte (no client-side normalisation). */
 function rawStatus(port: number, path: string): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -145,7 +164,8 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<
 
   const handoffs = new HandoffRegistry();
   const online = new OnlineAccounts();
-  const mapProvider = (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined);
+  const mapProvider = (mapId: number) =>
+    mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? TOWN_MAP : undefined;
   const game = new GameEntryServer({
     handoffs,
     online,
@@ -287,6 +307,38 @@ test("a fresh account creates its first character, then plays it", { timeout: 20
   browser.send({ t: "character", id: characters[0]!.id });
   const field = await browser.nextKind("field");
   assert.equal((field.self as { name: string }).name, "Rookie");
+  browser.close();
+});
+
+test("clicking a portal asks 0x0D and the server answers with a 0x16 for the other map", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t);
+  const { browser, field } = await enterGame(world.webPort, "admin", "admin");
+  assert.equal(field.mapId, 1000000);
+
+  // The page sends the map's own `pn`; the destination is the map file's `tm`, never the browser's.
+  browser.send({ t: "portal", name: "west00" });
+  const arrived = await browser.nextKind("field");
+  assert.equal(arrived.mapId, 2000000);
+  assert.equal((arrived.self as { mapId: number }).mapId, 2000000);
+
+  // The map endpoint knows the new map too, which is what the page refetches to redraw the ground.
+  const map = await fetch(`http://127.0.0.1:${world.webPort}/api/map/2000000`);
+  assert.equal(map.status, 200);
+  assert.equal(((await map.json()) as { name: string }).name, "stub-town");
+
+  // And back: the door on the other side is the map's own data as well.
+  browser.send({ t: "portal", name: "east00" });
+  const home = await browser.nextKind("field");
+  assert.equal(home.mapId, 1000000);
+
+  // A name that is not a portal of this map is a log line on the server, not a teleport.
+  browser.send({ t: "portal", name: "nowhere" });
+  const quiet = await browser.quiet(300);
+  assert.deepEqual(quiet.filter((message) => message.t === "field"), []);
+
+  browser.send({ t: "portal", name: "" });
+  const error = await browser.nextKind("error");
+  assert.match(String(error.message), /portal needs a name/);
   browser.close();
 });
 

@@ -205,6 +205,8 @@ class BrowserSession {
           return await this.say(String(message.text ?? ""));
         case "move":
           return await this.move(Number(message.x ?? 0), Number(message.y ?? 0), Number(message.foothold ?? 0));
+        case "portal":
+          return await this.usePortal(String(message.name ?? ""));
         default:
           return this.send({ t: "error", message: `unknown message ${String(message.t)}` });
       }
@@ -300,6 +302,16 @@ class BrowserSession {
 
   private async move(x: number, y: number, foothold: number): Promise<void> {
     await this.require().moveTo(x, y, foothold);
+  }
+
+  /**
+   * A click on a portal. The name is the map's own `pn`, which is what the page draws and what the
+   * 2003 client would have sent; the destination never comes from the browser. The arrival shows up
+   * as the `field` event the server's `0x16` produces.
+   */
+  private async usePortal(name: string): Promise<void> {
+    if (name === "") return this.send({ t: "error", message: "portal needs a name" });
+    await this.require().usePortal(name);
   }
 
   private eventJson(event: ClientEvent): unknown {

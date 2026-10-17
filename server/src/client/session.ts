@@ -40,7 +40,9 @@ import { readCharacterData, type CharacterData } from "../protocol/chardata.ts";
 import {
   FIELD_OPCODE,
   encodeClientChat,
+  encodeClientInteract,
   encodeClientUserMove,
+  INTERACT_KIND_CURSOR,
   readSetField,
   readUserChat,
   readUserEffect,
@@ -536,6 +538,25 @@ export class ClientSession {
     }
   }
 
+  /**
+   * Uses a portal of the map the session is in: `0x0D` with `kind = -1` and the portal's **name**.
+   *
+   * This is the packet the 2003 client sends when the mouse is over a portal and the player clicks
+   * (`sub_5134C0` -> `CField::SendInteract`, FINDINGS 4.11.6): the client reads the name out of the
+   * map file, the server looks the door up in the same file and answers with a `0x16` for the map
+   * it leads to. Nothing needs to be position-checked on either side - which is why a browser view
+   * with no collision can still use doors honestly.
+   *
+   * Resolves once the request has been written. The move itself arrives as a `field` event, and a
+   * portal that leads nowhere produces the `0x19` release and no event at all.
+   */
+  async usePortal(name: string): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("usePortal() needs a session in a field");
+    if (name === "") throw new Error("usePortal() needs a portal name");
+    await link.send(encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name }));
+  }
+
   close(): void {
     this.gameLink?.close();
     this.link?.close();
@@ -564,6 +585,12 @@ export class ClientSession {
             mobs: [],
             npcs: [],
           });
+          return;
+        }
+        case FIELD_OPCODE.requestRelease: {
+          // The gate release every `0x0D` is answered with (an empty `0x19`). It carries nothing a
+          // view can show; an `unknown` event per portal click would be noise, not honesty.
+          this.log("field: 0x19 request release");
           return;
         }
         case FIELD_OPCODE.userEnterField: {

@@ -61,6 +61,10 @@ let map;
 /** @type {Set<string>} */
 const keys = new Set();
 let lastMoveSent = 0;
+/** The portal the mouse is over, so the frame can ring it. @type {any} */
+let hoveredPortal;
+/** The last time a portal was asked for; `sub_472590` refuses a second request within 500 ms. */
+let lastPortalAt = 0;
 
 const MOVE_PX_PER_TICK = 14;
 const MOVE_TICK_MS = 100;
@@ -291,6 +295,7 @@ async function loadMap(mapId) {
     const response = await fetch(`/api/map/${mapId}`);
     if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
     map = await response.json();
+    hoveredPortal = undefined;
     if (self && selfView) {
       // Where the server put this character: `0x16` carries no position, and the 2003 client spawns
       // on the map's `sp` portal (the same portal `FieldInstance` uses). The first foothold is only a
@@ -301,11 +306,70 @@ async function loadMap(mapId) {
         self.y = "y" in spawn ? spawn.y : spawn.y1;
       }
     }
-    logLine(`map ${mapId}: ${map.name || "(no name)"}, ${map.footholds.length} foothold(s)`);
+    const doors = map.portals.filter((portal) => portal.name && portal.type !== 0 && portal.toMapId > 0).length;
+    logLine(`map ${mapId}: ${map.name || "(no name)"}, ${map.footholds.length} foothold(s), ${doors} door(s)`);
   } catch (error) {
     logLine(String(error));
   }
 }
+
+// ---------------------------------------------------------------- portals
+
+/** The diamond is 14 px tall and its name sits 20 px below it; the click box is that plus slack. */
+const PORTAL_BOX = { left: 18, right: 18, up: 11, down: 26 };
+/** `sub_472590` will not send a second `0x0D` for 500 ms; the page keeps the same promise. */
+const PORTAL_GUARD_MS = 600;
+/** `RETURN_MAP_NONE` (`game/map.ts`): a portal that leads to no map at all. */
+const RETURN_MAP_NONE = 999999999;
+
+/**
+ * The portal under a screen point.
+ *
+ * Only doors the 2003 client could click: a `sp` portal (type 0) has no body on screen and a
+ * `tm` of 0 or `RETURN_MAP_NONE` leads nowhere, so none of them are offered. The map's own `pn` is
+ * what gets sent - the server looks the destination up in the same WZ file, never in the packet.
+ *
+ * @param {number} clientX
+ * @param {number} clientY
+ */
+function portalAt(clientX, clientY) {
+  if (!map || !self) return undefined;
+  const cameraX = self.x - window.innerWidth * 0.45;
+  const cameraY = self.y - window.innerHeight * 0.62;
+  const x = clientX + cameraX;
+  const y = clientY + cameraY;
+  let found;
+  let best = Infinity;
+  for (const portal of map.portals) {
+    if (!portal.name || portal.type === 0) continue;
+    if (!(portal.toMapId > 0) || portal.toMapId === RETURN_MAP_NONE) continue;
+    const dx = x - portal.x;
+    const dy = y - portal.y;
+    if (dx < -PORTAL_BOX.left || dx > PORTAL_BOX.right) continue;
+    if (dy < -PORTAL_BOX.up || dy > PORTAL_BOX.down) continue;
+    const distance = dx * dx + dy * dy;
+    if (distance < best) {
+      best = distance;
+      found = portal;
+    }
+  }
+  return found;
+}
+
+canvas.addEventListener("mousemove", (event) => {
+  hoveredPortal = portalAt(event.clientX, event.clientY);
+  canvas.style.cursor = hoveredPortal ? "pointer" : "default";
+});
+
+canvas.addEventListener("click", (event) => {
+  const portal = portalAt(event.clientX, event.clientY);
+  if (!portal) return;
+  const now = performance.now();
+  if (now - lastPortalAt < PORTAL_GUARD_MS) return;
+  lastPortalAt = now;
+  logLine(`portal ${portal.name} -> ${portal.toMapId}`);
+  send({ t: "portal", name: portal.name });
+});
 
 // ---------------------------------------------------------------- rendering
 
@@ -387,6 +451,13 @@ function drawPortals(currentMap, cameraX, cameraY) {
     if (!portal.name) continue;
     const x = portal.x - cameraX;
     const y = portal.y - cameraY;
+    if (portal === hoveredPortal) {
+      ctx.strokeStyle = "rgba(190, 235, 255, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y + 2, 15, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.fillStyle = portal.toMapId > 0 ? "rgba(120, 190, 255, 0.85)" : "rgba(180, 180, 180, 0.5)";
     ctx.beginPath();
     ctx.moveTo(x, y - 7);
