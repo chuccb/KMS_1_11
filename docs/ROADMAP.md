@@ -25,7 +25,7 @@
 | 場地亂數種子 | ✅ 完成（含移植）| `0x16` 的三個 u32 是客戶端自訂亂數產生器的種子（FINDINGS §4.11.2：`sub_4C7930`→`sub_48A900`，反函式 `sub_4619F0` 就是 `Random()`）；伺服器可重算客戶端回報的傷害；`src/protocol/random.ts` 已逐位元移植並有 golden 測試 |
 | 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts`／`mob.ts`／`npc.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊**／**0x2F 怪物進場**／**0x33 怪物移動**／**0x30 死亡**／**0x31 收屍與重生**／**0x34 怪物 MP**／**0x35 怪物動畫**／**0x2C 怪物動作回報（頭 4 欄）**／**0x39 NPC 進場**／**0x3A／0x3B NPC 離場與走動**／**0x0D 能力值差異**／**0x4A／0x4B 商店＋0x16／0x33 商店請求與物件點擊＋空的 0x19** 的逐 byte codec（`test/field.test.ts`／`test/mob.test.ts`／`test/mobs.test.ts`／`test/npc.test.ts`／`test/stat.test.ts`／`test/shops.test.ts` golden 覆蓋）；`src/game/{map,mobs,npcs}.ts` 已能把 `life` 變成出生點、沿腳踏點巡邏、把 client 報的傷害記在怪物 HP 上、並讓 NPC 進場（§4.15／§4.16／§4.17／§4.19）|
 | 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：**71 列**（48 byte-exact／20 partial／3 skeleton）的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
-| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（483 個測試同時通過）|
+| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（484 個測試同時通過）|
 | 打怪的閉環 | 🟡 | 傷害照 client 的數字記帳（ADR-006）、`0x34`／`0x30`／`0x31` 三個封包與收屍／重生計時（`--mob-respawn`），`Mob/<id>.img` 的 `maxHP`／`maxMP`／die 動畫長度都從 WZ 讀（FINDINGS §4.17）；假 client 逐欄驗證、真 `Data.wz` 實跑 45 隻怪（§4.17.5）；**尚未實機驗證**，且沒有怪物 AI |
 | 共享世界（多玩家）| 🟡 | **一張地圖一個 `FieldInstance`**（FINDINGS §4.24、ADR-012）：怪物／NPC／掉落物／在場玩家屬於**場地**而不是連線，`game/world.ts` 的 `FieldRegistry` 是唯一入口（`of(mapId)` 沒人用過就建立、之後留著）；進場的人拿到整張圖的快照（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個掉落物 `0x43`、每個已在場玩家 `0x1C`），離場送其他人 `0x1D`，走路把 client 自己的路徑包成 `0x22` 轉播（不含走路的人自己），世界只有**一個時鐘**（`GameEntryServer.startClock`：原本每條連線一個 `setInterval` → 同一隻怪在兩個人螢幕上走不同的路）。廣播範圍照 client 的池子決定（§4.24.1 的表：場地池子的封包送全場，動到某人角色紀錄的只送他）；角色 id 改成**全伺服器唯一**（`nextCharacterId`）。測試：`test/world.test.ts` 18 個（假成員）＋`serve.test.ts` 的兩個真 socket 端到端＋真 `Data.wz` 兩個 client 的實跑（§4.24.8）。**尚未實機驗證**；頻道／分流還沒做（`FieldRegistry.of` 是入口）、`0x1C` 的三個欄位語意未解（送 0）；別人的升級特效**已解並實作**（§4.27／ADR-015）|
 | 換地圖（傳送門）| 🟡 | `0x0D`（`s32 kind` ＝ -1 ＋ 傳送門名字）→ 空的 `0x19`（client 的互動閘門只有它解得開）＋ `0x16`（FINDINGS §4.25）：**目的地查當前地圖的 `portal.tm`**（封包裡沒有地圖 id），`tm = 0` 不換圖；順序是「目的地先建好 → 離開舊場地 `0x1D` → `0x16` → 新場地快照」；**登入的地圖是角色紀錄自己的 `mapId`**（`--map` 只是新角色與沒有 mapId 的紀錄的後備），所以下線在哪上線就在哪。實作 `net/loginserver.ts` 的 `handlePortal`／`enterMap`／`withMapId`＋`game/world.ts` 的 `portal`；真 `Data.wz` 兩張相鄰的圖（102020000 ↔ 102030000）實跑通過。⚠️ **落點是目的地的出生點**：`0x16` 沒有座標、`mode` 的語意未解，所以 `tn`（目的地那一側的傳送門）只用於日誌（§4.25.4、ADR-013）；沒有頻道、沒有等級／道具條件 |
@@ -100,12 +100,14 @@
     怪物與 NPC 的位置（伺服器驅動）、腳踏點與傳送門的地形圖、走一步（`0x0E` 一個元素的
     `CMovePath`）、**點傳送門換圖**（`0x0D`，ADR-035——用的是 2003 client 自己的點擊觸發，不是碰撞）、
     **表情**（`0x13`，頁面一排按鈕；送的人自己先套用，跟 2003 一樣）與**密語／找人在哪**（`0x23` 的
-    kind `0x06`／`0x05`，回覆是 `0x1A` 的 `0x0A`／`0x09`；ADR-036）。順帶修掉一個真 bug：`0x1A` 的
-    文字是 CP949，先前的 UTF-8 解碼會把韓文變成替換字元。
+    kind `0x06`／`0x05`，回覆是 `0x1A` 的 `0x0A`／`0x09`；ADR-036）、**背包**（`0x0B` 的鏡子：四
+    個 tab、worn 欄、數量／可升級次數，雙擊消耗品送 `0x18`／`0x19`；名字與圖示由
+    `/api/item/<id>` 讀同一份 `Data.wz`——ADR-037）。順帶修掉一個真 bug：`0x1A` 的文字是 CP949，
+    先前的 UTF-8 解碼會把韓文變成替換字元。
   - **實測（同日，真的瀏覽器）**：預覽 proxy 會轉發 `wss` 的 upgrade，`https://8495-<sandbox>/`
     上完成登入→空白帳號建立角色（`0x06`＋`0x05`）→選角→進地圖（헤네시스）→聊天。所以「代理可能不
     轉發 upgrade」的風險不成立，HTTP 輪詢的備案不用做。
-  - **還沒做的**：WZ 圖層與 sprite、UI 視窗（背包／商店／交易／組隊）、傷害與怪物 AI（那是 2003
+  - **還沒做的**：WZ 圖層與 sprite、UI 視窗（商店／交易／組隊；背包已做）、傷害與怪物 AI（那是 2003
     client 的工作，§4.20）、鍵盤以外的輸入、音訊。細節與「有與沒有」的清單在 `docs/CLIENT.md`。
 - 地圖繪製（Back/Obj/Tile 分層 + z-order）、角色/怪物動畫、UI（Login/CharSelect/HUD/Item/Skill）、音訊
 - 輸入：鍵盤 + 手把；韓文輸入以平台層 fallback（不重寫 IMM32）

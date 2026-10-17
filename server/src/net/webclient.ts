@@ -31,6 +31,7 @@ import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClientSession, type ClientEvent } from "../client/session.ts";
 import { encodeCp949 } from "../protocol/cp949.ts";
+import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import type { MapData } from "../game/map.ts";
 import { WebSocket, upgradeResponse } from "./websocket.ts";
@@ -66,6 +67,12 @@ export interface WebClientOptions {
   root?: string;
   /** The same provider the game server uses, for `/api/map/<id>`. */
   mapProvider?(mapId: number): MapData | undefined;
+  /**
+   * Names, prices and icons for the inventory (`game/iteminfo.ts`). Absent (or `--data off`) means
+   * `/api/item/<id>` answers 404 - the page then shows an id and no icon, which is what the wire
+   * really carried.
+   */
+  itemCatalog?: ItemCatalog;
   log?(line: string): void;
 }
 
@@ -213,6 +220,8 @@ class BrowserSession {
           return await this.whisper(String(message.name ?? ""), String(message.text ?? ""));
         case "find":
           return await this.find(String(message.name ?? ""));
+        case "use":
+          return await this.useItem(Number(message.slot ?? 0), Number(message.itemId ?? 0));
         default:
           return this.send({ t: "error", message: `unknown message ${String(message.t)}` });
       }
@@ -347,6 +356,18 @@ class BrowserSession {
     await this.require().find(target);
   }
 
+  /**
+   * One USE-tab slot. The page sends both numbers because the wire carries both (`0x18`/`0x19`):
+   * the slot is where the client clicked and the id is what it believes is there, and the server
+   * refuses a pair that disagrees. The result is not a direct answer: the `0x0B`/`0x0D` the server
+   * sends arrive as an `inventory` and a `self` event.
+   */
+  private async useItem(slot: number, itemId: number): Promise<void> {
+    if (!Number.isInteger(slot) || slot <= 0) return this.send({ t: "error", message: "use needs a USE-tab slot" });
+    if (!Number.isInteger(itemId) || itemId <= 0) return this.send({ t: "error", message: "use needs an item id" });
+    await this.require().useItem(slot, itemId);
+  }
+
   private eventJson(event: ClientEvent): unknown {
     const { kind, ...rest } = event;
     return { t: kind, ...rest };
@@ -357,6 +378,50 @@ class BrowserSession {
     this.session?.close();
     this.session = undefined;
   }
+}
+
+/**
+ * `/api/item/<id>` (the catalogue facts) and `/api/item/<id>/icon.png` (the archive's own pixels).
+ *
+ * These are **not** wire data: `0x0B` carries an id and a count, and everything a person reads about
+ * an item - its name, its price, its icon - comes from `Data.wz`, which is what the 2003 client does
+ * with the archive it loaded. Keeping the lookup on the server is also what lets the page be a
+ * static file: the browser never parses WZ.
+ *
+ * Icons are cached by the browser for an hour (`immutable` would lie - `--data` can change) and by
+ * the catalogue forever.
+ */
+function serveItem(catalog: ItemCatalog | undefined, rest: string, response: ServerResponse): void {
+  const match = /^(\d{1,8})(\/icon\.png)?$/.exec(rest);
+  if (match === null) {
+    sendJson(response, 404, { error: `"${rest}" is not an item id` });
+    return;
+  }
+  const id = Number(match[1]);
+  if (catalog === undefined) {
+    sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
+    return;
+  }
+  if (match[2] !== undefined) {
+    const png = catalog.icon(id);
+    if (png === undefined) {
+      sendJson(response, 404, { error: `item ${id} has no icon in Data.wz` });
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "image/png",
+      "content-length": png.length,
+      "cache-control": "public, max-age=3600",
+    });
+    response.end(Buffer.from(png));
+    return;
+  }
+  const info = catalog.info(id);
+  if (info === undefined) {
+    sendJson(response, 404, { error: `Data.wz has no item ${id}` });
+    return;
+  }
+  sendJson(response, 200, info);
 }
 
 /** Serves one file out of `root`, or answers 404. */
@@ -415,6 +480,10 @@ export function startWebClient(options: WebClientOptions): Promise<WebClientServ
         return;
       }
       sendJson(response, 200, mapJson(map));
+      return;
+    }
+    if (url.pathname.startsWith("/api/item/")) {
+      serveItem(options.itemCatalog, url.pathname.slice("/api/item/".length), response);
       return;
     }
     if (url.pathname === "/healthz") {

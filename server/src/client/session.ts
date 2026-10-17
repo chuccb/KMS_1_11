@@ -36,7 +36,9 @@ import { encodeSessionPacket, SessionDeframer } from "../protocol/session.ts";
 import { encodeClientPacket } from "../protocol/login.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import { LOGIN_OPCODE, LOGIN_RESULT, NAME_CHECK_RESULT, type WorldEntry } from "../protocol/replies.ts";
-import { readCharacterData, type CharacterData } from "../protocol/chardata.ts";
+import { readCharacterData, type CharacterData, type CharacterItems } from "../protocol/chardata.ts";
+import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
+import type { ItemSlot } from "../protocol/itemslot.ts";
 import {
   FIELD_OPCODE,
   encodeClientChat,
@@ -44,6 +46,7 @@ import {
   encodeClientInteract,
   encodeClientUserMove,
   encodeClientUserRequest,
+  encodeClientUseItem,
   INTERACT_KIND_CURSOR,
   readSetField,
   readUserChat,
@@ -89,6 +92,77 @@ export interface SelfView {
   face: number;
   hair: number;
   avatarItems: number[];
+}
+
+/**
+ * One item, as the wire describes it.
+ *
+ * No archive lookup happens here: the id, the count and (for an equip) its upgrade slots are what
+ * `0x0B`/`CharacterData` carried. A name or an icon is not on the wire at all - the page asks
+ * `/api/item/<id>` for those, which is exactly what the 2003 client does with its own WZ archive.
+ */
+export interface ItemView {
+  /** 1..capacity for a tab slot; negative for one of the worn slots (`-1`..`-14`). */
+  slot: number;
+  itemId: number;
+  /** `u16 quantity` of a non-equip. */
+  quantity?: number;
+  /** `u8 ruc` of an equip: upgrades still available. */
+  ruc?: number;
+}
+
+/** One of the four tabs the client keeps. */
+export interface InventoryTabView {
+  /** 1 = equip, 2 = consume (USE), 3 = etc, 4 = cash. */
+  tab: number;
+  /** `u8 capacity` from `CharacterData` - the client's array size minus one. */
+  capacity: number;
+  items: ItemView[];
+}
+
+/** The whole inventory, as a view draws it. */
+export interface InventoryView {
+  /** Slots 1..14 of the worn equipment. */
+  worn: ItemView[];
+  /** Slots 1..14 of the worn cash equipment. */
+  wornCash: ItemView[];
+  tabs: InventoryTabView[];
+}
+
+/** One item slot as a view: equip and non-equip differ only in which number matters. */
+function itemViewOf(slot: number, item: ItemSlot): ItemView {
+  return item.kind === "equip"
+    ? { slot, itemId: item.itemId, ruc: item.ruc }
+    : { slot, itemId: item.itemId, quantity: item.quantity };
+}
+
+/** One group of slots, in slot order - the page draws cells by index and reads `slot` for the title. */
+function slotsOf(slots: Map<number, ItemSlot>): ItemView[] {
+  const out: ItemView[] = [];
+  for (const [slot, item] of slots) out.push(itemViewOf(slot, item));
+  return out.sort((left, right) => left.slot - right.slot);
+}
+
+/**
+ * The inventory a `CharacterData` block describes.
+ *
+ * `items` is optional in the record (a character list entry may leave it out) and a server without an
+ * item model sends an empty one - both become four empty tabs, because the page's job is to draw what
+ * is there, not to guess a capacity.
+ */
+export function inventoryViewOf(items: CharacterItems | undefined): InventoryView {
+  if (items === undefined) {
+    return { worn: [], wornCash: [], tabs: [1, 2, 3, 4].map((tab) => ({ tab, capacity: 0, items: [] })) };
+  }
+  return {
+    worn: slotsOf(items.worn),
+    wornCash: slotsOf(items.wornCash),
+    tabs: items.inventories.map((inventory, index) => ({
+      tab: index + 1,
+      capacity: inventory.capacity,
+      items: slotsOf(inventory.items),
+    })),
+  };
 }
 
 /** Another player in the field. */
@@ -138,6 +212,7 @@ export type ClientEvent =
   | { kind: "user-move"; characterId: number; x: number; y: number; action: number; foothold: number }
   | { kind: "user-emotion"; characterId: number; emotion: number }
   | { kind: "chat"; name: string; text: string }
+  | { kind: "inventory"; inventory: InventoryView }
   | { kind: "whisper-answer"; name: string; delivered: boolean }
   | { kind: "find-answer"; name: string; mapId: number }
   | { kind: "level-up"; characterId: number }
@@ -576,6 +651,64 @@ export class ClientSession {
   }
 
   /**
+   * Uses a USE-tab slot: `0x18` for the 200-family (potions), `0x19` for 203 (a town scroll).
+   *
+   * The split is the client's own: `sub_462DC0` (a double-click in the inventory window) picks the
+   * sender by `itemId / 10000` - 200/201/202 -> `sub_55B2C0` `0x18`, 203 -> `sub_55B4B0` `0x19`
+   * (FINDINGS 4.34). There is no result byte on either: the answer is the `0x0B` that takes the item
+   * out of the slot and the `0x0D` that moves the vitals, or an empty `0x0B` when the server refused.
+   *
+   * `itemId` is sent because the wire sends it: the server checks the slot really holds it.
+   */
+  async useItem(slot: number, itemId: number): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("useItem() needs a session in a field");
+    const family = Math.floor(itemId / 10000);
+    if (family < 200 || family > 203) {
+      throw new Error(`useItem(): ${itemId} is not a USE-tab consumable (200..203)`);
+    }
+    const opcode = family === 203 ? 0x19 : 0x18;
+    await link.send(encodeClientUseItem({ slot, itemId }, opcode));
+  }
+
+  /**
+   * Applies one `0x0B` entry to the character record the view reads (`this.latest.items`).
+   *
+   * The record is the same shape the server sent in `0x16`, so there is no second model to keep in
+   * step: an entry is written where the packet says, and the next snapshot is just a re-read of it.
+   * A negative slot is one of the worn groups (`-1` -> slot 1). Which of the two groups a negative
+   * slot means is not located in the 2003 client, and nothing this server sends currently uses one
+   * (wearing is `0x17`, which the bridge never sends), so they land in `worn`.
+   */
+  private applyInventoryChange(change: InventoryChange): void {
+    const items = this.latest?.items;
+    if (items === undefined) return;
+    const group = change.slot < 0 ? items.worn : items.inventories[change.inventory - 1]?.items;
+    if (group === undefined) return;
+    const key = (slot: number): number => (slot < 0 ? -slot : slot);
+    if (change.op === INVENTORY_OP.put) {
+      group.set(key(change.slot), change.item);
+      return;
+    }
+    if (change.op === INVENTORY_OP.clear) {
+      group.delete(key(change.slot));
+      return;
+    }
+    if (change.op === INVENTORY_OP.swap) {
+      const left = key(change.slot);
+      const right = key(change.slot2);
+      const first = group.get(left);
+      const second = group.get(right);
+      if (second === undefined) group.delete(left);
+      else group.set(left, second);
+      if (first === undefined) group.delete(right);
+      else group.set(right, first);
+    }
+    // `op == 1` (the obfuscation key) has no visible effect: it re-keys the client's own copy of the
+    // slot, which is client state this session does not keep.
+  }
+
+  /**
    * Walks to `(x, y)`. One `CMovePath` element: the server trusts the first element's position
    * (`FieldInstance.reportMove`), and the browser view does not animate, so a one-leg path is the
    * honest minimum. `action` 0 = stand; the real client's stance table is client-side data.
@@ -644,6 +777,16 @@ export class ClientSession {
             mobs: [],
             npcs: [],
           });
+          // The inventory travels inside the same record (`CharacterData.flags` bit 0x02), so it is
+          // a second event rather than a field of the first: a `0x0B` updates it without a field.
+          this.emit({ kind: "inventory", inventory: inventoryViewOf(field.character.items) });
+          return;
+        }
+        case INVENTORY_OPCODE: {
+          const update = readInventoryChange(new PacketReader(plain, 1));
+          for (const change of update.changes) this.applyInventoryChange(change);
+          this.log(`inventory: ${update.changes.length} change(s), timer ${update.result}`);
+          this.emit({ kind: "inventory", inventory: inventoryViewOf(this.latest?.items) });
           return;
         }
         case FIELD_OPCODE.requestRelease: {
@@ -828,6 +971,7 @@ export const CLIENT_EVENT_KINDS = [
   "user-move",
   "user-emotion",
   "chat",
+  "inventory",
   "whisper-answer",
   "find-answer",
   "level-up",

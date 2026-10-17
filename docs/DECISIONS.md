@@ -1700,7 +1700,61 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
   （`/api/map/<id>`）就把名字附在後面——**名字是頁面補的，不在線路上**，抓不到就只印 id。
 - 錯誤訊息在遊戲中也看得見了（之前只寫進隱藏的登入面板）。
 - 測試：`webclient.test.ts` 7 則（新的一則走完表情、壞表情、韓文密語、找不到人、兩種 `/f`、韓文
-  場地聊天），總數 **483**。
+  場地聊天），總數 **483**（ADR-037 再加一則，現在是 484）。
 - 實跑（乾淨的臨時伺服器，兩邊都建立新角色才同圖）：`emotion echo 1 6｜seen by alt 1 6`、
   `whisper FaceB true｜alt heard FaceA 안녕`、`find FaceB map 1000000`、`find Nobody -1`、
   `emotion 99` → `emotion 99 is not a face (the client's own range is 0..8)`。
+
+---
+
+## ADR-037：背包是 `0x0B` 的鏡子，名字與圖示來自伺服器的 `Data.wz`
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（實作在 `server/src/game/iteminfo.ts`、
+`server/src/client/session.ts`、`server/src/net/webclient.ts`、`client/main.js`、
+`server/test/webclient.test.ts`）。
+
+**決策**：頁面多一個背包面板（`I` 鍵或右上「背包」），資料**只有一個來源**：伺服器送來的
+`0x0B`（`protocol/inventory.ts`）對 `CharacterData` 那份物品表的每一次修改。面板把四個 tab
+（裝備／消耗／其他／現金）、worn 欄、數量與可升級次數畫出來；**雙擊消耗 tab 的 200–203 家族**
+送 c2s `0x18`（203 送 `0x19`）。名字、價格、描述與圖示**不在線路上**——它們是
+`GET /api/item/<id>` 與 `GET /api/item/<id>/icon.png` 從同一份 `Data.wz` 讀出來的。
+
+**理由**：
+
+1. **線路上真的只有 id 與數量。** `GW_ItemSlot` 帶 `u32 itemId`、`u16 quantity`（裝備是 15 個
+   屬性與 `ruc`），名字與圖示從來不是封包的一部分——2003 client 是拿 id 去查**自己載入的**
+   `Data.wz`（`sub_47CE40` 讀 `info/iconRaw`）。頁面沒有 WZ，所以查詢放在伺服器：**同一個 id
+   查同一份檔案**，等於同一個行為，只是查的人換了。
+2. **面板是鏡子，不是第二份模型。** `0x0B` 的 `put`/`swap`/`clear` 直接寫回 `session.latest`
+   那份 `CharacterItems`（跟 `0x16` 送來的是同一個形狀），所以「伺服器說背包長什麼樣」與
+   「頁面畫什麼」不可能分岔。拒絕的 `0x0B`（空的一包）就只是「沒有任何變化」，畫面不動——這
+   正是原 client 的語意（ADR 既有的 `0x0B` 條目）。
+3. **雙擊才是用道具。** `sub_462DC0`（背包視窗的雙擊）與 `sub_512570`（快捷鍵）都依
+   `itemId / 10000` 分流：200／201／202 → `0x18`，203 → `0x19`，204（卷軸）→ `0x1A`。頁面做
+   前兩者，因為第三種需要「點哪一件裝備」這個目標，而面板還沒有拖放（`0x17` 也還沒接）。
+4. **圖示是 `iconRaw` 優先。** `info/icon` 是 27×30 的框（含邊），`iconRaw` 是 27×27 的圖；
+   `sub_47CE40` 畫的是後者。`info.ts` 因此先找 `iconRaw` 再退回 `icon`。
+
+**被否決的選項**：
+
+- **把整個 `Data.wz` 傳給瀏覽器**（或用 `analysis/item_catalog.json` 打包成靜態檔）：87 MB 的
+  二進位檔、解析器要跟著搬進頁面，而且會變成**第二個** WZ 讀取器。`/api/item/<id>` 一行程式就
+  夠，快取在伺服器端（`itemCatalogOf` 的 root/location/icon 三層）。
+- **在頁面上用 id 猜名字**（例如「2000000 = 紅水」）：那是猜的。查不到就顯示 id，這是誠實的
+  「這台伺服器沒有 `Data.wz`」（`--data off` 時 `/api/item` 一律 404）。
+- **讓頁面自己記背包、不套 `0x0B`**：那樣一次拒絕、一次別人的交易或一次撿拾就會讓畫面說謊。
+- **把 `0x0B` 的 `op 1`（混淆 key）也做出來**：那是 client 自己那份拷貝的 key，頁面沒有那個
+  概念；跳過它不影響任何看得見的東西。
+
+**後果**：
+
+- JSON：多一種出（`inventory { worn, wornCash, tabs[] }`，進地圖的 `0x16` 之後立刻一則，之後
+  每個 `0x0B` 一則）與一種進（`use { slot, itemId }`）。
+- 新的 HTTP 端點：`/api/item/<id>`（`{id,name?,price?,desc?}`）與 `/api/item/<id>/icon.png`
+  （`image/png`，`cache-control: max-age=3600`）；兩者在沒有 `--data` 時都是 404。
+- `server/src/game/iteminfo.ts`：`ItemSource`（窄介面）＋`ItemCatalog`（`info`／`icon`），
+  位置規則沿用 `wz/paths.ts` 的 `itemImagePath` 家族；裝備掃 `Character/<Category>/<id>.img`。
+- 測試：`webclient.test.ts` 8 則（新的一則：進圖的 `inventory` 事件、`/api/item` 的三種答案、
+  一次真的雙擊把 3 瓶喝成 2 瓶並讓 HP 20→50、兩個頁面端錯誤），總數 **484**。
+- 已知限制：worn 欄的顏色與圖示沒有分類（`ItemView` 只帶 `ruc`）；負 slot 屬於哪一組
+  （worn／wornCash）在 2003 client 裡沒有定位，這台伺服器目前也不送（穿戴走 `0x17`，未接）。

@@ -12,6 +12,7 @@
     <header id="bar">
       <strong>KMS 1.11</strong>
       <span id="where">未連線</span>
+      <button id="inv-toggle" type="button">背包</button>
       <button id="log-toggle" type="button">日誌</button>
     </header>
 
@@ -38,6 +39,16 @@
       </div>
       <p id="character-status" class="status"></p>
     </section>
+
+    <aside id="inventory" class="hidden">
+      <header>
+        <div id="inv-tabs"></div>
+        <button id="inv-close" type="button" title="關閉背包（I）">×</button>
+      </header>
+      <div id="inv-worn" class="hidden"></div>
+      <div id="inv-grid"></div>
+      <p id="inv-info"></p>
+    </aside>
 
     <aside id="log" class="hidden">
       <h3>事件</h3>

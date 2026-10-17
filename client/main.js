@@ -45,6 +45,13 @@ const ui = {
   log: /** @type {HTMLElement} */ (document.getElementById("log")),
   logLines: /** @type {HTMLElement} */ (document.getElementById("log-lines")),
   logToggle: /** @type {HTMLButtonElement} */ (document.getElementById("log-toggle")),
+  inventory: /** @type {HTMLElement} */ (document.getElementById("inventory")),
+  invToggle: /** @type {HTMLButtonElement} */ (document.getElementById("inv-toggle")),
+  invClose: /** @type {HTMLButtonElement} */ (document.getElementById("inv-close")),
+  invTabs: /** @type {HTMLElement} */ (document.getElementById("inv-tabs")),
+  invWorn: /** @type {HTMLElement} */ (document.getElementById("inv-worn")),
+  invGrid: /** @type {HTMLElement} */ (document.getElementById("inv-grid")),
+  invInfo: /** @type {HTMLElement} */ (document.getElementById("inv-info")),
 };
 
 /** @type {WebSocket | undefined} */
@@ -76,6 +83,33 @@ let selfEmotion;
  * what it typed.
  */
 let pendingWhisper;
+
+// ---------------------------------------------------------------- inventory
+
+/** The inventory the server last described (`0x16` and every `0x0B` since); null before a map. */
+let inventory;
+/** The tab the panel shows: 1 equip, 2 use, 3 etc, 4 cash (`0x0B`'s `u8 inventory`). */
+let inventoryTab = 2;
+/** `itemId -> { id, name, price, desc }` from `/api/item/<id>`; absent until the fetch lands. */
+const itemInfo = new Map();
+/** Ids a lookup is already in flight for, so a re-render does not ask twice. */
+const itemInfoPending = new Set();
+/** Ids the archive has no icon for - the page stops asking. */
+const iconMissing = new Set();
+
+/** The four tabs, named the way a player says them; the numbers are the wire's. */
+const INVENTORY_TABS = [
+  { tab: 1, label: "裝備" },
+  { tab: 2, label: "消耗" },
+  { tab: 3, label: "其他" },
+  { tab: 4, label: "現金" },
+];
+
+/** A tab slot, or a worn slot when `slot` is negative (`-1` is the first of the group). */
+function slotName(slot) {
+  return slot < 0 ? `穿戴 ${-slot}` : String(slot);
+}
+
 /**
  * The nine faces, in the client's own order (`EMOTION_NAMES` in `server/src/protocol/field.ts`,
  * read out of `Character/Face/*` and the drawing code's table). 1..7 are what the 2003 client's
@@ -218,6 +252,11 @@ function handle(message) {
     case "self":
       selfView = message.self;
       updateHud();
+      return;
+
+    case "inventory":
+      inventory = message.inventory;
+      renderInventory();
       return;
 
     case "user-enter":
@@ -689,6 +728,134 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] ?? character);
 }
 
+// ---------------------------------------------------------------- inventory panel
+
+/**
+ * Draws the panel from `inventory`.
+ *
+ * Everything but the numbers on the cells is *not* from the wire: `0x0B` carries an id, a count and
+ * (for an equip) its upgrade slots, so the name and the icon come from `/api/item/<id>`, which reads
+ * the same `Data.wz` the 2003 client read. A fetch that fails leaves the id showing - the panel never
+ * invents a name.
+ */
+function renderInventory() {
+  if (inventory === undefined || inventory === null) {
+    ui.invGrid.replaceChildren();
+    ui.invWorn.replaceChildren();
+    ui.invInfo.textContent = "尚未進入地圖。";
+    return;
+  }
+  ui.invTabs.replaceChildren(
+    ...INVENTORY_TABS.map(({ tab, label }) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      if (tab === inventoryTab) button.classList.add("active");
+      button.addEventListener("click", () => {
+        inventoryTab = tab;
+        renderInventory();
+      });
+      return button;
+    }),
+  );
+
+  // The worn group: `worn` is the 14 equipment slots, `wornCash` the 14 cash ones. Both are drawn
+  // above the grid, the way the 2003 window has them; a tab with no such slots keeps the row hidden.
+  const worn = inventoryTab === 4 ? inventory.wornCash : inventory.worn;
+  ui.invWorn.replaceChildren(...worn.map((item) => inventoryCell(item, true)));
+  ui.invWorn.classList.toggle("hidden", worn.length === 0);
+
+  const active = inventory.tabs.find((entry) => entry.tab === inventoryTab);
+  const cells = [];
+  for (let slot = 1; slot <= (active?.capacity ?? 0); slot += 1) {
+    const item = active?.items.find((entry) => entry.slot === slot);
+    cells.push(item === undefined ? inventoryCell(undefined, false) : inventoryCell(item, false));
+  }
+  ui.invGrid.replaceChildren(...cells);
+  if (cells.length === 0) ui.invInfo.textContent = "這個伺服器沒有回報背包內容。";
+}
+
+/** One square. `item` undefined is an empty slot; a worn square never sends `use`. */
+function inventoryCell(item, worn) {
+  const cell = document.createElement("div");
+  cell.className = "inv-cell";
+  if (item === undefined) return cell;
+  // 200..203 are the four families `0x18`/`0x19` carry (204 is a scroll, `0x1A`, which this page
+  // has no target slot for).
+  const family = Math.floor(item.itemId / 10000);
+  const usable = !worn && inventoryTab === 2 && family >= 200 && family <= 203;
+  cell.classList.add("filled");
+  if (usable) cell.classList.add("usable");
+  cell.title = `${slotName(item.slot)} · ${item.itemId}`;
+  cell.dataset.itemId = String(item.itemId);
+  cell.dataset.slot = String(item.slot);
+
+  if (!iconMissing.has(item.itemId)) {
+    const image = document.createElement("img");
+    image.src = `/api/item/${item.itemId}/icon.png`;
+    image.alt = "";
+    image.addEventListener("error", () => {
+      iconMissing.add(item.itemId);
+      image.remove();
+    });
+    cell.append(image);
+  }
+  if (item.quantity !== undefined && item.quantity > 1) {
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = String(item.quantity);
+    cell.append(count);
+  }
+  if (item.ruc !== undefined) {
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = `${item.ruc}`;
+    cell.append(count);
+  }
+
+  // A double-click uses a USE-tab item, which is what `sub_462DC0` does with the same click.
+  if (usable) {
+    cell.addEventListener("dblclick", () => send({ t: "use", slot: item.slot, itemId: item.itemId }));
+  }
+  cell.addEventListener("click", () => showItemInfo(item));
+  describeItem(item.itemId);
+  return cell;
+}
+
+/** Puts the last-clicked item in the info line, if its facts have arrived. */
+function showItemInfo(item) {
+  const facts = itemInfo.get(item.itemId);
+  const lines = [`${slotName(item.slot)} · ${item.itemId}${facts?.name ? ` · ${facts.name}` : ""}`];
+  if (item.quantity !== undefined) lines.push(`數量 ${item.quantity}`);
+  if (item.ruc !== undefined) lines.push(`可升級次數 ${item.ruc}`);
+  if (facts?.desc) lines.push(facts.desc);
+  else if (facts !== undefined && facts.name === undefined) lines.push("（Data.wz 查不到這個道具）");
+  ui.invInfo.textContent = lines.join("\n");
+}
+
+/** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
+function describeItem(itemId) {
+  if (itemInfo.has(itemId) || itemInfoPending.has(itemId)) return;
+  itemInfoPending.add(itemId);
+  fetch(`/api/item/${itemId}`)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((facts) => {
+      itemInfo.set(itemId, facts);
+      itemInfoPending.delete(itemId);
+      renderInventory();
+    })
+    .catch(() => {
+      itemInfo.set(itemId, null);
+      itemInfoPending.delete(itemId);
+    });
+}
+
+function toggleInventory(force) {
+  const show = force ?? ui.inventory.classList.contains("hidden");
+  ui.inventory.classList.toggle("hidden", !show);
+  if (show) renderInventory();
+}
+
 function showPanel(panel) {
   for (const element of [ui.connect, ui.worlds, ui.characters]) element.classList.add("hidden");
   panel.classList.remove("hidden");
@@ -717,6 +884,8 @@ ui.user.addEventListener("keydown", (event) => {
   if (event.key === "Enter") ui.pass.focus();
 });
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
+ui.invToggle.addEventListener("click", () => toggleInventory());
+ui.invClose.addEventListener("click", () => toggleInventory(false));
 
 // The 2003 client sends these from F1..F7 (`sub_511E20` case 10); a browser cannot take those keys
 // (F1 is help, F5 reloads), so the page offers the same seven faces as buttons.
@@ -742,6 +911,13 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     ui.say.focus();
+    return;
+  }
+  // `I` opens the inventory. The 2003 client opens it from its own shortcut bar (`I` in the default
+  // key map); there is no packet involved - the panel is drawn from state this page already has.
+  if (event.key.toLowerCase() === "i") {
+    event.preventDefault();
+    toggleInventory();
     return;
   }
   // A key pressed while the login fields are focused belongs to them, not to the character.

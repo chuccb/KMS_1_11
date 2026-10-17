@@ -20,6 +20,7 @@ import { OnlineAccounts } from "../src/net/online.ts";
 import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
+import type { ItemCatalog } from "../src/game/iteminfo.ts";
 
 const STUB_MAP: MapData = {
   id: 1000000,
@@ -132,14 +133,42 @@ class Browser {
   }
 }
 
+/**
+ * Two items and a one-pixel PNG, standing in for `Data.wz`.
+ *
+ * The real lookup (`game/iteminfo.ts`) is covered by its own probe against the archive; what these
+ * tests pin is the *bridge*: that `/api/item/<id>` answers what the catalogue says, that a missing
+ * icon is a 404 rather than an empty image, and that `use` reaches `0x18` and comes back as an
+ * inventory event.
+ */
+const STUB_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const STUB_CATALOG: ItemCatalog = {
+  info: (itemId) =>
+    itemId === 2000000
+      ? { id: itemId, name: "빨간 포션", price: 25, desc: "HP를 약 50 회복시킨다." }
+      : itemId === 2000001
+        ? { id: itemId, name: "주황 포션", price: 80 }
+        : undefined,
+  icon: (itemId) => (itemId === 2000000 ? STUB_PNG : undefined),
+};
+
 interface World {
   loginPort: number;
   gamePort: number;
   webPort: number;
 }
 
+/** What a test world may change about its characters; everything else is the shared fixture. */
+interface WorldOptions {
+  /**
+   * Puts one 빨간 포션 at USE slot 1 and drops `admin`'s HP to 20 of 50, with the archive's own
+   * `spec/hp = 50` behind it - the state a double-click on the potion is supposed to change.
+   */
+  damaged?: boolean;
+}
+
 /** A world with two accounts, one character each, and a browser bridge in front of it. */
-async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<World> {
+async function startWorld(t: { after(fn: () => Promise<void>): void }, options: WorldOptions = {}): Promise<World> {
   const accounts = new Map<string, AccountRecord>([
     ["admin", { password: "admin", characters: [] }],
     ["alt", { password: "alt", characters: [] }],
@@ -159,7 +188,12 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<
     stats.mp = 30;
     stats.maxMp = 30;
     stats.mapId = 1000000;
-    accounts.get(user)!.characters.push(characterDataOf(stats, startingCharacterItems()));
+    const items = startingCharacterItems();
+    if (options.damaged === true && user === "admin") {
+      stats.hp = 20;
+      items.inventories[1]!.items.set(1, { kind: "nonequip", itemId: 2000000, quantity: 3, cash: null });
+    }
+    accounts.get(user)!.characters.push(characterDataOf(stats, items));
   }
 
   const handoffs = new HandoffRegistry();
@@ -172,6 +206,8 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<
     mapId: 1000000,
     mapProvider,
     handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+    // The archive's `Item/Consume/0200.img/02000000/spec` in one line: a flat 50 HP.
+    ...(options.damaged === true ? { consumeSpec: () => ({ hp: 50, unapplied: [] }) } : {}),
   });
   const gameInfo = await game.listen(0);
   const login = new LoginServer({
@@ -190,6 +226,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<
     gamePort: gameInfo.port,
     gameHost: "127.0.0.1",
     mapProvider,
+    itemCatalog: STUB_CATALOG,
   });
   t.after(async () => {
     await web.close();
@@ -272,6 +309,59 @@ test("a browser logs in, enters the field, talks and walks", { timeout: 20000 },
   assert.equal(move.characterId, self.characterId);
   assert.equal(move.x, 140);
   assert.equal(move.y, 250);
+
+  browser.close();
+});
+
+test("the inventory a 0x0B describes, and the archive facts a slot needs", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t, { damaged: true });
+  const { browser } = await enterGame(world.webPort, "admin", "admin");
+
+  // The `0x16` snapshot carries the items (`CharacterData` bit 0x02) and the bridge sends them as
+  // their own event, because a `0x0B` updates them without a new field.
+  const entered = await browser.nextKind("inventory");
+  type Slot = { slot: number; itemId: number; quantity?: number; ruc?: number };
+  const view = entered.inventory as { worn: Slot[]; wornCash: Slot[]; tabs: { tab: number; capacity: number; items: Slot[] }[] };
+  assert.deepEqual(
+    view.tabs.map((tab) => tab.tab),
+    [1, 2, 3, 4],
+  );
+  assert.equal(view.tabs[0]!.capacity, 24);
+  assert.deepEqual(view.tabs[1]!.items, [{ slot: 1, itemId: 2000000, quantity: 3 }]);
+  assert.deepEqual(view.worn, []);
+
+  // The name, the price and the description are not on the wire: they are the archive's, read by the
+  // server from the same `Data.wz` the 2003 client loaded.
+  const item = await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000000`);
+  assert.equal(item.status, 200);
+  assert.deepEqual(await item.json(), { id: 2000000, name: "빨간 포션", price: 25, desc: "HP를 약 50 회복시킨다." });
+
+  const icon = await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000000/icon.png`);
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get("content-type"), "image/png");
+  assert.deepEqual(new Uint8Array(await icon.arrayBuffer()), STUB_PNG);
+
+  // No canvas is a 404, so the page draws the slot without an icon instead of re-requesting a broken
+  // image; an id the archive does not carry and a non-id are both "nothing here".
+  assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000001/icon.png`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/item/999999`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/item/abc`)).status, 404);
+
+  // A double-click on the USE tab: `0x18 slot 1 item 2000000`. The answer is not a "use" reply - it
+  // is the `0x0B` that takes one out of the slot and the `0x0D` that moves the vitals.
+  browser.send({ t: "use", slot: 1, itemId: 2000000 });
+  const drank = (await browser.nextKind("inventory")).inventory as { tabs: { tab: number; items: Slot[] }[] };
+  assert.deepEqual(drank.tabs[1]!.items, [{ slot: 1, itemId: 2000000, quantity: 2 }]);
+  const healed = (await browser.nextKind("self")).self as { hp: number; maxHp: number };
+  assert.equal(healed.hp, 50);
+  assert.equal(healed.maxHp, 50);
+
+  // A slot the character does not have, and a pair the client made up, are page errors - the server
+  // is never asked, because there is nothing it could answer that the page would draw.
+  browser.send({ t: "use", slot: 0, itemId: 2000000 });
+  assert.match(String((await browser.nextKind("error")).message), /use needs a USE-tab slot/);
+  browser.send({ t: "use", slot: 1, itemId: 0 });
+  assert.match(String((await browser.nextKind("error")).message), /use needs an item id/);
 
   browser.close();
 });
