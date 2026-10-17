@@ -205,6 +205,10 @@ client 用 `0x2C` 回報的怪物動作（FINDINGS §4.20）。`0x0D` 解出之�
 
 ## ADR-009：經驗值／升級用 client 自己的表；升級的成長量先不送（缺口要看得見）
 
+**2026-10-17 更正／部分取代（ADR-047）**：下方第 3 點對 `sub_4C7450` 的解讀錯誤；
+它是 HP／MP 成長，原表已重新提取並實作。下方保留歷史決策，不再代表目前 HP／MP 行為。
+AP／SP 自然發放仍未定位，沒有因此套用其他版本數字。詳見 `STAT_GROWTH.md`。
+
 **日期**：2026-10-16 ｜ **狀態**：已定案（可再評估）
 
 **決策**：`0x0D`（能力值差異包）解出之後（FINDINGS §4.21），伺服器驅動「殺怪 → 經驗值 → 升級」這一條迴圈，
@@ -2035,3 +2039,26 @@ canvas rectangle／固定怪物y−20終點不是原CShape2D／485B80交點；�
 **驗證界線**：依使用者要求，未執行unit/socket/VM/browser/probe/check/typecheck。
 只靜態閱讀原始碼／PE與解析WZ；新增golden及選彈／WZ回歸來源未執行。沒有啟動服務或改動任何存檔。
 完整證據、例值、操作及剩餘差異見`BASIC_ATTACKS.md`。
+
+
+## ADR-047：更正 HP／MP 成長誤讀，原表與被動接入自然升級／AP（2026-10-17）
+
+**來源**：完整重讀 4C7450／4C71C0、PE VA 005BB344 十行六欄、45FCC0 flag0x20 的
+CharacterData+382 ZMap、4C5420 BasicStat INT、技能 loader +92/+96 與真 Skill/100.img／200.img。
+舊 ADR-009 將其視為傷害／熟練度是不正確的，不以新增註解掩蓋舊結論。
+
+**決定**：共用 growth.ts 重建自然／AP 表、INT trunc、HP 30000／MP 10000 cap、
+已學技能 x／y。戰士被動 level10 採 x30/y20，不照 hs 的40/30。
+每次跨級成長、活人回滿、死人不復活；HP／MP AP 成功只增上限扣1點，不免費補血。
+六種 AP 經 0x1B→0x0D ack→snapshot→保存／重連；沿用原 UI 與500ms pending。
+殺怪有效經驗立即保存，包含延後射擊；map32 語意補註，格式不變。
+
+**界線**：不用未找到來源的自然 AP/SP 數量；不引進5/3預設。BasicStat完整裝備需求依賴鏈、
+buff／Detail、技能學習／SP操作與轉職仍缺。伺服器權威接線／連續跨級／RNG種子不是原server程式。
+
+**預覽**：使用者明確選擇全新隔離檔，generated/preview-growth-20261017.json；preview帳號額外20 AP
+是明示體驗配置，不是原版創角或升級規則；另有demo空帳號。無舊存檔冒充或覆寫。
+
+**驗證**：僅原始碼／PE／WZ閱讀與靜態審閱；新增／更新回歸來源未執行。
+依使用者要求不跑 test/check/typecheck/browser/VM/probe，只啟動0.0.0.0預覽服務供其自行操作。
+完整原表與已知差異見 `STAT_GROWTH.md`。

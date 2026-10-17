@@ -3,7 +3,7 @@ import {
   type BasicAttackProvider,
 } from "../game/basicattack.ts";
 import type { SpriteFrame } from "../game/sprites.ts";
-import type { BaseAbility } from "../protocol/ability.ts";
+import { ABILITY_FIELDS, type Ability } from "../protocol/ability.ts";
 import {
   creationCatalogOf,
   validateCreationLook,
@@ -543,9 +543,9 @@ class BrowserSession {
           return await this.usePortal(String(message.name ?? ""));
         case "ability-up": {
           const field = String(message.field);
-          if (!["str", "dex", "int", "luk"].includes(field))
-            throw new Error("unsupported base ability");
-          return await this.require().increaseAbility(field as BaseAbility);
+          if (!ABILITY_FIELDS.includes(field as Ability))
+            throw new Error("unsupported ability");
+          return await this.require().increaseAbility(field as Ability);
         }
         case "emotion":
           return await this.emotion(Number(message.value ?? 0));

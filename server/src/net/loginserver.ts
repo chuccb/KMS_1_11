@@ -11,6 +11,7 @@ import {
   readAbilityRequest,
 } from "../protocol/ability.ts";
 import { spendAbility } from "../game/ability.ts";
+import { characterGrowthContext, type GrowthSkillProvider } from "../game/growth.ts";
 import { foldByteName } from "../protocol/cp949.ts";
 import {
   validCreationDice,
@@ -924,6 +925,8 @@ export interface GameEntryServerOptions {
   dropItemAllowed?: (itemId: number) => boolean;
   /** WZ basic action/speed facts; absent data refuses shots rather than inventing them. */
   basicAttack?: BasicAttackProvider;
+  /** Actual learned HP/MP passive x/y values from Skill/100.img and Skill/200.img. */
+  growthSkill?: GrowthSkillProvider;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -953,13 +956,12 @@ export interface GameEntryServerOptions {
   /** Heartbeat interval for a quiet field session; see `LoginServerOptions.pingMs`. */
   pingMs?: number;
   /**
-   * Called when a **session ends** - the one point where a character's play leaves this process.
+   * Called after durable gameplay mutations and when a session ends.
    *
-   * Everything a player changes in a field (exp, level, items, mesos, `mapId` from a portal) is
-   * written into the `CharacterData` the login server handed over, so "persist now" is the whole
-   * save: there is no second copy to reconcile. Saving only here is a choice: a server that is killed
-   * mid-session loses that session, and a save per packet would rewrite the file for every step of a
-   * walk.
+   * The CharacterData handed over by login is the account table's authoritative record: no second
+   * copy to reconcile. Successful AP allocations, inventory/wallet operations and kill EXP/maxima
+   * persist immediately (including delayed projectile kills). Ordinary movement does not rewrite
+   * the save for every step; leaving still captures the latest map/session state.
    */
   persist?(): void;
   log?(line: string): void;
@@ -1531,7 +1533,11 @@ export class GameEntryServer {
         last = this.abilityTimes.get(session);
       if (last === undefined || now - last >= 500) {
         this.abilityTimes.set(session, now);
-        diff = spendAbility(session.character.stats, mask);
+        diff = spendAbility(
+          session.character.stats,
+          mask,
+          characterGrowthContext(session.character, this.options.growthSkill),
+        );
       }
     } catch (error) {
       this.options.log?.(`game: AP request refused: ${String(error)}`);
@@ -2372,7 +2378,7 @@ export class GameEntryServer {
    *
    * The amount is the monster's own data and the level thresholds are the client's own table
    * (`game/exp.ts`); the packet is the *difference* between the record before and after, so a plain
-   * gain carries one field (`exp`) and a level-up carries the level plus the HP/MP refill the
+   * gain carries one field (`exp`) and a level-up carries maxima plus the HP/MP refill the
    * client's own routine performs. The client plays the level-up effect itself when it sees the level
    * grow (`sub_55BEB0`'s tail, FINDINGS 4.21) - which is why the effect packet below goes to the
    * **others** and not back to the player who levelled: for them the same animation is `0x29`.
@@ -2389,10 +2395,16 @@ export class GameEntryServer {
       return;
     }
     const before = { ...session.character.stats };
-    const gain = awardExp(session.character.stats, amount);
+    const gain = awardExp(
+      session.character.stats,
+      amount,
+      undefined,
+      characterGrowthContext(session.character, this.options.growthSkill),
+    );
     if (!gain.changed) return;
     const stats = session.character.stats;
     session.send(encodeStatUpdate({ diff: diffStats(before, stats) }));
+    this.persist(); // Persist EXP/maxima now, including delayed projectile kills.
     if (gain.levels > 0) {
       // The field's other half of a level-up: `0x29` plays over the levelling user the same effect
       // their own client plays from the `0x0D` above, and the receiving pool resolves the id (an id

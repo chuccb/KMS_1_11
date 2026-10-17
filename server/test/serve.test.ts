@@ -1135,7 +1135,7 @@ test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse
  *
  * The character arrives with hp 20/50 and mp 5/30, and the stub monster is worth 20 exp at level 1
  * (the client's own table wants 15 for that level), so one swing has to produce
- * `{ level: 2, exp: 15, hp: 50, mp: 30 }` and nothing else - the client computes the level-up
+ * level 2 / exp 15 plus native HP/MP growth/refill - the client computes the level-up
  * message and the effect from the level it sees (sub_55BEB0).
  */
 test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, async (t) => {
@@ -1200,7 +1200,7 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
   assert.equal(stat[0], STAT_OPCODE, "the kill pays out as 0x0D");
   assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), {
     ack: false,
-    diff: { exp: 15, level: 2, hp: 50, mp: 30 },
+    diff: { exp: 15, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp },
   });
   assert.ok(
     log.some((line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2")),
@@ -2768,7 +2768,7 @@ test("a level-up plays the effect for the other players (0x29), not for the one 
   const heroSaw = await hero.takeOpcode(STAT_OPCODE);
   assert.deepEqual(readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)), {
     ack: false,
-    diff: { exp: 5, level: 2, hp: 50, mp: 50 },
+    diff: { exp: 5, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp },
   });
   const effectsForHero = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userEffect);
   assert.deepEqual(effectsForHero, [], "the effect is not echoed to the player who levelled");
@@ -2929,15 +2929,17 @@ test("a session that ends leaves the character's progress in the save", { timeou
   await client.take(2); // the mob's stat + the corpse
   const stat = (await client.take(1))[0]!;
   const told = readStatUpdate(new PacketReader(stat, 1));
-  assert.deepEqual(told.diff, { exp: 15, level: 2, hp: 50, mp: 30 }, "the 0x0D this test then persists");
+  assert.ok(stats.maxHp >= 70 && stats.maxHp <= 75);
+  assert.ok(stats.maxMp >= 40 && stats.maxMp <= 42);
+  assert.deepEqual(told.diff, { exp: 15, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp }, "the growth diff is persisted immediately");
 
-  // The player leaves. That is the only moment this test has to wait for: the save happens on the
-  // server's `close` event, which is not synchronous with the client's.
-  assert.equal(saves, 0, "nothing is saved while the session is still open");
+  // Kill rewards persist immediately; leaving still saves the same authoritative record.
+  assert.ok(saves >= 1, "growth is durable while the session is open");
+  const savesBeforeClose = saves;
   client.close();
   const deadline = Date.now() + 2000;
-  while (saves === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(saves, 1, `the session ending saved once; log:\n${log.join("\n")}`);
+  while (saves === savesBeforeClose && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(saves, savesBeforeClose + 1, `the session ending saved once; log:\n${log.join("\n")}`);
 
   // What the store holds is the character as they left: the level-up, the refill that came with it,
   // and the rest of the record untouched.
@@ -2946,8 +2948,11 @@ test("a session that ends leaves the character's progress in the save", { timeou
   assert.equal(saved.stats.id, 21);
   assert.equal(saved.stats.level, 2);
   assert.equal(saved.stats.exp, 15);
-  assert.equal(saved.stats.hp, 50);
-  assert.equal(saved.stats.mp, 30);
+  assert.equal(saved.stats.hp, told.diff.maxHp);
+  assert.equal(saved.stats.maxHp, told.diff.maxHp);
+  assert.equal(saved.stats.mp, told.diff.maxMp);
+  assert.equal(saved.stats.maxMp, told.diff.maxMp);
+  assert.equal(saved.stats.ap, 0);
   assert.equal(saved.stats.mesos, 500);
   assert.equal(saved.items?.inventories.length, 4, "the bags came back too");
 });

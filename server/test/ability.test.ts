@@ -13,7 +13,7 @@ import { zeroStats } from "../src/protocol/chardata.ts";
 import { encodeStatUpdate, readStatUpdate } from "../src/protocol/stat.ts";
 import { spendAbility } from "../src/game/ability.ts";
 test("sub_55CF60 AP request is opcode 27 and exactly one little-endian u32 mask", () => {
-  for (const field of ["str", "dex", "int", "luk"] as const) {
+  for (const field of ["str", "dex", "int", "luk", "maxHp", "maxMp"] as const) {
     const packet = encodeAbilityRequest(field);
     assert.equal(packet[0], ABILITY_REQUEST_OPCODE);
     assert.equal(packet.length, 5);
@@ -28,7 +28,7 @@ test("sub_55CF60 AP request is opcode 27 and exactly one little-endian u32 mask"
     () => readAbilityRequest(new PacketReader(new Uint8Array(5))),
     /exactly/,
   );
-  assert.throws(() => encodeAbilityRequest("maxHp" as "str"), /unsupported/);
+  assert.throws(() => encodeAbilityRequest("hp" as "str"), /unsupported/);
 });
 test("four real base-stat allocations each spend one AP and survive the actual 0x0D codec", () => {
   const stats = zeroStats();
@@ -63,8 +63,7 @@ test("invalid masks, unavailable points, death, corruption and u8 overflow never
     0,
     0xffffffff,
     ABILITY_MASK.str | ABILITY_MASK.dex,
-    ABILITY_MASK.maxHp,
-    ABILITY_MASK.maxMp,
+    ABILITY_MASK.maxHp | ABILITY_MASK.maxMp,
   ]) {
     const s = fixture(),
       before = structuredClone(s);

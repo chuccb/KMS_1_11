@@ -34,8 +34,8 @@
  * that does not fit is not a value, and the default belongs to the caller.
  *
  * WHO CALLS IT: `LoginServer`/`GameEntryServer` take a `persist` callback and call it after a
- * mutation (a character created or deleted, a session that leaves the field - which is where exp,
- * items, mesos and `mapId` change). They do not know about files, and this module does not know
+ * mutation (character creation/deletion, AP, kill EXP/maxima, inventory/wallet changes), and when
+ * a session leaves with its latest map state. They do not know about files, and this module does not know
  * about sockets, so a test persists into `MemorySaveStore` and a run persists into a directory.
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

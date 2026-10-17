@@ -55,10 +55,11 @@
 ## 本輪新增（2026-10-17）
 
 - 原狀態列 **Stat**／**S** 可開能力窗；原 WZ／字座標、拖曳記憶、Close／Escape。
-- **已有 AP** 可真分配 STR／DEX／INT／LUK，native c2s 0x1B → s2c 0x0D → 保存／重連；不是只加畫面數字。
+- **已有 AP** 可真分配 STR／DEX／INT／LUK／HP／MP，native c2s 0x1B → s2c 0x0D → 保存／重連；不是只加畫面數字。
 - 靜態 scene 預排序／可見像素裁切／lazy PNG／跨圖快取及 blob 釋放；短樣本 drawImage 約 794→130/frame。
 - 修正合併到達的進圖／pool／stat 順序，及升級 EXP 分母和戰鬥能力 snapshot 同步。
-- **未完成**：升級 AP/SP／HP/MP 成長、HP/MP 配點、Detail／裝備與 buff 總值；不自動補點、不宣稱全遊戲完成。
+- **本次新接（未測試）**：原表自然 HP／MP 成長、已學被動 x/y、HP／MP AP 與立即保存；完整來源、更正與隔離帳號見 [STAT_GROWTH.md](STAT_GROWTH.md)。
+- **未完成**：自然 AP/SP 發放量、Detail／完整裝備與 buff 總值、SP 操作／技能學習與轉職；不自動猜點數、不宣稱全遊戲完成。
   S 不再兼作向下移動，下繩索用 ArrowDown。來源、實測與差異見 [SMOOTH_STAT_VALIDATION.md](SMOOTH_STAT_VALIDATION.md)。
 
 ## 怎麼跑

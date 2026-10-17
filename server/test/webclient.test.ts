@@ -975,7 +975,7 @@ test("AP bridge uses authoritative stats, a native cooldown/ack and isolates oth
   update=(await admin.nextKind("self")).self as Record<string,number>;
   assert.deepEqual([update.dex,update.ap],[5,2],"server rejects even a bridge request within the native 500ms gate");
   assert.equal((await admin.nextKind("ability-result")).changed,false,"refusal releases pending rather than hanging");
-  admin.send({t:"ability-up",field:"maxHp"});assert.match(String((await admin.nextKind("error")).message),/unsupported/);assert.equal(hero.ap,2);
+  admin.send({t:"ability-up",field:"hp"});assert.match(String((await admin.nextKind("error")).message),/unsupported/);assert.equal(hero.ap,2);
   await new Promise(resolve=>setTimeout(resolve,510));
   admin.send({t:"ability-up",field:"dex"});update=(await admin.nextKind("self")).self as Record<string,number>;
   assert.deepEqual([update.dex,update.ap],[6,1]);assert.equal((await admin.nextKind("ability-result")).changed,true);
@@ -1050,4 +1050,33 @@ test("browser slot requests cross native TCP: swap, wear, self/remote look, ack,
  assert.equal(character.items!.inventories[0]!.items.get(3)!.itemId,1002000);assert.equal(character.items!.worn.has(1),false);
  const saved=world.store.load()!;assert.equal(saved.get("admin")!.characters[0]!.items!.inventories[0]!.items.get(3)!.itemId,1002000);
  for(const bad of [{tab:0,fromSlot:1,toSlot:2,count:-1},{tab:1,fromSlot:32768,toSlot:2,count:-1},{tab:2,fromSlot:-1,toSlot:2,count:-1},{tab:1,fromSlot:1.5,toSlot:2,count:-1}]){browser.send({t:"change-slot",...bad});await browser.nextKind("error");}
+});
+
+test("HP/MP AP bridge spends one point, keeps current vitals, isolates observers and persists reconnect", { timeout: 20000 }, async t => {
+  const world = await startWorld(t, { ability: true });
+  const { browser, field } = await enterGame(world.webPort, "admin", "admin");
+  t.after(() => browser.close());
+  const initial = field.self as Record<string, number>;
+  browser.send({ t: "ability-up", field: "maxHp" });
+  const hp = (await browser.nextKind("self")).self as Record<string, number>;
+  assert.equal((await browser.nextKind("ability-result")).changed, true);
+  assert.ok(hp.maxHp! >= 65 && hp.maxHp! <= 70);
+  assert.equal(hp.hp, initial.hp);
+  assert.equal(hp.ap, 2);
+  await new Promise(resolve => setTimeout(resolve, 510));
+  browser.send({ t: "ability-up", field: "maxMp" });
+  const mp = (await browser.nextKind("self")).self as Record<string, number>;
+  assert.equal((await browser.nextKind("ability-result")).changed, true);
+  assert.ok(mp.maxMp! >= 36 && mp.maxMp! <= 38);
+  assert.equal(mp.mp, initial.mp);
+  assert.equal(mp.ap, 1);
+  const other = world.accounts.get("alt")!.characters[0]!.stats;
+  assert.deepEqual([other.maxHp, other.maxMp, other.ap], [50, 30, 2]);
+  const durable = readSave(world.store.saved!).get("admin")!.characters[0]!.stats;
+  assert.deepEqual([durable.maxHp, durable.maxMp, durable.ap], [hp.maxHp, mp.maxMp, 1]);
+  await browser.close();
+  const { browser: again, field: reentered } = await enterGame(world.webPort, "admin", "admin");
+  t.after(() => again.close());
+  const self = reentered.self as Record<string, number>;
+  assert.deepEqual([self.maxHp, self.maxMp, self.hp, self.mp, self.ap], [hp.maxHp, mp.maxMp, initial.hp, initial.mp, 1]);
 });

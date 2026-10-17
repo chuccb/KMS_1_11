@@ -1,5 +1,7 @@
 # 原版背包拖放／裝備窗驗證（2026-10-17）
 
+> 後續狀態更正：本文件的驗證／未完成清單為當輪歷史。HP／MP自然成長與配點已由原表接上（**新改動未測試**），舊「成長表不在client」判讀已更正；自然AP/SP發放、完整Detail／buff仍缺。見 [STAT_GROWTH.md](STAT_GROWTH.md)／ADR-047。
+
 > **歷史驗證範圍**：本文件的570／Chromium結果來自裝備窗這一輪。
 > 後續已新增地面丟棄／背包擴充捲動／商店數量框，依使用者要求**未測試**；
 > 最新操作與差異見 [INVENTORY_OPERATIONS.md](INVENTORY_OPERATIONS.md)，不能將舊PASS套用到新版本。

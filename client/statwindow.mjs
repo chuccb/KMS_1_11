@@ -55,10 +55,18 @@ export function statWindow({
       height: `${h}px`,
     });
   // CUIStat::Update enables by AP; sub_55CF60 gates sends separately, without flashing disabled art.
-  const disabled = (b) =>
-    !["str", "dex", "int", "luk"].includes(b.field) ||
-    !(getSelf()?.ap > 0) ||
-    !(getSelf()?.[b.field] < 255);
+  const disabled = (b) => {
+    const self = getSelf();
+    if (!(self?.ap > 0)) return true;
+    if (b.field === "maxHp" || b.field === "maxMp")
+      return (
+        !Number.isInteger(self?.job) ||
+        self.job < 0 ||
+        self.job >= 500 ||
+        !(self[b.field] < (b.field === "maxHp" ? 30000 : 10000))
+      );
+    return !(self?.[b.field] < 255);
+  };
   const blocked = (b) =>
     disabled(b) ||
     pending ||
@@ -71,7 +79,8 @@ export function statWindow({
         pending,
         self?.ap,
         self?.hp,
-        ...["str", "dex", "int", "luk"].map((k) => self?.[k]),
+        self?.job,
+        ...AP_BUTTONS.map((b) => self?.[b.field]),
       ].join("|");
     if (key === signature) return;
     signature = key;
@@ -242,7 +251,7 @@ export function statWindow({
       stamp(`UI/UIWindow.img/BtUIClose/${state}/0`, at.x + 128, at.y + 9);
       stamp("UI/UIWindow.img/Stat/BtDetail/disabled/0", at.x + 122, at.y + 280);
       // Accessible, non-visible mirror of canvas numbers; don't rebuild DOM per animation frame.
-      const description = `${self.name} STR ${self.str} DEX ${self.dex} INT ${self.int} LUK ${self.luk} AP ${self.ap}`;
+      const description = `${self.name} HP ${self.hp}/${self.maxHp} MP ${self.mp}/${self.maxMp} STR ${self.str} DEX ${self.dex} INT ${self.int} LUK ${self.luk} AP ${self.ap}`;
       if (el("stat-values").textContent !== description)
         el("stat-values").textContent = description;
     },

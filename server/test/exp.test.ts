@@ -79,12 +79,16 @@ test("a gain that fills the bar levels up, subtracts the threshold and refills H
   stats.maxHp = 50;
   stats.mp = 5;
   stats.maxMp = 30;
-  const gain = awardExp(stats, 20);
+  const gain = awardExp(stats, 20, undefined, { rand15: () => 0 });
   assert.deepEqual(gain, { gained: 20, levels: 1, changed: true, fullHeal: true });
   assert.equal(stats.exp, 15, "10 + 20 - f(1) = 15");
   assert.equal(stats.level, 2);
-  assert.equal(stats.hp, 50);
-  assert.equal(stats.mp, 30);
+  assert.equal(stats.hp, 70);
+  assert.equal(stats.maxHp, 70);
+  assert.equal(stats.mp, 40);
+  assert.equal(stats.maxMp, 40);
+  assert.equal(stats.ap, 0);
+  assert.equal(stats.sp, 0);
 });
 
 test("one award can cross several levels", () => {

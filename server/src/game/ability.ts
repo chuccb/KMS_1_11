@@ -1,11 +1,14 @@
 import type { CharacterStats } from "../protocol/chardata.ts";
-import { ABILITY_MASK, type BaseAbility } from "../protocol/ability.ts";
+import { ABILITY_MASK, ABILITY_FIELDS } from "../protocol/ability.ts";
 import type { StatDiff } from "../protocol/stat.ts";
-/** One AP for one base stat; reject first, never optimistically consume points or truncate the diff. */
-export function spendAbility(stats: CharacterStats, mask: number): StatDiff {
-  const field = (["str", "dex", "int", "luk"] as BaseAbility[]).find(
-    (field) => ABILITY_MASK[field] === mask,
-  );
+import { growVitals, type GrowthContext } from "./growth.ts";
+/** One point per request; exact masks only. Refuse before consuming AP or truncating a diff. */
+export function spendAbility(
+  stats: CharacterStats,
+  mask: number,
+  context: GrowthContext = {},
+): StatDiff {
+  const field = ABILITY_FIELDS.find((field) => ABILITY_MASK[field] === mask);
   if (
     !field ||
     !(stats.hp > 0) ||
@@ -15,10 +18,17 @@ export function spendAbility(stats: CharacterStats, mask: number): StatDiff {
   )
     return {};
   const value = stats[field];
-  // The located 0x0D stat-diff reader takes u8, unlike CharacterData's u16. Don't wrap 256 to zero.
-  if (!Number.isInteger(value) || value < 4 || value >= 255) return {};
-  const diff = { [field]: value + 1, ap: stats.ap - 1 };
-  stats[field] = value + 1;
-  stats.ap--;
+  let diff: StatDiff;
+  if (field === "maxHp" || field === "maxMp") {
+    const candidate = { ...stats };
+    diff = growVitals(candidate, mask, "ap", context);
+    if (diff[field] === undefined || !(candidate[field] > value)) return {};
+  } else {
+    // 0x0D reads u8, unlike CharacterData's u16. Never wrap 256 to zero.
+    if (!Number.isInteger(value) || value < 4 || value >= 255) return {};
+    diff = { [field]: value + 1 };
+  }
+  diff.ap = stats.ap - 1;
+  Object.assign(stats, diff);
   return diff;
 }

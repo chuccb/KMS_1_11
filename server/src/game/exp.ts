@@ -17,7 +17,7 @@
  * `sub_4C7190(n)` is the accessor: `n > 200` returns `0x7FFFFFFF`, `n < 1` is clamped to 1. The
  * client's own level-up routine `sub_4C71C0` is what says `f(n)` is "exp needed to go from level `n`
  * to `n + 1`": it clamps at 200, subtracts `f(level)`, adds one level, clamps exp to just under the
- * *next* threshold, recomputes the damage range (`sub_4C7450`, weapon atk tables) and refills HP/MP
+ * *next* threshold, grows max HP/MP (`sub_4C7450`, .data:005BB344) and refills HP/MP
  * when alive. It has **no call site anywhere in the binary**, so this build never levels itself up -
  * the level comes in `0x0D` from the server, and this module is the server's copy of that rule.
  *
@@ -41,11 +41,13 @@
  *
  * On a level-up the record's HP and MP are refilled **if the character is alive**, which is what the
  * client's own routine does (`sub_4C71C0`: only when `hp > 0`, then `hp = maxHp`, `mp = maxMp`).
- * What the server does *not* do is raise `maxHp`/`maxMp`/`ap`/`sp`: those numbers lived in the
- * original server and are not in the binary, so a freshly levelled character keeps the maxima it had
- * until a stat-growth rule is decided (FINDINGS 4.21.4).
+ * Maxima now grow from the native table for every crossed level, including while dead.
+ * Learned HP/MP passives use WZ x, with normal worn INT for MP. AP/SP level rewards are still
+ * unlocated: do not silently introduce a later version's 5/3 rewards into this build.
  */
 import type { CharacterStats } from "../protocol/chardata.ts";
+import { growVitals, type GrowthContext } from "./growth.ts";
+import { ABILITY_MASK } from "../protocol/ability.ts";
 
 /** Levels the client's table covers (`sub_4C7110` stops at 200, `sub_4C71C0` clamps there). */
 export const EXP_TABLE_MAX_LEVEL = 200;
@@ -114,7 +116,12 @@ export interface ExpGain {
  * inside the wire's `u32`. A level-up refills HP and MP only when the character is alive, exactly as
  * the client's own routine does.
  */
-export function awardExp(stats: CharacterStats, amount: number, maxLevel = EXP_TABLE_MAX_LEVEL): ExpGain {
+export function awardExp(
+  stats: CharacterStats,
+  amount: number,
+  maxLevel = EXP_TABLE_MAX_LEVEL,
+  growth: GrowthContext = {},
+): ExpGain {
   const gain = Number.isFinite(amount) ? Math.trunc(amount) : 0;
   if (gain <= 0) return { gained: 0, levels: 0, changed: false, fullHeal: false };
 
@@ -126,6 +133,7 @@ export function awardExp(stats: CharacterStats, amount: number, maxLevel = EXP_T
     exp -= expToNextLevel(stats.level);
     stats.level += 1;
     levels += 1;
+    growVitals(stats, ABILITY_MASK.maxHp | ABILITY_MASK.maxMp, "level", growth);
   }
   stats.exp = Math.min(exp, 0xffffffff);
   if (levels > 0 && stats.hp > 0) {

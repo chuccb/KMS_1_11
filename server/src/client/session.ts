@@ -1,5 +1,5 @@
 import { encodeMesoDrop, MESO_DROP_INTERVAL_MS } from "../protocol/mesodrop.ts";
-import { encodeAbilityRequest, type BaseAbility } from "../protocol/ability.ts";
+import { encodeAbilityRequest, type Ability } from "../protocol/ability.ts";
 /**
  * The client half of the 2003 protocol, running in Node.
  *
@@ -1035,7 +1035,7 @@ export class ClientSession {
     }
   }
 
-  async increaseAbility(field: BaseAbility): Promise<void> {
+  async increaseAbility(field: Ability): Promise<void> {
     if (!this.gameLink || !this.self)
       throw new Error("AP requires an active field");
     if (this.abilityPending || this.mesoPending)

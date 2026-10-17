@@ -1,5 +1,5 @@
 /** CUIStat::OnButtonClicked sub_4F2D70 -> sub_55CF60: c2s 27, one u32 stat mask.
- * Not attack: melee is c2s 0x0F. MaxHP/MaxMP masks are located but their server growth is not. */
+ * Not attack: melee is c2s 0x0F. HP/MP growth is in game/growth.ts (sub_4C7450). */
 import { PacketReader, PacketWriter } from "./packet.ts";
 export const ABILITY_REQUEST_OPCODE = 0x1b;
 export const ABILITY_MASK = {
@@ -11,10 +11,19 @@ export const ABILITY_MASK = {
   maxMp: 0x2000,
 } as const;
 export type BaseAbility = "str" | "dex" | "int" | "luk";
-export function encodeAbilityRequest(field: BaseAbility): Uint8Array {
+export type Ability = keyof typeof ABILITY_MASK;
+export const ABILITY_FIELDS: readonly Ability[] = [
+  "str",
+  "dex",
+  "int",
+  "luk",
+  "maxHp",
+  "maxMp",
+];
+export function encodeAbilityRequest(field: Ability): Uint8Array {
   const mask = ABILITY_MASK[field];
-  if (mask === undefined || !["str", "dex", "int", "luk"].includes(field))
-    throw new Error("unsupported base ability");
+  if (mask === undefined || !ABILITY_FIELDS.includes(field))
+    throw new Error("unsupported ability");
   return new PacketWriter(5)
     .writeByte(ABILITY_REQUEST_OPCODE)
     .writeU32(mask)

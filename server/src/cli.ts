@@ -35,6 +35,7 @@ import {
   type ShopKeeper,
 } from "./game/shops.ts";
 import { consumeSpecProvider } from "./game/items.ts";
+import { growthSkillProvider, type GrowthSkillProvider } from "./game/growth.ts";
 import { itemCatalogOf, type ItemCatalog } from "./game/iteminfo.ts";
 import { audioProviderOf, type AudioProvider } from "./game/audio.ts";
 import { artProviderOf } from "./game/art.ts";
@@ -402,6 +403,7 @@ async function runServe(rest: string[]): Promise<number> {
   let shops: ShopKeeper | undefined;
   let consumeSpec: ReturnType<typeof consumeSpecProvider> | undefined;
   let itemCatalog: ItemCatalog | undefined;
+  let growthSkill: GrowthSkillProvider | undefined;
   let art: ArtProvider | undefined;
   let audio: AudioProvider | undefined;
   const shopWarnings: string[] = [];
@@ -415,6 +417,7 @@ async function runServe(rest: string[]): Promise<number> {
       npcDialogue = npcDialogueProvider(archive);
       shops = shopKeeper(archive);
       consumeSpec = consumeSpecProvider(archive);
+      growthSkill = growthSkillProvider(archive);
       itemCatalog = itemCatalogOf(archive);
       art = artProviderOf(archive);
       audio = audioProviderOf(archive);
@@ -561,6 +564,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(npcWalk !== undefined ? { npcWalk } : {}),
       ...(shops !== undefined ? { shops } : {}),
       ...(consumeSpec !== undefined ? { consumeSpec } : {}),
+      ...(growthSkill !== undefined ? { growthSkill } : {}),
       ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
       ...(itemCatalog !== undefined
         ? {

@@ -266,7 +266,8 @@ export interface CharacterItems {
   wornCash: Map<number, ItemSlot>;
   /** [equip tab (category 1 items), consume, install, etc] - client arrays at +366/+370/+374/+378. */
   inventories: [Inventory, Inventory, Inventory, Inventory];
-  /** The `flags & 0x20` map: `u16 count` + `{u32, u32}` each. */
+  /** The `flags & 0x20` skill map: `u16 count` + `{u32 skillId, u32 level}` each.
+   * sub_45FCC0 writes CharacterData+382; sub_4C7450 reads 1000001/2000001 from it. */
   map32: InventoryRecord[];
   /** The `flags & 0x40` map: `u16 count` + `{string, string}` each. */
   mapString: Array<{ key: string; value: string }>;

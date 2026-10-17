@@ -5,12 +5,16 @@
 
 ## 最新交付
 
-- **本輪（未測試）**：原武器基本動作表／逐幀速度、弓弩拳套選彈與空射扣彈、0發飛鏢／末箭清格、
+- **本輪（未測試）**：依原 PE 十行成長表接上自然 HP／MP、已學被動與穿戴 INT、HP／MP AP、
+  六種加點與殺怪立即保存；更正舊反編譯誤讀。自然 AP/SP 發放量仍未定位。
+  [來源、限制與已啟動的隔離預覽帳號](docs/STAT_GROWTH.md)。
+
+- **前輪（未測試）**：原武器基本動作表／逐幀速度、弓弩拳套選彈與空射扣彈、0發飛鏢／末箭清格、
   0x10→0x24本人與旁觀投射物、延後命中／EXP掉落、stand2／walk2武器合成。
   來源與碰撞／傷害等政策界線見 [BASIC_ATTACKS.md](docs/BASIC_ATTACKS.md)。
 
 - 原WZ登入／世界／選角、建刪角；原地圖、角色／怪物動作、繩梯、傳送、BGM與基本音效。
-- 原Stat與已有AP的四基礎能力配點、背包拖放／裝備窗與真穿脫／旁觀外觀／保存。
+- 原Stat與已有AP的六種能力配點（含HP／MP）、背包拖放／裝備窗與真穿脫／旁觀外觀／保存。
 - 原小地圖與DPR整數實體像素顯示。
 - 前輪新增：背包超過24格的捲動、道具地面丟棄與數量框、商店批量買入／部分出售、
   原UtilDlgEx視窗與過期操作保護、交易立即保存。
@@ -59,10 +63,14 @@ login／game TCP與web HTTP是不同port；遠端瀏覽器使用web的網址，W
 尚未拾回就停服會消失；請用非重要物品自行確認最新未測試功能。
 背包捲動遵守原capacity，不會自動擴包。最新已接原金幣按鈕／0x1F楓幣丟棄，以及207飛鏢整組購買、補充與空組處理（均未測試）；詳見[交付範圍與限制](docs/MESO_RECHARGE.md)。
 
+最新已依原 exe 的 HP／MP 表補上逐級成長、已學被動與 HP／MP AP 加點／保存；舊「成長表不在 client」判讀已更正。自然 AP/SP 發放量仍未定位，不套後期數字。見 [STAT_GROWTH](docs/STAT_GROWTH.md)（未測試）。
+
 聊天 `/help`列出命令；`/map ID`需服務端明確開啟 `--map-command 帳號,...`，預設禁止。
 地圖ID、名稱、原圖、腳踏點來自Data.wz，不以人工平台或「缺素材」fallback掩蓋reader問題。
 
 ## 文件索引
+
+- [最新 HP／MP 原版成長、六種 AP 與隔離預覽（未測試）](docs/STAT_GROWTH.md)
 
 - [最新楓幣丟棄／飛鏢補充交付（未測試）](docs/MESO_RECHARGE.md)
 - [背包／丟棄／商店數量交付（未測試）](docs/INVENTORY_OPERATIONS.md)
@@ -77,5 +85,5 @@ login／game TCP與web HTTP是不同port；遠端瀏覽器使用web的網址，W
 - [協定與反編譯發現](docs/protocol/FINDINGS.md) · [WZ格式](docs/WZ1_FORMAT.md)
 - [伺服器](server/README.md) · [字型來源與授權](client/fonts/README.md)
 
-卷軸強化、完整技能／怪物攻擊與受擊、裝備／buff總值／Detail、自然升級AP/SP與HPMP成長、
+卷軸強化、完整技能／怪物攻擊與受擊、裝備／buff總值／Detail、自然升級AP/SP發放量、
 完整交易／組隊等瀏覽器UI、現金／寵物、技能遠距攻擊／原形狀碰撞與完整傷害公式仍有未完成範圍；既有server的etc/cash分頁映射與原UI標籤亦尚待存檔遷移。各文件區分原版證據、重建政策與歷史驗證。
