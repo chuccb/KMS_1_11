@@ -112,6 +112,21 @@ import {
   type MiniRoomParticipant,
 } from "../protocol/miniroom.ts";
 import { TradeRegistry, isTradeSlot, settleTrade, tabOfItem } from "../game/trades.ts";
+import {
+  MESSENGER_INVITE_RESULT,
+  MESSENGER_OPCODE,
+  describeClientMessengerRequest,
+  encodeMessengerChat,
+  encodeMessengerInvite,
+  encodeMessengerInviteResult,
+  encodeMessengerJoinFailed,
+  encodeMessengerLeft,
+  encodeMessengerParticipant,
+  readClientMessengerRequest,
+  type ClientMessengerRequest,
+  type MessengerParticipant,
+} from "../protocol/messenger.ts";
+import { MessengerRegistry, type MessengerRoom } from "../game/messenger.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -840,6 +855,11 @@ export class GameEntryServer {
    * `handleTradeInvite` 會先看兩邊是不是同一個 `FieldInstance`。
    */
   private readonly trades = new TradeRegistry();
+  /**
+   * 三人聊天室（메신저）的房間與邀請（FINDINGS §4.41）。跟隊伍、交易一樣是世界層：房間只認角色
+   * id，邀請卻可以跨地圖（聊天室本來就不在同一張圖上）。
+   */
+  private readonly messenger = new MessengerRegistry();
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
   private listenPort = 0;
@@ -2012,6 +2032,12 @@ export class GameEntryServer {
           this.handleMiniRoomRequest(session, event.plain);
           continue;
         }
+        // 메신저（三人聊天室，`0x24`）。跟交易共用「開著的視窗」這個概念，但是另一個 opcode：
+        // 開房／進房、離開、`/초대`、聊天（FINDINGS §4.41）。
+        if (session !== undefined && opcode === MESSENGER_OPCODE.request) {
+          this.handleMessengerRequest(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -2033,6 +2059,7 @@ export class GameEntryServer {
         this.sessionsByCharacter.delete(session.characterId);
         this.leaveParty(session.characterId, "disconnected");
         this.leaveTrade(session.characterId, "disconnected");
+        this.leaveMessenger(session.characterId);
       }
       // And the character's record has to leave the process - this is the only place a session ends.
       if (session !== undefined) this.persist();
@@ -2631,6 +2658,167 @@ export class GameEntryServer {
   }
 
   /**
+   * 메신저（三人聊天室）：`0x24` → `0x4D`（FINDINGS §4.41）。
+   *
+   * 跟交易一樣是「開著的視窗」：進房之後才有意義。但**邀請可以跨地圖**——聊天室不在場地上，
+   * 2003 的 client 也沒有「只邀同圖」的限制（`sub_4E1BB0` 直接跳模態，不像 `/교환` 要先用
+   * `CUserPool` 找名字）。
+   */
+  private handleMessengerRequest(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientMessengerRequest;
+    try {
+      request = readClientMessengerRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x24 messenger unreadable: ${(error as Error).message}`);
+      return;
+    }
+    this.options.log?.(`game: ${describeClientMessengerRequest(request)}`);
+    switch (request.kind) {
+      case "enter":
+        this.enterMessenger(session, request.roomId);
+        return;
+      case "leave":
+        this.leaveMessenger(session.characterId);
+        return;
+      case "command":
+        this.inviteToMessenger(session, request.text);
+        return;
+      case "chat":
+        this.sayInMessenger(session, request.text);
+        return;
+    }
+  }
+
+  /**
+   * `0x24 type 0`：`roomId == 0` 是「開一間新房」，其他值是「進那一間」。
+   *
+   * 進別人的房間一定要有邀請：編號是伺服器給的 `u32`，沒有邀請就只是猜中號碼。進不去時回
+   * `0x4D type 1`，client 印「- 초청 받은 대화방에 참가하지 못했습니다」。
+   */
+  private enterMessenger(session: FieldSession, roomId: number): void {
+    if (this.messenger.roomOf(session.characterId) !== undefined) {
+      // 已經在房間裡：client 自己不會送第二個 type 0，送了就是壞掉的狀態。
+      this.options.log?.(`game: messenger: "${session.name}" is already in a room`);
+      return;
+    }
+    const member = { characterId: session.characterId, name: session.name };
+    const room = roomId === 0 ? this.messenger.create(member) : this.joinMessengerRoom(roomId, member);
+    if (room === undefined) {
+      session.send(encodeMessengerJoinFailed());
+      this.options.log?.(`game: messenger: "${session.name}" could not enter room ${roomId}`);
+      return;
+    }
+    // 新進來的人要讓其他人（與自己）看到。`announce` 只有「剛進來」的那一格是 1：
+    // `sub_4DF3E0` 用它決定要不要印「- '%s'님이 입장하셨습니다」——所以每個人（含剛進來的那個）
+    // 都會在房間的訊息區看到那一行，跟自己開一間房時看到的一樣。
+    const slot = room.members.findIndex((entry) => entry.characterId === session.characterId);
+    const packets = this.messengerPackets(room, slot);
+    for (const entry of room.members) {
+      const recipient = this.sessionsByCharacter.get(entry.characterId);
+      if (recipient === undefined) continue;
+      for (const packet of packets) recipient.send(packet);
+    }
+    this.options.log?.(
+      room.members.length === 1
+        ? `game: messenger: room ${room.id} opened by "${session.name}"`
+        : `game: messenger: "${session.name}" joined room ${room.id} (${room.members.length} member(s))`,
+    );
+  }
+
+  /** 「進房間」的那一半：先查邀請，再交給 registry（房間存在、沒滿、這個人不在別的房間）。 */
+  private joinMessengerRoom(roomId: number, member: { characterId: number; name: string }): MessengerRoom | undefined {
+    const invite = this.messenger.inviteOf(member.characterId, Date.now());
+    if (invite === undefined || invite.roomId !== roomId) return undefined;
+    return this.messenger.join(roomId, member);
+  }
+
+  /**
+   * `0x24 type 3`：`/` 開頭的文字。`/q` 是 client 自己吃掉的，所以會到伺服器的只有別的指令。
+   *
+   * 這裡只認 `/초대 <名字>`（FINDINGS §4.41 的唯一指令）。🟡 client 送的是**整串文字**還是
+   * **指令後面的名字**沒有直接證據（`sub_4E24B0` 把字串原樣塞進封包，但 `/q` 的比對是在
+   * client 裡做的），所以兩種都收：有前綴就剝掉，沒有就當名字。
+   */
+  private inviteToMessenger(session: FieldSession, text: string): void {
+    const room = this.messenger.roomOf(session.characterId);
+    if (room === undefined) {
+      this.options.log?.(`game: messenger: "${session.name}" has no room to invite into`);
+      return;
+    }
+    const name = messengerInviteTarget(text);
+    if (name === "") {
+      this.options.log?.(`game: messenger: "${session.name}" sent an incomplete invite "${text}"`);
+      return;
+    }
+    const target = this.sessionNamed(name);
+    if (target === undefined) {
+      session.send(encodeMessengerInviteResult({ ok: MESSENGER_INVITE_RESULT.notFound, name }));
+      this.options.log?.(`game: messenger: "${session.name}" invited "${name}": no such player`);
+      return;
+    }
+    session.send(encodeMessengerInviteResult({ ok: MESSENGER_INVITE_RESULT.sent, name: target.name }));
+    target.send(encodeMessengerInvite({ inviterName: session.name, roomId: room.id }));
+    this.messenger.invite(target.characterId, { roomId: room.id, inviterName: session.name }, Date.now());
+    this.options.log?.(`game: messenger: "${session.name}" invited "${target.name}" to room ${room.id}`);
+  }
+
+  /**
+   * `0x24 type 5`：一行聊天。`0x4D type 5` 的字串**自己帶「說話者 : 內容」**（client 用
+   * `strstr(line, " : ")` 拆名字），所以伺服器組的字串就是畫面上那一行。
+   *
+   * 送給**所有成員，包括說話的人**：跟場地聊天同一個理由——client 的輸入框只送包，不自己回顯。
+   */
+  private sayInMessenger(session: FieldSession, text: string): void {
+    const room = this.messenger.roomOf(session.characterId);
+    if (room === undefined) {
+      this.options.log?.(`game: messenger: "${session.name}" said "${text}" outside a room`);
+      return;
+    }
+    const line = `${session.name} : ${text}`;
+    const packet = encodeMessengerChat(line);
+    for (const entry of room.members) this.sessionsByCharacter.get(entry.characterId)?.send(packet);
+    this.options.log?.(`game: messenger: room ${room.id} "${line}"`);
+  }
+
+  /**
+   * 離開房間（`0x24 type 2`、視窗關掉、或斷線）。其他人收到 `0x4D type 2` + 那一格。
+   *
+   * 這裡**不送給離開的人**：他的視窗已經關了，而且 client 收到 type 2 只會把那一格清掉
+   * （那一格是別人的名字）。房間因此空掉時 registry 直接把房間刪掉。
+   */
+  private leaveMessenger(characterId: number): void {
+    const left = this.messenger.leave(characterId);
+    if (left === undefined) return;
+    const packet = encodeMessengerLeft(left.slot);
+    for (const entry of left.room.members) this.sessionsByCharacter.get(entry.characterId)?.send(packet);
+    this.options.log?.(
+      `game: messenger: "${left.member.name}" left room ${left.room.id} (${left.room.members.length} left)`,
+    );
+  }
+
+  /** 一間房的成員包（`0x4D type 0`）：每一格一個封包，**只有 `announceSlot` 那一格帶 announce**。 */
+  private messengerPackets(room: MessengerRoom, announceSlot: number): Uint8Array[] {
+    return room.members.map((entry, slot) =>
+      encodeMessengerParticipant(
+        this.messengerParticipant(entry.characterId, entry.name, slot),
+        slot === announceSlot,
+      ),
+    );
+  }
+
+  /** 把一個 session 變成 `0x4D type 0` 的紀錄。 */
+  private messengerParticipant(characterId: number, name: string, slot: number): MessengerParticipant {
+    const target = this.sessionsByCharacter.get(characterId);
+    return {
+      room: 0,
+      slot,
+      name,
+      face: target?.face ?? 0,
+      look: target?.avatarItems ?? [],
+    };
+  }
+
+  /**
    * 把一次離開（退隊或被踢）變成 `0x10`，送給還連著的人。
    *
    * 兩種封包：隊長走了是 `flag = 0`（`partyId` + 隊長 id，client 自己把隊伍歸零），其他人走是
@@ -2756,6 +2944,21 @@ function withMapId(entry: HandoffEntry, fallbackMapId: number): CharacterData {
  * matter is that it never contains a 0, because the client stops reading at the first one. A bare
  * character therefore still gets its hair, or it would be drawn bald.
  */
+/**
+ * `/초대 <名字>` → 名字。
+ *
+ * 🟡 `sub_4E24B0` 把 `/` 開頭的文字原樣塞進 `0x24 type 3`，但 `/q` 的比對是在 client 自己身上做的，
+ * 所以「client 有沒有先剝掉指令」看不出來。兩種都收：有指令前綴就剝掉，沒有就當名字；
+ * 只有指令、沒有名字時回空字串（呼叫端記一行，不回封包）。
+ */
+function messengerInviteTarget(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return trimmed;
+  const rest = trimmed.slice(1).trim();
+  const space = rest.search(/\s/);
+  return space < 0 ? "" : rest.slice(space).trim();
+}
+
 function avatarItemsOf(character: CharacterData): number[] {
   const ids: number[] = [lookOf(character.stats).hair];
   const items = character.items;

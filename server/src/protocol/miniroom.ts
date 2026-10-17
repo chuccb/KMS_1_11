@@ -203,7 +203,7 @@ export interface MiniRoomParticipant {
   /** 0 或 1：房間裡的格子。 */
   index: number;
   name: string;
-  /** 臉（`CharacterData.appearanceA`）。 */
+  /** 臉（`CharacterData.appearanceA`）；`sub_424590` 的參數，寫進 `CUser+68`（§4.11.3c）。 */
   face: number;
   /** `0x1C` 的外觀清單：頭髮在最前面，以 0 結尾（寫入時補上）。 */
   look: readonly number[];

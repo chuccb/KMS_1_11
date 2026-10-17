@@ -23,6 +23,7 @@ import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
 import * as fame from "./fame.ts";
 import * as miniroom from "./miniroom.ts";
+import * as messenger from "./messenger.ts";
 import * as party from "./party.ts";
 import * as quest from "./quest.ts";
 import * as shop from "./shop.ts";
@@ -447,44 +448,22 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: 0x50,
-    direction: "s2c",
+    opcode: 0x24,
+    direction: "c2s",
     stage: "field",
-    name: "miniroom",
+    name: "messenger",
     status: "byte-exact",
     evidence:
-      "FINDINGS 4.40 (sub_4815E0 dispatches the type; types 1/2/4 are the no-window half, 3/5/6/7/8 are virtual slots on CMiniRoomBaseDlg, and 11/12/13 go through sub_4D3360 for a trade room). The participant's first byte is the one field still marked unknown",
+      "FINDINGS 4.41 (CUIMessenger's four senders: 0 = enter [u32 roomId] from sub_4DDFE0, 2 = close, 3 = a slash command [str] from sub_4E24B0, 5 = chat [str] from sub_4DE490; /q never leaves the client)",
     codecs: [
-      "readMiniRoomResult",
-      "encodeMiniRoomInvite",
-      "encodeMiniRoomRefused",
-      "encodeMiniRoomEnter",
-      "encodeMiniRoomParticipant",
-      "encodeMiniRoomMessage",
-      "encodeMiniRoomFinish",
-      "encodeMiniRoomItem",
-      "encodeMiniRoomMesos",
-      "encodeMiniRoomLock",
+      "readClientMessengerRequest",
+      "encodeClientMessengerRequest",
+      "describeClientMessengerRequest",
     ],
     fields: [
-      {
-        name: "type",
-        type: "u8",
-        note: "1 invite / 2 refusal / 3 join / 4 enter / 5 message / 6 update / 7 no-op / 8 finish / 11 item / 12 mesos / 13 lock",
-      },
-      { name: "inviterName+inviterId", type: STRING + "u32", note: "type 1" },
-      { name: "code(+name)", type: "u8 (+STRING)", note: "type 2: 0 ok, 1 not found, 2 busy (carries the name)" },
-      {
-        name: "roomKind/count/myIndex",
-        type: "u8 ×3",
-        note: "type 4; roomKind must be 1 or sub_481570 returns null and the client disconnects",
-      },
-      {
-        name: "participant",
-        type: "u8 + u32 + u32[] until 0 + STRING",
-        note: "u8 = a number the client renders (sent as level), u32 = face, then hair-first look ids, then the name",
-      },
-      { name: "item", type: "u8 index + u8 roomSlot + GW_ItemSlot (with category byte)", note: "type 11" },
+      { name: "type", type: "u8", note: "0 enter / 2 leave / 3 slash command / 5 chat" },
+      { name: "roomId", type: "u32", note: "type 0; 0 means 'open a new room'" },
+      { name: "text", type: STRING, note: "type 3 (e.g. '/초대 name') and type 5" },
     ],
   },
   {
@@ -538,6 +517,81 @@ export const PACKETS: readonly PacketSchema[] = [
   },
 
   // ---------------------------------------------------------------- field stage, server -> client
+  {
+    opcode: 0x50,
+    direction: "s2c",
+    stage: "field",
+    name: "miniroom",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.40 (sub_4815E0 dispatches the type; types 1/2/4 are the no-window half, 3/5/6/7/8 are virtual slots on CMiniRoomBaseDlg, and 11/12/13 go through sub_4D3360 for a trade room). The participant's first byte is the one field still marked unknown",
+    codecs: [
+      "readMiniRoomResult",
+      "encodeMiniRoomInvite",
+      "encodeMiniRoomRefused",
+      "encodeMiniRoomEnter",
+      "encodeMiniRoomParticipant",
+      "encodeMiniRoomMessage",
+      "encodeMiniRoomFinish",
+      "encodeMiniRoomItem",
+      "encodeMiniRoomMesos",
+      "encodeMiniRoomLock",
+    ],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "1 invite / 2 refusal / 3 join / 4 enter / 5 message / 6 update / 7 no-op / 8 finish / 11 item / 12 mesos / 13 lock",
+      },
+      { name: "inviterName+inviterId", type: STRING + "u32", note: "type 1" },
+      { name: "code(+name)", type: "u8 (+STRING)", note: "type 2: 0 ok, 1 not found, 2 busy (carries the name)" },
+      {
+        name: "roomKind/count/myIndex",
+        type: "u8 ×3",
+        note: "type 4; roomKind must be 1 or sub_481570 returns null and the client disconnects",
+      },
+      {
+        name: "participant",
+        type: "u8 + u32 + u32[] until 0 + STRING",
+        note: "u8 = a number the client renders (sent as level), u32 = face, then hair-first look ids, then the name",
+      },
+      { name: "item", type: "u8 index + u8 roomSlot + GW_ItemSlot (with category byte)", note: "type 11" },
+    ],
+  },
+  {
+    opcode: 0x4d,
+    direction: "s2c",
+    stage: "field",
+    name: "messenger",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.41 (sub_4E18D0 dispatches the type; 0x4D/0x4E/0x4F all land there. Types 0/1/2 are the room itself through sub_4DF1D0/sub_4DF620/sub_4DF8B0, 3/4 the invitation through sub_4E1BB0/sub_4E19A0, 5 the chat line through sub_4E1E30 - types 6/7 are unread and never sent)",
+    codecs: [
+      "readMessengerResult",
+      "encodeMessengerParticipant",
+      "encodeMessengerJoinFailed",
+      "encodeMessengerLeft",
+      "encodeMessengerInvite",
+      "encodeMessengerInviteResult",
+      "encodeMessengerChat",
+    ],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "0 participant / 1 join failed / 2 left / 3 invite / 4 invite result / 5 chat",
+      },
+      {
+        name: "participant",
+        type: "u8 slot + u8 level + u32 face + u32[] look + STRING name + u8 announce",
+        note: "type 0; announce != 0 prints \"- '%s'님이 입장하셨습니다\"",
+      },
+      { name: "slot/code", type: "u8", note: "type 1 (code) and type 2 (slot)" },
+      { name: "inviterName+roomId", type: STRING + "u32", note: "type 3; the modal's yes answers with that roomId" },
+      { name: "ok+name", type: "u8 + STRING", note: "type 4: 0 not found, 1 sent" },
+      { name: "line", type: STRING, note: "type 5, already formatted as 'name : text'" },
+    ],
+  },
   {
     opcode: field.FIELD_OPCODE.setField,
     direction: "s2c",
@@ -1320,6 +1374,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   movepath,
   fame,
   miniroom,
+  messenger,
   npc,
   packet,
   party,

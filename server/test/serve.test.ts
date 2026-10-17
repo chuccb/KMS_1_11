@@ -83,6 +83,11 @@ import {
   encodeClientMiniRoomRequest,
   readMiniRoomResult,
 } from "../src/protocol/miniroom.ts";
+import {
+  MESSENGER_OPCODE,
+  encodeClientMessengerRequest,
+  readMessengerResult,
+} from "../src/protocol/messenger.ts";
 import { grantItem } from "../src/game/rewards.ts";
 import {
   PARTY_OPCODE,
@@ -3992,4 +3997,137 @@ test("a trade that is cancelled: the other side gets 0x50 type 8 code 1", { time
   // And the room is gone: a second invite works, so a character is not stuck in a dead room.
   request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
   assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 71, inviterName: "Hero" });
+});
+
+test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const enter = async (id: number, name: string): Promise<FakeClient> => {
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: `user${id}`,
+        characterId: id,
+        characterName: name,
+        character: characterDataOf({
+          ...zeroStats(),
+          id,
+          name,
+          level: 12,
+          hp: 50,
+          maxHp: 50,
+          mesos: 0,
+        }),
+      }),
+    });
+    await client.takeOpcode(FIELD_OPCODE.setField);
+    return client;
+  };
+  const hero = await enter(81, "Hero");
+  const alt = await enter(82, "Alt");
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  const request = (client: FakeClient, body: Parameters<typeof encodeClientMessengerRequest>[0]): void => {
+    client.send({ kind: "unknown", opcode: MESSENGER_OPCODE.request, body: encodeClientMessengerRequest(body).slice(1) });
+  };
+  /** The next `count` `0x4d` packets, in arrival order. */
+  const answers = async (client: FakeClient, count: number): Promise<ReturnType<typeof readMessengerResult>[]> => {
+    const events: ReturnType<typeof readMessengerResult>[] = [];
+    for (let i = 0; i < count; i++) {
+      const packets = await client.takeOpcode(MESSENGER_OPCODE.result);
+      events.push(readMessengerResult(new PacketReader(packets[packets.length - 1]!, 1)));
+    }
+    return events;
+  };
+
+  // 1. Opening a room: `roomId 0` means "a new one", and the window shows itself in slot 0.
+  request(hero, { kind: "enter", roomId: 0 });
+  const [opened] = await answers(hero, 1);
+  assert.equal(opened?.kind, "participant");
+  if (opened?.kind !== "participant") return;
+  assert.equal(opened.participant.slot, 0);
+  assert.equal(opened.participant.name, "Hero");
+  assert.equal(opened.participant.face, DEFAULT_FACE_ID);
+  assert.equal(opened.announce, true, "the window was just opened - the entry line belongs in the log");
+
+  // 2. `/초대 Alt`: Hero is told it was sent, Alt gets the modal carrying Hero's name and the room id.
+  request(hero, { kind: "command", text: "/invite Alt" });
+  const [sent] = await answers(hero, 1);
+  assert.deepEqual(sent, { kind: "inviteResult", ok: 1, name: "Alt" });
+  const [invite] = await answers(alt, 1);
+  assert.equal(invite?.kind, "invite");
+  if (invite?.kind !== "invite") return;
+  assert.equal(invite.inviterName, "Hero");
+  // The room id is the server's own counter, so a client only ever learns it from the invite.
+  const roomId = invite.roomId;
+  assert.ok(roomId > 0);
+
+  // 3. Alt says yes: both windows end up with both people, and only Alt's own entry is announced.
+  request(alt, { kind: "enter", roomId });
+  const heroSaw = await answers(hero, 2);
+  assert.deepEqual(
+    heroSaw.map((event) => (event.kind === "participant" ? [event.participant.slot, event.participant.name, event.announce] : event)),
+    [
+      [0, "Hero", false],
+      [1, "Alt", true],
+    ],
+  );
+  const altSaw = await answers(alt, 2);
+  assert.deepEqual(
+    altSaw.map((event) => (event.kind === "participant" ? [event.participant.slot, event.participant.name, event.announce] : event)),
+    [
+      [0, "Hero", false],
+      [1, "Alt", true],
+    ],
+  );
+
+  // 4. Chat: one 0x4d type 5 line, already formatted, to everybody including the speaker.
+  request(hero, { kind: "chat", text: "hello" });
+  const heroLine = (await answers(hero, 1))[0];
+  const altLine = (await answers(alt, 1))[0];
+  assert.deepEqual(heroLine, { kind: "chat", line: "Hero : hello" });
+  assert.deepEqual(altLine, { kind: "chat", line: "Hero : hello" });
+
+  // 5. A name nobody is playing: the inviter is told, and no packet goes to the room.
+  request(hero, { kind: "command", text: "/invite Nobody" });
+  assert.deepEqual((await answers(hero, 1))[0], { kind: "inviteResult", ok: 0, name: "Nobody" });
+
+  // 6. Alt leaves: Hero is told which slot emptied.
+  request(alt, { kind: "leave" });
+  assert.deepEqual((await answers(hero, 1))[0], { kind: "left", slot: 1 });
+  assert.deepEqual(await alt.drainOpcodes(120), [], "the leaving window is already closed - nothing to send it");
+
+  // 7. Talking with no room is dropped, and coming back needs a fresh invitation.
+  request(alt, { kind: "chat", text: "still there?" });
+  assert.deepEqual(await alt.drainOpcodes(120), []);
+  assert.deepEqual(await hero.drainOpcodes(120), []);
+  request(alt, { kind: "enter", roomId });
+  assert.deepEqual((await answers(alt, 1))[0], { kind: "joinFailed", code: 1 });
+
+  // 8. Hero's own window closing removes the room: the next invitation is a new room.
+  request(hero, { kind: "leave" });
+  request(hero, { kind: "enter", roomId: 0 });
+  const [again] = await answers(hero, 1);
+  assert.equal(again?.kind === "participant" ? again.participant.slot : -1, 0);
+  assert.ok(
+    log.some((line) => line.includes('messenger: room 2 opened by "Hero"')),
+    JSON.stringify(log.filter((line) => line.includes("messenger"))),
+  );
 });

@@ -72,6 +72,11 @@ import { encodeClientPartyRequest, readPartyResult } from "../src/protocol/party
 import { encodeClientFameRequest, readFameResult } from "../src/protocol/fame.ts";
 import { encodeClientMiniRoomRequest, readMiniRoomResult } from "../src/protocol/miniroom.ts";
 import {
+  MESSENGER_OPCODE,
+  encodeClientMessengerRequest,
+  readMessengerResult,
+} from "../src/protocol/messenger.ts";
+import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
   SHOP_OPEN_OPCODE,
@@ -915,6 +920,86 @@ if (!together) {
     );
   }
 
+
+  // --- a messenger room: 0x24 out, 0x4d back (FINDINGS §4.41) ------------------------------------
+  // A 2003 "messenger" is a three-seat chat room, not a friend list: the window prints
+  // "초대 : /초대 캐릭터이름" and "종료 : /q", and every member is one `0x4d` type 0 packet
+  // `[room][slot][characterId][look…0][name][announce]`. The invitation is the same room id the
+  // window was opened with, handed out by `0x4d` type 3 and echoed back by the client's "yes".
+  //
+  // The three packets that matter for the round trip are: the room (`type 0`, announce=1),
+  // the invite answer (`type 4`, name first then the flag) and the chat line (`type 5`, already
+  // formatted "name : text" because the client splits on " : ").
+  const messenger = async (client) =>
+    readMessengerResult(new PacketReader(await takeKeeping(client, MESSENGER_OPCODE.result), 1));
+
+  hero.game.send(encodeClientMessengerRequest({ kind: "enter", roomId: 0 }));
+  const opened = await messenger(hero.game);
+  expect(
+    opened.kind === "participant" &&
+      opened.participant.slot === 0 &&
+      opened.participant.name === hero.character.stats.name &&
+      opened.participant.face === heroLook.appearanceA &&
+      opened.announce,
+    `Hero opens a room and sits in slot 0 (0x4d type 0, announce)`,
+  );
+
+  hero.game.send(encodeClientMessengerRequest({ kind: "command", text: "/invite " + alt.character.stats.name }));
+  const inviteSent = await messenger(hero.game);
+  expect(
+    inviteSent.kind === "inviteResult" &&
+      inviteSent.ok === 1 &&
+      inviteSent.name === alt.character.stats.name,
+    `the inviter is told it was sent (type 4: name then the flag)`,
+  );
+  const asked = await messenger(alt.game);
+  expect(
+    asked.kind === "invite" &&
+      asked.inviterName === hero.character.stats.name &&
+      asked.roomId > 0,
+    `and Alt is asked to join room ${asked.roomId} (type 3)`,
+  );
+
+  alt.game.send(encodeClientMessengerRequest({ kind: "enter", roomId: asked.roomId }));
+  const heroSeesHero = await messenger(hero.game);
+  const heroSeesAlt = await messenger(hero.game);
+  const altSeesHero = await messenger(alt.game);
+  const altSeesAlt = await messenger(alt.game);
+  expect(
+    heroSeesAlt.kind === "participant" && heroSeesAlt.participant.slot === 1 && heroSeesAlt.announce,
+    "Hero is told Alt took slot 1 (and only that entry is announced)",
+  );
+  expect(
+    heroSeesHero.kind === "participant" &&
+      !heroSeesHero.announce &&
+      altSeesHero.kind === "participant" &&
+      altSeesHero.participant.slot === 0 &&
+      altSeesAlt.kind === "participant" &&
+      altSeesAlt.participant.slot === 1 &&
+      altSeesAlt.participant.name === alt.character.stats.name &&
+      altSeesAlt.announce,
+    "both windows hold both entries, and Alt's own is the announced one",
+  );
+
+  hero.game.send(encodeClientMessengerRequest({ kind: "chat", text: "hello" }));
+  const heroLine = await messenger(hero.game);
+  const altLine = await messenger(alt.game);
+  expect(
+    heroLine.kind === "chat" &&
+      heroLine.line === `${hero.character.stats.name} : hello` &&
+      altLine.kind === "chat" &&
+      altLine.line === heroLine.line,
+    `one chat line reaches both sides, already formatted ("${heroLine.line}")`,
+  );
+
+  alt.game.send(encodeClientMessengerRequest({ kind: "leave" }));
+  const emptied = await messenger(hero.game);
+  expect(
+    emptied.kind === "left" && emptied.slot === 1,
+    "and leaving names the slot that emptied (type 2)",
+  );
+
+  hero.game.send(encodeClientMessengerRequest({ kind: "leave" }));
 }
 
 // --- using what a shop sold: 0x18 restores, 0x19 changes the map (FINDINGS 4.34) -------------------
