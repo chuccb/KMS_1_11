@@ -4,6 +4,9 @@
 依使用者要求，一輪處理資料／控制器／封包／畫面與相關生命週期，不以畫面假跳取代移動。
 原 `MapleStory.exe`、反編譯 C／listing、`Shape2D.dll.c`、`Data.wz` 未改寫。
 
+> 後續ADR-057（未測試）：雙面avatar／殘影中層、一般裝備slot遮擋、空中root深度、背景index z、
+> remote cold-art guard等已補。見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)；本文件保留前輪紀錄。
+
 ## 原始證據與更正
 
 | 來源 | 判讀 | 本輪接線 |

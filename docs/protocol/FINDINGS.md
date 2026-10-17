@@ -4501,3 +4501,17 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 `client/motion.mjs`的actionOf／remoteStance／actorDepth已改；mob仍用自己的16項表，mob hit1同值14不是角色ladder。
 目前不藉此新增prone施放或完整alert計時；本輪不執行test/check/typecheck/browser/VM/probe。
 原來源、跳躍怪／背景等接線及界線見 `NATIVE_JUMP_ATTACK_BACKGROUNDS.md`／ADR-056。
+
+
+## 2026-10-18 補記：圖層不等於封包位置y，overlay也不是world z加法
+
+靜態來源定位，**本輪未執行test/check/typecheck/browser/VM/probe**。完整整理見 `../NATIVE_LAYER_PRIORITY.md`／ADR-057。
+
+- Gr2D vtable100275A8：+188→10013770、+260→10014510；10013D40比較parent chain／z／序號，非world y。
+- 537260 init首參數→controller+24；511820 local傳1，520680 remote傳0；509A80在前者root多2。
+- 4011C0 zmap numeric reset；4C1610 islot最大rank、smap∩vslot；402130整part衝突不是單純z排序。
+- 402490 faceZ分兩面→508700 user+376/372；507A20 body0／afterimage1／front2為overlay child。
+- 509AF0 tomb(-1)也overlay主層，不能當worldRootZ-1。47D110 name child5、腳下(-width/2,+2)。
+- 513C80讀515C70(main layer z)→41B630 record[7]→41BF60 bullet create；damage41E610／41F200為-1073471524。
+- 46BDA0 back依1000*index-1073869824，未讀現代front旗標。原tile／obj公式未變，obj pointer arithmetic不是4*z。
+- HTTP僅新增MapBack.z與avatar planes=1/header；本輪沒有更改原版封包版型，也未宣稱NPC行走／全controller已完成。

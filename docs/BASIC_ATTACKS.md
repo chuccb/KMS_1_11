@@ -1,3 +1,6 @@
+> 2026-10-18 圖層後續（未測試）：原avatar雙面／afterimage child1中層、bullet發射來源root z、
+> remote資源ready與過期guard見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)。不是完整CShape2D／技能實作。
+
 > 2026-10-18後續：攻擊arm身份／冷圖／無武器fallback與idle動畫修補見 [NATIVE_JUMP_ATTACK_BACKGROUNDS.md](NATIVE_JUMP_ATTACK_BACKGROUNDS.md)。
 > 此文件較早的 combat.ts 舊公式敘述已由 NATIVE_STATS_COMBAT.md／NATIVE_EQUIPMENT_DAMAGE_FIX.md 後續實作取代。
 

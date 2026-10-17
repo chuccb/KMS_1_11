@@ -3,6 +3,9 @@
 2026-10-18；接續 `855cebd`。**本輪沒有執行 test／check／typecheck／browser／VM／probe。**
 本文件區分原檔證據、這次的實作，以及仍不等同原生 client 的部分；啟服不代表功能 PASS。
 
+> **2026-10-18 後續更正（未測試）**：Gr2D parent-chain證明Tomb是avatar child−1，不是world z−1；
+> 現已改成角色子樹內，兩面avatar也已接packed PNG。見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)。
+
 ## 先更正前輪漏接
 
 `MobArt.bodyAttack` 原本有從 WZ 讀取，卻沒有出現在 `/api/mob/<id>` 的 JSON。
@@ -24,7 +27,7 @@
 | Shape2D `1000E000`／`1000E250`；`10012060`／`10012070` | parent 角度矩陣、符號與取整 | death 點截整；cos/sin 偏移按 native 取整 |
 | `509AF0` 的兩張 avatar layer alpha vector；PE 與 vector transform | 新死亡 2500ms 由 255 到 0；sprite 本身不自轉 | composite avatar 同步 fade，並明列未重建雙 layer 內部狀態 |
 | `526CC0`／`5271F0` | `Game/Tombstone` 在新死亡時立即播放；計算的是音量，不是延遲到落地 | live transition 立即 spatial sound，remote 同樣；settled 靜音 |
-| `509AF0` 的 layer z 設定 | Tomb layer 為 avatar 前 layer 的 z−1 | 加入 scene merge，不在畫面最末一律蓋上 |
+| `509AF0` createLayer(-1)／overlay+260 | Tomb 是 avatar child−1；先前當成world z−1錯誤 | 後續ADR-057移回avatar子樹，不能讓另一root插入 |
 | `46A9F0`，Gr2D `10015290`／`100167C0` | 插入 canvas 的 delay/a0/a1；缺省 −1 保留 alpha，a1 可排到截止時間 | 共用 `animation.mjs` 與 WZ canvas metadata reader |
 | `4A3920` `delay` 分支，`Map/MapHelper.img/portal/game/pv` | 缺省 **120ms**，不是既有硬寫的 100ms | 原 8 格合計 960ms；field clock 起播 |
 | `537B00`→`495D60`，`495620`／`4953A0`，`4967C0`／`485330` | attr=2 是 staged external force；attr=1 另用於 stale record。不是 remote hurt event | browser→bridge→session→原 0x0E／0x22 保留 attr2 |
@@ -61,7 +64,7 @@
 - dead 優先於舊 swing；等待 attack art 的遠端 callback 不再把死亡角色改回 swing。
 - field／login／disconnect／實際 WebSocket close 清除 state；user-leave 清除該人的 Tomb。
   metadata／PNG 可以沿用 cache，但不讓上一個人物的生命週期沿用。
-- Tomb 加入既有原 z-space scene；既有原 Notice 復活窗與 kind0→field 回覆不被工具替換。
+- Tomb原world scene接法已由ADR-057更正為avatar child−1；既有原 Notice 復活窗與 kind0→field 回覆不被工具替換。
 - 顯示素材還在傳輸時，時間仍按事件時刻前進，不在 PNG 到達時假裝重新死亡。
 
 ### 外力 move／方向

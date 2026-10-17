@@ -2302,3 +2302,32 @@ Shape2D10010C40旗標0x10000000是累加重複，不是來回；x ratio0、y rat
 增加既有工具／map-command授權下的104040000按鈕，不自動warp或變更角色；補上輪遺漏聊天maxlength70。
 新增回歸來源但依使用者要求不執行test/check/typecheck/browser/VM/probe。
 沿用同save停服冷備份、重啟LIVE、[skip ci]非force推送；完整證據與尚未完成項見NATIVE_JUMP_ATTACK_BACKGROUNDS.md。
+
+
+## ADR-057：Gr2D parent-chain／序號排序，角色雙面與原slot遮擋，不以y或全域加z代替
+
+**日期**：2026-10-18 ｜ **狀態**：已實作，未執行驗證。
+
+Gr2D 1000C8A0與listing確認vtable100275A8；+188=10013770，+260=10014510，均經100137B0。
+10013D40先比共同parent、再比z與排序序號，不讀畫面y。移除server／client的y tie-break，
+動態WeakMap存stamp／換z重新分配，靜態保留來源順序；沒有重建完整engine每次put_z的排程。
+
+509A80的controller+24!=0額外2，交叉537260／511820(local1)／520680(remote0)確認是active/local，非繩梯。
+空中保留接觸page/group，包括一個RAF跨過的正fh fragment；不在平台上方4px提前換層。
+46BDA0背景依1000*index-1073869824，接MapBack.z→artJson→scene，不套後期front末尾overlay。
+513C80→41B630→41BF60把515C70讀的發射者main z存入bullet；傷害／MISS用原固定root -1073471524。
+
+4011C0 zmap保留明示數值reset與逐項減1；4C1610接受numeric／named z，unknown保留INT_MIN，
+不再猜body/arm fallback。按4C1460／smap與info/vslot兩字元intersection，402130以info/islot最大rank
+處理整張part的slot衝突（等值共存）；作用於一般穿戴，不冒稱body-level blocked-slot／cash完整。
+Hair按動作格原UOL選前／後頭髮，去掉每個正面多補backDefault的錯誤。
+
+402490以faceZ分兩面，508700→376/372；507A20設body0、afterimage1、front2的overlay子層。
+以單張PNG垂直pack兩面與planeHeight header傳輸，field保持原子avatar子樹；普通選角／工具仍可取合併圖。
+共同bounds／crop／origin與damageOriginY，保留鏡像／死亡alpha；殘影不受body tint。
+remote等資源ready才暴露swing，事件時鐘不重起，過期略過且防舊look／death／attack ticket回補。
+509AF0墓碑create(-1)後overlaymain，所以更正前輪world z−1為avatar child−1。
+47D110名字為child5、腳下+2、A0黑底／透明角、Gulim12白字，不是頭頂描邊字；browser metrics仍有界線。
+
+加103000000既有授權工具捷徑，不自動warp／改裝備或進度；同save停服冷備份再開LIVE、非force推送[skip ci]。
+新增回歸來源但不跑test/check/typecheck/browser/VM/probe。原始證據與全未完成界線見NATIVE_LAYER_PRIORITY.md。

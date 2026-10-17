@@ -51,6 +51,7 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
         options.frame ?? 0,
         options.emotion ?? "",
         options.flip === true ? "l" : "r",
+        options.planes === true ? "planes" : "merged",
       ].join("|");
       if (avatars.has(key)) return avatars.get(key);
       const frame = composeAvatar(archive, { faceId: look.face, hairId: look.hair, items: look.items }, {
@@ -58,6 +59,7 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
         ...(options.frame !== undefined ? { frame: options.frame } : {}),
         ...(options.emotion !== undefined ? { emotion: options.emotion } : {}),
         ...(options.flip !== undefined ? { flip: options.flip } : {}),
+        ...(options.planes === true ? { planes: true } : {}),
         ranks,
         ...(reader !== undefined ? { reader } : {}),
       });

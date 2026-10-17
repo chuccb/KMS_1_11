@@ -36,7 +36,7 @@ import { miniMapWindow } from "./minimap.mjs";
 import { viewLayout, DISPLAY_MODES } from "./display.mjs";
 import { movementPortal, arrivalPortal } from "./portals.mjs";
 import { statWindow } from "./statwindow.mjs";
-import { prepareMapScene, mergeScene, visibleSprite } from "./scene.mjs";
+import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.mjs";
 import { characterDialogs } from "./creation.mjs";
 import {
   WORLD_UI,
@@ -552,6 +552,7 @@ function handle(message) {
       playerBody = undefined;
       map = mapArt = undefined;
       mapScene = [];
+      layerOrder = sceneOrdering();
       camera.ready = false;
       terrain = collisionWorld({});
       lastPhysicsAt = undefined;
@@ -705,6 +706,7 @@ function handle(message) {
       deathFx.observe(message.user.characterId, (message.user.action & ~1) === 18,
         message.user, performance.now(), true);
       users.set(String(message.user.characterId), message.user);
+      preloadAvatar(lookOf(message.user));
       logLine(
         `user enter ${message.user.name}@${message.user.x},${message.user.y}`,
       );
@@ -716,6 +718,9 @@ function handle(message) {
       if (message.face !== undefined) user.face = message.face;
       if (message.avatarItems !== undefined)
         user.avatarItems = message.avatarItems;
+      user.attackTicket = (user.attackTicket ?? 0) + 1;
+      delete user.swing;
+      preloadAvatar(lookOf(user));
       return;
     }
 
@@ -1038,6 +1043,7 @@ async function loadMap(mapId, generation) {
     mapArt = undefined;
     // Shared UI/map sheets and avatar poses survive portals; bounded caches evict old entries.
     mapScene = [];
+    layerOrder = sceneOrdering();
     npcArts.clear();
     mobArts.clear();
     artMissing.clear();
@@ -1084,6 +1090,12 @@ async function loadMapArt(mapId, generation) {
     mapArt = art;
     miniMapPanel.setMap(art.miniMap, map.portals);
     mapScene = prepareMapScene(art.sprites);
+    // The archive's back index has a native z of its own, not a boolean final overlay.
+    for (const [index, back] of (art.backs ?? []).entries()) mapScene.push({
+      kind: "back", back, y: back.y, z: back.z ?? (1000 * index - 147990), order: mapScene.length,
+    });
+    mapScene.sort((a, b) => a.z - b.z || a.order - b.order);
+    layerOrder = sceneOrdering(mapScene.length);
     camera.ready = false;
     for (const back of art.backs) artImage(back.path);
     for (const frame of art.portalFrames ?? []) artImage(frame.path);
@@ -1624,6 +1636,7 @@ let mapArt;
 /** `archive path -> { img, ready }`; the page draws a sprite only once its PNG has arrived. */
 const artImages = new Map();
 let mapScene = [];
+let layerOrder = sceneOrdering();
 let mapGeneration = 0, mapAnimationStart = 0;
 /** `look|stance|frame|flip -> { img, dx, dy, ready }` avatar frames. */
 const avatarFrames = new Map();
@@ -1713,6 +1726,7 @@ function updateContact(now) {
       state.frame,
       facingFlip(selfView.facing),
       emotionFace(selfView.emotion, now),
+      true,
     );
     contactPending = {
       contactId: ++contactSerial,
@@ -2246,8 +2260,8 @@ function lookOf(entity) {
  * `dx`/`dy` say where the PNG's top-left corner goes relative to the character's feet; the server
  * composes at the WZ origins, so the page never adds anchors of its own.
  */
-function avatarFrame(look, stance, frame, flip, emotion) {
-  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}`;
+function avatarFrame(look, stance, frame, flip, emotion, planes = false) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}|${planes ? "planes" : "merged"}`;
   let entry = avatarFrames.get(key);
   if (entry) {
     avatarFrames.delete(key);
@@ -2265,13 +2279,14 @@ function avatarFrame(look, stance, frame, flip, emotion) {
   avatarFrames.set(key, entry);
   const query =
     `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&v=20261018-attack-hand`;
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&v=20261018-native-layers`;
   entry.requested = true;
   entry.loading = fetch(`/api/avatar.png${query}`)
     .then(async (response) => {
       if (!response.ok) throw new Error(`avatar ${response.status}`);
       entry.dx = Number(response.headers.get("x-frame-dx") ?? 0);
       entry.dy = Number(response.headers.get("x-frame-dy") ?? 0);
+      entry.planeHeight = Number(response.headers.get("x-frame-plane-height") ?? 0);
       const damageAnchor = response.headers.get("x-frame-damage-origin-y");
       if (damageAnchor !== null && Number.isFinite(Number(damageAnchor))) entry.damageOriginY = Number(damageAnchor);
       const blob = await response.blob();
@@ -2308,31 +2323,31 @@ function preloadAvatar(look) {
         ...(profile?.shoot ?? []),
       ]) {
         for (let frame = 0; frame < action.delays.length; frame++) {
-          avatarFrame(look, action.stance, frame, false);
-          avatarFrame(look, action.stance, frame, true);
+          avatarFrame(look, action.stance, frame, false, undefined, true);
+          avatarFrame(look, action.stance, frame, true, undefined, true);
         }
       }
     });
   }
   for (const stance of ["stand1", "jump"]) {
-    avatarFrame(look, stance, 0, false, "hit");
-    avatarFrame(look, stance, 0, true, "hit");
+    avatarFrame(look, stance, 0, false, "hit", true);
+    avatarFrame(look, stance, 0, true, "hit", true);
   }
   for (const item of look.items)
     if (item >= 1300000 && item < 2000000) describeItem(item);
   for (let frame = 0; frame < 3; frame++) {
-    avatarFrame(look, "stand1", frame, false);
-    avatarFrame(look, "stand1", frame, true);
+    avatarFrame(look, "stand1", frame, false, undefined, true);
+    avatarFrame(look, "stand1", frame, true, undefined, true);
   }
   for (const stance of ["jump", "ladder", "rope", "dead"]) {
     for (let frame = 0; frame < (stance === "jump" || stance === "dead" ? 1 : 2); frame++) {
-      avatarFrame(look, stance, frame, false);
-      avatarFrame(look, stance, frame, true);
+      avatarFrame(look, stance, frame, false, undefined, true);
+      avatarFrame(look, stance, frame, true, undefined, true);
     }
   }
   for (let frame = 0; frame < 4; frame++) {
-    avatarFrame(look, "walk1", frame, false);
-    avatarFrame(look, "walk1", frame, true);
+    avatarFrame(look, "walk1", frame, false, undefined, true);
+    avatarFrame(look, "walk1", frame, true, undefined, true);
   }
 }
 
@@ -2457,6 +2472,10 @@ function stanceOfEntity(entity, now) {
     selfSwing = undefined; // an old attack must never draw standing parts over a climbing pose
     return animationPose(entity, locomotion(body), Math.abs(body.vy) > 0, now);
   }
+  if (!body && entity !== selfView && ["ladder", "rope"].includes(remoteStance(entity))) {
+    delete entity.swing;
+    return animationPose(entity, remoteStance(entity), Math.abs(entity.vy ?? 0) > 0, now);
+  }
   // The wire carries the actual attack action. Use the body WZ's scaled delay per frame,
   // including every shoot2 frame, instead of stretching every motion into 480ms.
   const swing = entity === selfView ? selfSwing : entity.swing;
@@ -2487,6 +2506,13 @@ function emotionFace(emotion, now) {
 /** An avatar at `(screenX, screenY)`; native WZ faces left, right-facing pictures are mirrored. */
 function drawAvatarAt(entity, screenX, screenY, now, flip) {
   const dead = deathFx.get(entity.characterId);
+  // 509AF0 tomb z=-1 is an OVERLAY CHILD of the avatar, not an independent world z-1.
+  // It belongs behind this avatar's body, but not behind another root with a smaller z.
+  const tomb = dead && deathFx.tomb(entity.characterId, now);
+  if (tomb?.frame) {
+    const position = entity === selfView ? self : entity;
+    drawArchiveImage(tomb.frame, screenX + tomb.x - position.x, screenY + tomb.y - position.y, false);
+  }
   const pendingSwing = dead ? undefined : entity === selfView ? selfSwing : entity.swing;
   const swing = pendingSwing && attackFrame(pendingSwing, now) >= 0 ? pendingSwing : undefined;
   const direction = swing ? !swing.facingLeft : flip;
@@ -2497,67 +2523,46 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
     screenY += pose.y - position.y;
     ctx.globalAlpha *= pose.alpha;
   }
-  // Native 0xff808080 is RGB multiplication, NOT a translucent/vanishing avatar.
   if (entity === selfView && selfView.hp > 0 && contact.tinted) ctx.filter = "brightness(0.5019607843137255)";
-  drawAvatarBodyAt(entity, screenX, screenY, now, direction);
+  // 507A20/508700: body child z=0, afterimage z=1, front/face child z=2.
+  // Gr2D's overlay comparator walks parents first: these are NOT world z+1 / z+2.
+  drawAvatarBodyAt(entity, screenX, screenY, now, direction, () => {
+    if (!swing) return;
+    const index = attackFrame(swing, now), frames = swing.effects?.[String(index)];
+    if (!frames?.length || index < 0) return;
+    const prior = swing.delays.slice(0, index).reduce((sum, delay) => sum + delay, 0);
+    ctx.save();
+    ctx.filter = "none"; // User contact tint affects avatar canvases, not the weapon's afterimage.
+    drawArchiveImage(loopFrame(frames, now - swing.start - prior), screenX, screenY, direction);
+    ctx.restore();
+  });
   ctx.restore();
-  if (!swing) return;
-  const index = attackFrame(swing, now);
-  const frames = swing.effects?.[String(index)];
-  if (!frames?.length || index < 0) return;
-  const prior = swing.delays
-    .slice(0, index)
-    .reduce((sum, delay) => sum + delay, 0);
-  const elapsed = now - swing.start - prior;
-  // Sparse Afterimage body-frame attachments; no invented broad sword arc.
-  drawArchiveImage(loopFrame(frames, elapsed), screenX, screenY, direction);
 }
 
-function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
+function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   const look = lookOf(entity);
   preloadAvatar(look);
   const state = stanceOfEntity(entity, now);
-  let frame = avatarFrame(
-    look,
-    state.stance,
-    state.frame,
-    flip,
-    emotionFace(entity.emotion, now),
-  );
+  let frame = avatarFrame(look, state.stance, state.frame, flip, emotionFace(entity.emotion, now), true);
   const attackPose = /^(swing|stab|shoot)/.test(state.stance);
-  // Hit/emote PNGs may be cold even though the attack itself was predecoded. Keep the SAME
-  // body frame with a neutral face rather than replacing a swing with standing (or blanking it).
-  if (!frame.ready && attackPose) frame = avatarFrame(look, state.stance, state.frame, flip);
-  if (frame.ready) {
-    // The server composed this frame facing the requested way and reported where its top-left
-    // corner goes relative to the feet, so the page adds `dx`/`dy` and nothing else.
-    ctx.drawImage(
-      frame.img,
-      Math.round(screenX + frame.dx),
-      Math.round(screenY + frame.dy),
-    );
-    return;
-  }
-  if (state.stance !== "stand1" && !attackPose) {
-    // Non-attack cold poses may use idle until loaded; an attack must not change its body action.
-    const stand = avatarFrame(
-      look,
-      "stand1",
-      0,
-      flip,
-      emotionFace(entity.emotion, now),
-    );
-    if (stand.ready) {
-      ctx.drawImage(
-        stand.img,
-        Math.round(screenX + stand.dx),
-        Math.round(screenY + stand.dy),
-      );
-      return;
+  if (!frame.ready && attackPose) frame = avatarFrame(look, state.stance, state.frame, flip, undefined, true);
+  const draw = (entry) => {
+    const x = Math.round(screenX + entry.dx), y = Math.round(screenY + entry.dy);
+    const h = entry.planeHeight, w = entry.img.naturalWidth;
+    if (h > 0 && entry.img.naturalHeight === h * 2) {
+      ctx.drawImage(entry.img, 0, 0, w, h, x, y, w, h);
+      drawMiddle?.();
+      ctx.drawImage(entry.img, 0, h, w, h, x, y, w, h);
+    } else {
+      ctx.drawImage(entry.img, x, y);
+      drawMiddle?.();
     }
+  };
+  if (frame.ready) { draw(frame); return; }
+  if (state.stance !== "stand1" && !attackPose) {
+    const stand = avatarFrame(look, "stand1", 0, flip, emotionFace(entity.emotion, now), true);
+    if (stand.ready) { draw(stand); return; }
   }
-  // Before the composed PNG arrives (or if the archive is off): a neutral placeholder at the same
-  // spot, so the field is not empty while the first pictures load.
   ctx.fillStyle = "rgba(120, 170, 210, 0.35)";
   ctx.fillRect(Math.round(screenX) - 9, Math.round(screenY) - 42, 18, 42);
 }
@@ -2875,10 +2880,7 @@ function frame() {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  const backs = mapArt?.backs ?? [];
-  for (const back of backs) if (!back.front) drawBack(back, cameraX, cameraY, now);
-
-  // Characters, back to front by their feet.
+  // Root layers use native z + sequence. Avatar children remain grouped with their parent.
   const actors = [];
   for (const npc of npcs.values()) actors.push({ kind: "npc", y: npc.y, npc });
   for (const mob of mobs.values()) actors.push({ kind: "mob", y: mob.y, mob });
@@ -2891,28 +2893,29 @@ function frame() {
     const entity =
       actor.kind === "self" ? (playerBody ?? self) : actor[actor.kind];
     const z = actorDepth(entity, terrain, actor.kind);
-    scene.push({ ...actor, z });
-    if (actor.kind === "self" || actor.kind === "user") {
-      const view = actor.kind === "self" ? selfView : actor.user, death = deathFx.get(view.characterId);
-      if (death) scene.push({ kind: "tomb", deathId: view.characterId, y: death.y, z: z - 1 });
-    }
+    scene.push({ ...actor, z, order: layerOrder(entity, z) });
   }
   // Original CPortalList uses a fixed front-plane z; drops use their landing foothold's page/group.
   // Do not paint either before all the tiles: that hides them behind ordinary ground sprites.
-  scene.push({ kind: "portals", y: 0, z: 250110 }); // sub_4A3920: -1073471724 relative to tile base
+  scene.push({ kind: "portals", y: 0, z: 250110, order: 0 }); // sub_4A3920: -1073471724 relative to tile base
   for (const [key, record] of drops) {
-    scene.push({
-      kind: "drop",
-      key,
-      record,
-      y: record.drop.y,
-      z: actorDepth(record.drop, terrain, "drop"),
-    });
+    const z = actorDepth(record.drop, terrain, "drop");
+    scene.push({ kind: "drop", key, record, y: record.drop.y, z, order: layerOrder(record, z) });
   }
+  for (let i = projectiles.length - 1; i >= 0; i--)
+    if (now - projectiles[i].releaseAt >= projectiles[i].duration) projectiles.splice(i, 1);
+  for (const shot of projectiles)
+    if (now >= shot.releaseAt) scene.push({ kind: "projectile", shot, z: shot.z, y: 0, order: layerOrder(shot, shot.z) });
+  scene.push({ kind: "damage", z: 250310, y: 0, order: 0 }); // 41E610/41F200 -1073471524
   for (const actor of mergeScene(mapScene, scene)) {
-    if (actor.kind === "tomb") {
-      const tomb = deathFx.tomb(actor.deathId, now);
-      if (tomb?.frame) drawArchiveImage(tomb.frame, tomb.x - cameraX, tomb.y - cameraY, false);
+    if (actor.kind === "back") { drawBack(actor.back, cameraX, cameraY, now); continue; }
+    if (actor.kind === "projectile") { drawProjectile(actor.shot, cameraX, cameraY, now); continue; }
+    if (actor.kind === "damage") {
+      for (let i = damageMarks.length - 1; i >= 0; i--) {
+        const mark = damageMarks[i];
+        if (now - mark.start >= 1000) damageMarks.splice(i, 1);
+      }
+      for (const mark of damageMarks) damageArt.draw(ctx, mark, cameraX, cameraY, now);
       continue;
     }
     if (actor.kind === "portals") {
@@ -2964,23 +2967,13 @@ function frame() {
       );
     } else if (actor.kind === "self") {
       drawAvatarAt(selfView, x, y, now, facingFlip(selfView.facing));
-      drawName(selfView.name, x, y - 62);
+      drawName(selfView.name, x, y);
     } else {
       drawAvatarAt(actor.user, x, y, now, facingFlip(actor.user.facing));
-      drawName(actor.user.name, x, y - 62);
+      drawName(actor.user.name, x, y);
     }
   }
 
-  drawProjectiles(cameraX, cameraY, now);
-
-  // Native WZ glyphs and MISS, not browser-font stand-ins.
-  for (let i=damageMarks.length-1;i>=0;i--) {
-    const mark=damageMarks[i];
-    if(now-mark.start>=1000) {damageMarks.splice(i,1);continue;}
-    damageArt.draw(ctx,mark,cameraX,cameraY,now);
-  }
-
-  for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY, now);
   drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
@@ -3215,48 +3208,40 @@ function launchProjectile(entity, itemId, motion, mob, now, near) {
   const at = local ? self : entity;
   if (!at) return;
   const leg = projectileLeg(at.x, at.y, motion.facingLeft, mob, near);
-  const record = { ...leg, releaseAt: now + shotRelease(motion), frames: [] };
+  // 513C80 passes 515C70(source avatar main layer) through 41B630 -> 41BF60.
+  // A bullet keeps its launch root depth; moving the shooter later must not drag its z around.
+  const z = actorDepth(local ? (playerBody ?? at) : at, terrain, local ? "self" : "user");
+  const record = { ...leg, releaseAt: now + shotRelease(motion), frames: [], z };
   projectiles.push(record);
   const field = self;
   void ensureProjectileFrames(itemId).then((frames) => {
     if (self === field) record.frames = frames;
   });
 }
-function drawProjectiles(cameraX, cameraY, now) {
-  for (let i = projectiles.length - 1; i >= 0; i--) {
-    const shot = projectiles[i];
-    const elapsed = now - shot.releaseAt;
-    if (elapsed < 0) continue;
-    const t = elapsed / shot.duration;
-    if (t >= 1) {
-      projectiles.splice(i, 1);
-      continue;
-    }
-    const frame = loopFrame(shot.frames, elapsed);
-    if (!frame) continue;
-    ctx.save();
-    ctx.translate(
-      Math.round(shot.x0 + (shot.x1 - shot.x0) * t - cameraX),
-      Math.round(shot.y0 + (shot.y1 - shot.y0) * t - cameraY),
-    );
-    // 41BF60 turns the native left-facing bullet by atan2(start - destination).
-    ctx.rotate(Math.atan2(shot.y0 - shot.y1, shot.x0 - shot.x1));
-    drawArchiveImage(frame, 0, 0, false);
-    ctx.restore();
-  }
+function drawProjectile(shot, cameraX, cameraY, now) {
+  const elapsed = now - shot.releaseAt, t = elapsed / shot.duration;
+  const frame = loopFrame(shot.frames, elapsed);
+  if (!frame) return;
+  ctx.save();
+  ctx.translate(Math.round(shot.x0 + (shot.x1 - shot.x0) * t - cameraX),
+    Math.round(shot.y0 + (shot.y1 - shot.y0) * t - cameraY));
+  ctx.rotate(Math.atan2(shot.y0 - shot.y1, shot.x0 - shot.x1));
+  drawArchiveImage(frame, 0, 0, false);
+  ctx.restore();
 }
 async function receiveUserAttack(message, now) {
   const user = users.get(String(message.characterId));
-  if (!user || remoteStance(user) === "dead") return;
+  if (!user || ["dead", "ladder", "rope"].includes(remoteStance(user))) return;
   const field = self,
     epoch = combatEpoch;
-  const look = lookOf(user);
+  const ticket = user.attackTicket = (user.attackTicket ?? 0) + 1;
+  const look = lookOf(user), lookKey = JSON.stringify(look);
   const profile = await ensureAttackProfile(look);
   if (
     self !== field ||
     combatEpoch !== epoch ||
     users.get(String(message.characterId)) !== user ||
-    remoteStance(user) === "dead"
+    ["dead", "ladder", "rope"].includes(remoteStance(user)) || user.attackTicket !== ticket || JSON.stringify(lookOf(user)) !== lookKey
   )
     return;
   const action = (message.shoot ? profile?.shoot : profile?.melee)?.find(
@@ -3269,7 +3254,7 @@ async function receiveUserAttack(message, now) {
     Math.max(1, Math.trunc((delay * (speed + 5)) / 8)),
   );
   user.facing = message.facingLeft ? 1 : 0;
-  user.swing = {
+  const motion = {
     ...action,
     delays,
     start: now,
@@ -3282,7 +3267,7 @@ async function receiveUserAttack(message, now) {
     launchProjectile(
       user,
       message.projectileItemId,
-      user.swing,
+      motion,
       target,
       now,
       near,
@@ -3290,7 +3275,7 @@ async function receiveUserAttack(message, now) {
   for (const target of message.targets ?? []) {
     const mob = mobs.get(String(target.mobId));
     const delay = message.shoot
-      ? shotRelease(user.swing) +
+      ? shotRelease(motion) +
         projectileLeg(user.x, user.y, message.facingLeft, mob, near).duration
       : 0;
     scheduleAttackHit(
@@ -3299,6 +3284,17 @@ async function receiveUserAttack(message, now) {
       now + delay,
     );
   }
+  // Preserve the received attack clock / hit scheduling. A cold remote action is not exposed to
+  // the renderer as an unready gray box, and isn't restarted late after it already finished.
+  const frames = delays.map((_, frame) => avatarFrame(look, motion.stance, frame,
+    !message.facingLeft, undefined, true));
+  const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
+  await Promise.all([...frames, ...effects].map((frame) => frame.loading));
+  if (self !== field || combatEpoch !== epoch || users.get(String(message.characterId)) !== user
+      || user.attackTicket !== ticket || JSON.stringify(lookOf(user)) !== lookKey
+      || ["dead", "ladder", "rope"].includes(remoteStance(user)) || performance.now() - now >= attackDuration(motion)
+      || [...frames, ...effects].some((frame) => !frame.ready)) return;
+  user.swing = motion;
 }
 /** Candidate mob canvas rectangles, not a claim to have ported native CShape2D collision. */
 function mobInAttackRect(bounds, facingLeft, clampNear = false) {
@@ -3394,7 +3390,7 @@ async function swing() {
     const motion = action;
     const look = lookOf(entity), facingLeft = entity.facing === 1;
     const frames = motion.delays.map((_, frame) => avatarFrame(
-      look, motion.stance, frame, facingFlip(entity.facing)));
+      look, motion.stance, frame, facingFlip(entity.facing), undefined, true));
     const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
     await Promise.all([...frames, ...effects].map((frame) => frame.loading));
     entity = selfView;
@@ -3434,26 +3430,31 @@ async function swing() {
   }
 }
 
-/** The layer the characters are drawn in: after layers 0-2, before layer 3 and the front backs. */
-
-/** A name tag above a character, white with a soft shadow - the 2003 client's look. */
+/** CLife::47D110: child z=5, at feet +(-width/2,2), text +(2,2), A0-black
+ * rectangle with transparent 1px corners. Browser Gulim fallback metrics are not original GDI.
+ */
 function drawName(name, x, y) {
   if (!name) return;
-  ctx.font =
-    "12px 'Malgun Gothic', 'Apple SD Gothic Neo', 'KMSCJK', system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.75)";
-  ctx.strokeText(name, x, y);
+  ctx.save();
+  ctx.font = HUD_FONT;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const w = Math.ceil(ctx.measureText(name).width) + 5, h = 16;
+  const left = Math.round(x) - Math.trunc(w / 2), top = Math.round(y) + 2;
+  ctx.fillStyle = "rgba(0,0,0,0.6274509803921569)";
+  ctx.fillRect(left + 1, top, w - 2, h);
+  ctx.fillRect(left, top + 1, 1, h - 2);
+  ctx.fillRect(left + w - 1, top + 1, 1, h - 2);
   ctx.fillStyle = "#ffffff";
-  ctx.fillText(name, x, y);
+  ctx.fillText(name, left + 2, top + 2);
+  ctx.restore();
 }
 
 /**
  * The portal swirls, exactly where the original draws them: `pt == 2` warps (`pt == 0` is a spawn
  * point and `pt == 1` a hidden passage, neither of which has a picture), using the shared
- * `MapHelper.img/portal/game/pv` animation. They belong to the field, so they are drawn behind the
- * characters - the page calls this before the actors.
+ * `MapHelper.img/portal/game/pv` animation. They use the fixed portal root z,
+ * not an unconditional before/after-actor pass.
  */
 function drawPortals(cameraX, cameraY, now) {
   if (!map || !mapArt) return;

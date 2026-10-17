@@ -5,7 +5,15 @@
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：原48D080動作子樹能力分類、53DAA0無目標跳躍、重力／swept落地路徑，
+- **本輪（2026-10-18，未測試）**：追到 Gr2D 原 vtable／parent-chain comparator，改正同z按腳底y排序；
+  補本機角色深度+2、空中保留接觸層、背景index z、飛行道具來源z與傷害固定層。
+  補 zmap明示數值／smap／islot／vslot的一般裝備遮擋；去除正面動作多貼後腦頭髮。
+  角色兩面PNG與原殘影中間層接通；墓碑改正為avatar child−1（不是world z−1），名字回腳下黑底原式。
+  遠端基本攻擊補資源ready／事件時鐘與過期guard；加103000000圖層入口，沿用存檔、不seed／自動改角色。
+  [完整原檔證據、實作／未完成界線與操作](docs/NATIVE_LAYER_PRIORITY.md)／ADR-057。
+  **未執行test/check/typecheck/browser/VM/probe**；不宣稱完整Gr2D／CVecCtrl／CAvatar／全遊戲1:1。
+
+- **前輪（2026-10-18，未測試）**：原48D080動作子樹能力分類、53DAA0無目標跳躍、重力／swept落地路徑，
   連接0x33／browser jump動畫／中途進場／戰鬥位置／死亡重生；補info.link動作來源與靜止類分流。
   修攻擊arm身份與hand錨點、冷圖跳站姿、未知／無武器假480ms攻擊，以及待機0→1→2→1。
   508FC0另定位movement/body action混表，修jump6／ladder14／rope16的本機、遠端與繩梯深度接線。

@@ -13,7 +13,7 @@ import { miniMapArt, type MiniMapArt } from "./minimap.ts";
  * ---------------------------------------------------------------------------------------------
  *   back      `<n>`: `bS` (background set), `no` (canvas in `Map/Back/<bS>.img/back`), `x`, `y`,
  *             `rx`/`ry` (parallax speed), `type` (tiling), `cx`/`cy` (tile spacing), `a` (alpha),
- *             `front` (draw over the characters), `f` (flip)
+ *             (this build does not read the later `front` flag)
  *   <0..7>    one layer: `info/tS` (default tile set), `tile` entries (`x`, `y`, `u`, `no`, `zM`)
  *             and `obj` entries (`oS`, `l0`, `l1`, `l2`, `x`, `y`, `z`, `zM`, `f`)
  *
@@ -46,7 +46,9 @@ export interface MapBack {
   cy: number;
   /** 0..255 opacity (the map's `a`, 255 when absent). */
   a: number;
-  /** Drawn after the characters (the map's `front`). */
+  /** 46BDA0: 1000*index - 1073869824, normalized to the tile base. */
+  z: number;
+  /** Compatibility field only; KMS 1.11 does not read modern `front`. */
   front: boolean;
   /** Mirrored (`f = 1`); no shipped map in `Data.wz` uses it, but the field exists on the wire. */
   flip: boolean;
@@ -154,7 +156,8 @@ export function mapBacks(root: unknown, reader: ArtReader): MapBack[] {
       cx: asNumber(fields.cx),
       cy: asNumber(fields.cy),
       a: asNumber(fields.a, 255),
-      front: asNumber(fields.front) !== 0,
+      z: 1000 * asNumber(entry.name) - 147990,
+      front: false,
       flip: asNumber(fields.f) !== 0,
     });
   }
@@ -244,7 +247,8 @@ function mapSpriteScan(root: unknown, reader: ArtReader): { sprites: MapSprite[]
       });
     }
   }
-  out.sort((left, right) => left.z - right.z || left.y - right.y);
+  // Gr2D 10013D40 uses layer sequence for equal z, never the canvas' world y.
+  out.sort((left, right) => left.z - right.z);
   return { sprites: out, missingTiles, missingTileSets: [...missingTileSets].sort() };
 }
 

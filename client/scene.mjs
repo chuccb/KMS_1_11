@@ -1,8 +1,26 @@
-/** Stable native z/y ordering. Static map nodes precede dynamic actors on exact ties. */
-export const compareScene = (a, b) => a.z - b.z || a.y - b.y;
+/** Gr2D 10013D40/100137B0: root z, then insertion/reorder sequence. NEVER feet y.
+ * Child overlays stay inside their parent's subtree (avatar planes/afterimage/name).
+ */
+export const compareScene = (a, b) => a.z - b.z || (a.order ?? 0) - (b.order ?? 0);
+
+/** A persistent stamp, refreshed on z changes; rebuilding the RAF list must not change ties.
+ * Weak keys release despawned actors/shots. A field load supplies a new ordering instance.
+ */
+export function sceneOrdering(first = 0) {
+  const records = new WeakMap();
+  let sequence = first;
+  return (entity, z) => {
+    let record = records.get(entity);
+    if (!record || record.z !== z) {
+      record = { z, order: ++sequence };
+      records.set(entity, record);
+    }
+    return record.order;
+  };
+}
 export function prepareMapScene(sprites) {
   return sprites
-    .map((sprite) => ({ kind: "map", y: sprite.y, z: sprite.z, sprite }))
+    .map((sprite, order) => ({ kind: "map", y: sprite.y, z: sprite.z, order, sprite }))
     .sort(compareScene);
 }
 /** Merge the once-sorted static map with the small moving population; don't sort/clone every tile per RAF. */

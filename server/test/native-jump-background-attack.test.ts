@@ -156,7 +156,7 @@ test("attack armOverHair/armBelowHead publishes the same hand as arm without cha
     nodes.set(weapon,props(["weapon",0]));
     add(`${weapon}/weapon`,[255,0,0,255],[["hand",[0,0]]],"weapon");
     const reader:ArtReader={at:path=>arts.get(path),node:path=>nodes.get(path),size:0,clear(){}};
-    const composed=composeAvatarBitmap({} as WzArchive, {faceId:20000,hairId:30000,items:[1302000]},
+    const composed=composeAvatarBitmap({has:()=>false} as WzArchive, {faceId:20000,hairId:30000,items:[1302000]},
       {stance:"swingO1",frame:0,flip,reader,ranks:new Map([["body",0],[z,1],["weapon",2]])})!;
     const x=(flip?-12:12)-composed.dx,y=-composed.dy;
     assert.deepEqual([...composed.bitmap.data.subarray((y*composed.bitmap.width+x)*4,(y*composed.bitmap.width+x)*4+4)],[255,0,0,255]);

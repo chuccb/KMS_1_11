@@ -1,6 +1,12 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：補動作子樹能力／普通跳躍怪重力路徑、
+> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：交叉讀原Gr2D vtable／parent-chain，
+> 補root序號／child原排序、local+2／空中層記憶、背景index／bullet來源深度／damage固定層；
+> zmap數值reset＋smap／islot／vslot一般裝備遮擋，雙面角色與殘影中層，Tomb child−1、名字回腳下黑底。
+> 遠端攻擊cold-art guard、103000000授權捷徑，沿用save冷備份重啟。全CAvatar／Gr2D排程／UI focus仍缺。
+> 見 `NATIVE_LAYER_PRIORITY.md`／ADR-057；啟服不是功能PASS。
+
+> 前輪交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：補動作子樹能力／普通跳躍怪重力路徑、
 > 0x33與browser jump／落地／late join／戰鬥位置／死亡重生；補linked action來源，靜止／飛行不冒用地面巡邏。
 > 修攻擊arm身份／hand、冷載入跳站姿、無武器假480ms／未知action替換、待機ping-pong；依原46BDA0＋Shape2D接type4移動雲層。
 > 另修movement/body action混表：jump6／ladder14／rope16，本機發送／遠端／繩梯深度一起修。加104040000授權捷徑、補聊天70。沿用save，冷備份重啟；aggro／飛行／完整CVecCtrl仍未完成。

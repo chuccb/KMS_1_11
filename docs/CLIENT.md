@@ -4,7 +4,17 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：跳躍怪／攻擊姿勢／移動雲層（2026-10-18，未測試）
+## 最新實作：原版 root／child 圖層與裝備遮擋（2026-10-18，未測試）
+
+Gr2D 10013D40／100137B0 確認同z用序號而非y，overlay parent先比，不把角色兩面拆成global z±2。
+補本機controller+2、空中page/group記憶、背景index深度與HTTP欄、bullet來源z、傷害／MISS固定層。
+接zmap明示數值與smap／islot／vslot的一般裝備遮擋，移除正面多補backHair；雙面packed PNG以同origin畫
+back→afterimage→front，Tomb child−1與名字child5不再當獨立世界層；名字改回腳下A0黑底。
+遠端攻擊等圖ready、沿原事件時鐘，不在過期後重播。新增103000000授權圖層捷徑，沿用save不自動改角色。
+未做test/check/typecheck/browser/VM/probe。完整CAvatar blocked-slot／cash、原Gr2D排程、UI focus仍未還原。
+見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)／ADR-057。
+
+## 前輪實作：跳躍怪／攻擊姿勢／移動雲層（2026-10-18，未測試）
 
 補原動作子樹能力分類、無目標roam起跳與server ordinary air路徑、0x33 jump／0ms落地、
 browser動作／中途進場／戰鬥位置／死亡重生；link動作圖與原模板數值分離。飛行／追擊仍未完整實作。
@@ -251,7 +261,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 |---|---|---|
 | 背景（Back） | `GET /api/maps` | `[{id,name,streetName}]`，真 WZ 的只讀地圖清單，lazy cached |
 | `GET /api/map/<id>/art` 的 `backs[]` ＋ `/api/png/<path>` | 依 WZ 的 `bS/no/x/y/rx/ry/type/cx/cy/a` 畫；`type` 1／3／4／6 橫向鋪、2／3／5／7 縱向鋪，`rx/ry` 是視差百分比，`cx/cy` 覆寫鋪貼間距 |
-| 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色畫在 layer 0–2 之後、layer 3 之前（`CHARACTER_LAYER`） |
+| 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色依foothold page/group排序；local比remote/mob多2。子圖層依父層分組，不是固定`CHARACTER_LAYER` |
 | 傳送門 | `MapHelper.img/portal/game/pv` 的動畫 | 只畫 `pt == 2` 的可見傳送門（`pt == 0` 是出生點、`pt == 1` 是隱藏通道，原版都不畫） |
 | 選角畫面 | `/api/avatar.png?face&hair&items&stance=stand1&frame=0` | 每個角色列都放上他自己的站立幀（`0x02` 的角色清單已帶 face／hair／worn ids），不是文字佔位 |
 | 一張圖的尺寸與原點 | `/api/canvas/<archive path>` | 沒有 frame 表的圖（掉落的金幣堆 `Item/Special/0900.img/0900000X/iconRaw/N`）需要 `width/height/ox/oy`，PNG 本身帶不了 |
@@ -270,7 +280,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 
 | 端點 | 回什麼 |
 |---|---|
-| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,z,front:false,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，依tile／obj各自原公式排序，同z保留原插入順序；`bounds` 是相機可以顯示的矩形 |
 | `GET /api/death` | `{fall[],land[]}`：原 Tomb queue／delay／origin；fall只排到至少800ms，land全格。原素材無法讀取時404，不生成替代圖 |
 | `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
 | `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |

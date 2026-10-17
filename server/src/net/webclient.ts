@@ -135,6 +135,7 @@ export interface ArtProvider {
       frame?: number;
       emotion?: string;
       flip?: boolean;
+      planes?: boolean;
     },
   ): AvatarFrame | undefined;
   /** The canvas at a `Map/Tile/...` style archive path, as `CanvasArt`. */
@@ -289,6 +290,7 @@ function artJson(art: MapArt): unknown {
       cx: back.cx,
       cy: back.cy,
       a: back.a,
+      z: back.z,
       front: back.front,
       flip: back.flip,
     })),
@@ -434,6 +436,7 @@ function serveAvatar(
     stance: url.searchParams.get("stance") ?? "stand1",
     frame: number("frame", 0),
     flip: url.searchParams.get("flip") === "1",
+    planes: url.searchParams.get("planes") === "1",
     ...(url.searchParams.get("emotion") !== null
       ? { emotion: String(url.searchParams.get("emotion")) }
       : {}),
@@ -449,7 +452,8 @@ function serveAvatar(
     "x-frame-dx": String(frame.dx),
     "x-frame-dy": String(frame.dy),
     "x-frame-damage-origin-y": String(frame.damageOriginY ?? Math.max(0, -frame.dy)),
-    "access-control-expose-headers": "x-frame-dx, x-frame-dy, x-frame-damage-origin-y",
+    ...(frame.planeHeight !== undefined ? { "x-frame-plane-height": String(frame.planeHeight) } : {}),
+    "access-control-expose-headers": "x-frame-dx, x-frame-dy, x-frame-damage-origin-y, x-frame-plane-height",
     "cache-control": "public, max-age=3600",
   });
   response.end(Buffer.from(frame.png));

@@ -281,6 +281,12 @@ export function actionOf(body) {
   return ({ walk1: 2, stand1: 4, dead: 18, jump: 6, ladder: 14, rope: 16 }[locomotion(body)]) | body.facing;
 }
 
+/** CVecCtrl retains page/group from each contacted foothold even if a later fragment is airborne. */
+function rememberFootholdDepth(entity, world, foothold) {
+  const floor = world.byId.get(foothold);
+  if (floor) { entity.layer = floor.layer ?? 7; entity.group = floor.group ?? 0; }
+}
+
 /** Preserve path duration end-to-end. New paths start from what was drawn, avoiding tiny jitter. */
 export function beginPath(entity, path, now, fallbackDuration = 100) {
   const elements = path?.elements?.length ? path.elements : [];
@@ -297,6 +303,7 @@ export function sampleMotion(entity, now, world) {
       remaining -= e.duration; x = e.x; y = e.y;
       entity.action = e.action ?? entity.action; entity.facing = entity.action & 1;
       entity.foothold = e.foothold; entity.vx = e.vx ?? 0; entity.vy = e.vy ?? 0;
+      rememberFootholdDepth(entity, world, e.foothold);
       continue;
     }
     const fraction = remaining / e.duration;
@@ -318,12 +325,14 @@ export function sampleMotion(entity, now, world) {
       }
       if (closest) { entity.y = closest.y; entity.foothold = closest.f.id; }
     }
+    rememberFootholdDepth(entity, world, entity.foothold);
     return true;
   }
   const last = motion.elements.at(-1);
   entity.x = last.x;
   entity.y = last.y;
   entity.foothold = last.foothold;
+  rememberFootholdDepth(entity, world, last.foothold);
   entity.action = last.action ?? entity.action;
   entity.facing = entity.action & 1;
   entity.vx = last.vx ?? 0; entity.vy = last.vy ?? 0;
@@ -332,7 +341,9 @@ export function sampleMotion(entity, now, world) {
 }
 
 /** Same z-space as mapSprites, normalized by removing the common -1073721834 base.
- * sub_4861F0/sub_509A80: 30000*page - 2*group + 10008; sub_499BA0: NPC +10009; sub_4A88A0: drop +10011.
+ * 4861F0: page/group +10008; 499BA0 NPC +10009; 4A88A0 drop +10011.
+ * 509A80 adds 2 for CVecCtrl+24 (local/active controller), NOT for ladder/rope.
+ * 511820 initializes local controller with 1; 520680 initializes remote with 0.
  */
 export function actorDepth(entity, world, kind = "self") {
   const userClimbing = (kind === "self" || kind === "user")
@@ -340,9 +351,14 @@ export function actorDepth(entity, world, kind = "self") {
   const climbing = entity.ladder ?? (userClimbing
     ? world.ladders.find((l) => Math.abs(l.x - entity.x) < 1 && entity.y >= l.y1 && entity.y <= l.y2) : undefined);
   if (climbing) { entity.layer = climbing.page ?? entity.layer; entity.group = 0; }
-  const floor = world.byId.get(entity.foothold) ?? floorBelow(world, entity.x, entity.y - 2, 4)?.foothold;
+  // Jumping/falling keeps the previous page/group until contact. Looking four pixels below a
+  // player/mob used to promote it onto a platform BEFORE landing and reorder it through scenery.
+  // NPC/drop packets lack browser foothold state; resolve their fixed placement only.
+  const placed = kind === "npc" || kind === "drop";
+  const floor = world.byId.get(entity.foothold) ?? (placed
+    ? floorBelow(world, entity.x, entity.y - 2, 4)?.foothold : undefined);
   if (floor && !climbing) { entity.layer = floor.layer ?? 7; entity.group = floor.group ?? 0; }
-  return 30000 * (entity.layer ?? (kind === "drop" ? 0 : 7)) - 2 * (entity.group ?? 0) + (kind === "npc" ? 10009 : kind === "drop" ? 10011 : 10008);
+  return 30000 * (entity.layer ?? (kind === "drop" ? 0 : 7)) - 2 * (entity.group ?? 0) + (kind === "npc" ? 10009 : kind === "drop" ? 10011 : kind === "self" ? 10010 : 10008);
 }
 
 /** Body-frame delays from Character/00002000.img; climbing freezes its current frame, not frame 0. */
