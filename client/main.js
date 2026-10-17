@@ -36,11 +36,6 @@ const ui = {
   log: /** @type {HTMLElement} */ (document.getElementById("log")),
   logLines: /** @type {HTMLElement} */ (document.getElementById("log-lines")),
   logToggle: /** @type {HTMLButtonElement} */ (document.getElementById("log-toggle")),
-  shop: /** @type {HTMLElement} */ (document.getElementById("shop")),
-  shopTitle: /** @type {HTMLElement} */ (document.getElementById("shop-title")),
-  shopRows: /** @type {HTMLElement} */ (document.getElementById("shop-rows")),
-  shopClose: /** @type {HTMLButtonElement} */ (document.getElementById("shop-close")),
-  shopNote: /** @type {HTMLElement} */ (document.getElementById("shop-note")),
   dialogue: /** @type {HTMLElement} */ (document.getElementById("dialogue")),
   dialogueText: /** @type {HTMLElement} */ (document.getElementById("dialogue-text")),
   dialogueOk: /** @type {HTMLButtonElement} */ (document.getElementById("dialogue-ok")),
@@ -272,11 +267,11 @@ function handle(message) {
     case "inventory":
       // The window draws from this on the next frame; `0x0B` also changes the stack counts.
       inventory = message.inventory;
+      reconcileShopInventory();
       return;
 
     case "shop-open":
-      shop = message.shop;
-      renderShop();
+      openShop(message.shop);
       return;
 
     case "shop-result":
@@ -723,6 +718,27 @@ let pointerAt;
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
   pointerAt = point;
+  if (shopScrollDrag !== undefined) {
+    const { side, offset } = shopScrollDrag;
+    const geometry = shopScrollbarGeometry(side);
+    if (geometry !== undefined) {
+      const position = point.y - shopAt.y - SHOP.scrollbar[side].y - 12 - offset;
+      setShopScroll(side, Math.round(position * geometry.max / geometry.travel));
+    }
+    canvas.style.cursor = "default";
+    return;
+  }
+  if (shopDrag !== undefined) {
+    if (Math.abs(point.x - shopDrag.startX) + Math.abs(point.y - shopDrag.startY) > 3) shopDrag.moved = true;
+    if (shopDrag.moved) {
+      shopAt = {
+        x: Math.max(-SHOP.width + 48, Math.min(VIEW_W - 48, Math.round(point.x - shopDrag.dx))),
+        y: Math.max(0, Math.min(VIEW_H - 32, Math.round(point.y - shopDrag.dy))),
+      };
+      canvas.style.cursor = "move";
+      return;
+    }
+  }
   if (inventoryDrag !== undefined) {
     // Four pixels of slop: a click that wobbles on a slot still selects it instead of moving the
     // window. Past that, the press becomes the window drag the original has.
@@ -739,6 +755,22 @@ canvas.addEventListener("mousemove", (event) => {
       return;
     }
   }
+  const shopHit = shopWindowAt(point.x, point.y);
+  if (shopHit !== undefined) {
+    shopHover = shopHit;
+    inventoryHover = undefined;
+    statusHover = undefined;
+    hoveredPortal = undefined;
+    const pointer = shopHit.kind === "close"
+      || shopHit.kind === "button"
+      || shopHit.kind === "tab"
+      || shopHit.kind === "buy-row"
+      || shopHit.kind === "sell-row"
+      || shopHit.kind === "scrollbar";
+    canvas.style.cursor = pointer ? "pointer" : "default";
+    return;
+  }
+  shopHover = undefined;
   inventoryHover = inventoryWindowAt(point.x, point.y);
   if (inventoryHover !== undefined) {
     statusHover = undefined;
@@ -758,7 +790,24 @@ canvas.addEventListener("mousemove", (event) => {
 
 canvas.addEventListener("mousedown", (event) => {
   const point = viewPoint(event);
-  const hit = inventoryWindowAt(point.x, point.y);
+  const shopHit = shopWindowAt(point.x, point.y);
+  if (shopHit !== undefined) {
+    if (shopHit.kind === "scrollbar" && shopHit.part === "thumb") {
+      const geometry = shopScrollbarGeometry(shopHit.side);
+      shopScrollDrag = { side: shopHit.side, offset: point.y - shopAt.y - SHOP.scrollbar[shopHit.side].y - 12 - geometry.offset };
+    }
+    if (shopHit.kind === "body") {
+      shopDrag = {
+        dx: point.x - shopAt.x,
+        dy: point.y - shopAt.y,
+        startX: point.x,
+        startY: point.y,
+        moved: false,
+      };
+    }
+    if (shopHit.kind === "button") shopPressed = shopHit.button;
+  }
+  const hit = shopHit === undefined ? inventoryWindowAt(point.x, point.y) : undefined;
   if (hit !== undefined && hit.kind !== "close" && hit.kind !== "tab") {
     inventoryDrag = {
       dx: point.x - inventoryAt.x,
@@ -771,7 +820,7 @@ canvas.addEventListener("mousedown", (event) => {
   statusPressed = statusButtonAt(point.x, point.y)?.action;
 });
 
-canvas.addEventListener("mouseup", () => {
+function finishWindowPress() {
   if (inventoryDrag?.moved === true) {
     // A drag is not a click: the window moved, so the sheet under the press must not act.
     inventorySuppressClick = true;
@@ -781,8 +830,32 @@ canvas.addEventListener("mouseup", () => {
       // A blocked localStorage only costs the position.
     }
   }
+  if (shopDrag?.moved === true) {
+    shopSuppressClick = true;
+    try {
+      localStorage.setItem("kms111.shopAt", JSON.stringify(shopAt));
+    } catch {
+      // A blocked localStorage only costs the position.
+    }
+  }
+  if (shopScrollDrag !== undefined) shopSuppressClick = true;
+  shopScrollDrag = undefined;
   inventoryDrag = undefined;
+  shopDrag = undefined;
+  shopScrollDrag = undefined;
+  shopSuppressClick = false;
+  shopPressed = undefined;
   statusPressed = undefined;
+}
+canvas.addEventListener("mouseup", finishWindowPress);
+window.addEventListener("mouseup", finishWindowPress);
+window.addEventListener("blur", finishWindowPress);
+
+canvas.addEventListener("mouseleave", () => {
+  pointerAt = undefined;
+  shopHover = undefined;
+  inventoryHover = undefined;
+  statusHover = undefined;
 });
 
 /** Set by a finished window drag so the `click` that follows does not also hit a slot. */
@@ -790,6 +863,18 @@ let inventorySuppressClick = false;
 
 canvas.addEventListener("dblclick", (event) => {
   const point = viewPoint(event);
+  const shopHit = shopWindowAt(point.x, point.y);
+  if (shopHit?.kind === "buy-row") {
+    shopBuyRow = shopHit.index;
+    buyShopRow(shopHit.index);
+    return;
+  }
+  if (shopHit?.kind === "sell-row") {
+    shopSellPick = shopHit.row;
+    sellShopItem(shopHit.row);
+    return;
+  }
+  if (shopHit !== undefined) return;
   const hit = inventoryWindowAt(point.x, point.y);
   if (hit?.kind !== "slot" || hit.item === undefined) return;
   // `sub_462DC0` uses a USE-tab item on a double click; the family is the first three digits.
@@ -804,6 +889,40 @@ canvas.addEventListener("click", (event) => {
   const point = viewPoint(event);
   if (inventorySuppressClick) {
     inventorySuppressClick = false;
+    return;
+  }
+  if (shopSuppressClick) {
+    shopSuppressClick = false;
+    return;
+  }
+  const shopHit = shopWindowAt(point.x, point.y);
+  if (shopHit !== undefined) {
+    if (shopHit.kind === "close") {
+      closeShop();
+    } else if (shopHit.kind === "button") {
+      if (shopHit.button === "buy" && shopBuyRow >= 0) buyShopRow(shopBuyRow);
+      if (shopHit.button === "sell" && shopSellPick !== undefined) sellShopItem(shopSellPick);
+      if (shopHit.button === "recharge" && shopSellPick !== undefined && Math.floor(shopSellPick.itemId / 10000) === 207) {
+        send({ t: "shop", action: "recharge", slot: shopSellPick.slot });
+      }
+    } else if (shopHit.kind === "scrollbar") {
+      const side = shopHit.side;
+      const geometry = shopScrollbarGeometry(side);
+      const localY = point.y - shopAt.y - SHOP.scrollbar[side].y;
+      const delta = shopHit.part === "prev" ? -1 : shopHit.part === "next" ? 1
+        : localY < 12 + geometry.offset ? -shopVisibleRows(side) : shopVisibleRows(side);
+      if (shopHit.part !== "thumb") setShopScroll(side, shopScroll[side] + delta);
+    } else if (shopHit.kind === "tab") {
+      shopTab = shopHit.tab;
+      shopSellPick = undefined;
+      shopScroll.sell = 0;
+    } else if (shopHit.kind === "buy-row") {
+      shopBuyRow = shopHit.index;
+      describeItem(shopHit.row.itemId);
+    } else if (shopHit.kind === "sell-row") {
+      shopSellPick = shopHit.row;
+      describeItem(shopHit.row.itemId);
+    }
     return;
   }
   const hit = inventoryWindowAt(point.x, point.y);
@@ -842,6 +961,23 @@ canvas.addEventListener("click", (event) => {
   logLine(`portal ${portal.name} -> ${portal.toMapId}`);
   send({ t: "portal", name: portal.name });
 });
+
+// The wheel scrolls the shop list under the pointer, the way a wheel over the 2003 scrollbar does.
+canvas.addEventListener("wheel", (event) => {
+  if (shop === undefined) return;
+  const point = viewPoint(event);
+  const localX = point.x - shopAt.x;
+  const localY = point.y - shopAt.y;
+  for (const side of ["buy", "sell"]) {
+    const list = shopListOf(side);
+    if (localX < list.x || localX >= SHOP.scrollbar[side].x + 12) continue;
+    if (localY < list.y || localY >= list.y + list.rows * list.pitch) continue;
+    if (event.deltaY === 0) return;
+    setShopScroll(side, shopScroll[side] + Math.sign(event.deltaY));
+    event.preventDefault();
+    return;
+  }
+}, { passive: false });
 
 // ---------------------------------------------------------------- rendering
 //
@@ -1495,7 +1631,11 @@ function frame() {
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
   drawStatusBar();
   drawInventoryWindow();
-  if (pointerAt !== undefined) drawItemTooltip(pointerAt.x, pointerAt.y);
+  drawShopWindow();
+  if (pointerAt !== undefined) {
+    const pointed = shop !== undefined && shopHover !== undefined ? shopHover.row : inventoryPick ?? inventoryHover?.item;
+    drawItemTooltip(pointerAt.x, pointerAt.y, pointed);
+  }
 
   requestAnimationFrame(frame);
 }
@@ -1925,11 +2065,12 @@ function drawInventoryWindow() {
 function itemTooltipLines(item) {
   const facts = itemInfo.get(item.itemId);
   const lines = [facts?.name ?? `Item ${item.itemId}`];
+  if (item.price !== undefined) lines.push(`價格 ${item.price} 메소`);
   if (item.quantity !== undefined && item.quantity > 1) lines.push(`數量 ${item.quantity}`);
   if (item.ruc !== undefined && item.ruc > 0) lines.push(`可升級次數 ${item.ruc}`);
   if (facts?.desc) {
     // The archive stores the description with `\n` line breaks; the tooltip keeps them.
-    for (const line of String(facts.desc).split(/\r?\n/)) if (line !== "") lines.push(line);
+    for (const line of String(facts.desc).replace(/\\r\\n|\\n|\\r/g, "\n").split(/\r?\n/)) if (line !== "") lines.push(line);
   } else if (facts !== undefined && facts.name === undefined) {
     lines.push("（Data.wz 查不到這個道具）");
   }
@@ -1937,9 +2078,8 @@ function itemTooltipLines(item) {
 }
 
 /** A dark tooltip beside the pointer, the way the client's item box sits next to the cursor. */
-function drawItemTooltip(x, y) {
-  const item = inventoryPick ?? inventoryHover?.item;
-  if (item === undefined || !inventoryOpen) return;
+function drawItemTooltip(x, y, item) {
+  if (item === undefined) return;
   const lines = itemTooltipLines(item);
   ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
   ctx.textBaseline = "top";
@@ -1972,7 +2112,6 @@ function describeItem(itemId) {
     .then((facts) => {
       itemInfo.set(itemId, facts);
       itemInfoPending.delete(itemId);
-      if (shop !== undefined) renderShop();
     })
     .catch(() => {
       itemInfo.set(itemId, null);
@@ -1980,67 +2119,375 @@ function describeItem(itemId) {
     });
 }
 
-// ---------------------------------------------------------------- shop & dialogue
+// ---------------------------------------------------------------- shop window
+//
+// `CShopDlg` (`sub_4B7640`, built by `sub_4B3780` from the `0x4A` list) is a 407x291 sheet that the
+// client centres (`sub_461C50` -> `sub_545450` with `(800 - w) >> 1, (600 - h) >> 1`), so the page
+// opens it at (196, 154). Every coordinate below is measured off
+// `UI/UIWindow.img/Shop/backgrnd` and the controls `sub_4B3E60` creates:
+//
+//   close      id 2     (188,  9) 32x15     the sheet's own CLOSE stamp
+//   buy        id 1000  ( 78, 31) 46x19     `BtBuy`     - 사기
+//   sell       id 1001  (283, 31) 46x19     `BtSell`    - 팔기
+//   recharge   id 1002  (225, 29) 50x23     `BtRecharge`- 충전
+//   tabs       id 1003  (206, 65) 198x24    four inventory tabs, 장비/소비/설치/기타
+//   buy list   id 1004  x=6,  y=68, six rows at a 35 px pitch  (`sub_4B6930`)
+//   sell list  id 1005  x=209,y=91, five rows at a 35 px pitch
+//
+// The `buy` and `sell` canvases are the selected-row faces (188x34 with an icon slot at the left);
+// `sub_4B5B10` paints one under the row the player picked, and the page does the same.
+
+const SHOP = {
+  path: "UI/UIWindow.img/Shop/backgrnd",
+  width: 407,
+  height: 291,
+  /** `sub_461C50`: the window is centred, `((800 - w) >> 1, (600 - h) >> 1)`. */
+  home: { x: 196, y: 154 },
+  close: { x: 188, y: 9, width: 32, height: 15 },
+  buy: { x: 78, y: 31, width: 46, height: 19 },
+  sell: { x: 283, y: 31, width: 46, height: 19 },
+  recharge: { x: 225, y: 29, width: 50, height: 23 },
+  tabs: { x: 206, y: 65, width: 198, height: 24 },
+  buyList: { x: 6, y: 68, rows: 6, pitch: 35, slot: 32, nameX: 42, nameRight: 184 },
+  sellList: { x: 209, y: 91, rows: 5, pitch: 35, slot: 32, nameX: 245, nameRight: 388 },
+  /**
+   * The two selected-row faces, 188x34 - two pixels wider and taller than the 32-px row, so the
+   * raised frame shows. The sheet's row has its slot at x=6/y=68 (left) and x=209/y=91 (right);
+   * the sprite's slot interior sits one pixel inside its own edge, which is what puts the stamps
+   * at (1,67) and (204,90).
+   */
+  face: { buy: { path: "UI/UIWindow.img/Shop/buy", x: 1, y: 67 }, sell: { path: "UI/UIWindow.img/Shop/sell", x: 204, y: 90 } },
+  /** The dark field left of the sheet's own `메소` label. */
+  mesos: { right: 368, y: 272 },
+  /** `sub_4AC3A0`-style 12-px scrollbars, drawn only when a list overflows. */
+  scrollbar: { buy: { x: 189, y: 68, height: 207 }, sell: { x: 390, y: 89, height: 174 } },
+};
+
+/** Where the sheet sits, what is picked in each list, and the two scroll offsets. */
+let shopAt = { ...SHOP.home };
+
+// Like the inventory sheet, the client keeps a window's place in the registry; a page keeps it here.
+try {
+  const saved = JSON.parse(localStorage.getItem("kms111.shopAt") ?? "null");
+  if (saved !== null && Number.isFinite(saved.x) && Number.isFinite(saved.y)) shopAt = {
+    x: Math.max(-SHOP.width + 48, Math.min(VIEW_W - 48, Math.round(saved.x))),
+    y: Math.max(0, Math.min(VIEW_H - 32, Math.round(saved.y))),
+  };
+} catch {
+  // A blocked localStorage just means the shop opens centred.
+}
+let shopHover;
+let shopDrag;
+let shopPressed;
+let shopScrollDrag;
+let shopBuyRow = -1;
+/** The category tab the sell pane shows (1 equip, 2 use, 3 install, 4 etc). */
+let shopTab = 1;
+/** The inventory item picked in the sell pane (`{slot, itemId, ...}`), or undefined. */
+let shopSellPick;
+let shopScroll = { buy: 0, sell: 0 };
+/** Set by a finished window drag so the `click` that follows does not also act on a row. */
+let shopSuppressClick = false;
 
 /**
- * The window `0x4A` opened: one row per item the server priced from the archive.
- *
- * Buying sends the client's own `0x16` (`{t:"shop",action:"buy",row,itemId,count}`); the answer is
- * a `0x4B` result byte and, when it worked, a `0x0B` (the slot) plus a `0x0D` (the mesos) - the
- * same three packets a real client gets. Selling is *not* wired to a control: it needs a slot and a
- * count from somewhere, and the page has neither a drag nor a quantity dialog yet.
+ * The rows one half of the window shows: the shop's stock, or the player's items of the sell pane's
+ * own category tab (`CCtrlTab` id 1003, `sub_4B4AD0` walks `inventory[tab]`).
  */
-function renderShop() {
-  if (shop === undefined) {
-    ui.shop.classList.add("hidden");
-    return;
-  }
-  ui.shopTitle.textContent = `商店 ${shop.shopId}`;
-  ui.shopRows.replaceChildren(...shop.items.map((row, index) => shopRow(row, index)));
-  ui.shop.classList.remove("hidden");
+function shopRowsOf(side) {
+  if (side === "buy") return shop?.items ?? [];
+  return inventory?.tabs.find((entry) => entry.tab === shopTab)?.items ?? [];
 }
 
-function shopRow(row, index) {
-  const li = document.createElement("li");
-  li.className = "shop-row";
-  const image = document.createElement("img");
-  image.alt = "";
-  image.addEventListener("error", () => image.remove());
-  image.src = `/api/item/${row.itemId}/icon.png`;
-  const name = document.createElement("span");
-  name.className = "shop-name";
-  name.textContent = itemInfo.get(row.itemId)?.name ?? String(row.itemId);
-  const price = document.createElement("span");
-  price.className = "shop-price";
-  price.textContent = `${row.price} 元`;
-  const one = document.createElement("button");
-  one.type = "button";
-  one.textContent = "買";
-  one.title = `買 1 個（${row.price} 元）`;
-  one.addEventListener("click", () => buyItem(row, index, 1));
-  li.append(image, name, price, one);
-  // `maxCount` is the cap on one purchase, so a row that cannot take ten does not offer ten.
-  if (row.maxCount >= 10) {
-    const ten = document.createElement("button");
-    ten.type = "button";
-    ten.textContent = "×10";
-    ten.title = `買 10 個（${row.price * 10} 元）`;
-    ten.addEventListener("click", () => buyItem(row, index, 10));
-    li.append(ten);
-  }
-  describeItem(row.itemId);
-  return li;
+/** How many rows a list shows at once (6 on the left, 5 under the tabs). */
+function shopVisibleRows(side) {
+  return side === "buy" ? SHOP.buyList.rows : SHOP.sellList.rows;
 }
 
-function buyItem(row, index, count) {
-  send({ t: "shop", action: "buy", row: index, itemId: row.itemId, count });
+/** The list geometry for one side. */
+function shopListOf(side) {
+  return side === "buy" ? SHOP.buyList : SHOP.sellList;
+}
+
+/** The row index under a window-local point, or undefined. */
+function shopRowAt(side, localX, localY) {
+  const list = shopListOf(side);
+  const row = Math.floor((localY - list.y) / list.pitch);
+  if (row < 0 || row >= list.rows) return undefined;
+  // Inside the 32-px row face, not the 3-px gap below it.
+  if (localY - list.y - row * list.pitch >= list.slot) return undefined;
+  if (localX < list.x || localX >= SHOP.scrollbar[side].x) return undefined;
+  return row + shopScroll[side];
+}
+
+/** Which tab of the strip is under a window-local point, or -1. */
+function shopTabAt(localX, localY) {
+  const { tabs } = SHOP;
+  if (localY < tabs.y || localY >= tabs.y + tabs.height) return -1;
+  if (localX < tabs.x || localX >= tabs.x + tabs.width) return -1;
+  const inner = tabs.width - 4 - 12;
+  return Math.max(0, Math.min(3, Math.floor(((localX - tabs.x - 4) * 4) / inner)));
+}
+
+/** Whether a window-local point is inside one of the sheet's controls. */
+function insideBox(box, localX, localY) {
+  return localX >= box.x && localX < box.x + box.width && localY >= box.y && localY < box.y + box.height;
+}
+
+/**
+ * What of the shop is at a surface point. `kind` is `close`, `button` (with `button`), `tab` (with
+ * `index`/`tab`), `buy-row`/`sell-row` (with `index`), `face` or `body`; a point outside is
+ * `undefined`. The inventory window is drawn first, so a point both windows cover belongs to this
+ * one - exactly the order the desktop client stacks its modeless windows in.
+ */
+function shopWindowAt(x, y) {
+  if (shop === undefined || selfView === undefined) return undefined;
+  const localX = x - shopAt.x;
+  const localY = y - shopAt.y;
+  if (localX < 0 || localY < 0 || localX >= SHOP.width || localY >= SHOP.height) return undefined;
+  if (insideBox(SHOP.close, localX, localY)) return { kind: "close" };
+  for (const button of ["buy", "sell", "recharge"]) {
+    if (insideBox(SHOP[button], localX, localY)) return { kind: "button", button };
+  }
+  const tab = shopTabAt(localX, localY);
+  if (tab >= 0) return { kind: "tab", index: tab, tab: INVENTORY_TABS[tab].tab };
+  for (const side of ["buy", "sell"]) {
+    const geometry = shopScrollbarGeometry(side);
+    const bar = SHOP.scrollbar[side];
+    if (geometry !== undefined && insideBox({ ...bar, width: 12 }, localX, localY)) {
+      const y = localY - bar.y;
+      const part = y < 12 ? "prev" : y >= bar.height - 12 ? "next"
+        : y >= 12 + geometry.offset && y < 24 + geometry.offset ? "thumb" : "track";
+      return { kind: "scrollbar", side, part };
+    }
+    const row = shopRowAt(side, localX, localY);
+    if (row !== undefined && row < shopRowsOf(side).length) return { kind: `${side}-row`, index: row, row: shopRowsOf(side)[row] };
+  }
+  return { kind: "body" };
+}
+
+/**
+ * One line of row text, clipped to the plate it belongs on. The 2003 window draws both the name and
+ * the `메소` line from the plate's left edge (`sub_4B5B10` passes x=42 for both, `sub_4B5FA0`
+ * x=245), three pixels below the row's top edge and sixteen pixels apart.
+ */
+function drawShopText(text, x, y, width, colour = "#000000") {
+  ctx.save();
+  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.beginPath();
+  ctx.rect(x, y - 1, width, 14);
+  ctx.clip();
+  ctx.fillStyle = colour;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** Paints one list: the picked row's face, then its icon, name and price, then a scrollbar. */
+function drawShopList(side, originX, originY) {
+  const list = shopListOf(side);
+  const rows = shopRowsOf(side);
+  const scroll = shopScroll[side];
+  const picked = side === "buy" ? shopBuyRow : rows.findIndex((entry) => entry.slot === shopSellPick?.slot);
+  if (picked >= scroll && picked < scroll + list.rows) {
+    const face = artImage(SHOP.face[side].path);
+    if (face.ready) ctx.drawImage(face.img, originX + SHOP.face[side].x, originY + SHOP.face[side].y + (picked - scroll) * list.pitch);
+  }
+  for (let row = 0; row < list.rows; row++) {
+    const index = row + scroll;
+    const item = rows[index];
+    if (item === undefined) continue;
+    const cellY = originY + list.y + row * list.pitch;
+    const facts = itemInfo.get(item.itemId);
+    if (facts === undefined) describeItem(item.itemId);
+    const icon = itemIcon(item.itemId);
+    if (icon.ready) {
+      const width = icon.img.naturalWidth;
+      const height = icon.img.naturalHeight;
+      // `sub_4B5B10` anchors the icon by its own origin: `x = slot - ox`, `y = rowBottom - oy`.
+      const origin = facts?.iconRaw;
+      const left = origin !== undefined ? list.x - origin.ox : list.x + Math.floor((list.slot - width) / 2);
+      const top = origin !== undefined ? list.slot - origin.oy : Math.floor((list.slot - height) / 2);
+      ctx.drawImage(icon.img, originX + left, cellY + top);
+    }
+    // `sub_4B5FA0` draws a non-equipment stack with Basic/ItemNo at (209, row+20).
+    if (side === "sell" && Math.floor(item.itemId / 1_000_000) !== 1 && item.quantity !== undefined) {
+      const digits = String(item.quantity);
+      for (let digit = 0; digit < digits.length; digit++) {
+        const glyph = artImage(`UI/Basic.img/ItemNo/${digits[digit]}`);
+        if (glyph.ready) ctx.drawImage(glyph.img, originX + list.x + digit * 8, cellY + 20);
+      }
+    }
+    const nameWidth = list.nameRight - list.nameX;
+    drawShopText(facts?.name ?? `Item ${item.itemId}`, originX + list.nameX, cellY + 3, nameWidth);
+    // The second line is mesos in both panes: the shelf price on the left, the stack's value on the
+    // right (`ceil(count x info/price)`, the number `sub_4B4AD0` puts in the row).
+    let price = side === "buy" ? item.price : undefined;
+    if (side === "sell" && facts?.price !== undefined) price = Math.ceil((item.quantity ?? 1) * facts.price);
+    if (price !== undefined) drawShopText(`${price} 메소`, originX + list.nameX, cellY + 19, nameWidth);
+  }
+  if (rows.length > list.rows) drawShopScrollbar(side, originX, originY);
+}
+
+/** Clamp scrolling after wheel/arrow/track/drag input, including a shrinking inventory. */
+function setShopScroll(side, position) {
+  const max = Math.max(0, shopRowsOf(side).length - shopVisibleRows(side));
+  shopScroll[side] = Math.max(0, Math.min(max, position));
+  shopHover = undefined;
+}
+
+/** Do not send a second sale for an item the server has already removed or replaced. */
+function reconcileShopInventory() {
+  if (shop === undefined) return;
+  if (shopSellPick !== undefined) {
+    shopSellPick = shopRowsOf("sell").find((item) => item.slot === shopSellPick.slot && item.itemId === shopSellPick.itemId);
+  }
+  setShopScroll("sell", shopScroll.sell);
+}
+
+/** VScr's thumb is a fixed 12px sprite; only its position changes, not its painted size. */
+function shopScrollbarGeometry(side) {
+  const max = shopRowsOf(side).length - shopVisibleRows(side);
+  if (max <= 0) return undefined;
+  const travel = SHOP.scrollbar[side].height - 36;
+  return { max, travel, offset: Math.round(travel * Math.min(max, shopScroll[side]) / max) };
+}
+
+/** The 12-px `UI/Basic.img/VScr` strip: arrows, a clipped tiled trough and a fixed-size thumb. */
+function drawShopScrollbar(side, originX, originY) {
+  const bar = SHOP.scrollbar[side];
+  const geometry = shopScrollbarGeometry(side);
+  if (geometry === undefined) return;
+  const x = originX + bar.x;
+  const y = originY + bar.y;
+  const stamp = (piece, at) => {
+    const entry = artImage(`UI/Basic.img/VScr/enabled/${piece}`);
+    if (entry.ready) ctx.drawImage(entry.img, x, at);
+  };
+  stamp("prev0", y);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y + 12, 12, bar.height - 24);
+  ctx.clip();
+  for (let tile = 12; tile < bar.height - 12; tile += 12) stamp("base", y + tile);
+  ctx.restore();
+  stamp("next0", y + bar.height - 12);
+  stamp("thumb0", y + 12 + geometry.offset);
+}
+
+/**
+ * The four category tabs, built out of `UI/Basic.img/Tab` the way `CCtrlTab` (sub_4582A0) paints
+ * them: one 4-px `left` cap, a run of 1-px `fill` columns per tab, a 14-px `middle` crease at each
+ * tab's right edge, and one 12-px `right` cap that fades back into the sheet's navy strip. The
+ * crease is state 1 under the lit tab and state 2 when the next tab is the lit one (its gradient
+ * runs light-blue to white).
+ */
+function drawShopTabs(originX, originY) {
+  const { tabs } = SHOP;
+  const count = INVENTORY_TABS.length;
+  const open = Math.max(0, INVENTORY_TABS.findIndex((entry) => entry.tab === shopTab));
+  const x0 = originX + tabs.x;
+  const y = originY + tabs.y;
+  const cap = 4;
+  const right = 12;
+  const inner = tabs.width - cap - right;
+  const stamp = (piece, x) => {
+    const entry = artImage(`UI/Basic.img/Tab/${piece}`);
+    if (entry.ready) ctx.drawImage(entry.img, x, y);
+  };
+  stamp(`left${open === 0 ? 1 : 0}`, x0);
+  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let start = x0 + cap;
+  for (let index = 0; index < count; index++) {
+    const end = x0 + cap + Math.round((inner * (index + 1)) / count);
+    const lit = index === open;
+    // The crease belongs to this tab's right edge, so the last one sits under the right cap.
+    if (index < count - 1) {
+      const piece = lit ? "middle1" : index + 1 === open ? "middle2" : "middle0";
+      stamp(piece, end - 14);
+    }
+    const state = lit ? 1 : 0;
+    for (let fill = start; fill < end - (index < count - 1 ? 14 : 0); fill++) stamp(`fill${state}`, fill);
+    // `sub_4582A0` drops an unselected label one pixel, which is what makes the lit tab stand out.
+    ctx.fillStyle = "#000000";
+    ctx.fillText(INVENTORY_TABS[index].label, (start + end) / 2, y + (lit ? 12 : 13));
+    start = end;
+  }
+  stamp(`right${open === count - 1 ? 1 : 0}`, x0 + tabs.width - right);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+/** One of the three sheet buttons, in the state the pointer gives it. */
+function drawShopButton(name, originX, originY) {
+  const box = SHOP[name];
+  const pressed = shopPressed === name && shopHover?.kind === "button" && shopHover.button === name;
+  const hovered = shopHover?.kind === "button" && shopHover.button === name;
+  const state = pressed ? "pressed" : hovered ? "mouseOver" : "normal";
+  const entry = artImage(`UI/UIWindow.img/Shop/Bt${name[0].toUpperCase()}${name.slice(1)}/${state}/0`);
+  if (entry.ready) ctx.drawImage(entry.img, originX + box.x, originY + box.y);
+}
+
+/** Paints the whole shop: the sheet, its lists, tabs, buttons and the meso field. */
+function drawShopWindow() {
+  if (shop === undefined || selfView === undefined) return;
+  const entry = artImage(SHOP.path);
+  if (!entry.ready) return;
+  const x = Math.round(shopAt.x);
+  const y = Math.round(shopAt.y);
+  ctx.drawImage(entry.img, x, y);
+  drawShopList("buy", x, y);
+  drawShopList("sell", x, y);
+  drawShopTabs(x, y);
+  drawShopButton("buy", x, y);
+  drawShopButton("sell", x, y);
+  drawShopButton("recharge", x, y);
+  statusText(String(selfView.mesos), x + SHOP.mesos.right, y + SHOP.mesos.y, "right");
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+/** Opens the window at its saved position (centred by default), with nothing picked. */
+function openShop(view) {
+  shop = view;
+  shopBuyRow = -1;
+  shopTab = 1;
+  shopSellPick = undefined;
+  shopScroll = { buy: 0, sell: 0 };
+  shopHover = undefined;
+  shopDrag = undefined;
+  shopScrollDrag = undefined;
+  shopSuppressClick = false;
+  shopPressed = undefined;
+  for (const row of view.items) describeItem(row.itemId);
+}
+
+/** The buy button, a double click on a row and the row the player picked all land here. */
+function buyShopRow(index) {
+  const row = shop?.items[index];
+  if (row === undefined) return;
+  send({ t: "shop", action: "buy", row: index, itemId: row.itemId, count: 1 });
+}
+
+/** The sell button and a double click on an inventory row land here. */
+function sellShopItem(item) {
+  if (item === undefined) return;
+  send({ t: "shop", action: "sell", slot: item.slot, itemId: item.itemId, count: 1 });
 }
 
 /** Closes the window; `notify` is false when the server already dropped it (a map change did). */
 function closeShop(notify = true) {
-  ui.shop.classList.add("hidden");
   if (shop === undefined) return;
   shop = undefined;
+  shopBuyRow = -1;
+  shopSellPick = undefined;
+  shopHover = undefined;
+  shopDrag = undefined;
+  shopScrollDrag = undefined;
+  shopSuppressClick = false;
+  shopPressed = undefined;
   if (notify) send({ t: "shop", action: "close" });
 }
 
@@ -2100,7 +2547,6 @@ ui.user.addEventListener("keydown", (event) => {
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 // The page's own header keeps a button for the same window the ITEM button opens.
 document.getElementById("inv-toggle")?.addEventListener("click", () => toggleInventory());
-ui.shopClose.addEventListener("click", () => closeShop());
 ui.dialogueOk.addEventListener("click", () => closeDialogue(true, 1));
 ui.dialogueClose.addEventListener("click", () => closeDialogue(true, 0));
 

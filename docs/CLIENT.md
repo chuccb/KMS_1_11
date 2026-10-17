@@ -44,11 +44,21 @@ node src/cli.ts serve \
 串流上面那一排按鈕是**表情**（`0x13`）：2003 client 用 F1–F7 送 1–7，瀏覽器不能用那幾顆鍵（F1 是
 說明、F5 是重新整理），所以同樣的七張臉做成按鈕。0（中性眨眼）與 8 沒有對應的鍵，頁面也就沒有按鈕。
 
-點 NPC 就是 `0x33`（`{t:"click",objectId}`），回來的可能是**商店**（`0x4A` → 左邊的視窗）或
+點 NPC 就是 `0x33`（`{t:"click",objectId}`），回來的可能是**商店**（`0x4A` → `CShopDlg`）或
 **一句台詞**（`0x47` → 下面的對話框）。哪一個由伺服器決定：商店是 `game/shops.ts` 的表，台詞是
-`Npc/<id>.img -> info/speak`，頁面兩者都不知道。商店視窗每列有圖示、名字、價格與「買」「×10」；
-**賣出還沒接**（需要選格子與數量，頁面還沒有那種介面）。對話框的「確定」是主要按鈕（下一句），
-「關閉」是次要按鈕（結束）——跟 2003 client 的兩個按鈕一樣。
+`Npc/<id>.img -> info/speak`，頁面兩者都不知道。
+
+商店也是**畫在畫布上的原版視窗**：`UI/UIWindow.img/Shop/backgrnd`（407×291）貼在原版置中的
+`(196,154)`（`sub_461C50` → `((800-w)>>1, (600-h)>>1)`）。左邊 6 列是店裡的貨、右邊 5 列是
+**自己的背包**：右欄上緣那個 198 px 的深藍條就是原版的 `CCtrlTab`（id 1003，`sub_4B5A00` 之前
+建立），四個分類 장비／소비／설치／기타 用 `UI/Basic.img/Tab` 的 `left`／`middle`／`fill`／`right`
+拼出來（亮起的分頁白、隔壁那片用 `middle2` 的漸層），切換只影響右欄。按鈕是同一張圖的
+`BtBuy`／`BtSell`／`BtRecharge`（hover 換 `mouseOver`、按下換 `pressed`），右上 `CLOSE` 是圖上的
+章。**點右欄一列**選取要賣的東西（`sell` 188×34 的選取臉貼在原列上），**팔기** 送一次賣出、
+**충전** 對 207 家族（可補充彈藥）送 recharge，**사기** 或**雙擊左列**買一瓶。列數超過可視行時
+左右各出現一條 `UI/Basic.img/VScr` 的捲軸，滾輪也能捲。視窗可拖曳（位置記在 `localStorage` 的
+`kms111.shopAt`）。對話框的「確定」是主要按鈕（下一句），「關閉」是次要按鈕（結束）——跟 2003
+client 的兩個按鈕一樣。
 
 按 **`I`**（或右上「背包」）打開的背包是**畫在畫布上的原版視窗**，不是 HTML 面板：
 `UI/UIWindow.img/Item/backgrnd`（162×315）貼在 `sub_506440(this, 0, 114, 9, 1)` 的位置，格子
@@ -83,7 +93,7 @@ etc 順序）。圖上第一格分頁是「亮起」的版本，頁面把同一�
 | 名字與表情 | `0x16`／`0x1C`／`0x27` | 名字是白字黑邊；表情就是**臉**——`0x27` 的值換成 `Face/<id>.img` 的九個表情資料夾之一（`/api/avatar.png?...&emotion=smile`），跟 2003 client 一樣按下去先換自己的臉再送封包 |
 | 狀態列（HP／MP／EXP） | `UI/StatusBar.img` 的 `base/0`／`base/1`／`base/2` 與 `gauge/hp|mp|exp`（`/api/png`） | 完全是 2003 client 的版面：`CUIStatusBar` 是 (0,392) 的 800×208 視窗，左邊 243×208 面板、下面 446×27 聊天列、右邊 111×136 鍵盤圖；儀表是 1 px 條帶拉到 `163 × value / max`（`sub_4FA5E0`）。等級／職業／名字依 `sub_4FA170` 的 (54,116)／右對齊 136／(153,111) 畫。數字本身來自伺服器的 `self` 事件（`hp/maxHp/mp/maxMp/exp/expToNext`） |
 | 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來）；輸入框是 `base/1` 的白框上的一個透明 `<input>`，靠 `#game-ui` 跟畫布一起縮放 |
-| 商店視窗（點 NPC） | `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 買成功時是 `0x4B`＋`0x0B`＋`0x0D`；賣出沒有控制項 |
+| 商店視窗（點 NPC） | `UI/UIWindow.img/Shop/backgrnd`／`buy`／`sell`／`Bt*` 與 `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 原版 407×291、置中 (196,154)：左欄 6 列店貨、右欄 5 列背包（分類頁籤 장비／소비／설치／기타 用 `UI/Basic.img/Tab` 拼），選取臉是 `Shop/buy`／`sell`，捲軸是 `VScr`；買／賣／충전 都走 `{t:"shop"}`。買成功時是 `0x4B`＋`0x0B`＋`0x0D` |
 | NPC 對話框 | `0x47` 的 `say` 台詞（`info/speak` 原文） | 「確定」送 `0x15` answer 1（下一句），「關閉」送 0（結束） |
 | 背包視窗（`I`） | `UI/UIWindow.img/Item/backgrnd` ＋ `activeIcon` ＋ 每個 `0x0B` | 視窗、格子、分頁與 meso 欄都是原版圖；分頁用同一張圖的亮起／平常版本蓋上去，標籤依 `sub_4DA440` 的表。數量是線路的；名字／描述／圖示是 `/api/item/<id>` 從 `Data.wz` 讀的（ADR-037） |
 | 右上「日誌」 | 所有事件 | 沒實作的封包會以 `unhandled packet 0x..` 出現 |
@@ -186,9 +196,9 @@ error        { message }
   mastery／防禦／暴擊都不建模。這是選擇，不是證據。
 - **密語的「對方是不是在密你」**：線路上分不出來——送達的密語就是 `0x1A` 的 `0x12`，跟場地聊天同一包
   （FINDINGS 4.31）。頁面照實顯示，不假裝知道。
-- **賣出／交易／組隊／郵件**：伺服器都有（`0x16` 的 sell、`0x25`／`0x26`／`0x24`），頁面沒有介面；
-  它們的封包測試在 `test/shops.test.ts`、`test/miniroom.test.ts`、`test/party.test.ts`、
-  `test/messenger.test.ts`。商店**買**已經有了，賣只差一個「從哪一格、幾個」的控制項。
+- **交易／組隊／郵件**：伺服器都有（`0x25`／`0x26`／`0x24`），頁面沒有介面；它們的封包測試在
+  `test/miniroom.test.ts`、`test/party.test.ts`、`test/messenger.test.ts`。商店的買、賣與補充
+  彈藥都在 `test/shops.test.ts`。
 - **背包的拖放與裝備**：面板只**看**背包（與雙擊用消耗品）。拖放是 `0x17`、穿戴是它的負 slot
   目的地，頁面還沒接——所以 worn 欄只會在伺服器送負 slot 時才有東西。
 - **卷軸（204）**：`0x1A` 需要點一件裝備當目標，面板沒有拖放就沒有目標，頁面不送它。
@@ -247,3 +257,10 @@ found」之外的另一種空白。
 同一個分頁裡走完 登入（`admin`）→ 建立角色（`chui`，`0x06`＋`0x05`）→ 選角（`Hero`）→ 進地圖
 （헤네시스 `100000000`）→ 送出一句聊天，伺服器日誌逐包對得上。所以「代理不轉發 upgrade」的備案
 （HTTP 輪詢）**不需要**。
+
+### 離線 UI 回歸
+
+`node server/scripts/client_probe.mjs` 不需要伺服器、瀏覽器或外部套件：用 DOM／canvas shim 執行真正的
+`client/main.js`，注入與 WebSocket 相同的事件，驗證原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
+拖曳滑塊、背包減少後捲動與選取清理、視窗拖曳在畫布外放開、位置儲存，以及 WZ 說明的字面 `\n`
+換行。`server/test/client-ui.test.ts` 將它納入 `npm test`。這是互動回歸，不代替真 canvas 的像素檢查。
