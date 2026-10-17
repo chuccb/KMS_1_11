@@ -9,15 +9,18 @@
 ```sh
 cd server
 node src/cli.ts serve \
-  --port 8495 --game-port 8496 --web-port 8500 \
-  --account admin:admin,alt:alt \
+  --port 8496 --game-port 8497 --web-port 8495 \
+  --account admin:admin,alt:alt,newbie:newbie \
   --data ../Data.wz --start-mesos 200 --ping off
 ```
 
-（`--data` 不給的話會找工作目錄的 `./Data.wz`；`--web-port` 少了 `--game-port` 會被拒絕，因為
-`0x03` 回包裡的位址瀏覽器用不到——ADR-034 決策 1。）
+`--web-port` 是**頁面自己**的 port（HTTP＋`/ws`），另外兩個是 2003 協定的 TCP port。上面這組把頁面
+放在 `8495`、login 放 `8496`、game 放 `8497`：預覽環境給使用者的網址就是 `https://<port>-<sandbox>`，
+所以頁面拿第一個號碼；換一組號碼也完全可以（三個都要給，而且 `--web-port` 少了 `--game-port` 會被
+拒絕——`0x03` 回包裡的位址瀏覽器用不到，ADR-034 決策 1）。`--data` 不給的話會找工作目錄的
+`./Data.wz`。
 
-打開 `http://127.0.0.1:8500/`，用 `admin:admin` 登入，選世界、選角色。
+打開 `http://127.0.0.1:8495/`，用 `admin:admin` 登入，選世界、選角色。
 
 一個**空帳號**（例如 `--account newbie:newbie`）在選角頁下方有「建立角色」：輸入名字按下去，頁面送
 `0x06`（十個外觀字）再送 `0x05`，新角色就出現在清單裡——這是 2003 client 建立角色的那兩包，沒有另開
@@ -99,3 +102,10 @@ node --test test/websocket.test.ts test/webclient.test.ts
 `/api/map/<id>` 與 `..` 的拒絕，以及一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩。
 
 頁面的**繪圖**沒有自動測試——它需要眼睛。這一頁就是那個「眼睛」的說明書。
+
+## 預覽環境
+
+`serve` 的三個 port 都是參數，但只有 `--web-port` 那個會出現在預覽網址裡，所以本專案的預覽跑法固定是
+**頁面 8495、login 8496、game 8497**；`https://8495-<sandbox>.e2b.app/` 就是頁面。把 login 放在
+8495 的話，預覽只會拿到一段 2003 的位元組（瀏覽器把它當成壞掉的 HTTP），看起來就是「Sandbox not
+found」之外的另一種空白。
