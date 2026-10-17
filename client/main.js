@@ -59,6 +59,8 @@ const mobs = new Map();
 const npcs = new Map();
 /** @type {any} */
 let map;
+/** `mapId -> name`, filled by every `/api/map/<id>` this page fetches; a find answer has an id only. */
+const mapNames = new Map();
 /** @type {Set<string>} */
 const keys = new Set();
 let lastMoveSent = 0;
@@ -271,7 +273,12 @@ function handle(message) {
 
     case "whisper-answer": {
       // The text is not on the wire: the 2003 client prints its own kept line as "name<< text".
-      const text = pendingWhisper && pendingWhisper.name === message.name ? pendingWhisper.text : undefined;
+      // The answer names the character as the server spells it, which can differ in case from what
+      // was typed - `/w alt hi` still has to print its own line.
+      const text =
+        pendingWhisper && pendingWhisper.name.toLowerCase() === message.name.toLowerCase()
+          ? pendingWhisper.text
+          : undefined;
       pendingWhisper = undefined;
       if (message.delivered) {
         chatLine(`${message.name}<<`, text ?? "");
@@ -282,11 +289,20 @@ function handle(message) {
       return;
     }
 
-    case "find-answer":
-      // No map name on the wire (FINDINGS 4.31): the answer is a map id or "not found".
-      chatLine("系統", message.mapId === -1 ? `找不到「${message.name}」。` : `${message.name} 在地圖 ${message.mapId}。`);
+    case "find-answer": {
+      // No map name on the wire (FINDINGS 4.31): the answer is a map id or "not found". The name is
+      // this page's own extra, looked up from the endpoint it already uses to draw the ground, and
+      // only when a previous fetch happened to know it.
+      if (message.mapId === -1) {
+        chatLine("系統", `找不到「${message.name}」。`);
+      } else {
+        const where = mapNames.get(message.mapId);
+        chatLine("系統", `${message.name} 在地圖 ${message.mapId}${where ? `（${where}）` : ""}。`);
+        if (where === undefined) void rememberMapName(message.mapId);
+      }
       logLine(`find ${message.name}: ${message.mapId}`);
       return;
+    }
 
     case "mob-enter":
       mobs.set(String(message.mob.mobId), message.mob);
@@ -344,11 +360,24 @@ function handle(message) {
   }
 }
 
+/** Fetches one map's name for the next `find-answer`; a failure is not worth a chat line. */
+async function rememberMapName(mapId) {
+  try {
+    const response = await fetch(`/api/map/${mapId}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    mapNames.set(data.id, data.name);
+  } catch {
+    // The id is already on screen; the name is a bonus.
+  }
+}
+
 async function loadMap(mapId) {
   try {
     const response = await fetch(`/api/map/${mapId}`);
     if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
     map = await response.json();
+    mapNames.set(map.id, map.name);
     hoveredPortal = undefined;
     if (self && selfView) {
       // Where the server put this character: `0x16` carries no position, and the 2003 client spawns
