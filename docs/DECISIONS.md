@@ -1421,3 +1421,66 @@ s2c `0x23`（`encodeUserAttack`，FINDINGS **§4.11.7b**）。三個細節是決
 - 測試：`fame.test.ts` 10 則、`serve.test.ts` 一條兩 socket 的（442 個測試）、`whisper_probe.mjs`
   兩項（真 CLI：1 級的角色拿到 `type 2`，目標什麼都沒收到）。
 - **沒有存檔變更**：人氣加減寫在角色紀錄裡（跟經驗值一樣），配額不進存檔（§4.38.2）。
+
+## ADR-032：交易（c2s `0x25`／s2c `0x50`）—— 東西留在自己身上到成交、兩邊都確認才原子交換
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（證據在 FINDINGS §4.39／§4.40）。
+
+**決策**：實作 1:1 교환 的完整流程。`0x25` 是**開著的視窗共用的請求**（七個 type），`0x50` 是它的
+回包（`sub_4815E0`，交易會用到其中十一種）。codec 在 `protocol/miniroom.ts`，規則在 `game/trades.ts`，
+送包在 `net/loginserver.ts` 的 `handleMiniRoomRequest` 與七個 `trade*`／`leaveTrade`。
+
+**七個決策**（線路上有這些欄位，但「什麼時候送哪一個」是這份 repo 的規則）：
+
+1. **`0x25` 的七個 type 全部認得，未知的只記一行**：client 不會送表外的值，送了就是壞掉的封包；
+   伺服器不解釋、也不回包——回一個 client 不認得的 type 只會讓它斷線。
+2. **道具留在自己的庫存裡，直到成交**：`sub_4D5C80` 只送「哪一格、幾個、放到第幾格」，沒有
+   `0x0B`；所以伺服器也不動它。這讓「取消」不需要任何還原動作，代價是成交時要**重新驗證**。
+3. **成交是原子交換**：`settleTrade` 先 `structuredClone` 兩邊的庫存，在副本上扣／加，任何一步
+   失敗（東西不在了、對面放不下、錢不夠）就整個丟掉，回 `{ok:false}`，真正的 `CharacterItems`
+   一格都不動。
+4. **兩邊都按下確認才交換**：一個 `0x25 type 13` 只把 `TradeSide.confirmed` 設起來；兩邊都 true
+   時才送 `0x50 type 13`（鎖定）→ 交換 → `type 8 code 3`。
+5. **成交後用既有的 `0x0B`＋`0x0D` 更新兩邊**：庫存只有 `0x0B` 能改、錢只有 `0x0D` 能改
+   （§4.36／§4.21），所以交易結果不是新封包，就是這兩包。`type 8` 只負責關窗與顯示那一句話。
+6. **邀請 30 秒逾時**（`TRADE_INVITE_TTL_MS`）：client 的模態只有「是」會送包（`sub_481910`），
+   沒有「拒絕」，所以沒有逾時就會永遠停在「等待對方回答」。
+7. **交易格是 1..8、裝備的 `count` 一定是 1**：`sub_4D63C0` 的 `y` 對 `<= 0` 直接放棄，
+   `sub_4D5C80` 對 `tab == 1` 根本不寫 `count`。
+
+**理由**：
+
+| 考量 | 說明 |
+|---|---|
+| 為什麼房間住世界層 | 房間橫跨兩個 session（`TradeRegistry` 在 `loginserver` 的 world 那一側），關掉一個連線不能讓另一個人的視窗失去對手 |
+| 為什麼不托管道具 | 托管要多兩個封包（「拿走」與「還原」），而且 `0x0B` 的格子語意會被交易污染；2003 的 client 根本沒有「交易中的道具不在庫存」這個狀態 |
+| 為什麼要重新驗證 | 交易窗口可以開幾分鐘；這期間玩家可以丟掉、賣掉或使用那件東西。驗證放在**交換前一刻**，錯誤就不能被隱藏 |
+| 為什麼成功要送 `0x0B` | 兩邊的庫存都變了（一邊少、一邊多），而 client 的庫存只認 `0x0B`；不送就是畫面與紀錄不一致 |
+| 為什麼 `0x0D` 只給有變的人 | 錢沒動的一邊送 `0x0D` 只會讓它重畫一次（`diffStats` 也會是空的） |
+| 為什麼 `type 8` 不自己發明 code | 三句訊息（성사／취소／실패）在 client 自己的字串表裡，`sub_4D3D70` 只認 1／3／4 |
+
+**被否決的選項與原因**：
+
+- **交易開始時先從庫存扣掉（托管）**：見上；而且「取消」會需要一個 client 沒有處理的還原封包。
+- **用新 opcode 送交易結果**：沒有證據；`0x50 type 8` 就是為此存在的。
+- **讓確認只由一邊決定（按下即成交）**：`type 13` 的 s2c 是「鎖定」，client 的 UI 也把它畫成
+  鎖頭；一邊按了就換等於跳過對方最後一次確認。
+- **不驗證、直接相信 client 的 offer**：交易窗口可以開幾分鐘，這是唯一會讓玩家憑空生出道具的路。
+- **`tab == 1` 也讀 `count`**：client 不寫那個欄位，讀了會把後面的 `roomSlot` 當成 count。
+- **把「另一個視窗開著」的閘門搬到伺服器**：那是 client 的 UI 限制（`this_15`）；伺服器同時開商店
+  與交易不會產生任何 client 會斷線的封包，複製它只會多一條規則要維護。
+
+**後果**：
+
+- 新檔：`protocol/miniroom.ts`（`0x25`／`0x50` 的 codec、`describe*`、`MINIROOM_*` 常數）、
+  `game/trades.ts`（`TradeRegistry`／`settleTrade`／`isTradeSlot`）。
+- `net/loginserver.ts`：`handleMiniRoomRequest` 接在 `0x20` 旁邊；斷線時 `leaveTrade(…, "disconnected")`
+  讓對方收到 `type 8 code 1`。
+- `protocol/field.ts`：`describeClientFieldPacket` 認得 `0x25`、`describeFieldPacket` 認得 `0x50`。
+- `protocol/schema.ts`：c2s `0x25` 從 skeleton 就地升級成 byte-exact ＋ 新增 s2c `0x50`
+  （**71 個封包：48／20／3**）。
+- 測試：`miniroom.test.ts` 13 則、`serve.test.ts` 兩條兩 socket 的（**457 個測試**）、
+  `whisper_probe.mjs` 八項（真 CLI：邀請、答應、兩邊進房、放錢、兩邊確認、鎖定、`0x0D`、成交）。
+- **沒有存檔變更**：交易只改 `CharacterData.items` 與 `mesos`，兩者本來就在存檔裡。
+- 🟡 三個欄位仍是推論，文件已標：participant 的第一個 byte（送等級）、`type 5` 的第一個 byte（送 0）、
+  `type 4` 的結束 byte（送 `0xff`）。

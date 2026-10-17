@@ -94,6 +94,24 @@ import {
   type ClientFameRequest,
 } from "../protocol/fame.ts";
 import { FameLedgers, applyFame, fameClock } from "../game/fame.ts";
+import {
+  MINIROOM_KIND,
+  MINIROOM_OPCODE,
+  MINIROOM_REFUSAL,
+  TRADE_FINISH,
+  describeClientMiniRoomRequest,
+  encodeMiniRoomEnter,
+  encodeMiniRoomFinish,
+  encodeMiniRoomInvite,
+  encodeMiniRoomItem,
+  encodeMiniRoomLock,
+  encodeMiniRoomMesos,
+  encodeMiniRoomRefused,
+  readClientMiniRoomRequest,
+  type ClientMiniRoomRequest,
+  type MiniRoomParticipant,
+} from "../protocol/miniroom.ts";
+import { TradeRegistry, isTradeSlot, settleTrade, tabOfItem } from "../game/trades.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { INVENTORY_TAB, encodeInventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -816,6 +834,12 @@ export class GameEntryServer {
    * 狀態的一部分（`0x0D` 沒有它），重開伺服器就重新開始（ADR-031、§4.38 的 OPEN）。
    */
   private readonly fameLedgers = new FameLedgers();
+  /**
+   * 交易（1:1 교환）的房間與邀請（FINDINGS §4.40）。跟隊伍一樣是世界層的狀態：房間只認角色 id，
+   * 但**邀請**照 client 的規則只找同一張圖的人（`sub_471A40` 用 `CUserPool` 找名字），所以
+   * `handleTradeInvite` 會先看兩邊是不是同一個 `FieldInstance`。
+   */
+  private readonly trades = new TradeRegistry();
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
   private listenPort = 0;
@@ -1982,6 +2006,12 @@ export class GameEntryServer {
           this.handleFameRequest(session, event.plain);
           continue;
         }
+        // 交易（`/교환`、邀請的「是」、放道具／放錢／確認／關窗）。`0x25` 是所有小房間共用的
+        // 請求 opcode，房間種類在第一個 payload byte（FINDINGS §4.39）。
+        if (session !== undefined && opcode === MINIROOM_OPCODE.request) {
+          this.handleMiniRoomRequest(session, event.plain);
+          continue;
+        }
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
@@ -2002,6 +2032,7 @@ export class GameEntryServer {
         // the seat (ADR-030): the 2003 party has no offline members.
         this.sessionsByCharacter.delete(session.characterId);
         this.leaveParty(session.characterId, "disconnected");
+        this.leaveTrade(session.characterId, "disconnected");
       }
       // And the character's record has to leave the process - this is the only place a session ends.
       if (session !== undefined) this.persist();
@@ -2341,6 +2372,262 @@ export class GameEntryServer {
     this.options.log?.(
       `game: fame: "${session.name}" -> "${target.name}" ${request.up ? "up" : "down"} (now ${outcome.fame})`,
     );
+  }
+
+  /**
+   * 交易（1:1 교환）的請求（c2s `0x25`，FINDINGS §4.39／§4.40）。
+   *
+   * `0x25` 是**所有小房間共用**的請求 opcode（七個送出點裡四個在 `CTradingRoomDlg`），type 才是
+   * 語意。交易的規則在 `game/trades.ts`：房間狀態、成交時的原子交換。這裡只做「把封包變成動作」
+   * 與「把動作變成 `0x50`」。
+   *
+   * 幾個 2003 client 自己就有的閘門，伺服器仍然重做一次（封包是別人可以偽造的）：
+   * 邀請只找**同一張圖**的人、一次只能開一個房間、確認之後不能再改內容。
+   */
+  private handleMiniRoomRequest(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientMiniRoomRequest;
+    try {
+      request = readClientMiniRoomRequest(new PacketReader(plain, 1));
+    } catch (error) {
+      this.options.log?.(`game: 0x25 miniroom unreadable: ${(error as Error).message}`);
+      return;
+    }
+    this.options.log?.(`game: ${describeClientMiniRoomRequest(request)}`);
+    switch (request.kind) {
+      case "invite":
+        this.inviteToTrade(session, this.sessionsByCharacter.get(request.targetId));
+        return;
+      case "inviteByName": {
+        const target = this.sessionNamed(request.name);
+        if (target === undefined || target.instance !== session.instance) {
+          session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
+          return;
+        }
+        this.inviteToTrade(session, target);
+        return;
+      }
+      case "accept":
+        this.acceptTrade(session, request.inviterId);
+        return;
+      case "leave":
+        this.leaveTrade(session.characterId, "requested");
+        return;
+      case "offerItem":
+        this.offerTradeItem(session, request);
+        return;
+      case "offerMesos":
+        this.offerTradeMesos(session, request.amount);
+        return;
+      case "confirm":
+        this.confirmTrade(session);
+        return;
+    }
+  }
+
+  /** 一個玩家在交易房間裡的樣子。 */
+  private tradeParticipant(session: FieldSession, index: number): MiniRoomParticipant {
+    return {
+      index,
+      name: session.name,
+      face: session.face,
+      look: session.avatarItems,
+      level: session.character.stats.level,
+    };
+  }
+
+  /**
+   * `/교환`（c2s `type 0`）：把邀請送到對方，並用 `0x50 type 2` 回報結果。
+   *
+   * `type 2` 的 `code 0` 什麼都不顯示——它是「請求收到了」的意思，不是「對方答應了」。對方答應時
+   * 兩邊都會收到 `type 4`（進房間）。
+   */
+  private inviteToTrade(session: FieldSession, target: FieldSession | undefined): void {
+    if (target === undefined || target === session || target.instance !== session.instance) {
+      session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
+      this.options.log?.(`game: trade: "${session.name}" tried to invite someone who is not in this map`);
+      return;
+    }
+    const busy =
+      this.trades.roomOf(session.characterId) !== undefined || this.trades.roomOf(target.characterId) !== undefined;
+    if (busy) {
+      session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.busy, name: target.name }));
+      return;
+    }
+    this.trades.invite(session.characterId, target.characterId, Date.now());
+    session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.ok }));
+    target.send(encodeMiniRoomInvite({ inviterId: session.characterId, inviterName: session.name }));
+    this.options.log?.(`game: trade: "${session.name}" invited "${target.name}" (waiting for the answer)`);
+  }
+
+  /** 邀請的「是」（c2s `type 3`）：開房間，兩邊都收到 `0x50 type 4`。 */
+  private acceptTrade(session: FieldSession, inviterId: number): void {
+    const invite = this.trades.inviteOf(session.characterId, Date.now());
+    if (invite === undefined) {
+      session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
+      this.options.log?.(`game: trade: "${session.name}" accepted an invite that is no longer valid`);
+      return;
+    }
+    if (invite.inviterId !== inviterId) {
+      this.options.log?.(
+        `game: trade: "${session.name}" echoed ${inviterId}, but the pending invite is from ${invite.inviterId}`,
+      );
+    }
+    const inviter = this.sessionsByCharacter.get(invite.inviterId);
+    if (inviter === undefined) {
+      this.trades.clearInvite(session.characterId);
+      session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
+      return;
+    }
+    if (this.trades.roomOf(session.characterId) !== undefined) {
+      this.trades.clearInvite(session.characterId);
+      session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.busy, name: inviter.name }));
+      return;
+    }
+    const room = this.trades.open(inviter, session);
+    const participants = [this.tradeParticipant(inviter, 0), this.tradeParticipant(session, 1)];
+    inviter.send(encodeMiniRoomEnter({ roomKind: MINIROOM_KIND.trade, myIndex: 0, participants }));
+    session.send(encodeMiniRoomEnter({ roomKind: MINIROOM_KIND.trade, myIndex: 1, participants }));
+    this.options.log?.(
+      `game: trade: ${room.id} opened - "${inviter.name}" and "${session.name}" are trading`,
+    );
+  }
+
+  /** 放一格道具（c2s `type 11`）。道具本體不在封包裡，所以庫存是唯一的事實來源。 */
+  private offerTradeItem(
+    session: FieldSession,
+    request: Extract<ClientMiniRoomRequest, { kind: "offerItem" }>,
+  ): void {
+    const room = this.trades.roomOf(session.characterId);
+    if (room === undefined) return;
+    const side = this.trades.sideOf(room, session.characterId);
+    if (side === undefined || side.confirmed) return;
+    if (!isTradeSlot(request.roomSlot)) {
+      this.options.log?.(`game: trade: room slot ${request.roomSlot} is outside 1..8`);
+      return;
+    }
+    const inventory = session.character.items?.inventories[request.tab - 1];
+    const item = inventory?.items.get(request.slot);
+    if (item === undefined || tabOfItem(item.itemId) !== request.tab) {
+      this.options.log?.(
+        `game: trade: "${session.name}" offered tab ${request.tab} slot ${request.slot}, which holds nothing of that kind`,
+      );
+      return;
+    }
+    const count = request.count ?? 1;
+    if (item.kind === "equip" ? count !== 1 : count < 1 || item.quantity < count) {
+      this.options.log?.(`game: trade: "${session.name}" offered ${count} of ${item.itemId}, which it does not have`);
+      return;
+    }
+    const shown = item.kind === "equip" ? item : { ...item, quantity: count };
+    side.offers.set(request.roomSlot, {
+      roomSlot: request.roomSlot,
+      tab: request.tab,
+      slot: request.slot,
+      count,
+      item: shown,
+    });
+    const index = room.sides.indexOf(side);
+    const packet = encodeMiniRoomItem({ index, roomSlot: request.roomSlot, item: shown });
+    for (const member of room.sides) this.sessionsByCharacter.get(member.characterId)?.send(packet);
+    this.options.log?.(
+      `game: trade: ${room.id} "${session.name}" put item ${item.itemId} x${count} in slot ${request.roomSlot}`,
+    );
+  }
+
+  /** 放錢（c2s `type 12`）。超過自己身上的錢就忽略——伺服器不替玩家墊。 */
+  private offerTradeMesos(session: FieldSession, amount: number): void {
+    const room = this.trades.roomOf(session.characterId);
+    if (room === undefined) return;
+    const side = this.trades.sideOf(room, session.characterId);
+    if (side === undefined || side.confirmed) return;
+    if (amount > session.wallet.balance) {
+      this.options.log?.(
+        `game: trade: "${session.name}" offered ${amount} mesos but only has ${session.wallet.balance}`,
+      );
+      return;
+    }
+    side.mesos = amount;
+    const packet = encodeMiniRoomMesos({ index: room.sides.indexOf(side), amount });
+    for (const member of room.sides) this.sessionsByCharacter.get(member.characterId)?.send(packet);
+  }
+
+  /**
+   * 確認（c2s `type 13`）。**兩邊都確認**才成交：先送 `type 13`（鎖定），再交換，最後 `type 8`。
+   *
+   * 成交的失敗（東西不在了、對面放不下）回 `type 8` 的 `4`（교환에 실패하였습니다），房間照樣關掉：
+   * client 收到 1／3／4 都會把視窗關起來（`sub_4D3D70`）。
+   */
+  private confirmTrade(session: FieldSession): void {
+    const room = this.trades.roomOf(session.characterId);
+    if (room === undefined) return;
+    const side = this.trades.sideOf(room, session.characterId);
+    if (side === undefined) return;
+    side.confirmed = true;
+    const other = this.trades.otherSide(room, session.characterId);
+    if (other === undefined || !other.confirmed) {
+      this.options.log?.(`game: trade: ${room.id} "${session.name}" confirmed, waiting for the other side`);
+      return;
+    }
+    const sides = room.sides;
+    const sessions = sides.map((member) => this.sessionsByCharacter.get(member.characterId));
+    const [left, right] = sessions;
+    if (left === undefined || right === undefined) {
+      this.trades.close(room);
+      return;
+    }
+    left.send(encodeMiniRoomLock());
+    right.send(encodeMiniRoomLock());
+    const before = [{ ...left.character.stats }, { ...right.character.stats }];
+    const settlement = settleTrade(
+      {
+        offers: [...sides[0].offers.values()],
+        mesos: sides[0].mesos,
+        items: left.character.items ?? emptyCharacterItems(),
+        wallet: left.wallet,
+      },
+      {
+        offers: [...sides[1].offers.values()],
+        mesos: sides[1].mesos,
+        items: right.character.items ?? emptyCharacterItems(),
+        wallet: right.wallet,
+      },
+    );
+    this.trades.close(room);
+    if (!settlement.ok) {
+      this.options.log?.(`game: trade: ${room.id} failed - ${settlement.reason}`);
+      left.send(encodeMiniRoomFinish(TRADE_FINISH.failed));
+      right.send(encodeMiniRoomFinish(TRADE_FINISH.failed));
+      return;
+    }
+    left.character.items = settlement.items[0];
+    right.character.items = settlement.items[1];
+    const pair: Array<[FieldSession, number]> = [
+      [left, 0],
+      [right, 1],
+    ];
+    for (const [player, index] of pair) {
+      const changes = settlement.changes[index];
+      if (changes.length > 0) player.send(encodeInventoryChange(changes));
+      const diff = diffStats(before[index]!, player.character.stats);
+      if (Object.keys(diff).length > 0) player.send(encodeStatUpdate({ diff }));
+      player.send(encodeMiniRoomFinish(TRADE_FINISH.done));
+    }
+    this.options.log?.(
+      `game: trade: ${room.id} done - "${sides[0].name}" (${sides[0].offers.size} items, ${sides[0].mesos} mesos) ` +
+        `<-> "${sides[1].name}" (${sides[1].offers.size} items, ${sides[1].mesos} mesos)`,
+    );
+  }
+
+  /** 關窗／취소（c2s `type 7`）與下線：對面收到 `type 8` 的 `1`（상대방이 교환을 취소했습니다）。 */
+  private leaveTrade(characterId: number, why: string): void {
+    this.trades.clearInvite(characterId);
+    const room = this.trades.roomOf(characterId);
+    if (room === undefined) return;
+    const other = this.trades.otherSide(room, characterId);
+    this.trades.close(room);
+    if (other === undefined) return;
+    this.sessionsByCharacter.get(other.characterId)?.send(encodeMiniRoomFinish(TRADE_FINISH.cancelled));
+    this.options.log?.(`game: trade: ${room.id} cancelled (${why})`);
   }
 
   /**

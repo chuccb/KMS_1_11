@@ -70,6 +70,7 @@ import {
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import { encodeClientPartyRequest, readPartyResult } from "../src/protocol/party.ts";
 import { encodeClientFameRequest, readFameResult } from "../src/protocol/fame.ts";
+import { encodeClientMiniRoomRequest, readMiniRoomResult } from "../src/protocol/miniroom.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
@@ -502,6 +503,9 @@ hero.game.send(revive.toBytes());
 await hero.game.take(0x19); // a revive owes the release byte exactly like a click does
 const revived = characterOfSetField(await hero.game.take(0x16));
 const revivedMap = revived.stats.mapId;
+// The wallet as the record sees it here; the trade section below spends out of it, so the shop
+// section has to start from what is left rather than from this snapshot.
+let heroWallet = revived.stats.mesos;
 // State-relative on purpose: a field's `info/returnMap` is the town it belongs to (1000000 -> 1010000),
 // while a town's own returnMap is itself - so a *second* run against the same save (Hero was left in
 // 헤네시스 by the scroll section) revives in place, and that is not a failure.
@@ -825,6 +829,92 @@ if (!together) {
     "and the target hears nothing about a refused fame",
   );
 
+  // --- a trade: 0x25 out, 0x50 back (FINDINGS §4.40) ----------------------------------------------
+  // The whole handshake is four packets: `/교환` (type 0, `[kind 1][u32 target]`), the invite (`0x50`
+  // type 1), the modal's "yes" (type 3, the inviter's id echoed), and the room (`0x50` type 4, kind 1
+  // or `sub_481570` returns null and the client disconnects). Then the two sides put money in (type
+  // 12), confirm (type 13) and both windows lock (`0x50` type 13) right before the swap.
+  //
+  // Nothing here needs an item in the bag: mesos move the same way, and the `0x0D` that follows the
+  // swap is the proof that the record really changed on both sides.
+  const heroId = hero.character.stats.id;
+  const altId = alt.character.stats.id;
+  // Alt's wallet is the one its own login record carried: nothing else in this probe spends Alt's
+  // money, so the copy the client was handed at login is still the balance.
+  const altBefore = alt.character.stats.mesos;
+  const tradeMesos = Math.min(30, revived.stats.mesos);
+  if (tradeMesos === 0) {
+    console.log("  ..   Hero has 0 mesos - start the server with --start-mesos 200 on a fresh save");
+  } else {
+    const miniroom = async (client) =>
+      readMiniRoomResult(new PacketReader(await takeKeeping(client, 0x50), 1));
+
+    hero.game.send(encodeClientMiniRoomRequest({ kind: "invite", roomKind: 1, targetId: altId }));
+    const invitation = await miniroom(alt.game);
+    expect(
+      invitation.kind === "invite" &&
+        invitation.inviterId === heroId &&
+        invitation.inviterName === hero.character.stats.name,
+      `Alt is asked to trade by "${invitation.inviterName}" (0x50 type 1)`,
+    );
+    const acknowledged = await miniroom(hero.game);
+    expect(
+      acknowledged.kind === "refused" && acknowledged.code === 0,
+      `and the asker gets the silent code 0 (${acknowledged.kind}/${acknowledged.code})`,
+    );
+
+    alt.game.send(encodeClientMiniRoomRequest({ kind: "accept", inviterId: heroId }));
+    const heroEnter = await miniroom(hero.game);
+    const altEnter = await miniroom(alt.game);
+    expect(
+      heroEnter.kind === "enter" &&
+        heroEnter.roomKind === 1 &&
+        heroEnter.myIndex === 0 &&
+        heroEnter.participants.map((p) => p.name).join(",") ===
+          [hero.character.stats.name, alt.character.stats.name].join(","),
+      `both windows open with both names (type 4, kind ${heroEnter.roomKind})`,
+    );
+    expect(
+      altEnter.kind === "enter" && altEnter.myIndex === 1,
+      `and each side is told which half is its own (myIndex ${altEnter.kind === "enter" ? altEnter.myIndex : "-"})`,
+    );
+
+    hero.game.send(encodeClientMiniRoomRequest({ kind: "offerMesos", amount: tradeMesos }));
+    const heroOffer = await miniroom(hero.game);
+    const altOffer = await miniroom(alt.game);
+    expect(
+      heroOffer.kind === "mesos" && heroOffer.amount === tradeMesos && heroOffer.index === 0,
+      `Hero puts ${tradeMesos} mesos on the table (type 12)`,
+    );
+    expect(
+      altOffer.kind === "mesos" && altOffer.amount === tradeMesos,
+      "and the other window shows the same number",
+    );
+
+    hero.game.send(encodeClientMiniRoomRequest({ kind: "confirm" }));
+    alt.game.send(encodeClientMiniRoomRequest({ kind: "confirm" }));
+    const heroLock = await miniroom(hero.game);
+    const altLock = await miniroom(alt.game);
+    expect(heroLock.kind === "lock" && altLock.kind === "lock", "both sides see the lock (0x50 type 13)");
+    const heroPaid = readStatUpdate(new PacketReader(await takeKeeping(hero.game, 0x0d), 1)).diff;
+    const altPaid = readStatUpdate(new PacketReader(await takeKeeping(alt.game, 0x0d), 1)).diff;
+    expect(
+      heroPaid.mesos === revived.stats.mesos - tradeMesos,
+      `Hero's wallet really went down (0x0D mesos ${heroPaid.mesos})`,
+    );
+    expect(
+      altPaid.mesos === altBefore + tradeMesos,
+      `and Alt's went up by exactly that (0x0D mesos ${altPaid.mesos}, was ${altBefore})`,
+    );
+    heroWallet = heroPaid.mesos;
+    const heroDone = await miniroom(hero.game);
+    const altDone = await miniroom(alt.game);
+    expect(
+      heroDone.kind === "finish" && heroDone.code === 3 && altDone.kind === "finish" && altDone.code === 3,
+      `and both windows close as 교환이 성사되었습니다 (type 8 code ${heroDone.code})`,
+    );
+  }
+
 }
 
 // --- using what a shop sold: 0x18 restores, 0x19 changes the map (FINDINGS 4.34) -------------------
@@ -849,7 +939,7 @@ expect(
   mai !== undefined || revivedMap !== 1010000,
   `the town burst names 마이 (12100), with the pool id a click needs (${mai})`,
 );
-const wallet = revived.stats.mesos;
+const wallet = heroWallet;
 if (mai === undefined) {
   console.log("  ..   no 마이 to click; the buying half of this section cannot run");
 } else if (wallet < 90) {

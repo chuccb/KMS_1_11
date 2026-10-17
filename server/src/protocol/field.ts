@@ -54,6 +54,13 @@ import {
 } from "./party.ts";
 // The fame reply (`0x12`) and request (`0x20`): `CWvsApp`-level, like the party pair.
 import {
+  MINIROOM_OPCODE,
+  describeClientMiniRoomRequest,
+  describeMiniRoomResult,
+  readClientMiniRoomRequest,
+  readMiniRoomResult,
+} from "./miniroom.ts";
+import {
   FAME_OPCODE,
   describeClientFameRequest,
   describeFameResult,
@@ -504,6 +511,13 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === FAME_OPCODE.request) {
       return describeClientFameRequest(readClientFameRequest(new PacketReader(plain, 1)));
     }
+    if (opcode === MINIROOM_OPCODE.request) {
+      try {
+        return describeClientMiniRoomRequest(readClientMiniRoomRequest(new PacketReader(plain, 1)));
+      } catch (error) {
+        return `0x25 miniroom: (truncated: ${(error as Error).message})`;
+      }
+    }
     if (opcode === CLIENT_FIELD_OPCODE.interact) {
       const interact = readClientInteract(new PacketReader(plain, 1));
       return `0x0d interact: kind=${interact.kind} name="${interact.name}"`;
@@ -591,6 +605,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return describePartyResult(result);
     } catch (error) {
       return `0x10 party: (truncated: ${(error as Error).message})`;
+    }
+  }
+  if (opcode === MINIROOM_OPCODE.result) {
+    try {
+      return describeMiniRoomResult(readMiniRoomResult(new PacketReader(plain, 1)));
+    } catch (error) {
+      return `0x50 miniroom: (truncated: ${(error as Error).message})`;
     }
   }
   if (opcode === STAT_OPCODE) {

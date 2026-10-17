@@ -76,6 +76,15 @@ import { NPC_OPCODE, readNpcEnterField, readNpcState } from "../src/protocol/npc
 import { npcWalkPolicy } from "../src/game/npcs.ts";
 import { STAT_OPCODE, readStatUpdate } from "../src/protocol/stat.ts";
 import {
+  MINIROOM_KIND,
+  MINIROOM_OPCODE,
+  MINIROOM_REFUSAL,
+  TRADE_FINISH,
+  encodeClientMiniRoomRequest,
+  readMiniRoomResult,
+} from "../src/protocol/miniroom.ts";
+import { grantItem } from "../src/game/rewards.ts";
+import {
   PARTY_OPCODE,
   encodeClientPartyRequest,
   readPartyResult,
@@ -3763,4 +3772,224 @@ test("fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas r
   fame(hero, 999, true);
   assert.deepEqual(await answer(hero), { kind: "ignored" });
   assert.ok(log.some((line) => line.includes("fame: \"Hero\" -> \"Alt\" up (now 1)")), log.join("\n"));
+});
+
+/**
+ * 交易（1:1 교환），兩個真 socket：邀請、接受、放道具、放錢、確認，然後東西真的換邊。
+ *
+ * 這個切片跟派對不同的地方在於**成交**：`0x50 type 8` 之前的那兩個 `0x0B`／`0x0D` 才是交易的效果，
+ * 而 `settleTrade` 的原子性（東西不在了、對面放不下就整個不換）是伺服器自己的規則，client 只看到
+ * `type 8` 的 `3` 或 `4`。
+ */
+test("a trade: invite, accept, offer, confirm, and the swap lands in both inventories (0x25/0x50)", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  const heroItems = startingCharacterItems();
+  const heroStack = grantItem(heroItems, 2_000_000, 10)!;
+  const altItems = startingCharacterItems();
+  const altStack = grantItem(altItems, 2_000_001, 3)!;
+  const enter = async (id: number, name: string, items: ReturnType<typeof startingCharacterItems>, mesos: number): Promise<FakeClient> => {
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: `user${id}`,
+        characterId: id,
+        characterName: name,
+        character: characterDataOf({ ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50, mesos }, items),
+      }),
+    });
+    await client.takeOpcode(FIELD_OPCODE.setField);
+    return client;
+  };
+  const hero = await enter(61, "Hero", heroItems, 1_000);
+  const alt = await enter(62, "Alt", altItems, 100);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  const request = (client: FakeClient, body: Parameters<typeof encodeClientMiniRoomRequest>[0]): void => {
+    client.send({ kind: "unknown", opcode: MINIROOM_OPCODE.request, body: encodeClientMiniRoomRequest(body).slice(1) });
+  };
+  const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
+    const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
+    return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
+  };
+
+  // 1. `/교환 Alt`: Alt sees the invite, Hero gets the silent `code 0` acknowledgement.
+  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 62 });
+  assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
+  assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.ok });
+
+  // 2. Alt says yes: both windows open, each with its own side marked.
+  request(alt, { kind: "accept", inviterId: 61 });
+  const heroEnter = await answer(hero);
+  const altEnter = await answer(alt);
+  assert.equal(heroEnter.kind, "enter");
+  assert.equal(altEnter.kind, "enter");
+  if (heroEnter.kind !== "enter" || altEnter.kind !== "enter") return;
+  assert.equal(heroEnter.roomKind, 1);
+  assert.equal(heroEnter.myIndex, 0);
+  assert.equal(altEnter.myIndex, 1);
+  assert.deepEqual(heroEnter.participants.map((p) => p.name), ["Hero", "Alt"]);
+  assert.deepEqual(altEnter.participants.map((p) => p.name), ["Hero", "Alt"]);
+  assert.equal(heroEnter.participants[0]!.level, 10);
+  assert.equal(heroEnter.participants[0]!.face, DEFAULT_FACE_ID);
+
+  // 3. Hero puts 5 potions in slot 2 and 300 mesos: both sides see both packets.
+  request(hero, { kind: "offerItem", tab: heroStack.inventory, slot: heroStack.slot, count: 5, roomSlot: 2 });
+  for (const client of [hero, alt]) {
+    const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
+    const item = readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1));
+    assert.equal(item.kind, "item");
+    if (item.kind !== "item") return;
+    assert.equal(item.index, 0);
+    assert.equal(item.roomSlot, 2);
+    assert.equal(item.item.kind === "nonequip" ? item.item.quantity : 0, 5);
+  }
+  request(hero, { kind: "offerMesos", amount: 300 });
+  for (const client of [hero, alt]) {
+    const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1)), {
+      kind: "mesos",
+      index: 0,
+      amount: 300,
+    });
+  }
+
+  // 4. Alt puts its 3 blue potions in slot 1 and 100 mesos.
+  request(alt, { kind: "offerItem", tab: altStack.inventory, slot: altStack.slot, count: 3, roomSlot: 1 });
+  await hero.takeOpcode(MINIROOM_OPCODE.result);
+  await alt.takeOpcode(MINIROOM_OPCODE.result);
+  request(alt, { kind: "offerMesos", amount: 100 });
+  await hero.takeOpcode(MINIROOM_OPCODE.result);
+  await alt.takeOpcode(MINIROOM_OPCODE.result);
+
+  // 5. Both confirm: the lock (`13`), then `0x0B`/`0x0D`, then the finish (`8` code 3).
+  request(hero, { kind: "confirm" });
+  assert.deepEqual(await hero.drainOpcodes(80), [], "one confirmation changes nothing on the wire");
+  request(alt, { kind: "confirm" });
+  const heroLock = await hero.takeOpcode(MINIROOM_OPCODE.result);
+  assert.deepEqual(readMiniRoomResult(new PacketReader(heroLock[heroLock.length - 1]!, 1)), { kind: "lock" });
+  const altLock = await alt.takeOpcode(MINIROOM_OPCODE.result);
+  assert.deepEqual(readMiniRoomResult(new PacketReader(altLock[altLock.length - 1]!, 1)), { kind: "lock" });
+
+  const heroChanges = await hero.takeOpcode(INVENTORY_OPCODE);
+  const heroInventory = readInventoryChange(new PacketReader(heroChanges[heroChanges.length - 1]!, 1));
+  const heroPut = heroInventory.changes.find((change) => change.op === INVENTORY_OP.put);
+  assert.ok(heroPut !== undefined, JSON.stringify(heroInventory));
+  assert.equal(heroPut!.inventory, heroStack.inventory);
+  assert.equal(heroPut!.slot, heroStack.slot);
+  assert.equal(heroPut!.op === INVENTORY_OP.put && heroPut!.item.kind === "nonequip" ? heroPut!.item.quantity : 0, 5);
+  assert.ok(
+    heroInventory.changes.some(
+      (change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_001,
+    ),
+    "Alt's stack arrives in Hero's bag",
+  );
+
+  const heroStat = await hero.takeOpcode(STAT_OPCODE);
+  assert.deepEqual(readStatUpdate(new PacketReader(heroStat[heroStat.length - 1]!, 1)).diff, { mesos: 800 });
+  const heroFinish = await hero.takeOpcode(MINIROOM_OPCODE.result);
+  assert.deepEqual(readMiniRoomResult(new PacketReader(heroFinish[heroFinish.length - 1]!, 1)), {
+    kind: "finish",
+    code: TRADE_FINISH.done,
+  });
+
+  const altChanges = await alt.takeOpcode(INVENTORY_OPCODE);
+  const altInventory = readInventoryChange(new PacketReader(altChanges[altChanges.length - 1]!, 1));
+  assert.ok(
+    altInventory.changes.some((change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_000),
+    "Hero's 5 potions arrive in Alt's bag",
+  );
+  const altStat = await alt.takeOpcode(STAT_OPCODE);
+  assert.deepEqual(readStatUpdate(new PacketReader(altStat[altStat.length - 1]!, 1)).diff, { mesos: 300 });
+  const altFinish = await alt.takeOpcode(MINIROOM_OPCODE.result);
+  assert.deepEqual(readMiniRoomResult(new PacketReader(altFinish[altFinish.length - 1]!, 1)), {
+    kind: "finish",
+    code: TRADE_FINISH.done,
+  });
+
+  assert.ok(log.some((line) => line.includes('trade: 1 done - "Hero"')), log.join("\n"));
+});
+
+/**
+ * 交易的另一半：關窗就是取消，而且**對面**才是要收到封包的人。
+ *
+ * 2003 的 client 沒有「拒絕邀請」的封包，所以邀請只會逾時；但房間已經開了以後，關窗會送 `0x25 type 7`
+ * （`sub_4D31F0` 的參數 2），對面收到 `0x50 type 8` 的 `1`（상대방이 교환을 취소했습니다）。
+ */
+test("a trade that is cancelled: the other side gets 0x50 type 8 code 1", { timeout: 20000 }, async (t) => {
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+  const enter = async (id: number, name: string): Promise<FakeClient> => {
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: `user${id}`,
+        characterId: id,
+        characterName: name,
+        character: characterDataOf({ ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50 }, startingCharacterItems()),
+      }),
+    });
+    await client.takeOpcode(FIELD_OPCODE.setField);
+    return client;
+  };
+  const hero = await enter(71, "Hero");
+  const alt = await enter(72, "Alt");
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  const request = (client: FakeClient, body: Parameters<typeof encodeClientMiniRoomRequest>[0]): void => {
+    client.send({ kind: "unknown", opcode: MINIROOM_OPCODE.request, body: encodeClientMiniRoomRequest(body).slice(1) });
+  };
+  const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
+    const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
+    return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
+  };
+
+  // An id that is not in the map: `type 2 code 1` (캐릭터를 찾을 수 없습니다).
+  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 999 });
+  assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.notFound });
+
+  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
+  await answer(alt);
+  await answer(hero);
+  request(alt, { kind: "accept", inviterId: 71 });
+  await answer(hero);
+  await answer(alt);
+
+  request(alt, { kind: "leave" });
+  assert.deepEqual(await answer(hero), { kind: "finish", code: TRADE_FINISH.cancelled });
+  assert.deepEqual(await alt.drainOpcodes(80), [], "the one who closed the window hears nothing back");
+
+  // And the room is gone: a second invite works, so a character is not stuck in a dead room.
+  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
+  assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 71, inviterName: "Hero" });
 });

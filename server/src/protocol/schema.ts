@@ -22,6 +22,7 @@ import * as mob from "./mob.ts";
 import * as movepath from "./movepath.ts";
 import * as npc from "./npc.ts";
 import * as fame from "./fame.ts";
+import * as miniroom from "./miniroom.ts";
 import * as party from "./party.ts";
 import * as quest from "./quest.ts";
 import * as shop from "./shop.ts";
@@ -418,12 +419,73 @@ export const PACKETS: readonly PacketSchema[] = [
     opcode: 0x25,
     direction: "c2s",
     stage: "field",
-    name: "trade",
-    status: "skeleton",
+    name: "miniroom",
+    status: "byte-exact",
     evidence:
-      "FINDINGS 4.39 (not trade-only: one shared window request with seven senders; /교환 is [u8 0][u8 1][u32 target], the miniroom dialog's own types are still unread)",
-    codecs: [],
-    fields: [],
+      "FINDINGS 4.39/4.40 (one shared window request, seven senders; type 0 = /교환 [u8 roomKind=1][u32 target] from sub_471A40, 3 = the modal's yes, 7/11/12/13 = the trade window's four senders, 5 = invite-by-name from sub_4820E0)",
+    codecs: [
+      "readClientMiniRoomRequest",
+      "encodeClientMiniRoomRequest",
+      "describeClientMiniRoomRequest",
+    ],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "0 invite / 3 accept / 5 invite by name / 7 leave / 11 offer item / 12 offer mesos / 13 confirm",
+      },
+      { name: "roomKind", type: "u8", note: "type 0 only; the one writer stores a literal 1 (= trade)" },
+      { name: "targetId", type: "u32", note: "type 0: the character to invite" },
+      { name: "inviterId", type: "u32", note: "type 3: echoed from s2c type 1" },
+      { name: "name", type: STRING, note: "type 5 only" },
+      {
+        name: "tab/slot/count/roomSlot",
+        type: "u8 + u16 + (u16) + u8",
+        note: "type 11; count is absent for tab 1 (equips never stack), roomSlot is 1..8",
+      },
+      { name: "mesos", type: "u32", note: "type 12" },
+    ],
+  },
+  {
+    opcode: 0x50,
+    direction: "s2c",
+    stage: "field",
+    name: "miniroom",
+    status: "byte-exact",
+    evidence:
+      "FINDINGS 4.40 (sub_4815E0 dispatches the type; types 1/2/4 are the no-window half, 3/5/6/7/8 are virtual slots on CMiniRoomBaseDlg, and 11/12/13 go through sub_4D3360 for a trade room). The participant's first byte is the one field still marked unknown",
+    codecs: [
+      "readMiniRoomResult",
+      "encodeMiniRoomInvite",
+      "encodeMiniRoomRefused",
+      "encodeMiniRoomEnter",
+      "encodeMiniRoomParticipant",
+      "encodeMiniRoomMessage",
+      "encodeMiniRoomFinish",
+      "encodeMiniRoomItem",
+      "encodeMiniRoomMesos",
+      "encodeMiniRoomLock",
+    ],
+    fields: [
+      {
+        name: "type",
+        type: "u8",
+        note: "1 invite / 2 refusal / 3 join / 4 enter / 5 message / 6 update / 7 no-op / 8 finish / 11 item / 12 mesos / 13 lock",
+      },
+      { name: "inviterName+inviterId", type: STRING + "u32", note: "type 1" },
+      { name: "code(+name)", type: "u8 (+STRING)", note: "type 2: 0 ok, 1 not found, 2 busy (carries the name)" },
+      {
+        name: "roomKind/count/myIndex",
+        type: "u8 ×3",
+        note: "type 4; roomKind must be 1 or sub_481570 returns null and the client disconnects",
+      },
+      {
+        name: "participant",
+        type: "u8 + u32 + u32[] until 0 + STRING",
+        note: "u8 = a number the client renders (sent as level), u32 = face, then hair-first look ids, then the name",
+      },
+      { name: "item", type: "u8 index + u8 roomSlot + GW_ItemSlot (with category byte)", note: "type 11" },
+    ],
   },
   {
     opcode: fame.FAME_OPCODE.request,
@@ -1257,6 +1319,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   mob,
   movepath,
   fame,
+  miniroom,
   npc,
   packet,
   party,

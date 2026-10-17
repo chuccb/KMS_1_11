@@ -15,7 +15,7 @@
 | 握手 `body` 的 199 bytes | ⬜ | 語意未知；只有長度規則（§6 第 2 項）|
 | **capture harness** | ✅ 完成 | `node server/src/cli.ts capture` 能錄下並即時解密原 client 的封包序列 |
 | 登入鏈可重播 | ✅ 完成 | `server/test/loginflow.test.ts` 用假 client 走完 握手→登入→選世界→選角→遷移+token |
-| client → server 遊戲內目錄 | 🟡 | 39 個 sender 全部列出、其中聊天／密語／組隊／交易／商城／GM 指令有語意證據（FINDINGS §4.13）；**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 全部 byte-exact 解出、共用一個 codec 並各有 golden 測試**（§4.13.1／§4.13.1b）；**`0x2C`（怪物動作回報）已解出頭 4 個欄位**（§4.20，尾段未解）；缺的是真實流量驗證 |
+| client → server 遊戲內目錄 | 🟡 | 39 個 sender 全部列出、其中聊天／密語／組隊／交易／商城／GM 指令有語意證據（FINDINGS §4.13）；**交易那七個 sender 已全部 byte-exact**（§4.40）；**攻擊三兄弟 `0x0F`／`0x10`／`0x11` 全部 byte-exact 解出、共用一個 codec 並各有 golden 測試**（§4.13.1／§4.13.1b）；**`0x2C`（怪物動作回報）已解出頭 4 個欄位**（§4.20，尾段未解）；缺的是真實流量驗證 |
 | 怪物 AI 在哪一側 | ✅ 完成（決策）| **在 client**：`sub_4862C0` 是 `CMob` 的 per-frame virtual，攻擊挑選（`sub_487D10`）與命中影格（`sub_487A30`）都在 client 裡，伺服器只收到 `0x2C` 的回報（FINDINGS §4.20、DECISIONS ADR-008）。ROADMAP 的「怪物 AI」因此列在 Phase 3/4 的 client，伺服器對應的是 `0x2C` 記帳與 `0x35` 轉播 |
 | 遊戲內階段（0x16 進地圖）| 🟡 | 遊戲伺服器領到 `0x04` 後送 `0x16`（地圖由 `--map` 決定，預設 `1000000`），接著**依地圖自己的 `life` 清單送 `0x2F` 怪物進場**、讓怪物**沿腳踏點折線巡邏（每段一個 `0x33`）**，**依同一份 `life` 清單送 `0x39` 讓 NPC 進場**（`Npc/<id>.img` 不存在就不生成），再把 client 報的**傷害**記在怪物的 HP 上：命中回 `0x34`、殺死送 `0x30`、死亡動畫結束後 `0x31` 收屍、`--mob-respawn` 之後重生，最後**掉寶與拾取**（殺死時依掉落表送 `0x43`、玩家走到上面時 `0x44 kind 2`＋`0x0B`＋`0x11`；`--data` 指定 `Data.wz`，預設自動取用工作目錄的 `./Data.wz`；`--mob-speed` 調巡邏速度；FINDINGS §4.11.2b／§4.15／§4.16／§4.17／§4.18），假 client 逐欄驗證；**尚未實機驗證**，且還沒有怪物 AI |
 | 登入伺服器可跑 | 🟡 | `node server/src/cli.ts serve` 已能服務 0x01/0x02/0x03/0x05/0x06（記憶體帳號）＋角色 id 交接；**待原 client 實機驗證**（含 `0x16` 進地圖）|
@@ -24,8 +24,8 @@
 | 地圖 id 與載入器 | ✅ 完成 | `CharacterData.mapId`（第 23 欄）就是地圖 id：`0x16` → `sub_468E00` → `sub_4694F0` 載入 `Map/Map/%09d.img`（FINDINGS §4.11.2b）；地圖載入器的全部 WZ 路徑已列表，`server/src/wz/paths.ts` 收錄伺服器要用的三個 |
 | 場地亂數種子 | ✅ 完成（含移植）| `0x16` 的三個 u32 是客戶端自訂亂數產生器的種子（FINDINGS §4.11.2：`sub_4C7930`→`sub_48A900`，反函式 `sub_4619F0` 就是 `Random()`）；伺服器可重算客戶端回報的傷害；`src/protocol/random.ts` 已逐位元移植並有 golden 測試 |
 | 遊戲內封包 codec | 🟡 | `field.ts`／`movepath.ts`／`mob.ts`／`npc.ts` 已有 0x16／0x1C／0x1D／0x22／0x0E／0x0D／**0x0F 攻擊**／**0x2F 怪物進場**／**0x33 怪物移動**／**0x30 死亡**／**0x31 收屍與重生**／**0x34 怪物 MP**／**0x35 怪物動畫**／**0x2C 怪物動作回報（頭 4 欄）**／**0x39 NPC 進場**／**0x3A／0x3B NPC 離場與走動**／**0x0D 能力值差異**／**0x4A／0x4B 商店＋0x16／0x33 商店請求與物件點擊＋空的 0x19** 的逐 byte codec（`test/field.test.ts`／`test/mob.test.ts`／`test/mobs.test.ts`／`test/npc.test.ts`／`test/stat.test.ts`／`test/shops.test.ts` golden 覆蓋）；`src/game/{map,mobs,npcs}.ts` 已能把 `life` 變成出生點、沿腳踏點巡邏、把 client 報的傷害記在怪物 HP 上、並讓 NPC 進場（§4.15／§4.16／§4.17／§4.19）|
-| 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：**70 列**（46 byte-exact／20 partial／4 skeleton）的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
-| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（442 個測試同時通過）|
+| 協定目錄（可查詢）| ✅ 完成 | `server/src/protocol/schema.ts`（FINDINGS §4.14）：**71 列**（48 byte-exact／20 partial／3 skeleton）的 `direction`／`stage`／`status`／`evidence`／`codecs`／`fields`，opcode 一律引用既有常數；`node server/src/cli.ts schema [--json]` 可查；6 個反漂移測試（codec 名稱、唯一性、skeleton 不得有欄位、必須被 decode 認得）|
+| 型別檢查（strict TS）| ✅ 完成 | `server/tsconfig.json`：`strict`＋`noImplicitOverride`＋`noFallthroughCasesInSwitch`＋`noUnusedLocals/Parameters`＋`erasableSyntaxOnly`（**只允許 Node 的 strip-types 吃得下的語法**）、`noEmit`；`cd server && npm install && npm run typecheck` 在 `src/`＋`test/` 上 0 錯誤（457 個測試同時通過）|
 | 打怪的閉環 | 🟡 | 傷害照 client 的數字記帳（ADR-006）、`0x34`／`0x30`／`0x31` 三個封包與收屍／重生計時（`--mob-respawn`），`Mob/<id>.img` 的 `maxHP`／`maxMP`／die 動畫長度都從 WZ 讀（FINDINGS §4.17）；假 client 逐欄驗證、真 `Data.wz` 實跑 45 隻怪（§4.17.5）；**尚未實機驗證**，且沒有怪物 AI |
 | 共享世界（多玩家）| 🟡 | **一張地圖一個 `FieldInstance`**（FINDINGS §4.24、ADR-012）：怪物／NPC／掉落物／在場玩家屬於**場地**而不是連線，`game/world.ts` 的 `FieldRegistry` 是唯一入口（`of(mapId)` 沒人用過就建立、之後留著）；進場的人拿到整張圖的快照（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個掉落物 `0x43`、每個已在場玩家 `0x1C`），離場送其他人 `0x1D`，走路把 client 自己的路徑包成 `0x22` 轉播（不含走路的人自己），世界只有**一個時鐘**（`GameEntryServer.startClock`：原本每條連線一個 `setInterval` → 同一隻怪在兩個人螢幕上走不同的路）。廣播範圍照 client 的池子決定（§4.24.1 的表：場地池子的封包送全場，動到某人角色紀錄的只送他）；角色 id 改成**全伺服器唯一**（`nextCharacterId`）。測試：`test/world.test.ts` 18 個（假成員）＋`serve.test.ts` 的兩個真 socket 端到端＋真 `Data.wz` 兩個 client 的實跑（§4.24.8）。**尚未實機驗證**；頻道／分流還沒做（`FieldRegistry.of` 是入口）、`0x1C` 的三個欄位語意未解（送 0）；別人的升級特效**已解並實作**（§4.27／ADR-015）|
 | 換地圖（傳送門）| 🟡 | `0x0D`（`s32 kind` ＝ -1 ＋ 傳送門名字）→ 空的 `0x19`（client 的互動閘門只有它解得開）＋ `0x16`（FINDINGS §4.25）：**目的地查當前地圖的 `portal.tm`**（封包裡沒有地圖 id），`tm = 0` 不換圖；順序是「目的地先建好 → 離開舊場地 `0x1D` → `0x16` → 新場地快照」；**登入的地圖是角色紀錄自己的 `mapId`**（`--map` 只是新角色與沒有 mapId 的紀錄的後備），所以下線在哪上線就在哪。實作 `net/loginserver.ts` 的 `handlePortal`／`enterMap`／`withMapId`＋`game/world.ts` 的 `portal`；真 `Data.wz` 兩張相鄰的圖（102020000 ↔ 102030000）實跑通過。⚠️ **落點是目的地的出生點**：`0x16` 沒有座標、`mode` 的語意未解，所以 `tn`（目的地那一側的傳送門）只用於日誌（§4.25.4、ADR-013）；沒有頻道、沒有等級／道具條件 |
@@ -98,7 +98,7 @@
 - 移動/跳躍/繩梯/傳送門、戰鬥與傷害公式、**怪物 AI 與重生（在 client，照 ADR-008）**、掉落/拾取、
   **表情（§4.35，已完成）**、
   經驗/升級/能力點、裝備/背包/商店、**使用道具（§4.34／ADR-022）**、**裝備欄拖放（§4.36／ADR-029）**、
-  **組隊（§4.37／ADR-030，已完成）**、**人氣（§4.38／ADR-031，已完成）**、**交易（§4.39 已偵查：`0x25` 與 `0x50`–`0x52` 的號碼、`/교환` 的形狀、邀請流程；對話框的 vtable 欄位未讀）**、頻道切換、好友（若有證據支持）
+  **組隊（§4.37／ADR-030，已完成）**、**人氣（§4.38／ADR-031，已完成）**、**交易（§4.40／ADR-032，已完成：邀請 → 進房 → 放道具／錢 → 兩邊確認 → 原子交換；`0x25` 七個 type 與 `0x50` 十一種回包）**、頻道切換、好友（若有證據支持）
 - 出口條件：每個系統都有「與 oracle 的差異清單」，且清單為空或每項都有紀錄
 
 ## Phase 5 — 內容與驗收（持續）
