@@ -1,5 +1,8 @@
 # server/ — MMO 伺服器與協定工具（TypeScript，執行時零依賴）
 
+> 本輪新增（**未測試**）：基本射擊選彈／扣1發／原0x24投射物id轉播、WZ武器動作與時間、待命中排程，
+> 見[`docs/BASIC_ATTACKS.md`](../docs/BASIC_ATTACKS.md)。沒有改save schema或建立角色存檔；原傷害公式／形狀碰撞仍有缺口。
+
 > 最新交付：原背包捲動／地面丟棄數量、商店批量購買與部分出售，見
 > [`docs/INVENTORY_OPERATIONS.md`](../docs/INVENTORY_OPERATIONS.md)。
 > **依使用者要求，本輪未執行測試／typecheck／瀏覽器驗證**；下方測試數字與紀錄為歷史切片。

@@ -290,7 +290,17 @@ export function composeAvatarBitmap(
   if (reader === undefined) return undefined;
   const ranks = options.ranks ?? zRanksOf(archive);
   const requestedStance = options.stance ?? "stand1";
-  const stance = reader.node(`${BODY_IMAGE}/${requestedStance}`) ? requestedStance : "stand1";
+  // 508290 retains WZ info/walk and info/stand. A crossbow/two-handed weapon must not
+  // disappear simply because the browser called its neutral stance "stand1".
+  let normalStance = requestedStance;
+  if (requestedStance === "stand1" || requestedStance === "walk1") {
+    const weaponId = look.items.find((id) => id >= 1300000 && id < 1500000);
+    const weaponImage = weaponId === undefined ? undefined : itemImagePath(weaponId);
+    const info = nodeRecord(weaponImage === undefined ? undefined : reader.node(`${weaponImage}/info`));
+    const mode = requestedStance === "stand1" ? "stand" : "walk";
+    if (info[mode] === 2) normalStance = `${mode}2`;
+  }
+  const stance = reader.node(`${BODY_IMAGE}/${normalStance}`) ? normalStance : "stand1";
   const frame = options.frame ?? 0;
   const flip = options.flip === true;
   /** Insertion order breaks `z` ties the way the client's own list does. */

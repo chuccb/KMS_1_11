@@ -12,6 +12,7 @@ import { artReaderOf, type ArtReader } from "./wzart.ts";
 import { mapArtProvider, type MapArt } from "./mapart.ts";
 import { composeAvatar, zRanksOf, type AvatarFrame } from "./avatar.ts";
 import { spriteLibrary } from "./sprites.ts";
+import { basicAttackProvider, basicProjectileFrames } from "./basicattack.ts";
 import type { ArtProvider } from "../net/webclient.ts";
 
 /** How many composed avatar frames one process keeps (a look x stance x frame x flip key). */
@@ -26,6 +27,12 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
 
   return {
     reader,
+    ...(reader === undefined
+      ? {}
+      : {
+          attackProfile: basicAttackProvider(reader),
+          projectile: (itemId: number) => basicProjectileFrames(reader, itemId),
+        }),
     mapArt(mapId: number): MapArt | undefined {
       return mapProvider(mapId);
     },

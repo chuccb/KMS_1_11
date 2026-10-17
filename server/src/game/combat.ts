@@ -75,9 +75,17 @@ export function damageRangeFor(
   stats: Pick<CharacterStats, "job" | "str" | "dex" | "int" | "luk">,
   wornItemIds: readonly number[],
   catalog: ItemCatalog | undefined,
+  projectileItemId?: number,
 ): DamageRange {
   const [main, secondary] = damageStatsOf(stats.job);
-  return damageRangeOf(stats[main], stats[secondary], watkOf(wornItemIds, catalog));
+  // Applying the ammo's WZ incPAD to this existing approximation is a reconstruction policy,
+  // NOT proof of the original ranged formula (mastery, defence and weapon coefficients are open).
+  const ammoPad = projectileItemId === undefined
+    ? 0
+    : Math.max(0, catalog?.info(projectileItemId)?.incPAD ?? 0);
+  return damageRangeOf(
+    stats[main], stats[secondary], watkOf(wornItemIds, catalog) + ammoPad,
+  );
 }
 
 /** One swing's number: uniform in the range, `max` when the range is a point. */

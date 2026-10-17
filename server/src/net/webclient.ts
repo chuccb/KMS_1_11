@@ -1,3 +1,8 @@
+import {
+  firstBasicAmmo,
+  type BasicAttackProvider,
+} from "../game/basicattack.ts";
+import type { SpriteFrame } from "../game/sprites.ts";
 import type { BaseAbility } from "../protocol/ability.ts";
 import {
   creationCatalogOf,
@@ -106,6 +111,8 @@ export interface WebClientOptions {
  * `/api/png/...` decodes through, so a canvas the page already has costs nothing the second time.
  */
 export interface ArtProvider {
+  attackProfile?: BasicAttackProvider;
+  projectile?(itemId: number): SpriteFrame[];
   /** `Map/Map/%09d.img` as a flat sprite list, or `undefined` when the map is not in the archive. */
   mapArt(mapId: number): MapArt | undefined;
   npc(templateId: number): NpcArt | undefined;
@@ -525,6 +532,10 @@ class BrowserSession {
           return await this.attack(
             Number(message.mobId ?? 0),
             message.facingLeft === true,
+            message.mode === "shoot",
+            Number(message.action),
+            Number(message.targetX),
+            Number(message.targetY),
           );
         case "warp-map":
           return await this.require().warpTo(Number(message.mapId));
@@ -581,21 +592,50 @@ class BrowserSession {
    * numbers are the client's own, rolled here because the browser has no archive to read the
    * weapon's `incPAD` from (`game/combat.ts` says why that is the honest place for the formula).
    *
-   * The field is told with `0x0F`, exactly like a 2003 client would tell it, and the page gets the
+   * The field is told with `0x0F`/`0x10`, including empty attacks; the page gets the
    * number back so it can draw the damage it just dealt (`{t:"hit"}`) - the wire has no such
    * packet: the attacker's own client drew the number while it built the packet.
    */
-  private async attack(mobId: number, facingLeft: boolean): Promise<void> {
+  private async attack(
+    mobId: number,
+    facingLeft: boolean,
+    shoot: boolean,
+    actionId: number,
+    targetX: number,
+    targetY: number,
+  ): Promise<void> {
     const session = this.require();
-    const mob = session.mob(mobId);
-    if (mob === undefined) {
-      return this.send({
-        t: "error",
-        message: `there is no mob ${mobId} in this field`,
-      });
-    }
     const character = session.character;
-    if (character === undefined) return;
+    if (!character || character.stats.hp <= 0) return;
+    const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
+    const profile = this.options.art?.attackProfile?.(weaponId);
+    const actions = shoot ? profile?.shoot : profile?.melee;
+    const action =
+      actions?.find((entry) => entry.action === actionId) ?? actions?.[0];
+    const ammo = shoot ? firstBasicAmmo(character.items) : undefined;
+    if (shoot && (!ammo || !action)) return;
+    const knownMob = mobId === 0 ? undefined : session.mob(mobId);
+    // TCP movement records retain the next endpoint; the page samples the current leg.
+    // Preserve that visible target snapshot on the original attack's x/y fields instead of
+    // aiming at a future walking endpoint. The game server still validates its own live mob.
+    const currentPoint =
+      Number.isFinite(targetX) &&
+      Number.isFinite(targetY) &&
+      targetX >= -32768 &&
+      targetX <= 32767 &&
+      targetY >= -32768 &&
+      targetY <= 32767;
+    const mob =
+      knownMob === undefined
+        ? undefined
+        : {
+            ...knownMob,
+            ...(currentPoint
+              ? { x: Math.trunc(targetX), y: Math.trunc(targetY) }
+              : {}),
+          };
+    // A target can leave while the browser's command is in flight. Still send an empty shot:
+    // the native client fires/consumes a round even without a target (513C80).
     const worn = [...(character.items?.worn.values() ?? [])].map(
       (slot) => slot.itemId,
     );
@@ -603,10 +643,42 @@ class BrowserSession {
       character.stats,
       worn,
       this.options.itemCatalog,
+      ammo?.itemId,
     );
-    const damage = rollDamage(range);
-    await session.attack([{ mobId, x: mob.x, y: mob.y, damage }], facingLeft);
-    this.send({ t: "hit", mobId, damage });
+    const damage = mob === undefined ? 0 : rollDamage(range);
+    await session.attack(
+      mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage }],
+      facingLeft,
+      {
+        shoot,
+        action: action?.action ?? 5,
+        speed: profile?.speed ?? 1,
+        ...(ammo === undefined ? {} : { projectileSlot: ammo.slot }),
+      },
+    );
+    if (mob !== undefined) {
+      const release =
+        shoot && action
+          ? action.delays.reduce((sum, delay) => sum + delay, 0) -
+            (action.delays.at(-1) ?? 0)
+          : 0;
+      // Browser-local predicted numbers, not an invented TCP acknowledgement.
+      const bounds = profile?.melee[0]?.bounds;
+      const near = bounds
+        ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
+        : 65;
+      const delayMs =
+        release +
+        (shoot
+          ? Math.trunc(
+              Math.hypot(
+                mob.x - (session.selfPosition.x + (facingLeft ? -near : near)),
+                mob.y - 20 - (session.selfPosition.y - 25),
+              ) * 1.5,
+            )
+          : 0);
+      this.send({ t: "hit", mobId, damage, delayMs });
+    }
   }
 
   private newSession(): ClientSession {
@@ -1111,6 +1183,30 @@ export function startWebClient(
       response.setHeader("Content-Length", end - start + 1);
       response.end(
         request.method === "HEAD" ? undefined : bytes.subarray(start, end + 1),
+      );
+      return;
+    }
+    if (
+      url.pathname.startsWith("/api/attack/") ||
+      url.pathname.startsWith("/api/projectile/")
+    ) {
+      const projectile = url.pathname.startsWith("/api/projectile/");
+      const rest = url.pathname.slice(
+        projectile ? "/api/projectile/".length : "/api/attack/".length,
+      );
+      if (!/^\d{1,8}$/.test(rest)) {
+        sendJson(response, 404, { error: "invalid combat asset id" });
+        return;
+      }
+      const asset = projectile
+        ? options.art?.projectile?.(Number(rest))
+        : options.art?.attackProfile?.(Number(rest));
+      const known =
+        asset !== undefined && (!Array.isArray(asset) || asset.length > 0);
+      sendJson(
+        response,
+        known ? 200 : 404,
+        known ? asset : { error: "combat asset not present in Data.wz" },
       );
       return;
     }

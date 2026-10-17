@@ -561,6 +561,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(npcWalk !== undefined ? { npcWalk } : {}),
       ...(shops !== undefined ? { shops } : {}),
       ...(consumeSpec !== undefined ? { consumeSpec } : {}),
+      ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
       ...(itemCatalog !== undefined
         ? {
             dropItemAllowed: (id: number) =>

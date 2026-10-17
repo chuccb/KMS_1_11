@@ -20,6 +20,9 @@ export interface SpriteFrame {
   /** The canvas' `origin` - the pixel that lands on the entity's `(x, y)`. */
   ox: number;
   oy: number;
+  /** Native canvas extent, for browser target rectangles (not a full native CShape2D). */
+  width?: number;
+  height?: number;
 }
 
 /** An animated set of frames, e.g. a mob's `move` action. */
@@ -51,6 +54,8 @@ export function spriteFrames(reader: ArtReader, image: string, action: string, f
         delay: frameDelay(node, name, candidate === "move" ? 180 : 1000),
         ox: art.ox,
         oy: art.oy,
+        width: art.width,
+        height: art.height,
       });
     }
     if (out.length > 0) return out;

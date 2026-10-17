@@ -2006,10 +2006,32 @@ Yes/No初始焦點No防誤確認；字型度量與換行非Windows逐像素oracl
 服務端算費、查格、回0x4B／0x0B／0x0D再保存。不改save schema或私造角色道具。
 
 **政策界線**：商店stock／補充範圍、滿組購買、ceil補充費、50%回收屬重建server政策。
-服務只用WZ基礎slotMax；完整瀏覽器射擊選彈／扣彈、技能容量及交易UI未完成。
+服務只用WZ基礎slotMax；當時未做的基本瀏覽器射擊選彈／扣彈已由ADR046接通（未測試），技能容量及交易UI仍未完成。
 地面不持久化，停服前未撿的錢／物品會消失；wallet放不下整筆時不吞掉地面餘額。
 ADR044所列meso丟棄及recharge成功缺口由此補上，但CWvsApp全域gate仍未全面完成。
 
 **驗證**：使用者要求不測試，本輪未跑unit/socket/VM/browser/typecheck。新增golden來源未執行，
 不把570項歷史PASS當本輪證據。提交使用[skip ci]；未登入角色、未改正式或隔離save、未重啟預覽。
 詳細來源及Data.wz八種單價／容量見 `MESO_RECHARGE.md`。
+
+
+## ADR-046：基本normal動作、WZ逐幀時間與單發選彈生命週期（2026-10-17）
+
+**取證**：427F60／427FE0讀PE VA5B2144／5B2294的normal表，43FC80別名24–26為swingO1–3。
+511630掃USE格升序／彈種／足量，511E20先近身後射擊；513C80遠界角色x±200、近界n119、y−25、
+發射為總delay減最後frame，飛行trunc(distance×1.5)。41BC80讀道具bullet，41BF60按向量轉向。
+WZ弩shoot2實為五幀。508290／原loader串起attackSpeed、attack、walk／stand。
+
+**決定**：WZ normal動作與delay端到端保留action／speed；基本0x10即使空射仍扣1發，
+服務端查真實第一個相容slot後消耗。0x0B使用put／clear、timer0，不猜op1 key為數量，不解除別的pending。
+207保0物件、箭耗盡清格；提前保存id給0x24，避免末箭失去投射物。成功即persist，無存檔格式遷移。
+旁觀0x23／0x24、原bullet／afterimage、2型武器stand/walk同步接上，不以其他武器姿勢掩蓋缺動作資料。
+
+**政策**：server基本單發驗證／30ms冷卻容差／目標中心安全界線，及按client可見時間於world tick延後命中，
+不是還原原server。換場／斷線／目標重生清舊命中，pending射擊不保存也不退彈。
+canvas rectangle／固定怪物y−20終點不是原CShape2D／485B80交點；傷害沿用明示近似公式並加入ammo incPAD。
+技能／Soul Arrow／buff與完整傷害、effect混色／z等仍未完成；ADR045的基本射擊缺口由此補上，非完整職業。
+
+**驗證界線**：依使用者要求，未執行unit/socket/VM/browser/probe/check/typecheck。
+只靜態閱讀原始碼／PE與解析WZ；新增golden及選彈／WZ回歸來源未執行。沒有啟動服務或改動任何存檔。
+完整證據、例值、操作及剩餘差異見`BASIC_ATTACKS.md`。

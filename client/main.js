@@ -1,3 +1,12 @@
+import {
+  weaponIdOf,
+  basicAmmo,
+  attackDuration,
+  attackFrame,
+  shotRelease,
+  shotNear,
+  projectileLeg,
+} from "./basiccombat.mjs";
 import { itemDialogs } from "./itemdialogs.mjs";
 import { equipmentWindow, bodyPart, canWear } from "./equipment.mjs";
 import { miniMapWindow } from "./minimap.mjs";
@@ -334,6 +343,9 @@ function connect() {
     itemDialog.close(false);
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
+    combatEpoch++;
+    selfSwing = undefined;
+    projectiles.length = damageMarks.length = 0;
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
@@ -492,6 +504,12 @@ function handle(message) {
       selfView = message.self;
       self = { x: 0, y: 0, mapId: message.mapId };
       users.clear();
+      selfSwing = undefined;
+      combatEpoch++;
+      nextSwingAt = 0;
+      projectiles.length = 0;
+      damageMarks.length = 0;
+      mobHits.clear();
       mobs.clear();
       npcs.clear();
       drops.clear();
@@ -544,6 +562,8 @@ function handle(message) {
       if (message.ack) slotPending = false;
       inventoryPick = undefined;
       inventory = message.inventory;
+      const ammo = basicAmmo(inventory, weaponIdOf(lookOf(selfView)));
+      if (ammo) void ensureProjectileFrames(ammo.itemId);
       setInventoryScroll(inventoryScroll[inventoryTab] ?? 0);
       reconcileShopInventory();
       return;
@@ -770,52 +790,16 @@ function handle(message) {
     }
 
     case "hit": {
-      // The swing's own numbers: the wire has no packet for them (the 2003 client drew them while it
-      // built 0x1B), so the bridge answers the page with what it rolled and sent.
-      const mob = mobs.get(String(message.mobId));
-      const now = performance.now();
-      if (mob) {
-        void audio.effect(
-          `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
-          spatialVolume(mob.x, mob.y, self),
-        );
-        mobHits.set(String(message.mobId), now);
-        damageMarks.push({
-          x: mob.x,
-          y: mob.y,
-          value: message.damage,
-          start: now,
-        });
-      }
+      scheduleAttackHit(
+        message.mobId,
+        message.damage,
+        performance.now() + (message.delayMs ?? 0),
+      );
       return;
     }
 
     case "user-attack": {
-      // Somebody else's swing (`0x23`): their character plays the motion, the mobs they named flash
-      // and show the numbers they sent - which is exactly what the relayed packet carries.
-      const user = users.get(String(message.characterId));
-      const now = performance.now();
-      if (user) playWeaponSound(user);
-      if (user)
-        user.swing = {
-          stance: SWING_STANCES[swingCounter++ % SWING_STANCES.length],
-          start: now,
-        };
-      for (const target of message.targets ?? []) {
-        const mob = mobs.get(String(target.mobId));
-        if (!mob) continue;
-        void audio.effect(
-          `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
-          spatialVolume(mob.x, mob.y, self),
-        );
-        mobHits.set(String(target.mobId), now);
-        const total = (target.damages ?? []).reduce(
-          (sum, value) => sum + value,
-          0,
-        );
-        if (total > 0)
-          damageMarks.push({ x: mob.x, y: mob.y, value: total, start: now });
-      }
+      void receiveUserAttack(message, performance.now());
       return;
     }
 
@@ -1543,15 +1527,20 @@ let swingCounter = 0;
 const damageMarks = [];
 const mobHits = new Map();
 
-/** Every swing lives this long; the three `swingO*` motions cover the weapon images this build has. */
-const SWING_MS = 480;
-const SWING_COOLDOWN_MS = 460;
+/** No-WZ/unarmed fallback only; real weapon actions and delays come from /api/attack. */
+const SWING_COOLDOWN_MS = 480;
 const SWING_STANCES = ["swingO1", "swingO2", "swingO3"];
-/** The 2003 client's reach for a one-handed swing, in px, and how far up/down a mob still counts. */
+/** Legacy fallback reach, NOT a claimed native rectangle. WZ-equipped actions use lt/rb below. */
 const SWING_REACH_X = 90;
 const SWING_REACH_UP = 72;
 const SWING_REACH_DOWN = 36;
-let lastSwingAt = 0;
+let nextSwingAt = 0;
+let swingLoading = false;
+let combatEpoch = 0;
+const attackProfiles = new Map();
+const projectileFrames = new Map();
+const attackLooks = new Set();
+const projectiles = [];
 /** Template ids whose art endpoint said 404 - stop asking. */
 const artMissing = new Set();
 /** The camera: world coordinate shown at the top-left of the 800x600 view. */
@@ -2093,6 +2082,22 @@ function avatarFrame(look, stance, frame, flip) {
 
 /** Warms the frames a look needs: idle (3) and the two walk cycles (4 each), both ways. */
 function preloadAvatar(look) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}`;
+  if (!attackLooks.has(key)) {
+    if (attackLooks.size >= 128) attackLooks.clear();
+    attackLooks.add(key);
+    void ensureAttackProfile(look).then((profile) => {
+      for (const action of [
+        ...(profile?.melee ?? []),
+        ...(profile?.shoot ?? []),
+      ]) {
+        for (let frame = 0; frame < action.delays.length; frame++) {
+          avatarFrame(look, action.stance, frame, false);
+          avatarFrame(look, action.stance, frame, true);
+        }
+      }
+    });
+  }
   for (const item of look.items)
     if (item >= 1300000 && item < 2000000) describeItem(item);
   for (let frame = 0; frame < 3; frame++) {
@@ -2255,19 +2260,12 @@ function stanceOfEntity(entity, now) {
     selfSwing = undefined; // an old attack must never draw standing parts over a climbing pose
     return animationPose(entity, locomotion(body), Math.abs(body.vy) > 0, now);
   }
-  // A swing outranks walking: the 2003 client's attack motion is played to its end before the body
-  // goes back to standing, and both the local character and a relayed `0x23` use the same three
-  // `swingO*` motions. The frames are spread over the swing's own length.
+  // The wire carries the actual attack action. Use the body WZ's scaled delay per frame,
+  // including every shoot2 frame, instead of stretching every motion into 480ms.
   const swing = entity === selfView ? selfSwing : entity.swing;
   if (swing !== undefined) {
-    const elapsed = now - swing.start;
-    if (elapsed < SWING_MS) {
-      const frames = swing.frames ?? 3;
-      return {
-        stance: swing.stance,
-        frame: Math.min(frames - 1, Math.floor(elapsed / (SWING_MS / frames))),
-      };
-    }
+    const frame = attackFrame(swing, now);
+    if (frame >= 0) return { stance: swing.stance, frame };
     if (entity === selfView) selfSwing = undefined;
     else delete entity.swing;
   }
@@ -2288,6 +2286,22 @@ function emotionFace(emotion, now) {
 
 /** An avatar drawn with its feet at `(screenX, screenY)`, mirrored while facing left. */
 function drawAvatarAt(entity, screenX, screenY, now, flip) {
+  const swing = entity === selfView ? selfSwing : entity.swing;
+  const direction = swing ? !swing.facingLeft : flip;
+  drawAvatarBodyAt(entity, screenX, screenY, now, direction);
+  if (!swing) return;
+  const index = attackFrame(swing, now);
+  const frames = swing.effects?.[String(index)];
+  if (!frames?.length || index < 0) return;
+  const prior = swing.delays
+    .slice(0, index)
+    .reduce((sum, delay) => sum + delay, 0);
+  const elapsed = now - swing.start - prior;
+  // Sparse Afterimage body-frame attachments; no invented broad sword arc.
+  drawArchiveImage(loopFrame(frames, elapsed), screenX, screenY, direction);
+}
+
+function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
   const look = lookOf(entity);
   preloadAvatar(look);
   const state = stanceOfEntity(entity, now);
@@ -2560,19 +2574,23 @@ function frame() {
       shop !== undefined ||
       talkingNpc !== undefined ||
       document.activeElement instanceof HTMLInputElement;
+    const attackLocked =
+      selfSwing && attackFrame(selfSwing, now) >= 0 && playerBody.grounded;
     const wasGrounded = playerBody.grounded;
     advancePlayer(
       playerBody,
       {
-        horizontal: blocked
-          ? 0
-          : Number(keys.has("arrowright") || keys.has("d")) -
-            Number(keys.has("arrowleft") || keys.has("a")),
-        vertical: blocked
-          ? 0
-          : Number(keys.has("arrowdown")) -
-            Number(keys.has("arrowup") || keys.has("w")),
-        jump: !blocked && (keys.has("alt") || keys.has(" ")),
+        horizontal:
+          blocked || attackLocked
+            ? 0
+            : Number(keys.has("arrowright") || keys.has("d")) -
+              Number(keys.has("arrowleft") || keys.has("a")),
+        vertical:
+          blocked || attackLocked
+            ? 0
+            : Number(keys.has("arrowdown")) -
+              Number(keys.has("arrowup") || keys.has("w")),
+        jump: !blocked && !attackLocked && (keys.has("alt") || keys.has(" ")),
       },
       terrain,
       elapsed,
@@ -2703,6 +2721,8 @@ function frame() {
       drawName(actor.user.name, x, y - 62);
     }
   }
+
+  drawProjectiles(cameraX, cameraY, now);
 
   // The numbers a swing rolled, over the mobs they landed on (white with a dark edge, rising).
   for (let i = damageMarks.length - 1; i >= 0; i--) {
@@ -2882,27 +2902,277 @@ function playWeaponSound(entity) {
     );
 }
 
-/**
- * Ctrl: the client's own attack key. The swing is played locally no matter what, and the packet
- * only goes out when there is something in reach - a miss is a picture, not a message.
- */
-function swing() {
-  if (!self || !selfView || playerBody?.ladder) return;
-  const now = performance.now();
-  if (now - lastSwingAt < SWING_COOLDOWN_MS) return;
-  lastSwingAt = now;
-  playWeaponSound(selfView);
-  selfSwing = {
-    stance: SWING_STANCES[swingCounter++ % SWING_STANCES.length],
-    start: now,
-  };
-  const mob = mobInReach();
-  if (mob !== undefined) {
-    send({ t: "attack", mobId: mob.mobId, facingLeft: selfView.facing === 1 });
-    return;
+/** Fetch native weapon action choices, body delays and sparse afterimage canvases, once/id. */
+function ensureAttackProfile(look) {
+  const id = weaponIdOf(look);
+  if (!id) return Promise.resolve(undefined);
+  if (!attackProfiles.has(id)) {
+    attackProfiles.set(
+      id,
+      fetch(`/api/attack/${id}`)
+        .then((response) => (response.ok ? response.json() : undefined))
+        .then((profile) => {
+          for (const action of [
+            ...(profile?.melee ?? []),
+            ...(profile?.shoot ?? []),
+          ])
+            for (const frames of Object.values(action.effects ?? {}))
+              for (const frame of frames) artImage(frame.path);
+          return profile;
+        })
+        .catch(() => undefined),
+    );
   }
-  // Nothing in reach: the swing still plays (the 2003 client does the same), so the field is not
-  // spammed with empty attack packets.
+  return attackProfiles.get(id);
+}
+function ensureProjectileFrames(itemId) {
+  if (!projectileFrames.has(itemId)) {
+    projectileFrames.set(
+      itemId,
+      fetch(`/api/projectile/${itemId}`)
+        .then((response) => (response.ok ? response.json() : []))
+        .then((frames) => {
+          for (const frame of frames) artImage(frame.path);
+          return frames;
+        })
+        .catch(() => []),
+    );
+  }
+  return projectileFrames.get(itemId);
+}
+function scheduleAttackHit(mobId, damage, at) {
+  const field = self,
+    epoch = combatEpoch;
+  const show = () => {
+    if (self !== field || combatEpoch !== epoch) return;
+    const mob = mobs.get(String(mobId));
+    if (!mob) return;
+    const now = performance.now();
+    void audio.effect(
+      `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
+      spatialVolume(mob.x, mob.y, self),
+    );
+    mobHits.set(String(mobId), now);
+    if (damage > 0)
+      damageMarks.push({ x: mob.x, y: mob.y, value: damage, start: now });
+  };
+  const delay = at - performance.now();
+  if (delay > 0) setTimeout(show, delay);
+  else show();
+}
+function launchProjectile(entity, itemId, motion, mob, now, near) {
+  const local = entity === selfView;
+  const at = local ? self : entity;
+  if (!at) return;
+  const leg = projectileLeg(at.x, at.y, motion.facingLeft, mob, near);
+  const record = { ...leg, releaseAt: now + shotRelease(motion), frames: [] };
+  projectiles.push(record);
+  const field = self;
+  void ensureProjectileFrames(itemId).then((frames) => {
+    if (self === field) record.frames = frames;
+  });
+}
+function drawProjectiles(cameraX, cameraY, now) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const shot = projectiles[i];
+    const elapsed = now - shot.releaseAt;
+    if (elapsed < 0) continue;
+    const t = elapsed / shot.duration;
+    if (t >= 1) {
+      projectiles.splice(i, 1);
+      continue;
+    }
+    const frame = loopFrame(shot.frames, elapsed);
+    if (!frame) continue;
+    ctx.save();
+    ctx.translate(
+      Math.round(shot.x0 + (shot.x1 - shot.x0) * t - cameraX),
+      Math.round(shot.y0 + (shot.y1 - shot.y0) * t - cameraY),
+    );
+    // 41BF60 turns the native left-facing bullet by atan2(start - destination).
+    ctx.rotate(Math.atan2(shot.y0 - shot.y1, shot.x0 - shot.x1));
+    drawArchiveImage(frame, 0, 0, false);
+    ctx.restore();
+  }
+}
+async function receiveUserAttack(message, now) {
+  const user = users.get(String(message.characterId));
+  if (!user) return;
+  const field = self,
+    epoch = combatEpoch;
+  const look = lookOf(user);
+  const profile = await ensureAttackProfile(look);
+  if (
+    self !== field ||
+    combatEpoch !== epoch ||
+    users.get(String(message.characterId)) !== user
+  )
+    return;
+  const action = (message.shoot ? profile?.shoot : profile?.melee)?.find(
+    (entry) => entry.action === message.action,
+  );
+  if (!action) return; // Do not turn an unknown/skill action into a fabricated one-handed swing.
+  const speed = Math.max(0, Math.min(6, message.speed));
+  // The relay owns speed; scale original WZ delays, never an already rounded profile.
+  const delays = action.baseDelays.map((delay) =>
+    Math.max(1, Math.trunc((delay * (speed + 5)) / 8)),
+  );
+  user.facing = message.facingLeft ? 1 : 0;
+  user.swing = {
+    ...action,
+    delays,
+    start: now,
+    facingLeft: message.facingLeft,
+  };
+  playWeaponSound(user);
+  const target = mobs.get(String(message.targets?.[0]?.mobId));
+  const near = shotNear(profile.melee[0]);
+  if (message.shoot && message.projectileItemId)
+    launchProjectile(
+      user,
+      message.projectileItemId,
+      user.swing,
+      target,
+      now,
+      near,
+    );
+  for (const target of message.targets ?? []) {
+    const mob = mobs.get(String(target.mobId));
+    const delay = message.shoot
+      ? shotRelease(user.swing) +
+        projectileLeg(user.x, user.y, message.facingLeft, mob, near).duration
+      : 0;
+    scheduleAttackHit(
+      target.mobId,
+      (target.damages ?? []).reduce((sum, value) => sum + value, 0),
+      now + delay,
+    );
+  }
+}
+/** Candidate mob canvas rectangles, not a claim to have ported native CShape2D collision. */
+function mobInAttackRect(bounds, facingLeft, clampNear = false) {
+  let found,
+    best = Infinity;
+  const left = clampNear ? Math.max(bounds.left, -65) : bounds.left;
+  const right = bounds.right;
+  const x0 = self.x + (facingLeft ? left : -right);
+  const x1 = self.x + (facingLeft ? right : -left);
+  for (const mob of mobs.values()) {
+    if (dying.has(String(mob.mobId))) continue;
+    const actions = mobArts.get(mob.templateId);
+    const frame =
+      (mob.walking ? actions?.move : actions?.stand)?.[0] ??
+      actions?.stand?.[0];
+    const width = frame?.width ?? 20,
+      height = frame?.height ?? 30;
+    const ox = frame?.ox ?? 10,
+      oy = frame?.oy ?? 30;
+    const ml = mob.x + (facingFlip(mob.facing) ? ox - width : -ox);
+    const mt = mob.y - oy;
+    if (
+      ml + width < x0 ||
+      ml > x1 ||
+      mt + height < self.y + bounds.top ||
+      mt > self.y + bounds.bottom
+    )
+      continue;
+    const distance = Math.abs(mob.x - self.x);
+    if (distance < best) {
+      found = mob;
+      best = distance;
+    }
+  }
+  return found;
+}
+/** Ctrl: melee at close range/no ammo, otherwise a basic shot; empty attacks still go on the wire. */
+async function swing() {
+  if (
+    !self ||
+    !selfView ||
+    !playerBody ||
+    map?.id !== self.mapId ||
+    playerBody?.ladder ||
+    selfView.hp <= 0 ||
+    portalPending ||
+    shop ||
+    shopPending ||
+    talkingNpc ||
+    itemDialog.open ||
+    slotPending ||
+    mesoPending ||
+    swingLoading ||
+    performance.now() < nextSwingAt
+  )
+    return;
+  swingLoading = true;
+  const field = self,
+    entity = selfView,
+    epoch = combatEpoch;
+  try {
+    const profile = await ensureAttackProfile(lookOf(entity));
+    if (
+      self !== field ||
+      combatEpoch !== epoch ||
+      selfView !== entity ||
+      entity.hp <= 0 ||
+      !playerBody ||
+      map?.id !== self.mapId ||
+      playerBody?.ladder ||
+      portalPending ||
+      shop ||
+      shopPending ||
+      talkingNpc ||
+      itemDialog.open ||
+      slotPending ||
+      mesoPending
+    )
+      return;
+    if (weaponIdOf(lookOf(entity)) && !profile?.melee.length) {
+      logLine("無法取得此武器的原始攻擊資料；暫不以其他武器動作替代。");
+      return;
+    }
+    const now = performance.now();
+    if (now < nextSwingAt) return;
+    const pick = (actions) =>
+      actions?.[Math.floor(Math.random() * actions.length)];
+    let action = pick(profile?.melee);
+    const ammo = basicAmmo(inventory, weaponIdOf(lookOf(entity)));
+    let mob = action?.bounds
+      ? mobInAttackRect(action.bounds, entity.facing === 1, !!ammo)
+      : mobInReach();
+    const shoot = !!ammo && !!profile?.shoot.length && !mob;
+    const near = shotNear(action);
+    if (shoot) {
+      action = pick(profile.shoot);
+      // 513C80: near boundary to character x +/- 200, along y-25; CShape2D is not yet ported.
+      mob = mobInAttackRect(
+        { left: -200, right: -near, top: -25, bottom: -24 },
+        entity.facing === 1,
+      );
+    }
+    const fallback = {
+      action: 5 + (swingCounter++ % 3),
+      stance: SWING_STANCES[(swingCounter - 1) % 3],
+      delays: [160, 160, 160],
+      effects: {},
+    };
+    const motion = action ?? fallback;
+    selfSwing = { ...motion, start: now, facingLeft: entity.facing === 1 };
+    nextSwingAt = now + (action ? attackDuration(action) : SWING_COOLDOWN_MS);
+    playWeaponSound(entity);
+    if (shoot) launchProjectile(entity, ammo.itemId, selfSwing, mob, now, near);
+    send({
+      t: "attack",
+      mode: shoot ? "shoot" : "melee",
+      action: motion.action,
+      mobId: mob?.mobId ?? 0,
+      targetX: mob?.x,
+      targetY: mob?.y,
+      facingLeft: entity.facing === 1,
+    });
+  } finally {
+    swingLoading = false;
+  }
 }
 
 /** The layer the characters are drawn in: after layers 0-2, before layer 3 and the front backs. */

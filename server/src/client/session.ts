@@ -82,6 +82,7 @@ import {
 } from "../protocol/drop.ts";
 import {
   FIELD_OPCODE,
+  CLIENT_FIELD_OPCODE,
   encodeClientChat,
   encodeClientEmotion,
   encodeClientInteract,
@@ -395,11 +396,15 @@ export type ClientEvent =
   /** `0x30`: the monster was hit; its `die1` frames are the corpse. */
   | { kind: "mob-die"; mobId: number }
   | { kind: "mob-leave"; mobId: number }
-  /** `0x23`: another user's swing, relayed with the mob ids and the numbers they rolled. */
+  /** `0x23`/`0x24`: another user's melee/shot, including action, speed and projectile id. */
   | {
       kind: "user-attack";
       characterId: number;
       facingLeft: boolean;
+      shoot: boolean;
+      action: number;
+      speed: number;
+      projectileItemId: number;
       targets: { mobId: number; hitAnimation: number; damages: number[] }[];
     }
   /** `0x43`: a drop landed (`drop.money` picks the meso pile, otherwise `drop.value` is an item id). */
@@ -648,6 +653,7 @@ export class ClientSession {
   private readonly timeoutMs: number;
   private self: SelfView | undefined;
   private mapId = 0;
+  private lastPosition = { x: 0, y: 0 };
   private readonly users = new Map<number, UserView>();
   private readonly mobs = new Map<number, MobView>();
   private readonly npcs = new Map<number, NpcView>();
@@ -878,13 +884,17 @@ export class ClientSession {
     return this.mobs.get(mobId);
   }
 
+  get selfPosition(): { x: number; y: number } {
+    return { ...this.lastPosition };
+  }
+
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
     return this.latest;
   }
 
   /**
-   * One swing (`0x0F`), built the way the 2003 client builds it: one target record per mob, one hit
+   * One basic melee (`0x0F`) or shot (`0x10`), including empty attacks: one target record per mob, one hit
    * per target, the damage the caller already rolled (the field takes it on trust - see
    * `game/combat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
    */
@@ -897,11 +907,29 @@ export class ClientSession {
       hitAnimation?: number;
     }[],
     facingLeft = false,
+    options: {
+      shoot?: boolean;
+      action?: number;
+      speed?: number;
+      projectileSlot?: number;
+    } = {},
   ): Promise<void> {
     const link = this.gameLink;
     if (link === undefined)
       throw new Error("attack() needs a session in a field");
-    if (targets.length === 0) return;
+    if (
+      this.slotPending ||
+      this.shopPending ||
+      this.mesoPending ||
+      this.abilityPending
+    )
+      throw new Error("attack blocked by a pending character operation");
+    if (
+      options.shoot &&
+      (!Number.isInteger(options.projectileSlot) ||
+        (options.projectileSlot ?? 0) <= 0)
+    )
+      throw new RangeError("a shot requires a positive USE slot");
     this.attackSequence = (this.attackSequence + 1) & 0xff;
     const records: ClientAttackTarget[] = targets.slice(0, 6).map((target) => ({
       mobId: target.mobId,
@@ -916,11 +944,19 @@ export class ClientSession {
       targetCount: records.length,
       skillId: 0,
       facingLeft,
-      action: 0,
-      speed: 1,
+      action: options.action ?? 5,
+      speed: options.speed ?? 1,
+      ...(options.shoot ? { projectileSlot: options.projectileSlot ?? 0 } : {}),
       targets: records,
     };
-    await link.send(encodeClientAttack(attack));
+    await link.send(
+      encodeClientAttack(
+        attack,
+        options.shoot
+          ? CLIENT_FIELD_OPCODE.shootAttack
+          : CLIENT_FIELD_OPCODE.attack,
+      ),
+    );
   }
 
   /** Sends a field chat line. The 2003 client writes CP949; the adapter pre-encodes. */
@@ -1244,6 +1280,7 @@ export class ClientSession {
       elements: [{ attr: 0, x, y, vx, vy, action, foothold, duration }],
     };
     await link.send(encodeClientUserMove({ stageByte: 0, path }));
+    this.lastPosition = { x, y };
     const self = this.self;
     if (self !== undefined) {
       // The server does not echo a move back to the mover, so the local view moves itself - the same
@@ -1321,6 +1358,7 @@ export class ClientSession {
           this.latest = field.character;
           this.self = selfOf(field.character);
           this.mapId = field.character.stats.mapId;
+          this.lastPosition = { x: 0, y: 0 };
           this.users.clear();
           this.mobs.clear();
           this.npcs.clear();
@@ -1611,14 +1649,19 @@ export class ClientSession {
           if (presence.flag === 0) this.removeMob(presence.mobId);
           return;
         }
-        case FIELD_OPCODE.userAttack: {
-          // `0x23`: the others' half of a swing. The attacker's own client already drew it, so this
+        case FIELD_OPCODE.userAttack:
+        case FIELD_OPCODE.userShootAttack: {
+          // `0x23`/`0x24`: the others' half of an attack. The attacker already drew it, so this
           // only ever arrives for somebody else (`relayAttack`).
           const attack = readUserAttack(new PacketReader(plain, 1));
           this.emit({
             kind: "user-attack",
             characterId: attack.characterId,
             facingLeft: attack.facingLeft,
+            shoot: opcode === FIELD_OPCODE.userShootAttack,
+            action: attack.action,
+            speed: attack.speed,
+            projectileItemId: attack.projectileItemId,
             targets: attack.targets.map((target) => ({
               mobId: target.mobId,
               hitAnimation: target.hitAnimation,

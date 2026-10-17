@@ -1,3 +1,4 @@
+import { spendBasicAmmo, type BasicAttackProvider } from "../game/basicattack.ts";
 import {
   MESO_DROP_OPCODE,
   MESO_DROP_MIN,
@@ -921,6 +922,8 @@ export interface GameEntryServerOptions {
   consumeSpec?: (itemId: number) => ConsumeSpec | undefined;
   /** Native 463BE0 rejects WZ cash items as well as a wire cash serial. Unknown facts refuse. */
   dropItemAllowed?: (itemId: number) => boolean;
+  /** WZ basic action/speed facts; absent data refuses shots rather than inventing them. */
+  basicAttack?: BasicAttackProvider;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -1006,6 +1009,7 @@ interface FieldSession extends FieldMember {
    * `CDisconnectException` for that, the same way the shop dialog refuses a second `0x4A`.
    */
   talk?: NpcTalk;
+  attackReadyAt?: number;
 }
 
 export class GameEntryServer {
@@ -1017,6 +1021,14 @@ export class GameEntryServer {
   private readonly fields: FieldRegistry<FieldSession>;
   /** One character, one session: the second connection for an id is refused (see `onConnection`). */
   private readonly sessionsByCharacter = new Map<number, FieldSession>();
+  /** Reconstructed server scheduling: native release + distance * 1.5ms, no saved ground state. */
+  private pendingShots: {
+    session: FieldSession;
+    instance: FieldInstance<FieldSession>;
+    attack: ClientAttack;
+    dueAt: number;
+    deaths: Map<number, number>;
+  }[] = [];
   /**
    * 隊伍（FINDINGS 4.37）。世界層的狀態，跟 `sessionsByCharacter` 一樣不屬於任何一張場地：名冊裡
    * 只有角色 id 與名字，隊員分散在兩張圖是合法的（ADR-030）。
@@ -1123,6 +1135,7 @@ export class GameEntryServer {
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
     this.sessionsByCharacter.clear();
+    this.pendingShots = [];
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
@@ -1147,8 +1160,34 @@ export class GameEntryServer {
     );
   }
 
-  /** One tick: every field, then the pickup of every player standing on something. */
+  /** One tick: due shots, field lifecycle/movement, then nearby pickups. */
   private tickFields(now: number): void {
+    const ready = this.pendingShots;
+    this.pendingShots = [];
+    for (const shot of ready) {
+      if (
+        this.sessionsByCharacter.get(shot.session.characterId) !==
+          shot.session ||
+        shot.session.instance !== shot.instance
+      )
+        continue;
+      if (now < shot.dueAt) {
+        this.pendingShots.push(shot);
+        continue;
+      }
+      const targets = shot.attack.targets.filter(
+        (target) =>
+          shot.instance.mobs.mob(target.mobId)?.deaths ===
+          shot.deaths.get(target.mobId),
+      );
+      this.resolveAttackDamage(
+        shot.session,
+        CLIENT_FIELD_OPCODE.shootAttack,
+        { ...shot.attack, targets, targetCount: targets.length },
+        now,
+        false,
+      );
+    }
     for (const instance of this.fields.instances()) {
       instance.tick(now);
       for (const session of instance.memberList) this.pickUp(session);
@@ -1259,6 +1298,8 @@ export class GameEntryServer {
     }
     session.instance.leave(session.characterId);
     session.instance = target;
+    session.attackReadyAt = undefined;
+    this.pendingShots = this.pendingShots.filter((shot) => shot.session !== session);
     session.character.stats.mapId = mapId;
     session.character.stats.unknown101 = spawnPortalIndex(
       target.map,
@@ -2112,14 +2153,115 @@ export class GameEntryServer {
     const opcode = plain[0] ?? 0;
     let attack: ClientAttack;
     try {
-      attack = readClientAttack(new PacketReader(plain, 1), opcode);
+      const reader = new PacketReader(plain, 1);
+      attack = readClientAttack(reader, opcode);
+      if (opcode === CLIENT_FIELD_OPCODE.shootAttack && reader.remaining !== 0)
+        throw new RangeError("trailing shot bytes");
     } catch (error) {
       this.options.log?.(
         `game: 0x${hex(opcode)} attack unreadable: ${(error as Error).message}`,
       );
       return;
     }
+    if (
+      session.character.stats.hp <= 0 ||
+      session.shop ||
+      session.talk ||
+      this.trades.roomOf(session.characterId)
+    )
+      return;
     const now = Date.now();
+    if (now + 30 < (session.attackReadyAt ?? 0)) return; // Transport tolerance is server policy.
+    const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
+    const profile = this.options.basicAttack?.(weaponId);
+    if (opcode === CLIENT_FIELD_OPCODE.shootAttack) {
+      // This path is a basic one-round attack, not an accidental free skill/multi-shot service.
+      const motion = profile?.shoot.find(
+        (entry) => entry.action === attack.action,
+      );
+      if (
+        attack.skillId !== 0 ||
+        attack.hits !== 1 ||
+        attack.targets.length > 1 ||
+        !motion ||
+        attack.speed !== profile?.speed ||
+        attack.projectileSlot === undefined ||
+        !session.at
+      )
+        return;
+      const duration = motion.delays.reduce((sum, delay) => sum + delay, 0);
+      const release = duration - (motion.delays.at(-1) ?? 0);
+      const direction = attack.facingLeft ? -1 : 1;
+      // Selection geometry remains a bounded server policy until the native mob shape pool is ported.
+      const targets = attack.targets.filter((target) => {
+        const mob = session.instance.mobs.mob(target.mobId);
+        const dx = mob === undefined ? -1 : (mob.x - session.at!.x) * direction;
+        return (
+          mob?.alive &&
+          dx >= 0 &&
+          dx <= 265 &&
+          Math.abs(mob.y - session.at!.y) <= 100
+        );
+      });
+      const items = session.character.items;
+      const spent =
+        items === undefined
+          ? undefined
+          : spendBasicAmmo(items, attack.projectileSlot);
+      if (!spent) return;
+      session.attackReadyAt = now + duration;
+      session.send(encodeInventoryChange([spent.change], 0)); // A shot must not release a slot-move pending gate.
+      this.persist();
+      const accepted = { ...attack, targets, targetCount: targets.length };
+      this.relayAttack(
+        session,
+        opcode,
+        accepted,
+        targets.map((target) => ({
+          mobId: target.mobId,
+          hitAnimation: target.hitAnimation,
+          damages: target.damages,
+        })),
+        spent.itemId,
+      );
+      if (targets.length > 0) {
+        const mob = session.instance.mobs.mob(targets[0]!.mobId)!;
+        const bounds = profile?.melee[0]?.bounds;
+        const near = bounds
+          ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
+          : 65;
+        const travel = Math.trunc(
+          Math.hypot(
+            mob.x - (session.at.x + direction * near),
+            mob.y - 20 - (session.at.y - 25),
+          ) * 1.5,
+        );
+        this.pendingShots.push({
+          session,
+          instance: session.instance,
+          attack: accepted,
+          dueAt: now + release + travel,
+          deaths: new Map([[mob.mobId, mob.deaths]]),
+        });
+      }
+      return;
+    }
+    const motion = profile?.melee.find(
+      (entry) => entry.action === attack.action,
+    );
+    if (motion)
+      session.attackReadyAt =
+        now + motion.delays.reduce((sum, delay) => sum + delay, 0);
+    this.resolveAttackDamage(session, opcode, attack, now, true);
+  }
+
+  private resolveAttackDamage(
+    session: FieldSession,
+    opcode: number,
+    attack: ClientAttack,
+    now: number,
+    relay: boolean,
+  ): void {
     // The swing has to arrive before the mobs react, so the mob packets wait here for it.
     const mobPackets: Uint8Array[] = [];
     const kills: { mobId: number; templateId: number }[] = [];
@@ -2152,7 +2294,7 @@ export class GameEntryServer {
       if (hit.killed)
         kills.push({ mobId: hit.mobId, templateId: hit.templateId });
     }
-    this.relayAttack(session, opcode, attack, relayed);
+    if (relay) this.relayAttack(session, opcode, attack, relayed);
     session.instance.broadcastAll(mobPackets);
     // The reward first, the loot after: the exp is the kill's own payout (a stat diff plus, on a
     // level-up, the client's own effect), while a drop has to fly out of the corpse.
@@ -2181,10 +2323,10 @@ export class GameEntryServer {
    *                           attacker used comes from `sub_4BE270` on its own client.
    *   the trailing `u32`      0 for `0x0F`/`0x11`. For a `0x10` it is what the `0x24` handler reads
    *                           it as - the projectile's item id, used to offset a throwing star's
-   *                           effect (`bottom / 10000 == 207`) - so it is looked up in the slot the
-   *                           attacker named (`ClientAttack.projectileSlot`); an empty slot, a slot
-   *                           whose contents the client lied about, and the two opcodes that do not
-   *                           carry a slot all go out as 0.
+   *                           effect (`bottom / 10000 == 207`). Basic shots now validate/consume the
+   *                           selected USE slot first and pass its PRE-debit item id here. Thus the
+   *                           last arrow still has a projectile after its inventory slot clears.
+   *                           Invalid shots are refused, not relayed as projectile id 0.
    *
    * `encodeUserAttack` writes the s2c opcode the client opcode mirrors, and an opcode outside the
    * table (`ATTACK_RELAY_OPCODE`) has no relay at all.
@@ -2194,14 +2336,12 @@ export class GameEntryServer {
     opcode: number,
     attack: ClientAttack,
     targets: UserAttackTarget[],
+    spentProjectileItemId?: number,
   ): void {
     const relayOpcode = ATTACK_RELAY_OPCODE[opcode];
     if (relayOpcode === undefined) return;
     if (session.instance.memberCount <= 1) return;
-    const projectileItemId =
-      attack.projectileSlot === undefined
-        ? 0
-        : this.projectileItemOf(session, attack.projectileSlot);
+    const projectileItemId = spentProjectileItemId ?? 0;
     const packet = encodeUserAttack(
       {
         characterId: session.characterId,
@@ -2224,22 +2364,6 @@ export class GameEntryServer {
         `speed=${attack.speed}${projectileItemId === 0 ? "" : ` projectile=${projectileItemId}`} ` +
         `${targets.length} target(s)) sent to ${session.instance.memberCount - 1} other player(s)`,
     );
-  }
-
-  /**
-   * The item id sitting in one USE-tab slot of the attacker's own record.
-   *
-   * The client's `0x10` names the slot, not the item (`sub_511630` only ever returns a slot of a
-   * 2060xxx/2061xxx/207xxxx pile, but the packet carries the number), while the `0x24` receiver
-   * wants the id. This is a read: like the damage itself, what the client did with its own
-   * inventory is the client's account of the attack, and the server does not consume anything to
-   * relay a shot (FINDINGS 4.11.7c).
-   */
-  private projectileItemOf(session: FieldSession, slot: number): number {
-    const items = session.character.items ?? emptyCharacterItems();
-    const inventory = items.inventories[INVENTORY_TAB.consume - 1];
-    const item = inventory?.items.get(slot);
-    return item?.itemId ?? 0;
   }
 
   /**
@@ -2523,6 +2647,7 @@ export class GameEntryServer {
         // written to a closed socket is nothing anyone needs. Leaving the party is the same rule as
         // the seat (ADR-030): the 2003 party has no offline members.
         this.sessionsByCharacter.delete(session.characterId);
+        this.pendingShots = this.pendingShots.filter((shot) => shot.session !== session);
         this.leaveParty(session.characterId, "disconnected");
         this.leaveTrade(session.characterId, "disconnected");
         this.leaveMessenger(session.characterId);

@@ -4363,3 +4363,25 @@ WZ facts與wire instance stats分開；套服／褲、雙手／盾原子卸下�
 - WZ八種207的基礎容量為500/500/700/500/400/600/800/600，費率0.3/0.4/0.5/0.6/0.6/0.7/0.8/1。
   stock、ceil整數補充費及50%回收仍是server政策，不是找到原服腳本。完整遠距扣彈仍未接，見ADR-045。
 - 未執行任何測試、typecheck或browser；只解析原資料及靜態閱讀原碼。新增golden測試來源未執行。
+
+
+## 補充：基本武器動作表與單發射擊（2026-10-17；未測試）
+
+427F60讀PE VA5B2144（7 groups×2 rows×6 u32），427FE0讀5B2294（×4 u32）。normal列：
+melee group1=[5,6,7,16,17]、2=[10,13,14,19,20]、3=[9,11]、4=[9,19]、
+5=[9,10,11,16,17]、6=[6]、7=[16,17]；shoot group3=[22]、4=[23]、7=[24,25,26]。
+43FC80把22／23命名shoot1／shoot2，24–26別名swingO1–3；不是移動action byte。
+WZ1462000 shoot2/body有五幀150,150,250,100,100，speed4逐格取整後168,168,281,112,112。
+原loader把info/attackSpeed寫src[8]（缺值3），508290→this[38]，4BE8B0夾0..6，
+508700逐格trunc(delay×(speed+5)/8)，不再只是「attackSpeed最合理候選」。
+
+511630依USE槽升序／相容／足量，0發跳過。511E20先近身測試，無近敵才513C80；
+513C80基本遠界是角色x±200，近界x±n119、y−25，並非near再加200。
+發射等待讀this[50]陣列最後格並由總delay扣除；飛行trunc(distance×1.5)，起點在近界，空射仍有飛彈及0x10。
+41BC80讀bullet子畫布；41BF60按起點減終點向量atan2轉向。
+
+本輪接通basic 0x10消耗1發、0x24扣彈前id轉播、0x0B put／clear timer0及原WZ動作／bullet。
+**未把op1 key改解成quantity**；207保0，末箭清格後仍保留該次投射物id。
+server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現近似公式皆有政策界線，
+不能由client程式證明原server，也不代表技能／完整職業已完成。見`docs/BASIC_ATTACKS.md`／ADR-046。
+使用者要求不測試，新增回歸來源未執行，非PASS紀錄。

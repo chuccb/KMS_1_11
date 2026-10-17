@@ -1,6 +1,8 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新實作（**未執行任何測試／typecheck／瀏覽器**）：原CUIItem金幣按鈕、0x1F丟楓幣／非零0x0D ack、207補充double／WZ容量、price0補充列表、整組購買／出售／交易與0發物件；拾取立即保存及錢包溢出保護。見 `MESO_RECHARGE.md`／ADR-045。完整遠距射擊／扣彈、技能容量加成仍未完成。
+> 最新實作（**未測試／未typecheck**）：原武器normal動作表與逐幀WZ速度、弓弩拳套基本選彈／空射扣彈、0發207／末箭清格、0x10→0x24與原bullet／afterimage、延後命中、2型待機行走。見`BASIC_ATTACKS.md`／ADR-046。技能攻擊、原CShape2D碰撞及完整傷害公式仍未完成。
+
+> 最新實作（**未執行任何測試／typecheck／瀏覽器**）：原CUIItem金幣按鈕、0x1F丟楓幣／非零0x0D ack、207補充double／WZ容量、price0補充列表、整組購買／出售／交易與0發物件；拾取立即保存及錢包溢出保護。見 `MESO_RECHARGE.md`／ADR-045。當時的基本射擊／扣彈缺口已於ADR-046接通（未測試）；技能容量／多發等仍未完成。
 
 > 最新實作（**依使用者要求未測試**）：背包超過24格的原捲動／真slot命中、0x17地面丟棄與數量／4031確認、商店批量買入／部分出售、原UtilDlgEx輸入與modal隔離、shop pending／cash防線與立即存檔。見 `INVENTORY_OPERATIONS.md`。本輪未跑suite／typecheck／瀏覽器；以下570等PASS為前輪歷史，不能作為本輪驗證。
 
