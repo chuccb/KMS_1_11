@@ -83,6 +83,9 @@ test("a session that answers every ping is never dropped", async (t) => {
 test("a silent session is pinged and then dropped, which is what frees its account", async (t) => {
   const pair = await socketPair();
   t.after(() => pair.close());
+  // A loaded test runner may skip a 20ms interval entirely. Timeout is elapsed time, not a
+  // guaranteed number of callbacks; drive the clock deterministically while keeping real sockets.
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: 0 });
   const log: string[] = [];
   let pings = 0;
   const heartbeat = new Heartbeat({ intervalMs: 20, log: (line) => log.push(line) });
@@ -93,8 +96,15 @@ test("a silent session is pinged and then dropped, which is what frees its accou
     pings += 1;
     pair.server.write(Buffer.from([8]));
   });
-  await until(() => pair.server.destroyed, "the heartbeat to give up on the silent session");
-  assert.ok(pings >= 2, `the session was asked more than once before being dropped (${pings})`);
+  t.mock.timers.tick(20);
+  assert.equal(pings, 1);
+  assert.equal(pair.server.destroyed, false);
+  t.mock.timers.tick(20);
+  assert.equal(pings, 2);
+  assert.equal(pair.server.destroyed, false);
+  t.mock.timers.tick(20);
+  assert.equal(pair.server.destroyed, true);
+  assert.equal(pings, 2, "two scheduled pings, then drop without another ping");
   assert.equal(heartbeat.watching, 0, "a dropped session stops being watched");
   // The log line says how long it was quiet and how often it was asked - both in the unit the
   // interval is in, so a test's 20 ms and a server's 30 s read the same way.
