@@ -342,6 +342,55 @@ test("clicking a portal asks 0x0D and the server answers with a 0x16 for the oth
   browser.close();
 });
 
+test("a face goes to the others, and a whisper comes back as an answer", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t);
+  const hero = await enterGame(world.webPort, "admin", "admin");
+  const alt = await enterGame(world.webPort, "alt", "alt");
+  const heroId = (hero.field.self as { characterId: number }).characterId;
+  await hero.browser.nextKind("user-enter"); // Alt walked in
+
+  // 0x13: the 2003 client wears the face before it sends, so the page gets its own echo and the
+  // server's 0x27 goes to everybody else only.
+  hero.browser.send({ t: "emotion", value: 2 });
+  const own = await hero.browser.nextKind("user-emotion");
+  assert.deepEqual([own.characterId, own.emotion], [heroId, 2]);
+  const seen = await alt.browser.nextKind("user-emotion");
+  assert.deepEqual([seen.characterId, seen.emotion], [heroId, 2]);
+
+  // 0x13 with a value the client cannot produce: the codec refuses it, and the page gets a reason.
+  hero.browser.send({ t: "emotion", value: 99 });
+  const refused = await hero.browser.nextKind("error");
+  assert.match(String(refused.message), /not a face/);
+
+  // 0x23 kind 0x06: the receiver sees a plain chat line (0x1A 0x12 - the wire has no second shape
+  // for a delivered whisper), and the sender's answer carries the name and the delivered flag.
+  hero.browser.send({ t: "whisper", name: "Alt", text: "안녕" });
+  const delivered = await hero.browser.nextKind("whisper-answer");
+  assert.deepEqual([delivered.name, delivered.delivered], ["Alt", true]);
+  const heard = await alt.browser.next((message) => message.t === "chat" && message.name === "Hero");
+  assert.equal(heard.text, "안녕", "CP949 bytes must come back as the text that was typed");
+
+  hero.browser.send({ t: "whisper", name: "Nobody", text: "hi" });
+  const missing = await hero.browser.nextKind("whisper-answer");
+  assert.deepEqual([missing.name, missing.delivered], ["Nobody", false]);
+
+  // 0x23 kind 0x05: the find answer is a map id, or -1 for somebody who is not online.
+  hero.browser.send({ t: "find", name: "Alt" });
+  const found = await hero.browser.nextKind("find-answer");
+  assert.deepEqual([found.name, found.mapId], ["Alt", 1000000]);
+  hero.browser.send({ t: "find", name: "Nobody" });
+  const nowhere = await hero.browser.nextKind("find-answer");
+  assert.deepEqual([nowhere.name, nowhere.mapId], ["Nobody", -1]);
+
+  // Field chat is the same CP949 path, so a Korean line survives it too.
+  alt.browser.send({ t: "say", text: "안녕하세요" });
+  const line = await hero.browser.next((message) => message.t === "chat" && message.name === "Alt");
+  assert.equal(line.text, "안녕하세요");
+
+  hero.browser.close();
+  alt.browser.close();
+});
+
 test("two browsers in one map see each other: enter, move and chat", { timeout: 20000 }, async (t) => {
   const world = await startWorld(t);
   const hero = await enterGame(world.webPort, "admin", "admin");

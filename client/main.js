@@ -41,6 +41,7 @@ const ui = {
   chatbox: /** @type {HTMLElement} */ (document.getElementById("chatbox")),
   chatLines: /** @type {HTMLElement} */ (document.getElementById("chat-lines")),
   say: /** @type {HTMLInputElement} */ (document.getElementById("say")),
+  emotes: /** @type {HTMLElement} */ (document.getElementById("emotes")),
   log: /** @type {HTMLElement} */ (document.getElementById("log")),
   logLines: /** @type {HTMLElement} */ (document.getElementById("log-lines")),
   logToggle: /** @type {HTMLButtonElement} */ (document.getElementById("log-toggle")),
@@ -65,6 +66,21 @@ let lastMoveSent = 0;
 let hoveredPortal;
 /** The last time a portal was asked for; `sub_472590` refuses a second request within 500 ms. */
 let lastPortalAt = 0;
+/** The face the local player is wearing, and until when - the server's `0x27` excludes the mover. */
+let selfEmotion;
+/**
+ * The last whisper this page sent, kept the way the 2003 client keeps it (`CField+28`, written by
+ * `sub_4717D0`): the answer (`0x1A` 0x0A) carries no text, so the sender's own line is printed from
+ * what it typed.
+ */
+let pendingWhisper;
+/**
+ * The nine faces, in the client's own order (`EMOTION_NAMES` in `server/src/protocol/field.ts`,
+ * read out of `Character/Face/*` and the drawing code's table). 1..7 are what the 2003 client's
+ * F1..F7 send; 0 (the neutral blink) and 8 have no key there, and this page has no button for them.
+ */
+const EMOTE_NAMES = ["blink", "hit", "smile", "troubled", "cry", "angry", "bewildered", "stunned", "vomit"];
+const EMOTE_KEYS = [1, 2, 3, 4, 5, 6, 7];
 
 const MOVE_PX_PER_TICK = 14;
 const MOVE_TICK_MS = 100;
@@ -229,8 +245,15 @@ function handle(message) {
     }
 
     case "user-emotion": {
+      const until = performance.now() + 2500;
+      // The server sends 0x27 to everyone but the mover, so this branch is the page's own echo of
+      // what it just sent - the same reason `user-move` for `self` is applied without an event.
+      if (selfView && message.characterId === selfView.characterId) {
+        selfEmotion = { value: message.emotion, until };
+        return;
+      }
       const user = users.get(String(message.characterId));
-      if (user) user.emotion = { value: message.emotion, until: performance.now() + 2500 };
+      if (user) user.emotion = { value: message.emotion, until };
       return;
     }
 
@@ -241,7 +264,28 @@ function handle(message) {
     }
 
     case "chat":
+      // A delivered whisper arrives here too: the server relays it as `0x1A` sub-op 0x12, the same
+      // packet as field chat, so the receiving client cannot tell the two apart (FINDINGS 4.31).
       chatLine(message.name, message.text);
+      return;
+
+    case "whisper-answer": {
+      // The text is not on the wire: the 2003 client prints its own kept line as "name<< text".
+      const text = pendingWhisper && pendingWhisper.name === message.name ? pendingWhisper.text : undefined;
+      pendingWhisper = undefined;
+      if (message.delivered) {
+        chatLine(`${message.name}<<`, text ?? "");
+      } else {
+        chatLine("系統", `找不到「${message.name}」。`);
+      }
+      logLine(`whisper ${message.delivered ? "delivered" : "not found"}: ${message.name}`);
+      return;
+    }
+
+    case "find-answer":
+      // No map name on the wire (FINDINGS 4.31): the answer is a map id or "not found".
+      chatLine("系統", message.mapId === -1 ? `找不到「${message.name}」。` : `${message.name} 在地圖 ${message.mapId}。`);
+      logLine(`find ${message.name}: ${message.mapId}`);
       return;
 
     case "mob-enter":
@@ -275,11 +319,21 @@ function handle(message) {
       logLine(`disconnect: ${message.reason}`);
       return;
 
-    case "error":
-      ui.status.textContent = message.message;
-      ui.status.classList.add("bad");
+    case "error": {
+      // The status line lives in the login panel, which is hidden once a character is in a field -
+      // so a mid-game error (a text the code page cannot carry, an unreadable message) also goes to
+      // the chat box, or it would be invisible.
+      const text = /is not a CP949 character/.test(message.message)
+        ? `${message.message}（2003 client 只收 CP949：韓文與 ASCII，中文送不出去）`
+        : message.message;
+      if (self) chatLine("系統", text);
+      else {
+        ui.status.textContent = text;
+        ui.status.classList.add("bad");
+      }
       logLine(`error: ${message.message}`);
       return;
+    }
 
     case "unknown":
       logLine(`unhandled packet 0x${message.opcode.toString(16)} (${message.bytes}B)`);
@@ -475,6 +529,12 @@ function drawSelf(cameraX, cameraY) {
   const x = (self?.x ?? 0) - cameraX;
   const y = (self?.y ?? 0) - cameraY;
   drawAvatar(x, y, selfView, "#7fd1a0");
+  if (selfEmotion && selfEmotion.until > performance.now()) {
+    ctx.font = "14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(190, 235, 205, 0.95)";
+    ctx.fillText(EMOTE_NAMES[selfEmotion.value] ?? "?", x, y - 62);
+  }
 }
 
 function drawUser(user, cameraX, cameraY) {
@@ -482,9 +542,10 @@ function drawUser(user, cameraX, cameraY) {
   const y = user.y - cameraY;
   drawAvatar(x, y, user, "#d8c48a");
   if (user.emotion && user.emotion.until > performance.now()) {
-    ctx.font = "16px system-ui, sans-serif";
+    ctx.font = "14px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(["…", "hit", "!", "?", "♥", "angry", "!!", "zzz", "sick"][user.emotion.value] ?? "?", x, y - 56);
+    ctx.fillStyle = "rgba(255, 240, 200, 0.95)";
+    ctx.fillText(EMOTE_NAMES[user.emotion.value] ?? "?", x, y - 56);
   }
   if (user.levelUpAt && performance.now() - user.levelUpAt < 1200) {
     ctx.strokeStyle = "rgba(255, 230, 140, 0.9)";
@@ -571,7 +632,16 @@ function chatLine(name, text) {
   const line = document.createElement("li");
   const who = document.createElement("span");
   who.className = "who";
-  who.textContent = `${name} : `;
+  if (name === "系統") {
+    who.classList.add("system");
+    who.textContent = `${name}：`;
+  } else if (name.endsWith("<<")) {
+    // The 2003 client's own whisper echo: "name<< text" (`CField+28`).
+    who.classList.add("whisper");
+    who.textContent = `${name} `;
+  } else {
+    who.textContent = `${name} : `;
+  }
   line.append(who, document.createTextNode(text));
   ui.chatLines.append(line);
   while (ui.chatLines.children.length > 8) ui.chatLines.firstElementChild?.remove();
@@ -619,6 +689,19 @@ ui.user.addEventListener("keydown", (event) => {
 });
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 
+// The 2003 client sends these from F1..F7 (`sub_511E20` case 10); a browser cannot take those keys
+// (F1 is help, F5 reloads), so the page offers the same seven faces as buttons.
+ui.emotes.replaceChildren(
+  ...EMOTE_KEYS.map((value) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = EMOTE_NAMES[value];
+    button.title = `表情 ${value}：${EMOTE_NAMES[value]}`;
+    button.addEventListener("click", () => send({ t: "emotion", value }));
+    return button;
+  }),
+);
+
 // Arrow keys and WASD walk. The 2003 client runs a physics vecctrl here; the browser sends a
 // straight-line step and lets the server relay it, which is the honest subset until the movement
 // codec's per-element actions are used by something that draws them.
@@ -659,11 +742,50 @@ setInterval(() => {
   send({ t: "move", x: Math.round(self.x), y: Math.round(self.y), foothold: 0 });
 }, 40);
 
+/**
+ * The chat box's two commands.
+ *
+ * The 2003 client spells them `/귓속말` and `/헉추적`; the spellings never reach the wire - the
+ * client translates them into `0x23` kind 0x06 / 0x05 itself - so `/w` and `/f` are this page's own
+ * names for the same two requests (ADR-036). Anything that is not one of them is chat, including a
+ * line that merely starts with a slash.
+ *
+ * @param {string} text what was typed
+ * @param {() => void} local print a line in this page's own chat box
+ * @returns {boolean} true when the line was a command and must not be sent as chat
+ */
+function runCommand(text, local) {
+  const match = /^\/(w|f)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (!match) {
+    if (text.startsWith("/")) {
+      local("系統", "這個頁面的指令只有 /w 名字 訊息 與 /f 名字。");
+      return true;
+    }
+    return false;
+  }
+  const [, command, name, rest] = match;
+  if (command === "f") {
+    if (rest !== undefined && rest !== "") {
+      local("系統", "用法：/f 名字");
+      return true;
+    }
+    send({ t: "find", name });
+    return true;
+  }
+  if (rest === undefined || rest === "") {
+    local("系統", "用法：/w 名字 訊息");
+    return true;
+  }
+  send({ t: "whisper", name, text: rest });
+  pendingWhisper = { name, text: rest };
+  return true;
+}
+
 ui.say.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   const text = ui.say.value.trim();
   ui.say.value = "";
-  if (text !== "") send({ t: "say", text });
+  if (text !== "" && !runCommand(text, chatLine)) send({ t: "say", text });
   if (!event.shiftKey) ui.say.blur();
 });
 

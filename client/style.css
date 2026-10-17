@@ -295,6 +295,37 @@ body {
   color: var(--gold);
 }
 
+#chat-lines li .who.system {
+  color: #93a4bd;
+}
+
+#chat-lines li .who.whisper {
+  color: #9fd8ff;
+}
+
+#emotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+#emotes button {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+#emotes button:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
 #say {
   width: 100%;
   padding: 7px 10px;

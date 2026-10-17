@@ -207,6 +207,12 @@ class BrowserSession {
           return await this.move(Number(message.x ?? 0), Number(message.y ?? 0), Number(message.foothold ?? 0));
         case "portal":
           return await this.usePortal(String(message.name ?? ""));
+        case "emotion":
+          return await this.emotion(Number(message.value ?? 0));
+        case "whisper":
+          return await this.whisper(String(message.name ?? ""), String(message.text ?? ""));
+        case "find":
+          return await this.find(String(message.name ?? ""));
         default:
           return this.send({ t: "error", message: `unknown message ${String(message.t)}` });
       }
@@ -312,6 +318,33 @@ class BrowserSession {
   private async usePortal(name: string): Promise<void> {
     if (name === "") return this.send({ t: "error", message: "portal needs a name" });
     await this.require().usePortal(name);
+  }
+
+  /**
+   * One of the nine faces (`EMOTION_NAMES`, 0..8). The value is checked by the codec, whose message
+   * names the range - the page shows it as-is rather than this adapter inventing a second wording.
+   */
+  private async emotion(value: number): Promise<void> {
+    await this.require().emotion(value);
+  }
+
+  /**
+   * A whisper to one player: `0x23` kind 0x06. The receiver sees a normal `chat` (`0x1A` 0x12 - the
+   * same packet chat uses, so the two are indistinguishable on the wire) and the sender gets
+   * `whisper-answer`. The text is CP949 on the wire, like every string a human reads.
+   */
+  private async whisper(name: string, text: string): Promise<void> {
+    const target = name.trim();
+    if (target === "") return this.send({ t: "error", message: "whisper needs a target name" });
+    if (text === "") return this.send({ t: "error", message: "whisper needs a message" });
+    await this.require().whisper(target, encodeCp949(text));
+  }
+
+  /** `/헉추적`: `0x23` kind 0x05, answered by `find-answer` (`0x1A` 0x09). */
+  private async find(name: string): Promise<void> {
+    const target = name.trim();
+    if (target === "") return this.send({ t: "error", message: "find needs a name" });
+    await this.require().find(target);
   }
 
   private eventJson(event: ClientEvent): unknown {

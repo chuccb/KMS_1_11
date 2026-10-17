@@ -40,17 +40,25 @@ import { readCharacterData, type CharacterData } from "../protocol/chardata.ts";
 import {
   FIELD_OPCODE,
   encodeClientChat,
+  encodeClientEmotion,
   encodeClientInteract,
   encodeClientUserMove,
+  encodeClientUserRequest,
   INTERACT_KIND_CURSOR,
   readSetField,
   readUserChat,
   readUserEffect,
   readUserEmotion,
   readUserEnterField,
+  readUserFindAnswer,
   readUserMove,
+  readUserWhisperAnswer,
   USER_MESSAGE_CHAT,
+  USER_MESSAGE_FIND_ANSWER,
+  USER_MESSAGE_WHISPER_ANSWER,
+  USER_REQUEST_KIND,
 } from "../protocol/field.ts";
+import { decodeCp949 } from "../protocol/cp949.ts";
 import {
   MOB_OPCODE,
   readMobEnterField,
@@ -130,6 +138,8 @@ export type ClientEvent =
   | { kind: "user-move"; characterId: number; x: number; y: number; action: number; foothold: number }
   | { kind: "user-emotion"; characterId: number; emotion: number }
   | { kind: "chat"; name: string; text: string }
+  | { kind: "whisper-answer"; name: string; delivered: boolean }
+  | { kind: "find-answer"; name: string; mapId: number }
   | { kind: "level-up"; characterId: number }
   | { kind: "mob-enter"; mob: MobView }
   | { kind: "mob-move"; mobId: number; x: number; y: number }
@@ -517,6 +527,55 @@ export class ClientSession {
   }
 
   /**
+   * Whispers to a player by name: `0x23` with kind `0x06` - the packet `/귓속말 <name> <text>` sends
+   * (`sub_4717D0`, FINDINGS 4.31).
+   *
+   * The text is bytes because the client's own encoding is CP949; the adapter pre-encodes, exactly
+   * as it does for `say`. `name` is the target as typed: the client never sends character ids here,
+   * and the server looks the session up by name.
+   *
+   * Nothing about the result comes back on this call: a delivered whisper produces `0x1A` sub-op
+   * `0x12` **at the receiver** (the same packet as chat, which is why the receiver cannot tell them
+   * apart) and sub-op `0x0A` at the sender - the `whisper-answer` event, whose name is the resolved
+   * character and whose flag says delivered or not found.
+   */
+  async whisper(name: string, text: Uint8Array): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("whisper() needs a session in a field");
+    if (name === "") throw new Error("whisper() needs a target name");
+    await link.send(encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name, text }));
+  }
+
+  /**
+   * `/헉추적 <name>`: where is that player. `0x23` kind `0x05`, answered by `0x1A` sub-op `0x09`
+   * (`find-answer`), whose `mapId` is `-1` when nobody by that name is online.
+   */
+  async find(name: string): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("find() needs a session in a field");
+    if (name === "") throw new Error("find() needs a name");
+    await link.send(encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name }));
+  }
+
+  /**
+   * Wears a face: `0x13` (`sub_511E20` case 10, FINDINGS 4.35). `0..8` are the client's own nine
+   * faces (`EMOTION_NAMES`); its F-keys send `1..7`.
+   *
+   * The 2003 client applies the face **before** it sends (`CUser::SetFace` runs one instruction
+   * earlier, `.text:00511FD8` vs `00511FDF`) and the server's `0x27` excludes the mover - so this
+   * emits `user-emotion` for the local character itself, the same way `moveTo` echoes its own step.
+   */
+  async emotion(value: number): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("emotion() needs a session in a field");
+    await link.send(encodeClientEmotion({ emotion: value }));
+    const self = this.self;
+    if (self !== undefined) {
+      this.emit({ kind: "user-emotion", characterId: self.characterId, emotion: value });
+    }
+  }
+
+  /**
    * Walks to `(x, y)`. One `CMovePath` element: the server trusts the first element's position
    * (`FieldInstance.reportMove`), and the browser view does not animate, so a one-leg path is the
    * honest minimum. `action` 0 = stand; the real client's stance table is client-side data.
@@ -642,13 +701,26 @@ export class ClientSession {
           return;
         }
         case FIELD_OPCODE.userMessage: {
+          // One opcode, four shapes, told apart by the first body byte (FINDINGS 4.31). Only three
+          // of them have a codec; 0x22 (the whisper refusal) has a known shape and no client input
+          // that produces it, so it stays `unknown` like any other packet this build does not read.
           const subOp = plain[1];
-          if (subOp !== USER_MESSAGE_CHAT) {
-            this.emit({ kind: "unknown", opcode, bytes: plain.length });
+          if (subOp === USER_MESSAGE_CHAT) {
+            const chat = readUserChat(new PacketReader(plain, 1));
+            this.emit({ kind: "chat", name: chat.name, text: decodeChatText(chat.text) });
             return;
           }
-          const chat = readUserChat(new PacketReader(plain, 1));
-          this.emit({ kind: "chat", name: chat.name, text: decodeChatText(chat.text) });
+          if (subOp === USER_MESSAGE_WHISPER_ANSWER) {
+            const answer = readUserWhisperAnswer(new PacketReader(plain, 1));
+            this.emit({ kind: "whisper-answer", name: answer.name, delivered: answer.delivered });
+            return;
+          }
+          if (subOp === USER_MESSAGE_FIND_ANSWER) {
+            const answer = readUserFindAnswer(new PacketReader(plain, 1));
+            this.emit({ kind: "find-answer", name: answer.name, mapId: answer.mapId });
+            return;
+          }
+          this.emit({ kind: "unknown", opcode, bytes: plain.length });
           return;
         }
         case STAT_OPCODE: {
@@ -738,9 +810,13 @@ export class ClientSession {
   }
 }
 
-/** `0x1A` chat text is raw CP949; our lines are ASCII and UTF-8 is a superset for the rest. */
+/**
+ * `0x1A` text is CP949 bytes, never UTF-8 (`protocol/cp949.ts`): the 2003 client hands the bytes to
+ * its own ANSI renderer. Decoding them as UTF-8 happens to work for ASCII - which is why the first
+ * version of this line did - and turns every Korean line into replacement characters.
+ */
 function decodeChatText(bytes: Uint8Array): string {
-  return new TextDecoder("utf-8").decode(bytes);
+  return decodeCp949(bytes);
 }
 
 /** The events the adapter forwards, as a stable list (the JSON protocol's `t` values). */
@@ -752,6 +828,8 @@ export const CLIENT_EVENT_KINDS = [
   "user-move",
   "user-emotion",
   "chat",
+  "whisper-answer",
+  "find-answer",
   "level-up",
   "mob-enter",
   "mob-move",
