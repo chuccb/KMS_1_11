@@ -14,4 +14,5 @@ test("browser canvas UI: title login, shop buy/sell, scroll, drag, inventory upd
   assert.match(result.stdout, /SKILL BOOK \/ NATIVE ROW \/ EMPTY BEGINNER REGRESSION SOURCES OK/);
   assert.match(result.stdout, /SHOP REGRESSIONS OK/);
   assert.match(result.stdout, /TITLE REGRESSIONS OK/);
+  assert.match(result.stdout, /RECOVERY \/ EXPLICIT TEST TOOL REGRESSION SOURCES OK/);
 });

@@ -77,7 +77,7 @@ usage:
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
         [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
         [--web-port <n>] [--handshake-body <hex>]
-        [--quiet]
+        [--test-tools off|all|<accounts>] [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
@@ -120,6 +120,10 @@ notes:
   absent --npc-walk means - walks nobody; "all" walks every NPC; anything else is a comma-separated
   list of Npc/<id>.img template ids. Which NPCs the 2003 server walked is not located, which is why
   the default is the quiet one. A bare --npc-walk means "all".
+
+  --test-tools explicitly enables the DEVELOPMENT-ONLY browser panel for all or an account list.
+  Default off; separate from --map-command. No native opcode is invented. Changes are explicit and
+  saved to the current character. Ability/skill checkpoints are memory-only and level-guarded.
 
   --map-command explicitly allows the original /헉맵 map-jump packet (c2s 0x0D). Default: off.
   Use all only in a private development world, or a comma-separated account allowlist (e.g. admin).
@@ -370,6 +374,12 @@ async function runServe(rest: string[]): Promise<number> {
       .map((s) => s.trim())
       .filter(Boolean),
   );
+  const testArg=args["test-tools"];
+  if(testArg!==undefined && (typeof testArg!=="string" || !testArg.trim())) {
+    process.stderr.write("--test-tools needs off, all, or a comma-separated account list\n");return 1;
+  }
+  const testPolicy=typeof testArg==="string"?testArg.trim():"off";
+  const testUsers=new Set(testPolicy.split(",").map(s=>s.trim()).filter(Boolean));
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
   const quiet = args.quiet === true;
   const seed = parseSeed(args.seed);
@@ -557,6 +567,7 @@ async function runServe(rest: string[]): Promise<number> {
       online,
       pingMs,
       mapId,
+      allowTestTools: username=>testPolicy!=="off"&&(testPolicy==="all"||testUsers.has(username)),
       allowMapCommand: (username) =>
         mapCommandPolicy !== "off" &&
         (mapCommandPolicy === "all" || mapCommandUsers.has(username)),
@@ -611,6 +622,7 @@ async function runServe(rest: string[]): Promise<number> {
         ...(mapCatalog !== undefined ? { mapCatalog } : {}),
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
         ...(skills !== undefined ? { skills } : {}),
+        ...(game ? {testTools:(username:string,id:number,request:unknown)=>game!.testTools(username,id,request)} : {}),
         ...(art !== undefined ? { art } : {}),
         ...(audio !== undefined ? { audio } : {}),
         ...(log ? { log } : {}),
@@ -637,6 +649,7 @@ async function runServe(rest: string[]): Promise<number> {
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
       `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
+      `  test tools: ${testPolicy} (--test-tools; development only, default off)\n` +
       `  map commands: ${mapCommandPolicy} (--map-command; default off)\n` +
       `  heartbeat: ${pingMs === 0 ? "off (--ping <ms>)" : `0x08 every ${pingMs} ms, drop after ${pingMs * 3} ms`}\n` +
       `  browser:   ${web === undefined ? "off (--web-port <n> with --game-port)" : `http://${web.host === "0.0.0.0" ? "127.0.0.1" : web.host}:${web.port}/`}\n`,

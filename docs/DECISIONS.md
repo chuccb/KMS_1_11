@@ -2082,3 +2082,27 @@ Tooltip是明示的簡化版，沒有像素驗收；server保存／回包順序�
 **交付狀態**：新增codec／catalog／SP／save／bridge／UI回歸來源，依使用者要求**全部未執行**，
 未跑check/typecheck/browser/VM/probe。提交[skip ci]，重啟同隔離存檔服務供使用者操作，不重seed。
 細節與證據表見 `SKILLS.md`；ADR-047「技能學習缺口」由本輪接線，不追溯改寫其當時的未測狀態。
+
+
+## ADR-049：原自然恢復被動與明示分離的體驗工具（2026-10-17）
+
+**原證據**：4707E0 info/recovery double（default1）；558CF0→558950 HP／MP各+30、HP站立位置條件、
+MP活人條件；4BE790依職業查1000002／4100001／4200001的time×1000；技能loader hp／mp／time在+4／+8／+68。
+55B870固定0x1400 flags與兩個s16（另一欄仍0），繩梯HP flag1、MP flag0。原WZ1000000.hp=3..50、
+2000000.mp=2..32、1000002.time=31..10，不能改用hs或成長x/y。
+
+**原功能決定**：browser pure clock，位置／動作沿用目前移動層；ClientSession發原0x1C、等0x0D更新，不另加server補血timer。
+用全域恢復skill metadata和已學map32，無節點不造數值；背景暫停／長幀上限是明示瀏覽器政策。
+尚無完整TotalStat／回血數字泡泡、原CShape2D，report仍沿原client算amount的信任政策，非完整server姿勢／速率驗算。
+
+**體驗工具決定**：使用者另要求方便測試，不能讓初心者／SP0只能看空窗。新增獨立--test-tools帳號政策，預設off，
+不沿用map權限、不造native GM opcode。畫布外面板標非原版、讀登入後owner／目前session，所有修改需confirmed。
+提供原有書職業、明示AP/SP、選擇清技能、heal／nonlethal drain、實際地圖搜尋／原warp入口及記憶體能力技能還原點。
+開面板／填preset不變更；先純plan、預encode後才提交／保存，busy及shop／talk／trade／pending shot拒絕。
+
+**保護**：不重seed現有體驗存檔，啟用前保留ignored冷備份；還原點只含job／base stats／AP SP／vitals／map32，
+不含EXP等級／道具金錢／位置；等級不同拒絕restore。不跨服務重啟，不隱瞞還原範圍。新預設20AP／40SP只是表單體驗值，
+不冒充原創角／轉職／自然發點；使用者按套用前不會生效。
+
+**狀態**：新增模型／codec接線／plan／授權／bridge／UI回歸來源，全部未執行；不跑check／typecheck／browser／VM／probe，
+只啟服務供使用者操作。提交[skip ci]，當前分支非force推送。完整來源與操作見 `RECOVERY_TEST_TOOLS.md`。

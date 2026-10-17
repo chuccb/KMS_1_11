@@ -103,6 +103,7 @@ const STUB_ART = {
 };
 globalThis.fetch = async (url) => {
   const path = String(url);
+  if (path === "/api/maps") return {ok:true,status:200,json:async()=>[STUB_MAP]};
   if (path.startsWith("/api/skills/")) return {ok:true,status:200,json:async()=>({job:0,books:[]})};
   let body = STUB_MAP;
   if (path === '/api/creation') {
@@ -142,9 +143,12 @@ Object.assign(globalThis, await import("../../client/scene.mjs"));
 Object.assign(globalThis, await import("../../client/statwindow.mjs"));
 Object.assign(globalThis, await import("../../client/skills.mjs"));
 Object.assign(globalThis, await import("../../client/jobs.mjs"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+Object.assign(globalThis, await import("../../client/recovery.mjs"));
+Object.assign(globalThis, await import("../../client/testtools.mjs"));
+Object.assign(globalThis, await import("../../client/basiccombat.mjs"));
+runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
-  skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
+  testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},
   runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt, itemTooltipLines,
   get scroll() { return { ...shopScroll }; },
@@ -664,3 +668,28 @@ assert.equal(elements.get("sp-up-0").hidden,true,"native beginners have no skill
 elements.get("skill-close").fire("click");
 assert.equal(clientProbe.skillPanel.open,false);
 console.log("SKILL BOOK / NATIVE ROW / EMPTY BEGINNER REGRESSION SOURCES OK");
+
+// Recovery model regression sources; do not treat this addition as an executed probe.
+const recoverInput={hp:20,maxHp:50,mp:0,maxMp:50,action:2,stationary:true};
+const recoverClock={hp:0,mp:0};
+for(let i=0;i<333;i++)assert.deepEqual(recoveryTick(recoverClock,recoverInput),[]);
+assert.deepEqual(recoveryTick(recoverClock,recoverInput),[{hpDelta:10,flag:0},{mpDelta:3,flag:0}]);
+assert.deepEqual(recoveryTick({hp:9990,mp:9990},{...recoverInput,action:0,stationary:false}),[{mpDelta:3,flag:0}]);
+assert.deepEqual(recoveryTick({hp:30990,mp:0},{...recoverInput,action:36,climbMs:31000,hpBonus:3}),[{hpDelta:13,flag:1}]);
+assert.deepEqual(recoveryTick({hp:9990,mp:9990},{...recoverInput,action:37}),[{mpDelta:3,flag:0}]);
+assert.deepEqual(recoveryTick({hp:9990,mp:9990},{...recoverInput,hp:0}),[]);
+assert.deepEqual(recoveryTick({hp:9990,mp:9990},{...recoverInput,hp:49,mp:49,rate:1.5,hpBonus:50,mpBonus:32}),[{hpDelta:1,flag:0},{mpDelta:1,flag:0}]);
+assert.deepEqual(recoveryTick({hp:9990,mp:9990},{...recoverInput,rate:0}),[]);
+assert.deepEqual(recoveryBonuses(100,new Map([[1000000,99],[1000002,1]]),new Map([[1000000,{maxLevel:16,levels:[{level:16,values:{hp:50}}]}],[1000002,{maxLevel:8,levels:[{level:1,values:{time:31}}]}]])),{hpBonus:50,mpBonus:0,climbMs:31000});
+// The operator panel must not mutate on open or on merely filling a preset.
+const beforeTools=sent.length;
+clientProbe.testToolsPanel.openPanel();
+assert.deepEqual(sent.at(-1),{t:"test-tools",action:{kind:"state"}});
+activeSocket.push({t:"test-tools",enabled:true,canMap:true,checkpoint:false,restoreAvailable:false,message:"source fixture",jobs:[{id:0,name:"초보자"},{id:100,name:"검사"}]});
+elements.get("qa-warrior").fire("click");
+assert.equal(sent.length,beforeTools+1);
+assert.equal(elements.get("qa-apply").disabled,true,"no mutation before explicit confirmation");
+elements.get("qa-confirm").checked=true;elements.get("qa-confirm").fire("change");
+assert.equal(elements.get("qa-apply").disabled,false);
+clientProbe.testToolsPanel.close();
+console.log("RECOVERY / EXPLICIT TEST TOOL REGRESSION SOURCES OK");

@@ -176,3 +176,11 @@ test("real archive map catalog is cached and includes actual map zero; tn names 
   assert.equal(destination.portals.filter(p=>p.type!==3)[index]!.name,"west00");
   assert.notEqual(index,spawnPortalIndex(destination,"sp"));
 });
+
+// Regression source only; new recovery work was not executed for this delivery.
+test("4707E0 recovery multiplier defaults to one, and zero is not replaced with a fabricated heal",()=>{
+  const base={info:{},life:[],portal:[],foothold:0,ladderRope:0};
+  assert.equal(mapDataFrom(base,1000000).recovery,1);
+  assert.equal(mapDataFrom({...base,info:{recovery:0}},1000000).recovery,0);
+  assert.equal(mapDataFrom({...base,info:{recovery:1.5}},1000000).recovery,1.5);
+});

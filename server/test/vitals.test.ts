@@ -30,7 +30,7 @@ test("a damage report lowers HP and diff carries only the field that moved", () 
 });
 
 test("the map's own regeneration reports both fields", () => {
-  // `sub_558950`: HP is item group `1000000` + 10, MP is `2000000` + 3, once per 10000 ms.
+  // `sub_558950`: base HP +10 / MP +3; learned 1000000.hp / 2000000.mp are skill bonuses, not items.
   const stats = record({ hp: 20, mp: 5 });
   assert.deepEqual(applyVitalReport(stats, { hpDelta: 10, mpDelta: 3 }), { hp: 30, mp: 8 });
 });

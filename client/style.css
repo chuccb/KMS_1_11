@@ -709,3 +709,22 @@ body {
 /* CUISkill owns its whole native rectangle, including blank space: no field/item click-through. */
 #skill-window { position: absolute; z-index: 5; pointer-events: auto; touch-action: none; }
 #skill-values { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* Deliberately OUTSIDE the original 800x600 game UI; development tools are not native artwork. */
+#test-tools-shell { position:fixed; inset:0; z-index:70; background:#0005; display:flex; justify-content:flex-end; }
+#test-tools-panel { box-sizing:border-box; width:min(440px,100vw); height:100dvh; overflow:auto; padding:18px; background:#17202d; color:#eef3fa; box-shadow:-8px 0 28px #0006; font:14px/1.5 system-ui,sans-serif; }
+#test-tools-panel h2 { margin:0; font-size:19px; }
+#test-tools-panel .qa-heading, #test-tools-panel .qa-buttons, #test-tools-panel .qa-numbers { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+#test-tools-panel .qa-heading { justify-content:space-between; }
+#test-tools-panel fieldset { border:1px solid #59687b; border-radius:6px; margin:14px 0; padding:12px; min-width:0; }
+#test-tools-panel label { display:block; margin:8px 0; }
+#test-tools-panel select, #test-tools-panel input:not([type=checkbox]) { box-sizing:border-box; max-width:100%; padding:6px; color:#f1f5fb; background:#263549; border:1px solid #7d90aa; border-radius:4px; }
+#test-tools-panel select { width:100%; }
+#test-tools-panel input[type=number] { width:100px; }
+#test-tools-panel button { padding:7px 10px; border:1px solid #8393a9; border-radius:4px; color:#f8fbff; background:#354b68; cursor:pointer; }
+#test-tools-panel button:disabled { opacity:.45; cursor:default; }
+#test-tools-panel .qa-warning { color:#ffcf8a; }
+#test-tools-status { min-height:2em; padding:8px; background:#0d1725; border-left:3px solid #7db8ff; }
+#test-tools-panel ol { padding-left:21px; }
+
+@media (max-width: 800px) { #bar { flex-wrap:wrap; gap:6px; } }

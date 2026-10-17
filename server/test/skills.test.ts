@@ -179,3 +179,14 @@ test("max/foreign book/unknown skill/death/no-SP refusal leaves character and it
   assert.equal(spendSkillPoint(capped, 1000000, catalog), undefined);
   assert.deepEqual(capped, old);
 });
+
+// Recovery passive evidence, distinct from growth x/y; source only, not executed this delivery.
+test("native regeneration WZ uses hp/mp/time, not description formulas or growth x/y",()=>{
+  const catalog=skillCatalogOf(archive());
+  assert.equal(catalog.info(1000000)?.levels[0]?.values.hp,3);
+  assert.equal(catalog.info(1000000)?.levels.at(-1)?.values.hp,50);
+  assert.equal(catalog.info(2000000)?.levels[0]?.values.mp,2);
+  assert.equal(catalog.info(2000000)?.levels.at(-1)?.values.mp,32);
+  assert.equal(catalog.info(1000002)?.levels[0]?.values.time,31);
+  assert.equal(catalog.info(1000002)?.levels.at(-1)?.values.time,10);
+});

@@ -1,3 +1,4 @@
+import type { TestToolResult } from "../game/testtools.ts";
 import { nativeSkillBooks } from "../../../client/jobs.mjs";
 import type { SkillCatalog } from "../game/skills.ts";
 import {
@@ -96,6 +97,7 @@ export interface WebClientOptions {
    */
   itemCatalog?: ItemCatalog;
   skills?: SkillCatalog;
+  testTools?(username:string, characterId:number, request:unknown): TestToolResult;
   /**
    * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
    * frames (`game/sprites.ts`). Without them the page still draws the geometry, in flat colours -
@@ -235,6 +237,7 @@ function mapJson(map: MapData): unknown {
     name: map.name,
     streetName: map.streetName,
     bgm: map.bgm,
+    recovery: map.recovery ?? 1,
     portals: map.portals.map((portal) => ({
       name: portal.name,
       type: portal.type,
@@ -453,6 +456,7 @@ class BrowserSession {
   private readonly options: WebClientOptions;
   private session: ClientSession | undefined;
   private unsubscribe: (() => void) | undefined;
+  private username: string | undefined;
 
   constructor(socket: WebSocket, options: WebClientOptions) {
     this.socket = socket;
@@ -545,6 +549,19 @@ class BrowserSession {
           return await this.require().warpTo(Number(message.mapId));
         case "portal":
           return await this.usePortal(String(message.name ?? ""));
+        case "test-tools": {
+          const session=this.require();
+          if(!session.self || !this.username) throw new Error("請先進入地圖。");
+          session.assertTestToolsReady();
+          const result=this.options.testTools?.(this.username,session.self.characterId,message.action)
+            ?? {enabled:false,message:"此服務未開啟體驗工具。",checkpoint:false,restoreAvailable:false,canMap:false,jobs:[]};
+          this.send({t:"test-tools",...result}); return;
+        }
+        case "recovery":
+          return await this.require().recover({
+            ...(message.hpDelta===undefined?{}:{hpDelta:Number(message.hpDelta)}),
+            ...(message.mpDelta===undefined?{}:{mpDelta:Number(message.mpDelta)}),flag:Number(message.flag),
+          });
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {
@@ -688,6 +705,7 @@ class BrowserSession {
   }
 
   private newSession(): ClientSession {
+    this.username=undefined;
     this.unsubscribe?.();
     this.session?.close();
     const session = new ClientSession({
@@ -710,6 +728,7 @@ class BrowserSession {
   private async login(user: string, password: string): Promise<void> {
     const session = this.newSession();
     const reply = await session.login(user, password);
+    this.username=reply.result===0?user:undefined;
     this.gender = reply.gender ?? 0;
     this.characterStage = false;
     this.lastCharacters = [];
@@ -1016,6 +1035,7 @@ class BrowserSession {
     this.unsubscribe?.();
     this.session?.close();
     this.session = undefined;
+    this.username=undefined;
   }
 }
 

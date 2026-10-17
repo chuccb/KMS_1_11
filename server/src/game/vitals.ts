@@ -15,7 +15,8 @@
  * reader) and by the self level-up routine `sub_4C71C0` (which nothing calls). So `sub_5114A0` can
  * only report the delta - `sub_55B870(-damage, 0, 0)`, the c2s `0x1C` - and the HP bar moves when
  * the server answers with the new value. The map's own regeneration (`sub_558950`) uses the same
- * report with positive deltas (HP +10, MP +3, once per 10000 ms).
+ * report with positive deltas: HP 10+1000000.hp and MP 3+2000000.mp, scaled by map recovery.
+ * The 30ms clock, HP stance/stationary gate and passive ladder interval are in client/recovery.mjs.
  *
  * WHAT THE SERVER DECIDES (ADR-021)
  * --------------------------------------------------------------------

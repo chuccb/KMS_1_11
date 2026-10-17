@@ -1,3 +1,4 @@
+import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
 import { SKILL_UPDATE_OPCODE, encodeSkillRequest, readSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { learnedSkills } from "../game/skills.ts";
 import { emptyCharacterItems } from "../protocol/chardata.ts";
@@ -1057,6 +1058,19 @@ export class ClientSession {
       this.abilityPending = false;
       throw error;
     }
+  }
+
+  /** Development mutations must not race a native stat/item request. */
+  assertTestToolsReady(): void {
+    if(!this.gameLink || !this.self) throw new Error("請先進入地圖。");
+    if(this.skillPending || this.abilityPending || this.slotPending || this.shopPending || this.mesoPending) throw new Error("請等待目前能力／技能／道具操作回覆。");
+  }
+
+  /** Original positive 0x1C reports from the native recovery clock; no optimistic local HP edits. */
+  async recover(report: ClientStatReport): Promise<void> {
+    if(!this.gameLink || !this.self || this.self.hp<=0) return;
+    if(![report.hpDelta??0,report.mpDelta??0].every(n=>Number.isInteger(n)&&n>=0&&n<=32767) || ![0,1].includes(report.flag)) throw new Error("Invalid recovery report");
+    await this.gameLink.send(encodeClientStatReport({hpDelta:report.hpDelta??0,mpDelta:report.mpDelta??0,flag:report.flag}));
   }
 
   async increaseSkill(skillId: number): Promise<void> {

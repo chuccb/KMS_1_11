@@ -4,6 +4,15 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
+## 最新實作：自然恢復與方便體驗的獨立工具（未測試）
+
+- 558950 的獨立30ms HP／MP計時、站立／繩梯條件、1000000.hp／2000000.mp／1000002.time、地圖recovery；
+  原0x1C固定0x1400 flags、另一delta補0，等0x0D回值才動數字。主動施放／其他被動／buff仍缺。
+- 上方「體驗工具（非原版）」／`/tools`：查原地圖、明示配置職業／AP／SP、補滿／半血半魔、能力／技能還原點。
+  在原畫布之外，不冒充原版UI；預設off，帳號獨立授權，只有確認後才修改／保存。
+- 沿用同一進度，不重seed；第一個變更前自動建記憶體還原點，不跨重啟／不回溯EXP道具金錢，升級保護。
+- **沒有執行任何測試／typecheck／browser／probe**；依使用者要求只啟服務。來源與步驟見 [RECOVERY_TEST_TOOLS.md](RECOVERY_TEST_TOOLS.md)。
+
 ## 最新實作：原技能窗與 SP 學習（未測試）
 
 - K／HUD Skill 開啟原 176×315 CUISkill，四行與 I–IV 真 WZ 書、前置／滿級三態、原圖示與 SP 按鈕。

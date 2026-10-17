@@ -50,7 +50,7 @@ Gate=0 才用 skill0／iconDisabled；max 的 -1 仍是 skill1／正常 icon，�
 ## 3. 端到端流程與保存
 
 1. CLI 的 `--data` 建立共用 `SkillCatalog`，注入 game server 和 web bridge。
-2. `/api/skills/<job>` 按原 ancestry 回真 WZ 書；`/api/png?path=Skill/...` 經既有路徑／canvas 保護輸出原素材。
+2. `/api/skills/<job>` 按原 ancestry 回真 WZ 書；`/api/png/<URL-encoded Skill/...>` 經既有路徑／canvas 保護輸出原素材。
    這個 API 是瀏覽器讀取 WZ 的橋接，**不是聲稱原遊戲有 HTTP 封包**。
 3. 進場完整 CharacterData 先送 field／inventory，再送已學 skills snapshot；不是拿 HTTP catalogue 當已學技能。
 4. `{t:"skill-up",skillId}` → ClientSession pending → 原 c2s 0x1D。
@@ -67,7 +67,7 @@ Gate=0 才用 skill0／iconDisabled；max 的 -1 仍是 skill1／正常 icon，�
 ## 4. 可用與尚未實作
 
 - **已接線**：真技能書／四列原窗、SP 單點學習、前置／max／book／生命檢查、拒絕 release、即時保存、進場已學 snapshot、成長被動使用同一紀錄。
-- **只有學習紀錄，不代表效果已完成**：除已接的 1000001／2000001 成長外，其餘被動效果、自然回血／回魔、武器熟練／容量等仍需逐條還原。
+- **只有學習紀錄，不代表效果已完成**：1000001／2000001 成長已接；後續 ADR-049 又接上1000000／2000000自然恢復與1000002繩梯間隔（未測試），見 `RECOVERY_TEST_TOOLS.md`。其餘被動、武器熟練／容量等仍需逐條還原。
 - **未接**：主動技能施放、拖到快捷鍵、自訂技能按鍵、技能 MP 消耗／動作／特效／傷害、持續 buff／解除／裝備 buff 合計。
   不把點 icon 當成普通攻擊去偽裝已支援技能，也不偽造 buff 圖示。
 - **未接**：轉職流程、轉職加成、自然 AP／SP 的發放數量。仍不填慣見的 5AP／3SP。
@@ -81,3 +81,5 @@ Gate=0 才用 skill0／iconDisabled；max 的 -1 仍是 skill1／正常 icon，�
 - `server/scripts/client_probe.mjs`／`test/client-ui.test.ts`：補新 module shim，新增 38px row／2px gap、三態 eligibility、原初心者空書與關窗回歸來源。
 
 **以上只新增／維護來源，本輪一項也沒有執行；歷史 PASS 不能沿用到本輪。**
+
+後續方便體驗：`RECOVERY_TEST_TOOLS.md`／ADR-049增加明示非原版的帳號授權面板；可由使用者明確套用職業／SP，不再只能停在原初心者空窗。仍不自動更動角色，也沒有實作原轉職或自然發點。

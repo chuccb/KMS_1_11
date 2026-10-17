@@ -4408,3 +4408,19 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
   原codec之外，server權威交易／保存／SP stat回包順序是重建政策，非已擷取原伺服器序列。
 - 本輪未執行任何test／typecheck／browser／VM／probe。主動施放、其他被動／buff、自然AP/SP及轉職未接；
   tooltip是簡化版。詳見`docs/SKILLS.md`／ADR-048，不把學習紀錄當成所有技能效果完成。
+
+
+## 補充：自然恢復與原report的固定欄位（2026-10-17；實作未測試）
+
+- 4707E0讀info/recovery成double，field+144、缺省1；558950同一倍率用於HP及MP，向零截斷後夾剩餘量。
+- HP／MP計數各+30；站立action2／3且位置相同才累HP，其他狀態歸零；MP只需活人且未滿，移動也累計。
+- HP1000000.hp（level struct+4）+10；MP2000000.mp（+8）+3，不是物品或成長x/y。
+- 36／37是ladder／rope action，**不是場地type**。4BE790按job查1000002／4100001／4200001，讀time（+68）×1000；
+  無技能／非正interval不能爬繩回血。真1000002第一級31秒、末級10秒；不補不存在的410／420書內容。
+- 55B870固定寫flags5120=0x1400，然後兩個s16 HP／MP、u8 flag；HP／MP分開呼叫時另一delta仍0。
+  繩梯HP flag1、MP flag0。ClientSession.recover明確補0，避免只寫單flag而偏離原sender。
+- 恢復clock在browser client、同一0x1C→0x0D回值，沒有第二個server無條件補血timer。
+  瀏覽器長幀／背景策略、未完整TotalStat／CVecCtrl，以及原report信任界線見RECOVERY_TEST_TOOLS.md。
+- 本輪另加明示非原版的--test-tools面板；它不是新找到的GM封包／轉職規則，不加入native opcode catalogue。
+  帳號owner驗證、confirm、記憶體還原點與升級保護是開發工具政策，不是原client證據。
+- 沒有執行任何測試／typecheck／browser／probe；回歸來源未執行，啟服務不代表PASS。見ADR-049。

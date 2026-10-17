@@ -234,6 +234,7 @@ interface WorldOptions {
   mapCommands?: boolean;
   ability?: boolean;
   skills?: boolean;
+  testTools?: boolean;
   /** Gives NPC 2003 a shop - the click path that opens `0x4A`. */
   shop?: boolean;
   /** Gives NPC 2003 two lines of `info/speak` instead - the click path that opens `0x47`. */
@@ -294,6 +295,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
   const store = new MemorySaveStore();
   const game = new GameEntryServer({
     persist:()=>store.save(accounts),
+    ...(options.testTools ? {allowTestTools:(username:string)=>username==="admin"} : {}),
     ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
     handoffs,
     online,
@@ -346,6 +348,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     mapProvider,
     mapCatalog:()=>[STUB_MAP,TOWN_MAP].map(({id,name,streetName})=>({id,name,streetName})),
     itemCatalog: STUB_CATALOG,
+    ...(options.testTools ? {testTools:(username:string,id:number,request:unknown)=>game.testTools(username,id,request)} : {}),
     ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
     ...(ART_ARCHIVE !== null ? { art: artProviderOf(ART_ARCHIVE), audio: audioProviderOf(ART_ARCHIVE) } : {}),
   });
@@ -1121,4 +1124,39 @@ test("ClientSession SP pending blocks duplicate learning and AP; skill diff upda
   assert.deepEqual(session.character!.items!.map32,[{key:1000000,value:1}]);
   assert.equal(session.character!.flags & 0x20,0x20);
   await assert.rejects(session.increaseSkill(1000000),/too soon/);
+});
+
+/** Regression sources only: this delivery deliberately does not execute them. */
+test("operator tools: authenticated self only, explicit confirmation, native stat/skill refresh and bounded restore", {timeout:20000,skip:!ART_ARCHIVE}, async t=>{
+  const world=await startWorld(t,{skills:true,testTools:true});
+  const {browser}=await enterGame(world.webPort,"admin","admin");t.after(()=>browser.close());
+  browser.send({t:"test-tools",action:{kind:"state"}});
+  assert.equal((await browser.nextKind("test-tools")).enabled,true);
+  browser.send({t:"test-tools",action:{kind:"configure",job:200,ap:20,sp:40,resetSkills:true}});await browser.nextKind("error");
+  assert.equal(world.accounts.get("admin")!.characters[0]!.stats.job,100);
+  browser.send({t:"test-tools",action:{kind:"configure",confirmed:true,job:200,ap:20,sp:40,resetSkills:true}});
+  assert.equal((await browser.nextKind("test-tools")).checkpoint,true);
+  const changed=(await browser.nextKind("self")).self as {job:number;sp:number};assert.deepEqual([changed.job,changed.sp],[200,40]);
+  browser.send({t:"test-tools",action:{kind:"restore",confirmed:true}});assert.equal((await browser.nextKind("test-tools")).restoreAvailable,true);
+  const restored=(await browser.nextKind("self")).self as {job:number;sp:number};assert.deepEqual([restored.job,restored.sp],[100,10]);
+  const {browser:alt}=await enterGame(world.webPort,"alt","alt");t.after(()=>alt.close());
+  alt.send({t:"test-tools",username:"admin",characterId:21,action:{kind:"state"}});assert.equal((await alt.nextKind("test-tools")).enabled,false);
+  alt.send({t:"test-tools",username:"admin",characterId:21,action:{kind:"heal",confirmed:true}});await alt.nextKind("error");
+});
+
+test("development tools are default-off even when map commands are enabled", {timeout:20000}, async t=>{
+  const world=await startWorld(t,{mapCommands:true}),{browser}=await enterGame(world.webPort,"admin","admin");t.after(()=>browser.close());
+  browser.send({t:"test-tools",action:{kind:"state"}});assert.equal((await browser.nextKind("test-tools")).enabled,false);
+  browser.send({t:"test-tools",action:{kind:"configure",confirmed:true,job:100,ap:100,sp:100,resetSkills:true}});
+  assert.equal((await browser.nextKind("test-tools")).enabled,false);
+  assert.equal(world.accounts.get("admin")!.characters[0]!.stats.job,0);
+});
+
+
+test("recovery reports traverse ClientSession native 0x1C and return the server vital snapshot", {timeout:20000},async t=>{
+  const world=await startWorld(t,{damaged:true}),{browser}=await enterGame(world.webPort,"admin","admin");t.after(()=>browser.close());
+  browser.send({t:"recovery",hpDelta:13,flag:1});
+  assert.equal(((await browser.nextKind("self")).self as {hp:number}).hp,33);
+  browser.send({t:"recovery",hpDelta:-10,flag:0});await browser.nextKind("error");
+  assert.equal(world.accounts.get("admin")!.characters[0]!.stats.hp,33);
 });

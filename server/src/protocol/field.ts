@@ -1138,8 +1138,8 @@ export interface ClientStatReport {
   mpDelta?: number;
   /**
    * The trailing byte, which the client writes unconditionally. Its role is not located: the damage
-   * path sends 0 and the regeneration path sends 1 when the field type is 36/37 and the recovery is
-   * item-driven (`sub_558950`, `sub_4BE790`). The server keeps it so the field is not lost.
+   * path sends 0 and the HP regeneration path sends 1 for ladder/rope ACTION 36/37 and the recovery is
+   * passive-enabled (`sub_558950`, `sub_4BE790`). The server keeps it so the field is not lost.
    */
   flag: number;
 }

@@ -71,6 +71,8 @@ export interface MapData {
   name: string;
   streetName: string;
   bgm: string;
+  /** sub_4707E0 info/recovery double, default 1; scales natural HP AND MP recovery. */
+  recovery?: number;
   returnMapId: number;
   mobs: LifeSpawn[];
   npcs: LifeSpawn[];
@@ -171,6 +173,7 @@ export function mapDataFrom(summary: MapSummary, id: number): MapData {
     name: asText(summary.info.mapName),
     streetName: asText(summary.info.streetName),
     bgm: asText(summary.info.bgm),
+    recovery: Number.isFinite(summary.info.recovery) ? asNumber(summary.info.recovery,1) : 1,
     returnMapId: asNumber(summary.info.returnMap),
     mobs,
     npcs,

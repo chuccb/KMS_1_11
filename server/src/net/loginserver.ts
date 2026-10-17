@@ -1,3 +1,5 @@
+import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
+import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
 import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
 import { spendBasicAmmo, type BasicAttackProvider } from "../game/basicattack.ts";
@@ -867,6 +869,8 @@ export const ATTACK_OPCODES: readonly number[] = [
 export interface GameEntryServerOptions {
   /** Explicit operator policy for the original /헉맵 request. Absent denies all accounts. */
   allowMapCommand?(username: string): boolean;
+  /** Development-only, separate opt-in policy. Never inferred from map-command rights. */
+  allowTestTools?(username: string): boolean;
   handoffs: HandoffRegistry;
   handshake?: {
     clientSendSeed?: number;
@@ -1026,6 +1030,7 @@ export class GameEntryServer {
   private readonly fields: FieldRegistry<FieldSession>;
   /** One character, one session: the second connection for an id is refused (see `onConnection`). */
   private readonly sessionsByCharacter = new Map<number, FieldSession>();
+  private readonly testCheckpoints = new Map<string, TestCheckpoint>();
   /** Reconstructed server scheduling: native release + distance * 1.5ms, no saved ground state. */
   private pendingShots: {
     session: FieldSession;
@@ -1140,6 +1145,7 @@ export class GameEntryServer {
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
     this.sessionsByCharacter.clear();
+    this.testCheckpoints.clear();
     this.pendingShots = [];
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
@@ -1197,6 +1203,38 @@ export class GameEntryServer {
       instance.tick(now);
       for (const session of instance.memberList) this.pickUp(session);
     }
+  }
+
+  /** Out-of-band, authenticated development API; deliberately NOT a made-up native opcode. */
+  testTools(username: string, characterId: number, request: unknown): TestToolResult {
+    const session=this.sessionsByCharacter.get(characterId);
+    if(!session || session.username!==username) throw new Error("體驗工具只允許操作目前帳號已進場的角色。");
+    const kind=testToolKind(request), key=JSON.stringify([username,characterId]);
+    const enabled=this.options.allowTestTools?.(username)===true;
+    if(!enabled && kind!=="state") throw new Error("此帳號未獲 --test-tools 授權。");
+    const available=(id:number)=>id===0 || this.options.skills?.book(id)!==undefined;
+    let message=enabled?"體驗工具已授權；第一次變更前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
+    if(enabled && kind!=="state") {
+      if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
+      const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available);
+      const statPacket=encodeStatUpdate({ack:false,diff:plan.diff});
+      const skillPacket=encodeSkillUpdate({ack:false,changes:plan.changes});
+      const wasDead=session.character.stats.hp<=0;
+      Object.assign(session.character.stats,plan.diff);
+      if(plan.skills) {
+        const items=session.character.items??emptyCharacterItems();items.map32=plan.skills;
+        session.character.items=items;session.character.flags|=0x20;
+      }
+      this.testCheckpoints.set(key,plan.checkpoint);
+      if(wasDead && session.character.stats.hp>0) this.enterMap(session,session.instance.mapId);
+      else {session.send(statPacket);session.send(skillPacket);}
+      this.persist(); message=plan.message;
+      this.options.log?.(`test-tools: ${username} character ${characterId} ${kind} (explicit development action)`);
+    }
+    const checkpoint=enabled?this.testCheckpoints.get(key):undefined;
+    return {enabled,message,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
+      canMap:enabled&&this.options.allowMapCommand?.(username)===true,
+      jobs:enabled?[...NATIVE_JOB_NAMES].filter(([id])=>available(id)).map(([id,name])=>({id,name})):[]};
   }
 
   /** The map this server puts claimers into (`0x16`). */

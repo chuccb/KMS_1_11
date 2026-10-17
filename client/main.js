@@ -1,3 +1,5 @@
+import { naturalRecovery } from "./recovery.mjs";
+import { testTools } from "./testtools.mjs";
 import { skillWindow } from "./skills.mjs";
 import { NATIVE_JOB_NAMES } from "./jobs.mjs";
 import {
@@ -367,6 +369,8 @@ function connect() {
 
 /** @param {any} message */
 function handle(message) {
+  recovery.receive(message);
+  if (testToolsPanel.receive(message)) return;
   if (creationDialogs.receive(message)) return;
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
@@ -2561,6 +2565,7 @@ function frame() {
     const blocked =
       portalPending ||
       itemDialog.open ||
+      testToolsPanel.open ||
       selfView?.hp <= 0 ||
       shop !== undefined ||
       talkingNpc !== undefined ||
@@ -2600,6 +2605,7 @@ function frame() {
       if (portal) requestPortal(portal, now);
     }
   }
+  if (!portalPending) recovery.step(elapsed);
   for (const mob of mobs.values()) {
     const active = sampleMotion(mob, now, terrain);
     const motion = mob.motion;
@@ -4804,7 +4810,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
     return;
   }
-  if (itemDialog.open) return;
+  if (itemDialog.open || testToolsPanel.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     document.activeElement instanceof HTMLInputElement &&
@@ -4926,6 +4932,7 @@ setInterval(() => {
   send(packet);
 }, MOVE_TICK_MS);
 window.addEventListener("blur", () => {
+  recovery.reset();
   keys.clear();
   lastPhysicsAt = undefined;
 });
@@ -4943,6 +4950,11 @@ window.addEventListener("blur", () => {
  * @returns {boolean} true when the line was a command and must not be sent as chat
  */
 function runCommand(text, local) {
+  if (/^\/(tools|test)$/i.test(text)) {
+    if (loginStage === "game") testToolsPanel.openPanel();
+    else local("系統", "請先進入地圖；體驗工具只對伺服器明確授權帳號開放。");
+    return true;
+  }
   const warp = /^\/(map|warp|go|헉맵)(?:\s+(.*))?$/i.exec(text);
   if (warp) {
     const id = /^\d+$/.test(warp[2] ?? "") ? Number(warp[2]) : NaN;
@@ -4997,7 +5009,7 @@ function runCommand(text, local) {
   if (/^\/help$/i.test(text)) {
     local(
       "系統",
-      "/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息、/f 名字。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
+      "/tools 開啟體驗工具（非原版、需授權）、/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息、/f 名字。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
     );
     return true;
   }
@@ -5079,7 +5091,7 @@ const statPanel = statWindow({
 const skillPanel = skillWindow({
   ctx, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
-  log: logLine, isModal: () => itemDialog.open,
+  log: logLine, isModal: () => itemDialog.open || testToolsPanel.open,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5113,6 +5125,17 @@ const equipPanel = equipmentWindow({
     if (p) pointerAt = p;
   },
 });
+
+const recovery = naturalRecovery({
+  getSelf:()=>selfView, getBody:()=>playerBody, getMap:()=>map,
+  getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
+  isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
+});
+const testToolsPanel = testTools({
+  send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
+  onOpen(){itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
+});
+document.addEventListener?.("visibilitychange",()=>recovery.reset());
 
 const itemDialog = itemDialogs({
   ctx,
