@@ -82,6 +82,14 @@ function connect() {
     ui.status.classList.remove("bad");
     send({ t: "login", user: ui.user.value, password: ui.pass.value });
   });
+  socket.addEventListener("error", () => {
+    // The usual cause is a proxy that does not forward the upgrade (an https page whose proxy
+    // refuses `wss`). Saying so beats a page that silently does nothing.
+    ui.status.textContent =
+      "WebSocket 連線失敗：這個網址的代理可能不轉發 upgrade。請在本機開 http://127.0.0.1:8500/。";
+    ui.status.classList.add("bad");
+    logLine("websocket error");
+  });
   socket.addEventListener("close", () => {
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
@@ -273,12 +281,13 @@ async function loadMap(mapId) {
     if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
     map = await response.json();
     if (self && selfView) {
-      // Start the camera on the character's own entrance point: the first 0x1C this client receives
-      // for itself is not sent to the mover, so the spawn is the first foothold until it moves.
-      const spawn = map.footholds[0];
+      // Where the server put this character: `0x16` carries no position, and the 2003 client spawns
+      // on the map's `sp` portal (the same portal `FieldInstance` uses). The first foothold is only a
+      // fallback for a map without one.
+      const spawn = map.portals.find((portal) => portal.name === "sp") ?? map.footholds[0];
       if (spawn) {
-        self.x = spawn.x1;
-        self.y = spawn.y1;
+        self.x = "x" in spawn ? spawn.x : spawn.x1;
+        self.y = "y" in spawn ? spawn.y : spawn.y1;
       }
     }
     logLine(`map ${mapId}: ${map.name || "(no name)"}, ${map.footholds.length} foothold(s)`);
