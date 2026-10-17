@@ -1,0 +1,707 @@
+/* Original Windows fonts remain first choice. This OFL fallback prevents missing Korean glyphs
+ * on Linux/macOS; it is not claimed to reproduce Dotum's bitmap metrics. */
+@font-face {
+  font-family: "KMSCJK";
+  src: url("./fonts/kms-cjk.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --ink: #f4efe4;
+  --muted: #a99f8c;
+  --gold: #e8c26a;
+  --panel: rgba(20, 16, 12, 0.92);
+  --edge: rgba(232, 194, 106, 0.35);
+  --hp: #d95f5f;
+  --mp: #5a8fd9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0a09;
+  color: var(--ink);
+  font-family: "Segoe UI", "Noto Sans TC", "KMSCJK", system-ui, sans-serif;
+}
+
+/*
+ * The game view is the 2003 client's 800x600 surface, scaled up by CSS and letterboxed inside the
+ * window. display.mjs aligns to the device-pixel grid (including OS/browser zoom).
+ * Default pixel mode avoids non-uniform 1.25x/1.5625x source pixel widths; explicit fit is optional.
+ */
+#view {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: block;
+  image-rendering: pixelated;
+  touch-action: none;
+  background: #000;
+}
+
+#bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: linear-gradient(rgba(0, 0, 0, 0.65), transparent);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+#bar strong {
+  color: var(--gold);
+}
+
+#where {
+  color: var(--muted);
+}
+
+#bar button {
+  margin-left: auto;
+  pointer-events: auto;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100vw - 32px));
+  padding: 26px 28px 22px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+
+.panel h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+}
+
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 0.08em;
+}
+
+.panel .sub {
+  margin: 0 0 20px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.panel label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: left;
+}
+
+.panel input {
+  flex: 1;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font-size: 14px;
+  outline: none;
+}
+
+.panel input:focus {
+  border-color: var(--gold);
+}
+
+.panel button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--gold);
+  background: linear-gradient(#4a3a1d, #2a2110);
+  color: var(--gold);
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+
+.panel button:hover {
+  filter: brightness(1.15);
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choices button {
+  text-align: left;
+  letter-spacing: 0.02em;
+  font-size: 14px;
+}
+
+.choices button small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.status {
+  min-height: 18px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.status.bad {
+  color: #f08a8a;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/*
+ * The game's UI is drawn on the 800x600 canvas, so the one part that has to be a real element - the
+ * chat input - lives in a layer placed and scaled exactly like the canvas (`main.js` `resize`). A
+ * child at (243, 573) therefore lands on the chat bar that `UI/StatusBar.img/base/1` draws.
+ */
+#game-ui {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 800px;
+  height: 600px;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+#game-ui > * {
+  pointer-events: auto;
+}
+
+#chatbox {
+  position: absolute;
+  left: 243px;
+  top: 573px;
+  width: 446px;
+  height: 27px;
+  font-size: 12px;
+}
+
+#chat-lines {
+  position: absolute;
+  left: 0;
+  bottom: 31px;
+  width: 446px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 150px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  text-shadow: 0 1px 3px #000;
+}
+
+#chat-lines li {
+  padding: 1px 0;
+  color: #e8e2d4;
+}
+
+#chat-lines li .who {
+  color: var(--gold);
+}
+
+#chat-lines li .who.system {
+  color: #93a4bd;
+}
+
+#chat-lines li .who.whisper {
+  color: #9fd8ff;
+}
+
+/*
+ * The seven faces are a browser stand-in for the 2003 client's F1..F7, which a browser cannot take.
+ * They stay out of the picture unless the chat line is hovered or focused.
+ */
+#emotes {
+  position: absolute;
+  left: 0;
+  bottom: 186px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+#chatbox:hover #emotes,
+#chatbox:focus-within #emotes {
+  opacity: 0.85;
+}
+
+#emotes button {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+#emotes button:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+/* The white field `base/1` already draws: the input itself is only its dark text. */
+#say {
+  position: absolute;
+  left: 98px;
+  top: 4px;
+  width: 340px;
+  height: 19px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #1b2a44;
+  font-size: 12px;
+  opacity: 1;
+}
+
+#say:focus {
+  outline: none;
+}
+
+#say::placeholder {
+  color: rgba(27, 42, 68, 0.45);
+}
+
+#dialogue {
+  position: fixed;
+  left: 50%;
+  bottom: 130px;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 40px));
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(12, 15, 21, 0.96);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+#dialogue-text {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #efe9db;
+  white-space: pre-wrap;
+}
+
+.dialogue-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialogue-buttons button {
+  padding: 5px 14px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dialogue-buttons button:first-child {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+#log {
+  position: fixed;
+  top: 42px;
+  right: 12px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: 45vh;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+#log h3 {
+  margin: 0 0 6px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#log-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+
+#log-lines li {
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The character-select row: the archive's own standing frame, doubled, next to the record. */
+#character-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+#character-list .character-picture {
+  width: auto;
+  height: 92px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+#character-list .character-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#character-list .character-text small {
+  opacity: 0.75;
+}
+
+/* Title's metal panels and buttons are painted from WZ by drawTitleScreen. Only native input,
+   focus and click targets overlay them, using the same 800x600 coordinates as the canvas. */
+#game-ui > #title-ui {
+  pointer-events: none;
+}
+#title-menu {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.sprite-hit {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.sprite-hit:focus-visible {
+  opacity: 1;
+  outline: 1px dotted #000;
+  outline-offset: -2px;
+}
+.sprite-hit:disabled {
+  cursor: default;
+}
+#title-menu button {
+  left: 356px;
+  width: 88px;
+  height: 24px;
+}
+#title-new {
+  top: 394px;
+}
+#title-continue {
+  top: 423px;
+}
+#title-homepage {
+  top: 452px;
+}
+#title-quit {
+  top: 481px;
+}
+#connect {
+  position: absolute;
+  left: 247px;
+  top: 215px;
+  width: 306px;
+  height: 169px;
+  pointer-events: auto;
+}
+#connect input:not([type="checkbox"]) {
+  position: absolute;
+  left: 85px;
+  width: 176px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font:
+    12px "Dotum",
+    "돋움",
+    "KMSCJK",
+    sans-serif;
+}
+#user {
+  top: 37px;
+}
+#pass {
+  top: 63px;
+}
+#remember-user {
+  appearance: none;
+  left: 84px;
+  top: 84px;
+  width: 110px;
+  height: 14px;
+}
+#login-lost {
+  left: 40px;
+  top: 116px;
+  width: 65px;
+  height: 35px;
+}
+#login {
+  left: 126px;
+  top: 127px;
+  width: 65px;
+  height: 24px;
+}
+#login-cancel {
+  left: 198px;
+  top: 127px;
+  width: 65px;
+  height: 24px;
+}
+#connect .status {
+  position: absolute;
+  top: 171px;
+  left: 0;
+  width: 306px;
+  margin: 0;
+  padding: 4px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.85);
+  font: 12px sans-serif;
+}
+#connect .status:empty {
+  display: none;
+}
+#title-notice {
+  position: absolute;
+  left: 200px;
+  top: 530px;
+  width: 400px;
+  margin: 0;
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  text-align: center;
+  font: 12px sans-serif;
+}
+#title-notice:empty {
+  display: none;
+}
+
+/* Login selections: no HTML cards/panels over the native artwork. */
+#game-ui > .selection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.selection-overlay #world-list,
+.selection-overlay #character-list {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.selection-overlay .sprite-hit {
+  pointer-events: auto;
+}
+#character-status {
+  position: absolute;
+  left: 161px;
+  top: 492px;
+  width: 490px;
+  margin: 0;
+  color: #fff;
+  text-align: center;
+  font-size: 12px;
+}
+#character-status:empty {
+  display: none;
+}
+
+#character-dialogs {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: auto;
+}
+#new-character {
+  position: absolute;
+  left: 270px;
+  top: 88px;
+  width: 260px;
+  height: 424px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+#new-name {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font:
+    12px "Dotum",
+    "돋움",
+    "KMSCJK",
+    sans-serif;
+  pointer-events: auto;
+}
+#character-confirm,
+#creation-options {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#creation-options {
+  z-index: 2;
+}
+#character-dialogs button {
+  pointer-events: auto;
+}
+
+/* CUIStat: native WZ pixels on canvas, DOM only for input and accessible values. */
+#stat-window {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+}
+#stat-window button {
+  pointer-events: auto;
+}
+#stat-body {
+  cursor: default;
+}
+#stat-values {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+#view-scale {
+  pointer-events: auto;
+  max-width: 175px;
+  padding: 3px 6px;
+  background: #151515;
+  color: #eee;
+  border: 1px solid #666;
+  font-size: 12px;
+}
+#minimap-window {
+  position: absolute;
+  z-index: 1;
+  cursor: move;
+  touch-action: none;
+}
+
+#equip-window {
+  position: absolute;
+  z-index: 2;
+  cursor: default;
+  touch-action: none;
+}
+
+/* CUtilDlgEx modal: WZ canvas skin; real input and transparent accessible hit targets. */
+#item-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: auto;
+}
+#item-dialog button {
+  pointer-events: auto;
+}
+#item-quantity {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font:
+    12px "Dotum",
+    "돋움",
+    "KMSCJK",
+    sans-serif;
+  pointer-events: auto;
+}
+.accessible-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  margin: 0;
+}

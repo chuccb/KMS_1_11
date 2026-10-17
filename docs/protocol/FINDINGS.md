@@ -1,0 +1,4347 @@
+# 協定調查筆記（KMS 1.11, 2003）
+
+> 規則：**每條都要有證據位址**。未證實者標 `HYPOTHESIS`，不得當規格使用。
+> 證據優先序：原始 binary > IDA LST > Hex-Rays C > 實機擷取 > 外部資料。
+
+**狀態（2026-10-16 更新）**：協定主幹（傳輸 → 框架 → 加密 → 分派）已全數定位，**登入鏈
+（login → world → char → game）已解到欄位層**，`CharacterData`（含**能力值 69 bytes ＋ 道具區塊
+＋ `GW_ItemSlot`**）與 `CWvsApp` 層級的 `0x0B–0x13` 也已解出，實作於
+`server/src/protocol/{frame,cipher,session,packet,login,chardata,itemslot,replies}.ts`，並由
+`node --test` 覆蓋（含 `test/loginflow.test.ts` 的完整鏈重播、`test/itemslot.test.ts` 的逐 byte 佈局）。
+**遊戲內第一條垂直切片也已解到欄位層**（§4.11：進地圖 `0x16`、別人進場 `0x1C`、離場 `0x1D`、
+移動 `0x22`／`0x0E`、傳送門請求 `0x0D`），實作於 `server/src/protocol/{field,movepath}.ts`；
+怪物／NPC／掉落物的分派也已拆到函式層（§4.12，欄位仍待讀）。
+**社交面也開始有實作了**：場地聊天（§4.26）之外，**密語與找人**（`0x23` → `0x1A` 的 `0x09`／`0x0A`
+＋收件者看到的 `0x12`）在 **§4.31**，兩者都是「場地的」封包（第一條跨地圖送達的路徑）。
+剩下的未知：211-byte 握手的 199 bytes `body`、CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／
+CRewardPool／對話框／messenger／miniroom）欄位（§6）。
+
+---
+
+## 1. 傳輸層 ✅
+
+| 項目 | 內容 | 證據 |
+|---|---|---|
+| 傳輸 | Winsock TCP（`WS2_32`、`recv`/`send`）| `MapleStory.exe` import table；`sub_43A410`、`sub_43A9B0`、`sub_43ADB0` |
+| 事件模型 | `WSAAsyncSelect`，事件以 **自訂視窗訊息 1025（`WM_USER+1`）** 投遞到 WndProc | `sub_5576B0`（WndProc 分派；`1025` case）|
+| 事件對應 | `FD_READ(1)`→`sub_43A9B0`；`FD_WRITE(2)`→`sub_43ADB0`；`FD_CONNECT(16)`→`sub_43A410`；`FD_CLOSE(32)`→`sub_43ACC0` | `sub_5576B0` |
+| 非阻塞 | `recv` 回 −1 且 `WSAGetLastError() == 10035`（WSAEWOULDBLOCK）時 `Sleep(100ms)`，最多重試 100 次 | `sub_43A410`（`n100 = 100`）|
+| 接收緩衝 | 每次接收緩衝 **1460** bytes（= MTU）| `sub_43C3F0(..., 1460, ...)` 於 `sub_43A410` |
+| 收包模型 | 收到後包成 `ZSocketBuffer` 並串進 socket 的 buffer 鏈 | `sub_43A9B0`、`sub_43B6B0`（⚠️ 後者實為 `ZRef<T>::operator=`，非消費端）|
+| 送包模型 | 送出佇列（`ZSocketBuffer` 鏈），部分送出時把剩餘 bytes 重新排隊 | `sub_43ADB0` |
+| 類別 | `CClientSocket`（vftable `0x5860A8`）、`ZSocket`、`ZSocketThread`、`ZSocketBuffer`、`INetMsgHandler`、`IUIMsgHandler` | RTTI（`analysis/rtti_raw.txt`、`analysis/rtti_classes.txt`）|
+
+## 2. 封包框架（framing）✅
+
+**已證實**：**4 bytes 標頭（明文）+ 加密本文**，總長 = `bodyLen + 4`。
+
+```c
+// sub_4A1940（組包器）
+packet = alloc();                       // 物件欄位：bytes @+8、len @+12、header @+14、bodyLen @+16、cursor @+20
+if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
+```
+
+- `u16 @ 0`：`magic ^ HIWORD(cipherState)`——**每個封包都不同**，同時作為狀態同步自檢（§3、§3.1）。
+- `u16 @ 2`：本文長度；本文 = 接下來的 `bodyLen` bytes，**加密**。
+- 上限：單包不超過 **1456 bytes** 本文；超過時 `sub_4A2030` 會切成 **1460 bytes 的 socket chunk** 送出，
+  **只有第一塊帶標頭**（`sub_4A2030` 內 `v11 > 1456` 分支）。
+- 明文特例：**連線後第一個封包是 211 bytes 的握手**，其本文不加密（金鑰就藏在裡面）。
+
+**已證實的 211-byte 握手**（`sub_43A410`，於 `FD_CONNECT` 後執行）：
+
+```
+u16 totalLen                     // == 211（= 0xD3），否則：
+    > 211 → CxxThrowException(_TI3_AVCPatchException__)      // 需要更新（PATCH）
+    < 211 → CxxThrowException(_TI3_AVCTerminateException__)  // 終止
+u16 bodyLen                      // == 199
+u8[bodyLen] body                 // 199 bytes
+u32 clientSendSeed               // @ 4 + bodyLen = 203  → CClientSocket+120（送 state）
+u32 clientRecvSeed               // @ 8 + bodyLen = 207  → CClientSocket+124（收 state）
+```
+
+> 解讀：這是**登入/版本檢查握手**。長度必須等於 211 是這支 handler 的契約；兩個例外類別的存在意味著
+> 「版本不符 → 走更新流程」。`body` 的內容語意仍為 **UNKNOWN**（§6 待辦 1）。
+>
+> ✅ **已證實：伺服器先送**。`sub_43A410` 由 `FD_CONNECT` 觸發，函式內以 `recv()` **兩段式**讀取
+> （先 2 bytes 長度，再讀到 `總長 == u16@0`），所以它不可能是 client 的招呼封包——client 在收到這 211 bytes
+> 之前不會送任何東西。重寫版 client 必須等握手；重寫版**伺服器必須先送握手**。
+>
+> 欄位順序（`.lst 0043A744–0043A774`）：`u32 @ 4+bodyLen` → `CClientSocket+120`（**送** state）、
+> `u32 @ 8+bodyLen` → `+124`（**收** state），兩者皆原樣寫入（無 `not`、無轉換）。
+>
+> **client 的第一個回包**（`.lst 0043A7D4–0043A844`，`sub_43A410` 尾段）：握手解析完、且
+> `CClientSocket+36 == 0` 時，client 會建一個 buffer（`sub_4A1EA0(&buf, 4, 0)` = 先塞入 byte `0x04`）、
+> 再附上 `u32 *(CWvsApp+0x14)`（`mov edx, n3000` `mov esi, [edx+14h]`），走一般送出路徑送出。
+> 也就是說：**握手之後 client 送的第一個封包是 `[0x04][u32 app+0x14]`**。
+>
+> ✅ **寫入點已找到（2026-10-16）**：`sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196`
+> 執行 `mov [ebx+14h], esi`（`ebx = n3000`），值來自伺服器在 0x03 回包裡給的 **角色 id**
+> （§4.11.3 證明它是 id，不是不透明的 ticket）
+> （見 §4.8）。所以 `[0x04][u32]` 的意義 = **「我是剛剛被導向過來的那個角色/連線」**：
+> 登入伺服器在選角成功時發一組 token，client 帶著它連上遊戲伺服器、握手後立刻回報，
+> 遊戲伺服器才知道這條新連線屬於哪一個角色。
+
+## 3. 加密（cipher）✅
+
+**已證實**：金鑰 = 狀態的**最低位元組**；狀態是 MSVC `rand()` 的 LCG。
+
+```c
+key = (u8)state;
+// 收：sub_4A1B90
+body[i] = swapNibbles(key ^ body[i]);
+// 送：sub_4A2030
+body[j] = key ^ swapNibbles(plain[j]);
+// swapNibbles(x) = (x << 4) | (x >> 4)
+// 每包結束後推進一次（送出/收到「之後」）：
+state = state * 214013 + 2531011;      // mod 2^32
+```
+
+| 項目 | 內容 | 證據 |
+|---|---|---|
+| 送／收狀態 | `CClientSocket + 120`（送）、`+ 124`（收）| `sub_43AD50`（送）、`sub_43AFA0`（收：`*((_BYTE*)this + 124)` 取 key）|
+| 種子來源 | 上述握手的兩個 `u32` | `sub_43A410` |
+| 標頭 | **兩個方向不同**（見下）| `.lst 0043AD75`、`.lst 0043AFF9` |
+| 推進時機 | **每個封包一次**（不是每個 byte）| `sub_4A2030`、`sub_4A1B90` 呼叫端 |
+
+> 驗證自檢：因為標頭由狀態推導，**用錯種子會立刻在標頭出現不符**，不會靜默產生看似合理的亂碼。
+> 實作把這點變成硬檢查（`SessionDeframer.headerOk`、`decode` 的 exit code）。
+
+### 3.1 ⚠️ 兩個方向的標頭常數不同（實測兩處）
+
+```
+client → server : header = 0x00D3 ^ HIWORD(sendState)
+server → client : header = 0xFF2C ^ HIWORD(recvState)      // 0xFF2C = ~0x00D3
+```
+
+- **送**：client 只有一條送出路徑（`sub_43AD50`，login/選角/遊戲全走它）。`.lst 0043AD75` 將 `0D3h`
+  推入 `sub_4A2030`；`.lst 004A20F7–004A2113` 計算 `HIWORD(state) ^ 0xD3` 並存成封包第一個 word。
+- **收**：`.lst 0043AFF9`（`sub_43AFA0`）要求 `header ^ HIWORD(recvState) == 0FF2Ch`，不符就
+  `sub_43AC20` → `AVCDisconnectException`（斷線）。Hex-Rays 把這個比較顯示成 `!= -212`
+  （0xFF2C 的 signed 16-bit 值），是容易誤讀的地方。`sub_43AFA0` 另外要求 `bodyLen <= 0x8000`。
+
+0xFF2C 正好是 `~0xD3`，看起來是「同一常數在某一側被反相」。**原因不重要**：client 的檢查就是契約，
+所以**伺服器必須送 0xFF2C 系列、且必須接受 0xD3 系列**。搞錯的症狀是「client 靜默斷線」。
+> ✅ 這條已用「兩處獨立位址 + 兩處皆為唯一呼叫點」確認；`0D3h` 與 `0FF2Ch` 在整個 `.lst` 中各只出現一次。
+
+## 4. 封包分派（dispatch）✅ 已完整定位（含分派鏈）
+
+opcode 是**本文第 0 個 byte**。`sub_43B170`（由 `sub_43AFA0` 的解密後呼叫）讀取它並分派：
+
+```c
+// sub_43B170(this = CClientSocket, packet)
+// packet 物件：bytes @+8、len @+12、header @+14、bodyLen @+16、cursor @+20
+opcode = packet->bytes[cursor++];          // cursor 從 4 之後開始
+switch (opcode) {
+  case 0x07: sub_43B400(packet); break;
+  case 0x08: sub_43B280(this, packet); break;
+  case 0x0A..0x14: sub_55A900(n3000, opcode, packet); break;   // 只有 0x0B..0x13 真的被處理
+  default:   (**(dword_5C212C + 8))(dword_5C212C + 8, opcode, packet);   // → CField 的訊息介面
+}
+```
+
+`dword_5C212C` = **當前 CStage 實例**（登入階段或 CField）；由 `sub_4C3460`（= `SetStage`，內含
+`_RTDynamicCast(..., &CStage, &CField, ...)` 與 `dword_5C212C = ...`）安裝。`+8` 是它的多重繼承子物件，
+其 vtable `??_7CField@@6B@_1`（`.rdata:005865EC`）slot 0 = **`sub_472770`**，也就是**遊戲封包的總路由**。
+
+### 4.1 遊戲封包路由（`sub_472770`，唯一入口）
+
+`sub_472770(this, opcode, packet)` 依 opcode 區間轉給各子系統（`.c 121119`）：
+
+| opcode | 子系統 / 目標 | 證據 |
+|---|---|---|
+| 0x15–0x17 | `sub_4C2760(this, opcode, packet)`（CField 本身）| `sub_472770` |
+| 0x19 | `sub_4728B0(packet)` | 同上 |
+| 0x1A | `sub_472910(this - 8, packet)` | 同上 |
+| 0x1B–0x2D | **CUserPool**（`sub_51CF70(dword_5C1CEC, …)`）| 見下 |
+| 0x2E–0x37 | **CMobPool**（`sub_492330(dword_5C2054, …)`）| ctor `sub_4913E0` 安裝 `??_7CMobPool@@6B@` |
+| 0x38–0x41 | **CNpcPool**（`sub_49F560(dword_5C2050, …)`）| ctor `sub_49F020` 安裝 `??_7CNpcPool@@6B@` |
+| 0x42–0x45 | **CRewardPool**（`sub_4A8870(this_4 = 0x5C204C, …)`）| ctor `sub_4A73A0` 安裝 `??_7CRewardPool@@6B@` + 寫入 0x5C204C |
+| 0x46–0x48 | **CQuestMan**（`sub_4A58F0(dword_5C2048, …)`）| ctor `sub_4A5830` 安裝 `??_7CQuestMan@@6B@` |
+| 0x49–0x4C | `sub_4B73A0(opcode, packet)` | `sub_472770` |
+| 0x4D–0x4F | `sub_4E18D0(opcode, packet)` | 同上 |
+| 0x50–0x52 | `sub_4815E0(opcode, packet)` | 同上 |
+| 其他 | 忽略（無 else 分支）| 同上 |
+
+第二層（`CUserPool` = `sub_51CF70`，`.c 289155`）：0x1C→`sub_51CFE0`、0x1D→`sub_51D280`、
+0x1E–0x20→`sub_51D530`、0x21–0x2A→`sub_51D590`、0x2B–0x2C→`sub_51D6A0`（0x1B、0x2D 在這一層被忽略）。
+`CUserPool` 的 ctor `sub_51CA30` 內含 `ZMap<ulong, ZRef<USERREMOTE_ENTRY>, ulong>`（`+0x0C`）。
+
+> **結論**：遊戲 opcode 空間落在 **0x15–0x52**（有空洞），且每個區間屬於一個明確子系統。
+> 這是產生 `protocol/schema/` 的路線圖：每個子系統 handler 的欄位讀取順序即為該區間封包的欄位。
+
+### 4.2 已解出的三個特殊 opcode
+
+| opcode | 內容 | 證據 |
+|---|---|---|
+| 0x07 | **伺服器遷移/斷線**：`[u8 flag][u32 addr][u16 port]`。`flag == 0` → 直接丟 `AVCDisconnectException`（斷線）；否則把 addr/port 組成 `sockaddr_in`（port 經 `htons`）交給 `sub_558BD0` 連線。 | `sub_43B400`（`.c 67092`）|
+| 0x08 | **echo/ping**：讀 1 個 `u32`，把 `[0x08][u32]` 送回對端（走一般送出路徑 `sub_43AD50`）。 | `sub_43B280`（`.c 67002`）＋ `sub_4A1EA0`/`sub_4A1F20`（逐 byte append 的緩衝）|
+| 0x0B–0x13 | 登入/選角階段的九個處理函式（0x0B→`sub_55BAB0`、0x0C→`sub_55BDC0`、0x0D→`sub_55BEB0`、0x0E→`sub_55B6A0`、0x0F→`sub_55C090`、0x10→`sub_55C5E0`、0x11→`sub_55C130`、0x12→`sub_55C390`、0x13→`sub_55CDE0`）。**0x0A 與 0x14 會被忽略**（switch 沒有 case）。 | `sub_55A900`（`.c 351269`）|
+
+### 4.3 已排除的錯誤線索（勿重試）
+
+- ❌ 沒有大型靜態 jump table 分派器：最大的 `jpt_56FB8B`（46 目標）屬於 `sub_56FA9D`（韓文 Hangul
+  0x4003–0x400D 的 COM/BSTR 轉換）。`sub_4F9AD0` 是 UI tooltip。
+- ❌ `sub_43B6B0` 是 `ZRef<T>::operator=`（refcount），不是收包佇列的消費端。
+- ❌ `sub_449F30`（含 `jpt_449F68`、cases 112–123）是**UI 事件路由**，不是封包分派。
+
+### 4.4 封包欄位編碼（已解，寫／讀兩端都有證據）
+
+| 型別 | 線上格式 | 寫入端 | 讀取端 |
+|---|---|---|---|
+| byte | 1 byte 原樣 | `sub_4A1EA0(&buf, byte, 0)`（開包並塞入 opcode）或 `sub_431DE0(&buf, 1)` + 直接寫 | `sub_45DC40(&dst, ptr, avail)`：讀 1 byte，回傳 1；不足丟 `ZException(38)` |
+| u16 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, 2)` + 直接寫 | `sub_45DC80(&dst, ptr, avail)`：讀 2 bytes，回傳 2；不足丟 `ZException(38)` |
+| u32 | little-endian 原樣，無前綴 | `sub_431DE0(&buf, 4)` + 直接寫 | handler 內直接 `*(_DWORD*)(ptr + cursor)`（自己做邊界檢查）|
+| 字串 | **`u16 長度` + 原始 bytes（無 NUL、無長度逃逸）** | `sub_430230(&buf, zstr)` → `sub_4303C0(dst, zstr)`：`*dst = len; memcpy(dst+1, data, len); return len + 2` | `sub_418610(&zstr, ptr, len)`（`len == -1` 時用 `strlen`）|
+
+> 讀取端一律是「先檢查剩餘長度、不足就丟 `ZException` code 38」。`server/src/protocol/packet.ts`
+> 以 `PacketUnderflowError(code = 38)` 對應這個行為：**寧可爆掉也不要回 undefined**，否則欄位解析錯了會靜默產生垃圾。
+
+傳送端 API（`sub_43AD50(buf)` 才是真正的送出）：
+
+```c
+sub_4A1EA0(&buf, OPCODE, 0);   // 建立送包緩衝，第一個 byte 就是 opcode
+sub_430230(&buf, zstr);        // 附加字串（u16 長度 + bytes）
+sub_431DE0(&buf, 4);           // 保留 4 bytes（u32），呼叫端自行寫入後把長度 +4
+sub_43AD50(this, &buf);        // 加標頭（0xD3 ^ HIWORD(sendState)）→ 加密 → 排入送出佇列
+sub_45DC40(&dst, ptr, avail);  // 讀 1 byte；回傳消耗的 byte 數
+sub_45DC80(&dst, ptr, avail);  // 讀 2 bytes（u16）
+```
+
+> 讀取端的常見樣式是 `cursor += sub_45DC40(...)`（每次 1 byte），多 byte 欄位則直接記憶體存取；
+> 因此「handler 讀了幾個欄位、順序如何」就是該 opcode 的欄位定義。
+
+### 4.5 client → server opcode 目錄（抽取自 `sub_4A1EA0(&buf, N, 0)` 的所有呼叫點）
+
+共 **39 個** opcode 會被送出（同一 opcode 可能有多個呼叫點）。已解出欄位者：
+
+| opcode | 欄位 | 來源函式 / 類別 | 意義 |
+|---|---|---|---|
+| 0x01 | `u16 len id` + `u16 len pw` | `sub_4D0B20`（由 `sub_4D0000`/`CTitle` 呼叫）| **登入請求**（帳號、密碼）|
+| 0x02 | `u8 worldIndex` | `sub_54DFC0`（`CWorldSelect`）| **選世界**（index 對應 0x01 回包裡的世界清單，§4.8）|
+| 0x03 | `u32 characterId` | `sub_431620(1000)`（`CUICharSelect`）| **選角進入遊戲**（§4.8）|
+| 0x04 | `u32 *(CWvsApp+0x14)` | `sub_43A410` | **握手回覆**（見 §2）|
+| 0x05 | `u16 len name` | `sub_42FD30`（`CUINewChar` 的「確定」）| **建立角色**（只送名字，外觀由 0x06 先送，§4.8）|
+| 0x06 | `u16 len name` + `u32 ×10` | `sub_431620(1002)` | **角色名檢查 + 外觀**（回應是 0x04，§4.8）|
+| 0x07 | `u32 characterId` | `sub_431620(1001)` | **刪除角色**（回應是 0x06，§4.8）|
+| 0x08 | `u32`（原封不動回傳）| `sub_43B280` | **echo/ping 回覆**（見 §4.2）|
+| 0x09 | `u32`（`*(this+300)`）| `sub_5545F0` | 世界伺服器相關請求 |
+| 0x0A | `u16 len str` + `u32`，送出後 `Sleep(300)×2` 並丟 `CTerminateException` | `sub_5545F0` | **要求遷移**：等伺服器切換連線（配合 §4.2 的 0x07）|
+| 0x0D | `s32 kind` + `string name` | `sub_472590`（`CField::SendInteract`）| **點擊場地物件／傳送門**（`kind = -1`），也是 GM 的 `/헉맵 <mapId>`：見 §4.11.6、§4.13 |
+| 0x0E | `u8 *(CStage+156)` + `CMovePath` | `sub_542C40`（`CVecCtrlUser`）| **本機角色自己的移動**；舊註記只寫了那個 u8，因為 `CMovePath` 的來源是後來才定位的（§4.11.6）|
+| 0x0F | **已完整解出（byte-exact）**：`u8 段數\|目標數<<4`、`u32 技能 id`（0 ＝ 沒有技能）、`u8 面向<<7\|動作`、`u8 速度`、每目標 11 B ＋ 段數×`u16` 傷害 | `sub_512F90` | **普通攻擊**（§4.13.1）|
+| 0x10／0x11 | 同形狀；`0x10` 多一個 `u16`，兩者的高 nibble 是「有第二個物件」旗標而非計數 | `sub_513C80`／`sub_514D30` | 魔法／技能攻擊（§4.13.1b，已解）|
+| 0x12 | `string` | `sub_470C70` | **一般聊天**（§4.13；顯示端與伺服器那一半見 **§4.26**）|
+| 0x13 | `u32 emotion` | `sub_511E20`（case 10）| **表情**（F1..F7 → 1..7；送出前 client 已經自己套用了，見 **§4.35**）|
+| 0x22/0x23/0x25/0x26/0x27 | 見 §4.13 | `sub_470E10`／`sub_4717D0`／`sub_471A40`／`sub_471C*` | GM 廣播／密語／交易／**組隊**／GM 數值指令 |
+| 其餘 39 個 | — | 見 §4.13.2 的完整 sender 目錄 | |
+
+### 4.6 ⚠️ 修正：`0x0B` 不是登入封包，它是「道具欄操作」
+
+§4.6 舊版把 `0x0B` 記成「client 在登入畫面等的那個封包」。**這是錯的**：`0x0B–0x13` 是
+`CWvsApp` 層級的通用處理函式（在**任何**階段都會被呼叫，不只登入），而 `0x0B` 的內容是
+**角色的道具欄異動**。登入流程與它無關，走的是 §4.7 的階段分派。
+
+`0x0B`（`sub_55BAB0`，`this = CWvsApp`；道具在 `*(CWvsApp+0x24)`，也就是本機角色的
+`CharacterData`，欄位見 §4.9）：
+
+```
+u8  result                       // 非 0 時：*(CWvsApp+24) = 0，*(CWvsApp+28) = timeGetTime()
+u8  count                        // 後續條目數
+count × {
+  u8  op                         // 0 = 放入道具、1 = 重設道具加密金鑰、2 = 兩格互換、3 = 清空格子
+  u8  inventory                  // 1..4（1 = 裝備欄、2 = 消耗、3 = 其他、4 = 現金）；其他值丟棄該條目
+  u16 slot                       // 格子編號；裝備欄（inventory = 1）可用負值 -1..-14 = 已穿戴的格子
+  <op 專屬欄位>
+}
+```
+
+- 容器：`*(u32*)(charData + 4*inventory + 362)`（寫入端 `sub_55E8F0`，要求 `inventory ∈ 1..4`）。
+  裝備欄另有兩組 inline 格：`charData+122` 與 `charData+242`（各 15 格，8 bytes/ZRef）。
+- `op = 0`：接一個 `GW_ItemSlot`（`sub_45E6A0`），叫該物件的 `Decode`（vtable slot 1）讀欄位——
+  **欄位已全部解出，見 §4.9**。⚠️ **修正（見 §4.18.2）**：這裡的第三個參數是**剛剛讀到的
+  `inventory` 值本身**（`pExceptionObject_1 = (char)n570425348`，`.c` 352412 附近的 case 0），
+  不是 0；而 `sub_45E6A0` **只在參數為 0 時才從 stream 讀一個種類位元組**（`.c` 102334：
+  `if (pExceptionObject == 0) { … LOBYTE(pExceptionObject) = *(_BYTE *)(…) … }`）。所以
+  `0x0B` op 0 **沒有**種類位元組：種類由欄位本身決定（`inventory 1` → 旗標 1 → `GW_ItemSlotEquip`，
+  2/3/4 → `NonEquip`）。原本「這裡會讀種類位元組」的推論來自把 `sub_45E6A0` 的 0 分支當成了
+  這裡的呼叫；全 `.c` 只有 `sub_4D3950`（本伺服器尚未送出的子系統）是以 0 呼叫它。
+- `op = 1`：再讀 `u16 key`，用 `sub_55E780` 把那把金鑰寫進「道具 + 34」的隨機加密區；
+  **`inventory == 1`（裝備欄）會被 client 直接丟 `CTerminateException`**，伺服器不可對裝備欄送這個 op。
+- `op = 2`：再讀 `u16 slot2`，兩格互換。`op = 3`：清空該格。
+- 收尾 `sub_55EB00` 回傳非 0 就丟 `AVCDisconnectException`（它檢查的是 `charData` 的穿戴格）。
+
+> 這一節的價值不只是「解了一個 opcode」：它證明「同一號碼在登入階段成對」的舊假設是錯的，
+> 分派其實是**兩層：當前階段 → opcode**（§4.7）。
+
+### 4.7 ✅ 伺服器封包的真正分派：以「當前階段」為準
+
+`sub_43B170` 只對 `0x07` / `0x08` / `0x0A–0x14` 有硬編碼分支，其餘全部交給 `dword_5C212C`
+（當前 stage 實例）的 `INetMsgHandler` 子物件（`stage+8`）的 slot 0。每個 stage 類別各有自己的
+`OnPacket`，而「進入這個階段時要拿上一階段的資料」則由 vtable slot 1 負責
+（`sub_4C3460` = `SetStage`：安裝 `dword_5C212C`、呼叫新 stage 的 slot 1 傳入參數）。
+
+| stage | `OnPacket`（`??_7<類別>@@6B@_1` slot 0）| 處理的 opcode | 收到 SetStage 參數的 slot 1 |
+|---|---|---|---|
+| `CStage`（基底）| `sub_4C2760` | `0x16` → `sub_4C2780` | — |
+| `CLogo` | 繼承 `sub_4C2760` | — | `sub_47FAF0` 系列 |
+| `CTitle`（登入畫面）| **`sub_4D0D70`** | **`0x01`** → `sub_4D0DB0` | `sub_4D0000` |
+| `CWorldSelect` | **`sub_54E210`** | **`0x02`** → `sub_54E250` | `sub_54D6A0`（收**世界清單**）|
+| `CCharSelect` | **`sub_431EE0`** | **`0x03`** → `sub_432FB0`、**`0x04`** → `sub_432430`、**`0x05`** → `sub_4329A0`、**`0x06`** → `sub_432890` | `sub_431080`（收 **3 個角色紀錄**）|
+| `CField`（遊戲內）| `sub_472770` | `0x15–0x52`（§4.1）| `sub_4728D0` |
+
+- 這些 vtable 位址都在 `.rdata`，且都能在 `.lst` 直接讀出（`??_7CTitle@@6B@_1` @`.rdata:00586F50`
+  = `sub_4D0D70`、`??_7CWorldSelect@@6B@_1` @`00587E8C` = `sub_54E210`、`??_7CCharSelect@@6B@_1`
+  @`00585F10` = `sub_431EE0`、`??_7CField@@6B@_1` @`005865EC` = `sub_472770`）。
+- 每個 stage 的 `OnPacket` 都只是個 `switch`：不認得的 opcode 直接丟掉（不會斷線）。
+- **同一個 opcode 在不同階段可以是完全不同的封包**，而**請求與回應也不必然同號**
+  （刪角色：請求 `0x07`、回應 `0x06`）。舊 §4.7 的「+0x0A 成對」表因此作廢。
+
+### 4.8 ✅ 登入鏈：login → world → char → game（全部已解到欄位層）
+
+四個階段的封包如下。所有 `result` 值用同一組訊息字串（`sub_4D0DB0`／`sub_54E250`／`sub_432FB0`
+共用），`0` = 成功並繼續解析 payload —— **唯一的例外是 `0x05`（建立角色）**：那裡 `0` 是**失敗**，
+非 0 才是「成功，後面接新角色的 `CharacterData`」（`sub_4329A0`，見下）。
+
+| 階段 | client → server | server → client |
+|---|---|---|
+| `CTitle` | `0x01`：`string 帳號` + `string 密碼`（`sub_4D0B20`）| `0x01`：`u8 result`，成功時見下 |
+| `CWorldSelect` | `0x02`：`u8 worldIndex`（`sub_54DFC0`）| `0x02`：`u8 result`，成功時 = 角色清單 |
+| `CCharSelect` | `0x03`：`u32 characterId`（`sub_431620(1000)`）| `0x03`：`u8 result`，成功時 = 遊戲伺服器位址 |
+| `CCharSelect` | `0x06`：`string 名字` + `u32 ×10`（外觀）| `0x04`：`string 名字` + `s8 result`（0 = 可用）|
+| `CCharSelect` | `0x05`：`string 名字`（建立）| `0x05`：`u8 result`（**0 = 失敗、非 0 = 成功**，成功時後面接新角色的 `CharacterData`）|
+| `CCharSelect` | `0x07`：`u32 characterId`（刪除）| `0x06`：`u32 characterId` + `u8 flag`（0 → client 丟 `CTerminateException 570425350`）|
+| （連上遊戲伺服器後）| `0x04`：`u32 characterId` | — |
+
+**`0x01` 成功 payload**（`sub_4D0DB0`）：
+
+```
+u32 app4      → CWvsApp+0x04（語意未定）
+u8  app8      → CWvsApp+0x08（語意未定）
+u8  app9      → CWvsApp+0x09（`CUINewChar` 用 `~app9 & 1`，所以它帶帳號的性別位元）
+u8  worldCount
+worldCount × { string 世界名; u32 未定欄位 }
+```
+
+→ client 把整份世界清單交給 `CWorldSelect`（`sub_4C3460`）。
+
+**`0x02` 成功 payload**（`sub_54E250`）：
+
+```
+u8 charCount
+charCount × CharacterData          // 見 §4.9；client 固定填 3 格，超過 charCount 的格子自己清零
+```
+
+**`0x03` 成功 payload**（`sub_432FB0`，`.lst 0043310F–00433196`）：
+
+```
+u32 ip        // 網路位元組序！讀出後「原封不動」存進 sockaddr_in.sin_addr（沒有 htonl）
+u16 port      // host order，client 自己 htons
+u32 characterId  // → CWvsApp+0x14；**這就是本機角色的 id**（§4.11.3：別人的進場封包會拿角色的
+                 // id 和它比對來判斷「那是不是我自己」），不是不透明的通行證。伺服器必須一直用同一個 id
+```
+
+→ client 用 `sub_558BD0`（與 `0x07` 遷移同一條連線函式）連到 `ip:port`，把 id 存進
+`CWvsApp+0x14`，播放 "GameIn" 音效；抵達遊戲伺服器、收完 211-byte 握手後，就用
+`[0x04][characterId]` 表明身分（§2）。**這條線現在完全閉合。**
+
+**`result` 值表**（`sub_4D0DB0`／`sub_54E250`／`sub_432FB0` 三個 handler 的 switch 完全相同）；
+訊息欄是**從 `.rdata` 讀出來的原文**（CP949），`aAi`／`aO_2`／`aAiI_0` 只是 Hex-Rays 給字串常數取的名字：
+
+| result | client 訊息（原文）| 意義 |
+|---|---|---|
+| `0`（以及 `1`、`>= 10`）| — | **成功**，解析 payload |
+| `2`, `3` | 지워지거나 접속 중지된 아이디입니다. | 帳號**已被刪除**，或它的連線被中止 |
+| `4` | 잘못된 패스워드입니다. | 密碼錯誤 |
+| `5` | 등록되지 않은 아이디입니다. | **沒有這個帳號** |
+| `6`, `8`, `9`, `0xFF` | 시스템 오류로 접속 할 수 없습니다. | 系統錯誤（client 的通用失敗訊息）|
+| `7` | 현재 접속중인 아이디이거나,\r\n현재 서버점검중입니다. | **已在線上**，或伺服器維修中 |
+
+> ⚠️ **這張表在 2026-10-16 修正過（三個意義是錯的）**：前一版只有符號名（`aAi`／`aAi_0`／`aO_2`／
+> `aAiI_0`），語意是**從名字猜的** —— 於是 `2`／`3` 被記成「帳號或密碼錯誤」、`5` 被記成
+> 「不能連線的帳號」、`7` 被記成「帳號停權或 IP 被封鎖」。字串一直都在 `.rdata`（常數表在
+> `sub_576D6F` 附近），只是 `MapleStory.exe.c` 是 **CP949**：拿 UTF-8 的韓文去 `grep` 它一個字都
+> 找不到，而「找不到」看起來就像「不存在」。用 `python3 tools/kstr.py MapleStory.exe.c <func>`，
+> 或先把檔案以 CP949 decode 再搜。
+>
+> 修正的直接後果：**同一帳號的第二次登入要回 `7`**，而不是 `2`（`2` 說的是「這個帳號被刪了」）。
+> `LoginServer` 現在對「沒有這個帳號」回 `5`、對「密碼錯」回 `4`（以前兩者都回 `2`）。
+> `7` 的實作（誰在線上）列在 §6 第 15 項。
+
+> 證據：`sub_4D0DB0` 被編譯成 `switch (result + 1)`，`sub_54E250` 直接 `switch (result)`；兩者
+> 的 case 群完全對應（`0xFF↔0`、`6↔7`、`8↔9`、`9↔10`），jump table `jpt_433024` 的註解也把
+> default 標成 `cases 0,1`。**`result = 1` 會走成功分支**這件事很不直覺，但兩個 handler 都是這樣。
+
+> 建立角色的外觀：`0x05` 只送名字，外觀在**前一個** `0x06` 裡。十個 u32 的順序與來源**已解出**
+> （§4.8.1a）：**臉、頭髮、上衣、褲子、鞋子、武器，然後四顆骰子**。伺服器把前兩個寫進新角色紀錄的
+> `appearanceA`／`appearanceB`（就是 client 畫的臉與頭髮，§4.9），第 3–6 個變成**穿戴裝備**
+> （§4.11.3d 的格號表），四顆骰子依序落為 STR／DEX／INT／LUK（原 newDlg 標籤與繪字座標交叉證明）。
+
+#### 4.8.1a `0x06` 的十個 u32：順序、來源，以及伺服器能用哪幾個
+
+送包的是 char-select 視窗的按鈕分派 `sub_431620`（`.c:57280`，case 是控制項 id）。`1002`
+這條（「新角色」）會在建立 `CUINewChar` 之後組 `0x06`（`.c:57451`）：
+
+```
+sub_4A1EA0(buf, 6, nullptr)                    // opcode 6
+name = 名字輸入框（CUINewChar + 476）
+for (k = 0; k < 6; k++) writeU32(sub_430E40(*(CUINewChar + 496 + 8*k)))   // 六個下拉選單
+for (i = 420; i < 436; i += 4) writeU32(*(CUINewChar + i))                // 四顆骰子
+```
+
+那六格**是哪六個部位**，由對話框自己的預覽刷新 `sub_430D00`（`.c:56799`）決定：控制項 id
+`1002..1007` 的事件碼 600（選單變更）都走 `sub_430C90` → `sub_430D00`，而它把 `+496 + 8k` 的六個值
+寫進 avatar 的**部位格**，寫的格號用 §4.11.3b 的表就讀得出語意：
+
+| `0x06` 第 n 個 u32 | 來源 | `sub_430D00` 寫進的格 | 部位 |
+|---|---|---|---|
+| 1 | `+496` | `sub_424590(avatar, v, 0)` 的第 2 個參數（avatar `+8`）| **臉**（＝紀錄 `appearanceA`）|
+| 2 | `+504` | `src[0]` | **頭髮**（＝紀錄 `appearanceB`）|
+| 3 | `+512` | `src[5]` | 上衣／套裝（`104xxxx`／`105xxxx`）|
+| 4 | `+520` | `src[6]` | 褲子（`106xxxx`）|
+| 5 | `+528` | `src[7]` | 鞋子（`107xxxx`）|
+| 6 | `+536` | `src[11]` | 武器（`13xxxxx`／`14xxxxx`）|
+| 7–10 | `+420`..`+432` | 不進 avatar | 四顆骰子的點數 |
+
+- **「第 1 個是臉」有第二條獨立證據**：`sub_424590`（`.c:45274`）與 `CUser` 的 `sub_508260`
+  （`.c:269241`）**同形** —— 都是「兩個欄位有變才寫入，寫完把情緒歸零」（`this[2]`/`this[3]` ↔
+  `this[17]`/`this[18]`，`sub_4245C0` ↔ `sub_509790`），而 `sub_508260` 的第 2 個參數就是
+  `CUser+68`：情緒／動畫播放器 `sub_509070` 拿它去 `sub_408400` 找情緒節點的那個「臉」
+  （§4.11.3c）。同一條路上紀錄的 `appearanceA`（`+18`）也是餵 `sub_424590`（`sub_42E2C0`）。
+- **更正先前骰子順序未知的結論**：`UI/Login.img/CharSelect/newDlg` 畫布已印好
+  **STR／DEX／INT／LUK**，不是要在 `.exe` 找韓文標籤字串。`sub_430690` 把 `+420`..`+432`
+  依序畫在相對 y=293／313／333／353，正好對應這四行。`sub_430630` 從四個 4 開始做九次
+  `rand()%4` 加一，所以總和 **25**、單顆 **4..13**；`sub_430BE0` 用 12 個更新步驅動骰動畫。
+- **衣服那四個（第 3–6 個）在真機上會變成穿戴裝備**：`sub_42E2C0` 顯示「穿在身上的第 k 格 ↔ 外觀第 k 格」
+  是同一套格號（§4.11.3d 的四條證據），所以上衣該進穿戴格 5、褲子 6、鞋子 7、武器 11 —— 這也是
+  `sub_45F340` 從 itemId 的 part code 推出來的那組號碼。**已實作**：`wornOfLook`（`chardata.ts`）把
+  `0x06` 的第 3–6 個 u32 變成穿戴裝備（每個都是 `equipSlot(itemId)`，`ruc` 0 —— WZ `info` 還沒讀），
+  `createCharacter` 用 `withWorn` 併進新角色的穿戴群組，於是 `0x05`／`0x02` 的回包與 `0x1C` 的清單
+  自動帶著它們（`avatarItemsOf` 讀的就是同一個穿戴 Map）。
+- **骰子已落地**：第 7–10 個 u32 寫入新角色 STR／DEX／INT／LUK，拒絕總和不為 25
+  或單項小於 4 的請求；不再複製帳號首位角色的 level／job／exp／map。
+  HP／MP 50、起始金錢及初始地圖仍是重建伺服器政策，不能因此宣稱官方伺服器初始值已證。
+- 伺服器端的落地：`createCharacter`（`server/src/net/loginserver.ts`）把第 1／2 個 u32 寫進
+  `appearanceA`／`appearanceB`（兩個都是 0 時用 `lookOf` 的起始外觀：臉 `20000`、頭髮 `30000`），
+  第 3–6 個進穿戴群組。
+
+### 4.9 ✅ `CharacterData`（角色紀錄）在網路上的樣子（含道具區塊，已全部解出）
+
+讀：`sub_45FCC0` = `CharacterData::Decode`（`CCharSelect` 的 `0x02` 回包、`CStage` 的 `0x16`、
+`sub_54E250` 都用它）。
+寫：`sub_45F610` = `CharacterData::Encode`（只從 vtable 呼叫；能力值區塊交給 `sub_45D2E0`，
+每個道具交給 `sub_45E560`）。**兩支逐欄位互相對應**，這也是下面每個長度都能確定的原因。
+
+```
+u8 flags
+if (flags & 0x01) <能力值區塊 69 bytes>
+if (flags & 0x02) { 穿戴裝備、穿戴現金裝備、裝備欄、該欄的 8-byte 記錄 }
+if (flags & 0x04) { 道具欄 2 }
+if (flags & 0x08) { 道具欄 3 }
+if (flags & 0x10) { 道具欄 4 }
+if (flags & 0x20) { u16 count, count × {u32, u32} }
+if (flags & 0x40) { u16 count, count × {string, string} }
+```
+
+**每個道具欄**（含裝備欄）的形狀是：
+
+```
+u8 capacity                     // = 客戶端 ZArray 的元素數 − 1（見下）
+{ u8 slot, GW_ItemSlot }*       // slot 0 結束
+u8 0
+u8 n
+n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（this + 4*inv + 102）
+```
+
+- 兩組**穿戴格**（`this+122`、`this+242`，各 15 格、索引 1..14）沒有 capacity 欄，直接進
+  `{u8 slot, item}` 迴圈（`sub_45F610`：`n14 = 1; do {...} while (n14 <= 14)`）。
+- `capacity` 就是客戶端的陣列大小 − 1：解碼端 `u8 n` → `sub_4605A0(v, n+1, ...)` 調整大小，
+  編碼端寫 `ZArray 元素數 − 1`。**0 是合法的**（只有 index 0 的 dummy 格），之後可以用 `0x0C`
+  （§4.10）放大。
+- ⚠️ **整塊道具區塊裡沒有任何「種類位元組」**：編碼端每個道具欄都呼叫
+  `sub_45E560(item, packet, 0)`（= 不寫種類），種類由「哪一欄」決定——穿戴格與裝備欄是
+  Equip，2/3/4 欄是 NonEquip。只有 `0x0B` op 0（§4.6）會把種類位元組寫上線。
+
+**能力值區塊：69 bytes**（`sub_45D840` 讀、`sub_45D2E0` 寫，兩邊都是 24 個欄位）
+
+| # | 型別 | 名稱 | 備註 |
+|---|---|---|---|
+| 1 | u32 | `id` | 選角 UI 用它比對要刪除／選擇的角色（`sub_432890`）|
+| 2 | 13 bytes | `name` | **固定 13 bytes、NUL 補齊、沒有長度前綴**（`sub_45DD00` 直接 memcpy）|
+| 3 | u8 | `gender` | |
+| 4 | u32 | `appearanceA` | `sub_42E2C0` 把它交給 `sub_424590`（兩值 setter）|
+| 5 | u32 | `appearanceB` | `sub_42E2C0` 把它放進 avatar 的第 0 個部位格 |
+| 6 | u8 | `unknown26` | 真的是 u8，夾在第二個外觀字與頭髮之間（結構有 `#pragma pack`）|
+| 7 | u32 | `hair` | |
+| 8 | u8 | `level` | 以下到 `unknown93` 在**客戶端記憶體**裡是混淆的 |
+| 9–19 | u16 ×11 | `job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp` | 寬度與順序完全吻合 |
+| 20 | u32 | `exp` | 記憶體 +77/+81；`0x0D` 升級訊息讀這一對 |
+| 21 | u16 | `fame` | 記憶體 +85/+87 |
+| 22 | u32 | `mesos` | 記憶體 +89/+93；**這一欄是錢**（§4.22.5 的三個讀取端）|
+| 23 | u32 | **`mapId`** | 記憶體 +97，**不混淆**。**已證實是地圖 id**：`0x16` 把它與 `mode` 一起交給新場地物件（§4.11.2），最終 `sub_468E00` 用它載入 `Map/Map/%09d.img`（`sub_4694F0`）|
+| 24 | u8 | `unknown101`（保留舊欄名） | 記憶體 +101，**一般傳送門陣列索引**，不混淆（§4.43） |
+
+- ⚠️ **本節前一版寫的「75 bytes、尾巴多 u32/u16 各一」是錯的**：那版把 `sub_45D840` 的
+  *記憶體* 位移（+65/+67/+71/+75…）當成線上位移。實際上線上尾巴只有 5 個欄位
+  （u32 + u16 + u32 + u32 + u8 = 15 bytes），總長 32 + 22 + 15 = **69**。讀寫兩端各自加總都
+  得到 69，寫錯長度會讓後面整串錯位。
+- **混淆只在記憶體裡**：client 把 `rand()` 與 `value ^ rand()` 並排存（`sub_4618B0`），線上送的是純值
+  （`sub_45D2E0` 在寫出前把兩半 XOR 回來）。兩邊都不需要 RNG。
+- 客戶端的**記憶體**結構是 102 bytes（`sub_55BEB0` 複製 100 bytes + 一個 word；`sub_45F5C0`
+  對隊友直接 memcpy 0x66 = 102 bytes）：差額就是每個混淆配對的填充半 + 對齊尾巴。
+- 讀寫兩端都逐欄位讀取且越界就丟 `ZException(38)`，所以伺服器必須把 69 bytes 全部寫滿。
+
+**`GW_ItemSlot`（單一道具）** — 這是前一版缺的那一塊，完整落在 `server/src/protocol/itemslot.ts`：
+
+```
+u32 itemId
+u8  hasCash      // 讀到的旗標；寫出時由「8 bytes 是否為 0」推導（sub_45E860 用 *(u64*)(obj+0x10)）
+if (hasCash) {
+    u64 cashSn        // 記憶體 +0x10
+    u16 unknown18     // 記憶體 +0x18
+    u64 unknown1A     // 記憶體 +0x1A
+}
+
+GW_ItemSlotEquip（種類 = 1）         GW_ItemSlotNonEquip（其他種類）
+u8  ruc    남은 업그레이드 횟수       u16 quantity
+u8  cuc    업그레이드에 사용한 횟수
+u16 ×15    str dex int luk maxHp maxMp pad mad pdd mdd acc eva craft speed jump
+```
+
+證據：
+
+| 事實 | 位址 |
+|---|---|
+| 建物件＋讀種類位元組（0 → 讀 1 byte，1 → Equip，其餘 → NonEquip）| `sub_45E6A0` |
+| 物件大小：Equip `0x62`、NonEquip `0x26` bytes | `sub_45E6A0`（`sub_403350(&dword_5C25F0, 0x62u)`）|
+| 基底讀／寫（itemId、旗標、8/2/8 bytes）| `sub_45E9F0` / `sub_45E860` |
+| Equip 讀／寫（ruc、cuc、15 × u16，順序即此）| `sub_45ED50` / `sub_45EB50` |
+| NonEquip 讀／寫（quantity）| `sub_45F1B0` / `sub_45F130` |
+| 15 個 u16 的**語意與順序**（每個欄位一行 tooltip）| `sub_5014C0`：STR、DEX、INT、LUK、HP、MP、공격력(PAD)、마력(MAD)、물리방어력(PDD)、마법방어력(MDD)、명중률(ACC)、회피율(EVA)、손재주(CRAFT)、이동속도(SPEED)、점프력(JUMP)、以及 `ruc` = "업그레이드 가능 횟수"、`cuc` = 名字後的 "(+n)" |
+| 15 個 u16 的來源（WZ `info` +46..+74 → 物件 +38..+96，順序相同）| `sub_47A740`（+44 = ruc，cuc 寫 0）|
+| 種類位元組的值 = `itemId / 1000000` | `sub_45E560`（`*(this+3) / 1000000`）|
+| `cashSn != 0` ⇒ **不能丟棄**（與 WZ `info/cash` 同一個判斷式）| `sub_463BE0`（"이 아이템은 버릴 수 없습니다."）、`sub_47A420`（讀 `cash`）|
+
+> 語意未定但不影響傳輸的欄位：`unknown18`、`unknown1A` 沒有任何讀取端（全 binary 只有編碼／解碼
+> 碰它們），先保留結構名；`quantity` 在 `sub_47A740` 建新道具時寫 1。
+
+### 4.10 ✅ `CWvsApp` 層級的 `0x0B`–`0x13`（與階段無關）
+
+`sub_43B170` 把 `0x0A–0x14` 全部交給 `sub_55A900`，它是一個 9-way switch（`0x0A`／`0x14` 沒有 case，
+直接丟棄）。以下每一個都讀「本機角色的 `CharacterData`」，也就是 `*(CWvsApp+0x24)`：`sub_463050`
+取得它、`sub_465710` 取得某一格道具。
+
+| op | 處理函式 | 內容 | 讀到的欄位 |
+|---|---|---|---|
+| `0x0B` | `sub_55BAB0` | 道具欄操作（**已解到欄位層，見 §4.6 與 §4.18.2**）| `u8 result, u8 count, count × {u8 op, u8 inv, s16 slot, …}` |
+| `0x0C` | `sub_55BDC0` | **道具欄格數變更** | `u8 inventory(1..4), u8 slots` → `sub_55E7C0(charData + 4*inv + 362, slots + 1, …)`（對 `sub_4605A0` 的包裝）|
+| `0x0D` | `sub_55BEB0` | **能力值差異更新**（升級／配點／HP 變化）**已完整解出 → §4.21** | `u8 ack`（非 0 → `CWvsApp+0x18/0x1C` 重設）、`u32 flags` + 差異欄位（`sub_45E0D0`，19 個 bit）、`u32 panelFlags`（0 = 後面沒有東西）；等級變大時顯示 "레벨이 올랐습니다 (+%d)" |
+| `0x0E` | `sub_55B6A0` | **`charData+382` 的 `ZMap<u32,u32>` 更新** | `u8 flag`（同上重設）、`u16 n`、`n × {u32 key, s32 value}`：`value > 0` → insert，`value <= 0` → 移除該 key（`sub_460630`）|
+| `0x0F` | `sub_55C090` | **能力面板更新** | 無條件重設 `CWvsApp+0x18/0x1C`；`u8 flag`；若 flag ≠ 0 再讀 `u8 mode`，`mode == 0` → `sub_4C5DC0(CWvsApp+0x70, packet, …, 0)` |
+| `0x10` | `sub_55C5E0` | **組隊（파티）系統**：見下表 | `u8 type` + 依 type 的 payload |
+| `0x11` | `sub_55C130` | **獲得提示**（**已解，見 §4.18.3**）| `u8 type`：`1` → `u32` → "메소를 획득했습니다 (+%d)"；`0` → `u32 itemId`(`sub_479D30` 查名)`+ u32 count` → "아이템을 획득했습니다 (%s)"（count ≤ 1 時不印數量）；**其他值 → 2 bytes 的 "아이템을 더 이상 가질 수 없습니다"** |
+| `0x12` | `sub_55C390` | **인기도（人氣）系統** | `u8 type` + `string name`（`sub_432680`）：`0` → `u8 ok`（"'%s'님은 인기도를 …"，成功／失敗兩種訊息）、`2` = "초보자는 인기도를 올리거나 내리지 못합니다."、`3` = 等級不足、`4` … |
+| `0x13` | `sub_55CDE0` | **系統訊息／公告** | `u8 type` + `string text`：`0` → "[시스템] %s"（聊天視窗）、`1` → `sub_52BBE0(text)`（畫面中央公告）|
+
+`0x10` 的 type 對照（`sub_55C5E0` 的 switch，訊息字串就是語意）：
+
+| type | 意義 | payload |
+|---|---|---|
+| `3` | 收到組隊邀請，跳 dialog；按「是」時 **client 送出 `0x26`**：`u8 2` + `u32`（邀請者的角色 id）| `u32`（`*(CWvsApp+36) != 0` 才會讀）+ `string` 邀請者名（§4.37.1）|
+| `5` | 安靜的整份同步（沒有任何訊息）| `u32 partyId` + **102-byte 名冊**（`sub_45F5C0` 直接 memcpy，§4.37.4）|
+| `6` | **建立成功**（client 自己清空名冊、把自己寫進第 0 格）| `u32 partyId`；顯示 "새로운 파티를 만들었습니다" |
+| `7`, `14` | "이미 가입된 파티가 있습니다" | — |
+| `8` | "초보자는 파티를 만들 수 없습니다" | — |
+| `10` | 退出／被踢／解散（**兩種形狀**，§4.37.2）| `u32 partyId` + `u32 角色id` + `u8 flag`；`flag = 0`＝隊長退隊、隊伍解散（後面沒有東西）；`flag != 0` 再 `u8 kicked` + `string 名字` + 102-byte 名冊 |
+| `11` | "가입한 파티가 없습니다" | — |
+| `13` | 新成員加入（給全體，含加入者）| `u32 partyId` + `string 加入者名` + **102-byte 名冊**（`name` 是自己時 client 印「파티에 가입되었습니다.」）|
+| `15` | "가입하려는 파티에 이미 최대 인원 수만큼의 파티원이 가입했습니다" | — |
+
+> 註：`0x0D` 讀的那組「差異欄位」是 `sub_45E0D0`（**已完整解出 → §4.21**）：先 `u32 flags`，
+> 再依 bit 由 `0x01` 往上讀，只送有變的欄位。⚠️ 它的**線上的寬度不等於 `CharacterData`
+> 的寬度**（`str`/`dex`/`int`/`luk` 是 1 byte、`unknown26` 與 `fame` 是 4 bytes），§4.21.1 有完整對照表。
+
+### 4.11 ✅ CField 子系統：進地圖、角色進場／離場、移動、互動（`0x16`／`0x19`／`0x1C`／`0x1D`／`0x22`／`0x0D`／`0x0E`）
+
+§4.7 只解到「哪個 opcode 屬於哪個子系統」。這一節把**第一個垂直切片**（進地圖 → 看見別人 →
+別人移動 → 用傳送門換地圖）解到欄位層，這也是「兩個 client 走進同一張圖並互相看見」所必需的最小集合。
+
+實作：`server/src/protocol/field.ts`（封包）、`server/src/protocol/movepath.ts`（`CMovePath`），
+測試：`server/test/field.test.ts`（逐 byte golden）。
+
+#### 4.11.1 子系統的全域名稱（證據：建構子裡的 vftable）
+
+| 全域 | 類別 | 建構子 | 收包入口 |
+|---|---|---|---|
+| `dword_5C1CEC` | **CUserPool** | `sub_51CA30` | `sub_51CF70`（0x1B–0x2D）|
+| `dword_5C2054` | **CMobPool** | `sub_4913E0` | `sub_492330`（0x2E–0x37）|
+| `dword_5C2050` | **CNpcPool** | `sub_49F020` | `sub_49F560`（0x38–0x41）|
+| `dword_5C204C` | **CRewardPool** | `sub_4A73A0` | `sub_4A8870`（0x42–0x45，只有 0x43／0x44 有分支）|
+| `dword_5C2048` | **CQuestMan** | `sub_4A5830` | `sub_4A58F0`（0x46–0x48）|
+| `this_8` | **CUIMessenger** | `sub_4DDAF0` | `sub_4E18D0`（0x4D–0x4F）|
+| `this_15` = `dword_5C2040` | **CUniqueModeless**（開著的商店／交易視窗）| `sub_4B7640`、`sub_4812D0` | `sub_4B73A0`（0x49–0x4C；0x4A 開 `CShopDlg`）|
+| — | **CMiniRoomBaseDlg** | —（`_RTDynamicCast`）| `sub_4815E0`（0x50–0x52）|
+
+`CUserPool` 的第二層（`sub_51CF70`）：0x1C→`sub_51CFE0`、0x1D→`sub_51D280`、0x1E–0x20→`sub_51D530`、
+0x21–0x2A→`sub_51D590`、0x2B–0x2C→`sub_51D6A0`；**0x1B 與 0x2D 在這一層沒有分支**。
+
+#### 4.11.2 `0x16` = 進地圖（由 CStage 基底 `sub_4C2760` → `sub_4C2780`）
+
+```
+u8  mode                      // 交給新場地物件建構子的第一個參數（= 出生方式／portal）
+u8  hasData
+hasData != 0:
+    u32 ×3                    // ＝場地的亂數種子（見下），不是三個不明數字
+    CharacterData             // 與 §4.9 同一個讀取器（sub_45FCC0）
+hasData == 0:
+    u32 → obj+97              // obj 由 sub_463050 取得；decompiler 掉了查表用的來源
+    u8  → obj+101
+    u16 → obj+53              // 以 sub_4618B0 的隨機遮罩寫入（同 §4.9 的記憶體格式）
+```
+
+之後 `sub_4C2780` 會：建立 `CField` 物件 → `sub_4C3460`（= `SetStage`）→ `sub_51CBF0(CUserPool, charData, mode)`
+（配置 0x1C4 bytes = 本機角色 `CUserLocal`）；`hasData != 0` 時還多傳一個
+`sub_4C3460(field, &{mode, character.unknown97})`，所以**場地／出生點參數＝`mode` ＋ `CharacterData` 的 `unknown97`**。
+
+> ✅ **三個 u32 已經確定是場地的亂數種子**（不再是三個不明數字）：`sub_4C2780` 把三個值一起交給
+> `sub_4C7930(CWvsApp+632, a, b, c)`，它對 `CWvsApp+632` 與 `+652` 各呼叫一次
+> `sub_48A900`——`sub_48A900` 是「把三個部分打亂後存起來」的函式，而且它與
+> `sub_4619F0`（同一個結構的反函式）正是這支 client 的**自訂亂數產生器**：
+>
+> - 全域的 `dword_5D2C20` 在第一次使用時以 `rand()` 取三個部分初始化
+>   （`sub_461930(&dword_5D2C20, a, b, c)`，見第 105600 行附近），
+> - 同一支函式就是 `Random(lo, hi)`：`return lo + sub_4619F0(&dword_5D2C20) % (hi - lo)`，
+> - 攻擊路徑的 `sub_4C7960(CWvsApp+632, …)` 就是**用這個種子產生傷害數字**。
+>
+> 對伺服器的意義：`0x16` 送出的種子決定客戶端接下來所有「隨機」結果（傷害數字、掉落、怪物行為），
+> 所以客戶端在 `0x0F` 裡回報的傷害是**可以由種子重算出來**的，不是黑箱——這是伺服器端驗證傷害的基礎。
+>
+> ✅ 這支產生器已經逐位元移植到 `server/src/protocol/random.ts`（`seedState`／`nextRandom`／
+> `randomRange`／`class ClientRandom`），`test/random.test.ts` 用手算的序列釘住（同一組公式、
+> 五個輸出值、狀態演進都在測試裡），所以「伺服器重算客戶端傷害」現在是程式碼而不是想法。
+> 剩下的 UNKNOWN 只有 `mode` 的具體值，以及 `hasData == 0` 分支怎麼找到角色物件。
+
+#### 4.11.2b ✅ 地圖是怎麼被指定的：`CharacterData.mapId` → `Map/Map/%09d.img`
+
+上一節留下的「`mode` ＋ `CharacterData` 的 `unknown97`」這一對，這輪追完了整條鏈：
+
+```
+sub_4C2780                        // 0x16 的處理函式
+  k_7 = CharacterData 本體（sub_45FCC0 解出來的）
+  v48 = *(u32 *)((char *)k_7 + 97)   // ← CharacterData 的第 23 個欄位 = mapId
+  LOBYTE(v49) = 封包的 mode byte
+  sub_4C3460(newCField, &{mapId, mode})   // 安裝成當前場地，並呼叫它的 vtable slot 1
+     └─ sub_468E00(CField, init)
+          *(CField + 152) = init[0]            // mapId
+          *(CField + 156) = init[1]（u8）      // mode
+          sub_4694F0(mapId)                    // 載入 Map/Map/%09d.img
+          sub_403190(CField + 36, 載入的節點)
+          sub_469980(CField)                   // 解 foothold／ladderRope／portal／…
+          sub_4C3440(1); sub_4C2AE0(CField)    // 收尾（CStage::Init 系列）
+```
+
+所以 **`CharacterData` 的第 23 欄就是地圖 id**（原本叫 `unknown97`，現在定名 `mapId`），而
+**伺服器要讓客戶端進哪張地圖，就是把那個 id 塞進 `0x16` 的 `CharacterData`**——不需要別的封包。
+
+地圖檔名由 `sub_4694F0` 以 `L"Map/Map/%09d.img"`（`sub_4389B0` 格式化）產生，例如 `1000000` →
+`Map/Map/001000000.img`。同一個字串區塊把整支 **地圖載入器** 的位置全都標了出來（全部以 WZ 路徑定位，
+不是猜的）：
+
+| 函式 | WZ 路徑／節點 | 內容 |
+|---|---|---|
+| `sub_4694F0` | `Map/Map/%09d.img` | 開檔（回傳 map 根節點）|
+| `sub_469980` | `foothold`、`ladderRope`、`portal` | 碰撞／傳送點 |
+| `sub_469CC0` | `Map/Tile/`（`tile`、`z`、`zM`、`y`、`x`、`%s/%d`、`u`、`no`）| 背景圖磚 |
+| `sub_46A9F0` | `Map/Obj/%s.img/%s/%s/%s`（`obj`、`oS`、`l0`、`l1`、`l2`）| 場地物件 |
+| `sub_46BDA0` | `Map/Back/`、`back`、`back/%d`、`bS`、`BA`（`a`、`cy`、`cx`、`type`、`ry`、`rx`）| 背景層 |
+| `sub_46DA30` | `MapHelper.img/mark/`、`mapName`、`streetName` | 小地圖標記與地名 |
+| `sub_46E7C0` | `Map/MapHelper.img`（`weather`、`rain`、`snow`、`cloud`、`VR`）| 天氣／VR |
+| `sub_4A4430` | `portal` | 傳送門清單（NPC／場地物件側）|
+
+伺服器端需要的正是前三個（`foothold`／`ladderRope`／`portal`）：角色落點、可走範圍與傳送點都在那裡；
+它們的路徑已收在 `server/src/wz/paths.ts`（`mapImagePath`、`MAP_NODES`、`MAP_HELPER_PATH`，
+golden 測試 `test/paths.test.ts`）。
+
+> ✅ **伺服器已經會送這個封包**：`GameEntryServer`（`server/src/net/loginserver.ts`）領到 `0x04` 的角色 id
+> 之後就送 `0x16`（`mode = 0`、`full = 1`、三個亂數種子、把 `CharacterData.mapId` 換成要進的地圖），
+> 地圖由 `--map` 決定（預設 `1000000`，`Map/Map/001000000.img` 存在於 Data.wz）。
+> `test/serve.test.ts` 用假 client 逐欄驗證：領取 → `0x16` → `character.stats.mapId`、角色 id、名字都對，
+> 而且換一個連線不會沿用上一條的狀態。這是原 client 實機驗證之前能做的最完整一步。
+
+#### 4.11.3 `0x1C` = 別人進場（`sub_51CFE0` → `CUserRemote::Init` = `sub_520680`）
+
+```
+u32  characterId        // 等於 CWvsApp+0x14（＝自己的角色 id）時整個封包被忽略
+string name             // → CUser+60
+u8   unknown64          // → CUser+64
+u32  face               // → CUser+68：client 畫的**臉**（sub_508260 的第 2 個參數）
+u32  unknownA           // 讀了就丟
+u32  unknownB           // 讀了就丟
+u32  itemId…            // 外觀清單，**以 u32 0 結尾**（sub_45F340，見 §4.11.3b）
+s16  x
+s16  y
+u8   action             // → CUser+180，也是 vecctrl 初始化的第 6 個參數
+u16  foothold           // → sub_485400(場地, id) 的 foothold 查表
+```
+
+- 外觀清單**不是** `GW_ItemSlot`：`sub_45F340` 只讀 u32 道具 id，並依 `itemId / 1000 / 10`
+  自己歸類到外觀格（12 格的完整對照表見下面 §4.11.3b），所以「只給 id 就能畫出角色」。
+- 清單讀完之後，`sub_520680` 把「第一個 u32」「外觀清單裡被 `sub_45F340` 挑出來的 `101xxxx`」
+  與整條清單交給 `sub_507A20(user, 臉, 臉部裝飾, 15 格清單)` —— 它**不再讀封包**，做的是把外觀裝到
+  這個 user 身上（`sub_508260`／`sub_508290`）加上名牌／血條（§4.11.3c）。
+- 讀完 `x/y/action/foothold` 後，客戶端用 vtable slot 46（`+184`）呼叫
+  `(vecctrl, 0, x, y, 0, 0, action, foothold)` 來建立 `CVecCtrlUser` —— 這條呼叫順序是下面
+  §4.11.5 判讀移動元素欄位的關鍵證據。
+- 讀到的三個 u32 不是都留著：**第一個是臉**，另外兩個讀完就丟（§4.11.3c）。
+
+##### 4.11.3b 外觀清單怎麼變成身上的部位（`sub_45F340`）
+
+`0x1C`（上面）與 `0x16` 的角色紀錄都會經過 `sub_45F340`：它把清單裡的每個 id 歸到**一個 15 格的
+u32 陣列**（`memset(…, 0, 0x3C)` ＝ 60 bytes，只有 0–11 會被填），清單以 `u32 0` 結尾。
+**歸類只看 id，不看欄位順序**（`id / 1000 / 10` 就是 7 位數 id 的 3 位前綴），所以同一個部位送幾次都一樣 ——
+最後一個贏：
+
+| 格 | id 範圍 | 部位名（照出貨 `Data.wz` 的目錄）| 對應的目錄 |
+|---|---|---|---|
+| 0 | `3xxxx`（5 位數）| **頭髮** | `Character/Hair/00030000.img` |
+| 1 | `100xxxx` | **帽子** | `Character/Cap/01000000.img` |
+| 2 | `101xxxx` | **臉部裝飾** → 被拿出來給呼叫者（見下）| `Character/Accessory/01010000.img` |
+| 3 | `102xxxx` | 眼睛裝飾 | `Character/Accessory/01022000.img` |
+| 4 | `103xxxx` | 耳環 | `Character/Accessory/01032000.img` |
+| 5 | `104xxxx`／`105xxxx` | **上衣／套裝，同一格**（兩者只會穿一件）| `Character/Clothes/01040000.img` |
+| 6 | `106xxxx` | **褲子** | `Character/Clothes/0106xxxx.img` |
+| 7 | `107xxxx` | **鞋子** | `Character/Shoes/01071000.img` |
+| 8 | `108xxxx` | **手套** | `Character/Glove/01082000.img` |
+| 9 | `110xxxx` | （這份 Data.wz 裡沒有 `0110xxxx.img`，所以只有 id 前綴是證據）| — |
+| 10 | `109xxxx` | **盾** | `Character/Shield/01092000.img` |
+| 11 | `13xxxxx`／`14xxxxx`（前綴 `13x`／`14x`）| **武器** | `Character/Weapon/01302000.img` |
+| — | `111xxxx` | **直接丟掉**（`case 'o'` 只 break）| — |
+| — | `2xxxx`（**臉**）與其他 | **不會進這個陣列**（見下）| `Character/Face/00020000.img` |
+
+- ⚠️ **臉（`2xxxx`）不在外觀清單的語意裡**：`2xxxx / 10000` 是 2、`2xxxx / 1000 / 10` 也是 2，
+  落到 `default` 就被丟掉。所以臉是從角色紀錄的**另一組欄位**設的，不經過這張表。
+- **第 2 格會被拿走**：`sub_45F340` 的第三個參數不是 null 時，`*a3 = 陣列[2]` 並把那一格清成 0
+  —— 呼叫者要的是「頭上的臉部裝飾」，不是留在陣列裡給人畫。
+- **三個飾品共用一個目錄**：`101xxxx`（5 張）／`102xxxx`（5 張）／`103xxxx`（3 張）全部在
+  `Character/Accessory/` 底下，靠檔名開頭的 id 前綴分辨 —— 這也是為什麼「哪一格是哪個部位」
+  只能從 `sub_45F340` 的 switch 讀，不能從檔案目錄推。
+- **格號不是語意順序**：`109xxxx`（盾）在格 10、`110xxxx` 在格 9，兩個都比 `108xxxx`（手套）大 ——
+  這是一個**畫圖用的順序**，不是「裝備欄的欄號」。所以「108 是手套」是目錄說的（
+  `Character/Glove/`），「第 8 格」是這個函式說的。
+- 這張表也是 §4.8 那個註記缺的工具：client 自己的部位格現在是**已知的 12 個**，而 `0x06` 那 10 個
+  u32 的順序與來源也已經解出（§4.8.1a：`sub_430D00` 把對話框的六個下拉選單寫進 0／5／6／7／11 格與
+  臉的那一格，`0x06` 就照同一組控制項的順序送）。
+
+##### 4.11.3c 別人的臉與頭髮從哪裡來（`sub_507A20` → `sub_508260`／`sub_508290`）
+
+`0x1C` 的第一個 u32、它的外觀清單，與 `CharacterData` 的 `appearanceA`／`appearanceB` 是同一件事的兩個
+入口 —— 兩邊最後都寫進 `CUser` 的同幾個欄位：
+
+| 寫入 | 值 | 從哪裡來 |
+|---|---|---|
+| `CUser+68` | **臉** | `0x1C` 的第一個 u32（`sub_507A20` → `sub_508260`）；`CharacterData.appearanceA`（`sub_42E2C0` → `sub_424590`）；`0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）|
+| `CUser+72` | 臉部裝飾（`101xxxx`）| `0x1C` 外觀清單裡被 `sub_45F340` 挑出來的那一格（同一個 `sub_508260`）|
+| `CUser+76` 起 15 格 | 外觀清單（第 0 格＝頭髮）| `0x1C` 的清單（`sub_508290`）；`CharacterData.appearanceB` 進第 0 格（`sub_42E2C0`）|
+
+證據鏈（每一段都是呼叫，不是命名猜測）：
+
+1. `sub_520680`（`CUserRemote::Init`）讀完 `u8`（→`+64`）之後連讀**三個** u32，只留第一個，最後
+   `return sub_507A20(this, 第一個 u32, 清單挑出來的 101xxxx, 15 格清單)`（`.c:293205`）。
+2. `sub_507A20`（`.c:268901`）→ `sub_508260(this, 臉, 臉部裝飾)`（`.c:269148`）＋ `sub_508290(this, 清單)`。
+3. `sub_508260`（`.c:269241`）：只有 `this[17]`／`this[18]` 有變才寫入，寫完 `this[43] = -1` 再
+   `sub_509790(this, 0, -1)`（把表情歸零＝剛進場的靜止臉）。
+4. `sub_509070`（`.c:269876`，表情／動作播放）建 avatar 時用的是
+   `sub_408400(renderer, this[17], this[43], this[18], …)`，而 `sub_408400` 會拿第二個參數去
+   `(a2 + 16 * (n8 + 4))` 找**情緒節點**（`sub_45D500` 讀 `"0"`..`"8"`）—— 只有 `Character/Face/*.img`
+   有那些節點，所以 `+68` 是**臉 id**，不是「外觀版本鍵」。
+5. 紀錄那一邊：`sub_42E2C0`（char-select 視窗的 avatar，`.c:54826`）把紀錄複製到 `v3 + 108` 之後做
+   `sub_424590(avatar, *(v3 + 126), 挑出來的 101xxxx)`、`srca[0] = *(v3 + 130)`、
+   `sub_424410(avatar, srca)` —— `v3+126` ＝ 紀錄 `+18` ＝ `appearanceA`（**臉**）、`v3+130` ＝ `+22`
+   ＝ `appearanceB`（外觀第 0 格 ＝ **頭髮**，§4.11.3b）。`sub_424590` 與 `sub_508260` 同形（見 §4.8.1a）。
+6. `0x28`（`sub_5221A0`，欄位見 §4.35.4 隔壁那一段）在 flag bit 0 時寫的是同一個 `this[17]`，所以
+   「換臉」這條路徑也指著 `+68`。
+
+伺服器端的落地：`0x1C` 的第一個 u32 ＝ 角色的 `appearanceA`，外觀清單 ＝ **頭髮（`appearanceB`）＋
+穿戴中的裝備 id**（`avatarItemsOf`），兩者都由 `lookOf` 補上起始外觀（臉 `20000`、頭髮 `30000`）——
+0 在那裡等於「沒有這個部位」，client 會把整顆頭畫空。`0x16` 的紀錄同理（`withDefaultLook`），
+`0x0C`／`0x0D` 換外觀時也走 `sub_508260`／`sub_508290`。
+
+#### 4.11.3d 穿戴格與外觀格是**同一套號碼**：`sub_45F340` 的 part code 表
+
+一個角色「穿什麼」在 client 裡有兩個入口 —— `CharacterData` 的穿戴群組（`{u8 格號, 道具}`）與 `0x1C`
+的 id 清單 —— 而它們用的是同一套格號，來源是 itemId 的 **part code**（`itemId / 10000`）：
+
+| part code | 格 | 部位 | 例子 |
+|---|---|---|---|
+| `3xxxx`（30000–39999）| 0 | **頭髮**（只是外觀字，從來不是穿戴道具）| `30000` |
+| `100` | 1 | 帽子 | `1000000` |
+| `101` | 2 | 臉部裝飾 | `1010000` |
+| `102` | 3 | 眼睛裝飾 | `1020000` |
+| `103` | 4 | 耳環 | `1030000` |
+| `104`、`105` | 5 | 上衣／套裝（**兩碼共用同一格**）| `1040001`、`1050000` |
+| `106` | 6 | 褲子 | `1060001` |
+| `107` | 7 | 鞋子 | `1071000` |
+| `108` | 8 | 手套 | `1080000` |
+| `110` | 9 | 披風 | `1100000` |
+| `109` | 10 | 盾 | `1090000` |
+| `13xxxxx`、`14xxxxx` | 11 | 武器（走兩條 fallback 分支，不是 switch 的 case）| `1302000` |
+| `111` | — | 空的（switch 的 `case 'o'` 直接 break）| — |
+
+四條路都指向同一組號碼：
+
+1. `sub_45F340`（`.c:103133`）＝**唯一**讀 part code 的函式：把一列 u32 id 寫進 15 格的 avatar 陣列，
+   格號就是上表（`v6 / 10000 == 3` → 格 0；`switch (v6 / 10000)` 的 `case 100`..`110`；`default` 再看
+   `v6 / 100000` 是否 13／14 → 格 11）。`0x1C` 的清單就是餵它。
+2. `sub_45F610`（`CharacterData::Encode`，`.c:103389`）把穿戴群組寫成 `{u8 格號, GW_ItemSlot}`，格號是
+   **陣列索引 1..14**（`n14 = 1; … while (n14 <= 14)`）；`sub_45FCC0`（`Decode`，`.c:103872`）反向寫回
+   `this + 8 * 格號 + 122`。兩支逐格對應，所以線路上的格號就是陣列索引。
+3. `sub_42E2C0`（char-select 的 avatar，`.c:54840`）解完紀錄後用**一個線性迴圈**把兩邊接起來：
+   `srca[1 + k] = worn[k].itemId`（k = 1..14：`v6` 從 `v91 + 12` 起、每圈 +8，也就是第 k 筆的指標），
+   `srca[0]` ＝ 紀錄的頭髮，最後 `sub_424410(avatar, srca)`。也就是 **穿戴格 k ↔ 外觀格 k**。
+4. `sub_430D00`（建立角色對話框的預覽，`.c:56827`）把六個下拉選單寫進外觀格 0／5／6／7／11
+   （頭髮／上衣／褲子／鞋子／武器），而那六個 u32 就是 `0x06` 送出的順序（§4.8.1a）。
+
+⇒ 伺服器要知道「上衣放第 5 格」不必猜：**那就是 client 自己會放的那一格**。
+
+#### 4.11.4 `0x1D` = 別人離場（`sub_51D280`）
+
+```
+u32 characterId
+```
+
+只讀一個 id：查 `CUserPool` 的 `ZMap` → 取得 `USERREMOTE_ENTRY` → 用 `sub_51EE80` 兩次把前後節點接起來
+（雙向鏈結串列的移除）。沒有任何其他欄位。
+
+#### 4.11.5 `0x22` = 別人的移動：`u32 characterId` + `CMovePath`
+
+`CMovePath` 的線路格式（**每個元素 14 bytes**）：
+
+```
+u16 originX
+u16 originY
+u8  count                     // 元素數（≤ 255）
+count × {
+  u8  attr                    // 元素種類；本 build 沒有表，只有「路徑過期時補的那個元素」用 1
+  s16 x
+  s16 y
+  s16 vx
+  s16 vy
+  u8  action                  // 動作／姿勢位元組，直接餵給 vecctrl
+  u16 foothold
+  u16 duration                // 毫秒；客戶端會加總成 CMovePath+68
+}
+```
+
+| 角色 | 函式 | 證據 |
+|---|---|---|
+| 解碼（收 0x22）| `sub_4953A0` | 讀 2×u16 → `CMovePath+4/+6`、u8 count，再逐元素配置 16-byte 結構 |
+| 編碼（送 0x0E）| `sub_495620` | `CVecCtrlUser::SendMove` = `sub_542C40` 呼叫；逐元素 append `1+2+2+2+2+1+2+2` = **14 bytes**（沒有記憶體裡的兩個洞）|
+| 記憶體結構 | 16 bytes／元素 | 解碼器的位移是**結構**位移：`+0 attr`、`+2 x`、`+4 y`、`+6 vx`、`+8 vy`、`+10 action`、`+12 foothold`、`+14 duration`，洞在 +1／+11 |
+| 播放 | `sub_485330`、`sub_499760` | 讀 `vecctrl+250/252/254/256/258/260`（= `CMovePath+32` 的當前元素 `+2/+4/+6/+8/+10/+12`）丟進 vtable slot 46 |
+| 值不值得送 | `sub_495880` | 比對「當前元素」與活體狀態：`+2`↔x、`+4`↔y、`+6`／`+8` 必須為 0、`+10`↔action、`+12`↔foothold |
+| 時間上限 | `sub_4967C0` | 把每個元素的 `+14` 加進 `CMovePath+68`，再和 1000／1100 ms 比較 |
+
+> `originX/originY` 會在送出路徑後被覆寫成「當前元素的 x／y」（`sub_495880` 尾端），所以它們是路徑的
+> 起點，不是角色的即時座標；真正的位置由第一個元素的 `x/y` 決定。
+
+#### 4.11.6 client → server 的兩個 field 封包
+
+| opcode | 內容 | 送出的函式 | 說明 |
+|---|---|---|---|
+| `0x0E` | `u8 *(CStage+0x9C)` + `CMovePath` | `sub_542C40`（`CVecCtrlUser::SendMove`）| **本機角色自己的移動**。`§4.5` 舊註記只寫了那個 u8，因為那時還沒定位 `sub_495620`：路徑是接在後面的 |
+| `0x0D` | `s32 kind` + `string name` | `sub_472590`（`CField::SendInteract`）| 點擊場地物件；`sub_5124C0`／`sub_512510` 在滑鼠下是傳送門時送 `kind = -1` 並播 `Portal` 音效 → **換地圖的請求**（伺服器以 `0x16` 回應）|
+
+- `sub_472590` 內建節流：`n3000[6] != 0` 或距上次 `< 500 ms` 就拒送；送出後設 `n3000[6] = 1`。
+- **`0x19` 是這個節流的解除鈕**：`sub_4728B0`（0x19 的處理函式）只做 `n3000[6] = 0; n3000[7] = timeGetTime();`
+  →「客戶端送 `0x0D` 後，伺服器必須回一個空封包 `0x19`」，否則客戶端再也送不出互動封包。
+- 順帶解答 §6 第 6 項：`0x0E` 在**兩個方向是兩件不同的事** —— client 送的是自己的移動，
+  server 送的（`sub_55B6A0`，§4.10）是 `u16 n, n×{u32 key, s32 value}` 的 key/value 表。同號不同義。
+- `0x1A`（server → client）是**使用者訊息**家族：`sub_472910` 先讀 u8 再 `switch (值 - 9)`（跳表，
+  範圍 9..34，只有四個 case）；字串已解出：`'%s'님을 찾지 못했습니다`（找不到人）、
+  `'%s'님의 현재 위치는 '%s'입니다`（回報位置）、`'%s'님께 귓속말을 전달했습니다.`（密語已送達）、
+  `'%s'님은 현재 귓속말이 거부되어 있습니다.`（對方拒收密語）、`/헉맵 %d`。
+  **四個 case 的讀取形狀與「哪一個是聊天」見 §4.26** —— 其中 sub-op `0x12` 是**一般聊天**，
+  也就是玩家說的話怎麼傳給同一張圖的其他人。
+
+#### 4.11.7 `CUserPool` 其餘分支的現況（尚未解完）
+
+| opcode | 分支 | 目前已知 |
+|---|---|---|
+| 0x1E／0x20 | `sub_51D530` | 只讀 u32 查表，**沒有** payload 處理（0x1F 才有：`sub_50B320` ＝ **氣球**，形狀已定位但未實作，見 §4.35.5）|
+| 0x21／0x2A | `sub_51D590` | 讀 u32 查表後 `default` → 沒有分支 |
+| 0x23／0x24／0x25 | `sub_5209C0` → `sub_520F20`／`sub_521400`／`sub_521AD0` | **已解（本回合），見 §4.11.7b**：`sub_51D590` 先讀 `u32 characterId` 並在 `CUserPool` 查（查不到整包丟掉），本體＝`u8 (hits\|筆數<<4)`＋`u8 技能等級`＋〔`u32 技能 id`〕＋`u8 面向\|動作`＋`u8 速度`＋`u8 afterimage`＋`u32`，然後每筆 `u32 mobId`＋`u8 動畫`＋`hits × u16 傷害`——**別人的攻擊**（**三支都已實作轉播**，一對一見 §4.11.7c）|
+| 0x26 | `nullsub_13` | 空函式 |
+| 0x27 | `sub_509790` | **已解，見 §4.35**：`u32 characterId` ＋ `u32 emotion`（0..8）→ `CUser::SetFace`；同一格就是 c2s `0x13` 的送出端|
+| 0x28 | `sub_5221A0` | **已解，見 §4.11.8**：`u32 flags` →〔bit 0：`u32`（存起來當第一格）〕〔bit 4：`u32`（跳過）〕〔bit 8：`u32`（跳過）〕→ `u8`：非 0 就 `sub_45F340(packet, src[15])` 讀 **id 清單**成 15 格，0 就 `src = *(this + 19)`（這個人自己那一份）→ `sub_508260(this, …)` → **`sub_508290(this, src)`**（＝安裝 look 區，也就是 §4.11.7c 說的那條「觀察者怎麼知道那個人的武器」的路）|
+| 0x29 | `sub_522300` | **已解，見 §4.27**：`u32 characterId`（由 `sub_51D590` 讀並在池裡查）＋ `u8 effect`；0 = 在那個人身上播 `Effect/BasicEff.img/LevelUp` + `LevelUp` 音效（升級），1 後面還有一個 `u32`（未解）|
+
+> `0x15`／`0x17`（CStage 基底）沒有分支；`0x18`、`0x19`、`0x1A` 由 `sub_472770` 自己處理（0x19 見上）。
+
+#### 4.11.7b ✅ s2c `0x23`／`0x24`／`0x25` ＝**別人的一次攻擊**（`sub_5209C0` 讀完）
+
+`sub_51D590` 對這三個 opcode 是同一個 case（`'#'`／`'$'`／`'%'`，`sub_519xxx` 之前先做掉開頭那個 `u32`）：
+
+- 開頭 `u32 characterId`，用 `sub_51CD30` 在 `CUserPool` 查（雜湊：桶陣列在 `this+4`、桶數 `this+5`、
+  `__ROR4__(id, 5) % 桶數`、鏈結在 `+1`、鍵在 `+2`、回傳 `*(entry[4] + 16)`）。**查不到就整包丟掉**——
+  這也是這個家族可以安全廣播的原因（跟 `0x27`／`0x29` 同一條規則）。
+- 找到人之後交給 `sub_5209C0(user, opcode, packet)`，再由 opcode 選套用函式：
+  `0x23`→`sub_520F20`、`0x24`→`sub_521400`、`0x25`→`sub_521AD0`。
+
+**本體**（`sub_5209C0`，線上順序＝讀取順序；`sub_45DC40` = `u8`、`sub_45DCC0` = `u32`）：
+
+| # | 寬度 | 欄位 | 證據 |
+|---|---|---|---|
+| 1 | `u8` | 低 4 bits `hits`（每隻怪幾個傷害數字）／高 4 bits 目標筆數 | 與 c2s `0x0F` 同一個打包；`for (j = i; j; --j)` 每筆讀 `hits` 個 `u16` |
+| 2 | `u8` | 技能等級；**非 0 才有欄位 3** | 查到節點後這個值被夾在 `1..節點子節點數`（`*(right[18]-4)`），`sub_50C460` 再拿 `*node == 1001003` 比 |
+| 3 | `u32` | 技能 id（只有欄位 2 非 0 時讀） | 同上。`dword_5C2038` 那池是引擎的資料池，`Skill/` 的檔名就是 skill id（WZ 只有 `Skill/100.img`…`Skill/400.img`）|
+| 4 | `u8` | bit 7 面向左、低 7 bits 動作 id | `sub_508690(user, 動作, …)` 拿它在**那個人的**動作表（`user+37`）查動作 |
+| 5 | `u8` | `speed`：**跟 c2s `0x0F` 的第 4 byte 同一個值** | 收端也交給 `sub_508690` → `sub_508700`（`(n+5)/8` 乘進每格延遲，夾 0..6）；送端是 `sub_4BE8B0(*(this+38), …)`（§4.13.1c）|
+| 6 | `u8` | `afterimage`：`Character/Afterimage/<武器的 info/afterImage>` 的第幾個子節點 | `sub_50DAA0` 用 `_itow(值)` 接進路徑；`user+39` 是武器那條 afterImage 字串（`sub_508290` 從武器節點填）|
+| 7 | `u32` | 讀了但不給 `0x23`／`0x25` 的 handler，**只有 `0x24` 收** | `sub_521400(this, i, right, n, 動作, 面向, Valuea, bottom, 記錄陣列)` 比另外兩支多一個參數 |
+| 8… | 每筆 | `u32 mobId`（**0 代表空位**，後面兩個欄位都不在）＋`u8`（動畫）＋`hits × u16`（傷害） | 本機記錄是 76 bytes（`memset(buf, 0, 0x4C)`、`buf += 19` dword）：`+0` 物件指標、`+4` 動畫、`+8..` 傷害（`int`，取低 16 bits 上線）、`+68`／`+72` x／y |
+
+- 讀完之後還有一趟**壓縮**：每筆的第一個 `u32` 拿去 `sub_492C00(dword_5C2054 + 1, …)`（**CMobPool**）查，
+  查到就把記錄那格換成池裡的物件（`out[1]`），查不到就 `memmove` 整筆刪掉（筆數 `-1`）。
+  **所以「送幾筆」與「client 留下幾筆」不一定相等**，讀／寫兩端都不能假設筆數守恆。
+- **收端會做什麼**（`sub_520F20`，`0x23`）：對每筆、每個傷害索引跑 `sub_513C70(user)`（當前武器的普攻動作）
+  ＋`sub_50D7F0(…, 動作)` 播揮擊，再用 `sub_4882F0(monster, 動作, 基準時間 + sub_515CA0(now, 280), 記錄+4,
+  面向, 傷害[i], i, 記錄+68, 記錄+72)` 把傷害數字排到那隻怪身上——**跟攻擊者自己的 client 送包前跑的是同一組函式**
+  （§4.13.1）。`sub_50DAA0` 先用 `this+39`（武器節點給的攻擊範圍）與 `afterimage` 組特效路徑，
+  `sub_40EDA0` 解析不到就整段跳過（連傷害數字都不會出現）。
+- `sub_508690(user, 動作, speed)` 是**閘門**：`user+46 > -1`（這個人已經在攻擊中）或 `user+37` 的動作表查不到
+  這個動作 → 回 0，**整包不做事**（不丟例外）。所以「送錯動作」的結果是安靜地什麼都不播。
+- 三支的差異：`0x24`（`sub_521400`）用 `sub_514BA0`／`sub_4892A0`／`sub_489580`／`sub_514D00`／`sub_515C70`
+  這一組（子彈型特效）並且多收欄位 7；`0x25`（`sub_521AD0`）同組但不收欄位 7。
+  ⇒ 與 c2s 的 `0x0F`／`0x10`／`0x11` 一對一，**但名字是普攻／射擊／魔法**（原本寫的「魔法／技能」是錯的）：
+  哪一支對哪一支、以及 `0x24` 的欄位 7 是什麼，見 **§4.11.7c**。
+- **WZ 這一側**（寫實作時要用）：`Character/Afterimage/` 只有 10 張圖（`axe`／`crossBow`／`hit`／`mace`／
+  `poleArm`／`spear`／`swordOL`／`swordOS`／`swordTL`／`swordTS`），武器自己的
+  `Character/Weapon/0<id>.img → info/afterImage` 指名用哪一張（`01302000.img`＝검 → `swordOL`、
+  `01402000.img`＝양손검 → `swordTS`、`01372000.img`＝페어리 완드 → `mace`）；每張圖都有 `0`…`10` 十一個子節點
+  （`hit.img` 例外：子節點是 `sword1`／`sword2`／`mace1`／`mace2`／`maceF`／`swordF`），每個子節點底下才是
+  `swingO1`／`stabO1`／`proneStab`… 的動畫。**選子節點編號的是 client 的 `sub_4BE270`（未定位）**，
+  但 `0` 每一張都有，所以轉播送 0。
+- **伺服器端（本回合實作）**：`net/loginserver.ts` 的 `relayAttack`（原 `relaySwing`）把一次 c2s 攻擊轉播出去
+  （`0x0F`→`0x23`；另外兩對見 §4.11.7c）：
+  只給**同場地的其他人**（攻擊者自己的 client 在送包前已經播過同一組特效，跟 `0x27`／`0x29` 同一個理由）、
+  目標只放**這場地真的收下的怪**（`applyDamage` 有回傳的），欄位 5 直接**照抄**攻擊者自己的第 4 byte。
+  沒有來源的三格送中性值：`skillLevel`／`skillId` ＝ 0（沒有技能節點）、`afterimage` ＝ 0（每張圖都有 `0`）、
+  欄位 7 ＝ 0（只有 `0x24` 會收）。次序是「揮擊 → 怪物反應 → 獎勵」（`applyAttack` 先收集再送）。
+- **驗證**：`test/field.test.ts` 三組（golden bytes、技能 id、拒絕 `mobId 0`），`test/serve.test.ts` 的同場地
+  測試多驗「先 `0x23`、再 `0x34`／`0x30`，而且攻擊者自己沒有收到」；`whisper_probe.mjs` 用真 `Data.wz` 揮一刀
+  （8 個檢查：有怪可打、Alt 收到、id／動作／hits／speed／目標／中性三格、揮擊先於怪物反應、攻擊者沒有回音）。
+
+#### 4.11.7c ✅ 三支攻擊的一對一（`0x23`↔`0x0F`、`0x24`↔`0x10`、`0x25`↔`0x11`）與 `0x24` 的投射物
+
+§4.11.7b 把「有哪些欄位」讀完，**哪一支對哪一支**是這一節定的：把六支函式（三個 c2s sender、三個 s2c 套用函式）
+各自呼叫的特效 helper 抓出來比，其中兩支是互斥的：
+
+| | `sub_50DAA0` | `sub_5095A0` | `sub_41B630` | `sub_41B850` | `sub_514BA0` | `sub_514D00` | `sub_515C70` | `sub_4892A0` | `sub_489580` | `sub_50D7F0` | `sub_4882F0` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| c2s `0x0F` `sub_512F90` | ✓ | ✓ | | | | | | | | ✓ | ✓ |
+| c2s `0x10` `sub_513C80` | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ |
+| c2s `0x11` `sub_514D30` | | ✓ | | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ |
+| s2c `0x23` `sub_520F20` | ✓ | ✓ | | | | | | | | ✓ | ✓ |
+| s2c `0x24` `sub_521400` | | | ✓ | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| s2c `0x25` `sub_521AD0` | | ✓ | | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+- `sub_41B630`（子彈型特效）只出現在 c2s `0x10` 與 s2c `0x24`；`sub_41B850`（魔法特效）只出現在 c2s `0x11` 與
+  s2c `0x25`；`0x23` 與 `0x0F` 的呼叫集合**完全相同**。三對一因此是資料上的事實。
+- **命名更正**：`0x10` 不是「魔法」而是**射擊**——它的 sender 只服務弓／弩／爪
+  （`sub_4657F0(武器 id)`：`id/100000` 必須是 13／14，再回 `id/10000 %100`，只認 30–33、37、38、40–47；
+  射擊家族是其中的 45／46／47），`sub_511630` 也開頭就擋掉其他武器。`0x11` 才是**魔法**：唯一的上游是
+  `sub_518BF0` 對技能 `2001005`／`2101005` 走 `LABEL_53 → sub_5195D0`，而 `sub_5195D0` 就是
+  `if ((*(this + 45) & 0xFFFFFFFE) != 0xA) return sub_514D30(this, right, n30);`（狀態不是那個值就走 `0x11`，
+  是的話改跑 `sub_512F90` 並回 0）。⇒ `CLIENT_FIELD_OPCODE` 的 `magicAttack`（`0x10`）改名 `shootAttack`、
+  `skillAttack`（`0x11`）改名 `magicAttack`；`FIELD_OPCODE` 的 `userMagicAttack`（`0x24`）改名 `userShootAttack`、
+  `userSkillAttack`（`0x25`）改名 `userMagicAttack`。
+
+**c2s `0x10` 表頭那個 `u16` ＝ 投射物的 USE 分頁格號**（`sub_511630(this, right, n30, Args)`）：
+
+- 回傳值就是**格號**（1-based；它走分頁陣列的第 `v9` 格，`sub_465710(tab, …, 2, v9)`），**item id 走 out-param
+  `Args`**——所以「把封包抄進 `0x24` 的欄位 7」是錯的：`0x24` 的收端要的是 id（見下）。找不到 pile 就回 0，
+  而 caller 用 `if (… == 0) return` 表達「不要送這個包」。
+- 挑 pile 的條件：`v11/1000 - 2060`（箭，`2060xxx`）、`v11/1000 - 2061`（弩箭，`2061xxx`）、
+  `v11/10000 - 207`（飛鏢，`207xxxx`）三者之一必須為 0（依武器種類），而且那個 pile 的一個 `u16`
+  （`+34`／`+36` 兩 byte 互 xor 解出來；「數量」是最合理的讀法）必須 ≥ `n30`（目標自己那一格蓋寫後的值）。
+- c2s `0x11` 的表頭第 4 byte 是 `*(this + 38)` 原值，**沒有** `sub_4BE8B0` 的抖動（§4.13.1c 的兩個 sender 都有）。
+
+**s2c `0x24` 的欄位 7（那個 `u32`）＝投射物的 item id（推論，見最後一點）**：
+
+- `sub_521400(this, i, right, n, 動作, 面向, afterimage, bottom, 記錄陣列)` 多收的就是它，用處兩個：
+  `v96 = bottom / 10000 != 207 ? 0 : 0x78`（飛鏢家族才把每一排往下挪 120 px），以及當 `sub_41B630` 的最後一個參數。
+- **閘門不同**：`0x24` 開頭就要求 `sub_4657F0(*(this+34)) ∈ {45,46,47}`（觀察者手上這個人的武器不是弓／弩／爪就整包
+  不做事），`0x25` 沒有這個檢查。⇒ 射擊轉播要在別人的畫面上動起來，**觀察者必須已經知道那個人的武器**；那條路是
+  `0x1C` 的 id 清單（`sub_45F340` 歸格）→ `sub_507A20` → `sub_508290`，它把 `*(this+34) = src[11]`、`+38` 與 `+39`
+  換成武器 `info` 的那兩格（速度與 afterImage 字串）——也就是這個 server 已經在送的 `0x1C`。
+- `0x24` 內部的 `right[18] + 120*Value`、`sub_514BA0`、`sub_485AA0`、`sub_4892A0` 都是特效自己的事，轉播不必知道：
+  欄位對，收端自己會算。欄位錯的代價很小——`sub_508690` 是閘門（動作不在那個人的動作表就整包不做事），
+  而 `sub_50DAA0` 只用 `afterimage` 組路徑（每張 `Character/Afterimage/*.img` 都有子節點 `0`）。
+- ⚠️ **這一格是推論**：收端把 `bottom` 當 item id 用（`/10000 == 207` 的判斷與 `sub_41B630` 的最後一個參數）
+  是硬證據，但「原伺服器送的是 id，不是格號」沒有直接證據（沒有真實流量）。轉播時用 id 的理由是收端的
+  判斷形狀（`207xxxx`）；送格號永遠不會命中那個分支，等於送 0。
+
+**伺服器端（本回合實作）**：`ATTACK_RELAY_OPCODE` 一張表（`0x0F`→`0x23`、`0x10`→`0x24`、`0x11`→`0x25`；
+不在表上的 opcode 不轉播）＋ `relayAttack`（原 `relaySwing`）。`0x10` 的欄位 7 用**我們自己對那個分頁格的紀錄**
+查 item id（`projectileItemOf`；查不到＝0——原伺服器能回答這個問題，我們沒有那本帳時就送中性值），
+其餘與 §4.11.7b 相同（只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`skillId`／`afterimage` 送 0）。
+
+**驗證**：`test/field.test.ts`（`ATTACK_RELAY_OPCODE` 的三對＋`0x24`／`0x25` 的 golden bytes 與 `describe`）、
+`test/serve.test.ts`（同場地兩人：`0x10`→觀察者收到 `0x24` 且欄位 7 ＝ 2060000、`0x11`→`0x25` 欄位 7 ＝ 0、
+兩者攻擊者都沒有回音）、`whisper_probe.mjs`（真 `Data.wz`，射擊與魔法各一段）。
+
+#### 4.11.8 ✅ s2c `0x28` ＝**某個人的外觀換了**（`sub_5221A0` 讀完）
+
+§4.11.7 的分支表把 `0x28` 記成「flags ＋ 可選欄位 ＋ id 清單」；§4.36 的裝備路徑就是它的送出者，這一節把
+每個欄位的寬度與「哪一個 bit 帶哪一個字」釘住（`sub_5221A0`，.c:294622；範圍分派器 `sub_51D590` 先讀
+`u32 characterId` 並在 `CUserPool` 查，**查不到整包丟掉**，所以對一個不在場的角色送它是安全的）：
+
+```text
+u32  flags        // 每一個 bit 代表後面多一個 u32（先讀 flags，再依 bit 讀欄位）
+  0x1  -> u32  臉        （→ CUser+68，`sub_508260`；與 0x1C 的第一個 u32、appearanceA 同一格，§4.11.3c）
+  0x4  -> u32  （讀了丟掉，不存）
+  0x8  -> u32  （讀了丟掉，不存）
+u8   hasAvatar    // 非 0 ⇒ 後面是 id 清單（u32 一串、0 結尾）；0 ⇒ 不動外觀
+  非 0：{ u32 itemId }* u32 0     // `sub_45F340` 依 id 前綴歸進 15 格（§4.11.3b/3d）
+  0   ：memcpy(src, this + 19, 60) // 保留客戶端手上那一份 look
+尾段：sub_508260(this, face, faceAccessory) ＋ sub_508290(this, src)
+```
+
+四個要點：
+
+- **`0x28` 就是 `0x1C` 的「更新版」**：收尾那兩個呼叫與 `0x1C`（`sub_520680` → `sub_507A20`）相同，寫進的也是同幾格
+  （`CUser+68` 臉、`+72` 臉部裝飾、`+76` 起的 15 格外觀），所以「別人換裝備時我看到什麼」與「我剛進場時看到他
+  什麼」是同一條路（§4.11.3c）。清單裡被 `sub_45F340` 挑走的第 2 格（`101xxxx`）就是 `CUser+72`。
+- **沒帶的臉不變**：`face` 的初值是 `*(this + 17)`（客戶端手上那一格），bit 0 沒設就只是把原值寫回去。⇒ 只換裝備
+  的包不必帶臉，也不必知道對方的臉（本伺服器就是這樣送的）。
+- **`hasAvatar = 0` 是「不要動」而不是「脫光」**：那條路是 `memcpy` 自己那一份 60 bytes。⇒ 只想換臉的包可以只帶
+  `flags = 1` ＋ 一個 `u32`。
+- ⚠️ **`0x4`／`0x8` 兩格本伺服器不送**：不知道內容就不編值（和 `0x1C` 的兩個 unknown 同一條規矩）。codec 讀得出來、
+  也寫得出來（真封包有就照抄），但沒有呼叫者會用到它們。
+
+**伺服器端的用法（§4.36）**：換裝備時 `flags = 0`（臉沒動）、`hasAvatar = 1`、清單 ＝ `avatarItemsOf(record)`
+（頭髮＋穿戴中的裝備；`sub_45F340` 只依 id 前綴歸格，所以清單裡的順序無意義）。清單裡沒有臉部裝飾
+⇒ 客戶端把 `CUser+72` 寫成 0 ＝「頭上沒有那件裝飾」，正是實際狀態；`flags = 0` 則讓它保留現在這張臉。
+
+### 4.12 🟡 CMobPool／CNpcPool／CRewardPool：分派已拆到函式（`0x2F` → §4.15、NPC `0x39`–`0x3B` → §4.19）
+
+§4.11 把「哪個子系統」解到欄位層；這一節把同一條路線再往下一層拆成「哪個函式處理哪個 opcode」。
+**未標「已證實」的欄位都還不能當規格用**（這一節的目的是讓下一個回合不必重讀反編譯）。
+
+#### CMobPool（`sub_492330(dword_5C2054, opcode, packet)`）
+
+| opcode | 分支 | 目前已知（讀取順序）|
+|---|---|---|
+| 0x2E | — | 沒有分支 |
+| 0x2F | `sub_4924A0` | **怪物進場（✅ 已實作，§4.15）**：`u32 mobId`；池中已有 → `[mob+112] = 1` 後返回；沒有 → `u32 templateId`（`sub_48CFA0`→`sub_4848E0` 載模板）→ 建池項 → `sub_484ED0(newMob, mobId, packet)` = `CMob::Init` 讀剩下的欄位（下一段）|
+| 0x30 | `sub_4926B0` | `u32 mobId` + `s16 delayMs`：`>= 0` → 塞進池的定時佇列（`sub_492100` 到期時回首），`< 0` → 立刻移除（§4.16.3）|
+| 0x31 | `sub_4927B0` | `u8 flag` + `u32 mobId`（**不是移動，也沒有 `CMovePath`；移動是 0x33，見 §4.16.1**）；`flag != 0` → `sub_491630`：查到怪 → 有指標在跑就什麼都不做、否則 `sub_485330(mob, 1)` 推進一步；查不到 → `u32 templateId` + `CMob::Init` 建立；`flag == 0` → `sub_491830`（移除，`mob+112` 非 0 時放棄）|
+| 0x32–0x36 | `sub_492380` | `u32 mobId` 查表，然後 **0x33→`sub_488BC0`（移動，✅ 已實作 §4.16）**、0x34→`sub_488D90`（`u16`→`mob+132`）、0x35→`sub_488E10`（動畫區塊 `sub_4C6CE0`）（0x32／0x36 沒有分支）|
+| 0x37 | — | 沒有分支 |
+
+> 移動本身**就是 §4.11.5 的 `CMovePath`**：`sub_485330` 是「取移動路徑的下一個元素並移動 vecctrl」，
+> 和玩家的 `sub_499760`（`CVecCtrlUser`）是同一組程式碼。`sub_491830`／`sub_485520` 是「有沒有下一個元素」。
+
+#### CNpcPool（`sub_49F560(dword_5C2050, opcode, packet)`）
+
+| opcode | 分支 | 目前已知 |
+|---|---|---|
+| 0x38／0x41 | — | 沒有分支（`0x38` 到現在仍無法解釋）|
+| 0x39 | `sub_49F6C0` | **NPC 進場 ✅ 已實作 → §4.19**：`u32 npcId`；池中已有 → `+24 \|= 1` 後返回；沒有才讀 `u32 templateId`（`sub_49CB30` 快取模板 → `sub_498A20` 建物件）並進 `sub_498CF0` 讀剩下的欄位 |
+| 0x3A | `sub_49F810` | **NPC 離場 ✅ → §4.19**：`u32 npcId`；清 `+24` 的 bit 0，歸零才解除鏈結 |
+| 0x3B | `sub_49F970` | **NPC 走動 ✅ → §4.19＋§4.28**：`u8 flag` + `u32 npcId`（**順序是 flag 在前**）；`flag != 0` → `sub_49F260(npcId, packet)`（設 bit 1 後 `sub_499760(vecctrl, 1)` ＝ 開始走）、`flag == 0` → `sub_49F380(npcId)`（停）（**與怪物 0x31 同型**）|
+| 0x3C–0x40 | `sub_49F5B0` | `sub_49F610` 查表後**只有 0x3D** 才呼叫 `sub_49A280(opcode, packet)`；`0x3C`／`0x3E`／`0x3F`／`0x40` 讀完 `u32 npcId` 就結束 |
+
+#### 其餘區間（只有入口，尚未拆）
+
+| opcode | 入口 | 已知 |
+|---|---|---|
+| 0x42–0x45 | `sub_4A8870`（`dword_5C204C`）| 只有 0x43→`sub_4A88A0`、0x44→`sub_4A95B0` 兩個分支 |
+| 0x46–0x48 | `sub_4A58F0`（`dword_5C2048`）| CQuestMan（任務）|
+| 0x49–0x4C | `sub_4B73A0` | 對話框／商店（0x4A 開 `CShopDlg`；`this_15 = dword_5C2040` = `CUniqueModeless`）|
+| 0x4D–0x4F | `sub_4E18D0` | CUIMessenger，內部再 switch 0–7（`sub_4DF1D0`／`sub_4DF620`／`sub_4DF8B0`／`sub_4E19A0`／`sub_4E1E30`／`sub_4E2170`／`sub_4E2280`）|
+| 0x50–0x52 | `sub_4815E0` | CMiniRoomBaseDlg（交易／小房間），switch 3／5／6／7／8 → vtable slot 15–18 |
+
+#### 落掉的鉤子（本回合未做完，留給下一個回合）
+
+- `0x1E`／`0x20`／`0x21`／`0x2A` 在 CUserPool 內是「讀 u32 查表後什麼都不做」；`0x26` 是 `nullsub`。
+  這些很可能是**空實作或已停用**，但要先確認不是 Hex-Rays 掉的呼叫再下結論。
+  （`0x1F` 不在這一批：它是 `sub_50B320` 的氣球，形狀已定位，見 §4.35.5；`0x27` 是表情，**已實作**，
+  見 §4.35。）
+- ~~`sub_5209C0`（0x23／0x24／0x25）內有 76-byte 的 buff／怪物查表迴圈，還沒讀欄位。~~
+  **已讀完（§4.11.7b）**：那不是 buff 查表，是「別人的攻擊」——76-byte 是每隻被打到的怪的記錄，
+  中途那趟查表是 CMobPool。`0x23`（普攻）已實作成轉播；`0x24`／`0x25` 的套用函式只讀到結構。
+
+#### 4.12.1 `CMob::Init`（`sub_484ED0`）讀的前半段：怪物進場包 `0x2F` 的身體
+
+`0x2F` 的分派本體 `sub_4924A0` 先讀 `u32 mobId`（`*(this + 30) = mobId` → 就是 **mob + 120**，
+跟 `0x0F` 攻擊包裡的怪物 id 同一欄），池中沒有這個 id 時再讀 `u32 templateId`，
+經 `sub_48CFA0`（模板查表）→ `sub_4848E0`（建物件）後進 `CMob::Init(this, mobId, packet)`。
+
+`CMob::Init` 接著照這個順序讀（`sub_45DC40` = `u8`、`sub_45DC80` = `u16`，兩者都在長度不足時
+丟 `ZException(38)`——與 `server/src/protocol/packet.ts` 的 `PacketReader` 同一個契約）：
+
+| # | 寬度 | 寫入目標 | 語意 |
+|---|---|---|---|
+| 1 | `s16` | `mob + 368`、同時複製到 `mob + 360` | **x**（`sub_485AA0` 的命中框把它當位移加在矩形上，所以它就是怪物座標）|
+| 2 | `s16` | `mob + 372`、同時複製到 `mob + 364` | **y** |
+| 3 | `u8` | `mob + 272` | **面向**（`sub_485AA0` 用 `mob + 272 & 1` 在 `+292`／`+308` 兩個矩形之間選一個）|
+| 4 | `u16` | 只拿去查表 | 以 `sub_489800(this_7 + 25, &值, &out)` 查一次（全域 ZMap，`n2 = 0`）|
+| 5 | `u16` | 同上（`n2 = 1`）| 查到的 `+32` 欄位與 `*(template + 24)` 一起傳進 `sub_53D310`（音效／特效解析）；語意待續 |
+| 6 | — | `mob + 136` | `sub_4C6CE0`：**動畫狀態區塊**（見下）|
+
+`sub_4C6CE0(obj, packet, time)` 是共用的**動畫狀態解碼器**（只有兩個呼叫端，都在 CMob 的
+`Init`／重生路徑：`sub_484ED0`、`sub_4885D0`）。它的完整形狀已經讀出來：
+
+| 步驟 | 寬度 | 內容 |
+|---|---|---|
+| 旗標 | **`u32`** | `v8 = *(u32 *)&packet[pos]`（長度不足 4 → `ZException 38`）|
+| 每個被設定的 bit | `u16` × 2 | `(動畫索引, 時間索引)`；第二個乘 100 加上 `timeGetTime()` 寫進「結束時間」 |
+
+七個通道（bit `1`／`2`／`4`／`8`／`0x10`／`0x20`／`0x40`）分別寫進物件 `+10`、`+13`、`+16`、`+19`、
+`+22`、`+25`、`+28`（每個通道 2 個 dword：索引與結束時間；bit `1` 是 `4 * (25 * idx)`、
+bit `2` 是 `20 * (5 * idx)`，兩者都是 **100 ms 的倍數**，即「動畫延遲」）。沒設定的 bit 會把該通道歸零。
+以 `CMob::Init` 傳進來的 `obj = mob + 136` 換算，索引欄落在 mob `+176`、`+188`、`+200`、`+212`、
+`+224`、`+236`、`+248`。
+
+所以 `0x2F` 在兩個 `u16` 之後是：**`u32 動畫旗標` ＋ 每個設定的 bit 各 2 個 `u16`**，
+之後是 `CMob::Init` 尾端的本地初始化（`sub_4861F0`、`sub_485DA0`）——**封包到這裡結束**。
+`0x2F` 唯一還沒命名的是第 4/5 欄那兩個 `u16`：它們只被拿去查 `this_7 + 25` 這個雜湊表
+（`sub_489800` ＝ `ZMap`-style find：`__ROR4__(key,5) % size` 再走鏈），第二個查到的 `+32` 欄位
+與 `*(template + 24)` 一起傳進 `sub_53D310`，值本身**不會**存進怪物（所以不是 foothold／座標這類狀態），
+語意待續。
+
+`CMob::Init` 尾端還有 `sub_4861F0(this)`、`sub_485DA0(this)`（＝建立怪物狀態／站上 foothold），
+最後把 `mob + 116`（dword 29）設 `-1`、`+128`／`+132`／`+52`／`+280` 歸零。
+
+### 4.13 🟡 client → server 遊戲內封包的語意（證據：`/` 指令表 + CP949 字串 + 與 CMob 同區的呼叫）
+
+§4.5 的目錄只給號碼與 sender。這一節把其中幾個變成**有語意的封包**，方法是讀 `sub_470E10`
+＝聊天輸入框的「`/` 開頭」分支（`sub_4F8CB0`：Enter、非空、第一個字元是 `/` 才走到它）：
+它是一整張指令表，每一條指令就是「這個 opcode 該怎麼送」的現成範例。
+2003 年的 client 沒有符號，指令字串＝函式唯一的名字，而 `.c` 是 CP949——
+`grep` 只會看到亂碼，用本回合新增的 `tools/kstr.py` 讀：
+
+```bash
+python3 tools/kstr.py MapleStory.exe.c sub_470E10
+# /헉맵 /헉위치 [현재위치] Map : %09d  X : %d  Y : %d /헉추적 /헉경고 /헉공지 /헉창조 /헉소멸 /헉경험치
+# /귓속말 /찾기 /교환 /파티정보 /파티만들기 /파티탈퇴 /파티초대 /파티강퇴
+```
+
+| opcode | 指令 | sender | 已讀出的欄位 |
+|---|---|---|---|
+| `0x0D` | `/헉맵 <mapId>`（`atoi`）| `sub_472590(kind, name)` | `s32 kind` + `string name`；**name 為 null 時寫空字串**（`sub_430230` 收到 nullptr 會用全域空字串），所以 0x0D 永遠是「s32 + 字串」；節流 500 ms（`n3000[6]/[7]`，`0x19` 解除）|
+| `0x12` | 一般聊天（非 `/`、且沒有密語對象）| `sub_470C70` | `string`（`sub_430230`）；**已實作，見 §4.26** |
+| `0x22` | `/헉공지 <msg>`／`/헉경고 <msg>` | `sub_470E10` 內嵌 | `u8 0`（公告）／`u8 1`（警告）+ `string` |
+| `0x23` | `/귓속말 <name> <msg>`、`/헉추적 <name>` | `sub_4717D0` | 兩個 `string`；sender 自己會擋「다른 요청을 처리 중입니다」（一次只允許一個請求）|
+| `0x25` | `/교환 <name>` | `sub_471A40` | `[u8 0][u8 1][u32 目標角色 id]`；`0x25` 是**視窗共用的請求**（七個送出者），見 §4.39／§4.40 |
+| `0x26` | `/파티만들기`、`/파티탈퇴`、`/파티초대 <name>`、`/파티강퇴 <name>` | `sub_471CD0`／`sub_471E90`／`sub_472050`／`sub_4722E0`，以及 `sub_55C5E0`（§4.10 `0x10` type 3 按「是」）| 各自的 sub-code；§4.10 已證實「邀請回覆」＝`u8 2` + `u32 邀請者 id` |
+| `0x27` | `/헉창조 <id>`／`/헉소멸 <n>`／`/헉경험치 <n>` | `sub_470E10` 內嵌 | `u8 0` + `u32`；`u8 1` + `u8`；`u8 2` + `u32` |
+| `0x16` | 商店購買 | `sub_4B6B40` | 未讀；字串「정말로 사시겠습니까?」「몇 개를 사시겠습니까?」「현금이 부족합니다」|
+| `0x20` | **人氣**（인기도 +／−）| `sub_55D7B0` | `u32 目標角色 id` + `u8 up`；字串「캐릭터를 찾을 수 없습니다」「잠시 후 다시 시도해 보세요」是 client 自己的前置（§4.38）|
+| `0x14` | 社群選單（개인정보／인기도 +／인기도 -／귓속말／교환신청／파티초대）| `sub_512570` | 未讀；送出前用 `sub_51D7D0(CUserPool, name)` 找玩家 |
+| `0x24` | messenger（쪽지）| `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`（CUIMessenger）| 未讀 |
+
+`/헉*`（GM）系列全被 `if ((*(CWvsApp+9) & 1) != 0)` 包住——那就是 §4.8 `0x01` 回包的 `app9`；
+玩家指令（`/귓속말`、`/찾기`、`/교환`、`/파티*`）在這層之外。
+
+#### 4.13.1 `0x0F` 普通攻擊：**已完整解出（byte-exact）**
+
+`sub_512F90`（751 行）是近戰普通攻擊。它跟前兩個 sender 最大差別是：**傷害是 client 自己算的**——
+送包前 client 已經把每個目標的傷害算好、寫進自己的記錄陣列、套用到怪物身上（`sub_4882F0`），
+再照實回報。所以 2003 年的伺服器只能照收（現代伺服器要重算後比對，這是通膨防線的第一道）。
+
+##### 送包容器的組裝順序（＝線上順序，`ZArray` append＋`sub_43AD50` 送出）
+
+`sub_4A1EA0(&v111, 15, nullptr)` 先開好 `opcode = 0x0F` 的包，接著對 `count_1` 這個 `ZArray`
+依序 append（每次 append 前都有 `if (v113 + n > size) sub_433B50(...)` 的擴容，`v113` 是已寫入長度）：
+
+| # | 寬度 | 寫入的運算式 | 解出的語意 |
+|---|---|---|---|
+| 1 | `u8` | `LOBYTE(rcSrc1.top) \| (16 * i_1)` | 低 4 bits = **每隻怪的傷害段數**（`*(right[18] + 120*n30 - 40)`，夾在 1..15）；高 4 bits = **目標數** `i_1`（`sub_491E90` 例項查詢的結果，上限 6）|
+| 2 | `u32` | `*right`（`right == nullptr` 時 0）| **技能 id**（0 ＝ 這一擊沒有技能）：`right` 是 `sub_4BDD20(dword_5C2038, …)` 從 `CSkillInfo` 查到的 `SKILLENTRY`，而 `dword_5C2038` 就是 `CSkillInfo` 單例（`sub_4BA4B0`：`ZMap<long,ZRef<SKILLROOT>>` ＋ `ZMap<long,ZRef<SKILLENTRY>>`，`.c:194709`）；呼叫者把 `right` 交給 sender，sender 寫 `*right`（`.c:279079`）。舊名 `clickedMobId`（「游標下的物件」）沒有任何證據支持——被打的怪在目標記錄裡 |
+| 3 | `u8` | `v70 = (LOBYTE(rcSrc1.left) << 7) \| (n5 & 0x7F)` | **bit 7 = 面向左**（`*(this + 45) & 1`，同一 bit 也把揮擊矩形鏡射）；低 7 bits = **動作 id** `n5 = sub_427F60(*(this + 37), right)` |
+| 4 | `u8` | `rcSrc1.bottom` | `sub_4BE8B0(*(this + 38), targetId, app[86] ^ app[87])` 的結果，**夾在 0..6** ＝**揮擊速度**（§4.13.1c：同一個值下面又交給 `sub_508690`；`targetId == 4001334` 時少 1）|
+| 5.. | per target | 見下表 | 每隻被判定命中的怪一段記錄 |
+
+每隻目標的記錄（**固定 11 bytes ＋ `段數 × 2 bytes`**）：
+
+| # | 寬度 | 寫入的運算式 | 解出的語意 |
+|---|---|---|---|
+| a | `u32` | `*(_DWORD *)(*(_DWORD *)v75 + 120)` | **怪物物件 id**（`mob + 120`，與 server → client 封包同一欄）|
+| b | `u8`（`_BYTE`）| `v80 = v75[4]` | 記錄 `+4` 的**低位 byte**＝**受擊動畫**（`*(*(mob + 124) + 112) <= 0` → `-1`，否則 `rand() % 該值 + 7`）；以 `s8` 解讀 |
+| c | `u16`（`_WORD`）| `*(_WORD *)(mob + 360)` | 怪物 **x**（記憶體中是 `int`，線上取低 16 bits）|
+| d | `u16` | `*(_WORD *)(mob + 364)` | 怪物 **y** |
+| e | `u16` | `v123 = *(this + 49) - *(this + 50)[last]` | 一擊一值的**序號／計數差值**，同包所有目標相同；也餵進本地命中處理與送包後的 `sub_515790(this, …, v123 + last/3)`。語意未定 → 保留欄位，不猜 |
+| f | `u16 × 段數` | `v91 = (__int16 *)(v75 + 8); v91 += 2` | **傷害值**：記錄 `+8, +12, +16 …`（`int`，步幅 4）各取低 16 bits |
+
+> 記錄本身（本機用，不上線）是 **76 bytes / 隻**，`memset(buf, 0, 0x4C)`，`buf += 19`（`_DWORD*`）：
+> `+0` 物件指標、`+4` 受擊動畫、`+8..+67` 最多 15 個 `int` 傷害（4 + 4 + 15×4 + 8 = **76** 剛好塞滿）、
+> `+68`/`+72` x/y（由 `sub_485B80(mob, &v125[4], rc)` 寫入，送包時在第 a/b 欄之後被讀出）。
+
+##### 目標是怎麼挑的（空間查詢，不是清單）
+
+- 揮擊矩形 `rc`：以 `sub_50DAA0`／`sub_407780` 展開，面向左時 `SetRect(&rc, -right, top, -left, bottom)` 鏡射，
+  再 `OffsetRect(&rc, *(this + 100), *(this + 101))` 平移到角色位置。
+- `sub_491E90(dword_5C2054, &rc, p_left, n6)`：走 **CMobPool** 的場地物件鏈（`+10`、`next = *(node - 12) + 16`），
+  對每隻怪算命中框 `sub_485AA0(mob, &tmp, 1)` 後 `IntersectRect`，命中的寫進 `p_left`，回傳數量。
+  先用 `n6 = 1` 探測（游標下的那一隻），命中則 `n6 = 6` 做完整查詢（最多 6 隻）。
+- `sub_485AA0` 就是怪物命中框：`+292`／`+308` 兩個矩形由 `+272` 的 bit 0（面向）選一個，
+  `OffsetRect(&rc, *(mob + 360), *(mob + 364))` 移到怪物位置；`a3 != 0` 時再多聯集一個
+  `+(+368, +372)` 偏移的框（＝武器框）。這解釋了為什麼封包裡的 c/d 欄是怪的座標。
+- 動作 id：`sub_427F60(attackKey 1..7, right)`——`right[3] == 3` 時 `v3 = 2*n5 - 1`，否則 `2*n5 - 2`；
+  再從 `dword_5B2144[6*v3]` 取**這一式有幾個動作**，`dword_5B2144[6*v3 + 1 + rand() % n]` 取一個
+  → **`dword_5B2144` 是一張「攻擊動作 id」靜態表**（`{count, id…}` 每組 6 個 `int`）。
+- 收尾 `sub_508690(this, n5, rcSrc1.bottom)`（＝送出一次攻擊狀態）、`sub_5095A0`／`sub_50D7F0`
+  （以 `n5` 與當前武器動作 `sub_513C60/70` 產生本地特效），最後 `sub_43AD50(this_13, &v111)` 送出。
+
+##### 記錄陣列的排序（送包**之前**，決定誰先寫進封包）
+
+`rcSrc1.right = (rcSrc1.left == 0)` 先存下「面向右」這個布林，接著是泡沫排序：比較
+`*(_DWORD *)v42`（前一筆的 `+68`）與 `src[17]`（本筆的 `+68`，即 x），
+**面向右時用 `<=`、面向左時用 `<`** → 兩邊都是把 x 由小到大排（左面時等值不交換），
+即「由左而右」的穩定順序。目標順序因此與 `p_left` 的列舉順序無關，是可重現的。
+
+> 所以 `0x0F` 的三個 sender 關係是：`0x0F` 近戰（已解）、`0x10`／`0x11` 同形狀（魔法／技能），
+> 差別只在「段數／目標數的打包方式」與是否多帶 `u32 targetId`（§4.5）。
+> ⚠️ 舊註記寫「家族入口仍是 `sub_511E20`（opcode `0x13`）」不夠精確：`sub_511E20` 是**按鍵分派器**，
+> 它在**別的 case 裡呼叫**這三支 sender，而它**自己**送出的封包是 `0x13`＝**表情**（case 10，§4.35.1）。
+
+
+##### 4.13.1b `0x10`／`0x11`：同一家族、同一種目標記錄（本回合讀完）
+
+三支 sender 的尾端寫入順序逐一比對後，**表頭順序與目標記錄完全相同**，只有兩處差異：
+
+| | `0x0F` `sub_512F90` | `0x10` `sub_513C80` | `0x11` `sub_514D30` |
+|---|---|---|---|
+| byte 1 | `u8 段數 \| 目標數<<4`（`i_1` ≤ 6）| `u8 段數 \| (16 * (v129 != nullptr))` | `u8 段數 \| (16 * (v95 != nullptr))` |
+| byte 2..5 | `u32 *right`（技能 id）| `u32 *right`（技能 id）| `u32 *a2`（技能 id）|
+| byte 6 | `u8 面向<<7 \| 動作` | `u8 (left<<7) \| (n5 & 0x7F)` | `u8 (left<<7) \| (n8 & 0x7F)` |
+| byte 7（表頭最後一個）| `u8 speed`（`sub_4BE8B0`，§4.13.1c）| `u8 speed`（`n6`）| `u8 speed`（`n6`；`v49[v93++] = n6`）|
+| 目標記錄之前 | — | 多一個 `u16`：投射物的 USE 分頁**格號**（`sub_511630` 的回傳值，item id 走 `Args`；§4.11.7c）| — |
+| 目標記錄 | `u32 mobId, u8 動畫, u16 x, u16 y, u16 序號, u16 × 段數` | 同左（`if (v55 != nullptr)` 內）| 同左（`if (v36 != nullptr)` 內）|
+| 送出 | `sub_43AD50` | `sub_43AD50` | `sub_43AD50` |
+
+- 座標欄仍然是 `*(_WORD *)(mob + 360)`／`*(_WORD *)(mob + 364)`（`v55 + 180`／`v55 + 182` 是同一個位置，
+  以 `_WORD *` 索引），所以 §4.13.1 的 x／y 命名對三支都成立。
+- **所以「目標數」這個 nibble 對 `0x10`／`0x11` 其實是「有沒有第二個物件」的旗標**（只會是 0 或 1），
+  而 `0x0F` 才是真的計數——server 端要按 opcode 分別解讀，不能一套套到底。
+- `server/src/protocol/field.ts` 因此寫成**一個** `readClientAttack(reader, opcode)`／
+  `encodeClientAttack(attack, opcode)`，差異用 `ATTACK_SHAPE` 一張表描述（`0x10` 多讀一個 `u16`），
+  三個 opcode 共用同一段程式碼；`test/field.test.ts` 各有一組 golden bytes。
+- `0x0F`／`0x10` 的第 4 byte 都是 `sub_4BE8B0(*(this+38), …)` 的產物，`0x11` 是 `*(this+38)` 原值（無抖動）；
+  它與 `0x10` 的格號都已定位（§4.13.1c／§4.11.7c），但仍然**沒有真實流量**（§6 第 2 項）：
+  `0x10`／`0x11` 的 nibble 只有 0/1 這點，應該在第一次 `capture` 到的攻擊包上核對。
+
+##### 4.13.1c ⚠️ 更正：表頭第 4 個 byte（`sub_4BE8B0` 那個值）是**揮擊速度**，不是「還能再打幾隻」
+
+`sub_512F90` 把 `rcSrc1.bottom = sub_4BE8B0(*(this + 38), 被點的物件 id, n3000_1[86] ^ n3000_1[87])`
+寫進表頭第 4 byte（`.c:279131`），**同一個值下面幾行又交給 `sub_508690(this, 動作, 該值)`**；
+而 s2c `0x23` 的收端把封包裡的同一格也交給 `sub_508690`（§4.11.7b），最後進 `sub_508700`：
+`n6` 夾在 0..6，乘進每一格的延遲 `(n6 + 5) / 8`（`sub_508700` 的迴圈，`.c:269589`）。
+
+⇒ **只有「速度」說得通**：0..6 的夾範圍正是 `sub_508700` 的上限；`*(this + 38)` 是**武器資料區**的一格，
+`sub_508290` 從武器節點填進去（`*(this + 38) = src_3[8]`），而 WZ 那一側的 `info/attackSpeed` 就是這種小整數
+（검 `01302000`＝2、양손검 `01402000`＝3、참마도 `01402005`＝4、위젯 비밀가방 `01322013`＝1、페어리 완드 `01372000`＝3），
+「數字越小＝越快」也與 `(n+5)/8` 的方向一致。舊名 `targetCap`（把 0..6 讀成「這一擊還能再打幾隻」）
+沒有任何證據支持，已在 `protocol/field.ts` 改名為 `speed`，`0x10`／`0x11` 與 s2c `0x23` 沿用同一欄位。
+
+> 未證：`sub_4BE8B0` 的第三個參數（`app[86] ^ app[87]`）是什麼抖動，以及 `*(this+38)` 到底對應
+> `info` 的哪一格（`attackSpeed` 是最合理的候選，但沒有把 `CItemInfo` 的 loader 讀完就只是推論）。
+> 轉播端因此**照抄攻擊者自己的值**，不自己算。
+
+#### 4.13.2 §4.5 那 39 個 opcode 的完整 sender 目錄
+
+抽取方式：`grep -n "sub_4A1EA0("` 後取第二個參數（＝要送的 opcode），再用「往上找最近的函式標頭」
+決定 sender。**這張表是為了不必再跑一次抽取**（同一 opcode 可能有多個 sender）。
+
+| opcode | sender（`@`＝程式碼行號，方便回頭查）|
+|---|---|
+| `0x01` | `sub_4D0B20` ｜ `0x02` `sub_54DFC0` ｜ `0x03`／`0x06`／`0x07` `sub_431620` ｜ `0x04` `sub_43A410` |
+| `0x05` | `sub_42FD30` ｜ `0x08` `sub_43B280` ｜ `0x09`／`0x0A` `sub_5545A0`（舊文件寫 `sub_5545F0`，已更正）|
+| `0x0D` | `sub_472590` ｜ `0x0E` `sub_542C40` ｜ `0x0F` `sub_512F90` ｜ `0x10` `sub_513C80` ｜ `0x11` `sub_514D30` |
+| `0x12` | `sub_470C70` ｜ `0x13` `sub_511E20` ｜ `0x14` `sub_512570` |
+| `0x15` | `sub_4A5A80`／`sub_4A5D00`／`sub_4A5F40`／`sub_4A6320`／`sub_4A65C0`（CQuestMan）|
+| `0x16` | `sub_4B3C80`／`sub_4B6B40`／`sub_4B6E90`／`sub_4B7130`（對話框／商店）|
+| `0x17`–`0x1A` | `0x17` `sub_55ACB0`（**已解，見 §4.36**：道具欄的拖放／裝備／卸下／丟棄）｜ `0x18` `sub_55B2C0(this, s16, int)`（`.text:0055B311`）｜ `0x19` `sub_55B4B0(this, s16, int)`（`.text:0055B501`）｜ `0x1A` `sub_55B0E0(this, s16, s16)`（`.text:0055B130`）—— 三支都在 CWvsApp 層，`0x18`／`0x19` 的第二個參數是 out-param（item id）|
+| `0x1B`–`0x20` | `sub_55CF60`／`sub_55B870`／`sub_55D140`／`sub_55D320`／`sub_55D5F0`／`sub_55D7B0`（CWvsApp 層）|
+| `0x22`／`0x27` | `sub_470E10`（0x27 出現 3 次）｜ `0x23` `sub_4717D0`／`sub_472910` ｜ `0x25` `sub_471A40`／`sub_481910`／`sub_4820E0`／`sub_4D31F0`／`sub_4D5C80` |
+| `0x24` | `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`×2 ｜ `0x26` `sub_471CD0`／`sub_471E90`／`sub_472050`／`sub_4722E0`／`sub_55C5E0` |
+| `0x2C` | `sub_4885D0`（**已解，見 §4.20**：怪物的動作回報，`u32 mobId`＋旗標＋動作位元組＋位置＋尾段）｜ `0x2F` `sub_49A3C0` ｜ `0x33` `sub_55AF20`（`sub_55AF20` 帶一個 `u32`，且有 `this+6/+7` 的一次性節流；唯一呼叫點 177038 是滑鼠點擊物件的處理）|
+
+### 4.14 ✅ 協定目錄：`server/src/protocol/schema.ts`（可查詢的單一來源）
+
+§4.1–§4.13 的知識散在三個 module 的註解與本文件裡，要回答「這個封包我們到底解到什麼程度」
+本來得同時讀三支檔案。`schema.ts` 把這些收成一張**機器可讀的目錄**，而且**不重複定義任何數字**：
+`opcode` 一律引用 `login.CLIENT_OPCODE`／`replies.LOGIN_OPCODE`／`field.FIELD_OPCODE`／
+`field.CLIENT_FIELD_OPCODE`。
+
+每一列有：`direction`／`stage`／`name`／`status`／`evidence`／`codecs`／`fields`，
+其中 `status` 只有三種值：
+
+| status | 意思 |
+|---|---|
+| `byte-exact` | codec 與 client 自己的讀／寫逐欄一致，且 `test/` 有 golden bytes |
+| `partial` | 列出的欄位有證據，但後面還有尚未定位的東西 |
+| `skeleton` | 只知道 opcode 與 handler；**`fields` 必須是空的**（不准發明欄位）|
+
+反漂移由 `test/schema.test.ts` 保證（6 個測試）：
+
+- 每個 `codecs` 名稱都必須在 `src/protocol/**` 找到真的 export（`resolveCodec`），改名不會漏掉目錄；
+- 同一個 `(direction, stage, opcode)` 只能有一列（`0x05`／`0x22` 這種**兩個方向都用到**是合法的，
+  測試特別釘住這兩對）；
+- `skeleton` 列的 `fields` 必須是空的；
+- 有 codec 的列必須真的被 `decode` 的解讀器認得（`describeClientFieldPacket`／`describeFieldPacket`／
+  `describeClientPacket` 不能回 `undefined`）。
+
+查詢方式：`node server/src/cli.ts schema`（人看的表格）或 `schema --json`（工具用）。
+目前共 **54 列**：login c2s 8、login s2c 6、field c2s 14、field s2c 26；狀態分佈`byte-exact` **31**／`partial` **19**／`skeleton` 4（§4.17 把 `0x30`／`0x31`／`0x34` 從 `partial` 推到 byte-exact，
+§4.19／§4.20／§4.21 再把 NPC、`0x35`、`0x0D` 補上，§4.22 加上商店的四個封包與空的 `0x19`）。
+`requestRelease`（`0x19`）是唯一一列 `byte-exact` 而**沒有欄位**的封包 —— 它的身體本來就是空的
+（`test/schema.test.ts` 因此特別放行這一列）。
+
+### 4.15 ✅ 怪物進場到產品：地圖 `life` → `0x2F`
+
+§4.12.1 只給欄位表；這一節記的是**把它做成產品的那一步**，以及驗證它、以及還不能宣稱的部分。
+實作：`server/src/game/map.ts`（地圖視圖）＋`server/src/protocol/mob.ts`（codec）＋
+`GameEntryServer.spawnMobs`（送包時機）。
+
+#### 出生點來自地圖檔自己：`life`
+
+`0x16` 讓 client 自己載入 `Map/Map/%09d.img`（§4.11.2b），伺服器讀**同一張** image 的 `life`
+（`sub_469980` 讀的五個節點之一）——所以兩邊看到的怪物必然一致，沒有第二份資料要同步：
+
+| 欄位 | 型別 | 內容 |
+|---|---|---|
+| `type` | string | `"m"` = 怪物、`"n"` = NPC |
+| `id` | 7 位數字**字串** | 模板 id：`"0120100"` → `120100` = `Mob/0120100.img`（`sub_48CFA0` 查的就是它）|
+| `x`／`y` | u16 | 出生座標（`0x2F` 的 `s16 x,y`）|
+| `fh` | u16 | 腳踏點索引；`sub_485DA0` 之後用它把怪物綁到 foothold，伺服器目前只帶著 |
+| `f` | u8 | 地圖自己的翻轉位元（**只有部分地圖有**），直接當 `0x2F` 的 `facing`；沒有就 0 = 面向右 |
+| `cy`／`rx0`／`rx1`／`info` | — | 巡邏範圍，AI 之後才要 |
+
+100 張地圖共 2,322 筆 `life`：**2,256 隻怪物、66 個 NPC**，61 張地圖有怪物。實際數字
+（`server/test/map.test.ts` 釘住）：
+
+| 地圖 | 名稱 | 怪物 | NPC |
+|---|---|---|---|
+| `1000000`（`DEFAULT_MAP_ID`）| 암허스트서쪽필드 | **45**（第一隻是 `120100`）| 0 |
+| `100000000` | 헤네시스 | 0 | 2（Heena `1012000`、Roger `1010100`）|
+| `40000` | 달팽이사냥터 | 63（`100100` 蝸牛）| 1（`2003`）|
+
+#### 送出的內容與時機
+
+`GameEntryServer` 領到 `0x04` 的角色 id → 送 `0x16`（§4.11.2b）→ **緊接著每一筆 `type == "m"`
+送一個 `0x2F`**，欄位照 §4.12.1（`mobId`、`templateId`、`x`、`y`、`facing`）。
+
+- `mobId` 由伺服器從 1 開始配：client 只用它在 `CMobPool` 查表（`sub_492C00`），
+  池裡沒有這個 id 才會去讀 `templateId`；玩家在 `CUserPool`、怪物在 `CMobPool`，
+  目前找不到兩者會撞 id 的路徑——但這條也還沒實機驗證。
+- 兩個語意未解的 `u16` 送 **0**：`sub_489800` 查表失敗時 client 自己會替代一筆零記錄
+  （§4.12.1），所以 0 是合法包，不是猜值。
+- 動畫旗標送 **0**：不代表任何通道（`sub_4C6CE0` 對沒設定的 bit 就是把通道歸零）。
+- NPC（`type == "n"`）**不送**：`0x39`（`sub_49F6C0`）尚未解到欄位層。
+- 時機假設：`0x2F` 與 `0x16` 在同一個 TCP 流、且緊接在後。`0x16` 的處理器是**同步**載入地圖檔
+  （`sub_4C2780` → `sub_4694F0`），所以 client 應該在讀下一個封包前就把場地建好；
+  但這是推論，**只有原 client 能證實**（§6 第 2 項／ADR-004）。
+
+#### 已被測試釘住的行為
+
+| 測試 | 內容 |
+|---|---|
+| `server/test/mob.test.ts` | 逐 byte 的欄位順序（不是只有 round-trip）、`i` 號通道 ⇔ 旗標 bit `1 << i`、未設定的通道在讀回來時仍是洞、bit 7 以上被丟掉（client 沒有那些通道）、`unknownA/B` 與旗標預設 0、**任何長度的截斷都會丟 `PacketUnderflowError`**、`describeFieldPacket` 認得 `0x2F` |
+| `server/test/map.test.ts` | `life` → 出生點（`"0120100"` → `120100`、沒有 `id` 的紀錄被丟掉、`f` 缺席時預設 0）、`portal` 保留 `tm`/`tn`、`DEFAULT_MAP_ID` 真的有怪且座標放得進 `s16`、헤네시스 0 怪 2 NPC、달팽이사냥터 63 怪、未知地圖回 `undefined`（不是空 map）、`mapDataProvider` 只讀一次 |
+| `server/test/serve.test.ts` | 真 socket：`0x16` 之後逐隻 `0x2F`、id 由 1 遞增、負座標與面向位元活著回來、每個包的標頭都通過驗證、地圖不在地圖檔裡時**不送任何怪物**（而不是送一隻在 (0,0)） |
+
+#### 還不能宣稱的部分
+
+1. 兩個只被查表的 `u16` 語意未解（§4.12.1）——目前送 0 走的是 client 會處理的失敗路徑。
+2. 受傷／死亡（`0x30`／`0x31`／`0x34`–`0x36`）未實作：**怪物不會被打死**（但會走動，
+   見 §4.16）。離場的欄位已解到形狀，只是還沒有東西會殺死怪物。
+3. 沒有 AI（不追人、不攻擊玩家）、沒有重生。`fh` 綁定是 client 的 `sub_485DA0`，
+   伺服器這邊用腳踏點折線決定「站哪裡、走哪裡」（§4.16.4）。
+4. 送的時機與 id 的無碰撞都還是推論，待原 client 實測（`serve --game-port --data Data.wz`）。
+5. **每個連線各自一份怪物**：還沒有共享世界（ADR-001 的 Phase 2），所以兩個玩家在同一張地圖上
+   會各看到一份怪物、彼此的 id 也不一致。要變成「一個世界」需要**以場地為單位的註冊表**（擁有 id
+   與血量），這是下一階段的伺服器工作，不是這個 codec 的事。
+
+### 4.16 ✅ 怪物移動（`0x33`）與腳踏點：地圖的幾何就是怪物走路的地方
+
+§4.15 把怪物放到畫面上了，這一節讓它們**動起來**，並且把「怪物站在什麼上面」變成規格。
+兩個關鍵發現：**0x31 不是移動**（舊註記錯了，見 §4.12 的更正），移動是 **`0x33`**；
+而**腳踏點的 item key 就是 `life.fh`**——這一條用全部 100 張地圖驗證過。
+
+#### 4.16.1 `0x33` = 怪物移動（`sub_492380` → `sub_488BC0`）
+
+`sub_492330`（CMobPool 分派，§4.12）把 `case '3'` 交給 `sub_492380`：先讀 `u32 mobId` 查池
+（`sub_492400`），再呼叫 `sub_488BC0(mob, packet)`。`sub_488BC0` 的完整順序**逐指令核對過**
+（`MapleStory.exe.lst` 的 `.text:00488BC0`，不是只看 Hex-Rays）：
+
+```
+cmp  dword ptr [esi+74h], 1        ; mob+116 == 1 → 直接 return（連封包都不讀！）
+u8   byte1                         ; 只影響結尾的狀態：mob+116 = byte1 ? -3 : -2
+u8   byte2                         ; test dl, dl; jl → bit 7 = 「保持目前動畫」
+u32  value                         ; 一定有，而且在分支之前讀
+if byte2 >= 0:
+  facing = byte2 & 1 ; action = byte2 >> 1
+  if !(mob+276（舊 action）∈ 10..12 且 action ∈ 7..9):
+    mob+272 = (mob+272 & ~1) | facing ; mob+276 = action ; sub_485DA0(mob)   ← 重新綁定腳踏點
+  if action ∈ 10..12 → sub_488E30(mob, action, facing, value)      ← 攻擊動作才用到 value
+  else if action ∈ 7..9 → mob+280 = now + sub_486180(mob, action)  ← 受擊動作抓動畫長度
+CMovePath（sub_4967C0 → sub_4953A0，與 0x22／0x0E 同一支解碼器）
+mob+116 = byte1 ? -3 : -2
+```
+
+| # | 寬度 | 欄位 | 說明 |
+|---|---|---|---|
+| 1 | `u32` | **mobId** | 池查表（`sub_492400`）|
+| 2 | `u8` | **動作位元組** | bit 7 = 保持目前動畫；bit 0 = 面向；bit 1..6 = **動作索引** |
+| 3 | `u32` | value | 語意未解；只有攻擊動作（10..12）會把它傳進 `sub_488E30`，走路／站立時沒人讀 → **走路送 0** |
+| 4 | `CMovePath` | 路徑 | §4.11.5 的格式（`u16 originX/Y` + `u8 count` + 每個元素 14 bytes）|
+
+`readMobMove` 也讀得回來（`readMobMove`／`encodeMobMove`／`describeMobMove`，`src/protocol/mob.ts`）。
+
+#### 4.16.2 動作索引：client 自己的 16 個名字
+
+`sub_485400(mob, index)` 用 `index` 查怪物自己的動作表（`__ROR4__(key,5) % size` 的 ZMap 樣式），
+而填表的是 `sub_40B530`——它在 `+0x156` 配置一個 **`CActionMan::MOBACTIONENTRY`**（RTTI 名稱就在
+反編譯碼裡），並用 `(&off_5B20FC)[index]` 取名字。`.data:0x5B20FC` 就是這張 16 筆的表
+（`MapleStory.exe.lst` 行 773757 起，到 `0x5B2138` 的 `"dieF"`）：
+
+| 索引 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 名字 | move | stand | jump | magic | throw | ball1 | ball2 | hit1 | hit2 | hitF | attack1 | attack2 | attackF | die1 | die2 | dieF |
+
+三個獨立的地方都對上這張表：`sub_488BC0` 對 7..9（受擊）與 10..12（攻擊）特別處理；
+`sub_485530`（`sub_491AB0` 的另一條路，見下）挑 `13 + rand() % template+116`＝die1/die2/dieF；
+`MOB/0120100.img` 的動畫名稱正好是 `move, stand, hit1, die1`。
+
+#### 4.16.3 `0x30`／`0x31`：怪物怎麼離場（順便把 `0x31` 的舊錯誤改掉）
+
+| opcode | 函式 | 內容 | 語意（有證據的部分）|
+|---|---|---|---|
+| `0x30` | `sub_4926B0` | `u32 mobId` + `s16 delayMs` | `delayMs >= 0` → 把 (mobId, now+delayMs) 塞進**池的定時佇列**，到期就開始死亡動畫（§4.17.2）；`delayMs < 0` → 立刻 `sub_491AB0(pool, mobId, 0)`（sprite 還在播就放棄）|
+| `0x31` | `sub_4927B0` | `u8 flag` + `u32 mobId`（**沒有 CMovePath**）| `flag != 0` → `sub_491630`：池裡沒有這個 id 時才讀 `u32 templateId` + `CMob::Init` 的欄位並建立、最後 `sub_485330(mob, 1)` 打開**閃光**；`flag == 0` → `sub_491830`（收屍，§4.17.3）|
+
+- 定時佇列的消費者是**池自己的更新函式** `sub_492100`：`endTime - now <= 0` 就
+  `sub_491AB0(pool, mobId, 1)`。`a3 != 0` 的分支會 `sub_485530(mob)`（拆掉並重建怪物的元件清單，
+  然後挑一個 die 動作），兩條分支最後都會把怪物從池的雜湊鏈上移除。
+- `0x2F` 會把 **`mob+112` 設 1**，而 `sub_491AB0(a3 == 0)`（移除）遇到 `mob+112 != 0` 就直接放棄。
+  這個「留在池裡」的旗標語意仍未完全確定（§4.15 的第 1 項、§4.17.6 第 3 項），但欄位與流向是清楚的。
+- `0x32`／`0x36`：`sub_492380` 對它們**沒有分支**（只讀了 `u32 mobId`），等於空包。
+- `0x34`：`u16 → mob+132`，然後跑 `mob+116` 的狀態機（1→5、2→4、3→5，其餘 `sub_485330(mob, 1)`）。
+  `mob+132` 的唯一讀者把它拿去比攻擊的 `conMP`，所以**它是怪物的 MP**；狀態機則讓 client 進
+  「可以被重設成受擊動作」的 4／5（§4.17.1）——這一條是打怪有沒有「打到彈一下」的關鍵。
+- `0x35`：`sub_488E10` → `sub_4C6CE0`，就是 `0x2F` 尾巴那個**動畫狀態區塊**（`u32` 旗標 + 每個
+  設定的 bit 各 2 個 `u16`），差別是這裡的物件是 `mob+136`（同一組通道位移）。
+
+> **更正**：§4.12 的表與舊註記把 `0x31` 寫成「移動」。`0x31` **不帶 `CMovePath`**，
+> 它只是「這個 id 還在／不在了」；移動是 `0x33`。
+
+#### 4.16.4 腳踏點：`foothold/<page>/<group>/<item>` 的 item key 就是 `life.fh`
+
+`life` 的每個出生點都帶 `x`、`cy`、`fh`。`fh` 對應到的不是 group，而是**最內層 item 的 key**：
+
+```
+foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
+```
+
+`prev`／`next` 把同一條地面上的線段串成**折線**（`footholdChain`），所以怪物走路的地方就是這條
+折線。驗證方式是把「出生點站在它的腳踏點上」對**全部** `life` 檢查：
+
+| 檢查 | 結果 |
+|---|---|
+| 100 張地圖的 foothold item key 有沒有重複 | **0 個重複**（共 30,338 個線段）|
+| 2,322 筆 `life` 的 `fh` 是否都存在 | **全部命中** |
+| `x` 是否落在該線段的 x 範圍內 | **全部命中**（0 筆在外）|
+| 線段上內插出來的 y 是否等於 `cy` | **2,322 / 2,322（誤差 ≤ 1）** |
+
+所以地圖檔的 `cy` 就是「腳踏點在 `x` 的 y」，`y` 則是出生點左上角。另外 `life.rx0/rx1`
+幾乎等於該折線的 x 範圍（例：`000040000` 的 `fh 33` 折線是 −309..2919，出生點寫 −289..2899），
+這也解釋了伺服器為什麼可以只靠地圖檔決定巡邏範圍。
+
+#### 4.16.5 巡邏：一個 `0x33` 走一段（`src/game/mobs.ts`）
+
+沒有「怪物移動」的 client → server 封包（§4.5 的 39 個 sender 裡沒有），所以**怪物是伺服器驅動的**：
+位置是伺服器決定的，client 只負責播放收到的路徑。實作在 `src/game/mobs.ts` 的 `MobField`：
+
+1. 出生點來自 `life`，座標吸附到它的腳踏點（`footholdYAt`）；`fh` 找不到線段就站著不動。
+2. 巡邏範圍 = 該折線的 x 範圍 ∩ `life.rx0/rx1`（範圍只有一個點 → 不走路）。
+3. 每一段（leg）送一個 `0x33`：`originX/Y` = 現在位置，一個元素 `(x, y, foothold, duration)`
+   = 這一段的終點與時間，`action` = move（0）＋面向。**duration 就是視覺速度**，因為 client
+   只是照著播；元素一律 `vx = vy = 0`（`sub_495880` 認為路徑元素是位置快照）。
+4. 走到範圍端點就折返（下一段換方向）；一段最長 3 秒（長距離拆成小步，順便把封包量壓低）。
+5. 速度 = `PATROL_SPEED_PX_PER_SEC`（**60 px/s，伺服器自己的選擇**）× 怪物的 `info.speed` 百分比。
+   `info.speed` 是**相對值**：`sub_48D080` 讀 WZ 的 `speed` 後算 `clamp(0, speed + 100, 130)`
+   （스포아 −30 → 70%、스텀프 −70 → 30%、주황버섯 0 → 100%）。**基準值沒有 binary 證據**
+   （原伺服器自己選的），所以它是一個有名字、可調的常數（`--mob-speed`），不是散落的魔術數字。
+
+| 測試 | 內容 |
+|---|---|
+| `server/test/mobs.test.ts` | 腳踏點語意（item key、折線、內插、範圍外回 `undefined`）、巡邏（一個 tick 一段、到端點折返、`rx0/rx1` 裁切、速度換算、`vx/vy = 0`）、不動的怪（沒有腳踏點／`speedPercent 0`／範圍一個點）、出生點吸附到地面、`0x33` 逐 byte 形狀與截斷、動作表 |
+| `server/test/serve.test.ts` | 真 socket：`0x2F` 之後真的會來 `0x33`（`mobTickMs = 20`），欄位與腳踏點一致，標頭全數通過 |
+| `server/test/map.test.ts` | `life` → 出生點（`rx0/rx1/cy` 的預設值）、`footholdSegments` 數量等於 foothold 數 |
+
+#### 還不能宣稱的部分
+
+1. `0x33` 的 `value`（`u32`）語意未解；走路送 0（沒有讀者）。
+2. `0x31` flag != 0 路徑上的 `mob+112`「留在池裡」語意未解（§4.17.6 第 3 項）；
+   `0x34` 的 1/2/3 → 4/5 狀態機語意已解（§4.17.1：那 4／5 就是受擊動作的前提）。
+3. 怪物**已經會受傷／死亡／重生**（§4.17）：`0x30`／`0x31`／`0x34` 三個封包都有編碼器與測試。
+4. 元素 `attr` 沒有任何讀者（client 播放路徑時不讀，`sub_485330` 只讀 x/y/vx/vy/action/foothold/duration），
+   所以走路送 0；client 自己在「路徑過期」時補的元素用 1。
+5. 巡邏的 **60 px/s 基準**是伺服器的選擇（`--mob-speed` 可調）：原伺服器的值無從得知，
+   要靠原 client 實測（ADR-004）才會知道「看起來對」的速度。
+6. 還是**每個連線各自一份怪物**（§4.15 第 5 項），所以兩個玩家看到的怪物位置不會一致。
+
+### 4.17 ✅ 打怪的閉環：傷害是 client 算的，伺服器只送三個封包
+
+§4.13.1 解出「client 怎麼報告一刀」，§4.15／§4.16 解出「怪物怎麼出現、怎麼走」；這一節補上中間那一段：
+**怪物怎麼掉血、怎麼死、怎麼重生**。整個迴圈的形狀與後期楓之谷不同：2003 年的 client **自己算傷害、
+自己畫數字**，伺服器只記帳，並在關鍵時刻送三個「這隻怪的狀態變了」的封包。
+
+| 角色 | 做什麼 | 證據 |
+|---|---|---|
+| 攻擊者的 client | 算出每個目標的傷害 → `sub_4882F0`（143029-143151）把 `CMob::DAMAGEINFO` 排進**怪物自己**的佇列 → 怪物更新時由 `sub_487A30`（142584-142731）畫出數字 → 整刀寫成 `0x0F` | `sub_512F90`（278611-279361；§4.13.1）|
+| 伺服器 | 記帳（HP）、`0x34`（怪的 MP，兼「讓 client 進受擊狀態」）、`0x30`（開始死亡動畫）、`0x31`（收屍／重生）| `src/game/mobs.ts`、`src/protocol/mob.ts` |
+
+#### 4.17.1 `0x34`：`u16` 是**怪物的 MP**，而且它是「怪物會被打到彈一下」的前提
+
+`sub_488D90`（143664-143694）把 `u16` 存進 **`mob+132`**，而 `mob+132` 全 client 只有一個讀者：怪物的
+攻擊挑選器 `sub_487D10`（142738-142932）裡的 `if (v9[4] > *(this + 33)) skip`（`.text:0x487D81`）。
+被比較的 `v9` 是 `*(mob+124)` 這顆**怪物模板**攻擊清單裡的一筆，清單的來源也解出來了：`sub_48E360`
+（149342-150064）用 `L"attack"` ＋ `itow(n2 + 1)`（`n2 == 2` 時是 `L"F"`）拼出 `Mob/<id>.img` 的
+`attack1`／`attack2`／`attackF`，再把 `info` 的欄位依序寫進那筆記錄 —— 其中 `[3] = type`（149654）、
+**`[4] = conMP`**（149678）。所以 `mob+132` 是**怪物的 MP**，`0x34` 就是「這隻怪還有多少 MP」的通知。
+
+同一支處理器還會動 `mob+116`（怪物狀態）：
+
+| 進 `0x34` 前的 `mob+116` | 之後 | 誰設的（§4.16.1）|
+|---|---|---|
+| 1（非攻擊動作做完）| 5 | `sub_4885D0` 的尾巴 |
+| 2（攻擊動作，`n30a == 0`）| 4 | 同上 |
+| 3（攻擊動作，`n30a == 1`）| 5 | 同上 |
+| 其它（-1／-2／-3，例如剛被 `0x33` 設過）| `sub_485330(mob, 1)` → 4，並打開**閃光** | `CMob::Init` 設 -1、`0x33` 一律設 -3 |
+
+為什麼這件事重要：傷害數字顯示器 `sub_487A30` 只有在 `mob+116 ∈ {-2, 4, 5}` 時才會把動作重設成
+**受擊動作**：
+
+```
+if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
+    && mob+280 == 0 && a2 == now)                  // 沒有受擊動畫在跑、且是「現在」要顯示的
+  if (mob+116 ∈ {-2, 4, 5}) sub_4885D0(mob, hitAnim, facing, 0, …)      // 播 hit1
+```
+
+而 `mob+116` 的其他來源都不會停在 4／5：`CMob::Init` 設 -1、`0x33` 的尾巴一律設 -3、動作設定器
+`sub_4885D0` 只設 1／2／3。**所以不送 `0x34` 的話，怪物只會跳數字、不會被打到彈一下。**
+
+> `sub_485330(mob, 1)` 就是把模板的 `+250/+252/+254/+256`（`s16 ×4`）與 `+258`（`u8`）交給 sprite 的
+> `vtbl+184`，也就是「閃光／受擊覆蓋層」；`0x31 flag != 0`（新怪出現）走的是同一支函式。
+
+#### 4.17.2 `0x30`：開始死亡動畫（屍體不會自己消失）
+
+形狀見 §4.16.3。`delayMs >= 0` → 排進 `sub_492100`（153646-153793）的定時佇列；到期時呼叫
+`sub_491AB0(pool, mobId, 1)`（153127-153366），也就是 **`sub_485530`**（140481-140687）：
+
+1. 先把怪物身上還沒顯示的傷害記錄清單（`mob+340`，`sub_4882F0` 排的、上限 15 筆）全部送進 `sub_487A30`；
+2. `if (*(template + 116) > 0) mob+276 = 13 + rand() % *(template + 116)` → 挑一個 die 動作（13=die1／14=die2／15=dieF）；
+3. `sub_485DA0`（140931-141075）播它；die 動作是**不循環**的（`sub_485DA0` 對 13..15 在影格用完時 `break`）。
+
+`template+116` 是「這張圖有幾個 die 動作」。本 `Data.wz` 的 **28 張 `Mob/*.img` 全部只有 `die1`**（實測），
+所以動作一定是 13。`delayMs < 0` 走 `sub_491AB0(..., 0)`：立刻移除，但**只要 sprite 還有影格在跑
+（`sub_485520`）就放棄**，所以死亡動畫不會被切掉。
+
+**`0x30` 不會把怪物從池裡移除**（那要 `0x31`）：屍體留在 client 上，直到 `0x31 flag = 0`。
+死亡動畫長度＝Σ 每個影格的 `delay`；沒有 `delay` 的影格用 **180 ms**（`sub_40B530` 19949 的
+`lVal = 180`），`UOL` 影格也算一格（`Mob/5130100.img/die1` 的最後一格就是 `UOL`）：
+
+| 怪物 | `info.maxHP` | `info.maxMP` | `info.pushed` | `die1` 影格 | 死亡動畫 |
+|---|---|---|---|---|---|
+| 0100100 파란달팽이 | 8 | 0 | 1 | 9 × 180 | 1620 ms |
+| 0120100 스포아 | 20 | 0 | 1 | 4 × 180 | 720 ms |
+| 1210102 주황버섯 | 80 | 0 | 1 | 3 × 180 | 540 ms |
+| 5130100 와일드보어 | 2500 | 200 | 1 | 8 × 180 | 1440 ms |
+
+#### 4.17.3 `0x31`：收屍（flag = 0）與重生（flag != 0）
+
+- `flag == 0` → `sub_491830`（152889-153124）：池裡查不到這個 id 就**直接返回**（所以對已經消失的怪再送
+  一次是安全的）；查到的話，sprite 還在動就先 `sub_485330(mob, 0)` 關掉閃光，`mob+112 == 0` 才把池項
+  從侵入式鏈結串列上拆掉。
+- `flag != 0` → `sub_491630`（152770-152885）：池裡**已知**這個 id → 只刷新一下（封包後面沒有欄位）；
+  池裡**沒有** → 讀 `u32 templateId`，其餘**就是 `0x2F` 的身體**（兩條路都經過 `CMob::Init`），
+  建好之後 `sub_485330(mob, 1)`（**閃光**）。
+
+所以「重生」用 `0x31 flag != 0` 比 `0x2F` 更貼：client 會把新出現的怪物閃一下，也就是「怪物在你面前冒出來」。
+（`0x2F` 保留給「進地圖時本來就在的怪物」，那批不該全部閃。）
+
+#### 4.17.4 產品化：`src/game/mobs.ts` 與 `GameEntryServer.applyAttack`
+
+1. **扣血**：`MobField.applyDamage(mobId, damage, now)`。攻擊包裡每個目標記錄的傷害是 `hits` 個 `u16`
+   加起來（§4.13.1），直接從 `hp` 扣、夾在 0。**伺服器不重算傷害**（理由與之後要補的驗證見 **ADR-006**）：
+   2003 的 client 自己算、自己畫，伺服器重算只會與 client 不一致；它管的是「哪幾隻怪存在、各有多少 HP」。
+2. **命中**（HP > 0）：送 **`0x34`**，值是 `info.maxMP`（§4.17.1：這是讓 client 進 4／5 狀態、也就是
+   讓怪物彈一下的唯一方法）。傷害數字不用送 —— client 已經畫完了。
+3. **殺死**（HP == 0）：先送 `0x34`（讓閃光進狀態），再送 **`0x30`（`delayMs = 0`）**：死亡動畫立刻開始，
+   屍體留在畫面上。`dieMs` 來自 `Mob/<id>.img` 的 die 影格（§4.17.2 的表）。
+4. **收屍與重生**：`dieMs` 之後送 `0x31 flag = 0`；再過 `MOB_RESPAWN_MS`（**5000 ms，伺服器自己的選擇**，
+   `--mob-respawn` 可調）送 `0x31 flag != 0`（`templateId` + `0x2F` 身體），怪物回到地圖檔給的出生點、
+   HP 回滿。死掉的怪**不再收到 `0x33`**（不然 client 會把屍體搬走）。
+5. `MobField.tickPackets(now)` 是同一個 timer 的出口：先巡邏的 `0x33`，再收屍／重生，順序固定。
+
+#### 4.17.5 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/mob.test.ts` | `0x30`（含負延遲）、`0x31` 的兩個 flag、`0x34`、`0x31 flag != 0` 的尾巴與 `0x2F` **逐 byte 相同**、`decode` 的解讀器 |
+| `server/test/mobs.test.ts` | 扣血／`0x34` 的值／殺死時送 `0x34`＋`0x30`、死掉後不再有 `0x33`、`dieMs` 之後收屍、`respawnMs` 之後重生（回到出生點、HP 回滿）、`tickPackets` 的順序、沒有 image 的怪不能被打、真 `Data.wz` 的 `dieMs`／`maxMP` |
+| `server/test/serve.test.ts` | 真 socket：一刀 10 點 → `0x34` → `0x30` →（40 ms 的假 `dieMs` 之後）`0x31 flag = 0`；打不存在的 id → 完全不回封包，只寫 log |
+
+#### 4.17.6 還不能宣稱的部分
+
+1. **`0x34` 是「命中通知」還是單純「MP 更新」**：`mob+132` 的讀者只證明它被當 MP 用（拿來比 `conMP`），
+   不能排除原伺服器在怪物攻擊時扣 MP 後再送一次。本伺服器**每次命中都送 `info.maxMP`**（怪物不消耗 MP），
+   並在這裡註明「進 4／5 狀態」是實作目的之一。
+2. **屍體是 client 自己收還是等 `0x31`**：`sub_485530` 只設死亡動作，沒有把怪物拆出池子；`sub_492100`
+   到期時也只呼叫 `sub_491AB0(..., 1)`（=開始死亡）。本伺服器假設**要送 `0x31`**；若原 client 會自己收屍，
+   多送一個 `0x31 flag = 0` 也只是查不到 id 的空操作（`sub_491830` 的 early return）。
+3. **`mob+112`（§4.15 第 1 項）**：`0x31 flag = 0` 遇到 `mob+112 != 0` 就放棄，語意仍未解，本伺服器不設它。
+4. **重生 5000 ms 與巡邏 60 px/s 一樣是伺服器自己的選擇**：binary 裡沒有這兩個值。
+5. **沒有實機驗證**：`0x34`／`0x30`／`0x31` 送出去之後畫面長什麼樣（閃光、彈一下、倒下、重生）目前只由
+   反編譯碼推導；ADR-004 的實機 run 才能確認。
+
+### 4.18 ✅ 掉落與拾取：`0x43`／`0x44`（`CRewardPool`）＋ `0x0B`／`0x11`（`CWvsApp`）
+
+§4.13.2 記過一件事：v1.11 的 client **沒有**「撿東西」這個請求 —— 所有送出的地方都是寫死的
+opcode，最大只到 `0x33`。所以掉落是**伺服器單方面決定**的：誰掉、掉什麼、誰撿到、什麼時候消失，
+全部由伺服器送封包宣告，client 只負責演動畫。這一節把四個相關封包解到欄位層，並修正 §4.6 的一個
+錯誤（`0x0B` 的種類位元組）。
+
+| opcode | 方向 | 角色 | 處理函式 | 證據 |
+|---|---|---|---|---|
+| `0x43` | s2c | 地上出現一個掉落物 | `sub_4A88A0`（177841-178372）| `.c` 177828（`sub_4A8870` 只有這一條與 `0x44` 的分支）|
+| `0x44` | s2c | 掉落物消失（過期／被撿走）| `sub_4A95B0`（178480-178748）| 同上 |
+| `0x0B` | s2c | 道具欄異動（撿到道具、換位、清格）| `sub_55BAB0`（352319-352477）| §4.6、本節 §4.18.4 |
+| `0x11` | s2c | 聊天視窗的「獲得了 …」訊息 | `sub_55C130`（352678-352811）| §4.10、本節 §4.18.5 |
+
+#### 4.18.1 分派：`0x42`／`0x45` 沒有任何處理函式
+
+`sub_472770`（121118-121200）把 `0x42`–`0x45` 全部交給 `sub_4A8870(this_4 = &dword_5C204C, opcode,
+packet)`（`dword_5C204C` 是 `CRewardPool` 全域，建構子在 `sub_4A73A0`，176634-176762）。而
+`sub_4A8870`（177828-177838）**只有兩條分支**：
+
+```c
+if ( opcode == 67 )      sub_4A88A0(this, packet);   // 0x43
+else if ( opcode == 68 ) sub_4A95B0(this, packet);   // 0x44
+return opcode - 68;                                  // 0x42 / 0x45 落到這裡，什麼都不做
+```
+
+所以 `0x42`／`0x45` 是「有 opcode 但沒有 handler」。`schema.ts` 與 `describeFieldOpcode` 現在就照這個寫：
+`0x42 CRewardPool(no handler)`、`0x43 CRewardPool(drop appear)`、`0x44 CRewardPool(drop gone)`、
+`0x45 CRewardPool(no handler)`。
+
+#### 4.18.2 `0x43`：掉落物出現（`sub_4A88A0`）
+
+| 欄位 | 型別 | 讀取 | 意義與證據 |
+|---|---|---|---|
+| `kind` | u8 | `sub_45DC40` | 唯一的讀者是「`kind <= 1` 才多讀一顆怪物區塊」，見下 |
+| `dropId` | u32 | `sub_45DCC0` | ZMap 的鍵（`__ROR4__(key,5) % this[3]`）。**同一個 id 還在場上時只會更新那一筆**，不會多一筆 |
+| `money` | u8 | `sub_45DC40` | **分支而非旗標**：`!= 0` → 下一個 u32 是**金額**；`== 0` → 下一個 u32 是**道具 id** |
+| `value` | u32 | `sub_45DCC0` | 金額或道具 id（見上）。道具走 `sub_479B10(id, 0)`（128587-128697）→ `sub_47CE40` 讀 `Item/<種類>/<id>.img/<id>/info` 的 `icon`／`iconRaw`；金額走 `sub_4A9C40`（178763-178932）|
+| `x`, `y` | s16 ×2 | `sub_45DC80` | 掉落物**落點**（`v92[9]`/`v92[10]`），同時也是「目前位置」的初值（`v92[7]`/`v92[8]`）|
+| ↓ 只有 `kind <= 1` 才讀 | | | |
+| `mobId` | u32 | `sub_45DCC0` | 怪物 id：`sub_492C00`（154413-154433）拿它在 `CMobPool` 裡查；**查到就把「目前位置」覆寫成 `mob+360`/`mob+364`** —— 這就是「東西從怪物身上飛出來」的來源 |
+| `mobX`, `mobY` | s16 ×2 | `sub_45DC80` | 上面那個查詢**失敗**時的替代位置（失敗是正常路徑，不會丟例外）|
+| `unknown` | s16 | `sub_45DC80` | 無條件讀取（`.lst` 004A8C4A）之後只出現在一個指標加法（`v92[11] = ptr + 它`，178350）；沒有任何繪圖路徑把它當座標，**本伺服器寫 0** |
+
+- 金額圖示：`sub_4A9C10`（178753-178760）決定用哪一張錢堆圖：
+  `a < 50 → 0`、`a < 100 → 1`、`a < 1000 → 2`、其餘 `3`，圖示名 = `%08d` of `9000000 + 那個值`，
+  在 `Item/Special/0900.img`（四張錢堆）。
+- client 建出來的紀錄是 **88 bytes**（`sub_4ABB80`，180160-180207：一次配 1476 bytes / 15 筆）：
+  `+4 = kind`、`+5 = (kind == 1 || kind == 2)`、`+8 = dropId`、`+12 = money`、`+16 = value`。
+  `+5` 的角色未解；本伺服器送 `kind = 0`（怪物掉的）與 `kind = 2`（玩家自己丟的，§4.36），沒有送出者用 `kind = 1`。
+- 畫圖前對兩個 y 各做一次 `-= 16`，所以**封包裡的 y 是地面線**，圖示畫在地面線上 16 px。
+- 線路長度：`kind 0/1` = 1 + 4 + 1 + 4 + 2 + 2 + (4 + 2 + 2 + 2) = **22 bytes**；`kind 2` = **15 bytes**（含 opcode）。
+
+#### 4.18.3 `0x44`：掉落物消失（`sub_4A95B0`）
+
+| 欄位 | 型別 | 意義 |
+|---|---|---|
+| `kind` | u8 | `0` = 當場拆掉圖示（過期）、`1` = 安靜移除 + 一個效果分支、`2` = **被某個角色撿走** |
+| `dropId` | u32 | ZMap 查詢；**查不到就安靜結束**（不丟例外、不回封包）|
+| ↓ 只有 `kind == 2` 才讀 | | |
+| `characterId` | u32 | 寫進紀錄 `+60`；**等於自己的角色 id 時**，client 播 `PickUpItem`（100 ms）並用 `sub_41BAC0` 把圖示飛向那個人 —— 別人的 client 也會飛，只是不播音 |
+
+紀錄本身由 `sub_4A8620`（177607-177825）移除。線路長度：**6 bytes**，`kind 2` 時 **10 bytes**。
+
+#### 4.18.4 `0x0B`：道具欄異動（`sub_55BAB0`），順便修正 §4.6
+
+```text
+u8  result        // != 0 時把 CWvsApp+24/+28 歸零並記時間 = 解除 client 自己的送包節流
+u8  count
+count × {
+  u8  op          // 0 = 放入、1 = 重設該格的加密金鑰、2 = 兩格互換、3 = 清格
+  u8  inventory   // 1..4（1 裝備、2 消耗、3 其他、4 現金；其他值丟棄該條目）
+  s16 slot        // 格子；裝備欄可用 -1..-14 指向已穿戴的格子
+  <op 專屬欄位>
+}
+```
+
+- **⚠️ 修正**：`op = 0` 後面**沒有種類位元組**。`sub_55BAB0` 的 case 0 是
+  `sub_45E6A0(&obj, packet, pExceptionObject_1)`（352412 附近），而 `pExceptionObject_1 = (char)n570425348`
+  **就是剛剛讀到的 `inventory` 值**；`sub_45E6A0`（102334）只在第三個參數為 **0** 時才從 stream 讀一個
+  位元組（`if (pExceptionObject == 0) { … LOBYTE(pExceptionObject) = *(_BYTE *)(…) … }`）。所以種類由
+  **欄位本身**決定：`inventory 1` → 參數 1 → `GW_ItemSlotEquip`，2/3/4 → `NonEquip`。全 `.c` 只有
+  `sub_4D3950`（218459）是以 0 呼叫它 —— 那是本伺服器還沒實作的子系統。§4.6 原本的說法是把它當成了
+  這裡的呼叫，已改正。
+- 已驗證的 byte 向量（`test/drop.test.ts`）：放一顆 `4000019`（달팽이의 껍질）到「其他」欄第 1 格 →
+  `0b 01 01 00 03 01 00 | 19 09 3d 00 | 00 | 01 00`
+  = opcode、result、count、op、tab、slot(2)、itemId(4)、現金旗標(1)、數量(2)，共 14 bytes。中間沒有種類位元組。
+- `op = 1` 再讀 `u16 key`：`inventory == 1`（裝備欄）會被 client 直接丟 `CTerminateException`，伺服器不可送。
+  `op = 2` 再讀 `u16 slot2`（互換）。`op = 3` 清格。收尾 `sub_55EB00` 回傳非 0 → `AVCDisconnectException`。
+
+#### 4.18.5 `0x11`：獲得提示（`sub_55C130`，352678-352811）
+
+| `u8` 種類 | 後續 | client 顯示 |
+|---|---|---|
+| `1` | `u32 金額` | `메소를 획득했습니다 (+%d)` |
+| `0` | `u32 道具id` + `u32 數量` | `아이템을 획득했습니다 (%s)`；**數量 ≤ 1 時不印數量**，否則 `(%s %d개)`。名字由 `sub_479D30`（128701-128829）查，查不到（或空字串）→ **一行都不印** |
+| 其他 | 無（總長 2 bytes）| `아이템을 더 이상 가질 수 없습니다`（背包滿了）|
+
+`0x0B`–`0x13` 全部由 `sub_55A900`（351269-351303）分派，**case 號碼就是 opcode**（`0x0A`／`0x14` 沒有 case，直接丟棄）。
+
+#### 4.18.6 伺服器這一側：`game/drops.ts` 與 `game/rewards.ts`
+
+client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/net/loginserver.ts` 的 `tickField`／`pickUp`）：
+
+1. **誰掉什麼**：`defaultDropPolicy(source, random)` —— 三個各自獨立的 roll（`random.range(0, 1000)`）：
+   600‰ 掉錢（`1 + range(0, level * 3)`）、300‰ 掉這隻怪自己的雜物（`MOB_JUNK_DROP`，配對來自
+   `Item/Etc/0400.img` 的**道具名字**：달팽이 → 달팽이의 껍질…）、50‰ 掉藥水（`POTION_BY_LEVEL` 四個等級帶）。
+   三者的機率、金額公式與藥水等級帶**都是伺服器自己的選擇**（ADR-007；binary 裡沒有這些數字）。
+   **玩家自己丟的**是第三條來源（`0x17` `toSlot = 0`，§4.36）：`FieldInstance.dropItem` →
+   `DropField.dropFromPlayer`，`kind = DROP_KIND.placed`（沒有怪物區塊），**落點就是玩家站的地方**
+   （不擴散、不查腳踏點），數量由請求決定——`game/inventory.ts` 已經先從那一格扣掉了。
+2. **掉在哪**：`x` 在怪物 ±`DROP_SPREAD_PX`（24 px）內、`y` 取怪物腳下腳踏點的高度（`footholdYAt`），
+   腳踏點查不到才用怪物自己的 y。
+3. **存在多久**：`DROP_LIFETIME_MS`（300000 ms）之後 `0x44 kind 0`（`vanished`）——怪物掉的與玩家丟的同一條路。
+4. **誰撿到**：每個 field tick 檢查「玩家在自己的 `0x0E` 移動包裡報的位置」與每一筆掉落的距離
+   （`PICKUP_RANGE_PX` 40 / 上下 `PICKUP_RANGE_Y_PX` 60）。**站在上面就是全部的觸發條件**，沒有請求、
+   沒有按鍵；一次 tick 只撿一筆（這樣 client 的飛行動畫才一筆一筆演）。
+   另外，只有**比這個人最後一次移動更早**就躺在那裡的掉落才撿得起來（`reachable` 的第三個參數；
+   `FieldMember.lastMoveAt`，進場本身算一次移動）。兩個理由各自都足以要求這一條：怪物掉落的**落點就在
+   殺牠的人腳下**（擴散 ≤ 24 px），沒有它下一 tick 就會被同一個人吸走、客戶端看不到「從屍體飛出來」；
+   而玩家丟的東西**一定在自己腳下**，沒有它就會立刻被自己撿回來（等於丟不掉）。
+   這是伺服器自己的選擇（ADR-007）：binary 這一半在 client，沒有流量能證明原伺服器怎麼做。
+5. **撿到的三個封包（順序固定）**：`0x44 kind 2`（含角色 id）→ 道具才有的 `0x0B op 0`（放進哪一格）→
+   `0x11`（訊息）；三者都送給**全場**（`0x44` 是「東西是誰拿走的」，別人的 client 要靠它收掉那張圖）。
+   錢只送 `0x44` + `0x0D`（錢包是紀錄的一部分）+ `0x11`。
+6. **放哪一格**：`grantItem` —— 同 id、未滿 `MAX_ITEM_STACK`（200）的堆疊優先；否則第一個空格；
+   裝備與現金道具**永不堆疊**（兩件同 id 的裝備 = 兩格）。背包滿 → **不撿**，掉落留在原地（第三種
+   `0x11` 存在，但每 tick 對站在上面的人印一次會變噪音）。
+   建新格時如果**地面知道那件道具本身**（玩家丟的，`DropEntry.slot`），就用它當模板（`freshSlot`）：
+   捲軸加過的武器撿回來還是同一件，不會變成全新的。
+
+#### 4.18.7 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/drop.test.ts` | `0x43` 的兩種長度與欄位、`0x44` 的三個 kind、`0x11` 的三種形狀、`0x0B` 的 byte 向量與「裝備欄不可換鑰」、掉落的落點／過期／可撿範圍／「必須先動過」、`MOB_JUNK_DROP` 與等級帶、`grantItem` 的堆疊與「裝備不堆疊」、玩家丟的東西（`dropFromPlayer`：落點就是玩家、沒有怪物區塊、15 bytes、模板欄位留著） |
+| `server/test/serve.test.ts` | 真 socket 的整條迴圈：一刀殺怪 → `0x34`＋`0x30`＋`0x43` → 走到錢上 → `0x44 kind 2`＋`0x11` → 走到道具上 → `0x44`＋`0x0B`＋`0x11`；再站一次不會重複撿。另一個測試覆蓋玩家自己丟的：`0x17 toSlot = 0` → `0x0B`＋`0x43`（自己與觀察者都收到）→ 站著不動與走開 80 px 都不會撿 → 走回去才 `0x44`＋`0x0B`＋`0x11` |
+| `server/test/schema.test.ts` | 新增的四筆目錄列（`0x43`／`0x44`／`0x0B`／`0x11`）都要能被 `decode` 的描述器認出來 |
+
+#### 4.18.8 還不能宣稱的部分
+
+1. **`kind` 的三個值**：`0x43` 只有「`kind <= 1` 多讀怪物區塊」與「`+5 = kind == 1 || kind == 2`」兩個
+   線索，沒有字串或分支替它們命名；本伺服器只送 `kind = 0`（怪物）與 `kind = 2`（玩家丟的，§4.36），
+   沒有送出者用 `kind = 1`。`0x44` 的 `kind 1`（「安靜移除 + 效果」）
+   與 `kind 2` 的飛行動畫細節（`sub_41BAC0`）也沒有實機看過。
+2. ~~client 的錢包不會動~~ → **已解決**（§4.22.5）：`+89/+93`（`CharacterData` 第 22 欄）就是錢，
+   `0x0D` 的旗標 `0x40000` 就是它。拾取現在同時送 `0x11`（那行字）與 `0x0D`（錢包數字），
+   `MesoWallet` 也改成同一份紀錄的視圖，不再是另一本帳。
+3. **機率、壽命、擴散、可撿範圍全是伺服器的選擇**（ADR-007）：binary 裡一個都沒有，
+   「看起來對」要等 ADR-004 的實機 run 量。
+4. **`0x43` kind <= 1 的 `unknown` s16** 仍未解（本伺服器寫 0）。
+5. **沒有實機驗證**：`0x43` 的飛行、`0x44 kind 2` 的撿取音效、`0x0B` 放進格子的畫面，全部只由反編譯碼推導。
+
+### 4.19 ✅ NPC：`0x39`／`0x3A`／`0x3B`（`CNpcPool`）
+
+NPC 是 `0x2F` 的**簡化版**：同樣是「池中已有這個 id 就只改變狀態」，但進場包**沒有** `u32 動畫旗標`
+＋七個通道那一塊（§4.12.1）——NPC 的動畫由 client 自己從 `Npc/%07d.img` 的 `stand` 播，
+所以 `0x39` 不必送。`0x2F` 的教訓（欄位要一一對到讀取端）在這條路上一樣適用：以下每一列都對應
+`sub_49F6C0`／`sub_498CF0` 裡的某一次 `sub_45DC40`／`sub_45DC80`／`sub_45DCC0`。
+
+#### 4.19.1 分派（`sub_49F560`，168299-168317）
+
+`sub_472770` 把 `0x38`–`0x41` 送進 `sub_49F560(dword_5C2050, opcode, packet)`（`0x5C2050` 的建構子
+是 `sub_49F020`）：
+
+| opcode | 分支 | 位址（`.c` 行號）|
+|---|---|---|
+| 0x39 | `sub_49F6C0` | 168400-168475 |
+| 0x3A | `sub_49F810` | 168478-168595 |
+| 0x3B | `sub_49F970` | 168598-168631 |
+| 0x3C–0x40 | `sub_49F5B0` | 168320-168340 |
+| 0x38／0x41 | 沒有 case | — |
+
+#### 4.19.2 `0x39`：NPC 進場（已知 id **5 bytes**／新 id **20 bytes**）
+
+| # | 條件 | 寬度 | 寫入目標 | 語意 |
+|---|---|---|---|---|
+| 0 | 一定讀 | `u32` | 池的 key | `npcId`。查表用 `__ROR4__(id,5) % this[3]`（與 §4.12 的 CMobPool 同一個 ZMap）|
+| — | **查到了** | — | `entry + 24 \|= 1` | 就是全部：**只設 bit 0（refresh）**，之後不再讀任何欄位 → 封包總長 **5 bytes** |
+| 1 | 只有查不到 | `u32` | —（立刻拿去查模板）| `templateId`；`sub_49CB30`（165481-165518）是**有快取**的模板查詢，模板由 `sub_411E50` 的 `Npc/%07d.img`（`.c:20269`）建立，`sub_498A20` 再把它變成 NPC 物件 |
+| 2 | 只有查不到 | `s16` | `npc+32` 與 `npc+30` | **x**（兩個欄位都存，`sub_498CF0` 161467-161990）|
+| 3 | 只有查不到 | `s16` | `npc+33` 與 `npc+31` | **y** |
+| 4 | 只有查不到 | `u8` | `npc+20` | **面向**（＝地圖 `life` 的 `f`）|
+| 5 | 只有查不到 | `u16` | 只拿去查表 | `sub_489800(pool + 25, &key, &out)`：查到的 `+32` 欄位會進 vecctrl 的建立流程；**查不到是正常路徑** |
+| 6 | 只有查不到 | `s16` | `npc+16` | 成對的兩個值，一起交給 `sub_540400`（vecctrl 建立）；**沒有任何字串替它們命名** |
+| 7 | 只有查不到 | `s16` | `npc+17` | 同上 |
+
+新 id 讀完後 `sub_49F6C0` 把 `+24` 設成 `1`、把項目鏈進池，再交給 `sub_498CF0` 讀第 2–7 欄；
+**之後封包就結束了**（沒有動畫區塊、沒有 `CMovePath`）。
+
+- `sub_498CF0` 的讀取序列是 2×`sub_45DC80`(`u16`)、`sub_45DC40`(`u8`)、`sub_45DC80`、2×`sub_45DC80`
+  —— 精確對上第 2–7 欄（兩個 `s16` 由 `sub_45DC80` 讀，`u8` 由 `sub_45DC40` 讀，三個 `u16` 由
+  `sub_45DC80` 讀）。讀不完 → `ZException(38)`（與 §4.4 的契約相同）。
+- **已知 id 的 `0x39` 是「叫 client 重新整理這個 NPC」**，不是無意義的重複：`0x31`／`0x3B` 都動 bit 1，
+  bit 0 只有 `0x39` 會設，而 `0x3A` 只清 bit 0。
+- 沒有「目的地 id」這種東西：**`npcId` 由伺服器自己選**，與地圖 `life` 的順序無關（本伺服器從 1 開始編，
+  與怪物池各自獨立）。
+
+#### 4.19.3 `0x3A`：NPC 離場（**5 bytes**）
+
+`sub_49F810`（168478-168595）：`u32 npcId` → 查池 → 清 `+24` 的 bit 0；**只有 `+24` 變成 0 時**
+才解除鏈結（也就是 `0x3B` 打開的第二狀態會讓離場「記著」）。
+查不到這個 id → 安安靜靜地什麼都不做。
+
+#### 4.19.4 `0x3B`：NPC 走動（**6 bytes**；語意見 §4.28）
+
+`sub_49F970`（168598-168631）：**`u8 flag` 先讀，`u32 npcId` 後讀，兩個都無條件讀**
+（這點和怪物 `0x31` 的「`u8 flag` + `u32 mobId`」同型，也和 §4.12 的舊猜測相反）。
+
+| flag | 分支 | 動作 |
+|---|---|---|
+| `!= 0` | `sub_49F260`（168057-168116）| 設 `+24` 的 bit 1，再 `sub_499760(vecctrl, 1)`＝**開始走**（§4.28.1）—— **已知 id** 就到此為止；**未知 id** 會再讀完整個 `0x39` 尾段並用 `sub_49F260` 直接建一個「已經在走」的 NPC |
+| `== 0` | `sub_49F380`（168119-168228）| 清 bit 1，再 `sub_499760(vecctrl, 0)`＝**停**（§4.28.1）|
+
+⚠️ **一則更正**：`sub_49F260`／`sub_49F380` 交給 `sub_499760` 的是 `*(npc + 16)` —— byte 定址，也就是
+**byte 16** 那個 DWORD（一個指標）；而 4.19.2 第 6 欄（`pointX`）在 `sub_498CF0` 裡是 DWORD 索引的
+`*(this + 16)` ＝ **byte 64**。兩者位址不同，早期把「byte 16 的指標」當成第 6 欄的說法**作廢**。
+那個指標指向什麼（vecctrl 是最合理的讀法：它的 `+13`／`+14`／`+25` 才有 `sub_499760` 讀的欄位）仍未命名，
+`+250..+260` 那組 `s16` 的來源同樣未定位（§4.28.1、§6 第 14 項）。
+
+⚠️ 本伺服器**只用已知 id 的形狀**（`u8 flag` + `u32 npcId`）：未知 id 的那條路會讓 client 在讀封包時
+就建立 NPC，`+24` 直接是 2，與「先 `0x39` 再 `0x3B`」在位元上的結果相同但順序不同，沒有實機證據前
+不送。
+
+#### 4.19.5 `0x3C`–`0x40`：只有 id，**只有 `0x3D` 讀更多**
+
+`sub_49F5B0`（168320-168340）讀一個 `u32 npcId` 查表，**所有 case 都只有這 4 bytes**，唯一的分支是
+`0x3D` → `sub_49A280(npc, packet)`（162629-162717）：
+
+```
+s8 first      // 負值／非負值走不同分支
+s8 second     // 上面那個模板裡有兩組陣列（npc+19 的 +32／+36）
+<CMovePath>   // 兩個索引都命中時才由 sub_4967C0 讀（= §4.11.5 的移動路徑讀取器）
+```
+
+也就是說 **NPC 也可以是會走路的**，只是要走的路徑（以及那兩組陣列到底是表情還是動作）還沒有觀測到。
+`0x3C`／`0x3E`／`0x3F`／`0x40` 讀完 id 就結束；`0x38` 與 `0x41` 在 `sub_49F560` 裡**沒有 case**，
+`0x38` 至今無法解釋（§6 已記錄）。
+
+#### 4.19.6 資料面：`Npc/%07d.img` 與地圖的 `life`
+
+- 路徑格式來自 `sub_411E50`（`.c:20269` 的 `Npc/%07d.img`），`server/src/wz/paths.ts` 的
+  `npcImagePath(id)` 就是它。`analysis/data_wz_manifest.json` 這次以正確的形狀（**`images` 是扁平清單**）
+  讀出來：1056 張圖裡 **70 張 `Npc/*.img`、28 張 `Mob/*.img`**。
+- 地圖的 `life` 區塊同時裝怪物與 NPC（`type` 為 `"m"`／`"n"`），`game/map.ts` 早就把兩者分開；
+  NPC 進場用的是同一個 `{x, y, foothold, facing}`（`rx0`／`rx1`／`cy` 對 NPC 沒用）。
+- 已核對的現實資料：`헤네시스`（100000000）2 個 NPC／0 隻怪、`달팽이사냥터`（40000）1 個 NPC（2003）
+  ／63 隻怪、`암허스트서쪽필드`（1000000）0 個 NPC／45 隻怪。
+- 樣本裡**沒有** `Npc/<id>.img` 的地圖（例如自製的 `STUB_MAP` 若指向不存在的 id）→ 這個 NPC 直接
+  不生成、並記一行 log。這與怪物不同：`applyDamage` 對不存在模板回 `undefined`，NPC 這條路則是
+  **進場前**就查模板，因為 `Npc/%07d.img` 不存在時 client 也畫不出東西。
+
+#### 4.19.7 伺服器這一側：`protocol/npc.ts` 與 `game/npcs.ts`
+
+| 位置 | 內容 |
+|---|---|
+| `protocol/npc.ts` | `NPC_OPCODE`（`enterField 0x39`／`leaveField 0x3A`／`stateToggle 0x3B`／`update 0x3D`）、`encodeNpcEnterField`／`readNpcEnterField`／`describeNpcEnterField`、`encodeNpcLeaveField`／`readNpcId`、`encodeNpcState`／`readNpcState` |
+| `game/npcs.ts` | `NpcTemplate`（`templateId`／`name`／`description?`／`func?`）、`npcTemplateProvider(WzArchive)`（讀 `info/name`）、`NpcField`（`spawnAll`／`spawnPackets`／`enterPackets`／`refreshPacket`／`byId`／`present`／`walking`／`setWalking`／`remove`）、`npcWalkPolicy`（`--npc-walk` → 一個「這個模板要走嗎」的函式，§4.28.4）；一個場地只 spawn 一次，`enterPackets()` 是給**新進場玩家**的完整 body（§4.24.2）|
+| `wz/props.ts` | 新的共用層：`entriesOf`／`propertyOf`／`asNumber`／`asText`／`infoOf`，`game/mobs.ts` 與 `game/map.ts` 也改成用它（同一個規則：**形狀不對的值不算值**，預設值由呼叫端給）|
+| `net/loginserver.ts` | `npcTemplate?` 選項；NPC 的 `0x39` 由場地送（`FieldInstance.join`），緊接在怪物的 `0x2F` 之後、**在同一個 TCP 串流、同一組加密狀態**（`0x16` → 每個怪一個 `0x2F` → 每個 NPC 一個 `0x39` → 玩家 `0x1C`，§4.24.2）|
+| `wz/paths.ts` | `npcImagePath(id)` |
+| `cli.ts serve` | 有 `Data.wz` 時同時建立 `npcTemplateProvider(archive)`；`--npc-walk <none|all|id,id,...>`（裸的＝`all`，預設 `none`）|
+
+- **id 不重用**：`NpcField.remove()` 只把項目的 `present` 設成 false，id 留在池裡。理由與怪物池相同
+  ——client 也在自己的池裡留著那個 id，重用會讓 `0x3A`／`0x3B` 打到錯的對象。池是**單調遞增**的。
+- `encodeNpcEnterField` 送 `0` 給第 5–7 欄（`lookupKey`／`pointX`／`pointY`）。第 5 欄的查表失敗是
+  client 自己就會處理的路徑（和 §4.12.1 的 `0x2F` 那兩個 `u16` 一樣），後兩欄**沒有證據**，所以不猜。
+- `describeNpcEnterField` 對已知 id 的形狀會直接說出「refresh only」；`describeFieldPacket(0x39)` 的 5-byte
+  情況則兩種讀法都印（refresh／被截斷），因為**光看長度分不出來**，只有讀取器會不會丟 `ZException(38)` 知道。
+
+#### 4.19.8 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/npc.test.ts` | `0x39` 的 20-byte 形狀與常數 hex、已知 id 的 5-byte 形狀、負座標的 `s16`、`0x3A`／`0x3B` 的 5／6 bytes 與欄位順序、描述器對 refresh／截斷的兩種說法、`NpcField` 的 id 從 1 起算、模板不存在就跳過（並記 log）、沒有模板來源時仍然生成、`setWalking`／`remove` 的合法性（重複 remove 不發封包、id 不重用）、`npcWalkPolicy` 的三種寫法與錯誤輸入、要走 NPC 的快照順序（§4.28.4）、`npcImagePath` 的補零與錯誤輸入 |
+| `server/test/field.test.ts` | `describeFieldOpcode` 的 `0x38`（無 handler）／`0x39`–`0x41` 各一列 |
+| `server/test/schema.test.ts` | 新的 5 筆目錄列（`0x39`／`0x3A`／`0x3B`／`0x3C`／`0x3D`）都要能被描述器認出來 |
+| `server/test/serve.test.ts` | 真 socket：`0x16` → 兩個 `0x2F` → 一個 `0x39`（`templateId 2003`、`x 69`、`y 275`）的順序與欄位；既有的打怪／掉寶測試把 spawn 爆量從 3 改成 4；`--npc-walk` 的那一個則看 `0x39` 後面多一個 `0x3B`（§4.28.4）|
+
+#### 4.19.9 還不能宣稱的部分
+
+1. **第 5–7 欄的語意**（`lookupKey`／`pointX`／`pointY`）：只知道 `sub_489800` 的查表與
+   `sub_540400` 的 vecctrl 建立，**沒有名字**。目前送 0。
+2. **`0x3D` 的兩組索引**：`sub_49A280` 的兩個 `s8` 是**動畫索引**（一維／二維兩組，§4.28.2，
+   `sub_499C00` 是「播一個動畫」），但值是哪個動作沒有名字表；尾巴的 `CMovePath` **只在
+   `template+8 != 0` 時才讀**，而那個旗標來自哪個 WZ 標籤未定位 —— 所以這個封包（目前）不能送，
+   送錯長度會讓 client 把後面的位元組當路徑解。
+3. **`0x38` 與 `0x41` 沒有 case**：`0x38` 夾在 `0x37`（CMobPool 最後一個）與 `0x39` 之間，
+   很可能是某個已停用的 NPC 封包；`0x41` 同理。沒有字串或呼叫點能定位。
+4. **NPC 的生成是伺服器決定的**：`life` 裡有 2 個 NPC 的地圖就會有 2 個，沒有「NPC 重生」這種事
+   （`0x2F`／`0x30` 那一套不存在）。這一點符合 `sub_49F260` 的設計，但沒有實機驗證。
+5. ~~**第二狀態在做什麼**~~ → **已解**（§4.28）：對一個池裡已有的 id，`0x3B` 的 flag 就是
+   「**你自己走這個 NPC**」（`sub_499760(vecctrl, 1)`）／「停下來」（`0`），而且 client 會自己在
+   4–12 秒後重挑目標 —— 伺服器不必記 timer。**哪些** NPC 該走仍然沒有證據（那是政策，不是機制）。
+6. **沒有實機驗證**：`0x39` 之後 client 畫出來的 NPC 站在哪、面向哪，全部只由反編譯碼推導；
+   需要 ADR-004 的 oracle run。
+
+### 4.20 ✅ 怪物的 AI 在 client 裡：`0x2C`（回報）與 `0x35`（動畫）
+
+這一節回答「怪物為什麼不會打人」。答案不是「還沒實作」，而是**2003 年的怪物 AI 根本不在伺服器上**：
+每一隻怪在自己的 client 裡跑一個 per-frame 的狀態機（`sub_4862C0`），它自己挑攻擊、自己算傷害、
+自己打在玩家身上，然後用 `0x2C` 把「我剛剛做了什麼」回報給伺服器。伺服器的角色是**記帳與轉播**
+（`0x33`／`0x35` 給其他 client）。這對重寫的意義很大：AI 屬於 client（DECISIONS ADR-008），
+伺服器不需要、也不該憑空發明一套自己的。
+
+#### 4.20.1 攻擊決策鏈（全部在 client）
+
+| 步驟 | 函式（`.c` 行號）| 內容 |
+|---|---|---|
+| 每幀更新 | `sub_4862C0`（141156-142547，`HRESULT __fastcall`、**沒有直接呼叫點** ⇒ virtual）| 怪物的狀態機。攻擊的閘門在 141460：`mob+276 <= -1`（目前沒有動作在跑）且（`*(mob+124 + 24) == 3` 或 `*(mob+104 + 112) != 0`）且 `*(mob+108 + 24) != 0` 且 `*(mob+108 + 296) != 0` 且 **`mob+116 == 5`**（狀態）|
+| 挑攻擊 | `sub_487D10`（142738-142932）| `*(mob+124 + 108) <= 0` ⇒ 這隻怪沒有攻擊資料，回 0。否則對第 `i` 個攻擊（`sub_4880E0` 是**惰性解析**，`sub_48E360` 才真的讀 `attack<i>`）：**`entry[4] > mob+132`（＝`conMP` 大於怪物的 MP）就跳過**；`entry[3] == 0` 用兩個互為鏡像的矩形對玩家的矩形（`sub_5085E0(&this_6->x, &rc, 0)`）做 `IntersectRect`，否則用 `sub_488220(x, x ± w, y, 4, ...)` 做線段測試；命中的記下 `(攻擊索引, 面向, 位置)`|
+| 選擇 | 同上尾端 | 用 client 自己的亂數產生器（`dword_5D2C20`，`sub_4619F0`）從命中清單挑一個：`*action = 索引 + 10`、`*facing`、`*value = 位置（`x \| y << 16`，沒有原點的攻擊型別寫 0）`。**`+ 10` 就是動作表裡的 `attack1`**（§4.16 的 `MOB_ACTION`），與 `.data:0x5B20FC` 完全一致|
+| 執行 | `sub_4885D0`（143230-143557）| 播效果（`sub_53D3F0(v47, n, ±130, 0)`、`sub_53D390(v47, a5)`、`sub_5374F0`）、送 `0x2C`、把 `mob+116` 設成 `(n30a != 0) + 2`（＝2 或 3）或 `1`|
+
+`v47 = *(mob+108)` 是**被打的那個使用者物件**：它的 `+216` 區塊會被接進封包（`sub_495880`），
+而且攻擊的音效／特效都打在它身上。`v47 + 216` 依 §4.11.5 的佈局正是**使用者的 vecctrl 內嵌 `CMovePath`**，
+所以尾段是「我打到他的時候，他在哪裡」（§4.20.7）。`mob+104` 是另一個指標（`+112` 被當條件讀），
+**兩者的身份沒有定位**，只知道其中一個是使用者（`+216` 那條路徑的就是它）。
+
+#### 4.20.2 `0x2C`：client → server 的「怪物動作」回報
+
+送出的地方有三個（同一支 `sub_4885D0`）：
+
+| 呼叫點 | 時機 | `a5` |
+|---|---|---|
+| 141468（在 `sub_4862C0` 裡）| AI 決定要攻擊，`sub_487D10` 回非 0 | 1 |
+| 142636（在 `sub_487A30` 裡）| 動作播到**命中影格**（`ArgList >= *(mob+124 + 72)`）、狀態 ∈ {-2, 4, 5} | `a10` |
+| 141581（在 `sub_4862C0` 的 `LABEL_55`）| 收尾：`sub_5398B0(...) == -1` 且狀態 ∈ {4,5} | 0 |
+
+欄位（`sub_4A1EA0(&packet, 44, 0)` 之後的寫入順序）：
+
+| # | 寬度 | 值 | 語意 |
+|---|---|---|---|
+| 1 | `u32` | `mob[30]` | **怪物 id**（＝`mob+120`，與 `0x0F` 目標、所有 s2c 怪物封包同一欄）|
+| 2 | `u8` | `n30a \| (16 * a5)` | **bit 0** = `sub_4619F0(&dword_5D2C20) % 0x65 <= 0x46`（71/101，client 自己的產生器，**伺服器無法重算**）；**高 nibble** = `a5`（1 = AI 的攻擊、0 = 命中影格／收尾）。除此之外整個 byte 沒有其他線索 |
+| 3 | `u8` | `n13 >= 0 ? (2*n13) \| (facing & 1) : n13` | **動作位元組**，就是 `0x33` 的編碼（`(action << 1) \| facing`）；`n13 = -1` 時直接寫 `0xFF` ＝**收尾** |
+| 4 | `u32` | `value`（`sub_487D10` 的第 4 個輸出）| 攻擊型別 `entry[3] != 0` 時的**原點位置**（`x \| y << 16`），否則 0 |
+| 5 | 尾段 | `if (*(mob+124 + 24) != 0) sub_495880(v47 + 216, packet, *(mob+124 + 24) == 3, v50 + 216)` | ✅ **是移動路徑區塊，不是傷害清單**（見 §4.20.7 的修正）：`sub_495620` 是 `CMovePath` 的寫出器（讀 `+4`／`+6`／`+16`／`+20`，元素 14 bytes、`s16` 延遲在 `+14`），寫出來的形狀就是 `0x0E`／`0x33` 那個路徑。本伺服器仍**原封不動保留**（不解析、不行動）|
+
+寫完之後 `mob+116 = a5 != 0 ? (n30a != 0) + 2 : 1`。
+
+#### 4.20.3 `0x35`：server → client 的「這隻怪在播哪個動作」
+
+`sub_492380`（153831）讀 `u32 mobId`（長度不足 4 → `ZException(38)`），查池（`sub_492400`），
+**查不到就什麼都不讀**；查到才 `switch`：
+
+```
+case '3' (0x33) -> sub_488BC0   移動（§4.16）
+case '4' (0x34) -> sub_488D90   怪物 MP（§4.17）
+case '5' (0x35) -> sub_488E10   動畫
+```
+
+`sub_488E10` 只有三行：`timeGetTime(); return sub_4C6CE0(this + 34, packet, Time);` ——
+`this + 34`（dword）＝**`mob+136`**，正是 `CMob::Init` 傳給同一個解碼器的那個物件（§4.12.1）。
+所以 `0x35` 的身體**就是 `0x2F` 尾巴那塊動畫區塊**：`u32 旗標` ＋ 每個設定的 bit 各
+`s16 索引`、`s16 延遲`（延遲單位 100 ms，寫成 `timeGetTime() + 100 * 延遲` 的結束時間）。
+
+- 這才是「讓某隻怪播攻擊動作」的封包：自己操控的 client 走 `0x2C` 那條路，**其他 client 只會收到
+  這個**。
+- 旗標為 0 是合法的：七個通道全部歸零（`sub_4C6CE0` 會把沒設定的 bit 對應的通道清掉）。
+- 動作索引在這裡是**原樣的數字**（客戶端存 `(索引, 延遲)` 兩顆，不經過 `0x33` 的 `<<1` 編碼）。
+
+#### 4.20.4 怪物狀態 `mob+116`（已定位的轉移，命名是我們的）
+
+| 來源 | 效果 |
+|---|---|
+| `sub_488BC0`（`0x33`）| 進入時 `== 1` 就整包不讀直接返回；離開時設 `-2`（`byte1 == 0`）或 `-3` |
+| `sub_488D90`（`0x34`）| `1 → 5`、`2 → 4`、`3 → 5`，其他值 → `sub_485330(mob, 1)`（閃光）並且 `= 4` |
+| `sub_4885D0`（`0x2C` 的產生者）| `= (n30a != 0) + 2`（2 或 3），或 `a5 == 0` 時 `= 1` |
+| `sub_487A30`（動作的影格處理）| 狀態 ∈ {-2, 4, 5} 時在命中影格呼叫 `sub_4885D0` |
+
+⇒ 「1 = 站著、2/3 = 攻擊（miss/hit）、4/5 = 攻擊動畫的命中階段、-2/-3 = 走動」是**讀出來的合理命名**，
+不是 binary 裡的字串。這一節只主張轉移，不主張名字。
+
+#### 4.20.5 伺服器這一側：這一回合只做「讀得懂」
+
+- `protocol/mob.ts` 新增 `MOB_OPCODE.anim`（`0x35`）、`encodeMobAnim`／`readMobAnim`／`describeMobAnim`；
+  動畫區塊的讀寫抽成 `writeMobChannels`／`readMobChannels`，與 `0x2F` 的尾巴**共用同一份實作**
+  （測試直接比對兩者的 bytes 相同）。
+- `protocol/field.ts` 新增 `CLIENT_FIELD_OPCODE.mobAttack`（`0x2C`）、`readClientMobAttack`／
+  `encodeClientMobAttack`（`ClientMobAttackBody` 只收「真的寫進封包」的四個欄位，`action`／`facing`／
+  `hasPosition` 由 `actionByte` 與位置自己導出）；`describeClientFieldPacket` 會印出
+  `0x2c mob attack: mobId=… attack1,left flags=0x11 at (x,y) tail=nB`，所以 `serve`／`decode` 的日誌
+  從這一版起就看得懂原 client 的怪物攻擊。
+- **不做**：伺服器不模擬怪物 AI、不重算傷害、**不改玩家的 HP**（`0x0D` 能力值差異包雖然已解出並用於
+  經驗值／升級，§4.21，但「被怪物打 → 掉血」還沒接上：`0x2C` 只是 client 的報告，`applyAttack` 只處理
+  我們自己角色的攻擊）。`serve --game-port` 目前仍舊自己送 `0x33` 讓怪物巡邏——那是**我們 client 還沒
+  有 AI 之前的替代品**，與本節的結論並存但不同層（ADR-008 有寫明）。
+
+#### 4.20.6 還不能宣稱的部分
+
+1. **`0x2C` 的尾段**：形狀**已解**（＝`CMovePath`，`sub_495620` 是它的寫出器，來源是
+   `user + 216`；見 §4.20.7），但**沒有實機對照**：手上那唯一一筆真實 `0x2C` 的尾段只有 3 bytes，
+   比一個路徑區塊的最小值（`u16`＋`u16`＋`u8` = 5）還短，所以「哪一種情況下附加哪一條路徑」還沒被量到。
+   本伺服器仍然不解析、不回應。
+2. **旗標 byte 的兩個部分**：bit 0 的 71/101 roll 與高 nibble 的 `a5`。`a5` 只有「1 = AI 攻擊、
+   0 = 命中影格／收尾」這個觀察，它是不是「這一擊是否真的命中」**沒有證據**。
+3. **`mob+124 + 24` 與 `+72`**：前者是 `0x2C` 尾段的開關、後者是命中影格，都是怪物圖片解析後的欄位，
+   沒有名字。
+4. **`mob+104` / `mob+108` 的身份**：只知道 `+108` 會被打、它的 `+216` 進封包。
+5. **`0x2C` 之後伺服器該做什麼**：2003 年的伺服器（`d3d8`／`sub_55...` 那一側）不在手邊，
+   「扣怪物的 MP 後回 `0x34`」只是合理推測，**沒有證據**，所以本伺服器不做。
+6. **沒有實機驗證**：`0x35` 送出去之後 client 播什麼、`0x2C` 的時序（一次攻擊到底送幾包），
+   都要等 ADR-004 的 oracle run。
+
+#### 4.20.7 修正：`0x2C` 的尾段是一條 `CMovePath`，不是傷害清單
+
+本節前一版把尾段寫成「使用者 `+216` 的傷害／數字區塊」，那是**錯的**。重讀 `sub_495880`
+（143230-143557 內的那次呼叫）與 `sub_495620`（157452-157631）後可以確定：
+
+- `sub_495620(this, packet)` 依序寫：`u16`（`this+4`）、`u16`（`this+6`）、`u8`（`this+16`），
+  然後走 `this+20` 的鏈結串列逐筆寫元素（每個元素 14 bytes，`s16` 延遲在 `+14`）——
+  **這正是 §4.11.5 的 `CMovePath`**（`originX`、`originY`、`count`、元素），與 `movepath.ts` 的欄位一致。
+- `sub_495880(path, packet, a3, other)` 是它的呼叫者（唯一一個），作用是把一條路徑（或 `other` 那條，
+  由 `a3` 決定）接進封包；`a3` 來自 `*(mob+124 + 24) == 3`。
+- 來源是 `v47 + 216`，而 `v47 = *(mob+108)` 是**被打的使用者物件**（§4.20.1），
+  `+216` 就是使用者 vecctrl 內嵌的路徑（§4.11.5 的 `user[13] + 216`）。
+
+所以尾段是**「這一擊打中時，對方（玩家）在哪裡」**，不是傷害數字。這也解釋了它為什麼只在
+`*(mob+124 + 24) != 0` 時出現。**還沒有**解出的是「`a3 == 1` 與 `a3 == 0` 分別挑哪一條路徑」，
+以及 `*(mob+124 + 24)` 的語意（§4.20.6 第 3 項）。
+
+### 4.21 ✅ `0x0D` 能力值差異包（`sub_55BEB0`）＋經驗值表（`sub_4C7110`）
+
+這是**唯一已解出、會改動玩家自己那份角色紀錄的 server → client 封包**：狀態列的 HP／MP 條與
+經驗條畫的都是 client 自己的 `CharacterData`（§4.9），而這一包就寫在那份紀錄上。這也是
+「殺怪 → 經驗值 → 升級」與「怪物打我 → HP 下降」兩個閉環缺的最後一塊。
+
+#### 4.21.1 身體：`u8 ack` ＋ `u32 旗標` ＋ 差異欄位 ＋ `u32 panelFlags`（byte-exact）
+
+分派：`sub_55A900` 的 case 13，也就是 **`CWvsApp` 層**（`0x0A`–`0x14`，`sub_43B170`），不是 CField
+的分派表。所以**同一個位元組在另一個方向是別的封包**（c2s 的 `0x0D` 是 `CField::SendInteract`，
+`[u32 kind][string name]`，§4.13.2／`CLIENT_FIELD_OPCODE.interact`），跟 `0x0B`／`0x0F` 同一個道理。
+
+```
+u8  ack            // != 0 → CWvsApp+24 = 0、CWvsApp+28 = timeGetTime()
+u32 flags          // 19 個 bit（最高到 0x40000），由 0x01 往上依序處理
+                   // 每個 set bit 就讀一個欄位（沒 set 的不在線上）
+u32 panelFlags     // 能力面板／buff 區塊的旗標；0 = 後面沒有東西（見 §4.21.2）
+```
+
+`sub_45E0D0` 是差異讀取器（`.c:101985-102257`），讀到的每一個欄位都寫進 client 的角色紀錄
+（`sub_463050` 交出來的就是 `CWvsApp+36` 那份）；紀錄裡的每個值都是「遮罩對」中的一半，
+**線上送的是純值**，所以伺服器端不需要任何 RNG。
+
+| flag | 欄位 | **這一包的寬度** | `CharacterData` 的寬度 | 讀取端 |
+|---|---|---|---|---|
+| `0x00001` | `appearanceA` | u32 | u32 | `sub_45DCC0` |
+| `0x00002` | `appearanceB` | u32 | u32 | `sub_45DCC0` |
+| `0x00004` | `unknown26` | **u32** | u8 | `sub_45DCC0`（讀 4 byte，只留 1 byte：`mov [edi+1Ah], al`）|
+| `0x00008` | `hair` | u32 | u32 | `sub_45DCC0` |
+| `0x00010` | `level` | u8 | u8 | `sub_45DC40` |
+| `0x00020` | `job` | u16 | u16 | `sub_45DC80` |
+| `0x00040` | `str` | **u8** | u16 | `sub_45DC40` + `movzx bp, byte` |
+| `0x00080` | `dex` | **u8** | u16 | 同上 |
+| `0x00100` | `int` | **u8** | u16 | 同上 |
+| `0x00200` | `luk` | **u8** | u16 | 同上 |
+| `0x00400` | `hp` | u16 | u16 | `sub_45DC80` |
+| `0x00800` | `maxHp` | u16 | u16 | `sub_45DC80` |
+| `0x01000` | `mp` | u16 | u16 | `sub_45DC80` |
+| `0x02000` | `maxMp` | u16 | u16 | `sub_45DC80` |
+| `0x04000` | `ap` | u16 | u16 | `sub_45DC80` |
+| `0x08000` | `sp` | **s16** | u16 | `sub_45DD80`（有號）|
+| `0x10000` | `exp` | u32 | u32 | `sub_45DDC0` |
+| `0x20000` | `fame` | **u32** | u16 | `sub_45DDC0`（讀 4 byte，只留 2 byte：`mov [edi+55h], ax`）|
+| `0x40000` | `mesos`（原 `unknown93`）| u32 | u32 | `sub_45DDC0`（§4.22.5：這一欄是錢）|
+
+- ⚠️ **這是全表最重要的細節：差異包的寬度不等於 `CharacterData` 的寬度**。`sub_45D840`
+  （§4.9 的 69-byte 區塊）把 `unknown26` 讀 1 byte、`fame` 讀 2 bytes、`str`/`dex`/`int`/`luk`
+  讀 2 bytes；而 `sub_45E0D0` 讀 4／4／1 bytes。三處都在 `.lst` 的組語裡逐 byte 確認過
+  （Hex-Rays 對前兩處只寫 `u8`／`u16`，會讓人以為兩邊一樣）。
+- **`str`/`dex`/`int`/`luk` 送 u8 的後果**：讀進來的是零擴展的一個 byte，存進紀錄時上半部被遮罩成 0，
+  所以 client 看到的數值 = `value & 0xff`。**超過 255 的能力值送這一包會被 client 自己砍掉**
+  （`protocol/stat.ts` 因此直接拒絕 >255 的值，而不是靜默截斷）。
+- `mapId` 與 `unknown101` **不在這 19 個 bit 裡**：它們只在 `CharacterData`（`0x16`／`0x02`）裡旅行。
+- 19 個 bit 用完就沒了：旗標字最大是 `0x7FFFF`。
+
+**client 收到之後做什麼**（`sub_55BEB0` 在解碼之後的分支）：
+
+1. 等級**沒變**而 `exp` 變大 → 顯示 `"경험치가 상승했습니다 (+%d)"`（`.c:352580`，`%d` 是新舊差）。
+2. 等級**變大** → 播 `Effect/BasicEff.img/LevelUp` 並顯示 `"레벨이 올랐습니다 (+%d)"`。
+   也就是**升級是伺服器決定的，client 只負責慶祝**。（client 自己也有一支「就地升級」routine
+   `sub_4C71C0`：扣掉 `dword_5C2138[level]`、等級 +1、還活著就把 HP／MP 補滿、再重算傷害範圍。
+   這支在 .c 裡找不到呼叫端，而 `0x0D` 的升級分支才是伺服器驅動的那條路；它的**表**才是重點，見 §4.21.3。）
+3. `sub_55AA80` 重畫地圖／UI 單例，條列才會跟著動。它與 `0x0D` 的 panel 區塊（§4.21.2）都會碰到
+   client 的另一顆亂數 `dword_5D2C20`：**只有第一次**（`byte_5D2C04` 這個 MSVC 延遲初始化守衛）
+   才用真的 `rand()` 播種（`.c:351390`、`.c:206013`），之後只是抽號碼。`0x2C` 的 bit 0 用的是同一顆
+   —— 所以「client 算出來的傷害」並不只由 `0x16` 的三個場地種子決定。
+
+**`ack` 這個 byte 的意思**：非 0 會把 client 的「有一個場地請求還沒被回」閘門清掉（`CWvsApp+24 = 0`）
+並重打時間戳（`+28`）。那是 `CField::SendInteract` 送出前自己設起來的同一個欄位
+（`n3000[6] = 1; n3000[7] = timeGetTime()`），也是 `0x0B` 的 `result` 與 `0x11` 的同一個慣用法。
+只有「零／非零」被比較。本伺服器送 0（這一包不是任何請求的回覆）。
+
+#### 4.21.2 `panelFlags`：能力面板／buff 區塊（**未解，伺服器一律送 0**）
+
+`sub_55BEB0` 讀完差異後無條件呼叫 `sub_4C5DC0(CWvsApp+112, packet, *(u32*)(n3000_0+80), 紀錄副本)`，
+所以 `u32 panelFlags` **一定在線上**（沒有「長度不足就跳過」這回事 —— 少送會讓 client 丟
+`ZException(38)`）。`sub_4C5DC0` 的前幾行就是全部的關鍵：
+
+```
+u32 panelFlags            // sub_45DCC0；== 0 → 立刻 return 0（不再讀任何 byte）
+u32 unknownId             // 呼叫端的第 4 個參數指向紀錄副本，這個 u32 寫進副本的 +0（= id 欄位）
+// 每個 set bit（0x01…0x800，共 12 個）各一個 u16（sub_45DC80，有號讀取）
+//   每筆 u16 存成兩對「(rand, value ^ rand)」：第一對是值，第二對是 stamp = a3 + panelFlags
+// bit 0x800 另外動到 client 的全域傷害亂數 dword_5D2C20（第一次進來時用 rand() 播種，
+//   然後存一個 Random() 取樣）—— 與 0x2C 的 bit 0 是同一顆（§4.20）
+return a3 + panelFlags     // 非 0 時呼叫端會再讀一筆 buff（sub_4CBBD0：u8 + u32，buff 圖示與時間）
+```
+
+- `panelFlags == 0` 就是「這裡沒有東西」：`sub_4C5DC0` **立刻 return 0**，`sub_55BEB0` 也因為回傳值
+  是 0 而跳過 buff 區塊 —— 所以伺服器只要送一個 `u32 0`，封包就到這裡為止。
+- 12 個 bit 的**語意**（哪個 bit 是哪一項、那第二對 stamp 要 client 拿來幹嘛）沒有字串、沒有
+  呼叫端證據；`a3` 是呼叫端給的一個 stamp（`*(u32*)(n3000_0+80)`，身份未定）。
+  **沒有欄位語意就不送**（非 0 會逼我們發明 12 個 u16 的內容），所以 `stat.ts` 只寫 0，
+  `readStatUpdate` 遇到非 0 直接拒絕而不是猜。
+- `0x0F`（`sub_55C090`）走的是**同一支** `sub_4C5DC0`（`u8 flag`；`flag != 0` 再讀 `u8 mode`，
+  `mode == 0` 時才呼叫它）——所以 §6 第 6 項（能力面板第二種更新格式）仍然 OPEN。
+
+#### 4.21.3 經驗值表是**算出來的**，不是資料（`sub_4C7110`／`sub_4C7190`）
+
+2003 client 沒有經驗值表檔：它在啟動時用公式填出 `dword_5C2138[]`（`.data` 裡是 `dd ?`，
+所以**在檔案裡掃 15/34/57/92… 一定掃不到**；`sub_4C7100` 這支 thunk 掛在 `.data:005AD228`
+的函式指標表上）：
+
+```
+n = 1..5      f(n) = n * (n * n / 2 + 15)          // 整數除法
+n = 6..50     f(n) = q * (q + 19)，q = n * n / 3    // 整數除法
+n = 51..200   f(n) = trunc(f(n - 1) * 1.0548)      // fild / fmul 1.0548 / _ftol
+```
+
+`sub_4C7190(n)` 是存取器：`n > 200` 回 `0x7FFFFFFF`，`n < 1` 夾到 1（`sub_4C71C0` 自己也是這樣夾）。
+
+**`f(n)` 就是「從 `n` 升到 `n + 1` 所需經驗值」**——這句話的依據是 `sub_4C71C0`（`.c:206798`，client 自己的
+「就地升級」routine，**全 binary 唯一的定義、沒有任何呼叫端 ⇒ 這一版的 client 不會自己升級**）：
+
+```c
+if (level >= 200) { level = 200; exp = min(exp, dword_5C2458 - 1); return 0; }
+if (exp < dword_5C2138[level]) return 0;
+exp -= dword_5C2138[level];
+level += 1;
+if (exp >= dword_5C2138[level]) exp = dword_5C2138[level] - 1;   // 卡在「差一點升級」
+sub_4C7450(record, slot, 0x2800, 1);          // 重算傷害範圍（武器 atk 表 dword_5BB344）
+if (hp > 0) { hp = maxHp; mp = maxMp; }       // 活著才補滿
+return 1;                                     // 一次一級
+```
+
+**它沒有動 `maxHp`／`maxMp`／`ap`／`sp`**：呼叫的 `sub_4C7450` 是傷害範圍計算（讀
+`record+386` 那個裝備 map 裡的武器 `1000001`，配 `dword_5BB344` 的熟練度表與 `rand()`），不是成長表。
+所以「升級加多少」在原伺服器上，**binary 裡沒有答案**（§4.21.6 第 3 項）。
+
+**這些數字就是真正的 2003 表**：`f(1..20)` = 15, 34, 57, 92, 135, 372, 560, 840, 1242, 1716, 2360,
+3216, 4200, 5460, 7050, 8840, 11040, 13716, 16680, 20216，與公開的 2003 經驗值表相同；把 200 個值
+全部與 fan site 的複本比對，**196 個完全相同**，四個不同的（59／144／162／198）都是單筆打字錯誤，
+而且**前後兩級都跟我們的值一致**（例：198 用我們的 1906588648 才會乘出表上的 199 = 2011069705）。
+社群反推的高等級公式 `49269.68724 * e^(0.053351115 * level)` 也給了同一個倍率
+（`e^0.053351115` = 1.05480）。
+
+#### 4.21.4 伺服器這一側：`protocol/stat.ts` 與 `game/exp.ts`
+
+- `protocol/stat.ts`：`STAT_OPCODE`、`STAT_DIFF_FIELDS`（19 筆，旗標＝`1 << 索引`）、
+  `encodeStatUpdate`／`readStatUpdate`／`describeStatUpdate`，以及 `diffStats(舊紀錄, 新紀錄)`
+  —— 伺服器只要留著送出去的紀錄，改動之後就能得到「最小的一包」。
+- `game/exp.ts`：`expToNextLevel`（照 §4.21.3 的公式，含 51 級以上的倍率鏈）與
+  `awardExp(紀錄, 量)`：加經驗值、必要時連續升級、**升級且還活著就把 HP／MP 補滿**（這是 client
+  自己那支 routine 的行為，不是我們的猜測），並回報「有沒有變／升了幾級」。
+- `net/loginserver.ts`：`applyAttack` 確認怪物死亡後，先 `awardKillExp`（送 `0x0D`），再
+  `spawnDrops`。經驗值量是**怪物自己的 `info.exp`**（`MobTemplate.exp`），門檻是 client 自己的表。
+
+#### 4.21.5 測試
+
+- `test/stat.test.ts`（10）：手寫的 golden bytes 逐 byte 對齊三個「不一致寬度」、19 個 bit 的順序、
+  拒絕超界值（含 `str = 256` 與 `sp = 0x8000`）、`panelFlags != 0` 直接拒絕、
+  `diffStats` 只回報有變的欄位、以及「差異包的欄位集合 = `CharacterStats` 減掉 5 個」的反漂移檢查。
+- `test/exp.test.ts`（10）：公開表的 golden 值（1–30／50／51／52／100／150／190–200）、單調遞增、
+  `n > 200` → `0x7FFFFFFF`、一次多級、補血與「死掉不補」、`maxLevel` 上限。
+- `test/serve.test.ts`：殺怪 → `take(1)` 收到 `0x0D`（純 exp 的形狀），以及「hp 20/50、mp 5/30、
+  20 exp 的怪」→ `{ level: 2, exp: 15, hp: 50, mp: 30 }` 的完整差異。
+- **真 `Data.wz` 實跑**（`GameEntryServer` + `mapDataProvider` + `mobTemplateProvider`，地圖
+  `40000` 달팽이사냥터，假 client 從真 socket 送 `0x0F`）：進場 65 包（`0x16` ＋ 63 隻怪 ＋ 1 個 NPC）
+  標頭全對；殺五隻 달팽이（`100100`，`info.exp` = 3）後收到的差異包依序是
+
+  ```
+  kill 1..4:  0d 00 | 00 00 01 00 | 03 00 00 00 | 00 00 00 00      // ack=0, flags=0x10000, exp=3/6/9/12
+  kill 5:     0d 00 | 10 00 01 00 | 02 | 00 00 00 00 | 00 00 00 00 // flags=0x00010010: level=2 (u8) + exp=0
+  ```
+
+  也就是**第十五點經驗值讓 client 自己看到升級**（`f(1)` = 15，§4.21.3），HP／MP 沒有出現在差異裡
+  （本來就是滿的 50/50，所以升級補血不改變任何欄位 —— `diffStats` 只送真的有變的）。
+
+#### 4.21.6 還不能宣稱的部分
+
+1. **`panelFlags != 0` 的區塊**（12 個 bit，每個一個 u16 ＋ 那個 stamp ＋ buff）沒有欄位語意，
+   本伺服器一律送 0（§4.21.2）。也就是**能力面板（S 鍵那個視窗）與 buff 圖示還不會被伺服器驅動**。
+2. ~~client 的 메소（錢）不在這 19 個 bit 裡~~ → **已解決**：`0x40000` 就是錢（§4.22.5），
+   伺服器送它就等於推動畫面上的錢包。
+3. **升級的 `maxHp`／`maxMp`／`ap`／`sp` 成長量不在 binary 裡**：那是原伺服器的數字。目前升級只送
+   `level`／`exp`／（滿血）`hp`／`mp`，角色的最大值維持不變 —— 這是**已知且刻意的缺口**。
+4. **沒有實機驗證**（ADR-004）：HP 條／經驗條會不會照著動、升級特效會不會播，全部由反編譯碼推導。
+5. `fame`／`unknown26` 這種「線上 4 byte、記憶體 1–2 byte」的欄位，只知道寬度不知道用途；本伺服器
+   不會主動送它們。
+6. **誰能改 client 的 HP**：把整份 binary 裡「寫紀錄 `+53`／`+55`（hp 遮罩對）」的程式碼掃過一次，
+   總共只有四個地方，**沒有任何一個是「怪物打玩家」**：
+
+   | 寫入者 | 什麼時候 | 加註 |
+   |---|---|---|
+   | `sub_45D840`（`.c:101658`）| 解完 `CharacterData`（`0x16`／`0x02`／登入鏈）| 全量 |
+   | `sub_45E0D0`（`.c:102168`）| **`0x0D` 的差異包** | 只送有變的（這才是原伺服器改血的方式）|
+   | `sub_4BDDC0`（`.c:198090`）| **技能的 HP／MP（與彈藥）消耗**：`sub_518BF0(record, skillId)` 是技能分派器（`sub_4BDD20` 查 `Skill/<job>` 的等級列，再依 id 分派到 `sub_519600`…），兩個呼叫端之一是快捷鍵表（`n0xC8 + 8*key + 152`）| 與 `0x0D` 無關，client 自己扣；彈藥需求在 `entry+56`／`+60`，庫存在 `record + 4*tab + 362` |
+   | `sub_4C71C0`（`.c:206930`）| client 自己的就地升級 routine | **沒有呼叫端**（§4.21.3）|
+
+   也就是說：**怪物打玩家的扣血一定要由伺服器送 `0x0D`**，client 端沒有別的路徑；而伺服器要知道
+   打多少，就得先解出 `0x2C` 的尾段（§4.20.6 第 1 項，目前未解、只讀不回應）。這條閉環因此仍然是
+   **OPEN**（ADR-008 的「伺服器只記帳」目前包含「不改玩家的血」）。
+
+### 4.22 ✅ NPC 商店：`0x4A`／`0x4B`（開窗與結果）、`0x16`／`0x33`（client 的按鈕與點擊）
+
+這一節同時解決兩件一直掛在待辦上的事：
+
+1. **「對話框／商店」（`0x49`–`0x4C`）不再只是一個區間名** —— 兩個 opcode 的完整身體、誰開的窗、
+   以及 client 會自己丟出斷線例外的兩個時機，全部定位完成。
+2. **`CharacterData` 的第 22 欄（`+89/+93`）就是 메소**（原本叫 `unknown93`）。§4.18.8 一直說
+   「撿到錢時 client 的錢包不會動、而且不知道是哪一欄」，現在兩個問題都有答案：欄位是它，
+   `0x0D` 的旗標 `0x40000` 就是它 —— **錢包的顯示可以被伺服器驅動了**。
+
+#### 4.22.1 誰開的窗：`0x33`「點擊場地物件」（`sub_55AF20`）
+
+`CField` 的滑鼠處理 `sub_4A7770` 用一個 ±25 × −50..+10 的矩形（`rc.left = x-25, rc.top = y-50,
+rc.bottom = y+10`）找出指標下的場地物件，只對**型別欄位 `+48 == 3`** 的物件動作，而且同一個物件
+3 秒內不重複（`+56` 記時間戳）。命中的物件把它的 id 交給 `sub_55AF20`：
+
+```
+u8  0x33
+u32 objectId        // 場地物件的執行期 id；對 NPC 就是 0x39 發給它的那個 id
+```
+
+送出前它有兩個前置條件：`CWvsApp+24 == 0`（沒有請求在途）與 `hp > 0`（活著），送出後把
+`CWvsApp+24 = 1`、`+28 = timeGetTime()` —— **跟 `0x0D` 的 interact 是同一個閘門**。
+解除它的方法 §4.11.6 已寫：伺服器回一個空的 `0x19`（`sub_4728B0` 只做 `+24 = 0; +28 = time`）。
+`0x0D` 的 `ack` byte 也能清（§4.21.1）—— 兩個都合法，這支伺服器送 `0x19`。
+
+#### 4.22.2 `0x4A`：開窗與菜單（`sub_4B73A0` case 74 → `sub_4B3780`）
+
+`0x49`–`0x4C` 都由 `sub_4B73A0(opcode, packet)` 處理，而**只有 `0x4A` 與 `0x4B` 有分支**：
+`0x49`／`0x4C` 落到函式尾端、什麼都不讀。`0x4A` 先 `sub_403350` 配置一個 `0x3B8` bytes 的
+`CShopDlg`（RTTI 名稱與 vftable 都在 `.data` 裡，WZ 名稱 `"UI"`），再交給 `sub_4B3780`：
+
+```
+u32 shopId          // 存進 dlg+144；client 之後不會把它送回來
+u16 count           // 列數，0 是合法的空商店
+count × {
+  u32 itemId
+  u32 price         // client 自己顯示、自己拿它算總價
+  if itemId / 10000 == 207: u8[8]   // sub_45DD00 原封不動複製，client 不看內容
+  u16 maxCount      // 買入對話框的預設值與上限（sub_4B6B40 讀列結構的 +32）
+}
+```
+
+- 那一列在 client 記憶體裡是 **48 bytes**（`sub_4B7BA0` 從 `sub_4B3780` 的區域變數整塊複製）：
+  `+0 itemId`、`+4 ..`、`+16 price`（`sub_4B6B40` 的 `v4[4]`）、`+24` 那 8 bytes（只有 207）、
+  `+32 maxCount`（`v4[8]`）。**線上的順序**才是上面那個。
+- `207` 是這份檔案裡唯一會多帶 8 bytes 的家族（`sub_45DD00(dst, 8, …)`，判別用魔法乘法除以 10000）。
+  那 8 bytes 的**長度**確定、**內容**沒有證據，所以 `protocol/shop.ts` 原封不動帶著它們，
+  而**拒絕**自己組一列（發明內容會是無聲的錯）。
+- ⚠️ **開窗前 client 已經有別的 modeless 視窗時，`sub_4B73A0` 直接丟 `CDisconnectException`**
+  （`if (this_15 != 0) throw ...`）—— 所以伺服器不能在已經開著商店時再送一次 `0x4A`。
+  這支伺服器用 `FieldSession.shop` 記著自己開過哪個窗，第二次點同一個 NPC 只記一行 log。
+
+#### 4.22.3 `0x4B`：一個 byte，而且**只有在請求在途時才合法**
+
+```
+u8 code
+```
+
+`sub_4B73A0` case 75 的流程：把 `dword_5C2040`（開著的 modeless 視窗）用 RTTI 轉成 `CShopDlg`；
+**是 `CShopDlg` 且 `dlg+184 == 0`（沒有請求在途）→ 丟 `CDisconnectException`**（client 自己斷線），
+否則先把 `dlg+184 = 0` 再讀那個 byte，然後照它顯示訊息：
+
+| code | client 的字串 |
+|---|---|
+| 0 | **不顯示任何東西**（只把「請求在途」清掉）|
+| 1 | `물품이 부족합니다`（東西不夠）|
+| 2 | `현금이 부족합니다`（錢不夠）|
+| 3 | `남은 슬롯이 부족하지 않은지 확인해보세요`（背包沒位子）|
+| 4 | 與 1 **同一句話**（差別未定位）|
+| >4 | `오류가 발생해 거래를 하지 못했습니다`（預設分支，`.text:004B7469` 的 jump table 是 `cmp eax, 4`）|
+
+`dlg+184` 由三個「會做事」的按鈕在送出前設起來（`sub_4B6B40`／`sub_4B6E90`／`sub_4B7130`），
+**關窗的 `sub_4B3C80` 不設**。於是協定變成：
+
+- 買／賣／充電 **一定**要回一個 `0x4B`（哪怕是 `0`）——那是 client 解鎖自己的唯一方式。
+- 關窗**不能**回 `0x4B`：那時 `dlg+184 == 0`（而且視窗正在被拆掉），回下去就是叫 client 丟例外。
+
+#### 4.22.4 `0x16`：四個按鈕，同一個 opcode
+
+四個 sender（`sub_4B6B40`／`sub_4B6E90`／`sub_4B7130`／`sub_4B3C80`）都用
+`sub_4A1EA0(&buf, 22, nullptr)` 起頭（**22 = 0x16**），第一個 byte 是動作，其餘看動作：
+
+```
+u8 0 buy       u16 rowIndex  u32 itemId  u16 count      // 買：列索引是 client 自己的清單索引
+u8 1 sell      u16 slot      u32 itemId  u16 count      // 賣：slot 是背包格（server 靠它找堆疊）
+u8 2 recharge  u16 slot                                 // 充電（표창 那一類）
+u8 3 close     （沒有了）                                  // 關窗
+```
+
+- **`itemId` 才是伺服器該信的那一欄**：`rowIndex` 是 client 自己建的那份清單的索引，而它其實建了
+  **兩份**（`dlg+148` 可標價的一組、`dlg+152` 的 207 一組），螢幕上的順序屬於 UI。這支伺服器用
+  `itemId` 找列、把索引留在日誌裡。
+- 買入之前 client 自己也會檢查：數量必須 `1..maxCount`，總價不能超過 `+89 ^ +93`（見 §4.22.5），
+  而且它會先問「몇 개를 사시겠습니까?」。伺服器端再檢查一次是**權威**，不是重複。
+- `0x16` 與另一個方向的 `0x16`（`setField`）撞號，跟 `0x0D`／`0x0B`／`0x33` 一樣是同一個位元組在
+  兩個方向各有意思（§4.6）。
+
+#### 4.22.5 `+89`／`+93` 是 메소（`unknown93` 改名）
+
+`CharacterData` 的第 22 欄（`u32`，記憶體 `+89/+93` 的遮罩對）有三個互相獨立的讀取端：
+
+| 證據 | 行為 |
+|---|---|
+| `sub_4B6B40`（買）| `v7 = 紀錄+89 ^ 紀錄+93`，`總價 > v7` 就顯示 **`현금이 부족합니다`** —— 這一欄就是錢 |
+| `sub_4B6E90`→`sub_4B5Bxx`（賣）| 同一對值被拿去填商店視窗的持有金額 |
+| `.c:225553` 的對話框 | **`얼마를 버리시겠습니까?`**（丟錢）把該值當輸入框初始值，並 `min(值, 50000)` —— 50000 上限是 2003 年的丟錢上限 |
+
+而 `0x0D` 的旗標 `0x40000` 寫的正是這一欄（`sub_45DDC0` → `+89/+93`，§4.21.1），所以**伺服器現在
+可以推動畫面上的錢包**：`protocol/chardata.ts` 把它改名為 `mesos`，`game/rewards.ts` 的錢包改成
+**這一份紀錄的視圖**（不是第二本帳），撿到錢時連同 `0x11` 一起送 `0x0D`。
+
+#### 4.22.6 伺服器這一側：`protocol/shop.ts`、`game/shops.ts`、`loginserver.ts`
+
+- `protocol/shop.ts`：`0x4A`／`0x4B`／`0x16`／`0x33` 四個 codec 與它們的 describer（`decode` 日誌
+  現在看得懂商店的四個方向），`SHOP_RESULT`／`SHOP_REQUEST` 常數，207 家族原封不動攜帶、
+  拒絕自行組裝。
+- `game/shops.ts`：**價格來自資料**（`Item/Consume/0200.img/<id>/info/price`，`itemPrice`；
+  讀不到價格的列**不會被送**，而不是送 0）。**商店的內容是伺服器的選擇**（ADR-010）：
+  兩個商店（`1010100` 리나／헤네시스、`2003` 로빈／달팽이사냥터 —— 兩個都是地圖 `life` 裡真的
+  存在的 NPC）、`DEFAULT_SHOP_MAX_COUNT = 200`、`SELL_PRICE_RATIO = 0.5`（收購價，client 只看得到
+  買價，2003 的收購率不在 binary 裡）。買／賣都會**重新驗證**（錢、格子、數量、哪一格），
+  失敗回 `TradeFailure`，由 `shopResultCode` 映射成 `0x4B` 的 byte。
+- `loginserver.ts`：`0x33` → 先回 `0x19`，再（若該 NPC 有商店且沒開著窗）送 `0x4A`；
+  `0x16` → 買／賣／充電／關窗。成功的交易送三個封包：`0x4B`（silent）＋`0x0B`（那一格換了什麼）
+  ＋`0x0D`（`mesos`），跟拾取用的是同一組。`--data off` 時沒有任何價格 ⇒ 商店是空的、買不到東西。
+- `wz/paths.ts` 多了 `itemImagePath`：`Item/<kind>/<ids 前四位>.img`，四種 kind（Consume／Etc／
+  Book／Special）是這份 `Data.wz` 的實際目錄（`analysis/data_wz_manifest.json`）；**裝備不在
+  `Item/` 底下**（`Character/<type>/<id>.img`），所以這一版不賣裝備。
+
+#### 4.22.7 測試
+
+- `test/shops.test.ts`（16）：四個封包的 golden bytes 與 round-trip（含 207 那 8 bytes 的攜帶與兩種
+  拒絕、`0x4B` 的 `u8` 範圍、未知動作直接拒絕）；買／賣的完整會計（錢、格子、堆疊剩幾、清空），
+  六種失敗；`shopResultCode` 一定落在 client 的 switch 或它的 default；真 `Data.wz` 的價格
+  （25／80／160／100＋엘릭서 1000）與「讀不到價格的列不會被送」；`--data off` 什麼都買不到。
+- `test/serve.test.ts`：**真 socket** 走完一次商店 —— 點 NPC（`0x33`）→ `0x19`＋`0x4A`（列與價格
+  逐欄核對）→ 買一瓶（`0x4B` silent ＋`0x0B`　put ＋`0x0D` `mesos: 75`）→ 錢不夠時 `0x4B` code 2
+  → 關窗之後**什麼都不回**。
+
+#### 4.22.8 還不能宣稱的部分
+
+1. **207 那 8 bytes 的內容**：長度與位置確定，意義未知；本伺服器只攜帶、不產生。
+2. **`0x4B` 的 1 與 4**：client 顯示同一句話，差別沒有字串或分支能區分；本伺服器用 1 表示
+   「你沒有那個東西」、4 表示「這間店不收」。
+3. **充電（`0x16` op 2）沒有實作**：本伺服器開的商店沒有任何 207 商品，一律回 `0x4B` code 1。
+4. **`0x49`／`0x4C` 沒有 handler**：`sub_4B73A0` 只認 74／75，所以真正的「對話框文字」不在這個
+   區間 —— 2003 的 NPC 對話與任務共用 `0x46`–`0x48`（`CQuestMan`）與 client 的 `0x15` 回答，
+   那條線還沒解。
+5. **商店的內容是選擇**：原伺服器的商店是腳本，`Data.wz` 裡沒有商店資料，所以「哪個 NPC 賣什麼」
+   是這份 repo 的決定（ADR-010）；價格則是檔案裡的。
+6. **NPC 的對話與走動**（`0x3D`）仍然 OPEN（§4.19.9）；沒有實機驗證（ADR-004）。
+
+### 4.23 ✅ NPC 對話：`0x47`（s2c）與 `0x15`（c2s）
+
+「跟 NPC 說話」在這份 build 裡就是**一個對話框封包**：伺服器把要說的話放進 `0x47`，client 用
+`CUtilDlg` 把字畫出來、跑成 modal、把玩家的選擇用 `0x15` 送回來。沒有任務狀態、沒有腳本下載 ——
+client 連任務 UI 都沒有，`0x46`／`0x48` 連 handler 都不存在（下表）。
+
+#### 4.23.1 分派與欄位
+
+`sub_472770`（CField 的分派器）把 70..72 交給 `sub_4A58F0(dword_5C2048, opcode, packet)`
+（`dword_5C2048` 是 `CQuestMan` 全域），而它只認 71：
+
+| opcode | 分支 |
+|---|---|
+| `0x46` (70) | **沒有**（落在範圍裡、沒有 case）|
+| `0x47` (71) | `sub_4A5910`（175012-175082）|
+| `0x48` (72) | **沒有** |
+
+`sub_4A5910` 的欄位，依讀取順序：
+
+| # | 寬度 | 名稱 | 說明 |
+|---|---|---|---|
+| — | — | guard | `CQuestMan+4 != 0` ⇒ `CDisconnectException`：**一次只能有一個對話框**，與商店的 `CShopDlg+184` 同型 |
+| 1 | `u8` | `unknownA` | 讀完就再也不會被用到（見下）|
+| 2 | `u32` | `npcId` | 同上 |
+| 3 | `u8` | `subOp` | 0..4；**> 4 直接丟掉**（不報錯、不回任何東西）|
+| 4 | … | body | 依 `subOp`，見下表 |
+
+前兩個欄位「讀了不用」是這個 build 的事實，不是漏看：`.lst` 裡五個 handler 的第二個堆疊引數
+（`[esp+8]`，也就是那個 `u32`）**完全沒有被引用**，第一個只被當成下一次 byte 讀取的暫存槽。
+所以 client 不可能在意裡面放什麼 —— 本伺服器在第 1 欄送 0，第 2 欄送**被點的 NPC 的池 id**
+（`0x39` 發的那個），那是**我們**給這個空欄位的意義，讓擷取檔自己說得出話。
+
+body（`sub_432680`／`sub_45DC40`／`sub_45DC80`／`sub_45DCC0` 的讀取順序；`str` = `u16 長度` + 原始 bytes）：
+
+| subOp | 對話框 kind | body | client 回的 `0x15` |
+|---|---|---|---|
+| 0 `say` | 0 | `str message` ＋ `u8` ＋ `u8` | `u8 0`、`u8 answer` |
+| 1 `confirm` | 1 | `str message` | `u8 1`、`u8 answer` |
+| 2 `askText` | 3 | `str message`、`str default`、`s16`、`s16` | `u8 2`、`u8 answer`［= 1 時再接 `str`］|
+| 3 `askNumber` | 2 | `str message`、`u32`、`u32`、`u32` | `u8 3`、`u8 answer`［= 1 時再接 `u32`］|
+| 4 `kind 4` | 4 | `str message` | `u8 4`、`u8 answer`［= 1 時再接 `u32`］|
+
+五個 handler（`sub_4A5A80`／`4A5D00`／`4A5F40`／`4A6320`／`4A65C0`，175089-175760）都是同一個形狀：
+`sub_535AC0(dlg, kind, 1, message)` 開一個 `CUtilDlg`（0x3E4 bytes），再呼叫**一個** setter
+（`sub_535C60`／`sub_535C80`／`sub_535CE0`／`sub_535C90`／`sub_535E30`，即上表的 kind）、
+`sub_530CE0` 置中顯示，然後 `sub_461DD0` **把對話框跑成 modal**（`sub_5526D0(n3000, dlg+84)` 迴圈，
+回傳 `dlg+80`）。所以：封包一定先被完整讀完，玩家的回答才可能送出；`sub_4A5910` 在回包之後把
+`CQuestMan+4` 清掉 —— 一次一包是 client 保證的節奏。
+
+`sub_535AC0` 的第 3 個引數（本節全部是 1）是「這個對話框來自伺服器」的旗標：client 自己的
+本地呼叫端一律傳 0，這是分辨兩邊的現成記號。
+
+#### 4.23.2 五個 kind 的語意（證據是 client 自己的本地用法）
+
+`sub_5332C0`（311356-311392）是對話框的按鍵處理，它**依 kind 決定哪些結果可以結束 modal**，
+於是把每個 kind 的回包碼釘死：
+
+| kind | 可結束 modal 的結果 | handler 送出的 `answer` |
+|---|---|---|
+| 0 | `0x2000`、`0x2001`（＝主要按鈕，id 1；`sub_52BE10` 的 Enter 也映射到它）、ESC → 2 | `0x2001` → **1**；`0x2000` → **0**；其餘 → **0xFF** |
+| 1 | `6`(IDYES) / `7`(IDNO)、ESC → 2 | `1` / `0` / `0xFF` |
+| 2、3、4 | 主要按鈕 → 1、ESC → 2 | `1`（並附帶值）/ 其餘 → `0` |
+
+client 在本地用到這些 kind 的地方就是語意的直接證據（行號在 `MapleStory.exe.c`）：
+
+| kind | 本地使用者 | 參數 | client 從哪裡讀回結果 |
+|---|---|---|---|
+| 0 | 30 天現金道具公告（338650）| `sub_535C60(dlg, 0, 0)` | 丟掉不看 |
+| 2 | 「얼마를 버리시겠습니까?」(225559)、「얼마를 드리시겠습니까?」(220444)、191679、108018 | `sub_535C90(dlg, 預設值, 下限, 上限)`：`(1, 1, 메소)`、`(10, 10, min(메소, 50000))` | `dlg+152`（數字）|
+| 3 | 「길드명을 입력하십시오.」(254846) | `sub_535CE0(dlg, 預設字串, 4, 12)` | `dlg+160`（字串，`sub_4A61C0`）|
+| 4 | **沒有本地呼叫者** | — | `dlg+164`（`sub_535AC0` 初始化成 `-1`；`sub_5333D0` 在列上取值時寫入的是「列的 `+36`」）|
+
+⇒ kind 2 = **輸入數字**（回一個 `u32`）、kind 3 = **輸入文字**（回一個字串，兩個 `s16` 是長度範圍、
+`-1` 也合法）、kind 0 = 有主要按鈕的文字框、kind 1 = 是／否。kind 4 只有「回傳 `u32`」是確定的，
+內容沒有本地對照組，**本伺服器不送它**（codec 有，遊戲層沒有呼叫者）。
+
+#### 4.23.3 我們這一側（`protocol/quest.ts`／`game/dialogue.ts`／`protocol/cp949.ts`）
+
+- `protocol/quest.ts`：`QUEST_TALK_OPCODE`（`0x47`）／`QUEST_REPLY_OPCODE`（`0x15`）、
+  五種 body 的 encode／read／describe、`QUEST_ANSWER`（`1`／`0`／`0xFF`）、`0x15` 的 encode（假 client 與
+  煙霧測試用）與 read（伺服器用）。golden bytes 在 `server/test/quest.test.ts`。
+- `game/dialogue.ts`：台詞**不是我們編的**，是 `Npc/<7 位 id>.img -> info/speak`
+  （數字鍵的 property 清單，`0`、`1`、…；`info/quest` 例如 `begin5`／`rina` 原樣帶著不解釋）。
+  `NpcTalk` 只記「這隻 NPC、這幾句、講到第幾句」。
+- 遊戲層接法（**我們的選擇**，binary 裡沒有伺服器可以對照）：`0x33` 點 NPC → 有商店 → `0x4A`；
+  沒商店 → `0x47 say` 的第一句；`0x15` 的 `answer == 1` → 下一句，其餘（第二個按鈕／ESC／關窗）→ 結束；
+  NPC 沒有 `info/speak`（出貨資料裡的「메이플운수 중형택시」就是）→ 只回 `0x19`。
+  對話進行中再點一次同一個 NPC 只回 `0x19`（送第二個 `0x47` 會讓 client 丟例外）。
+- `protocol/cp949.ts`：**字要送出去就得是 CP949**。client 的 `sub_432680` 是 `u16 長度` + 原始 bytes，
+  直接進 `ZXString<char>`，畫的時候用系統 ANSI 字碼頁（＝CP949，這也是 `MapleStory.exe` 自己那些韓文字串
+  的編碼）。Node 只有 CP949 的**解碼器**（`TextDecoder("euc-kr")`），所以反向表是第一次用到時
+  「把 126 × 190 個合法 lead/trail 解一次再反轉」建出來的；編不出來的字元**丟例外**而不是送出去變亂碼
+  （Latin-1 的重音字母不在這個字碼頁裡、emoji 也不在；漢字／假名／希臘／西里爾在）。
+
+### 4.24 ✅ 一張地圖上的多個玩家：哪些封包是「世界的事實」（`game/world.ts`，ADR-012）
+
+§4.11 把「兩個 client 走進同一張圖並互相看見」需要的封包解到欄位層，但伺服器那一側一直是
+**一個連線一份世界**：`MobField`／`NpcField`／`DropField` 都掛在連線上，所以第二個玩家會拿到自己的一份
+怪物（各自扣各自的血）、自己的一套掉落物 id，以及自己的 timer（同一個怪物在兩個 client 上走不同的路）。
+這一節記的是把世界搬到「每張地圖一份」之後學到的東西：哪些封包是**場地的事實**（對站在圖裡的每個人都
+成立）、哪些是**個人的**，以及一個剛進場的人要看到什麼才和早進來的人看到同一張圖。
+
+實作：`server/src/game/world.ts`（`FieldInstance`／`FieldRegistry`，`FieldMember` 是唯一的介面），
+測試：`server/test/world.test.ts`（18 個，假成員）＋ `server/test/serve.test.ts` 的兩個真 socket 測試。
+
+#### 4.24.1 「世界的事實」與「個人的事」怎麼分（證據：handler 落在哪個池子）
+
+| opcode | 讀它的物件（§4.11.1） | 這句話在說什麼 | 誰收到 |
+|---|---|---|---|
+| `0x1C`／`0x1D` | CUserPool（`sub_51CFE0`／`sub_51D280`）| 有人進場／離場 | 場地裡的所有人（含剛進場的：他要看到已經在的人）|
+| `0x22` | CUserPool（`sub_51D590`）| 某個人在走 | 除了那個人以外的所有人 |
+| `0x2F`／`0x30`／`0x31` | CMobPool（`sub_4924A0`／`sub_4926B0`／`sub_4927B0`）| 怪物出現／開始死亡／屍體走了或回來了 | 所有人 |
+| `0x33`／`0x34`／`0x35` | CMobPool（`sub_492380`）| 怪物在走／受到攻擊（閃爍）／換動畫 | 所有人（`0x34` 見 4.24.4 的保留）|
+| `0x39`／`0x3A`／`0x3B` | CNpcPool（`sub_49F6C0`…）| NPC 出現／離開／**走動**（§4.28）| 所有人 |
+| `0x43`／`0x44` | CRewardPool（`sub_4A88A0`／`sub_4A95B0`）| 地上多了一個掉落物／某個掉落物沒了 | 所有人 |
+| `0x16` | CStage 基底（`sub_4C2780`）| **你**進這張圖（帶你的 `CharacterData`）| 只有你 |
+| `0x0B`／`0x0D`／`0x11` | CWvsApp（`sub_55A900`）| **你的**某一格道具／能力值／撿到東西的訊息 | 只有你 |
+| `0x19`／`0x4A`／`0x4B`／`0x47` | `CField`／`CUniqueModeless`／`CQuestMan` | 你的請求被放行／你的商店視窗／你的對話框 | 只有你 |
+
+判準不是猜的：上面「所有人」那一組的 handler 全部掛在**場地自己的池子**上，每一句話都是「這張圖現在長
+什麼樣」——`0x1C` 是「池子裡多了一個使用者」，`0x43` 是「地上多了一個 id」，對每個站在圖裡的人都成立；
+反過來 `0x0B`／`0x0D`／`0x11` 動的是**這個人的角色紀錄**（`0x0D` 是能力值差異包，§4.21），
+`0x16` 帶的是他自己的 `CharacterData`。
+
+`0x1C` 還多一行自我排除：`sub_51CFE0` 讀到 id 後先比 `n3000[5]`（＝本機角色 id），相等就直接 return。
+⇒ 伺服器**不需要**送自己的 `0x1C`（送了自己也會忽略），而自己的頭像來自 `0x16` 的 `CharacterData`。
+
+#### 4.24.2 剛進場的人要看到什麼（snapshot）
+
+| 送什麼 | 為什麼是這個形狀 |
+|---|---|
+| 每個**還活著**的怪物一個 `0x2F`（§4.15）| 新 client 的 `CMobPool` 是空的；位置用怪物**現在**的位置，不是出生點 |
+| 每個 NPC 一個**完整** `0x39`（§4.19）| ⚠️ 5-byte 的形狀**不是**給新玩家的：`sub_49F6C0` 只要 id 已知就結束讀取，而新 client 的池子是空的。完整 body（20 bytes）才有模板與座標 |
+| 地上每個掉落物一個 `0x43`（§4.18）| 一樣的理由：`dropId` 是場地的，新 client 沒見過 |
+| 每個已在場的玩家一個 `0x1C` | 見下（4.24.3）|
+| 已在場的玩家各收到新人的一個 `0x1C` | 同一件事的另一半 |
+
+- 只有**活著**的怪物會進 snapshot（屍體不補送）。這一格是**我們的選擇**：沒有證據說原伺服器會補，
+  補了也不會錯，只是多播一段不在場的死亡動畫。
+- 順序是 `0x16`（client 的場地要先存在）→ 怪物 → NPC → 掉落物 → 玩家（`0x1C`）。每個封包彼此獨立，
+  所以順序本身沒有證據，這是**我們的選擇**。
+
+#### 4.24.3 `0x1C` 的九個欄位：能填的、填 0 的、以及為什麼填 0 是安全的
+
+| 欄位 | 我們送 | 依據 |
+|---|---|---|
+| `characterId` | 角色 id | `sub_51CFE0` 用它當 `CUserPool` 的 key |
+| `name` | 角色名（ASCII，§4.9）| `sub_520680` → `ZXString`，就是頭上的名字 |
+| `avatarItems` | `CharacterData` 兩個穿戴陣列的 item id | `sub_45F340` 依 **id 自己分類**（`itemId/1000/10`），所以順序不重要；**0 不能出現**（那是清單結尾），所以 0 的 id 會被濾掉 |
+| `unknown64` | `0` | `CUser+64`，語意未解（§6 第 2 項）|
+| `face` | 角色的 **`appearanceA`**（沒有就補 `lookOf` 的 `20000`）| `sub_520680` → `sub_507A20` → `sub_508260` 寫進 `CUser+68`，就是 client 畫的那張臉（§4.11.3c）|
+| `unknownA`／`unknownB` | `0` | `sub_520680` 讀了直接丟掉（不存）|
+| `x`／`y` | 場地記得的位置；沒動過的人＝出生點 | `sub_485400(field, id)` 之後交給 vecctrl |
+| `action` | `0` | `CUser+180` 的姿態，值表未解 → 一律「站著」 |
+| `foothold` | 腳踏點 id（算得出來時）| 見下 |
+
+- **填 0 為什麼安全**：`sub_485400` 對未知的 foothold id 回 0（＝沒有 foothold），所以「算不出來」
+  不會壞；`action`／`unknown64` 與兩個「讀了就丟」的 u32 只是外觀的細節，不是長度或順序的一部分。
+  **`face` 不填 0**：0 是「沒有這個部位」，client 會把整顆頭畫空（§4.11.3c）。
+- **出生點**（`spawnPointOf`）：地圖的 `sp` portal → 第一個 `pt = 0` 的 portal → 第一個 portal，
+  再用 `footholdUnderPoint()`（腳踏點的 x 覆蓋 + y 最接近的線段）取那個位置的腳踏點 id。
+  ⚠️ `0x16` 的 `mode` 語意未解（§6 第 2 項），所以「`mode = 0` ⇒ 玩家站在 `sp` portal」是**我們的假設**，
+  要改只有一處（`spawnPointOf`）。真 `Data.wz` 上它落在합당한 값：地圖 40000 的 `sp` portal (1,183)
+  → foothold 28（就是那個線段的 id）。
+
+#### 4.24.4 廣播 vs 個人：含**我們的選擇**的部分
+
+| 事件 | 送什麼 | 給誰 | 依據 |
+|---|---|---|---|
+| 打死一隻怪物 | `0x34`（受擊閃爍）→ `0x30`（死亡動畫）| 全場 | `0x30` 是明顯的世界事實；⚠️ `0x34` 的廣播範圍**沒有證據**（原伺服器可能只回攻擊者），我們選「大家都看到同一隻怪的反應」 |
+| 那一擊的經驗值 | `0x0D` 差異包 | 只有攻擊者 | 差異是**他的**角色紀錄（§4.21，ADR-009）|
+| 怪物掉的東西 | `0x43` | 全場 | 掉落物屬於場地（§4.18）|
+| 拾取 | `0x44` kind 2 | 全場 | 見 4.24.6 |
+| 升級 | `0x0D` 差異包 ＋ `0x29`（`u32 characterId`＋`u8 0`）| 差異包**只有升級的人**；`0x29` 給**其他人**（自己的 client 已經從 `0x0D` 播了，見 §4.27）|
+| 離線 | `0x1D` | 其他人 | `sub_51D280` |
+| NPC 走動 | `0x3B` flag 1（`u8`＋`u32`）| 全場（新進場的人也拿到，見 §4.28.4）| 機制是 client 的（client 自己走、自己重挑目標）；⚠️ **哪些** NPC 該走沒有證據，所以預設沒人走（`--npc-walk`）|
+
+#### 4.24.5 世界的時鐘：一個 interval，不是每個連線一個
+
+原本每個連線一個 `setInterval`：兩個人在同一張圖就會各自拿到一份 `0x33` 腿、各自算一次重生。
+現在是**一個 server-wide interval**（`GameEntryServer.startClock`，第一個場地出現時啟動），
+每 tick 走過所有場地（`FieldInstance.tick`）。兩個是**我們的選擇**：
+
+1. **沒人看的場地不派 `0x33`**：一條腿是對 client 的承諾（它會把怪物走到那裡），沒人看就不走；
+   但屍體／重生照算，所以下一個進來的人看到的是「該在的怪物都在」。
+2. **場地在最後一個人離開後不刪**（`FieldRegistry` 留著）：世界比連線長壽，重登看到同一張圖；
+   代價是記憶體隨「去過的地圖數」成長（上限＝地圖數，出貨資料 100 張）。
+
+#### 4.24.6 拾取：一件掉落的消失是世界的，拿到什麼是個人的
+
+`0x44` kind 2 只說「這個 `dropId` 沒了，是這個人拿走的」→ 全場（**含**撿的人：飛行／音效就是這個封包）；
+`0x0B`（哪一格多了什麼）、`0x0D`（錢）、`0x11`（訊息）只在撿的人身上才有意義。
+
+⚠️ 這一節順手修掉一個缺口：**撿到 mesos 原本只送 `0x11`**，錢在 client 上不會動——錢是角色紀錄的第
+22 欄，只有 `0x0D` 會動它（§4.22.5）。現在 `pickUp` 先送 `0x0D` 的 `{mesos}`、再送 `0x11`。
+
+#### 4.24.7 一個 character id 只能在一張圖裡出現一次
+
+- `CUserPool` 以 id 為 key，所以同一張圖裡重複的 id 會讓 client 少算一個人（或更新錯的人）。
+  `FieldInstance.join` 遇到重複的 id 會先送 `0x1D` 再讓新的進場。
+- 這一節也把**角色 id 的配發改成全伺服器唯一**（`nextCharacterId(accounts)`）：原本是「每個帳號從 1
+  起算」，兩個帳號的第一個角色都會是 1 → 同一張圖就撞 id。⚠️ 症狀很難查，因為 `sub_51CFE0` 的自我排除
+  會讓 client **安靜地忽略**那筆進場紀錄（其中一個人看不到另一個人，而不是崩潰）。
+
+#### 4.24.8 真的跑起來的樣子（真 `Data.wz`、兩個 socket）
+
+地圖 40000（달팽이사냥터，63 隻怪／1 個 NPC）：
+
+```
+Hero 進場    : snapshot 65 個封包（0x16 + 63 × 0x2F + 0x39），出生點 (1,183)、foothold 28
+Alt 進場     : 同一份 snapshot，然後 0x1C「Hero 在 (1,183)、foothold 28、avatar=[]」
+Hero 收到    : 0x1C「Alt 在 (1,183)」
+Hero 走一步  : Alt 收到 0x22 characterId=11 → (441,395)（Hero 送的路徑，前面多了 id）
+Hero 打第一隻: Hero 收到 0x34 0x30 0x0d 0x43、Alt 收到 0x34 0x30 0x43
+               兩邊的掉落物一模一樣（dropId 1、(458,395)、錢 1）；0x0d 只在 Hero（+3 exp）
+Alt 走上掉落 : Alt 收到 0x44 0x0d 0x11、Hero 收到同一個 0x44 {dropId 1, kind 2, characterId 12}
+Alt 離線     : Hero 收到 0x1D characterId=12
+```
+
+#### 4.24.9 還不能宣稱的部分
+
+1. **沒有實機驗證**：這一節全部是「我們的兩個假 client」；原 client 看不看得到另一個人、頭像長什麼樣、
+   走路的插值順不順，都要靠 ADR-004 的 oracle run。
+2. `0x34` 的廣播範圍是**我們的選擇**（4.24.4）；原伺服器的行為沒有證據。
+3. ~~`0x29` 未解~~ → **已解並實作（§4.27／ADR-015）**：別人看得到升級特效了；剩下的是「不送給升級者自己」是推論（§4.27.5）。
+4. 「場地不刪」「沒人看不走路」是**我們的選擇**（沒有 server 可以對照）。
+5. **沒有頻道／分流**：整個 server 只有一份世界（一張圖一個 instance）。加頻道時要改的是
+   `FieldRegistry.of(mapId)`（key 要變成 map + channel）。
+6. NPC 的 `0x3D`（走動的 NPC）仍未實作（§4.19.9 第 2 項）。
+7. 進場 snapshot 沒有補送屍體、也沒有補送「正在死亡中」的怪物（4.24.2 的選擇）。
+
+### 4.25 ✅ 換地圖：`0x0D` 的傳送門請求 → `0x16`（＋「紀錄的 `mapId` 就是登入的地圖」）
+
+§4.11.6 解出了 client 的兩個 field 請求（`0x0D` 互動、`0x0E` 自己的移動），但伺服器這一側一直只有
+「一個 port 一張圖」。這一節把**走過傳送門**接起來：請求的形狀、目的地從哪來、四個步驟的順序、
+人會落在哪裡，以及為什麼「登入在哪張圖」是**角色紀錄自己的事**。
+
+實作：`net/loginserver.ts` 的 `handlePortal`／`enterMap`／`withMapId`，`game/world.ts` 的
+`FieldInstance.portal`／`map`；測試：`test/serve.test.ts` 的傳送門端到端（13）、`test/world.test.ts`
+的 `portal`／第二張圖（2 個）。
+
+#### 4.25.1 請求：`0x0D` 與那個「一定要回」的解鎖封包
+
+| 方向 | 封包 | 內容 | 證據 |
+|---|---|---|---|
+| c2s | `0x0D` | `s32 kind` + `string name`（`kind = -1` ＝「滑鼠下的東西」，`name` ＝它的名字）| `sub_472590`（`CField::SendInteract`）；`sub_5124C0`／`sub_512510` 在滑鼠下是傳送門時播 `Portal` 音效並送 `-1` ＋ 傳送門的 `pn`（§4.11.6）|
+| s2c | `0x19` | **空的**，只把 client 的互動閘門解開 | `sub_4728B0`：`n3000[6] = 0`；`sub_472590` 送完 `0x0D` 後設 `n3000[6] = 1` 並有 500 ms 節流 |
+
+⇒ **每一個 `0x0D` 都欠一個 `0x19`**，即使是「這個名字不是本圖的傳送門」。不回，玩家之後再也按不了
+任何東西（閘門永遠是 1）——所以本伺服器在讀取封包**之前**就先把 `0x19` 送出去。
+
+- `kind` 只有 `-1` 有證據：GM 的 `/헉맵 <mapId>` 會走同一個 sender（§4.11.6），它填什麼沒有定位，
+  所以其他 `kind` 一律**只記一行日誌、不動玩家**（`INTERACT_KIND_CURSOR`）。
+
+#### 4.25.2 目的地不在封包裡，在地圖資料裡
+
+`0x0D` 只有「哪一個傳送門」的名字，**沒有地圖 id**。目的地是那張圖自己的 `portal` 節點：
+`tm`（to map）／`tn`（to name，目的地那一側的傳送門名字）。
+
+- `tm = 0`（或 `999999999`，出貨資料裡「沒有目的地」的寫法）⇒ 這個傳送門不連去別張圖，只記日誌。
+- 名字比對**不分大小寫**（本伺服器的選擇）：名字是地圖資料，client 自己的比對沒定位，而大小寫的差別
+  會變成「傳送門有沒有作用」這種最難查的錯誤。
+- 因此「玩家用了傳送門」＝「查本圖同名的 portal」＋「它的 `tm` 就是新地圖」。同圖的傳送門
+  （`tm == 本圖`）也走同一條路：離開再進入，client 本來就會把場地重建（沒有特例）。
+
+#### 4.25.3 四個步驟的順序（每一步都有理由）
+
+| # | 做什麼 | 為什麼是這個順序 |
+|---|---|---|
+| 1 | `0x19` 解鎖 | 見 4.25.1；不管後面成不成立都欠 |
+| 2 | 目的地**先建好**（`FieldRegistry.of`）| 建不出來（那張圖沒有 `Map/Map/*.img`）就**留在原地**：這是唯一不會把玩家丟進「沒人模擬的地圖」的答案 |
+| 3 | 離開舊場地（`0x1D` 給還在的人）| client 的 `CUserPool` 以角色 id 為 key，同一個人**不能同時在兩張圖**（否則兩張圖各有一個他）|
+| 4 | `0x16`（新地圖），然後 `join`（快照）| client 要先有場地物件才裝得下後面那些封包（`0x2F`／`0x39`／`0x43`／`0x1C`）|
+
+- **商店與對話一起丟掉**：那些視窗屬於剛離開那張圖的 NPC，client 重建場地時會自己收掉，
+  伺服器留著就會出現「回一個已經不存在的視窗」的請求。
+- 換圖時**只有**那條連線的 `send` 與錢包不變（它們掛在 session 上，session 跟著人走）。
+
+#### 4.25.4 落點已定位：CharacterData+101 的 spawn portal index（2026-10-17 更正）
+
+原先把落點未知歸到 `0x16.mode` 是錯誤追蹤方向，現已由 `sub_511820` 確證。
+`unknown101` 是 **non-type3 一般門陣列的 u8 索引**（含 type0），初始 x=portal.x、y=portal.y−10。
+伺服器現在將目的 `tn` 解析到這個索引，寫進角色資料、0x16與保存；remote及browser一致。
+完整來源、門類型及容錯差異見 §4.43。先前「tn只記日誌／永遠sp」僅為歷史實作，已不適用。
+
+#### 4.25.5 「登入在哪張圖」是角色紀錄自己的事
+
+`0x16` 的地圖 id 來自 `CharacterData`（第 23 欄，`+97`）：`sub_4C2780` 把解出來的紀錄交給場地建構子，
+`sub_4694F0` 用它載入 `Map/Map/%09d.img`（§4.11.2b）。所以伺服器只要把**玩家自己的紀錄**送回去就好，
+本伺服器現在就是這樣：
+
+- 有 `entry.character` ⇒ **進該紀錄的地圖**；map0 是真實地圖，不能一概替換。
+- 只有 provider 根本沒有 map0 的 archive-free/tooling 情況，保留舊 map0→`--map` 相容行為；沒有 record 的 handoff 使用預設圖。
+
+`cli.ts` 因此把 `--map` 同時給兩邊：`LoginServer.startMapId`（**新角色**的紀錄要填哪張圖）
+與 `GameEntryServer.mapId`（沒有 mapId 的紀錄的後備）。
+
+#### 4.25.6 還不能宣稱的部分
+
+1. `0x16.mode` 的其他語意仍未全解；**不是現在已解出的 +101 出生門索引**。
+2. `tn` 已真正使用，原封包與保存有回歸測試（§4.43）。
+3. GM 地圖命令（kind=mapId／empty name）已接，明確 operator allowlist、預設禁止，不猜原 server rank。
+4. pt0出生／pt1隱藏手動／pt2可見手動／pt3自動已由client分支證實；任務／等級等原 server 條件仍未解。
+5. **沒有頻道／分流**：`FieldRegistry.of(mapId)` 是唯一入口，加頻道就是 key 變成 `(mapId, channel)`。
+6. **沒有實機驗證**：client 走進傳送門時的動畫／音效、換圖後鏡頭與 UI 的重建，全都沒看過。
+
+#### 4.25.7 真的跑起來的樣子（真 `Data.wz`，兩張相鄰的圖）
+
+```
+A = 102020000 페리온서쪽령（73 隻怪、0 個 NPC、23 個傳送門）
+B = 102030000 커닝시티북쪽공사장（73 隻怪、0 個 NPC、24 個傳送門）
+portal "west00" of A: tm=102030000 tn="east00" at (-42,272)；B 真的有 "east00" at (-2691,335)
+
+Hero 進 A      : 74 個封包（0x16 ＋ 73 × 0x2F），出生點 (33,-32)、foothold 63
+Alt 進 A       : Hero 收到他的 0x1C，他看到 Hero 的 0x1C
+Alt 用 west00  : [0x19, 0x16, 73 × 0x2F] → 0x16 的地圖是 102030000，落在 (-5863,149) foothold 41
+                 Hero（還在 A）收到 0x1D characterId=12
+Hero 也走過去  : [0x19, 0x16, 73 × 0x2F, 0x1C] → 0x1C 說 Alt 在 (-5863,149)
+                 Alt 收到 Hero 的 0x1C（兩個人在 B 又見面了）
+Hero 走一步    : Alt 收到 0x22（新場地的轉播照舊）
+Solo（紀錄寫 B）: 直接進 B，0x16 的地圖是 B，而且收到 11／12 兩個人的 0x1C
+Alt 離線       : Hero 收到 0x1D
+```
+
+#### 4.25.8 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/serve.test.ts`（13）| 兩條真 socket：不是本圖的傳送門名只拿得到 `0x19`；`west00` → `[0x19, 0x16(2000000), 0x2F, 0x39]`；舊圖收到 `0x1D`；紀錄寫著 2000000 的第三個連線進得了那張圖、且看到先過去的人站在**那張圖的**出生點上；先過去的人收到新人的 `0x1C` |
+| `server/test/world.test.ts` | `FieldInstance.portal` 不分大小寫、查不到回 `undefined`、`map` 留著自己那張圖；第二張圖是第二個場地（自己的出生點、自己的 portal、`FieldRegistry` 也留著它）|
+| `server/test/field.test.ts`（既有）| `0x0D` 的 `s32 kind` ＋字串（`encodeClientInteract`／`readClientInteract`）|
+
+### 4.26 ✅ 場地聊天：`0x12`（說）→ `0x1A` ＋ sub-op `0x12`（顯示）
+
+§4.11.6 找到了 `0x1A` 這個「使用者訊息」家族（密語、找人），但把它的四個 case 都當成密語相關；
+這一節把其中**真正是聊天**的那一個解到欄位層，並做出伺服器的那一半：一個人說話，同一張圖的
+每個人（**含說話的人自己**）都看到 `名字>> 內容`。
+
+實作：`protocol/field.ts` 的 `USER_MESSAGE_CHAT`／`UserChat`／`ClientChat`，`net/loginserver.ts` 的
+`handleChat`；測試：`test/field.test.ts` 的 codec golden（2）、`test/serve.test.ts` 的三條真 socket（1）。
+
+#### 4.26.1 「說」：`0x12`，一個字串，**沒有本地顯示**
+
+| 方向 | 封包 | 內容 | 證據 |
+|---|---|---|---|
+| c2s | `0x12` | `u16 長度` + bytes（就是那行字）| `sub_470C70`（119615）＝`sub_4A1EA0(&buf, 18, 0)` ＋ `sub_430230(buf, text)`，**中間沒有別的東西** |
+
+`sub_470C70` 的唯一呼叫點在 `sub_4F8CB0`（聊天輸入框的 Enter，255138 附近），而那裡有三條分支：
+
+```
+`/` 開頭            -> sub_470E10（GM 指令，送 0x22／0x27 等）
+有密語對象（+245）   -> sub_4717D0（密語，送 0x23）
+其他                -> sub_470C70（一般聊天，送 0x12）
+```
+
+⚠️ **關鍵的一句**：`sub_470C70` 只**組封包然後送出去**，整條輸入路徑裡沒有任何「顯示自己這句話」的
+呼叫；而 `%s>> %s` 的排版只存在於**接收端**（見下）。所以「玩家要看到自己說的話」是**伺服器的工作**
+—— 伺服器必須把這句話也送回給說話的人（§4.26.4）。
+
+#### 4.26.2 「顯示」：`0x1A` ＋ u8 sub-op（`sub_472910`，CField 分派 case 26）
+
+`sub_472770` 把 `0x1A` 交給 `sub_472910(this - 8, packet)`（121224）。它先讀 **1 個 byte**，再
+`switch (值 - 9)`（跳表 `byte_4732A4`／`jpt_47297F`，`cmp eax, 19h`，所以值域 9..34），四個 case：
+
+| sub-op | 讀取形狀（`sub_45DC40` ＝ 1 byte、`sub_45DCC0` ＝ 4 bytes、`sub_432680` ＝ 字串）| client 做什麼 |
+|---|---|---|
+| `0x09` | `str name` + `u32 mapId` | `mapId == -1` → 「`'name'님은 찾지 못했습니다`」（找不到人）；否則**用那個 id 去載 `Map/Map/%09d.img`**、讀 `info/mapName`／`info/streetName` → 「`'name'님의 현재 위치는 '…'입니다`」 —— 這是 `/찾기`（找人）的回報，也是 client 裡唯一會為了顯示而載入地圖的訊息 |
+| `0x0A` | `str name` + `u8` | 那個 byte 非 0 → 「`name<< 內容`」（內容來自 `this+7` 這個**本機自己記著的**字串，`sub_432680` 只讀到 `name`）；= 0 → 「`'name'님은 귓속말을 받지 않겠다고 설정해 두었습니다`」 ⇒ 自己送出的密語的**投遞結果** |
+| `0x12` | `str name` + `str text` | **一般聊天**：`sub_411E50(&line, "%s>> %s", name, text)`；聊天視窗開著 → `sub_4FB670(chat, line, 1)`（加一行）；關著 → client **自己組一個 `0x23`** 氣泡封包（`sub_4A1EA0(&buf, 35, 0)`、寫 `"`、名字、內容）再走 `sub_43AD50` |
+| `0x22` | `str name` | 「`'name'님은 현재 귓속말을 거부하고 있습니다`」⇒ 對方拒收密語 |
+
+- **`0x12` 這個 case 沒有角色 id**：名字是唯一的身分，接收端的 client 需要它才認得出「是誰」。
+- **`0x12` 的 sub-op 與 c2s 的 `0x12`（聊天）同號**，而 `0x1A` 的 sub-op 值域（9..34）跟
+  §4.10 那張 CWvsApp 表也不是同一回事（那張表的 `0x12` 是인기도）。這個編號怎麼來的**沒有證據**，
+  所以本節不宣稱它們有共同來源，只記「哪個數字配哪個形狀」。
+- `/헉맵 %d` 不是另一個 sub-op：它在 `0x09` 的**成功**分支裡，而且只在 `dword_5C203C != 0`（GM）時
+  出現 —— client 自己把 `/헉맵 <mapId>` 組出來再交給 `sub_470E10`（GM 指令的處理函式），
+  也就是「跳到找到的那個人所在的地圖」。同一個分支還有 `n3000[9] & 1` 會在地圖名後面補 `(%09d)`。
+
+#### 4.26.3 伺服器這一側：轉播，而且**回音給說話的人**
+
+`net/loginserver.ts` 的 `handleChat`：
+
+1. 讀 `0x12`（`readClientChat`）；讀不出來就記 log、不動。
+2. 記一行 log（`describeUserChat` 會把 bytes 用 CP949 解出來給人看）。
+3. `instance.broadcast(encodeUserChat({ name: session.name, text }))` —— **不排除說話的人**。
+
+三個決定，都有理由：
+
+- **含說話的人**：見 §4.26.1；不含，玩家的話就永遠不會出現在自己的聊天視窗（client 沒有本地回顯）。
+- **文字原樣轉送 bytes**（`UserChat.text` 是 `Uint8Array`，不是解碼後的字串）：伺服器是**轉播者**，
+  它不需要讀那行字；而「解碼再編碼」正是唯一會弄丟字元的一步（`cp949.ts` 對編不出來的字元丟例外）。
+  名字則是伺服器自己的事實（`session.name`），因為封包裡沒有角色 id。
+- **範圍是場地**：`0x1A` 是 `CField` 自己的 opcode，所以聽眾就是同一張圖的人；換圖之後自然換聽眾
+  （`FieldInstance.broadcast` 只走自己的成員）。
+
+**沒有實作的**：`0x09`／`0x0A`／`0x22`（密語與找人）。它們的讀取形狀在表上，但這台伺服器沒有密語系統，
+也沒有「找某個人在哪張圖」的指令，所以沒有 codec —— 依 §4.11.6 的規矩，沒做的就不猜。
+
+#### 4.26.4 測試
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/field.test.ts` | `0x12` 的 golden bytes（`12`＋`0400`＋`bec8b3e7`＝「안녕」）、`0x1A` 的 golden bytes（`1a12`＋名字＋同一串 bytes）、`readUserChat` 的第一個欄位是**名字**、`describeUserChat`／`describeFieldPacket(0x1a)` 的字、以及**不是聊天就丟例外**（sub-op `0x22` 一個名字的封包不能被當成聊天讀）|
+| `server/test/serve.test.ts` | 三條真 socket：同一張圖的兩個人互相聽得到（**含說話的人**，兩邊收到的封包逐欄相同）、換一個人說話時名字跟著換、**另一張圖的人什麼都收不到**，log 是 `chat "Hero": 안녕 in map 1000000` |
+
+> 同一回合修掉一個測試上的洞：`FakeClient.take(0)` 永遠回空清單（要 0 個封包不需要等），
+> 所以「之後什麼都沒發生」這種斷言以前**不可能失敗**。現在改用 `drain(ms)`／`drainOpcodes(ms)`
+> 收一段時間的封包再過濾（共用的場地永遠有東西在跑：走動的怪每個 tick 都有 `0x33`）。
+
+#### 4.26.5 還不能宣稱的部分
+
+1. **密語與找人沒有實作**（`0x09`／`0x0A`／`0x22`）：只有讀取形狀，沒有伺服器端。
+2. **`0x0A` 的第二個 byte 沒有語意**：只知道 0 與非 0 走不同的訊息，不知道它是什麼旗標。
+3. **聊天視窗關著時 client 自己組的那個 `0x23`**：只讀到它組了什麼（`"` ＋ 名字 ＋ …），
+   沒有讀完，也不知道氣泡畫在誰頭上（伺服器完全不參與這條路）。
+4. **沒有 `/` 指令、沒有過濾**：伺服器不解析文字（`sub_470E10` 的 GM 指令家族沒有實作），
+   也不擋任何字（2003 年的 client 本來就沒有）。
+5. **沒有頻道／分流**：聽眾是 `FieldInstance` 的成員，`(mapId, channel)` 這種 key 還不存在。
+6. **沒有實機驗證**：client 真的畫出 `名字>> 內容`、真的在聊天視窗關著時冒出氣泡，都還沒看過。
+
+### 4.27 ✅ 升級的兩半：自己的 `0x0D`、別人的 `0x29`
+
+§4.21 解了 `0x0D` 的升級分支，也在同一節記下「升級對別人不可見」——因為 `0x29`（別人看到的升級特效）
+當時沒有解。這一節把它解完：封包形狀、client 用它做什麼、以及為什麼**只送給別人**。
+
+實作：`protocol/field.ts` 的 `USER_EFFECT_LEVEL_UP`／`UserEffect`／`encodeUserEffect`／`readUserEffect`，
+`net/loginserver.ts` 的 `awardKillExp`；測試：`test/field.test.ts` 的 golden（1）、`test/serve.test.ts`
+的兩條真 socket（1）。
+
+#### 4.27.1 形狀：`u32 characterId` ＋ `u8 effect`，id 查不到就整個丟掉
+
+| 位置 | 內容 | 證據 |
+|---|---|---|
+| 分派 | `CUserPool` 的 `0x21`–`0x2A` 都由 `sub_51D590` 處理，case `')'`（0x29）呼叫 `sub_522300(user, packet)` | `.c:289577`（`sub_51D590`）|
+| id | `sub_51D590` 先讀 `u32`，再用 `sub_51CD30(pool, id)` 查那個人在不在；**查不到就 return**（封包整包丟棄）| 同上（`v5 == nullptr` 直接結束）|
+| effect | `sub_522300` 讀 `u8`：`0` → 用 `sub_50D6D0(this)` 在那個人身上建效果，資源是 `Effect/BasicEff.img/LevelUp` ＋ 音效 `LevelUp`；`1` → 再讀一個 `u32`（做什麼未解）；其他值 → 什麼都不做 | `.c:294701`（`sub_522300`）|
+
+- 「查不到就丟掉」是這個封包可以**安全廣播**的原因：對不知道的 id 送它等於沒送。
+- effect 只有 `0` 有證據，所以 codec 也只認 `0`（不是 0 就丟 `RangeError`，與 `0x1A` 的非聊天 sub-op
+  同一條規矩）。
+
+#### 4.27.2 為什麼只送給別人：升級的人自己已經播了
+
+`0x0D`（`sub_55BEB0`）的**尾端**會比較新舊等級，變大時在同一支函式裡播**同一組資源**
+（`Effect/BasicEff.img/LevelUp` ＋ `LevelUp` 音效，`.c:352616`）。也就是說：
+
+- **升級的人**：`0x0D` 的差異包 → client 自己播特效（§4.21 已記，`game/exp.ts` 的註解也提到）。
+- **其他人**：`0x29` ＋ 那個人的角色 id ＋ `0` → 同一組特效畫在**那個人的位置**上。
+
+⚠️ 「不送給升級的人自己」是**推論**：兩條路都會播同一組資源，兩者都送＝播兩次（疊在一起）。
+client 端沒有任何「同一個效果去重」的邏輯（`sub_50D6D0` 每次呼叫都建一個新效果物件），所以本伺服器
+送 `0x29` 時排除升級的人（`FieldInstance.broadcast` 的第二個參數）。這件事列進 §6，讓 oracle run 回答。
+
+#### 4.27.3 伺服器這一側
+
+`awardKillExp` 在 `gain.levels > 0` 時多做一件事：先送升級者自己的 `0x0D`（既有行為），再
+`session.instance.broadcast(encodeUserEffect({characterId, effect: USER_EFFECT_LEVEL_UP}), characterId)`
+—— 排除自己，並記一行 log（`0x29 level-up effect for "Hero" sent to 1 other player(s)`）。
+`awardKillExp` 原本那段「⚠️ 別人的升級特效 `0x29` 未解」的註解就是這一節的解。
+
+#### 4.27.4 測試與實跑
+
+| 檔案 | 內容 |
+|---|---|
+| `server/test/field.test.ts` | golden bytes `29`＋`07000000`＋`00`、`readUserEffect` 逐欄、`describeFieldOpcode(0x29)` 是 `0x29 CUserPool(user effect)`、effect `1` 被拒絕而不是被半讀 |
+| `server/test/serve.test.ts` | 兩條真 socket：殺怪升級時別人收到 `[0x34（被打）, 0x30（死）, 0x29]`（同一個同步處理常式，中間插不進怪的 tick）且 `0x29` 逐欄是 `{characterId: 7, effect: 0}`；升級的人收到 `0x0D`（`level: 2`、HP/MP 回滿）而**沒有** `0x29` |
+
+真 `Data.wz` 兩個 client（달팽이사냥터 40000）：달팽이（`maxHP 8`、把 exp 調成 20）一擊升到 2 級 ——
+Alt 收到 `[0x34, 0x30, 0x29]`、Hero 收到 `{level: 2, hp: 50, mp: 50, exp: 5}` 且 0 個 `0x29`。
+
+#### 4.27.5 還不能宣稱的部分
+
+1. **effect `1`**：只知道後面還有一個 `u32`，不知道它做什麼，所以沒有 codec。
+2. **「只送別人」是推論**（§4.27.2）：oracle run 可以確認（如果真正的伺服器也送給升級者自己，
+   差別只是特效播兩次）。
+3. **效果畫在哪裡、鏡頭怎麼動**：全在 client（伺服器只給 id 與 effect）。
+4. **沒有實機驗證**（ADR-004）：沒看過真的 client 播這個特效。
+5. **`0x29` 沒有其他用途的證據**：`0x23`–`0x25` 是技能／效果家族，`0x29` 只有 effect 0 解出來。
+
+### 4.28 ✅ NPC 的走動：`0x3B` 就是「你自己走」（`sub_499760`）
+
+§4.19.9 第 5 項把 `0x3B` 的旗標留成「走動或表情，兩種都說得通」。這一節把它結掉：對一個**池裡已經
+有的 id**，`sub_49F970` 的 flag 只有一個下場 —— `sub_499760(vecctrl, flag)` —— 而那個函式是
+**開始／停止走動**。
+
+#### 4.28.1 `sub_499760`（161997-162034）：走，或停
+
+```c
+if ( a2 == 0 )  return slot184(v3, 0,0,0,0,0,0,0);            // 停：七個 0
+v5 = (int)*(this + 13);
+v6 = sub_485400(this_7, *(__int16 *)(v5 + 260));              // s16 → foothold 查表（§4.16 的同一個）
+slot184(v3, 1, *(s16 *)(v5+250), +252, +254, +256, *(u8 *)(v5+258), v6);
+*(this + 15) = 0;
+*(this + 25) = rand() % 8000 + 4000;                         // 4000..12000 ms
+```
+
+- `sub_49F260` 傳進來的是 `*(npc + 16)` —— byte 16 的那個指標（§4.19.4 的更正；指向什麼沒有命名，
+  最合理的讀法是 NPC 的 vecctrl）。`v3 = *(this+14)` 是那個 vtable 第 184 槽的物件。`+250`／`+252`／`+254`／`+256` 是四個 `s16`，`+258` 一個 `u8`（方向），
+  `+260` 一個 `s16`（當 foothold id 交給 `sub_485400`）。**形狀**就是這樣；「四個 `s16` 是活動範圍」
+  是最合理的讀法，但**沒有**定位到填這幾個欄位的 WZ 標籤（§6）。
+- `rand() % 8000 + 4000` 是**重挑目標的間隔**：client 自己走、時間到自己在範圍裡再挑一個點。
+  ⇒ 伺服器**不需要**記任何 timer：一個 `0x3B` flag 1 就是一張長期有效（直到 flag 0、`0x3A` 或離場）
+  的「你自己走」。
+- `sub_49F260`（168057-168116）只在 `(npc+24) & 2` **還沒設**時才呼叫 `sub_499760`，所以重送是冪等的；
+  `sub_49F380`（168119-168228）清掉那個 bit、`sub_499760(vecctrl, 0)`、然後在整個 `+24` 變成 0 時才解鏈。
+- 同一個「走／停」機制在**怪物**那一側是 `sub_485330`（§4.28.3），兩者的 vtable 呼叫形狀一樣。
+
+#### 4.28.2 `0x3D`（`sub_49A280`，162629-162717）：索引解出來了，長度仍不確定
+
+`0x3D` 是 `0x3C`–`0x40` 裡唯一讀超過 id 的一個（§4.19.1）。它讀 `s8 first`、`s8 second`：
+
+| `first` | 做什麼 |
+|---|---|
+| `-1`（`0xFF`）| `second >= 0` 且在範圍內 → 取 `*(npc+19)+32` 那個**一維**陣列的第 `second` 項 → `sub_499C00(npc, 該項)` |
+| `>= 0` | 在 `*(npc+19)+36` 的**二維**陣列（外層 stride 8，`+4` 是內層）範圍內 → `npc+84 = first`、`sub_499900(npc)`；`second >= 0` 時再取 `[first][second]` → `sub_499C00` |
+| 其他負值 | 兩者都不做（只走到尾巴）|
+
+- `sub_499C00`（162256-）＝**播一個動畫**：`sub_4373A0(this+5, …, 5000, 0, 1)`（`n5000 = 5000` 是長度
+  參數）。所以兩個 `s8` 是**動畫索引**：`first` 選「組」、`second` 選組內的第幾格。
+- `sub_498A90`（NPC 建構子，161334-）用 `*(template+36)` 的長度 `+ 2` 建 NPC 自己的每組狀態陣列，
+  可見模板的 `+36` 就是「組」的清單；`template+8` 是一個旗標。
+- 尾巴：`if ( (*(npc+19))[2] != 0 ) sub_4967C0(*(npc+13)+216, packet)` —— **只有 `template+8 != 0` 才讀
+  `CMovePath`**。所以 `0x3D` 的長度是 7 bytes 或 7＋路徑，取決於**每個模板固定的資料**，而那個資料
+  來自哪個 WZ 標籤我們沒有定位。⇒ 現在**不送**：長度猜錯等於讓 client 把接下來的位元組當路徑解。
+- 沒解完的：兩個索引的實際值對到哪個動作（沒有名字表）、`sub_499900` 做什麼、`template+8` 的來源。
+  列在 §6，等 oracle run。
+
+#### 4.28.3 怪物那一側是同一個機制（順手定位，也是我們的偏離所在）
+
+`0x31`（`sub_4927B0`，154116-154160）＝ `u8 flag` ＋ `u32 mobId`：
+
+- flag 1 → `sub_491630`（152770-152888）：池裡**已有**這個 id 就只刷新，**沒有**就用封包裡的
+  `u32 templateId` 建一隻（`sub_48CFA0` 取模板、`sub_4848E0` 建構、`sub_484ED0` 讀身體）——
+  兩條路的最後都是 `sub_485330(mob, 1)`，也就是**開始走**（`sub_485520(mob) != 0` 時不動，已經在走）。
+- flag 0 → `sub_491830`（152889-）→ `sub_485330(mob, 0)`（停，把 `vecctrl+216` 的移動路徑解掉）→ 再解鏈。
+- `0x2F`（`sub_4924A0`）**不會**呼叫 `sub_485330`：它只建立怪物，所以「出現」與「開始活動」在原協定裡
+  是兩個封包。
+
+所以 **2003 年的怪物也是 client 自己走的**（一被標成「活著」就自己走，範圍由 client 自己的資料決定），
+這與 §4.20「怪物的 AI 在 client 裡」和 §4.11.2「`0x16` 的三個亂數種子決定怪物行為」是同一件事。
+我們的伺服器是**伺服器決定**（每條腿一個 `0x33`，§4.16／ADR-008 的例外）：多人同步需要一個權威
+（§4.24）。⚠️ 原 client 自己的走動會不會與我們的 `0x33` 打架，**沒有實機證據**（§6 第 14 項）。
+
+#### 4.28.4 伺服器這一側
+
+| 位置 | 內容 |
+|---|---|
+| `protocol/npc.ts` | `encodeNpcState(npcId, on)`（`u8 flag` 在 id **前面**）／`readNpcState`；沒有「建立」形式 —— 建立是 `0x39` 的事 |
+| `game/npcs.ts` | `NpcFieldOptions.walk?: (templateId) => boolean`、`NpcEntry.walking`、`setWalking(npcId, on)`（同一個狀態不發封包，和 client 一樣）、`NpcField.walking`（log 用）、`npcWalkPolicy(spec)`（`none`／`all`／`id,id,...`，解析不了就 `RangeError`）|
+| `game/world.ts` | `npcWalk` 一路傳到 `NpcField`；`enterPackets()` 在每個要走 NPC 的 `0x39` **之後**接一個 `0x3B`（所以新進場的人自動拿到同樣的狀態，伺服器不必再送一次）；場地 log 是 `N NPCs (M walking)` |
+| `net/loginserver.ts`／`cli.ts` | `--npc-walk <none|all|id,id,...>`（裸的 `--npc-walk` ＝ `all`），**預設 `none`** |
+| `test/npc.test.ts` | 政策的三種寫法與錯誤輸入、`setWalking` 的冪等、快照的封包順序（`0x39` → `0x3B`）|
+| `test/world.test.ts`／`serve.test.ts` | 真成員／真 socket：`0x16` → `0x2F`×2 → `0x39` → `0x3B{on:true}`，第二個玩家也一樣 |
+
+**為什麼預設是「沒人走」**：機制（client 自己走）有證據，**政策**（哪些 NPC 該走）沒有。所以
+`--npc-walk` 是伺服器的選擇，寫成 policy 而不是寫死在資料裡 —— 與 ADR-015 同一條規矩：不知道的不猜。
+⚠️ 真 `Data.wz` 上跑過的是機制那一半（地圖 1010000 4 個 NPC：政策點名的那一個拿到 `0x3B`、
+其他人沒有、第二個玩家看到同一份），**畫面**上 NPC 有沒有動起來仍然要 oracle run。
+
+### 4.29 ✅ 存檔不是封包：client 只**收**角色紀錄，從不回送
+
+持久化（ADR-017）之所以是**我們的設計**而不是「照封包實作」，是因為協定裡沒有那個封包。證據是本檔案
+自己的目錄：**client → server 的遊戲內送包**就是這七個（§4.13 的 sender 表；`src/protocol/field.ts` 的
+`CLIENT_FIELD_OPCODE` 是同一份清單）——
+
+| c2s | 語意 | 帶什麼 |
+|---|---|---|
+| `0x0D` | 與物件互動（傳送門、商店、對話框） | 種類 ＋ 名字／索引（§4.25／§4.22）|
+| `0x0E` | 自己走路 | 一條 `CMovePath`（§4.24.2）|
+| `0x0F`／`0x10`／`0x11` | 攻擊三兄弟 | 目標與傷害（**client 算的**，§4.13.1）|
+| `0x12` | 聊天 | CP949 bytes（§4.26）|
+| `0x15` | 對話框的按鈕 | sub-op ＋ 答案（§4.23）|
+| `0x2C` | 怪物動作回報 | mobId ＋ 旗標 ＋ 動作 ＋ 一條 `CMovePath`（§4.20）|
+
+**沒有任何一列帶角色資料**：等級、經驗值、HP／MP、道具、錢、`mapId` 全都只在**伺服器手上**那一份
+`CharacterData` 裡（`protocol/chardata.ts`），而 client 只在兩個地方**收到**它 —— 登入的 `0x03`
+（角色清單，`sub_431080` 一次收 3 份，§4.8）與進場的 `0x16`（`sub_4C2780` 收 1 份，**`mapId` 就是從那裡
+決定登入哪張圖**，§4.11.2b）。其他 sender（登入／選角、商城、組隊…）也只帶指令與參數。**玩家掉血同樣
+不是 client 回報的**：§4.20.7 說 `0x2C` 的尾段是移動路徑，不是傷害，所以那條路徑在協定裡目前找不到
+（§4.20.7；§6 第 5 項把怪物 AI 歸給 client 那一側）。
+
+**結論**：存檔的時機與格式在 2003 年的協定裡**沒有答案可比對** —— 它是伺服器實作自己的事，跟掉落機率
+（§4.18／ADR-007）與商店價格（§4.22／ADR-010）同一類。設計與取捨見 **ADR-017**；`src/game/save.ts` 是
+它的實作，`server/test/save.test.ts` 是它的規格（來回轉換、拒絕讀不懂的檔案、原子寫入），
+`serve.test.ts` 的兩條真 socket 測試則釘住「下線時存一次」與「重啟後同一個角色還在」。
+
+### 4.30 ✅ 「已在線上」與心跳：`0x08` 是 client 唯一保證會回的封包（ADR-018）
+
+`0x01`（以及 `0x02`／`0x03`）的 `result` 有一個值是 **`7`**：client 顯示
+「현재 접속중인 아이디이거나,\r\n현재 서버점검중입니다.」（「這個帳號正在線上，或伺服器維修中」）。
+這代表**原伺服器會拒絕同一帳號的第二條連線**，而那個行為是 client 自己的設計 —— 訊息字串就是證據
+（§4.8 的修正；`LOGIN_RESULT.alreadyConnected`）。這一節記的是「誰在線上」怎麼實作、以及它為什麼需要
+一個心跳。
+
+**`0x08` 的地位**（§4.2 的重點，值得單獨寫一次）：`sub_43B170` 是 client 的分派器，而 `0x07`／`0x08`
+是它在**看當前 stage 之前**就處理掉的兩個 opcode：
+
+```c
+case 7:  sub_43B400(packet);        // 斷線／遷移
+case 8:  sub_43B280(this, packet);  // 回聲：讀一個 u32，原封不動送回去
+```
+
+`sub_43B280` 沒有條件、沒有狀態、不看 stage —— 所以伺服器在**任何階段**（標題畫面、選角、地圖內）
+送 `[0x08][u32]` 都會收到同樣的 `[0x08][u32]` 回來。這是 client 唯一一個「一定有人回答」的封包，
+因此也是唯一能拿來量測「這條連線還活著嗎」的東西。
+
+**實作（`server/src/net/`）**：
+
+| 檔案 | 負責 |
+|---|---|
+| `online.ts` | `OnlineAccounts`：`account → 活著的 session 集合`（一個帳號一個座位）；`SeatKeeper`：一條連線的座位 ＋ 心跳一起拿、一起還 |
+| `heartbeat.ts` | 每 `intervalMs` 對「安靜了」的 session 送一次 `0x08`；安靜超過 `timeoutMs`（預設 3 × interval）就 `socket.destroy()` |
+
+- **座位在兩半各拿一次**：`LoginServer` 在 `0x01` 成功時拿、socket close 時還；`GameEntryServer` 在角色
+  進場（`0x04` 之後的 `enterField`）時拿、socket close 時還。兩半共用**同一份** `OnlineAccounts`
+  （`cli.ts` 傳給兩個 server），因為換到遊戲伺服器是**另一條 TCP 連線**：只有登入那一半會在選角畫面
+  待到連線逾時，只有遊戲那一半則認不出「剛登入、還沒選角」的帳號。
+- **`0x01` 的拒絕**：`online.sessionsOf(name)` 非空 → 回 `7`，並在日誌寫出**是誰在佔**：
+  `login 10.0.0.9:53123 (32s), game 10.0.0.9:53140 (5s)`。玩家申訴「它說我已經在線上」時，
+  操作者要的答案就是這一行的兩個欄位。
+- **同一個角色兩條連線**（沒有座位也做得出來：兩次 `0x03`、重播的 client、登入伺服器重啟）另外擋：
+  `GameEntryServer` 用 `sessionsByCharacter` 記住每個 id 的 session，第二條連線直接關掉。理由不是
+  「重複的 id」本身（`FieldInstance.join` 會處理），而是**舊的那條連線會活著但沒有人看見**：
+  它還能走、能說話、能打怪，而且兩條連線寫的是**同一個** `CharacterData`（帳號表裡的那一份，ADR-017）。
+- **半開的連線**是這個設計唯一的漏洞，而 `0x08` 就是它的答案：任何封包都算活著的證明
+  （`heartbeat.note`），安靜太久才問；問了三次不回答就`destroy()` —— 那會讓**所有 close 處理路徑照常執行**
+  （座位歸還、`0x1D` 廣播、存檔），跟玩家自己關掉視窗完全一樣。
+- **這兩個號碼是我們的選擇**：ping 間隔（預設 30 s）與逾時（3 倍）**不在 client 裡**（client 只負責回答），
+  所以是 ADR-018 的設計決策，不是解出來的常數。`--ping <ms|off>` 可以改；`off` 是「相信 TCP」，
+  代價是無聲消失的連線會把帳號佔到 OS 發現為止。
+- `sub_43B280` 回的那個 u32 本身沒有語意（client 讀進來就送回去，沒有其他地方讀它）—— 本伺服器送一個
+  計數器，只為了讓**我們自己的** trace 好讀。2003 年的伺服器送了什麼，client 裡沒有證據。
+
+**結論**：「已在線上」不是我們發明的規則，是 client 的訊息；我們補上的是它需要的狀態，以及讓那個狀態
+不會變成永久鎖門的心跳。`server/test/online.test.ts`、`heartbeat.test.ts` 與 `serve.test.ts` 的四條測試
+（第二條登入被拒 → 另一個帳號不受影響 → 下線後可以再進；同一個角色第二條連線被關；不回心跳的 session
+失去座位；`close()` 立刻歸還座位）釘住這些行為。
+
+### 4.31 ✅ 密語與找人：`0x23` 是「對一個名字的請求」，回包是 `0x1A` 的另外兩個 sub-op（ADR-019）
+
+§4.26 把 `0x1A`（`CField` 的使用者訊息）拆開時只實作了聊天（sub-op `0x12`），把 `0x09`／`0x0A`／`0x22`
+留給「有一天要做密語」。這一節就是那一天：`0x23` 的每個 byte、`0x1A` 的四個 case，以及伺服器端
+「用名字找人」的那一半。
+
+**送出：client 的 `0x23`（`sub_4717D0`）**
+
+三個地方會叫它：`/귓속말 <name> <text>`（`sub_470E10`，`.text:00471385`）、`/헉추적 <name>`
+（同一支，`.text:00471009`）、以及聊天輸入框按 Enter 時**已經有密語對象**的那條路（`sub_4F8CB0`，
+`.text:004F8F9F`；對象是 `sub_4732D0` 存進 `this + 247` 的名字）。它開頭先擋「一次只允許一個請求」：
+
+```c
+if ( *(this + 6) != nullptr ) {                  // 上一個請求還沒被回答
+    sub_4FB670(this_3, "다른 요청을 처리 중입니다", 6);   // "正在處理另一個請求"
+    return;
+}
+```
+
+那個旗標（`CField + 24`）由回包清掉（`sub_472910` 的每個 case 尾端都歸零），也會自己過期：
+`sub_4728D0` 在 `timeGetTime() - (CField + 32) > 0xBB8`（3 秒）時把它放掉。所以它是 **client 自己的
+UI 節流**，不是協定的一部分 —— 但知道它存在，就等於知道同一個 client 不會同時送兩個 `0x23`，
+而且它等一個回包最多等 3 秒。
+
+封包本體（`sub_4A1EA0(&buf, 35, 0)` 的第一個 byte 就是 opcode，寫入點在 `sub_4A1F20` 的
+`.text:004A1F85`）：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| opcode | `u8` | `0x23`（`sub_4717D0` 的 35） |
+| kind | `u8` | `0x05` = 找人、`0x06` = 密語、`0x22` = client 自己的氣球請求 |
+| name | `str` | 目標的名字（CP949），**先寫** |
+| text | `str` | 只有帶訊息的 kind 才有 |
+
+`kind` 的推導是 `v9 = (v6 + 1) | 4`，其中 `v6` = 「第二個參數（訊息）不是空字串」：
+
+```asm
+; .text:00471859   ; eax 是「訊息是空的嗎」(1 = 空)
+sete  %bl         ; bl = (eax == 0)  -> 有訊息 = 1、沒訊息 = 0
+inc   %ebx        ; 2 / 1
+or    $0x4,%bl    ; 0x06 / 0x05
+; .text:0047189A
+mov   %bl,(%ecx,%eax,1)   ; 寫進封包
+```
+
+所以它是 `0x04 | (有訊息 ? 2 : 1)`：`0x04` 是「對一個使用者」這個家族，低兩位元是「有沒有內容」。
+第三個 kind `0x22` 是 `0x20 | 2` —— **client 自己**在聊天視窗關著時組出來的請求：`sub_472910` 的
+`0x12` case 先看 `dword_5C1F74 + 24`（聊天視窗開著嗎，`.text:004729DC`），開著就 `sub_4FB670` 加一行，
+關著就自己組一個 `0x23`（`.text:00472A06`）、寫 kind `0x22`（`.text:00472A2C`），再寫**兩個字串**：
+先**講話的人的名字**（`.text:00472A53` 的 `sub_430230`）、再**自己的名字**（`.text:00472A70` 的
+`sub_4732C0(sub_4337A0())` ＝ `*(CWvsApp + 36) + 4`，`sub_4337A0` 回傳 `n3000`）——**不是訊息本身**。
+畫氣球的那個 s2c 已定位成 `0x1F`（§4.35.5），但請求裡沒有訊息，所以本伺服器只是讀得出來、記一行日誌
+（§6 第 17 項）。
+
+**兩個字串的先後**：`sub_4717D0` 先寫第 3 個參數（`.text:004718AD` 的 `sub_430230`）、有訊息時才寫第 2 個
+（`.text:004718E4`）。在 `/귓속말` 的呼叫點（`.text:00471379`..`.text:00471385`）第 3 個是
+`sub_526370` 的第 1 個輸出，而**那一個**是被 `sub_524A00` 驗證為角色名的字串（`.text:00471366`），
+第 2 個才是玩家打的話。所以線上的順序是 **name 然後 text**，跟讀取端的直覺一致。
+
+**回包：`0x1A` 的四個 case（`sub_472910`）**
+
+`sub_472910` 先讀 `u8` 再用 `v8 = (char)ArgList - 9` 進跳表：
+
+| sub-op | 讀取 | client 顯示 |
+|---|---|---|
+| `0x09` | `str name` + `u32 mapId` | `'name'님의 현재 위치는 'street:map'입니다`；第二個欄位是 **map id**（`sub_4694F0` 拿它載入 `Map/Map/%09d.img` 自己查地名），`0xFFFFFFFF` 才是 `'name'님을 찾지 못했습니다` |
+| `0x0A` | `str name` + `u8 flag` | flag≠0 且 client 自己最後送出的文字（`this + 7`，由 `sub_4717D0` 寫入）非空 → `name<< text`；flag≠0 但沒有 → `'name'님께 귓속말을 전달했습니다.`；flag=0 → `'name'님을 찾지 못했습니다` |
+| `0x12` | `str name` + `str text` | `name>> text`（聊天），並把名字存進 `this + 247`（密語的回覆對象） |
+| `0x22` | `str name` | `'name'님은 현재 귓속말이 거부되어 있습니다.`（對方拒收） |
+
+⚠️ **三件容易看錯的事**：
+
+1. `0x09` 的第二個欄位**不是**角色 id，是地圖 id（`sub_4694F0` 的參數），所以「找人在哪」不需要伺服器
+   送任何地名。
+2. `0x0A` **沒有 text**。它顯示的那一行文字是**寄件者自己電腦裡**的那一份（`CField + 28`）——
+   2003 年的 client 認為「你剛送出去的東西你已經有了」，所以回包只帶名字與成功與否。
+3. **收到的密語就是 `0x12`**（跟場地聊天同一個 sub-op）：收件者的 client 用同一行 `%s>> %s` 顯示，
+   所以它**分不出**「有人在附近說話」與「有人密我」；`sub_4732D0` 順手把講話的人存成回覆對象，
+   這就是那個年代「按回覆／打名字」的來源。反過來說，`0x0A` 是**寄件者**看到的 `name<< text`
+   （或「已送出」），本伺服器把 `0x0A` 送給寄件者、把 `0x12` 送給收件者。
+
+`0x22`（拒收）的形狀完整，但**client 端沒有任何輸入會設定「我拒收密語」**（那個開關的封包還沒找到），
+所以本伺服器不送它 —— 沒有驅動者的 codec 只是死碼，這是本文件一貫的規則。
+
+**伺服器端（ADR-019）**
+
+| 決定 | 內容 |
+|---|---|
+| 怎麼找名字 | `sessionNamed`：掃 `sessionsByCharacter`（線上 session 的唯一真相），不另建索引 |
+| 「線上」是什麼 | 只有活著的 session 才算：沒有 session 的角色沒有地圖可報、也沒有 client 可送，`0x09` 回 `0xFFFFFFFF`、`0x0A` 回 flag 0 —— 兩個都是 client 的「找不到」訊息 |
+| 大小寫 | 比對忽略大小寫（角色建立時 `nameTaken` 就是這樣擋重複的），但**回覆一律用存在的那個拼法**，所以打到 `alt` 會看到 `Alt` |
+| 跨圖 | 送達不看成員在哪張圖：`target.send(...)` 走對方自己的連線，這是本伺服器第一個離開「寄件者所在場地」的封包 |
+| 拒絕與氣球 | 見上：`0x22` 沒有驅動者、氣球請求只記日誌（§6 第 17 項） |
+| 落地 | 密語**不進存檔**：沒有離線訊息這種東西（`--save` 的格式不需要動） |
+
+**驗證**：`field.test.ts` 用 golden bytes 釘住 `0x23` 的三種 kind 與兩個回包（含 `0xFFFFFFFF`）；
+`serve.test.ts` 的「whisper and find reach a player by name, across maps」讓三條真連線跑完整個流程
+（跨圖送達、名字正規化、找不到、找人、氣球不回）。另外 `server/scripts/whisper_probe.mjs` 是**真 CLI**
+的煙霧測試：走真實登入鏈（`0x01`／`0x02`／`0x03`）＋`Data.wz` 的地圖（45 隻怪）跑一次同樣的段落。
+
+**結論**：密語／找人不是新 opcode 家族，而是 `0x23` 這個「對一個名字」的請求加上 `0x1A` 剩下的三個
+case。最值得記住的一點是形狀上的不對稱：**要送給誰的資訊在 c2s 只有名字**（client 沒有別人的角色 id），
+而**收件者看到的行跟聊天完全一樣** —— 這個年代的密語是「有對象的聊天」，不是私訊視窗。
+
+### 4.32 ✅ 死亡與復活（`부활`）：視窗是 client 的，`0x0D` `kind = 0` 是請求，`0x16` 才是復活（ADR-020）
+
+ROADMAP 的「被怪物打不會掉血」與「死亡」是同一條鏈的兩半，這一節把**兩半各定位到哪裡**寫清楚：
+可以實作的那一半（復活＝伺服器換圖＋補滿 HP）已實作，另一半（誰宣告玩家死亡、誰扣玩家的血）
+仍然是 OPEN —— 沒有證據的地方不補。
+
+#### 4.32.1 「死了」就是那個動作位元組：`CUser + 180` ＝ 18／19
+
+`CUser + 180` 是動作／姿態位元組（`0x1C` 送進來的 `action` 就是它，§4.11.3；那張值表**沒有解出來**，
+所以本伺服器對遠端角色一律送 0 ＝ 站著）。**死掉是 18／19 這一對**：兩個值只差 bit 0，所以每個
+判斷都先 `& 0xFFFFFFFE`（`sub_5084C0` 也用 `state >> 1` 去查動作）。
+
+| 函式 | 程式碼 | 意義 |
+|---|---|---|
+| `sub_50B570`（.c:271786）| `return (*(this + 45) & 0xFFFFFFFE) == 18;` | 「我死了嗎」——`this` 是 `_DWORD *`，所以 `+45` ＝ byte 180 |
+| `sub_464580(a1)`（.c:108052）| `(*(this_6 + 180) & 0xFFFFFFFE) == 0x12` → 顯示 **「죽은 후에는 할 수 없는 일입니다.」**（`aE_7`）| 死後禁止做的事（`this_6` ＝ 全域 0x5C2034）|
+| 同上 | `a1 != 0 && *(this_6 + 176) > 0` → 「지금은 할 수 없습니다.\r\n숨을 돌리고 다시 시도하세요.」| 那是**冷卻**（`+176`），不是死 |
+| `sub_509AF0`（.c:270659）| `*(_DWORD *)(n3000 + 680) == 0` | 場地層級的「還沒有待復活」 |
+
+> `CField + 680` 就是下面那個 2.2 秒計時器。`sub_558CF0`（349622）讀它時寫成 `*(this + 170)`
+> （`this` 是 `_DWORD *`）；`sub_4728D0`（121204）是呼叫 `sub_558CF0` 的那一幀（它的 disassembly 直接
+> 證明這個物件的 whisper 閘門在 `+0x18`、時間戳在 `+0x20`，與 §4.31 的 `CField + 24／+32` 同一個物件）。
+
+#### 4.32.2 復活視窗 `CUIRevive`：`sub_4E94E0`，一行字＋一個 OK
+
+| 事實 | 證據 |
+|---|---|
+| 文字 | `aI_6` ＝ 「확인을 누르시면 부활하게 됩니다.\r\n부활을 하시면 안전한 마을로 이동됩니다.」（.c:239955）|
+| 版面 | `sub_545450(this, 268, 104, 264, 132, 10, 0)`（.c:239980）—— x／y／寬／高／id |
+| vftable | 0x5872C4／0x5872CC／0x587300（三個基底子物件）|
+| 單例 | 建好後存進全域 `this_16`（0x5C26A8），`sub_4E9660` 的解構子把它歸零 → 一生只建一次 |
+| **什麼時候出現** | `sub_558CF0`（每幀）：`*(CField + 680) != 0` 且 `現在 - 它 > 2200`（**2.2 秒**）→ 建（或叫回）視窗，然後把欄位歸零 |
+
+**誰寫入 `CField + 680`（＝誰宣告玩家死亡）還沒定位** —— 這是這條鏈缺的第一塊，見 §6 第 18 項。
+
+#### 4.32.3 按下 OK：c2s `0x0D` `kind = 0`（`sub_4E9E70`）
+
+```c
+LONG *sub_4E9E70()                                    // 0x4E9E70
+{
+  if ( _RTDynamicCast(dword_5C212C, 0, &CStage, &CField, 0) != 0 )  // 現在是場地階段
+    sub_472590(0, nullptr);                            // ← 送出 c2s 0x0D：kind 0、name 空
+  sub_545A50(this_16);                                 // 關掉視窗
+  ...
+}
+```
+
+兩個入口：`sub_4E9E20(1)`（callback id 1 ＝ OK 鈕）與 `sub_4E9E30(13, a2)`（**13 ＝ VK_RETURN**；
+`27` ＝ ESC 只被吞掉）。所以**復活請求與傳送門是同一個封包**，只差 `kind`（`-1` ＝ 游標下的物件、
+`0` ＝ 復活、map id ＝ GM 的 `/헉맵`）。`name` 是空字串（`sub_430230` 對 `nullptr` 會寫空字串，§4.13）。
+
+#### 4.32.4 真正讓人活過來的是 `0x16`（不是任何 HP 封包）
+
+`0x16` 的處理函式 `sub_4C2780`（202598）在同一支函式裡做三件事：`sub_45FCC0` 把封包裡的
+`CharacterData` 解出來 → `sub_463050` 之後建**新的場地**（`sub_468D40` → `sub_4C3460`）→ 再建
+**新的本機角色**：
+
+```c
+202743:      v35 = sub_4772F0(k_5);            // 0x18 bytes 的階段物件
+202747:    sub_4C3460(v35, 0);
+202752:  k_6 = sub_403350(&dword_5C25F0, 0xA8u);   // 0xA8 ＝ CField
+202756:    v38 = sub_468D40(k_6);
+202760:  sub_4C3460(v38, (int)&v48);
+202767:  result = sub_51CBF0(v39, v42, k_3);   // → 288935: sub_511030(v5, *n16_1) ＝ CUserLocal 建構子
+```
+
+⇒ 死掉的動作位元組、屍體與那個視窗都屬於**被換掉的那張圖**；新的本機角色從封包裡的紀錄開始，
+而紀錄就是 client 的 HP 條畫的那一份（§4.21）。所以伺服器只要：**先把 HP 補滿，再送 `0x16`**，
+不需要第二個封包（ADR-020）。
+
+#### 4.32.5 伺服器端：目的地是 `info/returnMap`，而 client 完全不讀它
+
+`returnMap` 這個字串**在整個執行檔裡出現 0 次**（`grep` 過 `.c`），所以「안전한 마을로（安全的村莊）」是 client
+交給伺服器的問題，答案只能在資料裡：`Map/Map/*.img/info/returnMap`（`game/map.ts` 的
+`MapData.returnMapId`）。100 張圖的實際分布（`analysis/map_meta.json`）：
+
+| `returnMap` | 張數 | 例子 |
+|---|---|---|
+| `999999999`（**哨兵**，不是地圖 id）| 25 | 每一個村莊：`1010000` 암허스트（`town = 1`）|
+| `100000000`／`101000000`／`102000000`／`103000000`／`104000000`／`105040300` | 65 | 野外圖指向自己的村莊（`001000000` 암허스트서쪽필드 → `1010000`）|
+| `1010000`／`40000` | 8 | 早期地圖用的是短 id（`40000` ＝ 달팽이사냥터）|
+| （無）| 2 | |
+
+規則（`reviveMapId`，`game/map.ts`）：`returnMap` 是**正整數且不是哨兵**就用它，否則用**當前這張圖**。
+哨兵一定要排除：它不是地圖，`loadMapData(999999999)` 回 `undefined`（`test/map.test.ts` 早就釘住了）。
+「重進當前這張圖」不是「沒辦法時的降級」而是**真正的復活**（§4.32.4：新的本機角色就是活過來的證據），
+所以村莊裡死亡也走得通。
+
+伺服器流程（`GameEntryServer.revive`）：`0x19` 放行閘門（與點擊同一個閘門，`sub_472590` 會把它設起來）
+→ HP ＝ maxHp → 目的地讀不到圖就退回當前圖 → `enterMap`（`0x1D` 給舊場地、`0x16` 帶紀錄、`0x1C` 給新場地）。
+
+#### 4.32.6 還缺的一半（OPEN）
+
+- **誰宣告玩家死亡**：`CField + 680` 的寫入者還沒找到（找法：它是一個「時間」，寫入點應該在
+  client 判斷 HP ≤ 0 的地方）。在那之前伺服器不會自己送 `0x0D` 的 `hp = 0` —— 那會不會觸發
+  這條動畫／視窗，沒有證據。
+- ~~**怪物打玩家時誰扣血**~~ → **已解，見 §4.33**：client 自己算傷害，用 **c2s `0x1C`** 回報差值，
+  而玩家紀錄的 HP 只有伺服器的 `0x0D` 會寫（§4.21）——所以「被打 → 血條下降」＝
+  `sub_5114A0` 回報 → 伺服器套用（`game/vitals.ts`，ADR-021）→ s2c `0x0D`。c2s `0x2C` 裡沒有傷害
+  欄位這件事依然成立（§4.20.2），但傷害本來就不走 `0x2C`。
+- 死亡的懲罰（掉經驗／掉道具）沒有任何證據，沒有實作。
+
+**驗證**：`map.test.ts`（`reviveMapId` 的三種資料形狀＋真 `Data.wz` 的 `001000000` → `1010000`、
+`1010000` 的哨兵）；`serve.test.ts`「a revive restores HP and re-enters a field」用三條真連線跑
+「1/50 死亡 → `0x0D kind 0` → `0x19` ＋ `0x16`（50/50、換圖）→ 別人看到 `0x1D`／`0x1C` →
+在新圖被第三人看到 → 在村莊再復活一次（讀不到 returnMap → 重進）」。
+
+### 4.33 ✅ 玩家自己的 HP／MP 變動：c2s `0x1C`（client 回報差值，伺服器用 `0x0D` 落帳）（ADR-021）
+
+§4.32.6 缺的那一半：**扣血不需要任何伺服器封包**。2003 年的 client 自己跑怪物 AI、自己算傷害，
+把「我掉了多少血」用 **c2s `0x1C`** 回報；而**玩家紀錄的 HP 只有伺服器的 `0x0D` 會寫**（§4.21）。
+完整鏈是：`怪物 AI（client）` → `sub_4C8ED0` 算出傷害 → `sub_5114A0` → **c2s `0x1C`** →
+伺服器套用 → **s2c `0x0D`** → 血條。
+
+#### 4.33.1 封包：`[0x1C][u32 flags][s16 hpΔ][s16 mpΔ][u8 flag]`（byte-exact）
+
+唯一的寫入者是 `sub_55B870(__int16 hpΔ, __int16 mpΔ, char flag)`（`.c:352187`），它用 `ZArray`
+逐段 append；`objdump` 逐 byte 對得上：
+
+| 位址 | 指令 | 意義 |
+|---|---|---|
+| `.text:0055B88A`／`0055B890` | `push $0x1c` → `call 0x4a1ea0` | opcode byte（`sub_4A1EA0` 的第 2 個參數就是 opcode；⛔ **不是** `sub_43AD50` 加的）|
+| `.text:0055B8DD` | `movl $0x1400,(%ecx,%eax,1)` | `u32 flags`：`0x400`＝hp、`0x1000`＝mp（**與 `0x0D` 差異包同一組 bit**）|
+| `.text:0055B934` | `mov %cx,(%edx,%eax,1)` | `s16 hpΔ`（傷害是負的：`sub_55B870(-damage, 0, 0)`）|
+| `.text:0055B98E` | `mov %cx,(%edx,%eax,1)` | `s16 mpΔ` |
+| `.text:0055B9DE` | `mov %cl,(%edx,%eax,1)` | `u8 flag` |
+| `.text:0055B9E5`／`0055B9F5` | `mov 0x5c1f70,%ecx` → `call 0x43ad50` | 唯一的送出路徑（§4.2）：加 `0xD3` 標頭 → 加密 → 排入送出佇列 |
+
+⚠️ **`0x0D` 送的是絕對值、`0x1C` 送的是差值**：同一組 `flags`、相反的語意（例如 `-30` ＝ `E2 FF`）。
+`flag` byte 的語意未定位：傷害路徑送 0，地圖回復路徑在場地類型 36／37 且 `sub_4BE790(紀錄)` 非 0
+（道具驅動）時送 1。
+
+#### 4.33.2 誰送它：傷害（`sub_5114A0`）與地圖回復（`sub_558950`）
+
+`sub_55B870` 全檔只有三個呼叫點：
+
+| 呼叫點 | 情境 | 參數 |
+|---|---|---|
+| `sub_5114A0`（`.c:277377`）| **玩家被打** | `sub_55B870(-damage, 0, 0)` |
+| `sub_558950`（`.c:349512`／`349536`）| **地圖自己的回復** | `(+hp, 0, flag)`／`(0, +mp, 0)` |
+
+**傷害那條路**（**不需要任何伺服器封包**）：
+
+1. 怪物 AI 在 client：`sub_4862C0`（`CMob` 的 per-frame）→ `sub_487D10` 以玩家矩形挑一個
+   `Mob/<id>.img/attack<i>`（並比較 `conMP` 與怪物 MP）→ `sub_4885D0` 執行並把動作送 c2s `0x2C`
+   （§4.20.1；那包裡**沒有傷害**）。
+2. 本機玩家：`sub_511C60`（本機每幀）`sub_491FF0(CMobPool, 自己的矩形)` 找重疊的怪物，
+   再 `sub_4C8ED0(n3000+158, n3000+10, mob+136, …)` 算出傷害；`> 0` 就
+   `sub_5114A0(this, damage, ±270, -270, 1500)`。
+3. `sub_5114A0`：`sub_55B870(-damage, 0, 0)` 回報 → 擊退（`v6[22]`／`v6[23]` 兩個 double）→
+   `*(this+90) = 1500`（1.5 秒受擊冷卻）→ `sub_509790(this, 1, 1500)`（受擊動作）→
+   `sub_508450(this, -damage)`（傷害數字）。`sub_542F10`（`CVecCtrlUser` vtable **offset 0xC4**
+   ＝ slot 49）走同一條路。
+4. ⚠️ **這一整條路都不寫玩家紀錄的 HP**。紀錄的 `+53`／`+55`（HP 的 XOR 對）只有這些寫入者：
+   `sub_45E0D0`（s2c `0x0D` 差異包，§4.21）、`sub_45D840`（`sub_45FCC0` 讀 `CharacterData`，
+   `0x16` 進場時）、`sub_4BDDC0` 與 `sub_518BF0`（道具效果；使用道具／快捷鍵那條路）、
+   `sub_4C71C0`（client 自己的升級重算，**這份執行檔沒有任何呼叫點**）。另外 `sub_4C5DC0` 寫的是
+   `CWvsApp + 112` 那個「UI 副本」的同名欄位（同樣吃 `0x0D`）。**所以 `sub_5114A0` 只能回報差值，
+   血條要等伺服器的 `0x0D`** —— 這就是「誰扣玩家的血」的答案：沒有誰扣，client 算完回報、
+   伺服器落帳、再用 `0x0D` 把權威值送回去。
+
+**地圖回復那條路**（`sub_558950`）：每 10000 ms 一次，HP ＝ 道具群組 `1000000`（`sub_4BDD20`）
+的值 + 10、MP ＝ `2000000` 的值 + 3，乘上場地的回復率（`v25` 這個 double），只在 `hp < maxHp`／
+`mp < maxMp` 時送。⚠️ 它**不擋死亡**（只擋滿血）—— 伺服器端的對應規則是「HP ＝ 0 時不回復」
+（見下）。
+
+#### 4.33.3 伺服器端（ADR-021）
+
+- `protocol/field.ts`：`CLIENT_FIELD_OPCODE.statReport = 0x1c` ＋ `readClientStatReport`／
+  `encodeClientStatReport`／`describeClientStatReport`。旗標沿用 `0x0D` 的 bit
+  （`statDiffFlag("hp")`／`("mp")`，所以兩份封包的 bit 只有一處定義）；**未定位的 bit 直接丟例外**
+  （與 `0x0D` 的 panel block 同一條規則）。
+- `game/vitals.ts`：`applyVitalReport(stats, report)` 就地套用差值，回傳**只有真的動了的欄位**的
+  `StatDiff`（沒動就不送包，與商店／經驗同一慣例）。三條伺服器自己的規則：
+  1. 夾在 `[0, max]`（低於 0 的一擊落在 0，絕不會到負的）；
+  2. **HP ＝ 0 時不接受正向 HP 差值**（§4.33.2 說 client 的回復不擋死亡，沒有這條規則的話屍體會
+     每 10 秒站起來 10 點；真正補滿的是復活那條路，§4.32／ADR-020）；
+  3. MP 不受死亡規則影響（MP 不是死亡狀態的一部分）。
+- 伺服器**不驗算傷害**：`0x2C` 沒有傷害欄位可對（§4.20.2），傷害公式住在 `Mob/<id>.img/attack<i>`
+  與 client 的 `sub_4C8ED0` 裡；原 2003 server 也只能照單全收。要驗算＝在伺服器重寫一份怪物 AI，
+  那是另一個決策（ADR-021 列為後續選項）。
+- **別人的 HP 條仍然是各自 client 自己的**：遠端玩家的記錄裡沒有 HP 的來源 —— s2c `0x1C`（別人
+  進場）只帶 id／名字／外觀／座標（§4.11.3），沒有任何 HP；「某人被打」在別人的畫面上是那個人
+  自己的 client 在自己跑怪物 AI 時算出來的（vtable `+184`）。這條維持原樣，不另外發明封包。
+
+**驗證**：`field.test.ts`（黃金 bytes 兩個方向 ＋ 未知旗標被拒）；`vitals.test.ts`（夾、死亡不回復、
+沒動不送、NaN）；`serve.test.ts`「a monster's damage lands because the client reports it」用真 socket 走
+`-30 → hp 20`、再一次 `-30 → hp 0`、死後 `+10 hp／+3 mp → 只回 mp`、以及復活接回來（50/50、MP 不變）；
+`whisper_probe.mjs` 在真 `Data.wz` 上多兩項（`-30` 回 `hp 20`、`-30` 回 `hp 0`）與復活那項的 HP 斷言
+（加上 §4.34 新增的 8 項之後，這支探針共 **31** 項檢查）。
+
+### 4.34 ✅ 使用道具：c2s `0x18`（藥水）／`0x19`（地圖道具），效果表是 client 自己的 `spec`（ADR-022）
+
+§4.22 的商店只做到「買進袋子」；用掉那一步是這一節。兩個封包共用同一個形狀，而**道具做什麼**既不在
+封包裡、也不在伺服器上 —— 它是 `Item/Consume/0XXX.img/<id>/spec` 那一格，也就是 client 自己讀的效果表。
+
+#### 4.34.1 封包：`[0x18|0x19][s16 slot][u32 itemId]`（byte-exact）
+
+| 位址 | 指令 | 意義 |
+|---|---|---|
+| `.text:0055B311` | `push $0x18` → `call 0x4a1ea0` | `sub_55B2C0` 的 opcode（用道具）|
+| `.text:0055B501` | `push $0x19` → `call 0x4a1ea0` | `sub_55B4B0` 的 opcode（地圖道具）|
+| `sub_55B2C0`／`sub_55B4B0` 的 `a2` | `mov %cx` | **`s16 slot`**：USE 分頁裡的欄位編號 |
+| 同上，`Args` | `mov %ecx` | **`u32 itemId`** |
+
+⚠️ **分頁位元組不在線上**：`0x18`／`0x19` 只可能來自 USE 分頁，分頁是「送哪一個 opcode」決定的；
+`itemId` 是**封包自己宣稱**那個欄位裡有什麼，不是伺服器的帳（所以伺服器一定要拿自己的紀錄再對一次）。
+
+兩個送出者，都用 `itemId/10000` 決定分支（`objdump` 對得上）：
+
+| 函式 | 是誰 | 分支 |
+|---|---|---|
+| `sub_462DC0`（`.c:107025-107044`）| 道具欄的「使用」（`*(this+3) == 2` ＝ USE 分頁）| `200`／`201`／`202` → `sub_55B2C0`（0x18）；`203` → `sub_55B4B0`（0x19）|
+| `sub_512570`（`.c:278062`）| 快捷鍵 | 只有 `200`／`201`／`202` → `sub_55B2C0`（0x18）|
+
+兩個都先過**同一組 client 自己的閘門**（`.c:107025`／`.c:278082`）：`*(this+6) == 0`（沒有在途的請求）、
+**本機紀錄的 HP > 0**（死了不給用 —— 和 §4.32 的死亡位元組同一件事），以及節流：**200 ms**（0x18，
+`timeGetTime() - *(this+7) >= 0xC8`）／**500 ms**（0x19，`>= 0x1F4`）。這三條都是 client 的規則；伺服器
+不能靠它們（見 4.34.5），但要知道它們存在，因為「原 client 送不出來的東西」不需要伺服器擋。
+
+#### 4.34.2 回答：`0x0B`（含「拒絕」）＋ `0x0D` 或 `0x16`
+
+這個 slice 的形狀和 §4.22 的物件點擊完全一樣：**每一個請求都要有回包**，因為 client 的閘門
+（`*(this+6)`）是靠回包解開的。`0x0B` 的 `result` byte 由 `sub_55BAB0` 先丟給 `sub_463050(this, …)`
+（§4.6），**才**測試內容 —— 所以 `[0x0B][result = 0][count = 0]` 是格式完整、語意為「什麼都沒變」的一包，
+那就是這一節選的**拒絕**（不是沉默：沉默會讓玩家連下一罐都喝不了）。
+
+三個真的會發生的結果：
+
+| 結果 | 封包 | 誰寫的 |
+|---|---|---|
+| 拒絕（沒有 `spec`／buff 欄位沒接／滿血／欄位裡不是那個道具／目的地不是地圖）| **空的 `0x0B`**（`result = 1`）| `handleUseItem` 的 `refuse()` |
+| 藥水（`0x18`）：HP／MP 動了 | `0x0B`（`put` 剩下的數量，或沒有了就是 `clear`）＋ `0x0D` 差異包 | `takeItem` ＋ `encodeStatUpdate` |
+| 地圖道具（`0x19`）：換圖 | `0x0B`（同上）＋ `0x16` | `takeItem` ＋ `enterMap`（和傳送門／復活同一條路，§4.25／§4.32）|
+
+#### 4.34.3 效果表：`spec` 是 client 自己讀的那一格（全表）
+
+`Item/Consume/0XXX.img/<id>/spec` 的欄位就是**這個檔案裡所有**的消費品效果（`wz dump` 全家族核對過）：
+
+| 家族 | 例子 | `spec` | opcode |
+|---|---|---|---|
+| 0200 藥水 | `02000000` 빨간 포션／`02000001`／`02000002` | `hp` 50／150／300 | 0x18 |
+| | `02000003` 파란 포션／`02000006` | `mp` 100／300 | 0x18 |
+| | `02000004` 엘릭서 | `hpR` 50、`mpR` 50 | 0x18 |
+| | `02000005` 파워 엘릭서 | `hpR` 100、`mpR` 100 | 0x18 |
+| | `02002000`–`02002005` 各種 물약 | `eva`／`speed`／`mad`／`pad`／`acc` ＋ `time` | —（buff，未實作）|
+| 0201 食物 | `02010000`–`02010004` | `hp` 30／100／50、`mp` 50／150 | 0x18 |
+| | `02010005` | `hpR` 30、`mpR` 30 | 0x18 |
+| | `02010006` | `hpR` **`"50"`**（字串！）、`mpR` `"50"` | 0x18（讀不到值 → 拒絕）|
+| | `02011000` | `spec` 是**空的** | —（拒絕）|
+| | `02012000`–`02012003` | `pad`／`eva`／`mad`／`pdd` ＋ `time` 300000 | —（buff）|
+| 0202 高階藥水 | `02020000`–`02020006`、`02022000`、`02022003` | `mp` 200／`hp` 200／`hp` 100＋`mp` 100／`hp` 400／400／300／500／`mp` 800／`hp` 1000 | 0x18 |
+| | `02022002` | `pda` 20、`acc` −5、`time` 180000 | —（buff）|
+| 0203 傳送 | `02030000` 마을 귀환 주문서 | `moveTo` **−1** | **0x19** |
+| | `02030001`–`02030005` | `moveTo` 104000000／101000000／102000000／100000000／103010000 | **0x19** |
+| 0204 卷軸強化 | `02040000`…（75 個）| **沒有 `spec`**（`info/price` 全是 1）| 兩個 opcode 都不是 |
+| 0207 標槍 | `02070000`… | **沒有 `spec`** | — |
+
+兩條規則直接從表裡讀出來：
+
+1. **`info/desc` 會說謊（或至少不精確），`spec` 才是效果。** 빨간 포션 的 `info/desc` 寫
+   「HP를 약 50 회복시킨다」而 `spec/hp` 正是 50；엘릭서 的 desc 寫「약 50%」而 `hpR`／`mpR` 是 50；
+   파워 엘릭서 的 desc 寫「HP, MP를 모두 회복시킨다」而 `hpR`／`mpR` 是 **100**。所以伺服器讀的是
+   `spec`，不是描述文字。
+2. **形狀不對的值等於沒有值**：`02010006` 的 `hpR`／`mpR` 是**字串** `"50"`（整份檔案唯一一個），
+   照 `wz/props.ts` 的規則（`asNumber`：型別不對就是 fallback）會被當成「這一項沒有」，於是那一罐
+   在伺服器上做不了事 → 拒絕。⚠️ 不要「順手」把字串轉成數字：那是在猜原 client 的行為。
+3. `moveTo` 的 `−1` ＝「最近的城市」（마을 귀환 주문서 的 `info/desc` 正是「현재 위치에서 가장 가까운
+   마을로 귀환」），其他五個是**寫死的村莊 id**；`0204`（強化卷軸）與 `0207`（標槍）連 `spec` 都沒有 ——
+   前者本來就不是「用在自己身上」，後者是丟出去用的（`0x1A` 家族，本節不含）。
+
+#### 4.34.4 誰把效果寫進紀錄：`sub_518BF0` → `sub_4BDDC0`（效果表的 loader 仍 OPEN）
+
+§4.33.2 說紀錄的 HP 只有幾個寫入者，其中兩個在「道具」那條路上 —— 就是這裡：
+
+- **`sub_518BF0(this, itemId)`**（`.c:284652`）：`sub_463050` 拿本機紀錄 →
+  **動作位元組是 `0x12`／`0x13`（死亡）就 `return 0`**（`if ((*(this + 45) & 0xFFFFFFFE) == 0x12)`，
+  和 §4.32 的死亡位元組是同一組）→ `sub_4BDD20(dword_5C2038, 紀錄, itemId, &out)` 查**道具效果表**
+  （回傳 `<= 0` ＝「這個 id 不是有效果的道具」）→ `sub_4BDDC0(this, 紀錄, itemId)` → 之後是一大串
+  依 itemId 的特例（`Args <= 2101006` 的 switch 鏈）。
+- **`sub_4BDDC0`**（`.c:197970`）：檢查（`n4_1/1000 % 10 == 0` 就先退貨、等級／HP／MP 門檻、
+  `+56` 那個「需要持有 N 個某道具」的欄位）→ 把紀錄的 HP／MP **XOR 對**（`+53^+55`、`+61^+63`）
+  用「舊值 − 表值」寫回，中間夾一段自訂 RNG 的混淆（`sub_4619F0`／`sub_48A900`，與 `0x16` 的
+  場地亂數同一個引擎，§4.11.2）。
+- **呼叫者只有兩個**：快捷鍵 `sub_512570`（它的條目 `kind`：**1 → 只在本機套用、完全不送包**；
+  2 → 在 USE 分頁裡找那個 itemId 的欄位再送 `0x18`）與 `sub_4ED340`（帶滑鼠座標的 UI handler）。
+- ⚠️ **OPEN**：把 `spec` 讀成那張表的 loader 沒有定位，而且 `hp`／`hpR`／`mp`／`mpR`／`moveTo`／
+  `slotMax`／`reqLevel` 這些名字在 `MapleStory.exe` 裡**一個字面字串都沒有**（`grep -a` 五次全 0）
+  —— 要嘛用雜湊比對屬性名、要嘛名字藏在別處。這也是本專案**讀 WZ 而不是移植那張表**的理由
+  （`game/items.ts` 直接讀 `spec`）；找到 loader 才能回答「原 client 的百分比怎麼取整」這類問題
+  （§6 第 19 項）。
+
+#### 4.34.5 伺服器端（ADR-022）
+
+- `protocol/field.ts`：`CLIENT_FIELD_OPCODE.useItem = 0x18`／`useMapItem = 0x19`、
+  `USE_ITEM_OPCODES`、`readClientUseItem`／`encodeClientUseItem`／`describeClientUseItem`（分頁不在線上，
+  所以唯讀的只有兩個欄位；未知的 bit 一律丟例外，與 §4.21／§4.33 同一條規則）。
+- `game/items.ts`：`consumeSpecOf`（`Item/Consume/0XXX.img/<id>/spec` → `ConsumeSpec`；
+  未定位的欄位收進 `unapplied`，讓**用不到的 buff 道具被拒絕而不是半套用**）、`healsVitals`、
+  `consumeDeltas`（`hp`／`mp` 是定值、`hpR`／`mpR` 是**上限的百分比並向下取整** —— 半點 HP 不是血條能畫的
+  東西，這是伺服器的選擇，原 client 的取整方式未定位）、`consumeSpecProvider(archive)`。
+- `net/loginserver.ts` 的 `handleUseItem`／`useMapItem`：**先查 spec → 再驗「真的會動」→ 最後才扣道具**
+  （滿血喝藥水不會浪費一罐；`0x19` 的目的地用 `fields.of` 先驗，換不到的圖不會把卷軸吃掉）。
+  `moveTo < 0` 用 `reviveMapId(地圖)`（§4.32 的同一個答案：`info/returnMap`，村莊的哨兵
+  `999999999` 就是「重進這一張」）。
+- `--start-mesos <n>`（**新角色**的起始錢，預設 0 ＝ 2003 年新角色的樣子；沒有它就買不了東西，
+  所以這是一個明講的伺服器選擇，與掉落率同一個層級）。
+- `game/shops.ts` 的三間店：`1010100` 리나（헤네시스）、`2003` 로빈（달팽이사냥터）、
+  **`12100` 마이（암허스트）**；三間都賣 마을 귀환 주문서（75），마이 還賣 헤네시스 귀환 주문서（90）——
+  前者是「新角色真的能到得了的店」（`--map` 的 1000000 → 1010000 就是復活也會去的那個村），
+  後者是**指名一張圖**的卷軸，所以「用道具換圖」在測試裡是可觀察的。
+
+#### 4.34.6 驗證
+
+- `test/items.test.ts`（6 個，手寫 fixture 的 archive）：`spec` 的每一種形狀（定值／百分比／向下取整／
+  buff 進 `unapplied`／`moveTo`／空 `spec`／沒有圖／不是道具 id／`--data off`）與**滿血時什麼都不該發生**。
+- `test/field.test.ts`：`0x18`／`0x19` 兩個方向的黃金 bytes（`18 0300 80841e00`、`19 0100 b0f91e00`）
+  與兩個陷阱（第三種 opcode、超出 u32 的 id）。
+- `test/serve.test.ts`「using a USE-tab item…」：真 socket 走完**買（`0x4A` 三列含 2030000@75）→
+  喝一罐（`0x0B` `put` 剩 1 ＋ `0x0D` hp 50）→ 滿血再喝（**空的 `0x0B`**，罐子還在）→ `0x1C` 打一拳
+  → 喝掉最後一罐（`0x0B` `clear`）→ 空欄位（拒絕，且**沒有**後續封包）→ 捲軸（`0x0B` `clear` ＋
+  `0x16` → 1010000）→ 欄位已空（拒絕，沒有第二個 `0x16`）**。
+- `test/shops.test.ts`：「三間店的每一列都有 `info/price`」之外多一條**「每一列用起來都有事做」**
+  （每個 id 的 `spec` 非空、而且不是回血就是命名一張圖）。
+- `server/scripts/whisper_probe.mjs`（**31** 項，新增 8 項）：在真 `Data.wz` 上從 마이（池 id 從 `0x39`
+  的模板欄位認出來）開窗、確認 헤네시스 귀환 주문서 標的是**存檔裡的 90**、買下去看 `0x4B silent` ＋
+  `0x0B put` ＋ 錢包 `200 → 110`、用掉看 `0x0B clear` ＋ `0x16` 真的進 `100000000`。這一段需要
+  `--start-mesos 200`（否則只印一行提示跳過）。
+
+### 4.35 ✅ 表情：c2s `0x13`（自己的臉）與 s2c `0x27`（別人的臉）（ADR-023）
+
+§4.11.7 的 `CUserPool` 分支表裡 `0x27` 一直只寫著「u32 → 動作／姿勢切換」；這一節把它接回**按鍵**那一端，
+並且把「哪九張臉」直接從執行檔讀出來。
+
+#### 4.35.1 c2s `0x13`：`[0x13][u32 emotion]`（byte-exact）
+
+唯一送出者是**按鍵分派器** `sub_511E20`（`.text:00511FDF` 的 `push $0x13` + `call 0x4a1ea0`；整個函式只有
+這一個 `0x13`）。它的 switch 由**按鍵類別表**決定（`.data:0x512260[key - 16]`，key ∈ 16..123）：
+
+| 類別 | 按鍵 | 做什麼 |
+|---|---|---|
+| 0–9 | Shift／Ctrl／Alt／PageUp／PageDown／End／Home／↑／Insert／Delete | 各自的單鍵行為（case 0..9）|
+| **10** | **F1–F12（VK 112–123）** | **表情**（case 10）|
+| 11 | 其餘 86 個按鍵 | 一般按鍵（移動／攻擊／道具…；同一個函式在別的 case 裡呼叫 `sub_512F90`（`0x0F`）／`sub_513C80`（`0x10`），所以「攻擊家族入口」與「表情」是同一個按鍵分派器的不同 case）|
+
+case 10 的兩道警衛是 `if (key == 119) return 1;`（F8 什麼都不做）與 `(unsigned)(key - 111) <= 8`，所以
+**F1..F7 送 1..7**（`key - 111`），F9..F12 連送都送不出去（`key - 111 > 8`）。順序才是重點：
+
+```
+.text:00511FD8  call 0x509790          ; CUser::SetFace(this, key - 111, -1)  <- 先套在自己身上
+.text:00511FDF  push $0x13             ; 才組封包
+.text:00511FEA  mov 0xac(%esi),%esi    ; 寫入的是 CUser+172（剛被 SetFace 寫過的那格）
+```
+
+⇒ **送出的人不需要伺服器就能看到自己的表情**，這也是伺服器只廣播給別人的理由（4.35.4）。封包本體只有
+一個 `u32`：`CUser + 172`。`sub_509790` 的參數是 `unsigned`，`n8 <= 8` 的檢查在它裡面，`objdump` 的
+`cmp $0x9,%eax` / `jge` 對得上（-1 ＝「沒有表情」）。
+
+#### 4.35.2 九張臉：`.data:0x5B20D8` 的九個 `wchar_t*`（＝ `EMOTION_NAMES`）
+
+`CUser + 172` 是索引，`-1` ＝沒有：建構子 `sub_507680` 寫 `-1`，`CUser::SetAvatar`（`sub_508260`，
+就是 `0x1C` 第一個 u32（**臉**）與外觀清單收下的那一位，§4.11.3c）換裝時寫 `-1` 再
+`sub_509790(this, 0, -1)`。
+
+| 索引 | 名稱（`Character/Face/%07d.img` 的子節點）| 誰會用 |
+|---|---|---|
+| 0 | `blink`（平常、眨眼）| 預設；畫圖端 `n8 > 8` 也夾回 0 |
+| 1 | `hit`（被打）| **client 在被打時自己用**（`sub_5114A0`：`sub_509790(this, 1, 1500)`，1500 ms）|
+| 2 | `smile` | F2 |
+| 3 | `troubled` | F3 |
+| 4 | `cry` | F4 |
+| 5 | `angry` | F5 |
+| 6 | `bewildered` | F6 |
+| 7 | `stunned` | F7 |
+| 8 | `vomit` | 沒有按鍵（`n8 <= 8` 允許，F1..F7 到不了）|
+
+兩份互相印證的證據：`.data:0x5B20D8` 是九個 `wchar_t*`（`0x5B254C` `blink`、`0x5B2544` `hit`、
+`0x5B2538` `smile`、`0x5B2524` `troubled`、`0x5B251C` `cry`、`0x5B2510` `angry`、`0x5B24F8` `bewildered`、
+`0x5B24E8` `stunned`、`0x5B24DC` `vomit`；讀法：`objdump -s --start-address=0x5B20D8` 的九個指標 ＋ 各自指向的
+寬字串），而畫臉的 `sub_408400` 正是用 `(&off_5B20D8)[n8 > 8 ? 0 : n8]` 取名字去查臉圖；`Data.wz` 的
+`Character/Face/00020000.img` 子節點也正好是 `default` 加這九個（`wz dump` 印得出來）。索引 1 兩邊都對得上：
+client 被打時給自己 `1`，而表上第 1 個就是 `hit`。
+
+⚠️ 名稱只有這些英文節點名，**沒有韓文對應**：`기쁨`／`슬픔`／`화남`／`눈물` 在 `.exe` 與 `Data.wz` 裡都
+找不到（按鍵設定不在資料檔裡），所以文件與程式一律用這九個節點名，不替它們編譯名。
+
+#### 4.35.3 s2c `0x27`：`[u32 characterId][u32 emotion]`
+
+`sub_51D590` 的 case `'\''`（0x27）：範圍分派器先讀 `u32 characterId` 並用 `sub_51CD30` 在池裡查
+**（查不到就整包丟掉**，所以對一個不在場的角色送它是安全的），再讀一個 `u32` 交給
+`sub_509790(user, emotion, -1)` —— 和 c2s `0x13` 的送出端是**同一個函式**，所以兩邊對「0..8 才是臉」的
+判斷一致（`sub_509790` 的 `n8 <= 8` 與 `(n35 != 33 && n35 != 32 || n8 != 8)` 那道護欄）。
+
+#### 4.35.4 誰該收到它（ADR-023）
+
+- **送出的人不要收**：client 已經自己套用過了（4.35.1 的順序），回送只會把同一個值再設一次；這與
+  `0x22`（自己的移動路徑）與 `0x29`（自己的升級特效，ADR-015）是同一條規則。
+- **被打的 `hit` 不用送**：每個 client 都在本機自己算怪物傷害（§4.33），「別人被打」在別人畫面上也是
+  那個人自己的 client 算出來的 —— 伺服器沒有、也不需要這個事件的來源。
+- **沒有回包義務**：表情不像點擊或使用道具，client 沒有在途請求閘門，所以不合法（> 8）的值直接丟掉並
+  記一行日誌，而不是回一個空包。
+- **狀態不用記**：臉是「現在的樣子」而不是伺服器要保存的東西 —— 換圖時不會重送（新進場的人本來就從
+  `0x1C` 的紀錄開始畫），存檔也不動。
+
+#### 4.35.5 順手定位、但**尚未實作**：s2c `0x1F` 是氣球（§6 第 17 項）
+
+`sub_51D530`（範圍分派器 0x1E–0x20）在 `n31 == 31`（＝ `0x1F`）時把查到的 user 與封包交給
+`sub_50B320(user, packet)`，而它做的事情很明確：
+
+- 從封包讀**一個字串**（`sub_432680`）；
+- `sub_411E50(&str, "%s : %s", *(user + 60) /* 使用者的名字，§4.11.3 */, 讀到的字串)` 組成氣球的文字；
+- `n5000 = 5000`（顯示 5 秒）、位置取自 `user + 13`（vecctrl）、`sub_4373A0(user + 5, …)` 把它掛在那個人身上。
+
+⇒ 形狀是 `[0x1F][u32 characterId][string text]`，畫面是「**名字 : 文字**」的氣球。**沒有實作**的理由：
+它的驅動者是 §6 第 17 項那個 c2s `0x23` kind `0x22`（聊天視窗關著時 `sub_472910` 的 case 0x12 自己組出來的
+請求），而那個請求帶的是 **`[str 講話的人的名字][str 自己的名字]`** —— 第二個字串是 `CWvsApp + 36`
+（本機角色的名字，見 §4.37.4；`sub_4732C0` ＝ `*(app + 36)` 再 `+4`），**不是**剛收到的那則訊息，
+所以請求裡**根本沒有氣球的文字**。把「說者 + 自己」硬塞進 `0x1F` 只會畫出一個丟掉訊息的氣球；原伺服器
+拿這個請求做什麼（回給誰、`characterId` 填誰）沒有任何客戶端證據能回答，所以這一格只留紀錄，不實作。
+
+### 4.36 ✅ 道具欄的拖放：c2s `0x17` ＋ 兩個回答（`0x0B`／s2c `0x28`）（ADR-029）
+
+§4.22 的商店把東西放進袋子、§4.34 讓藥水生效；這一節是**玩家自己搬東西**：雙擊裝備、拖到另一個格子、拖到
+已穿戴的位置、丟到地上。四種動作由**同一個送出者**負責，而它的四個參數就是線上的四個欄位。
+
+#### 4.36.1 封包：`[0x17][u8 tab][s16 fromSlot][s16 toSlot][s16 count]`（byte-exact）
+
+`sub_55ACB0`（.c:351477）依序 append `a2`(u8)、`a3`(u16)、`x`(u16)、`ArgList`(u16)，opcode 23 ＝ `0x17`
+（`.text:0055AD01` 的 `push $0x17` ＋ `.text:0055AD07` 的 `call 0x4a1ea0`）。四個呼叫點一一對應：
+
+| 送出者 | 什麼動作 | 線上四格 |
+|---|---|---|
+| `sub_4636B0`（.c:107381）| 雙擊裝備（能力不足先跳 `현재 능력치가 낮아서…`，**不送**）| `1, 格, -部位, -1` |
+| `sub_4630A0`（.c:107062）| 裝備分頁裡的拖放（兩端都可能已穿戴）| `1, from, to, -1` |
+| `sub_463A50`（.c:107536）| 任何分頁裡的拖放（from/to 由滑鼠決定，兩者相等時先 return）| `tab, from, to, -1` |
+| `sub_463BE0`（.c:107607）| 丟到地上（問過「몇 개나 버리시겠습니까?」之後）| `tab, from, 0, 數量` |
+
+- `tab`：1 裝備／2 消耗／3 其他／4 現金（`INVENTORY_TAB`，與 `CharacterData` 的順序同一套）。
+- **負的格子 ＝ 已穿戴**，號碼與 itemId 的部位碼同一套（`-1` 帽子、`-11` 武器、`111xxxx` 可到 `-12`/`-13`，§4.11.3d）。
+  雙擊那條路的部位是**游標所指的那一格**（`sub_463490` → `n2_1 = sub_4D9110(x, y)` → `sub_4636B0(this, *(this+4), n2_1)`），
+  而且送出前客戶端自己比對過 itemId 的 part code 與游標那一格（`switch (itemId / 1000 / 10)`，不符就 return）——
+  所以「哪個部位」是請求的內容，不是伺服器猜的。
+- `count`：三個搬移送出者都送**字面上的 `-1`**（整格）；只有丟棄帶數量，而那個數量是**問出來的**
+  （`sub_4643F0(asc_5B578C, 堆疊數)`，`몇 개나 버리시겠습니까?`）——除了兩種例外：`tab == 1`（裝備分頁）
+  時它直接用 `1`，`itemId / 10000 == 207` 時直接送**整疊**（家族未查）。所以「丟幾個」是客戶端的選擇，
+  伺服器只把它跟堆疊數比對（§4.36.3）。
+- ⚠️ **能力需求不在這裡**：`sub_4636B0` 用 `sub_4C5020`／`sub_4C5420` 算出的角色總和，比對 `sub_465A30(itemId)`
+  的 `reqSTR/DEX/INT/LUK/level` 與職業位元（`sub_4657F0(itemId) ∈ {0,30,31,32,33,37,38}`）以及性別位
+  （`itemId / 1000 % 10` 對 `record + 17`）。這是客戶端自己的規則，伺服器照抄只會多一份沒人能驗的第二份規則。
+
+#### 4.36.2 客戶端自己不搬，而且它有閘門 ⇒ 拒絕一定要回包
+
+- 四個送出者都**不動客戶端的道具欄**：`sub_55ACB0` 只組包、送出，然後把 `CWvsApp + 0x18` 設成 1
+  （`.text:0055AE70`）。
+- 每個送出者開頭都檢查那一格 ＋ 500 ms 節流 ＋ 本機 HP > 0（`sub_463A50`：`n3000[6] != 0 || (HP 的那兩個
+  byte) <= 0 || timeGetTime() - n3000[7] < 0x1F4` 就 return 0）。
+- 能清掉那一格的**只有 `0x0B`**：`sub_55BAB0` 在 `result != 0` 時 `movl $0x0,0x18`（`.text:0055BB0C`，§4.6）。
+
+⇒ 這個 slice 的拒絕**必須是空的 `0x0B`**（`[0x0B][1][0]`）。沉默會讓閘門永遠關著，玩家第一次被拒之後整個
+道具欄就再也不能互動——這與 §4.34.2 的 `0x18`／`0x19` 是同一條規則，也是「原 client 沒有回包義務」那些 opcode
+（§4.35.4 的表情）與這一族的分界。
+
+#### 4.36.3 伺服器端（ADR-029）
+
+`applyChangeSlot`（`game/inventory.ts`，純函式）先判定再寫入，答案只有兩種：`{kind:"done", changes, lookChanged}`
+或 `{kind:"failed", reason}`（`reason` 只進日誌——線上沒有結果位元組）。判定順序：
+
+| 條件 | 拒絕值 |
+|---|---|
+| `tab ∉ 1..4` | `unknownTab` |
+| `fromSlot == 0` | `slotOutOfRange` |
+| 負格但 `tab != 1`、或 `\|slot\| > 14`、或超過該分頁的格數 | `slotOutOfRange` |
+| `count != -1`（地面以外的四種動作） | `badCount` |
+| 來源格是空的 | `emptySlot` |
+| 來源格的道具不屬於那一格（裝備分頁放了消耗品／部位不符）| `itemNotInTab`／`wrongPart` |
+| 目的格的道具放不回來源格（互換不可能）| `displacedItemDoesNotFit` |
+| `toSlot == 0` 而 `count` 不是 `1..堆疊數`（裝備只能 1）| `badCount` |
+| `toSlot == 0` 而來源是現金道具（`cash != null`）| `cashItem` |
+
+成功時的 `changes` 就是 `0x0B` 的內容（目的格 `put`、來源格 `clear`；兩格都有東西就是兩個 `put`），
+`lookChanged` ＝「動到了負格」，呼叫者據此送 `0x28`（§4.11.8）。五個決策記在 ADR-029：**只驗結構不驗需求**、
+**兩格都有東西 ＝ 互換**、**丟到地上有落地規則**、**現金裝備不動**（第 4 點的追加見 ADR-029 追記）。
+
+**丟到地上那一條路**（`toSlot = 0`，`sub_463BE0`）多一個答案而不是一個拒絕：`applyChangeSlot` 回
+`{kind: "drop", slot, count, changes, lookChanged}` —— `changes` 是 `0x0B`（整疊丟掉是 `clear`、丟一部分是
+同一格重 `put`），**地面上那一半屬於場地**（呼叫者做 `FieldInstance.dropItem` → `0x43` `kind 2` 給全場、
+**包含丟的人**：客戶端從來沒在地上畫過它，那一包才是它第一次出現在畫面上的原因）。`slot` 是**那件道具本身**
+（數量已改成丟出去的量），落地紀錄因此留得住物件——撿回來的是同一件（`game/rewards.ts` 的 `freshSlot`）。
+動到負格時照樣要 `0x28`（把武器丟到地上 ＝ 脫掉它，§4.11.8）。
+
+#### 4.36.4 驗證
+
+- `test/field.test.ts`：`0x17` 與 `0x28` 的 golden bytes（`-1` 的 s16、flags 驅動的可選欄位、清單結尾的 0、
+  清單含 0 會被拒）。
+- `test/inventory.test.ts`：十個純函式案例（裝備／卸下／換位／互換／**丟到地上：丟一部分與整疊、
+  裝備只能 1、現金道具與 `count` 不合理的拒絕**／邊界與各拒絕值）。
+- `test/drop.test.ts`：玩家丟的東西（`dropFromPlayer`）——落點就是玩家、沒有怪物區塊、`0x43` 15 bytes、
+  「沒動過的人撿不到、動過的人撿得到」、以及**模板欄位留著**（`ruc = 4` 的武器原樣回來）。
+- `test/serve.test.ts`「a throw-away answers 0x0B and puts the item on the ground for the whole map」：丟 4 瓶藥水
+  → 自己收 `0x0B`（同一格 `put` 剩 6）＋**自己與觀察者都收 `0x43`**（`kind 2`、15 bytes、沒有 `mobId`）
+  → 站著不動**不會**被自己撿回來 → 走開 80 px 也不會 → 走回去才 `0x44 kind 2`（含自己的 id）＋`0x0B`
+  （回到 10 瓶）＋`0x11`；`count = 0` 的請求是空的 `0x0B`，地上不多一筆。
+- `test/serve.test.ts`「equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map」：同場兩人，
+  穿戴者收到 `0x0B`（`put(-1)` ＋ `clear(2)`）、觀察者收到 `0x28`（清單從 `[30000]` 變成 `[30000,1002000]`）、
+  穿戴者**沒有**自己的 `0x28`、紀錄本身（同一個物件）的 `worn[1]` 是那頂帽子、同一個拖放再送一次是空的 `0x0B`。
+
+#### 4.36.5 還缺的一半（OPEN）
+
+- **落地的那三個常數是伺服器的選擇**：躺多久（沿用 `DROP_LIFETIME_MS` 300 s）、誰能撿（同圖＋走到範圍內
+  40/60 px＋「必須在這筆掉落之後動過」，§4.18.6 第 4 點）、以及**丟錢**（`0x17` 只搬道具欄裡的東西，玩家沒有
+  丟錢的送出者）。binary 這一半在 client，要等 ADR-004 的實機 run 才能對照（ADR-007）。
+- **現金裝備**（第 4 分頁、`wornCash` 那一組、`111xxxx` 的 12／13 格）：一律拒絕；**丟到地上的現金道具也拒絕**
+  （`cashItem`——序號只存在道具欄那一格，落地紀錄沒有地方放它）。寧可少穿一件，也不要送一個會
+  讓客戶端丟 `AVCDisconnectException` 的 `0x0B`（§4.6 的收尾檢查）。
+- **裝備的能力加成**：客戶端自己算傷害（§4.17），所以伺服器不重算武器攻擊力；「換武器 → 攻擊動作家族改變」那條路
+  （c2s `0x0F`／`0x10`／`0x11` 的選擇）也在客戶端，本伺服器不干預（§4.11.7c）。
+
+### 4.37 ✅ 組隊：s2c `0x10`（結果）與 c2s `0x26`（請求）—— 名冊就是 6 × (u32 id + char name[13])（ADR-030）
+
+§4.10 把 `0x10` 的 type 表列了出來，但只到「哪個 type 帶什麼」。這一節把它補到可實作的層級：兩個方向的
+號碼、`0x26` 的五個送出者、102-byte 名冊是怎麼推出來的，以及**伺服器要做的那些決定**（binary 裡沒有）。
+
+**號碼**：s2c `0x10` 是 `CWvsApp` 層（`sub_43B170` 把 `0x0A`–`0x14` 交給 `sub_55A900`，case 16 →
+`sub_55C5E0`）；c2s `0x26` 是**遊戲伺服器**的請求（`sub_4A1EA0(..., 38, 0)`）。兩個方向只是剛好同一個數字，
+跟 `0x0B`／`0x0F` 一樣互不相干。
+
+#### 4.37.1 `0x10`（s2c）：`u8 type` ＋ 依 type 的 payload
+
+| type | payload | client 做什麼（`sub_55C5E0`）|
+|---|---|---|
+| `3` | `u32 inviterId` ＋ `str inviterName` | 只在 `*(CWvsApp + 36) != 0` 時才讀（那一格是本機角色的**名字物件**，見 §4.37.4——角色還沒載入時整包丟掉）；跳**模態**對話框「'%s'님이 파티에 초대했습니다.\r\n파티에 가입하시겠습니까?」（`sub_52C140` 回 6 ＝ `IDYES`），按「是」送 `0x26 type 2` ＋**同一個** u32 |
+| `5` | `u32 partyId` ＋ 102-byte 名冊 | 安靜地覆蓋名冊（沒有訊息）|
+| `6` | `u32 partyId` | `*(CWvsApp+404) = partyId`、名冊清空、把自己（`+20` 的角色 id 與 `+36` 的名字）寫進第 0 格，印「새로운 파티를 만들었습니다」|
+| `7`／`14` | — | 「이미 가입한 파티가 있습니다」|
+| `8` | — | 「초보자는 파티를 만들 수 없습니다」|
+| `10` | `u32 partyId` ＋ `u32 characterId` ＋ `u8 flag`；`flag != 0` 再加 `u8 kicked` ＋ `str name` ＋ 102-byte 名冊 | 見 §4.37.2 |
+| `11` | — | 「가입한 파티가 없습니다」|
+| `13` | `u32 partyId` ＋ `str name` ＋ 102-byte 名冊 | 名冊換成封包裡那一份；`name` 是自己 →「파티에 가입되었습니다.」、否則「'%s'님이 파티에 가입하셨습니다」|
+| `15` | — | 「가입하려는 파티에 이미 최대 인원 수만큼의 파티원이 가입했습니다」|
+| 其他 | — | default：「알 수 없는 오류가 발생해서 파티 요청을 처리하지 못했습니다」|
+
+讀取順序是 disassembly 驗過的（`sub_55C5E0`）：case 5 是 `sub_45DCC0`（u32）→ `sub_45F5C0`（0x66 bytes）；
+case 13 是 u32（`0x55ca34`）→ `sub_432680`（字串，`0x55ca55`）→ 名冊（`0x55cae3`）；case 10 是 u32
+（`0x55c83d`）→ u32（`0x55c86b`）→ u8（`0x55c88e`）→（`flag != 0`）u8（`0x55c8be`）→ 字串（`0x55c8df`）
+→ 名冊（`0x55c971`）。
+
+**`CWvsApp + 36` 是本機角色的名字**：`type 13` 收名字時就是拿它來比對（`sub_416B00(name, *(CWvsApp + 36) + 4)`；
+相同 →「파티에 가입되었습니다.」、不同 →「'%s'님이 파티에 가입하셨습니다」），`type 6` 也把同一個字串抄進名冊的
+第 0 格。所以 `type 3` 的守門不是某個 UI 開關，而是**「本機角色已經載入」**（不在遊戲內就沒有名字可以問）。
+
+#### 4.37.2 `0x10 type 10` 的兩種意思
+
+`flag == 0`：**隊長退隊、隊伍解散**。封包只有兩個 u32（party id 與發起人的角色 id），client **不讀名冊**，
+`*(CWvsApp+404) = 0`；訊息取決於「發起人是不是我」：是我 →「파티장을 그만둡니다. 파티가 해체되었습니다」、
+否則 →「파티장이 파티를 그만둬서 파티에서 나갑니다」。
+
+`flag != 0`：**有人退隊或被踢**。`kicked` 區分兩者（`0`：自己退出 →「파티를 그만둡니다」／
+「'%s'님이 파티를 탈퇴하셨습니다」；`1`：被踢 →「파티에서 강퇴당했습니다.」／「'%s'님이 파티에서
+강퇴당하셨습니다」），名冊是**更新後**的那一份，client 直接 `memcpy` 覆蓋自己的 6 格。發起人是自己時
+`partyId` 歸零，否則不動。
+
+#### 4.37.3 `0x26`（c2s）：五個送出者，四個指令 ＋ 一個回答
+
+| type | payload | 送出者 | 觸發 |
+|---|---|---|---|
+| `0` | — | `sub_471CD0` | `/파티만들기`（先看 `n3000[101] == 0`，已在隊伍裡就本地印「이미 가입한 파티가 있습니다」）|
+| `1` | `u8`（唯一寫入者是字面 `0`）| `sub_471E90` | `/파티탈퇴`（先看 `n3000[101] != 0`）|
+| `2` | `u32 inviterId` | `sub_55C5E0` case 3 | 邀請對話框按「是」|
+| `3` | `u32 targetCharacterId` | `sub_472050` | `/파티초대 <name>` |
+| `4` | `u32 targetCharacterId` | `sub_4722E0` | `/파티강퇴 <name>` |
+
+`type 3`／`4` 的 id 是**客戶端自己查出來的**：`sub_472050` 用 `sub_51D7D0(CUserPool, name)` 找**同一張圖**的
+CUser、取 `+56`（角色 id）；`sub_4722E0` 用 `sub_55DB00(CWvsApp, name)` 在自己的名冊裡找名字、回傳
+`*(u32 *)(CWvsApp + 408 + 4 * i)`。所以 2003 的 `/파티초대` **只找得到同圖的人**——線上沒有「名字→id」的查詢。
+
+`type 1` 的第二個 byte 沒有語意可定位（唯一寫入者是字面 `0`）；它與 `type 0` 的差別只有「有沒有隊伍」這個
+客戶端自己先擋的檢查。
+
+#### 4.37.4 名冊 = 102 bytes
+
+`sub_45F5C0` 是一次 `qmemcpy(dst, src, 0x66)` 再 `+= 102`，所以形狀要從**讀的人**看：
+
+- `sub_55DB00`：`CWvsApp + 432 + 13 * i` 是名字、`CWvsApp + 408 + 4 * i` 是角色 id（`i = 0..5`）。
+- `sub_55CC40`（`/파티정보`）：從 `+432` 起以 **13 bytes** 步進印六個名字。
+
+於是名冊 ＝ `u32 characterId[6]`（24 bytes，`+408`）＋ `char name[6][13]`（78 bytes，`+432`）＝ **102**，
+空位全 0；`CWvsApp + 404` 是 party id。名字欄位與 `CharacterData` 那一個完全相同（13 bytes、NUL 結尾、
+ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameFieldToString`。
+
+**第 0 格就是隊長**，而且這是 client 判斷「我是不是隊長」的唯一方法：`sub_472050`（`/파티초대`）與
+`sub_4722E0`（`/파티강퇴`）的前置都是 `n3000[101] != 0 && n3000[102] == n3000[5]`，其中 `n3000[101]` 是
+「在隊伍裡」、`n3000[102]` 就是 `+408` 的第一個 u32（＝名冊第 0 格）、`n3000[5]` 是本機角色 id。`type 6`
+建立成功時 client 自己做的也正是「清空 102 bytes、把自己寫進第 0 格、把自己的名字抄進 `+432`」
+（`memset(this + 408, 0, 0x64)` ＋ `*(u16 *)(this + 508) = 0` ＝ 102 bytes、`*(u32 *)(this + 408) = this + 20`、
+`lstrcpyA(this + 432, *(this + 36) + 4)`）——所以伺服器的名冊**必須把隊長放在第 0 格**；隊員照加入順序
+往後排，有人離開就往前補，隊長一定還在（他離開＝解散）。
+
+#### 4.37.5 伺服器端（ADR-030）
+
+| 決定 | 我們的選擇 | 理由 |
+|---|---|---|
+| 隊伍住哪 | 世界層（`GameEntryServer.parties`）| 名冊裡沒有地圖，隊員分散在兩張圖是合法的；`0x1C`／`0x1D` 的場地廣播辦不到 |
+| 隊長退隊 | **解散**（`type 10 flag 0` 給全體，含隊長自己）| 封包沒有「換隊長」的欄位，`flag 0` 的訊息就是解散 |
+| 下線 | 退隊（隊長 → 解散）| 2003 的隊伍是記憶體裡的東西，沒有離線隊員 |
+| 邀請 | 一個目標一格，後到的蓋掉前一個 | 邀請對話框是模態的，玩家不可能同時看兩個 |
+| 名冊 | 六格、依加入順序、離開後補位 | 六格就是 client 的陣列；順序只影響顯示 |
+| 隊伍 id | 伺服器自己遞增、不重用 | 只回給 client 記錄，線上沒有查詢用到它 |
+| 拒絕 | **一定回一個 `0x10`**（`7`／`11`／`15`／`0`）| 跟 `0x0B`／`0x18` 同一條規則：client 在等一個答案（`type 3` 更是模態）|
+
+#### 4.37.6 驗證
+
+- `test/party.test.ts`：`0x26` 五個 type 的 golden bytes（`2600`／`260100`／`2602…`／`2603…`／`2604…`）、
+  `0x10` 每個 type 的 golden bytes（含 102-byte 名冊的完整 hex）、雙向 round-trip、未知 type、`describe*`，
+  以及 `PartyRegistry` 的建立／加入／滿六人／邀請覆蓋／退出與解散。
+- `test/serve.test.ts`（同場兩人）：create → invite → accept → leave（`flag 1`）→ 隊長 leave（`flag 0`）→
+  沒有隊伍時的 leave（`type 11`）。
+- `whisper_probe.mjs`（真 CLI）：上面那一整條走一次，十個檢查。
+
+#### 4.37.7 OPEN
+
+- `0x10` `type 5`：原伺服器什麼時候送（安靜同步、沒有訊息）？本伺服器沒有用它（`13` 已經帶著完整名冊）。
+- `0x26` `type 1` 的第二個 byte（`sub_471E90` 只寫 0）。
+- **跨圖邀請**：client 的 `/파티초대` 只查 CUserPool（同圖），但 `0x26 type 3` 本身只是一個 u32——原伺服器
+  是否接受跨圖的邀請無法從 client 判斷（本伺服器接受：隊伍在世界層）。
+- `0x10` `type 5` 的 102-byte 名冊與 `type 13` 相同（同一個 `sub_45F5C0`），但原伺服器什麼時候送
+  `type 5` 看不出來（沒有任何訊息，client 也不會把自己補進去）。
+
+### 4.38 ✅ 人氣（인기도）：c2s `0x20` 與 s2c `0x12`（ADR-031）
+
+角色右鍵選單上的「인기도 +」／「인기도 -」是 2003 年唯一的社交評分，兩個方向都解到欄位層。
+
+**送出**：`0x20` 只有一個送出者 `sub_55D7B0(CWvsApp, name, up)`，呼叫點是 `sub_5478F0` 的選單
+（`n2 = 1` → up = 1、`n2 = 2` → up = 0）。它在送出前做三件**client 自己的**事：
+
+1. 在自己的 `CUserPool` 裡用**名字**找那個人（`sub_51D7D0`）——所以目標一定在**同一張圖**；
+   找不到就本地印「캐릭터를 찾을 수 없습니다」，封包不出去。
+2. 5 分鐘的本地冷卻（`timeGetTime() - *(app + 0x2AC) < 300000`）→「잠시 후 다시 시도해 보세요」。
+3. 送出 `[0x20][u32 目標角色 id][u8 up]`（`id` 來自 `*(user + 56)`）。
+
+⇒ 伺服器不需要重做「同不同圖」或冷卻，但**必須**自己判斷「能不能給」——封包可以偽造。
+
+**回包**：`0x12` 的處理函式是 `sub_55C390`（`sub_55A900` 的 case 18）：
+
+| type | payload | client 顯示 |
+|---|---|---|
+| `0` | `str name` + `u8 up` | 「'%s'님의 인기도를 내렸습니다.」／「…올려주었습니다.」（**給送出者**，`name` 是被給的人）|
+| `1` | — | **什麼都不顯示**（`break`，連一行都沒有）|
+| `2` | — | 「초보자는 인기도를 올리거나 내리지 못합니다.」|
+| `3` | — | 「오늘은 더 이상 인기도를 올리거나 내리지 못합니다.」|
+| `4` | — | 「이번 달에는 더 이상 지정된 캐릭터의 인기도를 올리거나 내리지 못합니다.」|
+| `5` | `str name` + `u8 up` | 「'%s'님께서 '%s'님의 인기도를 …」（**給被給的人**；`name` 是給的人，第二個名字是 client 自己補的）|
+| 其他 | — | 「알 수 없는 오류로 인기도를 올리거나 내리지 못했습니다.」|
+
+`type 5` 的第二個名字是 `*(CWvsApp + 36) + 4`（本機角色名，§4.37.4）**不是**封包裡的字串，所以兩個帶名字
+的 type 各自只有**一個**名字由伺服器給。
+
+**數值**：人氣是 `CharacterData` 的 `u16`（`fame`，`0x0D` 的 bit `0x20000` 以 u32 送、只留 2 byte）——
+所以「給人氣」的另一半是**給被給的人一個 `0x0D`**（`diffStats` 的 `fame`），他的能力視窗才會跟著動；
+給的人自己沒有任何紀錄變動，因此**不送** `0x0D`。
+
+#### 4.38.1 伺服器端（ADR-031）
+
+`0x20` 的目標用**場地**找（`FieldInstance.member(id)`）：client 只可能送同圖的 id（選單來自
+`CUserPool`），查不到就是過期的 id，回 `type 1`（什麼都不顯示），不編一個訊息。
+
+| 規則 | 我們的選擇 | 為什麼 |
+|---|---|---|
+| 初學者的界線 | `FAME_MIN_LEVEL = 15` | client 沒有任何等級檢查（只有 5 分鐘冷卻），所以「초보자는…」那句話一定是伺服器說的。2003 的實際數字不在 binary 裡 → 選 15 並記錄 |
+| 「今天」／「這個月」 | UTC 的日序號／月序號（`fameClock`） | 不隨時區或重開機跳動；同時讓「월」的訊息有明確的界線 |
+| 哪一條先問 | 自己 → 初學者 → **這個月同一個人**（`4`）→ **今天**（`3`） | 同一個人、同一天再給一次時，client 顯示的是「這個月」那一句 |
+| 人氣的範圍 | `[0, 65535]` | 紀錄是 u16；往下給 0 分的人不會變成負數 |
+| 配額存哪 | `GameEntryServer` 的 `FameLedgers`（**不進存檔**） | 它不是角色狀態的一部分（`CharacterData` 沒有那一格）；2003 的伺服器怎麼記看不出來 → §4.38.2 |
+
+#### 4.38.2 OPEN
+
+- **配額不進存檔**：重開伺服器就重新開始。要持久化的話，`AccountRecord` 加一個「角色 id → 日／月／名單」
+  的欄位就夠了（`readSave` 對缺欄位是容忍的）——但那是新的存檔語意，留給之後。
+- **初學者的界線**是不是 15：client 只證明得出「有這條規則」。
+- **被給的人有沒有等級下限**：看不出來（本伺服器不檢查；只有給的人要 ≥ 15）。
+- **`type 1` 的用途**：client 有一個「什麼都不顯示」的 case，但哪一種失敗該走它沒有證據（本伺服器用在
+  「目標不在這張圖」與「自己給自己」）。
+
+#### 4.38.3 驗證
+
+- `test/fame.test.ts`（10 則）：`0x20` 與 `0x12` 六種 type 的 golden bytes、round-trip、`describe*`、
+  `fameClock` 的 UTC 日／月、`applyFame` 的每一條拒絕與成功（含夾在 `[0, 65535]`）、`FameLedgers`。
+- `test/serve.test.ts`「fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas refuse (3/4)」：
+  兩條真 socket（30 級與 14 級）——type 0 給給的人、type 5 ＋ `0x0D` 給被給的人、同一個目標第二次是
+  `4`、14 級的人是 `2`、不在場地的 id 是 `1`。
+- `whisper_probe.mjs`（真 CLI）：1 級的角色送出 `0x20` → 收到 `0x12` type 2，目標什麼都沒收到。
+
+### 4.39 🟡 交易（1:1 교환）的偵查：`0x25` 是「視窗」請求、`0x50` 是回包
+
+這一節是**號碼與流程**的偵查紀錄；欄位與實作見 §4.40（ADR-032）。原本寫在這裡的兩個 sender 型別
+（`0x4819d9` 的「type 2」、`0x4821ca` 的「type 1」）是**讀錯了**：那兩個 byte 是 SEH 狀態
+（`movb $0x2,0x28(%esp)`），真正的 payload byte 是函式稍後的 `movb $0x3,(%eax,%ecx,1)` 與
+`movb $0x5,...`，也就是 **type 3** 與 **type 5**。
+
+**c2s `0x25` 不是交易專用**：`objdump` 找到 **七個**送出者 —— `/교환`（`sub_471A40`，`.text:00471b11`）、
+`CMiniRoomBaseDlg` 裡兩個（`.text:00481a2a` 的 type 3 ＋ `u32`、`.text:00482228` 的 type 5 ＋ `str name`）、
+以及**交易對話框**那四個（`.text:004d3270` 的 type 7、`4d5db7` 的 type 11、`4d60ee` 的 type 12、
+`4d62f1` 的 type 13）。⇒ 第一個 payload byte 是**請求種類**，
+`0x25` 是「開著的視窗」共用的請求 opcode（跟 s2c 的 `0x50`–`0x52` 一對）。
+
+`/교환` 的形狀（`sub_471A40`）：`[0x25][u8 0][u8 1][u32 目標角色 id]`——第一個 byte 是種類、第二個 byte
+永遠是字面 `1`（語意未定位，可能是「1:1」這個房間種類）。送出前的三個前置**都在 client**：
+
+| 前置 | 訊息 |
+|---|---|
+| GM 帳號（`n3000[9] & 1`）| 「관리용 아이디는 1:1교환을 할 수 없습니다」|
+| 已經開著另一個 modeless 視窗（`this_15 != 0`）| 「다른 작업중에는 1:1교환을 할 수 없습니다」|
+| 名字不在同一張圖的 `CUserPool`（`sub_51D7D0`）| 「캐릭터를 찾을 수 없습니다」|
+
+**s2c `0x50`–`0x52` → `sub_4815E0`**：先讀一個 `u8 type`，然後看有沒有開著的對話框
+（`this_15` 動態轉型成 `CMiniRoomBaseDlg`）：
+
+| 狀態 | type | 去哪裡 | 做什麼 |
+|---|---|---|---|
+| 沒有對話框 | `1` | `sub_481910` | **交易請求**：`str 對方名字` ＋ `u32`，跳模態「'%s'님께서 1:1 교환을 요청하였습니다…」；按「是」送出 c2s `0x25` **type 3** |
+| 沒有對話框 | `2` | `sub_481B20` | **請求失敗**：`u8 code`（0 ＝ 靜默、1 ＝ 캐릭터를 찾을 수 없습니다、2 ＝ `str name` ＋ '%s'님은 다른 일을 하는 중입니다）|
+| 沒有對話框 | `4` | `sub_481790` | 進房間：`u8 roomKind`（0 →「방에 들어갈 수 없습니다.」走 `sub_52BBE0` 的畫面中央公告；**只有 `1` 會開出交易視窗**，其他值 `sub_481570` 回 null ⇒ 斷線）|
+| 沒有對話框 | 其他 | — | **丟 `AVCDisconnectException`**（client 會斷線！）|
+| 有對話框 | `3` | `sub_481E00` | 房間裡多一格：`u8 index` ＋ 參與者 |
+| 有對話框 | `5` | vtable 第 15 槽 | 系統訊息 |
+| 有對話框 | `6` | `sub_481EB0` | 與 `3` **機器碼幾乎相同**（同一種 `u8 index` ＋ 參與者）|
+| 有對話框 | `7`／`8` | vtable 第 16／17 槽 | 第 8 槽＝結束（`u8 code`，見 §4.40.2）|
+| 有對話框 | 其他 | vtable 第 18 槽（type 原樣傳進去）| 同上 |
+
+⇒ 視窗裡的那些訊息（放道具、拿掉、錢、鎖定、確認、取消）都是 **virtual** 的，欄位由
+`CMiniRoomBaseDlg` 的子類別決定——這是它比攻擊三兄弟難讀的原因，也是為什麼這一節停在這裡。
+
+**三個切片，兩個已經落地**（§4.40）：
+
+1. **邀請** ✅ `0x50 type 1`／`type 2`、`0x25 type 0`／`type 3`（`u32` ＝ 邀請者自己的角色 id，client 只負責回聲）。
+2. **視窗** ✅ `0x50 type 4`（進房）／`type 8`（結束）／`type 11`／`12`／`13`（道具、錢、鎖定）與
+   c2s 的 `type 7`／`11`／`12`／`13`。三句結束訊息（`교환이 성사되었습니다`／`상대방이 교환을 취소했습니다`／
+   `교환에 실패하였습니다`）就是 `type 8` 的 code 3／1／4。
+3. **`0x14` 的社群選單**（`교환신청`／`파티초대`／`귓속말`／`개인정보`／`인기도 ±`）：`sub_512570` 是同一個
+   選單的另一半，現在仍然「未讀」——它會是「用名字送交易請求」之外的第二條入口（c2s `0x25 type 5`
+   已經讀出來是 `str name`，但那是 messenger 的邀請，本伺服器只記一行）。
+
+### 4.40 ✅ 交易（1:1 교환）：`0x25`／`0x50` 的完整欄位與伺服器的房間規則（ADR-032）
+
+§4.39 只到號碼。這一節把讀完的部分寫下來，並對照兩個檔案：`server/src/protocol/miniroom.ts`（codec）
+與 `server/src/game/trades.ts`（規則）。**一個 opcode 兩個方向**是這裡最重要的結構——`0x25` 不是
+「交易請求」，而是「**開著的視窗**送出的請求」；`0x50` 是同一扇窗的回包，`type` 決定去哪一條路（`0x51`／`0x52` 屬於 messenger，本節不用）。
+
+| 方向 | opcode | 誰用 |
+|---|---|---|
+| c2s | `0x25` | `/교환`、邀請對話框的「是」、交易視窗的四個按鈕（**七個送出者共用一個 opcode**）|
+| s2c | `0x50` | 上面那扇窗的回包（`sub_4815E0`）|
+
+#### 4.40.1 c2s `0x25`：七個送出者、七種 type
+
+| type | 送出者 | payload（opcode 之後）| 意義 |
+|---|---|---|---|
+| `0` | `/교환` `sub_471A40`（`0x471b11`）| `[u8 roomKind][u32 targetId]`；`roomKind` 的字面值永遠是 `1` | 邀請同一張圖的某個人 |
+| `3` | 邀請對話框的「是」`sub_481910`（`0x481a2a`）| `[u32 inviterId]` | 答應；`u32` 就是 `0x50 type 1` 給的那個值（原樣回聲）|
+| `5` | `sub_4820E0`（`0x482228`）| `[str name]` | messenger 的「用名字邀請」；本伺服器只記一行 |
+| `7` | `sub_4D31F0`（`0x4d3270`）| 空 | 關掉視窗（離開房間）|
+| `11` | `sub_4D5C80`（`0x4d5db7`）| `[u8 tab][u16 slot]`＋`tab != 1` 時 `[u16 count]`＋`[u8 roomSlot]` | 把庫存的一格放上桌；`roomSlot` 是 **1..8** |
+| `12` | `sub_4D5F50`（`0x4d60ee`）| `[u32 mesos]` | 把錢放上桌 |
+| `13` | `sub_4D61F0`（`0x4d62f1`）| 空 | 「정말로 교환하시겠습니까?」的「是」|
+
+`type 11` 的兩個細節是 client 自己決定的，伺服器必須跟著：**裝備（`tab == 1`）不帶 `count`**
+（`sub_4D5C80` 只在 `tab != 1` 時寫那個 `u16`，因為裝備不堆疊），而 `roomSlot` 來自
+`sub_4D63C0` 的 `y`，`y <= 0` 時 sender 直接放棄——所以交易格是 1..8，從來不會是 0。
+
+#### 4.40.2 s2c `0x50`：`sub_4815E0` 的分派
+
+`sub_4815E0` 先讀 `u8 type`，然後看「現在有沒有開著 modeless 視窗」（`this_15`，
+`_RTDynamicCast` 成 `CMiniRoomBaseDlg`）：**沒有**的時候只認 1／2／4，其他一律
+`AVCDisconnectException`；**有**的時候把 3／5／6／7／8 交給固定函式或 vtable 第 15–17 槽、
+其餘交給第 18 槽（type 原樣傳進去）。
+
+| type | 沒有視窗 | 有視窗 | payload |
+|---|---|---|---|
+| `1` | `sub_481910` | — | `[str inviterName][u32 inviterId]` |
+| `2` | `sub_481B20` | — | `[u8 code]`；`code == 2` 再一個 `[str name]` |
+| `3` | — | `sub_481E00` | `[u8 index][participant]` |
+| `4` | `sub_481790` → `sub_481D00` | — | `[u8 roomKind][u8 count][u8 myIndex]` ＋ `[u8 index][participant]` 重複到某個 byte 的最高位是 1 |
+| `5` | — | vtable 15 | `[u8 0][str text]`（🟡 第一個 byte 被 client 跳過；本伺服器送 0）|
+| `6` | — | `sub_481EB0` | `[u8 index][participant]`（與 `3` 的機器碼幾乎相同）|
+| `7` | — | vtable 16 | （本伺服器不送）|
+| `8` | — | vtable 17 | `[u8 code]`：`1` ＝ 상대방이 교환을 취소했습니다、`3` ＝ 교환이 성사되었습니다、`4` ＝ 교환에 실패하였습니다 |
+| `11` | — | vtable 18 | `[u8 index][u8 roomSlot][GW_ItemSlot]`（**帶類別 byte**）|
+| `12` | — | vtable 18 | `[u8 index][u32 mesos]` |
+| `13` | — | vtable 18 | 空（「鎖定」）|
+
+`type 2` 的三個 code 就是 `sub_481B20` 裡的三條分支：`0` **什麼都不顯示**（＝請求已送出）、
+`1`「캐릭터를 찾을 수 없습니다」、`2`「'%s'님은 다른 일을 하는 중입니다」（所以 `2` 才需要那個名字）。
+`type 4` 的 `roomKind` 不是 1 就會被客戶端丟掉並斷線（`sub_481570` 只認 1，其餘回 `null`），這是
+`0x50` **唯一**會讓 client 主動斷線的欄位，所以伺服器只在這裡送 `1`。
+
+`type 8` 的三句訊息由 `sub_4D3D70`（三個字串 `aI_11`／`aI_12`／`aE_9` 的擁有者，也就是
+`CTradingRoomDlg` 覆寫的 vtable 第 17 槽）挑選：它讀一個
+`u8`，先呼叫 `(*(*this + 44))(this, 8)`（＝用 type 8 關窗），再看 `1`／`3`／`4` 三個值——其他值
+**不做任何事**。所以「結束碼」不是猜的。
+
+#### 4.40.3 participant：`[u8 A][u32 B][外觀清單][str name]`
+
+一段參與者（`type 3`／`4`／`6` 共用，`sub_482340`）：
+
+1. `u8 A` → `sub_423EC0(obj, A, pos)`：它用 `sub_421E00(dword_5C271C, &A, …)` **建兩個同值的文字標籤**
+   （本体＋影子）⇒ 這是一個**畫出來的數字**；🟡 是哪個數字沒有直接證據（等級最合理）。本伺服器送**等級**。
+2. `u32 B` → `sub_424590(obj, B, faceFromList)`：🟡 與「從外觀清單抽出的臉」並排存；本伺服器送
+   `CharacterData.appearanceA`（＝臉），跟 `0x1C` 進場包的第一個 `u32` 同一個值。
+3. **外觀清單** → `sub_45F340`：`u32` 一直讀到 0 為止，`id / 10000 == 3` 的進第 0 格（＝頭髮），
+   其餘按 `id / 10000` 分派到身體部位——**與 `0x1C` 的 `avatarItems` 完全同一種清單**。
+4. `[str name]` → `sub_432680`。
+
+⇒ 這一整段和 `0x1C` 的差別只有最前面兩個欄位（`u8 A`、`u32 face`）與最後的名字，所以伺服器
+直接重用 `CharacterData` 的欄位，不需要第二套「外觀」模型。
+
+#### 4.40.4 伺服器這一側（`trades.ts`）
+
+binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，每一條都寫在 `trades.ts` 的檔頭：
+
+| 規則 | 值 | 為什麼 |
+|---|---|---|
+| 邀請只在**同一張圖** | — | `/교환` 的對象是 `CUserPool` 查出來的（`sub_51D7D0`），client 根本看不到別張圖的人 |
+| 邀請存活時間 | `TRADE_INVITE_TTL_MS = 30_000` | client **沒有「拒絕」封包**（模態只有「是」會送 `type 3`），沒有逾時就會永遠卡在「等待對方回答」|
+| 一個人同時只能有一個房間 | — | 「'%s'님은 다른 일을 하는 중입니다」（`type 2 code 2`）就是這個意思 |
+| 成交的原子性 | `settleTrade` 先 `structuredClone` 再驗證 | 交易窗口可以開幾分鐘，東西可能已經被丟掉／賣掉；**任何一邊不成立就整個不換** |
+| 成交後的通知 | 兩邊各 `0x0B`（道具）＋`0x0D`（錢的差異）＋`type 8 code 3` | 庫存只由 `0x0B` 改寫，錢只由 `0x0D` 改寫（§4.36／§4.21）|
+| 取消／失敗 | `type 8 code 1`／`code 4` | 三句訊息在 client 自己手上 |
+| 斷線 | 對方收到 `code 1` | 沒有別的東西會替那扇窗收尾 |
+
+`settleTrade` 的失敗字串（`left no longer owns an offered item`／`… has no room for …`）是**測試看的**，
+不是玩家看的：玩家看到的一律是「교환에 실패하였습니다」。
+
+#### 4.40.5 還是 🟡 的地方，與刻意沒做的事
+
+- **participant 的 `u8 A`**：`sub_423EC0` 把它變成兩個同值的文字標籤（`sub_421E00`），所以它一定會被
+  畫出來；**語意**（等級？角色 id？）沒有證據。送等級是選擇——`0x482090`／`sub_482340` 都沒有讀回它，
+  而且交易視窗本來就只顯示名字與外觀。
+- **`type 4` 的結束 byte**：client 只檢查符號位（`pExceptionObject_2 < 0`），值本身丟掉；本伺服器送
+  `0xff`。任何 `0x80`–`0xff` 都等價。
+- **`type 5` 的第一個 byte**：client 跳過它，本伺服器送 0。
+- **`type 11` 的類別 byte**：s2c 帶、c2s 不帶（`GW_ItemSlot` 的類別由 `itemId / 1000000` 決定），
+  所以 codec 的 `encodeMiniRoomItem` 自己補。
+- **`0x14` 的社群選單**（用名字點「교환신청」）沒有接：那是 §4.39 第 3 塊，和 `0x25 type 5` 的
+  messenger 邀請一起留著。
+- **`this_15` 的「另一個視窗開著」閘門**在伺服器這一側**沒有**對應物：本伺服器的會話可以同時開商店
+  與交易。這是刻意的不對稱——伺服器的職責是「不要送 client 會斷線的封包」，不是複製它的 UI 限制。
+
+### 4.41 ✅ 메신저（三人聊天室）：c2s `0x24` 與 s2c `0x4D`–`0x4F`（ADR-033）
+
+2003 的「메신저」**不是好友名單**，是一扇三人聊天室（대화방）：`sub_4DDFE0` 開窗時先往訊息區印五行
+說明（`[ Maple Messenger 도움말 ]`、`-------------------------`、`초대 : /초대 캐릭터이름`、
+`종료 : /q`、`-------------------------`），成員格是 `this + 25 * slot + 31` 的 25 個 dword，
+而 `sub_4DF3E0` 的第一行就是 `if (slot <= 2)`。
+
+| 方向 | opcode | 誰用 |
+|---|---|---|
+| c2s | `0x24` | 開窗／進房、關窗、`/` 指令、聊天（**四個送出者**）|
+| s2c | `0x4D`–`0x4F` | `sub_4E18D0`：**三個 opcode 同一個 handler**，語意全在 `u8 type` |
+
+#### 4.41.1 c2s `0x24`：四個送出者
+
+`sub_4A1EA0(&buf, 36, 0)` 的 36 就是 `0x24`。全檔只有四個地方送它，全部在 `CUIMessenger`：
+
+| type | 送出者 | payload（opcode 之後）| 意義 |
+|---|---|---|---|
+| `0` | `sub_4DDFE0` | `[u32 roomId]`；`0` ＝ 自己開一間 | 開窗／進房。`sub_4DDF10(roomId)`（邀請模態的「是」）就是帶著 `0x4D type 3` 給的號碼走到這裡 |
+| `2` | `sub_4DE280` | 空 | 離開房間（關窗）|
+| `3` | `sub_4E24B0` | `[str name]` | `/초대 <名字>` 的**名字部分**（`/q`／`/Q` 由 client 自己吃掉，見下）|
+| `5` | `sub_4DE490`／`sub_4DEAF0` | `[str line]` | 一行聊天，**client 已經組成「名字 : 內容」**（見 4.41.3）|
+
+`sub_4E24B0` 是 `/` 指令的處理器：先比對 `/q`／`/Q`（`sub_525EC0`），中了就 `sub_4DDFA0` 關窗、
+**不送任何封包**；再比對 `/초대`（`sub_526070`）取出名字，空白或自己的名字會被擋掉並印
+「- 다른 캐릭터의 이름을 입력하세요.」。
+
+#### 4.41.2 s2c `0x4D`–`0x4F`：一個 handler、八種 type
+
+`0x4D`／`0x4E`／`0x4F` 都指向 `sub_4E18D0`，所以 **opcode 本身不帶語意**。本伺服器固定用 `0x4D`。
+
+| type | 去哪裡 | payload（type 之後）| 畫面／行為 |
+|---|---|---|---|
+| `0` | `sub_4DF1D0` → `sub_4DF3E0` | `[u8 slot][u8 level🟡][u32 face]` ＋ 外觀清單 ＋ `[str name]` ＋ `[u8 announce]` | 一格成員；`announce != 0` ⇒「- '%s'님이 입장하셨습니다」|
+| `1` | `sub_4DF620` → `sub_4DF670` | `[u8 code]` | 「- 초청 받은 대화방에 참가하지 못했습니다」|
+| `2` | `sub_4DF8B0` → `sub_4DF910` | `[u8 slot]` | 「- '%s'님이 퇴장하셨습니다」（名字取自那一格；`slot > 2` 直接丟掉）|
+| `3` | `sub_4E1BB0` | `[str inviterName][u32 roomId]` | 邀請。**沒有視窗也處理**：`*(n0xC8 + 28) != 0` 才動作，沒開窗就跳模態，按「是」（`sub_52C140 == 6`）⇒ `sub_4DDF10(roomId)` |
+| `4` | `sub_4E19A0` | `[str name][u8 ok]` | `ok != 0` ⇒「- '%s'님에게 초청 메시지를 보냈습니다」、`ok == 0` ⇒「- '%s'님을 찾지 못했습니다」|
+| `5` | `sub_4E1E30` | `[str line]` | 一行聊天，字串**自己帶「說話者 : 內容」**（用 `strstr(line, " : ")` 拆）|
+| `6` | `sub_4E2170` | `[u8 slot][u8 ?][u32 ?]` | 更新某一格（沒有名字與外觀）|
+| `7` | `sub_4E2280` | 一串成員紀錄，`u8` 為 0 時結束 | 整份名冊（`sub_4DF3E0(..., announce = 0)`）|
+
+`type 3` 的閘門要記下來：**視窗開著時只印一行**，沒開時才跳模態——位元組完全相同，差別在
+`this_8` 是不是 `nullptr`。
+
+#### 4.41.3 成員紀錄，以及「client 自己組聊天行」
+
+`sub_4DF1D0` 依序讀：`u8 slot`、`u8 level🟡`、`u32 face`、外觀清單（`sub_45F340`：`u32` 一直讀到 0，
+`id / 10000 == 3` 進第 0 格，`101xxxx` 被抽出來另存）、`str name`、`u8 announce`。
+
+- `face` 走 `sub_424590`，與 `0x1C` 的第一個 `u32`、`CharacterData.appearanceA` 同一個值（§4.11.3c）——
+  與交易 participant 的 `u32` 是同一格。
+- 第二個 `u8` 🟡：它落在 `v9[6]`，與交易 participant 的第一個 `u8` 同一個位置（推論為等級）。
+
+**聊天行是 client 組的**：`sub_4DE490` 先用 `sub_418610(自己的名字)` ＋ `" : "` ＋ 輸入的文字串起來，
+`sub_4DEE50` **先印在自己的訊息區**，然後才 `sub_4A1EA0(…, 36)` 送 `type 5`。兩個結論：
+
+1. 伺服器收到的是 `"名字 : 內容"`，不是純文字；
+2. **不能把這一行回送給說話的人**，否則他的畫面上會有兩行。
+
+#### 4.41.4 伺服器這一側（`protocol/messenger.ts`、`game/messenger.ts`）
+
+| 規則 | 值 | 為什麼 |
+|---|---|---|
+| 一間房三格 | `MESSENGER_ROOM_SIZE = 3` | `sub_4DF3E0` 只認 `slot <= 2` |
+| 一個人只有一間房 | — | 成員陣列的索引**就是**格子；同時在兩間房會互相蓋掉 |
+| 進別人的房要邀請 | `roomId == 0` ＝ 開新房 | 房號是伺服器給的 `u32`；沒有邀請就只是猜中號碼 |
+| 邀請存活 | `MESSENGER_INVITE_TTL_MS = 60_000` | client 的模態只有「是」，沒有拒絕封包 |
+| 房空了就消失 | — | 2003 的聊天室沒有主持人、沒有殘留狀態 |
+| 聊天只送給**別人** | — | client 已經自己印過（4.41.3）|
+| 聊天行的名字用**伺服器的** | 前綴換掉、內容保留 | 封包可以偽造；「 : 」之前那一截不算證據 |
+| 離線／關窗 | `0x4D type 2` 給其他人 | 離開的人的視窗已經關了，而且那一格是別人的名字 |
+
+#### 4.41.5 還是 🟡 的地方
+
+- **`type 6`／`type 7`**：一個是「更新某一格」、一個是「整份名冊」，本伺服器都不送——`type 0`
+  的逐格更新已經足夠，而且 `type 7` 的結束條件（`u8 == 0`）只讀到一半。
+- **成員紀錄的第二個 `u8`**：位置與交易的等級相同，語意仍然只有推論。
+- **指令字串**：`/초대` 的「초대」是 CP949 的三個 byte。伺服器**不比對指令字**，只取第一個空白
+  之後的字（`messengerInviteTarget`）——所以 `/invite Hero` 與 `/초대 Hero` 等價。
+- **`0x4D type 4` 的欄位順序**：名字在前、旗標在後（`sub_4E19A0` 先 `sub_432680` 再讀 byte）。
+  §4.39 的舊筆記寫反了，這裡以機器碼為準。
+- **`0x4E`／`0x4F`**：同一個 handler，但沒有辦法從封包分辨三者，所以只送 `0x4D`。
+
+### 4.42 ✅ AP 請求的 bytes／🟡 能力窗與四基礎能力分配
+
+`sub_4F2D70`（CUIStat button ids 2000..2005）呼叫 `sub_55CF60`。後者用
+`sub_4A1EA0(&packet, 27, nullptr)` 建包，接著直接寫一個 u32 mask，再送出：
+
+```text
+c2s 0x1B: [u32 mask] — 沒有 timestamp，沒有欲設定的能力值
+HP 0x800 / MP 0x2000 / STR 0x40 / DEX 0x80 / INT 0x100 / LUK 0x200
+```
+
+它檢查 native pending gate、HP>0、AP>0、距上次送出至少 500ms；送出後設 pending。
+`s2c 0x0D` 的非零 ack 清除 gate（§4.21），拒絕也不能不回應。
+**勿把 AP 的 c2s 0x1B 和近戰 c2s 0x0F 混淆，亦勿和 s2c 方向的 CUserPool 區間混淆。**
+
+`sub_4F2450` 的窗為 176×315；`sub_4F2820` 配置 BtApUp：x148、y112/130/202/220/238/256，
+BtDetail (122,280)。`sub_4F3210` 依 AP!=0 enable 六個按鈕；500ms 是 sender gate，不是把有 AP 的
+按鈕短暫換成 disabled 圖。`sub_4F32D0` 繪字座標與原 WZ 路徑見
+[`../SMOOTH_STAT_VALIDATION.md`](../SMOOTH_STAT_VALIDATION.md)。
+
+實作 `protocol/ability.ts`、`game/ability.ts`、native dispatch、ClientSession、Web bridge 與原能力窗。
+只落帳 STR/DEX/INT/LUK 各 +1/AP-1；單 mask／長度／點數／alive／500ms 均檢查，成功立即 persist，
+拒絕回空 diff+ack。0x0D 四基礎能力為 u8（§4.21.1），因此拒絕 255 再增加且不耗點，不宣稱這是原遊戲上限。
+
+HP/MP AP 成長、升級發放 AP/SP、Detail 與裝備／buff 總能力仍未證實或未完整接上，不用後期版本公式填空。
+真 TCP／WS／隔離 Chromium 六 AP 測試均走原封包，不是只改畫面；限制與重現見上方驗證文件。
+
+### 4.43 ✅ 原版門類型、CharacterData+101 與繩頂登台（2026-10-17）
+
+| 原函式 | 已確證行為 |
+|---|---|
+| `sub_4A3920` | pt3獨立auto陣列，其他pt（含0）保留WZ列舉順序進一般陣列 |
+| `sub_5124C0`／`sub_4A47D0` | 每user update找type3，x/y±50，不要求grounded／↑ |
+| `sub_512510`／`sub_4A4740` | grounded＋↑，一般陣列pt!=0，x±20/y±50；反向找，RECT右／下exclusive |
+| `sub_511820` | CharacterStats+101為一般門陣列u8索引，初始化x=portal.x、y=portal.y−10 |
+| `sub_542DF0` | 攀爬向上越y1且uf=true→y1−5並detach；uf=false→clamp；越底→y2+1 |
+
+1000000的八條真繩頂平台全部y1−2；舊y1−1會在平台下方，非素材缺失，也不應擴大floor snap。
+已改原版−5並由swept gravity落地。tm=0也不是無效門；真正無目的地為999999999，pt0不可啟動。
+`tn`→non-pt3 index→`unknown101`→0x16／保存／SelfView.spawnPortal，前後端與remote一致。
+舊欄名保留避免改壞save。mode仍有未明語意，但不能再把它與spawn byte混為一談。
+
+`/map`／`/warp`／`/go`／`/헉맵`用原0x0D kind=mapId/empty string；GameEntryServer採明確
+`--map-command off|all|account,...`政策，預設off，原TCP偽造也不能繞過。kind0與revive重疊：
+僅獲授權且alive時作map0命令；dead仍revive。這是server policy，不宣稱原server GM權限已還原。
+`/maps`、`/where`、`/help`是browser便利命令，不創造native opcode。
+
+完整561/561＋TS PASS；八繩×三刷新率、真TCP／WS、Chromium往返門／隱形門／空中type3及登台保持均PASS。
+來源表、精確幾何、隔離fixture、重現指令與尚未完成部分見
+[`../PORTAL_CLIMB_VALIDATION.md`](../PORTAL_CLIMB_VALIDATION.md)。
+
+### 4.44 ✅ CUIMiniMap原框、裁切與標記（2026-10-17）
+
+`sub_4E52C0`讀miniMap/canvas、world width/height、centerX/Y、mag；NPC只取life.type=n原x/y。
+canvasW>=280改內容W210，canvasH>=150改H112。`sub_4E5C70`以unit=1<<mag、玩家位置與world/center
+先clamp低再高，算crop後**1:1**貼原圖；point為floor((center+trunc(world))/unit)−crop。
+背景白覆A0000000；pt2門CC8090FF（128tick前64亮），NPC AA20FF20（80tick前40亮），
+其他人AAFF2020、自己最後DDFFFF00。標記是相疊矩形，與原圖同受內容clip；不標怪物與隱藏／自動門。
+
+`sub_4E6430`用UI/UIWindow.img/MiniMap八片框，window=W+6/H+13、內容(3,3)，sw45×11含MINIMAP字。
+`sub_4E7030`是M（scan0x32）切換；`sub_43D750`window type4預設(8,8,shown1)。
+`sub_553F40`→`sub_549660`每30ms呼叫registered updates；小地圖每4次更新快取，不依螢幕RAF頻率。
+
+100張真WZ：80有canvas、20沒有node，mag全4；沒有node不造fallback。
+已接mapart metadata→webclient→client/minimap.mjs；M／drag／位置顯示保存與上層canvas UI遮擋。
+純幾何／標記／WZ及真Chromium操作／三種尺寸／無node／1:1 blits通過；標準564/564＋TS。
+精確矩形、crop與框座標、原函式表和限制見 [`../DISPLAY_MINIMAP_VALIDATION.md`](../DISPLAY_MINIMAP_VALIDATION.md)。
+localStorage是browser設定替代，不冒稱原per-character設定或絕對閃爍相位已同步。
+
+## 5. 字元編碼
+
+- 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。
+- 網路訊息（封包）中的字串編碼**已解**：`u16 長度` + 原始 bytes，見 §4.4。
+  ⚠️ 注意與 WZ 檔內的字串編碼（位置遮罩）**完全不同**，不要混用。
+- 那些 bytes 是**人看的文字**時，字碼頁是 **CP949**（client 的 `sub_432680` 原樣收進 `ZXString<char>`，
+  繪字時用系統 ANSI 字碼頁；`MapleStory.exe` 自己的韓文字串也是 CP949）。`server/src/protocol/cp949.ts`
+  是雙向實作：解碼用 `TextDecoder("euc-kr")`，編碼是**反轉表**（第一次用到時建），
+  編不出來的字元丟例外（§4.23.3）。
+
+## 6. 待辦（依重要性）
+
+1. **211-byte 握手的 `body`（199 bytes）**：長度規則已知（§2），內容語意仍未知；最快的解法是用
+   `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應（同一支 client 對不同 body
+   的反應就是唯一的量測工具）。
+2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
+   `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，地圖 id 已解＝`CharacterData.mapId`，§4.11.2／
+   §4.11.2b；落點已另由 CharacterData+101 解出，§4.43）；`0x1C` 的 `unknown64` 與第二／第三個 u32
+   （第一個 u32 已解＝**臉**，§4.11.3c）；`0x0D` 的 `kind` 其他取值。
+3. **攻擊家族已全部解出**（`0x0F`／`0x10`／`0x11`，§4.13.1＋§4.13.1b），三支共用一個 codec，並且已經接上
+   怪物的 HP（§4.17：`0x34`／`0x30`／`0x31`，伺服器把 client 報的傷害記在帳上）。
+   還缺的是**真實流量驗證**（§6 第 2 項）與 `0x10` 的 `u16 v138`。
+4. **CField 其餘區間**（分派已拆到函式，見 §4.12）：~~`0x1A` 的 sub-opcode 表~~
+   （四個 case 全部解出：聊天與密語／找人都已實作，見 §4.26／**§4.31**；還沒落地的兩件事
+   在第 17 項）、
+   CUserPool 的 `0x1E–0x29` 分支（**`0x27` 表情已完成，§4.35**；**`0x26` 隊伍請求已完成，§4.37**；
+   `0x1F` 氣球形狀已定位、未實作，
+   見 §4.35.5 與第 17 項(b)；**`0x23`／`0x24`／`0x25` ＝「別人的攻擊」已讀完（§4.11.7b）並且三支都轉播（§4.11.7c／ADR-027）**）、
+   `0x35`（動畫區塊）的用途（`0x2F` 進場、`0x33` 移動、`0x30`／`0x31`／
+   `0x34` 的離場／收屍／受擊都已完成，§4.15／§4.16／§4.17）、
+   `0x46–0x48`（CQuestMan）**已完成**：只有 `0x47` 有 case，而且它就是 NPC 對話（`0x15` 是回包），
+   見 §4.23；`0x4D–0x52`（messenger／miniroom）**交易已完成**（§4.40／ADR-032：`0x25` 七個 type、
+   `0x50` 的 1／2／3／4／6／8／11／12／13、participant 的形狀、原子交換），**messenger 那半還沒**
+   （`0x51`／`0x52`、`0x25 type 5` 的邀請都只記一行）。
+   （CRewardPool 的 `0x42–0x45` **已完成**：只有 `0x43`／`0x44` 有 handler，見 §4.18；
+   商店的 `0x4A`／`0x4B` **已完成**（開窗與結果；`0x49`／`0x4C` 沒有 case），
+   加上 client 的 `0x33`／`0x16` 與那個空的 `0x19`，見 §4.22；
+   CNpcPool 的 `0x39`／`0x3A`／`0x3B` **已完成**（`0x3B` 的語意＝「你自己走」也解了，§4.28），
+   `0x38`／`0x41` 與 `0x3D` 的欄位仍 OPEN，見 §4.19；
+   `CWvsApp` 層的 `0x0D` 能力值差異包 **已完成**，見 §4.21。）
+5. **進地圖之後還缺的東西** ✅ 進場、移動、打怪與掉寶的閉環都已完成：`0x16` → `0x2F`（§4.15）→
+   每段一個 `0x33`（§4.16，含腳踏點幾何）→ 命中／死亡／重生（§4.17：`0x34`／`0x30`／`0x31`，
+   含 `dieMs` 與重生計時）→ 掉落物與拾取（§4.18：`0x43`／`0x44`／`0x0B`／`0x11`）。
+   **經驗值與升級也接上了**（§4.21：殺怪送 `0x0D` 能力值差異包，門檻是 client 自己的公式）。
+   商店也接上了（§4.22：點 NPC → `0x19`＋`0x4A`；買／賣 → `0x4B`＋`0x0B`＋`0x0D`），
+   **用掉買來的東西也接上了**（§4.34：`0x18` 回血／`0x19` 換圖，效果表讀的是 client 自己的
+   `Item/Consume/0XXX.img/<id>/spec`；buff 那一家族列在 §6 第 19 項）。
+   NPC 的對話也接上了（§4.23：點 NPC → `0x19`＋`0x47`，台詞是 `Npc/<id>.img -> info/speak`，
+   client 的 `0x15` 走下一句）；**走過傳送門換地圖也接上了**（§4.25：`0x0D` → `0x19` ＋`0x16`，
+   目的地是地圖資料的 `tm`，落點由 `tn`→+101 索引決定（§4.43），紀錄的 `mapId` 就是登入的地圖）；
+   剩下的 NPC 那一半是 `0x3D`（**伺服器指定**動作的 NPC；`0x3B` 的「client 自己走」已實作，§4.28）
+   與真正的**任務**流程
+   （`info/quest` 的腳本名已經讀得到，但這個 client 沒有任務 UI、`0x46`／`0x48` 也沒有 handler）。
+   怪物 AI **不在伺服器上**（§4.20：它在 client 裡，伺服器只收到 `0x2C` 的回報），
+   所以 ROADMAP 的「怪物 AI」屬於 Phase 3/4 的 client，而不是伺服器。
+   `0x2F` 那兩個只被查表的 `u16`（§4.12.1）仍是 OPEN，但目前送 0 走的是 client 自己會處理的
+   「查表失敗」路徑，所以不擋這條路。
+6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支（已解＝背包滿的訊息，§4.18.5）、
+   `0x12` 的 type 4 之後，
+   以及 `0x0F`／`0x0D` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板／buff 區塊的第二種更新格式；
+   `panelFlags = 0` 時它直接 return，所以本伺服器送 0 就安全 —— 見 §4.21.2）。
+7. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
+   在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
+8. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
+   `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
+   剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
+9. ~~`unknown97`~~ → **已證實是 `mapId`**（§4.11.2b：`sub_468E00` 用它載入 `Map/Map/%09d.img`）。
+   剩下的：**`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`
+   （能力值區塊），傳輸上已完整，語意待找讀取端；`unknown101` 已解為出生門索引，見 §4.43。
+10. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
+   格式：兩者都帶角色資料但長度不同，值得並排比一次。
+11. **`0x0D` 解出之後剩下的兩個洞**（§4.21.6）：`panelFlags != 0` 的能力面板／buff 區塊（沒有欄位
+   語意，伺服器一律送 0）與**升級的成長量**（`maxHp`／`maxMp`／`ap`／`sp` 加多少是原伺服器的表，
+   client 裡沒有，所以目前不送 —— ADR-009）。~~「被怪物打 → 扣玩家的血」沒有驅動者~~ →
+   **已解**：驅動者是 **c2s `0x1C`**（client 自己算完傷害、回報差值，伺服器落帳並用 `0x0D` 回覆），
+   見 **§4.33**／ADR-021；`0x2C` 的尾段確實是**路徑**不是傷害（§4.20.7），所以傷害從來就不在
+   `0x2C` 裡。
+12. ~~**`mesos` 在 client 角色紀錄裡的位移**~~ → **已解**：`+89/+93`（第 22 欄）就是錢，
+   `0x0D` 的旗標 `0x40000` 送它（§4.22.5）。剩下的延伸題是「**商店的庫存與收購價**」——
+   原伺服器的商店是腳本，所以那是我們的選擇（ADR-010），而不是還沒解出來的東西。
+   同一句話也適用**新角色的起始錢**（`--start-mesos`，預設 0：2003 年的新角色身上沒有錢，
+   連一罐 25 元的紅水都買不起，那是設計而不是缺口）。
+13. **多玩家在同一張圖之後剩下的洞**（§4.24.9）：`0x1C` 的 `unknown64`／第二與第三個 u32／`action`
+   語意（仍送 0；第一個 u32 ＝ **臉**已解，§4.11.3c）、`0x34` 的廣播範圍（我們的選擇）、`0x29` 的
+   effect 1（未解）與「不送給升級者自己」的推論、頻道／分流（`FieldRegistry.of` 是入口）、
+   以及**兩個真 client 的實機驗證**。
+14. **NPC／怪物的「client 自己走」與我們的權威之間的關係**（§4.28.3）：`0x31` flag 1 會讓原 client
+   自己走那隻怪（`sub_485330`），而我們是伺服器每條腿送 `0x33` —— 兩者會不會互相打斷，只有 oracle run
+   能回答。`--npc-walk` 的**預設值**（目前 `none`）也等這個答案：原伺服器走了哪些 NPC 完全未知。
+   同一個 oracle run 可以順手回答另外兩題：`sub_499760` 讀的那組 `s16`＋方向＋foothold id
+   （`+250..+260`）**來自哪個資料**（§4.28.1），以及 `0x3D` 尾巴的 `CMovePath` 在實機上會不會出現
+   （那個模板旗標的來源，§4.28.2）。
+
+15. ~~**「已在線上」的處理**~~ → **已完成**：`OnlineAccounts`（`account → 活著的 session`）＋
+   `SeatKeeper`＋`Heartbeat`，見 **§4.30** 與 ADR-018；`0x01` 對已在線上的帳號回 `7`，
+   第二條連線佔同一個角色也會被關掉，安靜的 session 由 `0x08` 心跳清掉。剩下的問題只有**號碼**：
+   ping 間隔與逾時是我們選的（30 s／90 s，`--ping`），實機跑一段時間就知道合不合適。
+
+16. ~~**`0x06` 的 10 個外觀 u32 → `CharacterData`**~~ → **已完成（§4.8.1a、§4.11.3d）**：
+   臉、頭髮、上衣、褲子、鞋子、武器，然後四顆骰子。伺服器把**臉與頭髮**寫進新角色紀錄
+   （`appearanceA`／`appearanceB`）、把**第 3–6 個**變成**穿戴裝備**（格號 5／6／7／11 由 itemId 的
+   part code 決定：`wornOfLook` ＋ `withWorn`），`0x1C`／`0x05`／`0x02` 三個出口都據此送對
+   （`avatarItemsOf` 讀的就是同一個穿戴 Map）。格號的證據鏈見 §4.11.3d。
+   **骰子亦已完成**：newDlg 的四行標籤配合 `sub_430690` 四個 y 座標確定
+   STR／DEX／INT／LUK 次序（§4.8.1a）。瀏覽器讀真 MakeCharInfo、套用骰點並走原始封包，
+   驗證與剩餘限制見 `../CREATION_VALIDATION.md`。裝備的初始 `ruc`／能力值仍未套入 WZ info。
+
+
+17. **密語剩下的兩件事**（§4.31）：(a) `0x1A` sub-op `0x22`（「對方拒收密語」）的形狀已知
+   （`str name`），但**沒有任何 client 輸入能設定拒收** —— 選項／好友視窗裡那個開關的封包還沒找到，
+   所以伺服器不送它（沒有驅動者的 codec 是死碼）；(b) client 在聊天視窗關著時自己送的 `0x23`
+   kind `0x22`（氣球請求）目前只記一行日誌。**進展**：畫氣球的那個 s2c 定位了 —— `0x1F` →
+   `sub_50B320`，`[u32 characterId][string text]`，畫面是「名字 : 文字」的氣球、顯示 5000 ms（§4.35.5）。
+   **還沒實作的原因**是請求裡沒有訊息：`sub_472910` 的 case 0x12 寫的是
+   `sub_4732C0(sub_4337A0())` ＝ `CWvsApp + 36` ＝ **本機角色的名字**（§4.37.4 的三條證據），
+   所以那個請求是 `[str 講話的人的名字][str 自己的名字]`，剛收到的訊息不在裡面。
+   原伺服器拿它做什麼（氣球畫在誰頭上、文字從哪來）看不出來；要嘛用 `capture` 看真 client
+   收到什麼回包，要嘛等 oracle。
+
+18. ~~**死亡的另一半**~~ **（b）已完成：§4.33。** 剩下 **(a) 誰寫入 `CField + 680`**（＝誰宣告玩家
+   死亡的那個時刻）。它是一個時間（`sub_558CF0` 拿它跟 `n3000_0[5]` 相減，`> 2200` 就彈復活視窗），
+   唯一找到的寫入者是 `sub_509AF0` 裡的進場 hook（§4.32），所以寫入點應該是 client 判斷「HP ＝ 0」
+   的地方 —— 找法：從動作位元組變成 18／19 的寫入點（`sub_5084C0` 的呼叫者）往下找。**這不再是**
+   ROADMAP 的阻礙：扣血已由 §4.33 走完，`hp = 0` 現在是伺服器算出來的（`game/vitals.ts`），
+   client 自己會走完死亡與 2.2 秒那條路（§4.32）。另外，**伺服器端的傷害驗算**（把 `Mob/<id>.img`
+   的 `attack<i>` 搬到伺服器上重算）是 ADR-021 列出的後續選項，不是缺口。
+
+19. **效果表的 loader（§4.34.4）**：`spec` 是怎麼被讀成 `dword_5C2038` 那張道具效果表的
+   （`sub_4BDD20`／`sub_4BDDC0` 用的欄位 `+48`／`+52`／`+56`／`+72`），以及**原 client 對
+   `hpR`／`mpR` 怎麼取整**。`hp`／`hpR`／`mp`／`mpR`／`moveTo`／`slotMax`／`reqLevel` 在 `.exe` 裡
+   沒有任何字面字串，所以入口不在字串表：從 `dword_5C2038` 的初始化（誰在啟動時填它）往下找，
+   或從 `Item/Consume/*.img` 的載入路徑（`sub_411E50` 家族）反推。它不擋任何功能（伺服器直接讀 WZ），
+   只擋「原 client 的數字與我們的數字是否一致」這個問題。
+20. **buff 道具（`spec/time` 家族，§4.34.3）**：`time`／`pad`／`mad`／`pdd`／`eva`／`acc`／`speed`／`pda`
+   在伺服器上沒有狀態，也沒有解出「哪個 s2c 會在 client 上顯示 buff 圖示」（`0x0D` 的
+   `panelFlags != 0` 區塊，§4.21.6 與第 11 項是同一件事）。目前 `spec.unapplied` 非空就**拒絕**這次使用
+   （道具留在袋子裡），所以不是資料錯誤而是「還沒做的功能」。
+
+21. **道具欄拖放剩下的兩件事**（§4.36.5）：**現金裝備**（第 4 分頁、`wornCash`、`111xxxx` 的 12／13 格）
+   目前一律拒絕 —— `sub_463490` 的 switch 允許游標指到 12／13，但外觀那一張表（`sub_45F340`）會把 `111xxxx`
+   丟掉，所以「穿戴格 12／13」在這一版 client 裡畫不出來，要先知道原伺服器怎麼用它（丟到地上的現金道具也拒絕，
+   序號沒地方放）；以及**裝備的能力加成**（傷害是客戶端自己算的，所以本伺服器不重算武器攻擊力，換武器也不動
+   我們的帳）。落地本身的常數（壽命／可撿範圍／「必須動過」）是伺服器的選擇，要等實機 run 對照。
+
+22. **人氣（§4.38）的配額不進存檔**：`FameLedgers` 只在記憶體裡，重開伺服器就重新開始
+   （一天一次／同一個對象一個月一次兩條都一樣）。要留住就替 `AccountRecord` 加一欄
+   （`readSave` 對缺欄位是容忍的），但那是一個新的存檔語意，不是這個切片的必要部分。
+   另外「初學者的界線＝15」與「被給的人沒有等級下限」都是我們的選擇，沒有 binary 證據。
+
+## 7. 擷取工作流（ADR-004）
+
+> ✅ 除了被動擷取，現在也可以**主動走完登入鏈**：
+> `node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin`
+> （實作 §4.8；原 client 導向該 port 即可走到選角畫面。遊戲內階段尚未實作，因此進地圖後會停在
+> `GameEntryServer` 的角色記錄上。）
+
+```bash
+# 1. 接住原 client。session 模式會「先送」211-byte 握手（種子由我們選、寫進 trace），
+#    再即時解密 client 回送的封包。
+node server/src/cli.ts capture --port 8484 --out traces/login.jsonl
+
+#    想要可重現的實驗就固定種子；想試握手 body 內容就餵它（body 語意仍未知，看 client 反應）
+node server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
+     --handshake-body 0001020304... --out traces/login.jsonl
+
+#    若手上是「client 先送握手」的流量（例如重播），改用 --handshake off
+node server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl
+
+# 2. 把 JSONL 重播成可讀封包（種子由 trace 內的握手自動決定；沒有握手時手動給）
+node server/src/cli.ts decode traces/login.jsonl
+node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
+```
+
+- trace 的 `hex` 一律是**線上的原始 bytes**（證據），`plainHex` 才是解密的本文。
+- 任何無法解碼的 chunk 只會被標記一次，之後該連線改為 raw dump——外部探測（如 sandbox 的 HTTP probe）
+  不會汙染 trace。
+- `decode` 會逐包檢查標頭並以非零 exit code 回報不符：**用錯種子的假成功會被抓出來**。
+  （此機制已抓到一個真實 bug：早期版本用同一個種子解兩個方向，client 的封包會解成「看似合理的亂碼」。）
+- 方向與種子的對應：**c2s 用 client 的送 state、s2c 用 client 的收 state**；握手由其**接收方**取得
+  `sendSeed`（送）與 `recvSeed`（收）。伺服器先送握手時，「接收方」就是 client。
+
+## 8. 工具
+
+| 工具 | 用途 |
+|---|---|
+| `tools/hexfunc.py <dump.c> <name> [--list\|--calls\|--globals]` | 從反編譯輸出抽出單一函式（或其呼叫／全域引用），是這一整份文件的證據來源 |
+| `tools/kstr.py <dump.c> <function> [--list\|--names]` | 把函式引用的字串以 **CP949** 解出來。`.c` 直接 `grep` 會看到亂碼，而 2003 年的 client 只有這些字串能替函式命名（§4.13）|
+| `server/src/protocol/random.ts` | 客戶端自訂亂數產生器的逐位元移植（種子遮罩 `sub_48A900`／步進 `sub_4619F0`）；golden 序列在 `server/test/random.test.ts`，伺服器用它重算客戶端回報的傷害（§4.11.2）|
+| `tools/wzimg.py` | `.img` 值層編解碼器：物件語法、名稱表、15 種型別、`Canvas`／`UOL`／`Shape2D#*` body、zlib 像素解碼。全檔 1,056 張 image 逐 byte 驗證（規格見 `docs/WZ1_FORMAT.md` §4） |
+| `tools/wzdata.py <Data.wz> [--census\|--manifest STEM\|--maps OUT\|--dump PATH]` | 讀 `Data.wz` 的**唯一支援入口**：解析樹、驗證／掃描定位每張 image、統計 canvas 與像素、輸出 manifest／地圖 metadata／單張屬性樹 |
+| `node server/src/cli.ts wz <images|census|maps|dump|png>` | WZ 的產品端入口（ADR-005）：目錄樹、值層、canvas 普查、地圖 metadata、單張 dump、像素→PNG；與上面兩個 Python 工具對同一組黃金值 |
+| `server/src/protocol/mob.ts` | 怪物封包 codec：`0x2F` 進場（`u32 mobId`＋`u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16 ×2`＋動畫旗標區塊，§4.12.1）、`0x33` 移動（§4.16.1）、`0x30` 死亡計時／`0x31` 收屍與重生／`0x34` 怪物 MP（§4.17）；`encode`／`read`／`describe` 三件套，golden 測試在 `server/test/mob.test.ts`，`decode` 與 `cli.ts schema` 共用同一份 |
+| `server/src/game/mobs.ts` | 一場地的怪物：出生點從 `life`、腳踏點折線決定巡邏範圍、每段一個 `0x33`；`Mob/<id>.img` 的 `info`（`speed`／`maxHP`／`maxMP`／`level`／`exp`）與 die 動畫長度（`dieMs`）由 `mobTemplateProvider` 快取。**怪物是伺服器驅動的**，並且有 HP：`applyDamage` → `0x34`／`0x30`，`tickPackets` 收屍與重生（§4.16／§4.17；golden 測試在 `server/test/mobs.test.ts`）|
+| `server/src/game/map.ts` | 伺服器端的地圖視圖：`WzArchive.mapMetadata()` → `life`（怪物／NPC 出生點）、`portal`、`info`、腳踏點（`footholdSegments`）；`mapDataProvider(archive)` 做快取，`GameEntryServer` 用它送 `0x2F` 並驅動巡邏（§4.15／§4.16）|
+| `server/src/wz/paths.ts` | 客戶端自己的 WZ 路徑（`Map/Map/%09d.img` ＝ `mapImagePath`、`foothold`／`ladderRope`／`portal`、`MapHelper.img`）；地圖載入器的函式表在 §4.11.2b，golden 測試在 `server/test/paths.test.ts` |
+
+
+## 補充：CUIEquip／背包拖放與原視窗位置校正（2026-10-17）
+
+`sub_4D89F0`的Equip窗176×315；`sub_4D9110`從PE VA005BC368讀14組(x,y)，每格32px，strict邊界。
+反編譯的a7字串"7"實是座標表中y=55的低byte，不能以字串猜版面。
+`sub_506440`把114/128,9存為Close控制座標；視窗位置另經`sub_43E340`讀CConfig。
+`sub_43D750`給type0/1/2預設(24,24)/(48,48)/(72,72)，修正舊背包誤讀；能力窗原browser政策也改回native預設。
+CUIItem的uiOpt0預設0、建構子+1給初始裝備頁，不能因有藥水便切USE。
+
+sub_462DC0→4636B0雙擊裝備，4630A0／463A50拖放；均用既有§4.36的0x17，count=-1，
+負格worn。req使用4636B0／4658E0的gender/level/job與四基礎能力，先排除舊部位與465B50／465C60互斥物。
+本輪未在這些比較找到人氣檢查；舊§4.36將fame列為已比較需求過度，以實際比較的欄位為準。
+
+ClientSession→WS→頁面接通ack／500ms、0x0B本人look重建與0x28旁觀原地外觀更新，保留remote path；
+原0x0B op2 swap的正／負容器分開處理。一般換位／互換／穿脫立即保存，沒有改存檔schema或回填舊裝備數值。
+WZ facts與wire instance stats分開；套服／褲、雙手／盾原子卸下的空格選擇仍是server政策。
+真TCP／WS、VM、雙頁Chromium與既有功能回歸通過，570/570＋TS。
+精確座標、函式表與未完成界線見 [`../EQUIPMENT_VALIDATION.md`](../EQUIPMENT_VALIDATION.md)。
+
+
+## 補充：CUIItem捲動、CUtilDlgEx數量與商店預設值（2026-10-17；未執行測試）
+
+- 4DA440建立id2001捲軸(147,80,h208)；4DA810／4DA8B0採每tab row，firstSlot=4*row+1。
+  4DB170／4DB990的24格命中、矩形都相對於firstSlot，不能只捲畫面卻送可見格編號。
+- 463BE0：cash／cash serial拒絕，4031家族先確認，非equip且非207的堆疊>1才問數量；
+  4643F0→535C90(total,1,total)，不是預設1。207整組送0x17的to0。
+- 4B6B40：4B7960(prompt,1,row[8])，故0x4A maxCount為**上限，不是預設**；
+  校正舊shop.ts與shops.ts註解。4B6E90 sell則是(total,1,total)，207改Yes/No整組。
+- type2由530C20給230內容寬；535EF0給外寬+22／textHeight+99；532A80給input
+  (16,textHeight+38)、OK(w-119,h-42)、Cancel(w-65,h-42)。531110使用真UtilDlgEx Border/0..7。
+- 本輪只讀CP949反編譯及WZ原樹／尺寸，沒有執行原Windows client動態oracle，亦沒有測試結果。
+  實作、持久化／地面暫存界線與瀏覽器政策見 [`../INVENTORY_OPERATIONS.md`](../INVENTORY_OPERATIONS.md)。

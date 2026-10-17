@@ -1,0 +1,541 @@
+info  t9
+  icon  t9
+    canvas 29x30 fmt=1 pixels=799B
+      origin  t9
+        (-2, 30)
+  iconRaw  t9
+    canvas 29x28 fmt=1 pixels=727B
+      origin  t9
+        (-2, 30)
+  name  t8  '파란색 털모자'
+  islot  t8  'Cp'
+  vslot  t8  'CpH1H5'
+  reqJob  t3  0
+  reqLevel  t3  27
+  reqSTR  t3  0
+  reqDEX  t3  0
+  reqINT  t3  0
+  reqLUK  t3  0
+  cash  t3  1
+default  t9
+  default  t9
+    canvas 45x47 fmt=1 pixels=946B
+      origin  t9
+        (15, 25)
+      map  t9
+        brow  t9
+          (2, -8)
+      z  t8  'cap'
+  defaultAc  t9
+    canvas 4x13 fmt=1 pixels=57B
+      origin  t9
+        (15, 25)
+      map  t9
+        brow  t9
+          (-4, -42)
+      z  t8  'capBelowBody'
+backDefault  t9
+  default  t9
+    canvas 41x33 fmt=1 pixels=996B
+      origin  t9
+        (15, 25)
+      map  t9
+        brow  t9
+          (1, -8)
+      z  t8  'backCap'
+walk1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+walk2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stand1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stand2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+alert  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingO1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingO2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingO3  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingOF  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    backDefault  t9
+      -> ../../backDefault/default
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingT1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingT2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingT3  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingTF  t9
+  0  t9
+    backDefault  t9
+      -> ../../backDefault/default
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingP1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingP2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+swingPF  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabO1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabO2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabOF  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabT1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabT2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+stabTF  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+shoot1  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+shoot2  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  3  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  4  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+shootF  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+proneStab  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+prone  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+heal  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  2  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+fly  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+  1  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+jump  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+sit  t9
+  0  t9
+    default  t9
+      -> ../../default/default
+    defalutAc  t9
+      -> ../../default/defaultAc
+ladder  t9
+  0  t9
+    backDefault  t9
+      -> ../../backDefault/default
+  1  t9
+    backDefault  t9
+      -> ../../backDefault/default
+rope  t9
+  0  t9
+    backDefault  t9
+      -> ../../backDefault/default
+  1  t9
+    backDefault  t9
+      -> ../../backDefault/default

@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KMS 1.11 — browser view</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <header id="bar">
+      <strong>KMS 1.11</strong>
+      <span id="where">未連線</span>
+      <select id="view-scale" aria-label="畫面縮放模式">
+        <option value="pixel">清晰整數像素</option>
+        <option value="native">原尺寸 800×600</option>
+        <option value="fit">填滿視窗（非整數）</option>
+      </select>
+      <button id="sound-toggle" type="button" aria-pressed="false">
+        聲音：開
+      </button>
+      <button id="inv-toggle" type="button">背包</button>
+      <button id="log-toggle" type="button">日誌</button>
+    </header>
+
+    <aside id="dialogue" class="hidden">
+      <p id="dialogue-text"></p>
+      <div class="dialogue-buttons">
+        <button id="dialogue-ok" type="button">確定</button>
+        <button id="dialogue-close" type="button">關閉</button>
+      </div>
+    </aside>
+
+    <aside id="log" class="hidden">
+      <h3>事件</h3>
+      <ol id="log-lines"></ol>
+    </aside>
+
+    <!--
+      The game's own UI lives on the canvas; only the chat input has to be a real <input>. This layer
+      is placed and scaled exactly like `#view`, so its children can use the 2003 client's 800x600
+      coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
+    -->
+    <div id="game-ui">
+      <section
+        id="item-dialog"
+        class="hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="item-question"
+      >
+        <p id="item-question" class="accessible-only"></p>
+        <input
+          id="item-quantity"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="item-quantity-error"
+        />
+        <p
+          id="item-quantity-error"
+          class="accessible-only"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <button
+          id="item-dialog-ok"
+          class="sprite-hit"
+          type="button"
+          aria-label="確定"
+        >
+          OK
+        </button>
+        <button
+          id="item-dialog-cancel"
+          class="sprite-hit"
+          type="button"
+          aria-label="取消"
+        >
+          Cancel
+        </button>
+      </section>
+      <section
+        id="equip-window"
+        class="hidden"
+        role="dialog"
+        aria-label="裝備視窗；E 開關，拖曳穿脫裝備"
+      >
+        <button
+          id="equip-close"
+          class="sprite-hit"
+          type="button"
+          aria-label="關閉裝備視窗"
+        >
+          Close
+        </button>
+      </section>
+      <div
+        id="minimap-window"
+        class="hidden"
+        role="img"
+        aria-label="小地圖；拖曳移動，M 顯示或隱藏"
+      ></div>
+      <section
+        id="stat-window"
+        class="hidden"
+        role="dialog"
+        aria-label="角色能力"
+        aria-describedby="stat-values"
+      >
+        <button
+          id="stat-body"
+          class="sprite-hit"
+          type="button"
+          tabindex="-1"
+          aria-label="拖曳能力視窗標題列"
+        ></button>
+        <button
+          id="stat-close"
+          class="sprite-hit"
+          type="button"
+          aria-label="關閉能力視窗"
+        >
+          Close
+        </button>
+        <button
+          id="ap-maxHp"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加最大 HP（成長規則尚未還原）"
+          disabled
+        >
+          HP
+        </button>
+        <button
+          id="ap-maxMp"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加最大 MP（成長規則尚未還原）"
+          disabled
+        >
+          MP
+        </button>
+        <button
+          id="ap-str"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加 STR"
+        >
+          STR
+        </button>
+        <button
+          id="ap-dex"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加 DEX"
+        >
+          DEX
+        </button>
+        <button
+          id="ap-int"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加 INT"
+        >
+          INT
+        </button>
+        <button
+          id="ap-luk"
+          class="sprite-hit"
+          type="button"
+          aria-label="增加 LUK"
+        >
+          LUK
+        </button>
+        <button
+          id="stat-detail"
+          class="sprite-hit"
+          type="button"
+          aria-label="詳細戰鬥能力（尚未完整還原）"
+          disabled
+        >
+          Detail
+        </button>
+        <p id="stat-values"></p>
+      </section>
+      <div id="title-ui">
+        <nav id="title-menu" aria-label="主選單">
+          <button
+            id="title-new"
+            class="sprite-hit"
+            type="button"
+            aria-label="新帳號"
+          >
+            새로하기
+          </button>
+          <button
+            id="title-continue"
+            class="sprite-hit"
+            type="button"
+            aria-label="登入遊戲"
+          >
+            이어하기
+          </button>
+          <button
+            id="title-homepage"
+            class="sprite-hit"
+            type="button"
+            aria-label="官方網站"
+          >
+            홈페이지
+          </button>
+          <button
+            id="title-quit"
+            class="sprite-hit"
+            type="button"
+            aria-label="結束遊戲"
+          >
+            끝내기
+          </button>
+        </nav>
+        <section
+          id="connect"
+          class="hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="登入"
+        >
+          <input
+            id="user"
+            aria-label="帳號"
+            autocomplete="username"
+            maxlength="64"
+            spellcheck="false"
+          />
+          <input
+            id="pass"
+            aria-label="密碼"
+            type="password"
+            autocomplete="current-password"
+            maxlength="12"
+          />
+          <input
+            id="remember-user"
+            class="sprite-hit"
+            aria-label="記住帳號（不儲存密碼）"
+            type="checkbox"
+          />
+          <button
+            id="login-lost"
+            class="sprite-hit"
+            type="button"
+            aria-label="忘記帳號或密碼"
+          >
+            帳密查詢
+          </button>
+          <button id="login" class="sprite-hit" type="button" aria-label="登入">
+            確定
+          </button>
+          <button
+            id="login-cancel"
+            class="sprite-hit"
+            type="button"
+            aria-label="取消登入"
+          >
+            取消
+          </button>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+        </section>
+        <p id="title-notice" role="status" aria-live="polite"></p>
+      </div>
+
+      <section
+        id="worlds"
+        class="selection-overlay hidden"
+        aria-label="選擇世界"
+      >
+        <div id="world-list" role="group" aria-label="世界列表"></div>
+        <button
+          id="world-connect"
+          class="sprite-hit"
+          type="button"
+          aria-label="連接世界"
+          disabled
+        >
+          連接世界
+        </button>
+      </section>
+      <section
+        id="characters"
+        class="selection-overlay hidden"
+        aria-label="選擇角色"
+      >
+        <div id="character-list" role="group" aria-label="角色槽位"></div>
+        <button
+          id="character-enter"
+          class="sprite-hit"
+          type="button"
+          aria-label="進入遊戲"
+          disabled
+        >
+          進入遊戲
+        </button>
+        <button
+          id="character-delete"
+          class="sprite-hit"
+          type="button"
+          aria-label="刪除角色"
+          disabled
+        >
+          刪除角色
+        </button>
+        <button
+          id="character-new"
+          class="sprite-hit"
+          type="button"
+          aria-label="建立新角色"
+        >
+          建立新角色
+        </button>
+        <div
+          id="character-dialogs"
+          class="hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="角色操作"
+        >
+          <div id="new-character" class="hidden">
+            <input
+              id="new-name"
+              aria-label="新角色名稱"
+              maxlength="12"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button
+              id="check-name"
+              class="sprite-hit"
+              type="button"
+              aria-label="檢查角色名稱"
+            >
+              Check
+            </button>
+            <button
+              id="create-combo-0"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇臉型"
+            >
+              臉型
+            </button>
+            <button
+              id="create-combo-1"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇髮型"
+            >
+              髮型
+            </button>
+            <button
+              id="create-combo-2"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇上衣"
+            >
+              上衣
+            </button>
+            <button
+              id="create-combo-3"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇下衣"
+            >
+              下衣
+            </button>
+            <button
+              id="create-combo-4"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇鞋子"
+            >
+              鞋子
+            </button>
+            <button
+              id="create-combo-5"
+              class="sprite-hit"
+              type="button"
+              aria-label="選擇武器"
+            >
+              武器
+            </button>
+            <button
+              id="roll-dice"
+              class="sprite-hit"
+              type="button"
+              aria-label="重擲 STR DEX INT LUK"
+            >
+              擲骰
+            </button>
+            <button
+              id="create"
+              class="sprite-hit"
+              type="button"
+              aria-label="確認建立角色"
+            >
+              建立角色
+            </button>
+            <button
+              id="create-cancel"
+              class="sprite-hit"
+              type="button"
+              aria-label="取消建立角色"
+            >
+              取消
+            </button>
+          </div>
+          <div id="creation-options"></div>
+          <div id="character-confirm" class="hidden">
+            <button
+              id="native-yes"
+              class="sprite-hit"
+              type="button"
+              aria-label="確認刪除角色"
+            >
+              Yes
+            </button>
+            <button
+              id="native-no"
+              class="sprite-hit"
+              type="button"
+              aria-label="取消刪除角色"
+            >
+              No
+            </button>
+            <button
+              id="native-ok"
+              class="sprite-hit"
+              type="button"
+              aria-label="確認訊息"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+        <p
+          id="character-status"
+          class="status"
+          role="status"
+          aria-live="polite"
+        ></p>
+      </section>
+
+      <div id="chatbox" class="hidden">
+        <ol id="chat-lines"></ol>
+        <div id="emotes"></div>
+        <input
+          id="say"
+          placeholder="Enter 開始輸入，再按 Enter 送出（/w 名字 訊息、/f 名字）"
+          maxlength="120"
+          spellcheck="false"
+        />
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
