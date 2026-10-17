@@ -43,6 +43,12 @@ node src/cli.ts serve \
 串流上面那一排按鈕是**表情**（`0x13`）：2003 client 用 F1–F7 送 1–7，瀏覽器不能用那幾顆鍵（F1 是
 說明、F5 是重新整理），所以同樣的七張臉做成按鈕。0（中性眨眼）與 8 沒有對應的鍵，頁面也就沒有按鈕。
 
+點 NPC 就是 `0x33`（`{t:"click",objectId}`），回來的可能是**商店**（`0x4A` → 左邊的視窗）或
+**一句台詞**（`0x47` → 下面的對話框）。哪一個由伺服器決定：商店是 `game/shops.ts` 的表，台詞是
+`Npc/<id>.img -> info/speak`，頁面兩者都不知道。商店視窗每列有圖示、名字、價格與「買」「×10」；
+**賣出還沒接**（需要選格子與數量，頁面還沒有那種介面）。對話框的「確定」是主要按鈕（下一句），
+「關閉」是次要按鈕（結束）——跟 2003 client 的兩個按鈕一樣。
+
 按 **`I`**（或右上「背包」）打開背包：四個 tab（裝備／消耗／其他／現金）、worn 欄、數量與可升級
 次數（`ruc` 是 0 的新裝備不印那個 0——starter 裝每一件都是 0）。第一次打開會停在**有東西的分頁**
 （消耗優先），之後就照你點的那個；兩者都空的時候面板會留一行提示，而不是一片空格。**雙擊消耗 tab 的東西**就是用它——頁面送 `0x18`（203 家族的地圖卷軸送 `0x19`），跟 2003
@@ -64,6 +70,8 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來） |
 | 表情列（七顆按鈕） | c2s `0x13` → 別人收 `0x27`；自己那一張是頁面自己套用的 | 名字用的是 client 自己的表（`EMOTION_NAMES`），臉本身還沒畫（沒有 `Character/Face`） |
 | 新角色 | `0x04`（名字檢查）＋`0x05`（建立） | 外觀十個字固定，等於 `scripts/whisper_probe.mjs` 的那組 |
+| 商店視窗（點 NPC） | `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 買成功時是 `0x4B`＋`0x0B`＋`0x0D`；賣出沒有控制項 |
+| NPC 對話框 | `0x47` 的 `say` 台詞（`info/speak` 原文） | 「確定」送 `0x15` answer 1（下一句），「關閉」送 0（結束） |
 | 背包面板（`I`） | `0x16` 的角色紀錄 ＋ 每個 `0x0B` | 位置與數量是線路的；名字／價格／描述／圖示是 `/api/item/<id>` 從 `Data.wz` 讀的（ADR-037） |
 | 右上「日誌」 | 所有事件 | 沒實作的封包會以 `unhandled packet 0x..` 出現 |
 
@@ -82,6 +90,10 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 表情 | `{t:"emotion",value}` | c2s `0x13` → 其他人收 s2c `0x27`（送的人自己不會收到） |
 | 密語 | `{t:"whisper",name,text}` | c2s `0x23` kind `0x06` → 對方收 `0x1A`/`0x12`，自己收 `0x1A`/`0x0A` |
 | 找人在哪 | `{t:"find",name}` | c2s `0x23` kind `0x05` → `0x1A`/`0x09`（`u32 mapId`，`-1`＝不在線） |
+| 點 NPC | `{t:"click",objectId}` | c2s `0x33` → 先 `0x19`，再 `0x4A`（商店）或 `0x47`（台詞） |
+| 買東西 | `{t:"shop",action:"buy",row,itemId,count}` | c2s `0x16` → `0x4B`（結果）＋`0x0B`（格子）＋`0x0D`（mesos） |
+| 關商店 | `{t:"shop",action:"close"}` | c2s `0x16` 的 close → **不回包**（2003 client 的 close 不 arm flag） |
+| 回答對話 | `{t:"talk",answer}` | c2s `0x15`（answer 1＝下一句、0＝結束） |
 | 用消耗品（雙擊） | `{t:"use",slot,itemId}` | c2s `0x18`（203 家族 `0x19`）→ s2c `0x0B`（少一瓶）＋`0x0D`（HP／MP 動了）；被拒絕時是空 `0x0B` |
 | 升級特效（別人的） | — | s2c `0x29` |
 
@@ -94,6 +106,9 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 field        { mapId, self, users[], mobs[], npcs[] }     ← 0x16 的快照
 self         { self }                                     ← 0x0D 之後的完整狀態
 inventory    { worn[], wornCash[], tabs[4] }              ← 0x16 之後一則，此後每個 0x0B 一則
+shop-open    { shop: { shopId, items[] } }                ← 0x4A（價格與 maxCount 都是伺服器的）
+shop-result  { code, message }                            ← 0x4B（0＝silent，成功）
+npc-say      { npcId, message }                           ← 0x47 的 say（台詞來自 info/speak）
 user-enter   { user }        user-leave { characterId }
 user-move    { characterId, x, y, action, foothold }
 user-emotion { characterId, emotion }
@@ -109,8 +124,8 @@ disconnect   { reason }
 error        { message }
 ```
 
-頁面 → 伺服器只有十一種：`login`／`world`／`character`／`create`／`say`／`move`／`portal`／`emotion`／
-`whisper`／`find`／`use`（上表）。
+頁面 → 伺服器只有十四種：`login`／`world`／`character`／`create`／`say`／`move`／`portal`／`emotion`／
+`whisper`／`find`／`use`／`click`／`shop`／`talk`（上表）。
 
 ## 文字編碼（CP949，不是 UTF-8）
 
@@ -128,9 +143,9 @@ error        { message }
 - **傷害與怪物 AI**：2003 client 自己算（FINDINGS §4.20／ADR-008），這個殼不算，所以打不到怪。
 - **密語的「對方是不是在密你」**：線路上分不出來——送達的密語就是 `0x1A` 的 `0x12`，跟場地聊天同一包
   （FINDINGS 4.31）。頁面照實顯示，不假裝知道。
-- **商店、交易、組隊、郵件**：伺服器都有（`0x4A`／`0x25`／`0x26`／`0x24`），頁面沒有介面；它們的
-  封包測試在 `test/shops.test.ts`、`test/miniroom.test.ts`、`test/party.test.ts`、
-  `test/messenger.test.ts`。
+- **賣出／交易／組隊／郵件**：伺服器都有（`0x16` 的 sell、`0x25`／`0x26`／`0x24`），頁面沒有介面；
+  它們的封包測試在 `test/shops.test.ts`、`test/miniroom.test.ts`、`test/party.test.ts`、
+  `test/messenger.test.ts`。商店**買**已經有了，賣只差一個「從哪一格、幾個」的控制項。
 - **背包的拖放與裝備**：面板只**看**背包（與雙擊用消耗品）。拖放是 `0x17`、穿戴是它的負 slot
   目的地，頁面還沒接——所以 worn 欄只會在伺服器送負 slot 時才有東西。
 - **卷軸（204）**：`0x1A` 需要點一件裝備當目標，面板沒有拖放就沒有目標，頁面不送它。
@@ -147,11 +162,13 @@ node --test test/websocket.test.ts test/webclient.test.ts
 ```
 
 `websocket.test.ts`（8 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
-一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（8 則）用 Node 內建的 `WebSocket` 當瀏覽器，
+一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（10 則）用 Node 內建的 `WebSocket` 當瀏覽器，
 對**真的** `LoginServer`／`GameEntryServer` 走完登入→選角→進圖→說話→走路，外加靜態檔、
 `/api/map/<id>` 與 `..` 的拒絕、一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩，以及點一扇門
 換到另一張圖再走回來，一張臉、一通韓文密語（CP949 來回）、一次找不到人的密語與兩種 `/f` 答案，
-以及背包（`inventory` 事件的形狀、`/api/item` 的三種答案、一次雙擊把 3 瓶喝成 2 瓶且 HP 20→50）。
+背包（`inventory` 事件的形狀、`/api/item` 的三種答案、一次雙擊把 3 瓶喝成 2 瓶且 HP 20→50），
+以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
+兩句台詞用 `0x15` 走完）。
 
 頁面的**繪圖**沒有自動測試——它需要眼睛。這一頁就是那個「眼睛」的說明書。
 

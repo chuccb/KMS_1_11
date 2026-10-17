@@ -222,6 +222,12 @@ class BrowserSession {
           return await this.find(String(message.name ?? ""));
         case "use":
           return await this.useItem(Number(message.slot ?? 0), Number(message.itemId ?? 0));
+        case "click":
+          return await this.clickObject(Number(message.objectId ?? 0));
+        case "shop":
+          return await this.shopRequest(message);
+        case "talk":
+          return await this.talk(Number(message.answer ?? 0));
         default:
           return this.send({ t: "error", message: `unknown message ${String(message.t)}` });
       }
@@ -362,6 +368,59 @@ class BrowserSession {
    * refuses a pair that disagrees. The result is not a direct answer: the `0x0B`/`0x0D` the server
    * sends arrive as an `inventory` and a `self` event.
    */
+  /**
+   * A click on a field object: an NPC (`0x33`). The page hit-tests its own drawing, and the server
+   * only accepts the runtime id it gave that NPC - a made-up id is a log line and the release byte.
+   */
+  private async clickObject(objectId: number): Promise<void> {
+    if (!Number.isInteger(objectId) || objectId <= 0) return this.send({ t: "error", message: "click needs an object id" });
+    await this.require().clickObject(objectId);
+  }
+
+  /**
+   * One shop button - `{action:"buy", row, itemId, count}`, `{action:"sell", slot, itemId, count}`,
+   * `{action:"recharge", slot}` or `{action:"close"}`.
+   *
+   * The page currently only sends `buy` and `close` (there is no sell/drag UI yet), but the wire
+   * message is the client's whole `0x16`, so the other two are accepted as-is rather than refused
+   * by the bridge: the server validates them exactly as it validates a real client's.
+   */
+  private async shopRequest(message: Record<string, unknown>): Promise<void> {
+    const action = String(message.action ?? "");
+    if (action === "close") {
+      await this.require().shop({ kind: "close" });
+      return;
+    }
+    if (action === "recharge") {
+      const slot = Number(message.slot ?? 0);
+      if (!Number.isInteger(slot) || slot <= 0) return this.send({ t: "error", message: "shop recharge needs a slot" });
+      await this.require().shop({ kind: "recharge", slot });
+      return;
+    }
+    if (action !== "buy" && action !== "sell") {
+      return this.send({ t: "error", message: `shop action ${action || "(none)"} is not buy, sell, recharge or close` });
+    }
+    const itemId = Number(message.itemId ?? 0);
+    const count = Number(message.count ?? 0);
+    if (!Number.isInteger(itemId) || itemId <= 0) return this.send({ t: "error", message: "shop needs an item id" });
+    if (!Number.isInteger(count) || count <= 0) return this.send({ t: "error", message: "shop needs a count above 0" });
+    if (action === "buy") {
+      const row = Number(message.row ?? 0);
+      if (!Number.isInteger(row) || row < 0) return this.send({ t: "error", message: "shop buy needs a row" });
+      await this.require().shop({ kind: "buy", row, itemId, count });
+      return;
+    }
+    const slot = Number(message.slot ?? 0);
+    if (!Number.isInteger(slot) || slot <= 0) return this.send({ t: "error", message: "shop sell needs a slot" });
+    await this.require().shop({ kind: "sell", slot, itemId, count });
+  }
+
+  /** One answer to an NPC's dialog: `1` is the primary button, `0` the secondary (which ends it). */
+  private async talk(answer: number): Promise<void> {
+    if (answer !== 0 && answer !== 1) return this.send({ t: "error", message: "talk answer must be 0 or 1" });
+    await this.require().talk(answer);
+  }
+
   private async useItem(slot: number, itemId: number): Promise<void> {
     if (!Number.isInteger(slot) || slot <= 0) return this.send({ t: "error", message: "use needs a USE-tab slot" });
     if (!Number.isInteger(itemId) || itemId <= 0) return this.send({ t: "error", message: "use needs an item id" });

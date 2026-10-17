@@ -52,6 +52,15 @@ const ui = {
   invWorn: /** @type {HTMLElement} */ (document.getElementById("inv-worn")),
   invGrid: /** @type {HTMLElement} */ (document.getElementById("inv-grid")),
   invInfo: /** @type {HTMLElement} */ (document.getElementById("inv-info")),
+  shop: /** @type {HTMLElement} */ (document.getElementById("shop")),
+  shopTitle: /** @type {HTMLElement} */ (document.getElementById("shop-title")),
+  shopRows: /** @type {HTMLElement} */ (document.getElementById("shop-rows")),
+  shopClose: /** @type {HTMLButtonElement} */ (document.getElementById("shop-close")),
+  shopNote: /** @type {HTMLElement} */ (document.getElementById("shop-note")),
+  dialogue: /** @type {HTMLElement} */ (document.getElementById("dialogue")),
+  dialogueText: /** @type {HTMLElement} */ (document.getElementById("dialogue-text")),
+  dialogueOk: /** @type {HTMLButtonElement} */ (document.getElementById("dialogue-ok")),
+  dialogueClose: /** @type {HTMLButtonElement} */ (document.getElementById("dialogue-close")),
 };
 
 /** @type {WebSocket | undefined} */
@@ -102,6 +111,10 @@ const itemInfo = new Map();
 const itemInfoPending = new Set();
 /** Ids the archive has no icon for - the page stops asking. */
 const iconMissing = new Set();
+/** The shop `0x4A` opened, or undefined when no NPC's window is up. */
+let shop;
+/** The NPC whose `0x47` line is on screen, or undefined when the dialog is closed. */
+let talkingNpc;
 
 /** The four tabs, named the way a player says them; the numbers are the wire's. */
 const INVENTORY_TABS = [
@@ -247,6 +260,10 @@ function handle(message) {
       for (const mob of message.mobs) mobs.set(String(mob.mobId), mob);
       for (const npc of message.npcs) npcs.set(String(npc.npcId), npc);
       hidePanels();
+      // The server drops the windows with the map (the shop and the dialog belong to its NPCs), so
+      // this side must not tell it to close something it already forgot.
+      closeShop(false);
+      closeDialogue(false);
       ui.hud.classList.remove("hidden");
       ui.chatbox.classList.remove("hidden");
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
@@ -263,6 +280,22 @@ function handle(message) {
     case "inventory":
       inventory = message.inventory;
       renderInventory();
+      return;
+
+    case "shop-open":
+      shop = message.shop;
+      renderShop();
+      return;
+
+    case "shop-result":
+      // Every buy/sell is answered with a result byte - `0` is "silent", i.e. it worked.
+      if (message.code !== 0) logLine(`shop: ${message.message}`);
+      return;
+
+    case "npc-say":
+      talkingNpc = message.npcId;
+      ui.dialogueText.textContent = String(message.message);
+      ui.dialogue.classList.remove("hidden");
       return;
 
     case "user-enter":
@@ -484,12 +517,56 @@ function portalAt(clientX, clientY) {
   return found;
 }
 
+// ---------------------------------------------------------------- NPCs
+
+/** `drawNpc` draws an 18x34 box from `y-34` to `y`; the click box adds a few pixels of slack. */
+const NPC_BOX = { left: 12, right: 12, up: 38, down: 4 };
+
+/**
+ * The NPC under a screen point, or undefined.
+ *
+ * The click itself is the whole interaction: `0x33` with the runtime id `0x39` gave the NPC. What
+ * comes back is the NPC's shop (`0x4A`) or its line (`0x47`) - the page does not decide which, it
+ * only sends the click.
+ */
+function npcAt(clientX, clientY) {
+  if (!self) return undefined;
+  const cameraX = self.x - window.innerWidth * 0.45;
+  const cameraY = self.y - window.innerHeight * 0.62;
+  const x = clientX + cameraX;
+  const y = clientY + cameraY;
+  let found;
+  let best = Infinity;
+  for (const npc of npcs.values()) {
+    const dx = x - npc.x;
+    const dy = y - npc.y;
+    if (dx < -NPC_BOX.left || dx > NPC_BOX.right) continue;
+    if (dy < -NPC_BOX.up || dy > NPC_BOX.down) continue;
+    const distance = dx * dx + dy * dy;
+    if (distance < best) {
+      best = distance;
+      found = npc;
+    }
+  }
+  return found;
+}
+
 canvas.addEventListener("mousemove", (event) => {
   hoveredPortal = portalAt(event.clientX, event.clientY);
-  canvas.style.cursor = hoveredPortal ? "pointer" : "default";
+  const npc = npcAt(event.clientX, event.clientY);
+  canvas.style.cursor = hoveredPortal || npc ? "pointer" : "default";
 });
 
 canvas.addEventListener("click", (event) => {
+  // An NPC first: its box stands on the ground where a door could also be, and the server can only
+  // open one window at a time (`0x4A`/`0x47` while another is up is a disconnect in the client).
+  const npc = npcAt(event.clientX, event.clientY);
+  if (npc) {
+    if (shop !== undefined || talkingNpc !== undefined) return;
+    logLine(`click NPC ${npc.npcId} (template ${npc.templateId})`);
+    send({ t: "click", objectId: npc.npcId });
+    return;
+  }
   const portal = portalAt(event.clientX, event.clientY);
   if (!portal) return;
   const now = performance.now();
@@ -864,11 +941,88 @@ function describeItem(itemId) {
       itemInfo.set(itemId, facts);
       itemInfoPending.delete(itemId);
       renderInventory();
+      if (shop !== undefined) renderShop();
     })
     .catch(() => {
       itemInfo.set(itemId, null);
       itemInfoPending.delete(itemId);
     });
+}
+
+// ---------------------------------------------------------------- shop & dialogue
+
+/**
+ * The window `0x4A` opened: one row per item the server priced from the archive.
+ *
+ * Buying sends the client's own `0x16` (`{t:"shop",action:"buy",row,itemId,count}`); the answer is
+ * a `0x4B` result byte and, when it worked, a `0x0B` (the slot) plus a `0x0D` (the mesos) - the
+ * same three packets a real client gets. Selling is *not* wired to a control: it needs a slot and a
+ * count from somewhere, and the page has neither a drag nor a quantity dialog yet.
+ */
+function renderShop() {
+  if (shop === undefined) {
+    ui.shop.classList.add("hidden");
+    return;
+  }
+  ui.shopTitle.textContent = `商店 ${shop.shopId}`;
+  ui.shopRows.replaceChildren(...shop.items.map((row, index) => shopRow(row, index)));
+  ui.shop.classList.remove("hidden");
+}
+
+function shopRow(row, index) {
+  const li = document.createElement("li");
+  li.className = "shop-row";
+  const image = document.createElement("img");
+  image.alt = "";
+  image.addEventListener("error", () => image.remove());
+  image.src = `/api/item/${row.itemId}/icon.png`;
+  const name = document.createElement("span");
+  name.className = "shop-name";
+  name.textContent = itemInfo.get(row.itemId)?.name ?? String(row.itemId);
+  const price = document.createElement("span");
+  price.className = "shop-price";
+  price.textContent = `${row.price} 元`;
+  const one = document.createElement("button");
+  one.type = "button";
+  one.textContent = "買";
+  one.title = `買 1 個（${row.price} 元）`;
+  one.addEventListener("click", () => buyItem(row, index, 1));
+  li.append(image, name, price, one);
+  // `maxCount` is the cap on one purchase, so a row that cannot take ten does not offer ten.
+  if (row.maxCount >= 10) {
+    const ten = document.createElement("button");
+    ten.type = "button";
+    ten.textContent = "×10";
+    ten.title = `買 10 個（${row.price * 10} 元）`;
+    ten.addEventListener("click", () => buyItem(row, index, 10));
+    li.append(ten);
+  }
+  describeItem(row.itemId);
+  return li;
+}
+
+function buyItem(row, index, count) {
+  send({ t: "shop", action: "buy", row: index, itemId: row.itemId, count });
+}
+
+/** Closes the window; `notify` is false when the server already dropped it (a map change did). */
+function closeShop(notify = true) {
+  ui.shop.classList.add("hidden");
+  if (shop === undefined) return;
+  shop = undefined;
+  if (notify) send({ t: "shop", action: "close" });
+}
+
+/**
+ * The NPC dialog (`0x47`). `確定` sends the primary answer, which the server advances on; `關閉`
+ * sends the secondary one, which ends the conversation - exactly the two buttons the 2003 client
+ * offers. The box closes on either, and reappears if the server sent another line.
+ */
+function closeDialogue(notify = true, answer = 0) {
+  ui.dialogue.classList.add("hidden");
+  if (talkingNpc === undefined) return;
+  talkingNpc = undefined;
+  if (notify) send({ t: "talk", answer });
 }
 
 function toggleInventory(force) {
@@ -910,6 +1064,9 @@ ui.user.addEventListener("keydown", (event) => {
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 ui.invToggle.addEventListener("click", () => toggleInventory());
 ui.invClose.addEventListener("click", () => toggleInventory(false));
+ui.shopClose.addEventListener("click", () => closeShop());
+ui.dialogueOk.addEventListener("click", () => closeDialogue(true, 1));
+ui.dialogueClose.addEventListener("click", () => closeDialogue(true, 0));
 
 // The 2003 client sends these from F1..F7 (`sub_511E20` case 10); a browser cannot take those keys
 // (F1 is help, F5 reloads), so the page offers the same seven faces as buttons.
@@ -935,6 +1092,11 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     ui.say.focus();
+    return;
+  }
+  if (event.key === "Escape") {
+    if (shop !== undefined) closeShop();
+    if (talkingNpc !== undefined) closeDialogue();
     return;
   }
   // `I` opens the inventory. The 2003 client opens it from its own shortcut bar (`I` in the default

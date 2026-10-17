@@ -21,6 +21,8 @@ import { characterDataOf, startingCharacterItems, zeroStats } from "../src/proto
 import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import type { ItemCatalog } from "../src/game/iteminfo.ts";
+import { grantItem } from "../src/game/rewards.ts";
+import type { ShopDef, ShopKeeper } from "../src/game/shops.ts";
 
 const STUB_MAP: MapData = {
   id: 1000000,
@@ -152,6 +154,43 @@ const STUB_CATALOG: ItemCatalog = {
   icon: (itemId) => (itemId === 2000000 ? STUB_PNG : undefined),
 };
 
+/**
+ * One shop and one talker, standing in for `game/shops.ts` + `game/dialogue.ts` over `Data.wz`.
+ *
+ * The server's own buy/sell (`shops.test.ts`) and its `info/speak` reader (`quest.test.ts`) are
+ * pinned elsewhere; what these tests need is the *bridge*: a click becomes `0x33`, `0x4A` becomes a
+ * `shop-open`, a buy becomes `0x16` and comes back as `0x4B` + `0x0B` + `0x0D`, and an `0x47` line
+ * is walked with `0x15`.
+ */
+const STUB_SHOP_DEF: ShopDef = { shopId: 2003, npcTemplateId: 2003, items: [{ itemId: 2000000 }] };
+const STUB_SHOP: ShopKeeper = {
+  shopOfNpc: (templateId) => (templateId === 2003 ? STUB_SHOP_DEF : undefined),
+  linesOf: () => [{ itemId: 2000000, price: 25, maxCount: 200 }],
+  priceOf: (itemId) => (itemId === 2000000 ? 25 : undefined),
+  sellPriceOf: (itemId) => (itemId === 2000000 ? 12 : undefined),
+  buy: (items, wallet, _shop, itemId, count) => {
+    if (itemId !== 2000000) return { kind: "failed", reason: "notInShop" };
+    if (!Number.isInteger(count) || count <= 0 || count > 200) return { kind: "failed", reason: "badRequest" };
+    const total = 25 * count;
+    if (wallet.balance < total) return { kind: "failed", reason: "notEnoughMesos" };
+    const granted = grantItem(items, itemId, count);
+    if (granted === undefined) return { kind: "failed", reason: "notEnoughSlots" };
+    wallet.spend(total);
+    return {
+      kind: "bought",
+      itemId,
+      count,
+      unitPrice: 25,
+      total,
+      inventory: granted.inventory,
+      slot: granted.slot,
+      change: granted.change,
+      mesos: wallet.balance,
+    };
+  },
+  sell: () => ({ kind: "failed", reason: "notEnoughItems" }),
+};
+
 interface World {
   loginPort: number;
   gamePort: number;
@@ -160,6 +199,10 @@ interface World {
 
 /** What a test world may change about its characters; everything else is the shared fixture. */
 interface WorldOptions {
+  /** Gives NPC 2003 a shop - the click path that opens `0x4A`. */
+  shop?: boolean;
+  /** Gives NPC 2003 two lines of `info/speak` instead - the click path that opens `0x47`. */
+  guide?: boolean;
   /**
    * Puts one 빨간 포션 at USE slot 1 and drops `admin`'s HP to 20 of 50, with the archive's own
    * `spec/hp = 50` behind it - the state a double-click on the potion is supposed to change.
@@ -188,6 +231,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     stats.mp = 30;
     stats.maxMp = 30;
     stats.mapId = 1000000;
+    stats.mesos = 100;
     const items = startingCharacterItems();
     if (options.damaged === true && user === "admin") {
       stats.hp = 20;
@@ -208,6 +252,10 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
     // The archive's `Item/Consume/0200.img/02000000/spec` in one line: a flat 50 HP.
     ...(options.damaged === true ? { consumeSpec: () => ({ hp: 50, unapplied: [] }) } : {}),
+    ...(options.shop === true ? { shops: STUB_SHOP } : {}),
+    ...(options.guide === true
+      ? { npcDialogue: (templateId: number) => (templateId === 2003 ? { templateId, name: "로빈", lines: ["first line", "second line"] } : undefined) }
+      : {}),
   });
   const gameInfo = await game.listen(0);
   const login = new LoginServer({
@@ -362,6 +410,78 @@ test("the inventory a 0x0B describes, and the archive facts a slot needs", { tim
   assert.match(String((await browser.nextKind("error")).message), /use needs a USE-tab slot/);
   browser.send({ t: "use", slot: 1, itemId: 0 });
   assert.match(String((await browser.nextKind("error")).message), /use needs an item id/);
+
+  browser.close();
+});
+
+test("clicking an NPC opens its shop, and a buy moves the item and the mesos", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t, { shop: true });
+  const { browser } = await enterGame(world.webPort, "admin", "admin");
+  // NPCs arrive as their own `0x39`, not inside the `0x16` snapshot.
+  const npc = (await browser.nextKind("npc-enter")).npc as { npcId: number; templateId: number };
+  assert.equal(npc.templateId, 2003);
+  // The entry `0x16` is followed by the inventory it carries; take it now so the next one is the
+  // buy's.
+  await browser.nextKind("inventory");
+
+  // The click is `0x33` with the *runtime* id (`0x39` gave it), and the answer is the shop window
+  // the server priced from the archive - not a guess by the page.
+  browser.send({ t: "click", objectId: npc.npcId });
+  const shop = (await browser.nextKind("shop-open")).shop as {
+    shopId: number;
+    items: { itemId: number; price: number; maxCount: number }[];
+  };
+  assert.equal(shop.shopId, 2003);
+  assert.deepEqual(shop.items, [{ itemId: 2000000, price: 25, maxCount: 200 }]);
+
+  // Buy two: `0x16` in, `0x4B` (silent), `0x0B` (the slot) and `0x0D` (the mesos) back - the same
+  // three packets a pickup or a trade uses.
+  browser.send({ t: "shop", action: "buy", row: 0, itemId: 2000000, count: 2 });
+  assert.equal((await browser.nextKind("shop-result")).code, 0);
+  const after = (await browser.nextKind("inventory")).inventory as {
+    tabs: { tab: number; items: { slot: number; itemId: number; quantity?: number }[] }[];
+  };
+  assert.deepEqual(after.tabs[1]!.items, [{ slot: 1, itemId: 2000000, quantity: 2 }]);
+  assert.equal((((await browser.nextKind("self")).self) as { mesos: number }).mesos, 50);
+
+  // A close is deliberately unanswered (the client's close does not arm its in-flight flag).
+  browser.send({ t: "shop", action: "close" });
+  const quiet = await browser.quiet(200);
+  assert.deepEqual(quiet.filter((message) => message.t === "shop-result"), []);
+
+  // Bad arguments never reach the server, so they come back as page errors instead of a packet.
+  browser.send({ t: "shop", action: "buy", row: 0, itemId: 2000000, count: 0 });
+  assert.match(String((await browser.nextKind("error")).message), /shop needs a count above 0/);
+  browser.send({ t: "shop", action: "steal", itemId: 2000000, count: 1 });
+  assert.match(String((await browser.nextKind("error")).message), /is not buy, sell, recharge or close/);
+
+  browser.close();
+});
+
+test("clicking a talking NPC walks its lines, and 0x15 ends the conversation", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t, { guide: true });
+  const { browser } = await enterGame(world.webPort, "admin", "admin");
+  const npc = (await browser.nextKind("npc-enter")).npc as { npcId: number; templateId: number };
+
+  browser.send({ t: "click", objectId: npc.npcId });
+  const first = await browser.nextKind("npc-say");
+  assert.equal(first.npcId, npc.npcId);
+  assert.equal(first.message, "first line");
+
+  // The primary button advances; the dialog is modal, so the server sends exactly one line per
+  // answer and nothing at all after the last one.
+  browser.send({ t: "talk", answer: 1 });
+  assert.equal((await browser.nextKind("npc-say")).message, "second line");
+  browser.send({ t: "talk", answer: 1 });
+  const quiet = await browser.quiet(200);
+  assert.deepEqual(quiet.filter((message) => message.t === "npc-say"), []);
+
+  // A second click starts a new conversation from the first line; the secondary button ends it.
+  browser.send({ t: "click", objectId: npc.npcId });
+  assert.equal((await browser.nextKind("npc-say")).message, "first line");
+  browser.send({ t: "talk", answer: 0 });
+  browser.send({ t: "talk", answer: 7 });
+  assert.match(String((await browser.nextKind("error")).message), /talk answer must be 0 or 1/);
 
   browser.close();
 });

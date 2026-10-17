@@ -40,6 +40,17 @@ import { readCharacterData, type CharacterData, type CharacterItems } from "../p
 import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import {
+  SHOP_OPEN_OPCODE,
+  SHOP_RESULT_OPCODE,
+  describeShopResult,
+  encodeClientObjectClick,
+  encodeClientShopRequest,
+  readShopOpen,
+  readShopResult,
+  type ClientShopRequest,
+} from "../protocol/shop.ts";
+import { QUEST_TALK_OPCODE, encodeQuestReply, readQuestTalk } from "../protocol/quest.ts";
+import {
   FIELD_OPCODE,
   encodeClientChat,
   encodeClientEmotion,
@@ -165,6 +176,25 @@ export function inventoryViewOf(items: CharacterItems | undefined): InventoryVie
   };
 }
 
+/**
+ * One row of an open shop, as `0x4A` described it.
+ *
+ * `price` is the archive's `info/price` (the server never guesses one) and `maxCount` is the cap on a
+ * *single* purchase, which is what the counted buy dialog starts at and refuses to exceed - not a
+ * stock level (FINDINGS 4.22).
+ */
+export interface ShopItemView {
+  itemId: number;
+  price: number;
+  maxCount: number;
+}
+
+/** The shop the server opened: which shop, and its rows. */
+export interface ShopView {
+  shopId: number;
+  items: ShopItemView[];
+}
+
 /** Another player in the field. */
 export interface UserView {
   characterId: number;
@@ -213,6 +243,9 @@ export type ClientEvent =
   | { kind: "user-emotion"; characterId: number; emotion: number }
   | { kind: "chat"; name: string; text: string }
   | { kind: "inventory"; inventory: InventoryView }
+  | { kind: "shop-open"; shop: ShopView }
+  | { kind: "shop-result"; code: number; message: string }
+  | { kind: "npc-say"; npcId: number; message: string }
   | { kind: "whisper-answer"; name: string; delivered: boolean }
   | { kind: "find-answer"; name: string; mapId: number }
   | { kind: "level-up"; characterId: number }
@@ -672,6 +705,46 @@ export class ClientSession {
   }
 
   /**
+   * Clicks a field object: `0x33` `[op][u32 objectId]`.
+   *
+   * This is the click that opens an NPC's shop (`0x4A`) or starts its conversation (`0x47`) - the
+   * 2003 client's `sub_55AF20`, which also arms the "a field request is pending" gate that the
+   * server clears with an empty `0x19` (the bridge already drops that byte). The id is the runtime
+   * one `0x39` gave the NPC, not its `life` template id.
+   */
+  async clickObject(objectId: number): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("clickObject() needs a session in a field");
+    await link.send(encodeClientObjectClick({ objectId }));
+  }
+
+  /**
+   * One shop button: `0x16` `[op][u8 action]...` (FINDINGS 4.22, `game/shops.ts`).
+   *
+   * The reply is `0x4B` for buy/sell/recharge (the three that arm the client's in-flight flag) and
+   * **nothing** for close; a trade that happened is then told by `0x4B`, `0x0B` and `0x0D`.
+   */
+  async shop(request: ClientShopRequest): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("shop() needs a session in a field");
+    await link.send(encodeClientShopRequest(request));
+  }
+
+  /**
+   * One answer to an NPC's `0x47` dialog: `0x15` `[op][u8 subOp][u8 answer]`.
+   *
+   * The 2003 client runs the dialog modally and only sends the two answers (`1` primary, `0`
+   * secondary); the server walks to its next line on `1` and ends the conversation on anything else.
+   * This session only ever opens `say` dialogs (that is all the server sends), so the sub-op is the
+   * say one.
+   */
+  async talk(answer: number): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("talk() needs a session in a field");
+    await link.send(encodeQuestReply({ kind: "say", answer }));
+  }
+
+  /**
    * Applies one `0x0B` entry to the character record the view reads (`this.latest.items`).
    *
    * The record is the same shape the server sent in `0x16`, so there is no second model to keep in
@@ -787,6 +860,35 @@ export class ClientSession {
           for (const change of update.changes) this.applyInventoryChange(change);
           this.log(`inventory: ${update.changes.length} change(s), timer ${update.result}`);
           this.emit({ kind: "inventory", inventory: inventoryViewOf(this.latest?.items) });
+          return;
+        }
+        case SHOP_OPEN_OPCODE: {
+          // The shop window this server opened: which shop, and the rows it priced from the
+          // archive. `0x19` (the release byte) is dropped above - it carries nothing to draw.
+          const opened = readShopOpen(new PacketReader(plain, 1));
+          this.emit({
+            kind: "shop-open",
+            shop: {
+              shopId: opened.shopId,
+              items: opened.items.map((line) => ({ itemId: line.itemId, price: line.price, maxCount: line.maxCount })),
+            },
+          });
+          return;
+        }
+        case SHOP_RESULT_OPCODE: {
+          const code = readShopResult(new PacketReader(plain, 1));
+          this.emit({ kind: "shop-result", code, message: describeShopResult(code) });
+          return;
+        }
+        case QUEST_TALK_OPCODE: {
+          // An NPC's own line (`Npc/<id>.img -> info/speak`). The server only opens `say` dialogs,
+          // so anything else is answered with a log line rather than an event a view cannot draw.
+          const talk = readQuestTalk(new PacketReader(plain, 1));
+          if (talk.body.kind === "say") {
+            this.emit({ kind: "npc-say", npcId: talk.npcId, message: talk.body.message });
+          } else {
+            this.log(`0x47 ${talk.body.kind}: this server only opens say dialogs`);
+          }
           return;
         }
         case FIELD_OPCODE.requestRelease: {
@@ -972,6 +1074,9 @@ export const CLIENT_EVENT_KINDS = [
   "user-emotion",
   "chat",
   "inventory",
+  "shop-open",
+  "shop-result",
+  "npc-say",
   "whisper-answer",
   "find-answer",
   "level-up",
