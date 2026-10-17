@@ -226,9 +226,20 @@ function handle(message) {
         ...message.characters.map((character) => {
           const button = document.createElement("button");
           button.type = "button";
-          button.innerHTML =
+          // The 2003 character-select shows the character itself; the archive's own frame is one
+          // request away and the record already carries the face, the hair and the worn ids.
+          const picture = document.createElement("img");
+          picture.className = "character-picture";
+          picture.alt = character.name;
+          picture.src =
+            `/api/avatar.png?face=${character.face ?? 20000}&hair=${character.hair ?? 30000}` +
+            `&items=${(character.items ?? []).join(",")}&stance=stand1&frame=0`;
+          const text = document.createElement("span");
+          text.className = "character-text";
+          text.innerHTML =
             `${escapeHtml(character.name)}<small>Lv.${character.level} · ${character.job} · ` +
             `HP ${character.hp}/${character.maxHp} · 地圖 ${character.mapId}</small>`;
+          button.append(picture, text);
           button.addEventListener("click", () => {
             ui.characterStatus.textContent = "進入遊戲…";
             send({ t: "character", id: character.id });

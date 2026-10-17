@@ -69,6 +69,7 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 背景（Back） | `GET /api/map/<id>/art` 的 `backs[]` ＋ `/api/png/<path>` | 依 WZ 的 `bS/no/x/y/rx/ry/type/cx/cy/a` 畫；`type` 1／3／4／6 橫向鋪、2／3／5／7 縱向鋪，`rx/ry` 是視差百分比，`cx/cy` 覆寫鋪貼間距 |
 | 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色畫在 layer 0–2 之後、layer 3 之前（`CHARACTER_LAYER`） |
 | 傳送門 | `MapHelper.img/portal/game/pv` 的動畫 | 只畫 `pt == 2` 的可見傳送門（`pt == 0` 是出生點、`pt == 1` 是隱藏通道，原版都不畫） |
+| 選角畫面 | `/api/avatar.png?face&hair&items&stance=stand1&frame=0` | 每個角色列都放上他自己的站立幀（`0x02` 的角色清單已帶 face／hair／worn ids），不是文字佔位 |
 | 自己與其他玩家 | `/api/avatar.png?face&hair&items&stance&frame&flip` | 伺服器用 `Character/*` 的 canvas 依**身體的錨點**（`navel`／`neck`／`hand`／`brow`）組出一張 PNG，回傳的 `x-frame-dx`／`x-frame-dy` 是它相對腳底的位置 |
 | 怪物 | `/api/mob/<id>` ＋ `/api/png/<path>` | `move`／`stand`／`hit` 動作表，延遲是 WZ 的 `delay`；朝向來自 `0x2F`／`0x30`（`facing` 0＝右、1＝左） |
 | NPC | `/api/npc/<id>` ＋ `/api/png/<path>` | 站著不動（`0x3B` 的走動沒有畫）；朝向是地圖 `life/f` |
@@ -199,6 +200,12 @@ node --test test/websocket.test.ts test/webclient.test.ts
 背包（`inventory` 事件的形狀、`/api/item` 的三種答案、一次雙擊把 3 瓶喝成 2 瓶且 HP 20→50），
 以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
 兩句台詞用 `0x15` 走完）。
+
+另外還有一支**對真的伺服器**跑的畫面探針：`node server/scripts/frame_probe.mjs 8495`。它把
+`client/main.js` 放進一個 DOM shim（元素、會算次數的 2D context、會 `onload` 的 `Image`、Node 的
+`WebSocket`）裡真的登入、選角、進圖，再跑真的 `requestAnimationFrame`；它斷言背景、圖塊／物件、
+NPC 與角色的 avatar 都在**同一幀**被畫出來（헤네시스：3 幀 4118 次 `drawImage`、152 個不同來源）。
+它不取代眼睛，但它釘住「資料到得了畫面」這一段。
 
 頁面的**繪圖**本身仍然只有眼睛能驗，但把它切開的那幾層有測試：`test/art.test.ts`（17 則）釘住
 compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM` 的深度、背景的 origin 與

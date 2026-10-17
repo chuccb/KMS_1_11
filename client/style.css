@@ -657,3 +657,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* The character-select row: the archive's own standing frame, doubled, next to the record. */
+#character-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+#character-list .character-picture {
+  width: auto;
+  height: 92px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+#character-list .character-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#character-list .character-text small {
+  opacity: 0.75;
+}
