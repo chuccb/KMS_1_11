@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KMS 1.11 — browser view</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <header id="bar">
+      <strong>KMS 1.11</strong>
+      <span id="where">未連線</span>
+      <button id="log-toggle" type="button">日誌</button>
+    </header>
+
+    <section id="connect" class="panel">
+      <h1>KMS 1.11</h1>
+      <p class="sub">2003 年客戶端協定的瀏覽器視圖：<br />伺服器端真的用 TCP 跑完整條登入鏈。</p>
+      <label>帳號 <input id="user" autocomplete="username" spellcheck="false" /></label>
+      <label>密碼 <input id="pass" type="password" autocomplete="current-password" /></label>
+      <button id="login" type="button">登入</button>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="worlds" class="panel hidden">
+      <h2>選世界</h2>
+      <div id="world-list" class="choices"></div>
+    </section>
+
+    <section id="characters" class="panel hidden">
+      <h2>選角色</h2>
+      <div id="character-list" class="choices"></div>
+      <p id="character-status" class="status"></p>
+    </section>
+
+    <aside id="log" class="hidden">
+      <h3>事件</h3>
+      <ol id="log-lines"></ol>
+    </aside>
+
+    <footer id="hud" class="hidden">
+      <div class="who"><span id="hud-name"></span> <span id="hud-level"></span></div>
+      <div class="bar hp"><i id="hud-hp"></i><b id="hud-hp-text"></b></div>
+      <div class="bar mp"><i id="hud-mp"></i><b id="hud-mp-text"></b></div>
+      <div class="stats"><span id="hud-exp"></span><span id="hud-mesos"></span><span id="hud-map"></span></div>
+    </footer>
+
+    <div id="chatbox" class="hidden">
+      <ol id="chat-lines"></ol>
+      <input id="say" placeholder="Enter 開始輸入，再按 Enter 送出" maxlength="120" spellcheck="false" />
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

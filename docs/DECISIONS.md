@@ -1537,3 +1537,71 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
 - 測試：`messenger.test.ts` 10 則、`serve.test.ts` 一條兩 socket 的（**468 個測試**）、
   `whisper_probe.mjs` 八項（105 個檢查）。
 - **沒有存檔變更**：房間與邀請都只活在記憶體。
+
+## ADR-034：Phase 3 的第一刀是**瀏覽器客戶端 ＋ WebSocket 橋**，不是 Godot 殼層
+
+**日期**：2026-10-17 ｜ **狀態**：已定案（實作在 `client/`、`server/src/client/session.ts`、
+`server/src/net/websocket.ts`、`server/src/net/webclient.ts`）。
+
+**決策**：Phase 3 的第一步是「能登入、能看到世界、能說話、能走」的最小客戶端，技術上是**瀏覽器
+頁面 ＋ 伺服器端的一個 WebSocket 橋**，而**不是** Godot 專案。
+
+**三個理由**（前兩個是環境事實，第三個是設計）：
+
+1. **瀏覽器開不了 TCP socket。** 2003 的協定是裸 TCP：`u16 header + u16 length + 加密 body`，
+   連線一開始由伺服器送 211-byte 握手（`sub_43A410`）。瀏覽器只有 WebSocket，所以「在瀏覽器裡玩」
+   一定需要一個**伺服器端的進程**替它持有那條 socket。這個橋就是 `net/webclient.ts`：每一條
+   WebSocket 連線配一個 `ClientSession`（`src/client/session.ts`），後者用真正的
+   `LoginServer`／`GameEntryServer`、真正的密碼表與真正的 cipher 跑完整條登入鏈。
+2. **這個環境拿不到 Godot 的 binary。** `github.com/.../Godot_v4.3-stable_linux.x86_64.zip` 回
+   302 指向 `objects.githubusercontent.com`，而沙箱只放行 `github.com`／`codeload`／`api`／npm／
+   PyPI 幾個主機，下載會停在 0 byte。沒有引擎就不能驗證 Godot 專案能開、能 export web——那正好是
+   Phase 3 的出口條件，所以先做一個**現在就能跑、現在就能驗**的殼。
+3. **協定知識留在被測試的那一側。** 橋的兩邊是「2003 封包 ↔ JSON」；JSON 是**我們的設計**，不是
+   證據。把協定留在 TypeScript 的伺服器端，讓它可以被 `node --test` 直接驅動（
+   `test/webclient.test.ts` 用 Node 內建的 `WebSocket` 當瀏覽器），而頁面只剩畫圖與輸入。
+
+**線路的兩端各自負責什麼**：
+
+| 位置 | 知道什麼 | 不知道什麼 |
+|---|---|---|
+| `ClientSession`（Node） | 握手、cipher、`0x01`→`0x02`→`0x03`→`0x04`→`0x16`、`0x1C`／`0x1D`／`0x22`／`0x0D`／`0x1A`／`0x2F`／`0x33`／`0x39` | 畫面、輸入、任何「玩家想要什麼」 |
+| `net/webclient.ts` | HTTP 靜態檔、`/ws`、`/api/map/<id>` | 2003 封包的內容（它只轉 `ClientEvent`） |
+| `client/main.js` | canvas、鍵盤、聊天框 | 密碼、封包、WZ |
+
+**四個決策**：
+
+1. **`--web-port <n>` 一定要配 `--game-port`。** `0x03` 的回包帶的是「遊戲伺服器的 IP 與 port」
+   （`sub_432FB0` 直接把它塞進 `sockaddr_in`），瀏覽器無論如何都用不到那個位址；橋因此用自己的
+   `127.0.0.1:<game-port>` 連線，只跟回包拿**角色 id**（那是 `0x04` 要的值）。少了 `--game-port`
+   就沒有遊戲伺服器可以連，所以直接在參數檢查時拒絕，而不是讓使用者看到一個連不上的頁面。
+2. **地圖幾何由伺服器給，不重寫 WZ 讀取器。** `/api/map/<id>` 把 `MapData.footholdSegments`、
+   `portal`、`life` 換成 JSON；`game/map.ts` 已經是那張圖的唯一讀者。頁面因此不需要碰 `Data.wz`，
+   也不需要我們把 `Map/Map/*.img` 的圖層先轉成 assets（那些是 Phase 1 的工作，而且不進 git）。
+3. **走路由瀏覽器送一個元素的 `CMovePath`。** `CVecCtrlUser` 的物理在 2003 client 裡；這個殼沒有
+   物理，只有「按方向鍵 → 新的絕對座標」。伺服器信任路徑的第一個元素（`FieldInstance.reportMove`
+   就是這樣做的），所以一個元素的路徑是**誠實的最小值**，不是猜測。
+4. **不做建置步驟、不加執行時依賴。** 頁面是三個檔案（`index.html`／`style.css`／`main.js`），
+   由伺服器直接供應；`package.json` 仍然是零執行時依賴，測試仍然只要 `node --test`。
+
+**被否決的選項與原因**：
+
+- **在瀏覽器裡實作 cipher，橋只轉發原始 bytes**：2003 的 cipher 已經有 golden 測試的 TypeScript
+  實作；把它複製一份到沒有型別檢查的頁面，等於把一個已驗證的東西變成兩個未驗證的。
+- **用 long-poll 取代 WebSocket**：可以穿過更多代理，但每個訊息一來一回，走路會抖；WebSocket 是
+  瀏覽器的標準 API，Node 也有，測試不需要額外依賴。
+- **把 WZ 圖層先轉成 PNG 再畫**：那是 Phase 1 的資產管線（而且 `assets/` 不進 git）；這個切片先畫
+  腳踏點與標籤，把「真實的圖」留給下一個切片。
+- **在頁面裡做怪物 AI／傷害**：那正是 ADR-008 說「在 client」的東西，但那是**2003 的 client**；
+  這個殼不是它，硬做只會得到一份沒有證據的戰鬥模型。
+- **用 Godot 先建空專案**：拿不到引擎，無法 compile、無法 export、無法驗證，等於用猜的交付。
+
+**後果**：
+
+- 新檔：`client/index.html`、`client/style.css`、`client/main.js`、
+  `server/src/client/session.ts`、`server/src/net/websocket.ts`、`server/src/net/webclient.ts`。
+- `server/src/cli.ts`：`serve --web-port <n>`（需 `--game-port`），啟動訊息多一行 `browser:`。
+- 測試：`websocket.test.ts` 8 則、`webclient.test.ts` 4 則（真 socket、真 WebSocket、真 cipher；
+  **480 個測試**）。頁面的繪圖本身**沒有**自動測試，`docs/CLIENT.md` 說明怎麼用眼睛驗。
+- 瀏覽器端**不是** 2003 client 的替代品：沒有傷害、沒有怪物 AI、沒有背包／商店／交易介面；它是一個
+  **視窗**加一個聊天框。真正的客戶端仍然是 Phase 3 的 Godot 專案（或任何能吃這條協定的東西）。

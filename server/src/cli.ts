@@ -21,6 +21,7 @@ import { DEFAULT_PING_MS } from "./net/heartbeat.ts";
 import { OnlineAccounts } from "./net/online.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
+import { startWebClient } from "./net/webclient.ts";
 import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { consumeSpecProvider } from "./game/items.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -53,7 +54,7 @@ usage:
         [--start-mesos <n>]
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
         [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
-        [--handshake-body <hex>]
+        [--web-port <n>] [--handshake-body <hex>]
         [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
@@ -110,6 +111,13 @@ notes:
   starts from), and a file this build cannot read is refused - the server prints why and exits instead
   of overwriting it. Saves happen after a character is created or deleted and when a session leaves
   the field (the one place a character's play ends), written atomically: a crash never truncates it.
+
+  --web-port serves the browser client in client/ (a page plus a WebSocket) on another port and
+  bridges every browser connection to this server over real TCP: the 2003 packets, the cipher and
+  the handshake are all still there, the browser just cannot open a socket itself (net/webclient.ts,
+  ADR-034). The page logs in, picks a world and a character, then draws the map's footholds from
+  /api/map/<id> and the players, monsters and NPCs it is told about; arrow keys send 0x0E and the
+  chat box sends 0x12. It needs --game-port, because a browser tab cannot use the address in 0x03.
 
   wz png <image path> --out <dir> is the way to look at decoded pixels: it writes one PNG per
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
@@ -255,6 +263,7 @@ async function runServe(rest: string[]): Promise<number> {
   const port = Number(args.port ?? 8484);
   const gamePort = args["game-port"] === undefined ? undefined : Number(args["game-port"]);
   const mapId = args.map === undefined ? DEFAULT_MAP_ID : Number(args.map);
+  const webPort = args["web-port"] === undefined ? undefined : Number(args["web-port"]);
   const startMesos = args["start-mesos"] === undefined ? 0 : Number(args["start-mesos"]);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
@@ -262,6 +271,14 @@ async function runServe(rest: string[]): Promise<number> {
   }
   if (gamePort !== undefined && (!Number.isInteger(gamePort) || gamePort < 0 || gamePort > 65535)) {
     process.stderr.write(`invalid --game-port: ${String(args["game-port"])}\n`);
+    return 1;
+  }
+  if (webPort !== undefined && (!Number.isInteger(webPort) || webPort < 0 || webPort > 65535)) {
+    process.stderr.write(`invalid --web-port: ${String(args["web-port"])}\n`);
+    return 1;
+  }
+  if (webPort !== undefined && gamePort === undefined) {
+    process.stderr.write("--web-port needs --game-port: the browser cannot connect to a TCP address in 0x03\n");
     return 1;
   }
   if (!Number.isInteger(mapId) || mapId < 0) {
@@ -421,6 +438,32 @@ async function runServe(rest: string[]): Promise<number> {
     }
   }
   const info = await login.listen(port, host);
+  // The browser client (ADR-034). It dials this process over TCP, so it must come up after the two
+  // listeners: `--web-port` with `--game-port` is checked above, and the login port is the one that
+  // was just bound (port 0 becomes a real number here).
+  let web: Awaited<ReturnType<typeof startWebClient>> | undefined;
+  if (webPort !== undefined) {
+    try {
+      web = await startWebClient({
+        port: webPort,
+        host,
+        loginPort: info.port,
+        gamePort: boundGamePort,
+        gameHost: "127.0.0.1",
+        ...(mapProvider !== undefined ? { mapProvider } : {}),
+        ...(log ? { log } : {}),
+      });
+    } catch (error) {
+      // The two listeners are already up; close them before reporting, or the operator's next run
+      // hits the same ports and the message is about the wrong problem.
+      process.stderr.write(
+        `--web-port ${webPort}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      await login.close();
+      await game?.close();
+      return 1;
+    }
+  }
   process.stdout.write(
     `login server listening on ${info.host}:${info.port}\n` +
       `  accounts: ${[...accounts.keys()].map((name) => `${name}:${accounts.get(name)?.password}`).join(", ")}\n` +
@@ -432,13 +475,15 @@ async function runServe(rest: string[]): Promise<number> {
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
       `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
-      `  heartbeat: ${pingMs === 0 ? "off (--ping <ms>)" : `0x08 every ${pingMs} ms, drop after ${pingMs * 3} ms`}\n`,
+      `  heartbeat: ${pingMs === 0 ? "off (--ping <ms>)" : `0x08 every ${pingMs} ms, drop after ${pingMs * 3} ms`}\n` +
+      `  browser:   ${web === undefined ? "off (--web-port <n> with --game-port)" : `http://${web.host === "0.0.0.0" ? "127.0.0.1" : web.host}:${web.port}/`}\n`,
   );
   await new Promise<void>((resolve) => {
     const stop = () => resolve();
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
   });
+  await web?.close();
   await login.close();
   await game?.close();
   return 0;
