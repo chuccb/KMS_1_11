@@ -163,6 +163,27 @@ body {
   margin-top: 2px;
 }
 
+#new-character {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#new-character input {
+  flex: 1;
+  min-width: 0;
+}
+
+#new-character button {
+  width: auto;
+  margin-top: 0;
+  padding: 10px 16px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 .status {
   min-height: 18px;
   margin: 14px 0 0;

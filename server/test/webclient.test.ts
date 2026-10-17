@@ -124,6 +124,8 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }): Promise<
   const accounts = new Map<string, AccountRecord>([
     ["admin", { password: "admin", characters: [] }],
     ["alt", { password: "alt", characters: [] }],
+    // Empty on purpose: a fresh account is what the page's create row exists for.
+    ["newbie", { password: "newbie", characters: [] }],
   ]);
   for (const [user, id, name] of [
     ["admin", 21, "Hero"],
@@ -251,6 +253,40 @@ test("a browser logs in, enters the field, talks and walks", { timeout: 20000 },
   assert.equal(move.x, 140);
   assert.equal(move.y, 250);
 
+  browser.close();
+});
+
+test("a fresh account creates its first character, then plays it", { timeout: 20000 }, async (t) => {
+  const world = await startWorld(t);
+  const browser = await Browser.open(world.webPort);
+  browser.send({ t: "login", user: "newbie", password: "newbie" });
+  assert.equal((await browser.nextKind("login")).result, 0);
+
+  browser.send({ t: "world", index: 0 });
+  const empty = await browser.nextKind("characters");
+  assert.equal(empty.result, 0);
+  assert.deepEqual(empty.characters, []);
+
+  // The page sends `create`; the bridge answers with the refreshed list (so the new button can be
+  // drawn) and then the `created` line the page prints.
+  browser.send({ t: "create", name: "Rookie" });
+  const listed = await browser.nextKind("characters");
+  const characters = listed.characters as { id: number; name: string }[];
+  assert.equal(characters.length, 1);
+  assert.equal(characters[0]!.name, "Rookie");
+  const created = await browser.nextKind("created");
+  assert.equal(created.ok, true);
+  assert.equal(created.name, "Rookie");
+
+  // A second one with the same name is refused by the name check, and the list does not grow.
+  browser.send({ t: "create", name: "Rookie" });
+  const refused = await browser.nextKind("created");
+  assert.equal(refused.ok, false);
+  assert.match(String(refused.reason), /name check 1/);
+
+  browser.send({ t: "character", id: characters[0]!.id });
+  const field = await browser.nextKind("field");
+  assert.equal((field.self as { name: string }).name, "Rookie");
   browser.close();
 });
 

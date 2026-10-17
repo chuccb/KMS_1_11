@@ -26,6 +26,8 @@ const ui = {
   characters: /** @type {HTMLElement} */ (document.getElementById("characters")),
   characterList: /** @type {HTMLElement} */ (document.getElementById("character-list")),
   characterStatus: /** @type {HTMLElement} */ (document.getElementById("character-status")),
+  newName: /** @type {HTMLInputElement} */ (document.getElementById("new-name")),
+  create: /** @type {HTMLButtonElement} */ (document.getElementById("create")),
   hud: /** @type {HTMLElement} */ (document.getElementById("hud")),
   hudName: /** @type {HTMLElement} */ (document.getElementById("hud-name")),
   hudLevel: /** @type {HTMLElement} */ (document.getElementById("hud-level")),
@@ -144,6 +146,7 @@ function handle(message) {
         return;
       }
       ui.characterStatus.textContent = "";
+      ui.characterStatus.classList.remove("bad");
       ui.characterList.replaceChildren(
         ...message.characters.map((character) => {
           const button = document.createElement("button");
@@ -159,9 +162,17 @@ function handle(message) {
         }),
       );
       if (message.characters.length === 0) {
-        ui.characterList.textContent = "這個世界還沒有角色（用原客戶端或 0x05 建立）。";
+        ui.characterList.textContent = "這個世界還沒有角色：在下面輸入名字建立一個。";
       }
       logLine(`characters: ${message.characters.length}`);
+      return;
+
+    case "created":
+      ui.characterStatus.textContent = message.ok
+        ? `已建立「${message.name}」，選它進入遊戲。`
+        : `建立失敗「${message.name}」：${message.reason}`;
+      ui.characterStatus.classList.toggle("bad", !message.ok);
+      logLine(message.ok ? `created ${message.name} (id ${message.id})` : `create failed: ${message.reason}`);
       return;
 
     case "field":
@@ -520,6 +531,15 @@ function hidePanels() {
 // ---------------------------------------------------------------- input
 
 ui.login.addEventListener("click", connect);
+
+ui.create.addEventListener("click", () => {
+  const name = ui.newName.value.trim();
+  if (name === "") {
+    ui.characterStatus.textContent = "先輸入角色名稱。";
+    return;
+  }
+  send({ t: "create", name });
+});
 ui.pass.addEventListener("keydown", (event) => {
   if (event.key === "Enter") connect();
 });

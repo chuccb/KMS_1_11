@@ -199,6 +199,8 @@ class BrowserSession {
           return await this.selectWorld(Number(message.index ?? 0));
         case "character":
           return await this.selectCharacter(Number(message.id ?? 0));
+        case "create":
+          return await this.createCharacter(String(message.name ?? ""));
         case "say":
           return await this.say(String(message.text ?? ""));
         case "move":
@@ -252,6 +254,36 @@ class BrowserSession {
     const character = this.lastCharacters.find((candidate) => candidate.stats.id === id);
     if (character !== undefined) session.remember(character);
     await session.enterGame(reply);
+  }
+
+  /**
+   * The one thing a fresh account cannot do without a 2003 client: make its first character.
+   *
+   * The reply is two messages, in this order: the refreshed list (so the page can show the new
+   * button without another round trip) and a `created` line the page prints as-is. A refusal is not
+   * an error - a taken name is the ordinary outcome of a typo - so it does not use the `error` type.
+   */
+  private async createCharacter(name: string): Promise<void> {
+    const session = this.require();
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      this.send({ t: "created", ok: false, name: trimmed, reason: "empty name" });
+      return;
+    }
+    const reply = await session.createCharacter(trimmed);
+    if (reply.character !== undefined) this.lastCharacters.push(reply.character);
+    this.send({
+      t: "characters",
+      result: 0,
+      characters: this.lastCharacters.map((character) => summaryOf(character)),
+    });
+    if (reply.character !== undefined) {
+      this.send({ t: "created", ok: true, name: reply.character.stats.name, id: reply.character.stats.id });
+    } else if (reply.nameCheck !== 0) {
+      this.send({ t: "created", ok: false, name: trimmed, reason: `name check ${reply.nameCheck}` });
+    } else {
+      this.send({ t: "created", ok: false, name: trimmed, reason: "the server refused the create" });
+    }
   }
 
   /** The records the character list handed out; `remember` needs the full stats, not the summary. */

@@ -19,6 +19,10 @@ node src/cli.ts serve \
 
 打開 `http://127.0.0.1:8500/`，用 `admin:admin` 登入，選世界、選角色。
 
+一個**空帳號**（例如 `--account newbie:newbie`）在選角頁下方有「建立角色」：輸入名字按下去，頁面送
+`0x06`（十個外觀字）再送 `0x05`，新角色就出現在清單裡——這是 2003 client 建立角色的那兩包，沒有另開
+後門。名字重複時伺服器的 `0x06` 會回「已取用」，頁面照實印出來。
+
 在同一個伺服器上再開一個分頁、用 `alt:alt` 登入，兩個角色就會在同一個地圖看到彼此。
 
 ## 畫面上有什麼
@@ -32,6 +36,7 @@ node src/cli.ts serve \
 | NPC（綠色方塊＋模板 id） | `0x39`／`0x3A` | 站著不動（`0x3B` 的走動沒有畫） |
 | HP／MP／EXP／mesos／地圖 | `0x16` 的角色紀錄 ＋ `0x0D` 的差異包 | 數字直接來自伺服器 |
 | 聊天 | `0x1A` sub-op `0x12` | 只顯示場地聊天；密語沒有接 |
+| 新角色 | `0x04`（名字檢查）＋`0x05`（建立） | 外觀十個字固定，等於 `scripts/whisper_probe.mjs` 的那組 |
 | 右上「日誌」 | 所有事件 | 沒實作的封包會以 `unhandled packet 0x..` 出現 |
 
 ## 操作的封包對照
@@ -41,6 +46,7 @@ node src/cli.ts serve \
 | 登入 | `{t:"login",user,password}` | c2s `0x01` → s2c `0x01` |
 | 選世界 | `{t:"world",index}` | c2s `0x02` → s2c `0x02` |
 | 選角色 | `{t:"character",id}` | c2s `0x03` → s2c `0x03`，再連遊戲伺服器送 `0x04` |
+| 建立角色 | `{t:"create",name}` | c2s `0x06` → s2c `0x04`，c2s `0x05` → s2c `0x05`（成功才帶角色紀錄） |
 | 進地圖 | — | s2c `0x16`（＋ `0x2F`／`0x39`／`0x1C` 快照） |
 | 說話 | `{t:"say",text}` | c2s `0x12` → s2c `0x1A`/`0x12` |
 | 走一步 | `{t:"move",x,y,foothold}` | c2s `0x0E` ＋ 一個元素的 `CMovePath` → 其他人收 s2c `0x22` |
@@ -63,11 +69,12 @@ level-up     { characterId }
 mob-enter    { mob }         mob-move { mobId, x, y }     mob-leave { mobId }
 npc-enter    { npc }         npc-leave { npcId }
 unknown      { opcode, bytes }                            ← 這個殼沒讀的封包
+created      { ok, name, id?, reason? }                    ← 建立角色（0x05）的結果
 disconnect   { reason }
 error        { message }
 ```
 
-頁面 → 伺服器只有五種：`login`／`world`／`character`／`say`／`move`（上表）。
+頁面 → 伺服器只有六種：`login`／`world`／`character`／`create`／`say`／`move`（上表）。
 
 ## 刻意沒有的東西
 
@@ -87,8 +94,8 @@ node --test test/websocket.test.ts test/webclient.test.ts
 ```
 
 `websocket.test.ts`（8 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
-一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（4 則）用 Node 內建的 `WebSocket` 當瀏覽器，
+一定要遮罩、server 訊框一定不遮罩。`webclient.test.ts`（5 則）用 Node 內建的 `WebSocket` 當瀏覽器，
 對**真的** `LoginServer`／`GameEntryServer` 走完登入→選角→進圖→說話→走路，外加靜態檔、
-`/api/map/<id>` 與 `..` 的拒絕。
+`/api/map/<id>` 與 `..` 的拒絕，以及一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩。
 
 頁面的**繪圖**沒有自動測試——它需要眼睛。這一頁就是那個「眼睛」的說明書。

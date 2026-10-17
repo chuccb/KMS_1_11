@@ -35,7 +35,7 @@ import { CipherState, SERVER_SEND_MAGIC } from "../protocol/cipher.ts";
 import { encodeSessionPacket, SessionDeframer } from "../protocol/session.ts";
 import { encodeClientPacket } from "../protocol/login.ts";
 import { PacketReader } from "../protocol/packet.ts";
-import { LOGIN_OPCODE, LOGIN_RESULT, type WorldEntry } from "../protocol/replies.ts";
+import { LOGIN_OPCODE, LOGIN_RESULT, NAME_CHECK_RESULT, type WorldEntry } from "../protocol/replies.ts";
 import { readCharacterData, type CharacterData } from "../protocol/chardata.ts";
 import {
   FIELD_OPCODE,
@@ -59,6 +59,9 @@ import {
 import { NPC_OPCODE, readNpcEnterField, readNpcId } from "../protocol/npc.ts";
 import { STAT_OPCODE, readStatUpdate, type StatDiff } from "../protocol/stat.ts";
 import type { MovePath } from "../protocol/movepath.ts";
+
+/** The ten appearance words the create dialog sends (`CHECK_NAME_APPEARANCE_WORDS`). */
+const CREATE_DIALOG_LOOK = [20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 7];
 
 /** What a view needs to know about the character the connection belongs to. */
 export interface SelfView {
@@ -144,6 +147,20 @@ export interface LoginReply {
 export interface CharacterListReply {
   result: number;
   characters: CharacterData[];
+}
+
+/**
+ * What `0x06` + `0x05` came back with.
+ *
+ * The name check and the create are one operation here because the 2003 dialog also sends them as a
+ * pair, and because the server keeps the check's appearance words for the create that follows: a
+ * `0x05` with no `0x06` before it is created from the default look instead of the chosen one.
+ */
+export interface CreateCharacterReply {
+  /** The `0x06` answer: 0 free, a positive value taken, negative "the check itself failed". */
+  nameCheck: number;
+  /** The record from `0x05`, present only when the server accepted the create. */
+  character?: CharacterData;
 }
 
 export interface CharacterSelectReply {
@@ -392,6 +409,40 @@ export class ClientSession {
     const characters: CharacterData[] = [];
     for (let i = 0; i < count; i++) characters.push(readCharacterData(reader));
     return { result, characters };
+  }
+
+  /**
+   * `0x06` then `0x05`: the pair the 2003 create dialog sends (`sub_42FD30` / `sub_42FF90`).
+   *
+   * `0x06` carries ten appearance words even though this view has no create dialog of its own -
+   * `encodeClientPacket` refuses any other count, and the server stores them for the `0x05` that
+   * follows. The words are the ones `scripts/whisper_probe.mjs` uses: a real face, hair, top, pants,
+   * shoes and weapon from the shipped `Data.wz`, then four dice rolls. Which of the four is STR and
+   * which is LUK is not located, and nothing in this repo reads them.
+   *
+   * A create the server refuses answers with the bare result byte (0), which is the one place in the
+   * login chain where 0 is failure (`encodeCreateCharacterResult`).
+   */
+  async createCharacter(name: string): Promise<CreateCharacterReply> {
+    const link = this.requireLink();
+    await link.send(
+      encodeClientPacket({
+        kind: "check-name",
+        opcode: LOGIN_OPCODE.checkName,
+        name,
+        appearance: [...CREATE_DIALOG_LOOK],
+      }),
+    );
+    const checked = await link.take(LOGIN_OPCODE.nameCheckResult, this.timeoutMs);
+    const checkReader = new PacketReader(checked, 1);
+    checkReader.readAsciiString();
+    const nameCheck = (checkReader.readByte() << 24) >> 24;
+    if (nameCheck !== NAME_CHECK_RESULT.available) return { nameCheck };
+
+    await link.send(encodeClientPacket({ kind: "create-character", opcode: LOGIN_OPCODE.createCharacter, name }));
+    const created = await link.take(LOGIN_OPCODE.createCharacter, this.timeoutMs);
+    if ((created[1] ?? 0) === 0) return { nameCheck };
+    return { nameCheck, character: readCharacterData(new PacketReader(created, 2)) };
   }
 
   /** `0x03`: asks to enter the game with that character. */
