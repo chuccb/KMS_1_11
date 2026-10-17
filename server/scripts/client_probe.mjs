@@ -145,8 +145,9 @@ Object.assign(globalThis, await import("../../client/skills.mjs"));
 Object.assign(globalThis, await import("../../client/jobs.mjs"));
 Object.assign(globalThis, await import("../../client/recovery.mjs"));
 Object.assign(globalThis, await import("../../client/testtools.mjs"));
+Object.assign(globalThis, await import("../../client/temporarystats.mjs"));
 Object.assign(globalThis, await import("../../client/basiccombat.mjs"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
   testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},

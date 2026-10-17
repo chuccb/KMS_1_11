@@ -2,6 +2,7 @@
 export function testTools({
   send,
   getSelf,
+  getMovement = () => undefined,
   isInGame,
   onOpen,
   openSkills,
@@ -18,16 +19,33 @@ export function testTools({
     canMap = false,
     jobs = [],
     maps = [],
-    lastRequest;
+    lastRequest,
+    lastMovementAt = -Infinity;
   const status = (text) => {
     el("test-tools-status").textContent = text;
   };
+  function movementStatus() {
+    const state = getMovement();
+    el("qa-movement").textContent = state
+      ? `移動快照（非原版工具）：速度 ${state.speedPercent}%／跳躍 ${state.jumpPercent}%` +
+        (state.secondsLeft === undefined
+          ? "；沒有加速藥水效果。"
+          : `；加速效果剩約 ${state.secondsLeft} 秒。`)
+      : "尚未進入地圖。";
+  }
   function sync() {
+    movementStatus();
     root.classList.toggle("hidden", !opened);
     toggle.disabled = !isInGame();
     toggle.setAttribute("aria-expanded", String(opened));
     const ready = enabled && !busy && el("qa-confirm").checked;
-    for (const id of ["qa-apply", "qa-heal", "qa-drain", "qa-checkpoint"])
+    for (const id of [
+      "qa-apply",
+      "qa-heal",
+      "qa-drain",
+      "qa-checkpoint",
+      "qa-speed-potions",
+    ])
       el(id).disabled = !ready;
     el("qa-restore").disabled = !ready || !restoreAvailable;
     for (const id of ["qa-map-go", "qa-town", "qa-hunt"])
@@ -42,7 +60,7 @@ export function testTools({
       ? restoreAvailable
         ? "已有還原點（只存能力／技能；不跨服務重啟）"
         : "已有還原點，但等級已不同；為保護升級成長，不能還原舊點。"
-      : "第一次變更前自動記住能力與已學技能；不回溯EXP、道具、金錢或地圖。";
+      : "第一次變更能力前自動記住能力與已學技能；不回溯EXP、道具、金錢或地圖。";
   }
   function close() {
     opened = false;
@@ -146,7 +164,13 @@ export function testTools({
       resetSkills: el("qa-reset-skills").checked,
     });
   });
-  for (const kind of ["heal", "drain", "checkpoint", "restore"])
+  for (const kind of [
+    "heal",
+    "drain",
+    "checkpoint",
+    "restore",
+    "speed-potions",
+  ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));
   el("qa-map-filter").addEventListener("input", filterMaps);
   el("qa-map-go").addEventListener("click", () => {
@@ -162,6 +186,12 @@ export function testTools({
   return {
     get open() {
       return opened;
+    },
+    tick(now) {
+      if (opened && now - lastMovementAt >= 250) {
+        lastMovementAt = now;
+        movementStatus();
+      }
     },
     close,
     openPanel: open,

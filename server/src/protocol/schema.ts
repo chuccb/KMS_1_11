@@ -1276,10 +1276,14 @@ export const PACKETS: readonly PacketSchema[] = [
         note: `flag 0x${(1 << index).toString(16)}${STAT_DIFF_WIDTH_WARNINGS[field.name] ?? ""}`,
       })),
       {
-        name: "panelFlags",
+        name: "durationMs",
         type: "u32",
-        note: "0 = nothing more (the client returns immediately); the panel/buff block itself is not decoded yet",
+        note: "0 ends the packet; otherwise temporary-stat mask, signed values and one source pair follow (PE 4C5DC0 / FINDINGS 4.21.2)",
       },
+      { name: "temporaryMask", type: "u32", note: "only if durationMs != 0; bits 0x001..0x800, not the duration word" },
+      { name: "temporaryValues", type: "s16[]", note: "one signed value per set bit in increasing order; only if durationMs != 0" },
+      { name: "sourceIsSkill", type: "u8", note: "only if durationMs != 0; 0 = item iconRaw, nonzero = skill icon; ONE source per application" },
+      { name: "sourceId", type: "u32", note: "only if durationMs != 0; the item or skill id (4CBBD0)" },
     ],
   },
   {

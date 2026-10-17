@@ -40,9 +40,8 @@
  *    change is worse than a no-op the player can repeat, and the wire cannot say "refused" -
  *    `0x18`/`0x19` have no result byte (unlike the shop's `0x4B`).
  *
- * A buff item (`spec/time` - 속도향상의 물약 and friends) is refused rather than half-applied: the
- * buff block is the `0x0D` panel blob that is not decoded yet (FINDINGS 4.21.6), so an item whose
- * only effect the server cannot express is left in the bag.
+ * Speed items now use the native temporary-stat tail, with WZ time in milliseconds.
+ * Other timed effects stay all-or-nothing refused until their actual mechanics are implemented.
  */
 import { recordOf, propertyOf } from "../wz/props.ts";
 import { itemImagePath } from "../wz/paths.ts";
@@ -71,8 +70,11 @@ export interface ConsumeSpec {
   mpR?: number;
   /** Destination of a 203-family item; `-1` is "the nearest town" (`spec/moveTo`). */
   moveTo?: number;
+  /** Native movement bonus and duration; only this timed item mechanic is enabled. */
+  speed?: number;
+  time?: number;
   /**
-   * `spec` field names that exist on this item but are **not** applied (`time`, `pad`, `speed`,
+   * `spec` field names that exist on this item but are **not** applied (`pad`, `mad`,
    * `eva`, …: the buff line). A use of one of these is refused, so nothing is lost silently.
    */
   unapplied: string[];
@@ -108,12 +110,21 @@ export function consumeSpecOf(archive: WzArchive | undefined, itemId: number): C
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   };
   const applied = new Set<string>([...APPLIED_SPEC_FIELDS, MOVE_TO_FIELD]);
+  // Recognizing a duration is not implementing every timed effect. Unknown fields still refuse
+  // the entire item, including an item mixing speed with a not-yet-functional combat effect.
+  const speed = read("speed"), time = read("time");
+  if (speed !== undefined && Number.isInteger(speed) && speed !== 0 && speed >= -32768 && speed <= 32767
+      && time !== undefined && Number.isInteger(time) && time > 0 && time <= 0x7fffffff) {
+    applied.add("speed");
+    applied.add("time");
+  }
   return {
     hp: read("hp"),
     mp: read("mp"),
     hpR: read("hpR"),
     mpR: read("mpR"),
     moveTo: read(MOVE_TO_FIELD),
+    ...(applied.has("speed") ? { speed, time } : {}),
     unapplied: [...fields].filter((name) => !applied.has(name) && typeof spec[name] === "number"),
   };
 }

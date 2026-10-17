@@ -4,6 +4,15 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
+## 最新實作：原加速藥水／暫時能力與裝備移動值（未測試）
+
+- 原0x0D tail實為duration／mask／s16 values／來源，已更正舊誤判並接上client；原iconRaw、32px右排、y45、alpha210。
+- `2002001` 原speed8／180000ms改實際移動，重喝覆蓋／刷新、換圖保留deadline，到期清掉；
+  穿戴裝備實例speed/jump依原兩階段clamp，非cash外觀／非WZ模板覆蓋。
+- 體驗工具勾選後可明確發3瓶（會存檔，能力還原不回收），另有唯讀速度與剩餘秒數。
+- 其他戰鬥buff道具仍整筆拒絕，原完整碰撞／傷害／技能施放未完成；不宣稱全buff系統完成。
+- 不執行測試，只啟服務。來源、斷線政策與步驟見 [TEMPORARY_STATS.md](TEMPORARY_STATS.md)。
+
 ## 最新實作：自然恢復與方便體驗的獨立工具（未測試）
 
 - 558950 的獨立30ms HP／MP計時、站立／繩梯條件、1000000.hp／2000000.mp／1000002.time、地圖recovery；

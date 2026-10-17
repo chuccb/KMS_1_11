@@ -86,9 +86,9 @@ test("the percentage fields are percentages of the maxima, rounded down", () => 
   assert.deepEqual(consumeDeltas(odd!, record()), { hpDelta: 16 });
 });
 
-test("a buff item is refused instead of half-applied", () => {
-  // Item/Consume/0200.img/02002000 (민첩함의 물약): the only fields are the buff block the server
-  // cannot express yet - `eva` and the duration - so the item stays in the bag (FINDINGS 4.21.6).
+test("an evasion buff is refused until its actual mechanic is implemented", () => {
+  // Item/Consume/0200.img/02002000 (민첩함의 물약): the unimplemented combat mechanic is
+  // `eva`; recognizing the wire format alone does not make this potion functional - so the item stays in the bag (FINDINGS 4.21.6).
   const potion = consumeSpecOf(
     fakeArchive("Item/Consume/0200.img", image({ "02002000": { spec: { eva: 5, time: 180000 } } })),
     2002000,
@@ -137,4 +137,26 @@ test("a hostile spec is not a use: a percent that is not a number, or an id that
   assert.equal(weird?.mpR, undefined);
   assert.equal(healsVitals(weird!), false);
   assert.equal(consumeSpecOf(undefined, Number.NaN), undefined);
+});
+
+// New regression sources; not executed for this delivery.
+test("native speed potion reads milliseconds, while mixed unknown mechanics refuse as a whole", () => {
+  const spec = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
+    "02002001": { spec: { speed: 8, time: 180000 } },
+  })), 2002001)!;
+  assert.equal(spec.speed, 8);
+  assert.equal(spec.time, 180000);
+  assert.deepEqual(spec.unapplied, []);
+  assert.equal(healsVitals(spec), false, "speed is not a fake HP/MP restoration");
+  const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
+    "02002001": { spec: { speed: 8, time: 180000, eva: 5 } },
+  })), 2002001)!;
+  assert.deepEqual(mixed.unapplied, ["eva"]);
+  for (const time of [0, -1, 1.5, 0x80000000]) {
+    const bad = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
+      "02002001": { spec: { speed: 8, time } },
+    })), 2002001)!;
+    assert.ok(bad.unapplied.includes("speed"));
+    assert.ok(bad.unapplied.includes("time"));
+  }
 });

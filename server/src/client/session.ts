@@ -1,3 +1,4 @@
+import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
 import { SKILL_UPDATE_OPCODE, encodeSkillRequest, readSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { learnedSkills } from "../game/skills.ts";
@@ -358,6 +359,7 @@ export type ClientEvent =
       npcs: NpcView[];
     }
   | { kind: "self"; self: SelfView }
+  | { kind: "temporary-stat"; update: TemporaryStatUpdate }
   | { kind: "user-enter"; user: UserView }
   | {
       kind: "user-look";
@@ -1649,6 +1651,7 @@ export class ClientSession {
         case STAT_OPCODE: {
           const update = readStatUpdate(new PacketReader(plain, 1));
           this.applyStats(update.diff);
+          if (update.temporary) this.emit({ kind: "temporary-stat", update: update.temporary });
           if (update.ack && this.mesoPending) {
             this.mesoPending = false;
             this.nextMesoAt = performance.now() + MESO_DROP_INTERVAL_MS;
@@ -1843,6 +1846,7 @@ export const CLIENT_EVENT_KINDS = [
   "field",
   "request-release",
   "self",
+  "temporary-stat",
   "ability-result",
   "skill-result",
   "skills",

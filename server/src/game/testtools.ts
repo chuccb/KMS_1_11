@@ -1,4 +1,5 @@
-/** Explicit development tools, NOT native game rules. No EXP, items, mesos or map edits. */
+/** Ability/skill checkpoint planner, NOT native rules. No EXP, items, mesos or map edits here.
+ * The separate fixed-item preview grant is handled by the authenticated server entry point. */
 import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import type {
   CharacterData,

@@ -1,3 +1,4 @@
+import { temporaryStats, movementStats, drawTemporaryStats } from "./temporarystats.mjs";
 import { naturalRecovery } from "./recovery.mjs";
 import { testTools } from "./testtools.mjs";
 import { skillWindow } from "./skills.mjs";
@@ -316,6 +317,7 @@ function setLoginPending(pending) {
 
 function connect() {
   if (loginPending) return;
+  buffs.clear();
   showPanel(ui.connect);
   setLoginPending(true);
   ui.status.textContent = "連線中…";
@@ -353,6 +355,7 @@ function connect() {
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
+    buffs.clear();
     logLine("websocket closed");
   });
   connection.addEventListener("message", (event) => {
@@ -380,7 +383,7 @@ function handle(message) {
     itemDialog.close(false);
     inventoryScrollDrag = undefined;
     shopPending = false;
-    if (message.t !== "field") inventoryScroll.fill(0);
+    if (message.t !== "field") { inventoryScroll.fill(0); buffs.clear(); }
     itemDrag = undefined;
     slotPending = mesoPending = false;
     mesoNextAt = 0;
@@ -534,6 +537,10 @@ function handle(message) {
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
       void loadMap(message.mapId);
       logLine(`field ${message.mapId}`);
+      return;
+
+    case "temporary-stat":
+      buffs.apply(message.update, performance.now());
       return;
 
     case "self":
@@ -2559,6 +2566,7 @@ function frame() {
     return;
   }
   const now = performance.now();
+  testToolsPanel.tick(now);
   const elapsed = Math.max(0, Math.min(250, now - (lastPhysicsAt ?? now)));
   lastPhysicsAt = now;
   if (playerBody && self && map?.id === self.mapId) {
@@ -2587,6 +2595,7 @@ function frame() {
             : Number(keys.has("arrowdown")) -
               Number(keys.has("arrowup") || keys.has("w")),
         jump: !blocked && !attackLocked && (keys.has("alt") || keys.has(" ")),
+        ...movementStats(inventory?.worn, buffs.values(now)),
       },
       terrain,
       elapsed,
@@ -2742,6 +2751,7 @@ function frame() {
   }
 
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
+  drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
   drawStatusBar();
   drawInventoryWindow();
@@ -5126,12 +5136,21 @@ const equipPanel = equipmentWindow({
   },
 });
 
+const buffs = temporaryStats();
+
 const recovery = naturalRecovery({
   getSelf:()=>selfView, getBody:()=>playerBody, getMap:()=>map,
   getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
 const testToolsPanel = testTools({
+  getMovement(){
+    if (loginStage!=="game") return;
+    const now=performance.now();
+    const active=buffs.icons(now).find(entry=>entry.values.speed!==undefined);
+    return {...movementStats(inventory?.worn,buffs.values(now)),
+      secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
+  },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
   onOpen(){itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
 });

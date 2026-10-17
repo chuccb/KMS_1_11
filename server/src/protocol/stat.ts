@@ -15,7 +15,7 @@
  * ```
  * u8  ack          // != 0 -> CWvsApp+24 = 0, CWvsApp+28 = timeGetTime()   (see below)
  * <stat diff>      // sub_45E0D0: u32 flags, then one field per set bit
- * u32 panelFlags   // sub_4C5DC0: 0 = nothing more (it returns right away), see "the panel block"
+ * u32 durationMs   // sub_4C5DC0: 0 = nothing more; otherwise see temporary-stat tail below
  * ```
  *
  * `sub_45E0D0` tests the flag bits from `0x01` upwards, so the wire order of the diff is the flag
@@ -57,21 +57,15 @@
  * (`n3000[6] = 1; n3000[7] = timeGetTime()`), and the same idiom as `0x0B`'s `result` and `0x11`.
  * Only zero vs non-zero is ever compared. A stat update answers nothing, so the server sends 0.
  *
- * THE PANEL BLOCK (`u32 panelFlags`, `sub_4C5DC0`)
+ * TEMPORARY STATS (PE re-read, 2026-10-17; FINDINGS 4.21.2)
  * --------------------------------------------------------------------
- * `sub_55BEB0` calls `sub_4C5DC0(CWvsApp+112, packet, ..., charRecord)` unconditionally, so the u32
- * is always on the wire - there is no "short packet" path, a missing one would throw 38 in the
- * client. **Read off the disassembly: `flags2 == 0` returns immediately** - nothing else is read,
- * and the caller then skips the buff block too (`if (result != 0) sub_4CBBD0(...)`, and with
- * `flags2 == 0` the return value is a constant 0). With `flags2 != 0` the packet continues with a
- * `u32` (written into the record copy's `id` field) and then one `u16` per bit of `0x01`-`0x800`
- * (twelve of them), each stored as two obfuscated pairs - the value, plus a stamp of
- * `a3 + panelFlags` that the caller supplies; the `0x800` bit also touches the client's global
- * damage RNG (`dword_5D2C20`, the same one `0x2C` bit 0 uses). `sub_4CBBD0` (a
- * `CTemporaryStatView`, i.e. a buff) then reads a `u8` and a `u32` per buff. None of those fields
- * is located yet, so this codec only ever writes `panelFlags = 0` and keeps it as a named field
- * rather than inventing a layout (FINDINGS 4.21.2).
+ * After the diff: u32 durationMs. Zero ends the packet. Otherwise u32 mask, one s16
+ * per set bit 0x001..0x800, then ONE u8 sourceIsSkill and u32 sourceId for the icon.
+ * 4C5DC0 adds duration to the caller's clock and writes that expiry per changed field.
+ * 4CBBD0 removes overlapping flags from older icon entries before appending the new source.
+ * Older notes named the first word panelFlags and the second unknownId; that was incorrect.
  */
+import { readTemporaryStat, writeTemporaryStat, type TemporaryStatUpdate } from "./temporarystat.ts";
 import { PacketReader, PacketWriter } from "./packet.ts";
 import type { CharacterStats } from "./chardata.ts";
 
@@ -153,10 +147,11 @@ export function statDiffFlags(diff: StatDiff): number {
 export interface StatUpdate {
   ack?: boolean;
   diff: StatDiff;
+  temporary?: TemporaryStatUpdate;
 }
 
 /**
- * Pack one `0x0D`: `u8 ack`, the diff, then `panelFlags = 0`.
+ * Pack one `0x0D`: `u8 ack`, the diff, then the temporary-stat tail (duration 0 when absent).
  *
  * Out-of-range values throw instead of being masked - most of these fields are `u8`/`u16` on the
  * wire while the record keeps them wider, and a silent truncation would be a stat that jumps for no
@@ -177,8 +172,7 @@ export function encodeStatUpdate(update: StatUpdate): Uint8Array {
     else if (field.bytes === 2) writer.writeU16(value);
     else writer.writeU32(value);
   }
-  // The panel/buff block's flags word. 0 is the "nothing here" the client returns on immediately.
-  writer.writeU32(0);
+  writeTemporaryStat(writer, update.temporary);
   return writer.toBytes();
 }
 
@@ -213,13 +207,8 @@ export function readStatUpdate(reader: PacketReader): StatUpdate {
     else if (field.bytes === 2) diff[field.name] = readSigned(reader, field);
     else diff[field.name] = reader.readU32();
   }
-  const panelFlags = reader.readU32();
-  if (panelFlags !== 0) {
-    throw new RangeError(
-      `0x0d panel flags 0x${panelFlags.toString(16)}: the panel/buff block is not decoded (FINDINGS 4.21.2)`,
-    );
-  }
-  return { ack, diff };
+  const temporary = readTemporaryStat(reader);
+  return { ack, diff, ...(temporary === undefined ? {} : { temporary }) };
 }
 
 /** One line for the `decode` tool: `ack=0 level=2 exp=5 (+4 fields)`. */
@@ -227,7 +216,8 @@ export function describeStatUpdate(update: StatUpdate): string {
   const parts = STAT_DIFF_FIELDS.filter((field) => update.diff[field.name] !== undefined).map(
     (field) => `${field.name}=${update.diff[field.name]}`,
   );
-  return `ack=${update.ack === true ? 1 : 0} ${parts.length === 0 ? "(no fields)" : parts.join(" ")}`;
+  const tail = update.temporary ? ` temporary=${update.temporary.durationMs}ms source=${update.temporary.sourceIsSkill ? "skill" : "item"}:${update.temporary.sourceId} ${JSON.stringify(update.temporary.values)}` : "";
+  return `ack=${update.ack === true ? 1 : 0} ${parts.length === 0 ? "(no fields)" : parts.join(" ")}${tail}`;
 }
 
 /** `sp` is the one signed field (`sub_45DD80`); everything else is unsigned in the client's reader. */

@@ -534,7 +534,7 @@ u16 ×15    str dex int luk maxHp maxMp pad mad pdd mdd acc eva craft speed jump
 |---|---|---|---|
 | `0x0B` | `sub_55BAB0` | 道具欄操作（**已解到欄位層，見 §4.6 與 §4.18.2**）| `u8 result, u8 count, count × {u8 op, u8 inv, s16 slot, …}` |
 | `0x0C` | `sub_55BDC0` | **道具欄格數變更** | `u8 inventory(1..4), u8 slots` → `sub_55E7C0(charData + 4*inv + 362, slots + 1, …)`（對 `sub_4605A0` 的包裝）|
-| `0x0D` | `sub_55BEB0` | **能力值差異更新**（升級／配點／HP 變化）**已完整解出 → §4.21** | `u8 ack`（非 0 → `CWvsApp+0x18/0x1C` 重設）、`u32 flags` + 差異欄位（`sub_45E0D0`，19 個 bit）、`u32 panelFlags`（0 = 後面沒有東西）；等級變大時顯示 "레벨이 올랐습니다 (+%d)" |
+| `0x0D` | `sub_55BEB0` | **能力值差異更新**（升級／配點／HP 變化）**已完整解出 → §4.21** | `u8 ack`（非 0 → `CWvsApp+0x18/0x1C` 重設）、`u32 flags` + 差異欄位（`sub_45E0D0`，19 個 bit）、`u32 durationMs`（0 = 後面沒有東西，非0見§4.21.2）；等級變大時顯示 "레벨이 올랐습니다 (+%d)" |
 | `0x0E` | `sub_55B6A0` | **`charData+382` 的 `ZMap<u32,u32>` 更新** | `u8 flag`（同上重設）、`u16 n`、`n × {u32 key, s32 value}`：`value > 0` → insert，`value <= 0` → 移除該 key（`sub_460630`）|
 | `0x0F` | `sub_55C090` | **能力面板更新** | 無條件重設 `CWvsApp+0x18/0x1C`；`u8 flag`；若 flag ≠ 0 再讀 `u8 mode`，`mode == 0` → `sub_4C5DC0(CWvsApp+0x70, packet, …, 0)` |
 | `0x10` | `sub_55C5E0` | **組隊（파티）系統**：見下表 | `u8 type` + 依 type 的 payload |
@@ -2036,7 +2036,7 @@ case '5' (0x35) -> sub_488E10   動畫
 經驗條畫的都是 client 自己的 `CharacterData`（§4.9），而這一包就寫在那份紀錄上。這也是
 「殺怪 → 經驗值 → 升級」與「怪物打我 → HP 下降」兩個閉環缺的最後一塊。
 
-#### 4.21.1 身體：`u8 ack` ＋ `u32 旗標` ＋ 差異欄位 ＋ `u32 panelFlags`（byte-exact）
+#### 4.21.1 身體：`u8 ack` ＋ `u32 旗標` ＋ 差異欄位 ＋ `u32 durationMs`（byte-exact）
 
 分派：`sub_55A900` 的 case 13，也就是 **`CWvsApp` 層**（`0x0A`–`0x14`，`sub_43B170`），不是 CField
 的分派表。所以**同一個位元組在另一個方向是別的封包**（c2s 的 `0x0D` 是 `CField::SendInteract`，
@@ -2046,7 +2046,7 @@ case '5' (0x35) -> sub_488E10   動畫
 u8  ack            // != 0 → CWvsApp+24 = 0、CWvsApp+28 = timeGetTime()
 u32 flags          // 19 個 bit（最高到 0x40000），由 0x01 往上依序處理
                    // 每個 set bit 就讀一個欄位（沒 set 的不在線上）
-u32 panelFlags     // 能力面板／buff 區塊的旗標；0 = 後面沒有東西（見 §4.21.2）
+u32 durationMs     // 暫時能力持續時間；0 = 後面沒有東西，非0接mask/values/source（見 §4.21.2）
 ```
 
 `sub_45E0D0` 是差異讀取器（`.c:101985-102257`），讀到的每一個欄位都寫進 client 的角色紀錄
@@ -2102,30 +2102,39 @@ u32 panelFlags     // 能力面板／buff 區塊的旗標；0 = 後面沒有東�
 （`n3000[6] = 1; n3000[7] = timeGetTime()`），也是 `0x0B` 的 `result` 與 `0x11` 的同一個慣用法。
 只有「零／非零」被比較。本伺服器送 0（這一包不是任何請求的回覆）。
 
-#### 4.21.2 `panelFlags`：能力面板／buff 區塊（**未解，伺服器一律送 0**）
+#### 4.21.2 暫時能力：`durationMs`／`temporaryMask`（更正舊 `panelFlags` 誤讀）
 
-`sub_55BEB0` 讀完差異後無條件呼叫 `sub_4C5DC0(CWvsApp+112, packet, *(u32*)(n3000_0+80), 紀錄副本)`，
-所以 `u32 panelFlags` **一定在線上**（沒有「長度不足就跳過」這回事 —— 少送會讓 client 丟
-`ZException(38)`）。`sub_4C5DC0` 的前幾行就是全部的關鍵：
+**2026-10-17 重新交叉 PE／lst 後更正**：第一 u32 是持續時間，不是 flags；
+第二 u32 才是12-bit效果 mask，不是角色 id。舊文把反編譯中被第二次 read 覆寫的 a3 當成舊值，
+因而錯把第一字命名為 panelFlags；不能沿舊命名編碼。
 
 ```
-u32 panelFlags            // sub_45DCC0；== 0 → 立刻 return 0（不再讀任何 byte）
-u32 unknownId             // 呼叫端的第 4 個參數指向紀錄副本，這個 u32 寫進副本的 +0（= id 欄位）
-// 每個 set bit（0x01…0x800，共 12 個）各一個 u16（sub_45DC80，有號讀取）
-//   每筆 u16 存成兩對「(rand, value ^ rand)」：第一對是值，第二對是 stamp = a3 + panelFlags
-// bit 0x800 另外動到 client 的全域傷害亂數 dword_5D2C20（第一次進來時用 rand() 播種，
-//   然後存一個 Random() 取樣）—— 與 0x2C 的 bit 0 是同一顆（§4.20）
-return a3 + panelFlags     // 非 0 時呼叫端會再讀一筆 buff（sub_4CBBD0：u8 + u32，buff 圖示與時間）
+u32 durationMs            // 0: return 0，不再讀尾段
+if durationMs != 0:
+  u32 temporaryMask
+  s16 values[set bits]    // mask bits 0x001..0x800，由小到大
+  u8 sourceIsSkill        // 0=item iconRaw；非0=skill icon
+  u32 sourceId            // 整筆只有一個來源pair，非每個bit一份
 ```
 
-- `panelFlags == 0` 就是「這裡沒有東西」：`sub_4C5DC0` **立刻 return 0**，`sub_55BEB0` 也因為回傳值
-  是 0 而跳過 buff 區塊 —— 所以伺服器只要送一個 `u32 0`，封包就到這裡為止。
-- 12 個 bit 的**語意**（哪個 bit 是哪一項、那第二對 stamp 要 client 拿來幹嘛）沒有字串、沒有
-  呼叫端證據；`a3` 是呼叫端給的一個 stamp（`*(u32*)(n3000_0+80)`，身份未定）。
-  **沒有欄位語意就不送**（非 0 會逼我們發明 12 個 u16 的內容），所以 `stat.ts` 只寫 0，
-  `readStatUpdate` 遇到非 0 直接拒絕而不是猜。
-- `0x0F`（`sub_55C090`）走的是**同一支** `sub_4C5DC0`（`u8 flag`；`flag != 0` 再讀 `u8 mode`，
-  `mode == 0` 時才呼叫它）——所以 §6 第 6 項（能力面板第二種更新格式）仍然 OPEN。
+`4C5DE1` read duration；`4C5E11` 加呼叫者clock到EBP；`4C5E1E` read mask；
+`4C5E36..4C5E3A` 複製 mask 到out；`4C5E3C` test **第二字** 的bit1。
+`4C6310` 反向encoder同樣先a3／再a4並按a4逐欄寫。
+`55BEB0` 呼叫 `4C5DC0(this+28,packet,*(u32*)(n3000_0+20),out)`，
+回傳 expiry 非零才 `4CBBD0(this+94,packet,expiry,out[0])`。
+
+- value遮罩對DWORD起點2,8,14,20,26,32,38,44,50,54,58,62；expiry在value起點+2。
+- 前九bit：PAD／PDD／MAD／MDD／ACC／EVA／hands／speed／jump；最後三bit仍用中性欄名，
+  不借後期buff表猜施放規則。`0x800` 使用全域RNG保護值不代表收到後就抽傷害。
+- `4CBBD0` 清除舊圖示重疊bits、保留舊來源其他欄，再append新來源；不是效果相加。
+- `4C65A0` clock−expiry>0清值，`4CC2D0` 移除過期圖示；`4CC560` 32px槽、右界797、y45、alpha210，
+  舊來源在右；`479B10(...,0)` 是道具iconRaw。
+- `0x0F` 的 `55C090` 仍共用decoder但沒有 `4CBBD0` 圖示來源讀取；本輪不發明其餘mode/cancel語意。
+
+**已實作、未測試**：`protocol/temporarystat.ts`＋0x0D tail、client timed state／原raw圖示、
+`2002001` speed8/time180000ms及實際移動；一般穿戴speed/jump也按原兩階段clamp套用。
+其他戰鬥buff道具仍整筆拒絕，不能因wire已解就燒掉無實際效果的藥水。
+完整來源、生命週期政策及方便操作入口見 [TEMPORARY_STATS](../TEMPORARY_STATS.md)。
 
 #### 4.21.3 經驗值表是**算出來的**，不是資料（`sub_4C7110`／`sub_4C7190`）
 
@@ -2205,8 +2214,8 @@ return 1;                                     // 一次一級
 
 #### 4.21.6 還不能宣稱的部分
 
-1. **`panelFlags != 0` 的區塊**（12 個 bit，每個一個 u16 ＋ 那個 stamp ＋ buff）沒有欄位語意，
-   本伺服器一律送 0（§4.21.2）。也就是**能力面板（S 鍵那個視窗）與 buff 圖示還不會被伺服器驅動**。
+1. **原 `panelFlags` 誤讀已更正**（§4.21.2）：duration／mask／s16 values／source tail已接線，
+   加速藥水與原raw圖示／實際移動已實作（未測）；不代表其他戰鬥buff或Detail總值完成。
 2. ~~client 的 메소（錢）不在這 19 個 bit 裡~~ → **已解決**：`0x40000` 就是錢（§4.22.5），
    伺服器送它就等於推動畫面上的錢包。
 3. **HP／MP 成長的舊缺口已更正並實作（未測試）**：`sub_4C7450`／VA 005BB344 有原表，
@@ -4182,8 +4191,8 @@ localStorage是browser設定替代，不冒稱原per-character設定或絕對閃
    「查表失敗」路徑，所以不擋這條路。
 6. **`0x12`／`0x11` 的少數分支**：`0x11` 的 type ≠ 0/1 分支（已解＝背包滿的訊息，§4.18.5）、
    `0x12` 的 type 4 之後，
-   以及 `0x0F`／`0x0D` 的 `sub_4C5DC0` 到底讀了哪些欄位（能力面板／buff 區塊的第二種更新格式；
-   `panelFlags = 0` 時它直接 return，所以本伺服器送 0 就安全 —— 見 §4.21.2）。
+   `0x0D`／`0x0F` 共用 `4C5DC0` 的duration/mask已更正並解出（§4.21.2）；
+   `0x0F` 的其他mode／取消效果語意仍未定位，不造opcode。
 7. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
    在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
 8. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
@@ -4194,8 +4203,8 @@ localStorage是browser設定替代，不冒稱原per-character設定或絕對閃
    （能力值區塊），傳輸上已完整，語意待找讀取端；`unknown101` 已解為出生門索引，見 §4.43。
 10. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
-11. **`0x0D` 解出之後剩下的兩個洞**（§4.21.6）：`panelFlags != 0` 的能力面板／buff 區塊（沒有欄位
-   語意，伺服器一律送 0）與**AP／SP 自然發放量**。HP／MP 的原表與被動已於本輪重新定位並接上，
+11. **`0x0D` 的暫時能力尾段已重新定位**（§4.21.2／TEMPORARY_STATS）：舊panelFlags命名錯誤，
+   現在已有duration/mask/values/source codec及加速藥水（未測），其餘戰鬥buff效果與**AP／SP 自然發放量**仍缺。HP／MP 的原表與被動已於本輪重新定位並接上，
    舊「client 裡沒有成長量」判讀錯誤，見 STAT_GROWTH／ADR-047（均未測試）。~~「被怪物打 → 扣玩家的血」沒有驅動者~~ →
    **已解**：驅動者是 **c2s `0x1C`**（client 自己算完傷害、回報差值，伺服器落帳並用 `0x0D` 回覆），
    見 **§4.33**／ADR-021；`0x2C` 的尾段確實是**路徑**不是傷害（§4.20.7），所以傷害從來就不在
@@ -4256,10 +4265,10 @@ localStorage是browser設定替代，不冒稱原per-character設定或絕對閃
    沒有任何字面字串，所以入口不在字串表：從 `dword_5C2038` 的初始化（誰在啟動時填它）往下找，
    或從 `Item/Consume/*.img` 的載入路徑（`sub_411E50` 家族）反推。它不擋任何功能（伺服器直接讀 WZ），
    只擋「原 client 的數字與我們的數字是否一致」這個問題。
-20. **buff 道具（`spec/time` 家族，§4.34.3）**：`time`／`pad`／`mad`／`pdd`／`eva`／`acc`／`speed`／`pda`
-   在伺服器上沒有狀態，也沒有解出「哪個 s2c 會在 client 上顯示 buff 圖示」（`0x0D` 的
-   `panelFlags != 0` 區塊，§4.21.6 與第 11 項是同一件事）。目前 `spec.unapplied` 非空就**拒絕**這次使用
-   （道具留在袋子裡），所以不是資料錯誤而是「還沒做的功能」。
+20. **buff 道具（`spec/time` 家族，§4.34.3）**：`2002001` speed8／time180000ms已接原0x0D暫時能力、
+   原raw圖示與實際walk倍率（未測）。duration/mask舊誤讀已更正，見§4.21.2。
+   其他 `pad`／`mad`／`pdd`／`eva`／`acc`／`pda` 等實際戰鬥效果仍未完成；
+   `spec.unapplied` 非空仍**整筆拒絕**，包含混合speed的未實作道具，不白耗道具。
 
 21. **道具欄拖放剩下的兩件事**（§4.36.5）：**現金裝備**（第 4 分頁、`wornCash`、`111xxxx` 的 12／13 格）
    目前一律拒絕 —— `sub_463490` 的 switch 允許游標指到 12／13，但外觀那一張表（`sub_45F340`）會把 `111xxxx`

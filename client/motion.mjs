@@ -141,6 +141,11 @@ function sweepWalls(body, oldX, oldY, world) {
   if (wall) { body.x = wall.x1 - Math.sign(body.x - oldX) * 0.001; body.vx = 0; }
 }
 function step(body, input, world, dt) {
+  // CUserLocal 512400 updates CAttrShoe walkSpeed (+32) and jump (+56), not gravity.
+  const speedScale = clamp(input.speedPercent ?? 100, 80, 130) / 100;
+  const jumpScale = clamp(input.jumpPercent ?? 100, 80, 123) / 100;
+  const walkSpeed = PHYSICS.walkSpeed * speedScale;
+  const jumpSpeed = PHYSICS.jumpSpeed * jumpScale;
   const horizontal = clamp(input.horizontal ?? 0, -1, 1);
   const vertical = clamp(input.vertical ?? 0, -1, 1);
   const jumping = Boolean(input.jump) && !body.jumpHeld;
@@ -166,8 +171,8 @@ function step(body, input, world, dt) {
     const ladder = body.ladder;
     if (jumping && horizontal) {
       body.ladder = undefined;
-      body.vx = horizontal * 162.5;
-      body.vy = -PHYSICS.jumpSpeed * 0.5; // sub_5378D0: jumping away from a ladder
+      body.vx = horizontal * 162.5 * speedScale;
+      body.vy = -jumpSpeed * 0.5; // sub_5378D0: jumping away from a ladder
     } else {
       body.vx = 0;
       body.vy = vertical * PHYSICS.climbSpeed;
@@ -195,11 +200,11 @@ function step(body, input, world, dt) {
       body.y += 1;
       body.vy = 0;
     } else {
-      body.vy = -PHYSICS.jumpSpeed;
+      body.vy = -jumpSpeed;
       // sub_5378D0: a standing jump halves drift; a walking jump starts at least at 80% walk speed.
       if (horizontal) {
-        if (horizontal * body.vx < PHYSICS.walkSpeed * .8) body.vx += horizontal * PHYSICS.walkSpeed * .8;
-        body.vx = horizontal * Math.min(PHYSICS.walkSpeed, horizontal * body.vx);
+        if (horizontal * body.vx < walkSpeed * .8) body.vx += horizontal * walkSpeed * .8;
+        body.vx = horizontal * Math.min(walkSpeed, horizontal * body.vx);
       } else body.vx *= .5;
     }
     body.grounded = false;
@@ -208,7 +213,7 @@ function step(body, input, world, dt) {
   const oldX = body.x, oldY = body.y;
   const oldVx = body.vx, oldVy = body.vy;
   if (body.grounded) {
-    body.vx = approach(body.vx, horizontal * PHYSICS.walkSpeed, (horizontal ? PHYSICS.acceleration : PHYSICS.friction) * dt);
+    body.vx = approach(body.vx, horizontal * walkSpeed, (horizontal ? PHYSICS.acceleration : PHYSICS.friction) * dt);
     walkGround(body, (oldVx + body.vx) * .5 * dt, world);
   } else {
     // In air input accelerates only towards the control limit; a walking jump retains its speed.

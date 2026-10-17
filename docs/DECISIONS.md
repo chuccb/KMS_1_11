@@ -2106,3 +2106,26 @@ MP活人條件；4BE790依職業查1000002／4100001／4200001的time×1000；�
 
 **狀態**：新增模型／codec接線／plan／授權／bridge／UI回歸來源，全部未執行；不跑check／typecheck／browser／VM／probe，
 只啟服務供使用者操作。提交[skip ci]，當前分支非force推送。完整來源與操作見 `RECOVERY_TEST_TOOLS.md`。
+
+
+---
+
+## ADR-050：更正暫時能力封包，先完成真正可用的加速道具鏈（2026-10-17）
+
+**來源更正**：取代§4.21.2原panelFlags／unknownId假說；PE 4C5DE1／4C5E11／4C5E1E／4C5E3C證明
+先duration再mask。4C6310反向encoder、4CBBD0來源圖示及4C65A0 expiry交叉一致。
+
+**實作**：0x0D optional tail、十二欄signed codec、單一skill/item來源pair、client逐欄覆蓋與到期、
+原4CC560 iconRaw位置／alpha；2002001原speed8/time180000ms完整接扣道具→wire→raw圖示→移動→expiry。
+一般穿戴speed/jump實例依4C5740與512400的兩階段clamp接物理walk/jump倍率，不改重力／空中阻力。
+原完整物理與其餘戰鬥buff仍未完成；最後三bit只給中性欄名、不套後期buff表。
+
+**安全與體驗**：time已是毫秒；混合未支援效果仍整筆拒絕，先編碼再扣道具、立即保存，死亡拒絕使用。
+另加明示非原版固定2002001×3體驗發放，owner/allowlist/confirmed/busy、clone與預encode；
+不自動改存檔，不擴張還原點到道具。唯讀剩餘秒數只放體驗工具，不加進原buff圖層。
+
+**明示政策**：native client-owned效果換圖保留deadline；目前不做離線保存，斷線／新登入清除，
+不是取得原server規則。主動技能／圖示取消／傷害與命中防禦未完成，不把codec完成當成效果完成。
+
+**交付**：新增／更新回歸來源但依使用者指示全部不執行，不跑typecheck/browser/VM/probe；
+保留原體驗save及ignored冷備份、啟LIVE、[skip ci]提交推送本分支。詳見 `TEMPORARY_STATS.md`。

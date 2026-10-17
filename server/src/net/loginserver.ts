@@ -60,7 +60,7 @@ import {
   type FieldInstance,
   type FieldMember,
 } from "../game/world.ts";
-import { MesoWallet, pickUpDrop, takeItem } from "../game/rewards.ts";
+import { MesoWallet, pickUpDrop, takeItem, grantItem } from "../game/rewards.ts";
 import { applyChangeSlot } from "../game/inventory.ts";
 import { reviveMapId, spawnPortalIndex, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
@@ -208,6 +208,7 @@ import {
   LOOK_WORDS,
   characterDataOf,
   emptyCharacterItems,
+  CHAR_FLAG_INVENTORY_2,
   lookOf,
   startingCharacterItems,
   withDefaultLook,
@@ -1213,22 +1214,35 @@ export class GameEntryServer {
     const enabled=this.options.allowTestTools?.(username)===true;
     if(!enabled && kind!=="state") throw new Error("此帳號未獲 --test-tools 授權。");
     const available=(id:number)=>id===0 || this.options.skills?.book(id)!==undefined;
-    let message=enabled?"體驗工具已授權；第一次變更前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
+    let message=enabled?"體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
     if(enabled && kind!=="state") {
       if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
-      const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available);
-      const statPacket=encodeStatUpdate({ack:false,diff:plan.diff});
-      const skillPacket=encodeSkillUpdate({ack:false,changes:plan.changes});
-      const wasDead=session.character.stats.hp<=0;
-      Object.assign(session.character.stats,plan.diff);
-      if(plan.skills) {
-        const items=session.character.items??emptyCharacterItems();items.map32=plan.skills;
-        session.character.items=items;session.character.flags|=0x20;
+      if(kind==="speed-potions") {
+        if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
+        const spec=this.options.consumeSpec?.(2002001);
+        if(!spec || spec.unapplied.length || spec.speed===undefined || spec.time===undefined) throw new Error("原 WZ 的加速藥水效果不可用，未發放道具。");
+        const items=structuredClone(session.character.items??emptyCharacterItems());
+        const grant=grantItem(items,2002001,3);
+        if(!grant) throw new Error("消耗欄沒有可放三瓶加速藥水的空間，未變更背包。");
+        const packet=encodeInventoryChange([grant.change]);
+        session.character.items=items;session.character.flags|=CHAR_FLAG_INVENTORY_2;
+        session.send(packet);this.persist();
+        message="已明確領取 3 瓶 속도향상의 물약（2002001）；這是非原版體驗發放，會存檔且能力還原點不會回收道具。開啟道具窗，選消耗欄並連點使用。";
+      } else {
+        const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available);
+        const statPacket=encodeStatUpdate({ack:false,diff:plan.diff});
+        const skillPacket=encodeSkillUpdate({ack:false,changes:plan.changes});
+        const wasDead=session.character.stats.hp<=0;
+        Object.assign(session.character.stats,plan.diff);
+        if(plan.skills) {
+          const items=session.character.items??emptyCharacterItems();items.map32=plan.skills;
+          session.character.items=items;session.character.flags|=0x20;
+        }
+        this.testCheckpoints.set(key,plan.checkpoint);
+        if(wasDead && session.character.stats.hp>0) this.enterMap(session,session.instance.mapId);
+        else {session.send(statPacket);session.send(skillPacket);}
+        this.persist(); message=plan.message;
       }
-      this.testCheckpoints.set(key,plan.checkpoint);
-      if(wasDead && session.character.stats.hp>0) this.enterMap(session,session.instance.mapId);
-      else {session.send(statPacket);session.send(skillPacket);}
-      this.persist(); message=plan.message;
       this.options.log?.(`test-tools: ${username} character ${characterId} ${kind} (explicit development action)`);
     }
     const checkpoint=enabled?this.testCheckpoints.get(key):undefined;
@@ -1787,6 +1801,11 @@ export class GameEntryServer {
         `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" refused (${reason})`,
       );
     };
+    // Server safety policy: never consume a stack that is being offered in a trade.
+    if (session.shop || session.talk || this.trades.roomOf(session.characterId)) {
+      refuse("close the shop, conversation or trade before using an item");
+      return;
+    }
     const spec = this.options.consumeSpec?.(request.itemId);
     if (spec === undefined) {
       refuse(
@@ -1805,20 +1824,25 @@ export class GameEntryServer {
       this.useMapItem(session, request, spec, refuse);
       return;
     }
-    if (!healsVitals(spec)) {
-      refuse("no hp/mp effect located in its spec");
+    const temporary = spec.speed !== undefined && spec.time !== undefined
+      ? { durationMs: spec.time, values: { speed: spec.speed }, sourceIsSkill: false, sourceId: request.itemId }
+      : undefined;
+    if (!healsVitals(spec) && !temporary) {
+      refuse("no implemented vital or temporary effect in its spec");
       return;
     }
     // The rules are `game/vitals.ts`'s, and the copy is how "would anything move?" is asked without
     // applying twice: a potion used at full HP changes nothing, and nothing is what it should cost.
     const probe: CharacterStats = { ...stats };
     const diff = applyVitalReport(probe, consumeDeltas(spec, stats));
-    if (Object.keys(diff).length === 0) {
+    if (stats.hp <= 0 || (Object.keys(diff).length === 0 && !temporary)) {
       refuse(
-        `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp} is already what it restores`,
+        `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}: dead or already restored`,
       );
       return;
     }
+    // Validate/encode the entire effect before consuming even one item.
+    const statPacket = encodeStatUpdate({ diff, temporary });
     const taken = takeItem(items, request.itemId, request.slot, 1);
     if (taken === undefined) {
       refuse(
@@ -1829,7 +1853,8 @@ export class GameEntryServer {
     stats.hp = probe.hp;
     stats.mp = probe.mp;
     session.send(encodeInventoryChange([taken.change]));
-    session.send(encodeStatUpdate({ diff }));
+    session.send(statPacket);
+    this.persist();
     this.options.log?.(
       `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
         `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}, ${taken.remaining} left in the slot`,

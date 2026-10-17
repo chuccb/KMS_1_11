@@ -53,7 +53,7 @@ test("a two-field diff is byte for byte what the client reads", () => {
   const body = encodeStatUpdate({ diff: { level: 2, exp: 5 } });
   assert.equal(hex(body), "0d 00 10 00 01 00 02 05 00 00 00 00 00 00 00");
   assert.equal(body[0], STAT_OPCODE);
-  // The trailing `u32` is the panel/buff block's flag word: 0 = the client returns immediately.
+  // The trailing `u32` is the temporary-stat duration word: 0 = the client returns immediately.
   assert.equal(body.length, 1 + 1 + 4 + 1 + 4 + 4);
 });
 
@@ -83,7 +83,7 @@ test("every field is written in flag order, with the widths the diff reader uses
       "04 03 02 01", // 0x10000 exp          u32
       "ff 00 00 00", // 0x20000 fame         u32 on the wire (2 bytes kept in memory)
       "0a 00 00 00", // 0x40000 mesos        u32
-      "00 00 00 00", // panelFlags
+      "00 00 00 00", // durationMs
     ].join(" "),
   );
   // 1 opcode + 1 ack + 4 flags + 47 field bytes + 4 panel flags.
@@ -141,10 +141,10 @@ test("values that do not fit the client's reader are refused, not truncated", ()
   assert.equal(readStatUpdate(new PacketReader(encodeStatUpdate({ diff: { sp: -1 } }), 1)).diff.sp, -1);
 });
 
-test("a panel/buff block is refused until its fields are located", () => {
+test("a nonzero duration requires a complete temporary-stat tail", () => {
   const body = encodeStatUpdate({ diff: { level: 1 } });
-  body[body.length - 1] = 1; // panelFlags = 1
-  assert.throws(() => readStatUpdate(new PacketReader(body, 1)), /panel flags 0x1.*FINDINGS 4\.21\.2/s);
+  body[body.length - 4] = 1; // durationMs = 1, NOT effect mask = 1
+  assert.throws(() => readStatUpdate(new PacketReader(body, 1)));
 });
 
 test("diffStats reports exactly the fields that changed", () => {
