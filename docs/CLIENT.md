@@ -217,7 +217,12 @@ node --test test/websocket.test.ts test/webclient.test.ts
 `client/main.js` 放進一個 DOM shim（元素、會算次數的 2D context、會 `onload` 的 `Image`、Node 的
 `WebSocket`）裡真的登入、選角、進圖，再跑真的 `requestAnimationFrame`；它斷言背景、圖塊／物件、
 NPC 與角色的 avatar 都在**同一幀**被畫出來（헤네시스：3 幀 4118 次 `drawImage`、152 個不同來源）。
-它不取代眼睛，但它釘住「資料到得了畫面」這一段。
+它不取代眼睛，但它釘住「資料到得了畫面」這一段；同一支探針還會把兩筆 `0x43`（一件道具、
+一堆金幣）注入頁面，確認掉落的 `iconRaw`／`Item/Special/0900.img` 真的被畫出來。
+
+還有一支**不用瀏覽器**的實機走查：`node server/scripts/play_probe.mjs 8495`——直接走瀏覽器協定
+登入、從 헤네시스 過 `west00` 進獵場、Ctrl 式揮擊打到怪死、走到掉落物上等撿起，把每一步收到的
+訊息（`hit`／`mob-die`／`drop-enter`／`drop-leave` taken／`loot`／`inventory`）印出來。
 
 頁面的**繪圖**本身仍然只有眼睛能驗，但把它切開的那幾層有測試：`test/art.test.ts`（17 則）釘住
 compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM` 的深度、背景的 origin 與

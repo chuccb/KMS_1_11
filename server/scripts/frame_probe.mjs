@@ -160,12 +160,17 @@ await pumpFrames(8);
 console.log("frames pumped:", pump, "draw calls:", JSON.stringify(calls));
 console.log("drawn sources:", drawn.slice(0, 6).map((d) => String(d.src).slice(0, 60)));
 console.log("distinct sources:", new Set(drawn.map((d) => d.src)).size);
+// The map's own art, unless the tile set this map names is not in the archive: those maps draw the
+// footholds as ground instead (the page's `drawFootholds`), which is `fillRect`, not `Map/Tile`.
+const artJson = await (await fetch(`${BASE}/api/map/${field.mapId}/art`)).json();
+const missingTiles = Number(artJson.missingTiles ?? 0);
 const back = drawn.some((d) => String(d.src).includes("Map%2FBack"));
 const tiles = drawn.some((d) => String(d.src).includes("Map%2FTile"));
+const fallbackGround = missingTiles > 0 && calls.fillRect > 0;
 const npc = drawn.some((d) => String(d.src).includes("Npc%2F"));
 const blobs = drawn.filter((d) => String(d.src).startsWith("blob:")).length;
-console.log(JSON.stringify({ back, tiles, npc, avatarBlobs: blobs }));
-if (!back || !tiles || blobs === 0) throw new Error("one of the layers never drew");
+console.log(JSON.stringify({ back, tiles, fallbackGround, missingTiles, npc, avatarBlobs: blobs }));
+if (!back || !(tiles || fallbackGround) || blobs === 0) throw new Error("one of the layers never drew");
 
 // `0x43` twice: the junk a snail leaves, and a meso pile. Both are pictures the page looks up from
 // the packet alone - the item's `iconRaw` through `/api/item`, the pile through `/api/canvas` - so
