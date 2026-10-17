@@ -83,6 +83,8 @@ export interface ItemInfo {
   desc?: string;
   /** `info/iconRaw` (or `info/icon`), the node `sub_47CE40` draws for a drop. */
   iconRaw?: ItemIcon;
+  /** Native UI/quickslot icon (479B10(...,1)); distinct from the smaller raw/drop canvas. */
+  icon?: ItemIcon;
   /** `info/incPAD`: template metadata (including ammunition); worn attack uses instance PAD. */
   incPAD?: number;
   /** Template only: never a replacement for an existing rolled/scrolled instance. */
@@ -196,13 +198,14 @@ function infoNodeOf(
 function iconCanvasOf(
   root: WzObject | undefined,
   location: ItemLocation,
+  raw = true,
 ): { canvas: WzCanvas; name: string } | undefined {
   if (root === undefined) return undefined;
   const node =
     location.nodeName === null ? root : propertyOf(root, location.nodeName);
   if (node === undefined || node === null) return undefined;
   const info = propertyOf(node, "info");
-  for (const name of ["iconRaw", "icon"]) {
+  for (const name of raw ? ["iconRaw", "icon"] : ["icon"]) {
     const value = propertyOf(info, name);
     if (value instanceof WzNode) {
       const canvas = value.canvas;
@@ -237,13 +240,14 @@ export function itemCatalogOf(
     if (!roots.has(path)) roots.set(path, source.objects(path)[0]);
     return roots.get(path);
   };
-  const iconMetas = new Map<number, ItemIcon | undefined>();
-  const iconMetaOf = (itemId: number): ItemIcon | undefined => {
-    if (iconMetas.has(itemId)) return iconMetas.get(itemId);
+  const iconMetas = new Map<string, ItemIcon | undefined>();
+  const iconMetaOf = (itemId: number, raw = true): ItemIcon | undefined => {
+    const key = `${itemId}:${raw}`;
+    if (iconMetas.has(key)) return iconMetas.get(key);
     let meta: ItemIcon | undefined;
     const location = locate(itemId);
     if (location !== undefined && source.has(location.imagePath)) {
-      const found = iconCanvasOf(rootOf(location.imagePath), location);
+      const found = iconCanvasOf(rootOf(location.imagePath), location, raw);
       if (found !== undefined) {
         let ox = 0;
         let oy = 0;
@@ -269,7 +273,7 @@ export function itemCatalogOf(
         };
       }
     }
-    iconMetas.set(itemId, meta);
+    iconMetas.set(key, meta);
     return meta;
   };
 
@@ -285,6 +289,7 @@ export function itemCatalogOf(
       const desc = asText(info.desc, "");
       const incPAD = asNumber(info.incPAD, Number.NaN);
       const iconMeta = iconMetaOf(itemId);
+      const normalIcon = iconMetaOf(itemId, false);
       return {
         id: itemId,
         ...(Math.floor(itemId / 1000000) === 1
@@ -317,6 +322,7 @@ export function itemCatalogOf(
         ...(Number.isFinite(incPAD) ? { incPAD } : {}),
         ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),
         ...(iconMeta === undefined ? {} : { iconRaw: iconMeta }),
+        ...(normalIcon === undefined ? {} : { icon: normalIcon }),
       };
     },
 

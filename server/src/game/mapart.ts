@@ -85,7 +85,26 @@ export interface MapBounds {
   bottom: number;
 }
 
+export interface MapTitleArt {
+  streetName: string;
+  mapName: string;
+  mark?: { path: string };
+}
+
+/** Original CField::46DA30: map info strings and MapHelper mark, independent of minimap. */
+export function mapTitleArt(root: unknown, reader: ArtReader): MapTitleArt {
+  const info = propertyOf(root, "info");
+  const streetName = asText(propertyOf(info, "streetName"));
+  const mapName = asText(propertyOf(info, "mapName"));
+  const mark = asText(propertyOf(info, "mapMark"));
+  if (!mark || mark === "None") return { streetName, mapName };
+  const path = `Map/MapHelper.img/mark/${mark}`;
+  if (!reader.at(path)) throw new Error(`mapMark canvas cannot be read: ${path}`);
+  return { streetName, mapName, mark: { path } };
+}
+
 export interface MapArt {
+  title?: MapTitleArt;
   miniMap?: MiniMapArt;
   backs: MapBack[];
   sprites: MapSprite[];
@@ -285,6 +304,7 @@ export function mapArtFrom(root: unknown, reader: ArtReader, imagePath?: string)
   const scan = mapSpriteScan(root, reader);
   return {
     ...(imagePath ? {miniMap:miniMapArt(root,reader,imagePath)} : {}),
+    title: mapTitleArt(root, reader),
     backs: mapBacks(root, reader),
     sprites: scan.sprites,
     bounds: mapBounds(root, reader),

@@ -272,6 +272,7 @@ function mapJson(map: MapData): unknown {
 /** `/api/map/<id>/art`: the background stack, the tiles/objects and the camera's own bounds. */
 function artJson(art: MapArt): unknown {
   return {
+    title: art.title,
     miniMap: art.miniMap,
     portalFrames: art.portalFrames,
     missingTiles: art.missingTiles,

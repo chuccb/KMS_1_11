@@ -189,6 +189,12 @@ export function statWindow({
       return opened;
     },
     toggle,
+    contains(x, y) {
+      if (!opened || !isInGame()) return false;
+      if (x >= at.x && x < at.x + 176 && y >= at.y && y < at.y + 315) return true;
+      return detail && !!getBasis() && x >= at.x + 176 && x < at.x + 352 &&
+        y >= at.y + 123 && y < at.y + 315;
+    },
     receive(message) {
       if (message.t === "ability-result") {
         pending = false;

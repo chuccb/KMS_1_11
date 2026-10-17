@@ -2245,3 +2245,29 @@ Detail是STR+PAD，29只剩STR；4C7960乘0後clamp為1。前輪漏接新實例�
 **交付**：本輪保留既有preview-death-20261018.json／角色，停服後ignored冷備份再重啟，不重seed。
 新增工廠／原案例／0x0B／opt-in／保存／商店與HTTP bridge回歸來源，但不執行test/check/typecheck/browser/VM/probe。
 [skip ci]、非force推送固定分支；原裝備隨機品質、卷軸、active/magic與完整physics仍不宣稱完成。
+
+
+---
+
+## ADR-055：截圖不取代原始來源；HUD／地圖標題／聊天／七格消耗品連貫接線
+
+**日期**：2026-10-18 ｜ **狀態**：已實作、未執行驗證。
+
+以使用者原版截圖的800×600遊戲區比對，不以Windows外框改viewport／角色／地圖。
+4FA5E0／4FB440確認EXP151、整除、百分比位置與FF869EAA；527720(1)確認人物欄黑字，
+PE5B3A00實際UTF-16是Gulim，不再延用Dotum假設。本輪HUD/map/chat優先原字體，fallback仍非同metrics。
+46DA30確認右上獨立兩行白字黑影與38×38mark，補loader→artJson→browser全鏈，不把名稱搬進小地圖。
+
+4F6B70／4FBEE0確認聊天434×84、六列13px、12×82VScr；接原圖捲動與正確輸入位置。
+保留文字安全textContent；DOM wrapping／64條訊息不是原64個換行記錄，顏色分類不聲稱全部native types。
+BtWhisper僅先提供明示browser `/w`捷徑，不冒稱4F8940收件人原窗完成。
+
+以5BCEC0座標、512260 VK表、463DF0／4FC180／512570補七格200/201/202消耗品。
+綁itemId／去重／加總／最低slot使用、200msguard，仍走server use，不預扣或自行回血。
+479B10(...,1)用normal icon而非raw，525AE0用原ItemNo位圖零間距；保留原drop raw端點行為。
+本機storage替代CConfig registry且按帳號角色隔離，不寫server角色，不憑截圖預綁物品。
+技能施放、格間拖放／拖出、完整鍵位設定、BtChat與Menu原窗仍明列未完成。
+
+沿用現有save，停服冷備份再重啟，不建角／seed／自動repair。新增純函數、WZ normal/raw與HTTP欄位回歸來源，
+但遵使用者要求不執行test/check/typecheck/browser/VM/probe；啟服與diff --check不作功能PASS。
+來源表、實作接線與操作見NATIVE_HUD_CHAT_QUICKSLOTS.md；[skip ci]非force推送固定工作分支。

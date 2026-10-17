@@ -221,38 +221,84 @@ body {
   font-size: 12px;
 }
 
-#chat-lines {
+/* CUIStatusBar local (243,97), width=446-VScr width(12), height=84. */
+#chat-history {
   position: absolute;
   left: 0;
-  bottom: 31px;
-  width: 446px;
+  top: -84px;
+  width: 434px;
+  height: 84px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.502);
+  font: 12px 'Gulim', '굴림', 'KMSCJK', sans-serif;
+}
+#chat-lines {
   list-style: none;
   margin: 0;
-  padding: 0;
-  max-height: 150px;
-  overflow: hidden;
+  padding: 6px 0 0;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  text-shadow: 0 1px 3px #000;
 }
-
 #chat-lines li {
-  padding: 1px 0;
-  color: #e8e2d4;
+  flex-shrink: 0;
+  padding: 0;
+  line-height: 13px;
+  color: #fff;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-shadow: none;
 }
-
-#chat-lines li .who {
-  color: var(--gold);
+#chat-lines li .who { color: inherit; }
+#chat-lines li:has(.who.system) { color: #0f0; }
+#chat-lines li:has(.who.whisper) { color: #00f; }
+#chat-scroll {
+  position: absolute;
+  left: 434px;
+  top: -83px;
+  width: 12px;
+  height: 82px;
+  background: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fbase') repeat-y;
 }
-
-#chat-lines li .who.system {
-  color: #93a4bd;
+#chat-scroll.disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fbase'); }
+#chat-scroll button {
+  position: absolute;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  cursor: pointer;
+  image-rendering: pixelated;
 }
-
-#chat-lines li .who.whisper {
-  color: #9fd8ff;
+#chat-scroll [data-chat-prev] { top: 0; background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev0'); }
+#chat-scroll [data-chat-prev]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev1'); }
+#chat-scroll [data-chat-prev]:disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fprev'); }
+#chat-scroll [data-chat-next] { bottom: 0; background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext0'); }
+#chat-scroll [data-chat-next]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext1'); }
+#chat-scroll [data-chat-next]:disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fnext'); }
+#chat-scroll [data-chat-thumb] { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb0'); }
+#chat-scroll [data-chat-thumb]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb1'); }
+#chat-scroll [data-chat-track] { position: absolute; left: 0; top: 12px; width: 12px; height: 58px; }
+#chat-whisper {
+  position: absolute;
+  left: 84px;
+  top: 2px;
+  width: 14px;
+  height: 23px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fnormal%2F0');
+  cursor: pointer;
 }
+#chat-whisper:hover { background-image: url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2FmouseOver%2F0'); }
+#chat-whisper:active { background-image: url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fpressed%2F0'); }
 
 /*
  * The seven faces are a browser stand-in for the 2003 client's F1..F7, which a browser cannot take.
@@ -261,7 +307,7 @@ body {
 #emotes {
   position: absolute;
   left: 0;
-  bottom: 186px;
+  bottom: 115px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -293,16 +339,16 @@ body {
 /* The white field `base/1` already draws: the input itself is only its dark text. */
 #say {
   position: absolute;
-  left: 98px;
-  top: 4px;
+  left: 103px;
+  top: 7px;
   width: 340px;
-  height: 19px;
-  padding: 0 4px;
+  height: 12px;
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: #1b2a44;
-  font-size: 12px;
+  color: #000;
+  font: 12px 'Gulim', '굴림', 'KMSCJK', sans-serif;
   opacity: 1;
 }
 

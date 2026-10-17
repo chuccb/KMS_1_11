@@ -4,7 +4,18 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：全零起始裝備／傷害資料鏈修補（2026-10-18，未測試）
+## 最新實作：原版截圖交叉核對 HUD／地圖名／聊天／快捷格（2026-10-18，未測試）
+
+以原800×600遊戲內容而非 Windows 外框比對。補 EXP151px／整除／百分比、人物欄黑字；
+PE 5B3A00 確認本輪來源字體為 **Gulim（굴림）**，不是舊註解的 Dotum。補 HP/MP/EXP hover數值。
+接 WZ街名／地圖名／mark → HTTP artJson → 右上兩行白字黑影與原徽章；不硬編截圖地圖。
+聊天改原434×84／六列與原 VScr捲軸，輸入位置修正；悄悄話按鈕先提供明示 browser `/w`捷徑，非原收件人窗。
+補七格消耗品拖入／itemId去重／數量合計／最低slot使用、原normal icon與ItemNo位圖；設定為本機帳號角色profile。
+只有200/201/202可綁，不把技能學習當施放；快捷格互拖／拖出、BtChat／Menu原視窗仍缺。
+沿用原save／角色，不自動修裝備／建角。未跑test/check/typecheck/browser/VM/probe。
+見 [NATIVE_HUD_CHAT_QUICKSLOTS.md](NATIVE_HUD_CHAT_QUICKSLOTS.md)／ADR-055。
+
+## 前輪實作：全零起始裝備／傷害資料鏈修補（2026-10-18，未測試）
 
 原案例STR29但起始劍PAD0，Detail只剩29，原傷害公式乘0後clamp為1；不是把最低傷害強行調高。
 補478270→47A740的tuc及15項inc*，新建角／新掉落／商店用同一WZ裝備工廠，既有實例仍保留。

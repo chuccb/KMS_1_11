@@ -1,3 +1,6 @@
+import { chatHistory } from "./chatlog.mjs";
+import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
+import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile } from "./quickslots.mjs";
 import { animationFrame } from "./animation.mjs";
 import { deathEffects, deathPose } from "./death.mjs";
 import { reviveWindow } from "./revive.mjs";
@@ -553,6 +556,9 @@ function handle(message) {
       lastSentMotion = undefined;
       keys.clear();
       selfView = message.self;
+      loadQuickItems();
+      nextBagUseAt = 0;
+      pendingUse = undefined;
       self = { x: 0, y: 0, mapId: message.mapId };
       users.clear();
       selfSwing = undefined;
@@ -578,6 +584,7 @@ function handle(message) {
       closeShop(false);
       closeDialogue(false);
       ui.chatbox.classList.remove("hidden");
+      chatHistoryPanel.latest();
       ui.where.textContent = `${selfView.name} · 地圖 ${message.mapId}`;
       void loadMap(message.mapId, mapGeneration);
       logLine(`field ${message.mapId}`);
@@ -1441,13 +1448,7 @@ canvas.addEventListener("dblclick", (event) => {
   // `sub_462DC0` uses a USE-tab item on a double click; the family is the first three digits.
   const family = Math.floor(hit.item.itemId / 10000);
   if (inventoryTab !== 2 || family < 200 || family > 203) return;
-  pendingUse = {
-    slot: hit.item.slot,
-    itemId: hit.item.itemId,
-    quantity: hit.item.quantity ?? 1,
-    at: performance.now(),
-  };
-  send({ t: "use", slot: hit.item.slot, itemId: hit.item.itemId });
+  useBagItem(hit.item);
 });
 
 canvas.addEventListener("click", (event) => {
@@ -2633,11 +2634,7 @@ const STATUS_BAR = {
   panel: { path: "UI/StatusBar.img/base/0", x: 0, y: 392 },
   chat: { path: "UI/StatusBar.img/base/1", x: 243, y: 573 },
   keys: { path: "UI/StatusBar.img/base/2", x: 689, y: 464 },
-  gauges: {
-    hp: { x: 49, y: 143, w: 163, h: 16 },
-    mp: { x: 49, y: 162, w: 163, h: 16 },
-    exp: { x: 50, y: 190, w: 163, h: 8 },
-  },
+  gauges: STATUS_GAUGES,
   // `base/0` carries the same pixels at these spots; the client still draws the button widgets on
   // top of it so a hover or a press can swap the face (36x35, and `BtMenu` 38x17).
   buttons: [
@@ -2678,24 +2675,21 @@ function jobNameOf(job) {
   );
 }
 
-/** One line of the bar's white boxes: white text with the dark edge its bitmap font draws. */
+/** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
 function statusText(text, x, y, align = "left") {
-  ctx.font = "12px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
+  ctx.font = HUD_FONT;
   ctx.textAlign = align;
   ctx.textBaseline = "top";
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-  ctx.strokeText(text, x, y);
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "#000000";
   ctx.fillText(text, x, y);
 }
 
-/** One gauge: the 1-px sheet stretched to `163 * value / max` (`sub_4FA5E0`). */
+/** Integer division: HP/MP 163px, EXP 151px (4FA5E0). */
 function drawStatusGauge(key, value, max) {
   const trough = STATUS_BAR.gauges[key];
   const entry = artImage(`UI/StatusBar.img/gauge/${key}`);
   if (!entry.ready || max <= 0) return;
-  const filled = Math.round(trough.w * Math.max(0, Math.min(1, value / max)));
+  const filled = gaugeFill(trough.w, value, max);
   if (filled <= 0) return;
   ctx.drawImage(
     entry.img,
@@ -2708,6 +2702,46 @@ function drawStatusGauge(key, value, max) {
     filled,
     trough.h,
   );
+}
+
+
+/** 512570's 200ms guard; the server still owns validation and consumption. */
+let quickProfile, quickOwner, nextBagUseAt = 0;
+function loadQuickItems() {
+  const owner = JSON.stringify([ui.user.value, selfView.characterId, selfView.name]);
+  if (owner === quickOwner) return;
+  quickOwner = owner;
+  let storage;
+  try { storage = localStorage; } catch {}
+  quickProfile = quickItemProfile(storage, owner);
+}
+function useBagItem(item) {
+  const now = performance.now();
+  if (!item || loginStage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
+      portalPending || itemDrag || itemDialog.open || testToolsPanel.open || shop !== undefined ||
+      talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
+      now < nextBagUseAt) return;
+  nextBagUseAt = now + 200;
+  pendingUse = { slot: item.slot, itemId: item.itemId, quantity: item.quantity ?? 1, at: now };
+  send({ t: "use", slot: item.slot, itemId: item.itemId });
+}
+function drawQuickItems() {
+  if (!quickProfile) return;
+  ctx.save();
+  quickProfile.values().forEach((id, index) => {
+    if (!id) return;
+    const {x,y} = QUICK_SLOTS[index];
+    // Native 4FC440: canvas left = x-originX, top = y-originY+32 (not centred).
+    const facts = itemInfo.get(id);
+    if (facts === undefined) void describeItem(id);
+    if (facts?.icon) {
+      const icon = artImage(facts.icon.path);
+      if (icon.ready) ctx.drawImage(icon.img, x - facts.icon.ox, y + 32 - facts.icon.oy);
+    }
+    const {quantity} = quickItemState(inventory, id);
+    drawItemCount(ctx, artImage, quantity, x, y + 20);
+  });
+  ctx.restore();
 }
 
 function drawStatusBar() {
@@ -2727,6 +2761,10 @@ function drawStatusBar() {
     if (entry.ready)
       ctx.drawImage(entry.img, button.x, STATUS_BAR.y + button.y);
   }
+  ctx.fillStyle = "#869eaa"; // 4FB440: ARGB FF869EAA, 20x12 at local (214,190).
+  ctx.fillRect(214, STATUS_BAR.y + 190, 20, 12);
+  statusText(`${expPercent(selfView.exp, selfView.expToNext ?? 0)}%`, 214, STATUS_BAR.y + 190);
+  drawQuickItems();
   statusText(`Lv.${selfView.level}`, 54, STATUS_BAR.y + 116);
   statusText(jobNameOf(selfView.job), 136, STATUS_BAR.y + 116, "right");
   statusText(selfView.name, 153, STATUS_BAR.y + 111);
@@ -2954,6 +2992,7 @@ function frame() {
   }
 
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
+  drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
   drawStatusBar();
@@ -2969,8 +3008,16 @@ function frame() {
         : equipPanel.hit(pointerAt.x, pointerAt.y)
           ? equipHover
           : (inventoryPick ?? inventoryHover?.item);
-    if (!itemDrag && !itemDialog.open && !skillPanel.contains(pointerAt.x, pointerAt.y))
+    if (!itemDrag && !itemDialog.open && !testToolsPanel.open &&
+        !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y))
       drawItemTooltip(pointerAt.x, pointerAt.y, pointed);
+    if (!itemDrag && !itemDialog.open && !testToolsPanel.open && !pointed &&
+        !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
+        !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
+        !skillPanel.contains(pointerAt.x, pointerAt.y)) {
+      const line = statusVitalText(pointerAt.x, pointerAt.y, selfView, effectiveSelf());
+      if (line) drawTooltipLines(pointerAt.x, pointerAt.y, [line]);
+    }
   }
 
   drawDraggedItem();
@@ -3414,6 +3461,18 @@ function drawPortals(cameraX, cameraY, now) {
 
 // ---------------------------------------------------------------- hud & chat
 
+const chatHistoryPanel = chatHistory({
+  root: document.getElementById('chat-history'), list: ui.chatLines,
+  bar: document.getElementById('chat-scroll'),
+});
+// Native 4F8940 opens a recipient UI. Until that dialog is reconstructed, this explicit browser
+// shortcut uses the EXISTING /w parser; it does not silently set a recipient or send a message.
+document.getElementById('chat-whisper').addEventListener('click', () => {
+  if (revivePanel.open || itemDialog.open || testToolsPanel.open) return;
+  if (!ui.say.value) ui.say.value = '/w ';
+  ui.say.focus();
+});
+
 function chatLine(name, text) {
   const line = document.createElement("li");
   const who = document.createElement("span");
@@ -3430,8 +3489,7 @@ function chatLine(name, text) {
   }
   line.append(who, document.createTextNode(text));
   ui.chatLines.append(line);
-  while (ui.chatLines.children.length > 8)
-    ui.chatLines.firstElementChild?.remove();
+  chatHistoryPanel.changed();
   return line;
 }
 
@@ -3562,6 +3620,12 @@ window.addEventListener("mouseup", (e) => {
     return;
   }
   const bag = inventoryWindowAt(p.x, p.y);
+  const quickIndex = quickSlotAt(p.x, p.y);
+  if (!bag && quickIndex >= 0 && e.target === canvas) {
+    if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !testToolsPanel.open)
+      quickProfile?.bind(quickIndex, d.item.itemId);
+    return; // This is never a field drop, even for an unsupported item.
+  }
   if (!bag) {
     // Only releasing on the actual field canvas can throw away. Off-canvas, DOM UI, status bar
     // and minimap are cancellations. Worn equipment must first be put back in the bag.
@@ -4127,7 +4191,10 @@ function itemTooltipLines(item) {
 /** A dark tooltip beside the pointer, the way the client's item box sits next to the cursor. */
 function drawItemTooltip(x, y, item) {
   if (item === undefined) return;
-  const lines = itemTooltipLines(item);
+  drawTooltipLines(x, y, itemTooltipLines(item));
+}
+function drawTooltipLines(x, y, lines) {
+  ctx.save();
   ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
   ctx.textBaseline = "top";
   let width = 0;
@@ -4148,7 +4215,7 @@ function drawItemTooltip(x, y, item) {
   for (let index = 0; index < lines.length; index++) {
     ctx.fillText(lines[index], left + 4, top + 3 + index * 14);
   }
-  ctx.textBaseline = "alphabetic";
+  ctx.restore();
 }
 
 /** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
@@ -5049,6 +5116,13 @@ window.addEventListener("keydown", (event) => {
     if (talkingNpc !== undefined) closeDialogue();
     return;
   }
+  const quickIndex = QUICK_SLOTS.findIndex(s => s.key === event.key);
+  if (quickIndex >= 0) {
+    event.preventDefault();
+    const id = quickProfile?.values()[quickIndex];
+    if (id) useBagItem(quickItemState(inventory, id).item);
+    return;
+  }
   if (event.key.toLowerCase() === "e") {
     event.preventDefault();
     if (!event.repeat) equipPanel.toggle();
@@ -5256,7 +5330,7 @@ ui.say.addEventListener("keydown", (event) => {
 });
 
 ui.say.addEventListener("blur", () => {
-  ui.say.placeholder = "Enter 開始輸入，再按 Enter 送出";
+  ui.say.placeholder = ""; // Native idle field is blank; browser instructions live in title/aria-label.
 });
 
 /** The first thing a user sees; also what a refresh returns to. */

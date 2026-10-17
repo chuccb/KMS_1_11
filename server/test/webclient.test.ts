@@ -437,10 +437,20 @@ artTest("the map's art, its canvases and a composed avatar are served", { timeou
   const art = await fetch(`http://127.0.0.1:${world.webPort}/api/map/100000000/art`);
   assert.equal(art.status, 200, "Henesys is in the archive every shipped session reads");
   const body = (await art.json()) as {
+    title: {streetName:string; mapName:string; mark?:{path:string}};
     backs: { path: string; ox: number; oy: number; type: number }[];
     sprites: { layer: number; z: number; frames: { path: string }[] }[];
     bounds: { left: number; right: number };
   };
+  // Source-only addition, NOT executed 2026-10-18: catches a dropped artJson field, not just loader metadata.
+  assert.ok(body.title.streetName.length > 0);
+  assert.ok(body.title.mapName.length > 0);
+  assert.equal(body.title.mark?.path, "Map/MapHelper.img/mark/헤네시스");
+  const mark = await fetch(`http://127.0.0.1:${world.webPort}/api/png/${encodeURIComponent(body.title.mark!.path)}`);
+  assert.equal(mark.status, 200);
+  const markPng = new DataView(await mark.arrayBuffer());
+  assert.equal(markPng.getUint32(16), 38);
+  assert.equal(markPng.getUint32(20), 38);
   assert.ok(body.backs.length > 0);
   assert.ok(body.sprites.length > 0);
   assert.ok(body.sprites.every((sprite) => Number.isInteger(sprite.layer) && sprite.layer >= 0 && sprite.layer <= 7));
