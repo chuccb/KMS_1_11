@@ -1,6 +1,8 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新實作（**未測試／未typecheck**）：更正4C7450的舊誤讀，PE原表自然HP／MP、逐級成長、已學被動x/y、一般穿戴INT、HP／MP AP／原六按鈕、殺怪與加點即時保存。見 `STAT_GROWTH.md`／ADR-047。**自然AP/SP發放仍未定位，不套5/3**；技能學習／Detail／完整裝備buff依賴仍缺。按使用者選擇開啟全新隔離體驗檔，非舊進度。
+> 最新實作（**未測試／未typecheck／未browser**）：原四列 CUISkill、真 WZ 技能書／前置／max、SP 單點學習 0x1D→0x0E／拒絕 release／map32 保存與已學 snapshot；成長被動共用紀錄。原 PE 職業表與 ancestry 更正，初心者空書、不改體驗進度。**主動施放、其他被動效果／buff、轉職與自然 AP/SP 尚未完成**；tooltip 是簡化版。見 `SKILLS.md`／ADR-048。
+
+> 前輪實作（**未測試／未typecheck**）：更正4C7450的舊誤讀，PE原表自然HP／MP、逐級成長、已學被動x/y、一般穿戴INT、HP／MP AP／原六按鈕、殺怪與加點即時保存。見 `STAT_GROWTH.md`／ADR-047。**自然AP/SP發放仍未定位，不套5/3**；當時缺的技能學習／SP操作已於ADR-048接線（仍未測），Detail／完整裝備buff依賴仍缺。按使用者選擇開啟全新隔離體驗檔，非舊進度。
 
 > 最新實作（**未測試／未typecheck**）：原武器normal動作表與逐幀WZ速度、弓弩拳套基本選彈／空射扣彈、0發207／末箭清格、0x10→0x24與原bullet／afterimage、延後命中、2型待機行走。見`BASIC_ATTACKS.md`／ADR-046。技能攻擊、原CShape2D碰撞及完整傷害公式仍未完成。
 

@@ -1,3 +1,4 @@
+import { SKILL_REQUEST_OPCODE, SKILL_UPDATE_OPCODE, readSkillRequest, describeSkillRequest, readSkillUpdate, describeSkillUpdate } from "./skills.ts";
 import { MESO_DROP_OPCODE, readMesoDrop, describeMesoDrop } from "./mesodrop.ts";
 import { ABILITY_REQUEST_OPCODE, readAbilityRequest, describeAbilityRequest } from "./ability.ts";
 /**
@@ -502,6 +503,7 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
       return `0x13 emotion: ${describeClientEmotion(readClientEmotion(new PacketReader(plain, 1)))}`;
     }
     if (opcode === MESO_DROP_OPCODE) return describeMesoDrop(readMesoDrop(new PacketReader(plain, 1)));
+    if (opcode === SKILL_REQUEST_OPCODE) return describeSkillRequest(readSkillRequest(new PacketReader(plain, 1)));
     if (opcode === ABILITY_REQUEST_OPCODE) {
       return describeAbilityRequest(readAbilityRequest(new PacketReader(plain, 1)));
     }
@@ -597,6 +599,10 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   const opcode = plain[0]!;
   // `0x0B` and `0x11` belong to `CWvsApp` (`sub_55A900`), i.e. they are below the field dispatcher's
   // range but a field session is where they arrive, so they are described here.
+  if (opcode === SKILL_UPDATE_OPCODE) {
+    try { return describeSkillUpdate(readSkillUpdate(new PacketReader(plain, 1))); }
+    catch (error) { return `0x0e skills: (truncated: ${(error as Error).message})`; }
+  }
   if (opcode === INVENTORY_OPCODE) {
     try {
       const { result, changes } = readInventoryChange(new PacketReader(plain, 1));

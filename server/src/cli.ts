@@ -1,3 +1,4 @@
+import { skillCatalogOf, type SkillCatalog } from "./game/skills.ts";
 import { creationCatalogOf } from "./game/creation.ts";
 /**
  * kms111-rebuild CLI.
@@ -404,6 +405,7 @@ async function runServe(rest: string[]): Promise<number> {
   let consumeSpec: ReturnType<typeof consumeSpecProvider> | undefined;
   let itemCatalog: ItemCatalog | undefined;
   let growthSkill: GrowthSkillProvider | undefined;
+  let skills: SkillCatalog | undefined;
   let art: ArtProvider | undefined;
   let audio: AudioProvider | undefined;
   const shopWarnings: string[] = [];
@@ -418,6 +420,7 @@ async function runServe(rest: string[]): Promise<number> {
       shops = shopKeeper(archive);
       consumeSpec = consumeSpecProvider(archive);
       growthSkill = growthSkillProvider(archive);
+      skills = skillCatalogOf(archive);
       itemCatalog = itemCatalogOf(archive);
       art = artProviderOf(archive);
       audio = audioProviderOf(archive);
@@ -565,6 +568,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(shops !== undefined ? { shops } : {}),
       ...(consumeSpec !== undefined ? { consumeSpec } : {}),
       ...(growthSkill !== undefined ? { growthSkill } : {}),
+      ...(skills !== undefined ? { skills } : {}),
       ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
       ...(itemCatalog !== undefined
         ? {
@@ -606,6 +610,7 @@ async function runServe(rest: string[]): Promise<number> {
         ...(mapProvider !== undefined ? { mapProvider } : {}),
         ...(mapCatalog !== undefined ? { mapCatalog } : {}),
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
+        ...(skills !== undefined ? { skills } : {}),
         ...(art !== undefined ? { art } : {}),
         ...(audio !== undefined ? { audio } : {}),
         ...(log ? { log } : {}),

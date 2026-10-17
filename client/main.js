@@ -1,3 +1,5 @@
+import { skillWindow } from "./skills.mjs";
+import { NATIVE_JOB_NAMES } from "./jobs.mjs";
 import {
   weaponIdOf,
   basicAmmo,
@@ -366,6 +368,7 @@ function connect() {
 /** @param {any} message */
 function handle(message) {
   if (creationDialogs.receive(message)) return;
+  if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
     miniMapPanel.setMap(undefined);
@@ -2460,23 +2463,7 @@ function statusButtonAt(x, y) {
 }
 
 /** The job names `CUIStatusBar` prints from its own table (this archive has no String.wz). */
-const JOB_NAMES = new Map([
-  [0, "초보자"],
-  [100, "전사"],
-  [110, "파이터"],
-  [120, "페이지"],
-  [130, "스피어맨"],
-  [200, "마법사"],
-  [210, "위자드"],
-  [220, "클레릭"],
-  [230, "위자드"],
-  [300, "궁수"],
-  [310, "헌터"],
-  [320, "사수"],
-  [400, "도적"],
-  [410, "어쌔신"],
-  [420, "시프"],
-]);
+const JOB_NAMES = NATIVE_JOB_NAMES;
 
 function jobNameOf(job) {
   return (
@@ -2543,6 +2530,10 @@ function drawStatusBar() {
 function statusButtonClick(button) {
   if (button.action === "inventory") {
     toggleInventory();
+    return;
+  }
+  if (button.action === "skill") {
+    skillPanel.toggle();
     return;
   }
   if (button.action === "stat") {
@@ -2751,6 +2742,7 @@ function frame() {
   equipPanel.draw();
   drawShopWindow();
   statPanel.draw();
+  skillPanel.draw();
   if (pointerAt !== undefined) {
     const pointed =
       shop !== undefined && shopHover !== undefined
@@ -2758,7 +2750,7 @@ function frame() {
         : equipPanel.hit(pointerAt.x, pointerAt.y)
           ? equipHover
           : (inventoryPick ?? inventoryHover?.item);
-    if (!itemDrag && !itemDialog.open)
+    if (!itemDrag && !itemDialog.open && !skillPanel.contains(pointerAt.x, pointerAt.y))
       drawItemTooltip(pointerAt.x, pointerAt.y, pointed);
   }
 
@@ -3347,6 +3339,7 @@ window.addEventListener("mouseup", (e) => {
     !Number.isFinite(e.clientX) ||
     !Number.isFinite(e.clientY) ||
     e.target?.closest?.("#stat-window") ||
+    e.target?.closest?.("#skill-window") ||
     e.target?.closest?.("#dialogue")
   )
     return;
@@ -4832,6 +4825,10 @@ window.addEventListener("keydown", (event) => {
       itemDrag = undefined;
       return;
     }
+    if (skillPanel.open) {
+      skillPanel.toggle(false);
+      return;
+    }
     if (statPanel.open) {
       statPanel.toggle(false);
       return;
@@ -4852,6 +4849,11 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "m") {
     event.preventDefault();
     if (!event.repeat) miniMapPanel.toggle();
+    return;
+  }
+  if (event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (!event.repeat) skillPanel.toggle();
     return;
   }
   if (event.key.toLowerCase() === "s") {
@@ -5074,6 +5076,12 @@ const statPanel = statWindow({
   log: logLine,
 });
 
+const skillPanel = skillWindow({
+  ctx, image: artImage, send, audio, point: viewPoint,
+  getSelf: () => selfView, isInGame: () => loginStage === "game",
+  log: logLine, isModal: () => itemDialog.open,
+});
+
 const miniMapPanel = miniMapWindow({
   ctx,
   image: artImage,
@@ -5082,6 +5090,7 @@ const miniMapPanel = miniMapWindow({
   isInGame: () => loginStage === "game",
   point: viewPoint,
   isCovered: (p) =>
+    skillPanel.contains(p.x, p.y) ||
     inventoryWindowAt(p.x, p.y) !== undefined ||
     equipPanel.hit(p.x, p.y) !== undefined ||
     shopWindowAt(p.x, p.y) !== undefined,
@@ -5098,7 +5107,7 @@ const equipPanel = equipmentWindow({
   audio,
   beginItem: beginItemDrag,
   describe: describeItem,
-  isCovered: (p) => shopWindowAt(p.x, p.y) !== undefined,
+  isCovered: (p) => skillPanel.contains(p.x, p.y) || shopWindowAt(p.x, p.y) !== undefined,
   hover(item, p) {
     equipHover = item;
     if (p) pointerAt = p;

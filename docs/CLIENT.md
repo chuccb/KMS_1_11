@@ -4,6 +4,15 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
+## 最新實作：原技能窗與 SP 學習（未測試）
+
+- K／HUD Skill 開啟原 176×315 CUISkill，四行與 I–IV 真 WZ 書、前置／滿級三態、原圖示與 SP 按鈕。
+- 支援 tabs／鍵盤、捲軸／滾輪／拖曳滑塊、標題拖窗保存、modal 隔離與說明；tooltip 是明示的簡化版，非完整原 renderer。
+- SP 經原 0x1D／0x0E、500ms／pending、server 檢查、保存與已學 snapshot；同一 map32 接入成長被動。
+- 職業名稱改讀原 PE 表，不再套後期名稱；初學者沒有書，現有隔離角色／SP／進度不變。
+- **主動施放／快捷鍵拖放、其餘被動與 buff 仍未完成，不將學習紀錄冒充技能效果。**
+- 本輪沒有執行測試、typecheck、browser 或 probe；完整來源／政策／差異見 [SKILLS.md](SKILLS.md)。
+
 ## 最新實作：原武器基本動作／弓弩拳套射擊（未測試）
 
 - Ctrl依原normal動作表及WZ每幀delay；有近敵／無彈保留近身路徑，有彈無近敵則射擊，空射也扣1發。

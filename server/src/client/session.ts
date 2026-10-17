@@ -1,3 +1,6 @@
+import { SKILL_UPDATE_OPCODE, encodeSkillRequest, readSkillUpdate, type SkillChange } from "../protocol/skills.ts";
+import { learnedSkills } from "../game/skills.ts";
+import { emptyCharacterItems } from "../protocol/chardata.ts";
 import { encodeMesoDrop, MESO_DROP_INTERVAL_MS } from "../protocol/mesodrop.ts";
 import { encodeAbilityRequest, type Ability } from "../protocol/ability.ts";
 /**
@@ -374,6 +377,8 @@ export type ClientEvent =
     }
   | { kind: "user-emotion"; characterId: number; emotion: number }
   | { kind: "request-release" }
+  | { kind: "skills"; skills: SkillChange[] }
+  | { kind: "skill-result"; changed: boolean }
   | { kind: "ability-result"; changed: boolean }
   | { kind: "meso-drop-result"; changed: boolean }
   | { kind: "chat"; name: string; text: string }
@@ -661,6 +666,8 @@ export class ClientSession {
   /** `0x0F`'s per-swing `sequence`: it only has to differ between swings. */
   private attackSequence = 0;
   private abilityPending = false;
+  private skillPending = false;
+  private nextSkillAt = 0;
   private mesoPending = false;
   private nextMesoAt = 0;
   private slotPending = false;
@@ -918,6 +925,7 @@ export class ClientSession {
     if (link === undefined)
       throw new Error("attack() needs a session in a field");
     if (
+      this.skillPending ||
       this.slotPending ||
       this.shopPending ||
       this.mesoPending ||
@@ -1018,6 +1026,7 @@ export class ClientSession {
     if (
       this.mesoPending ||
       this.abilityPending ||
+      this.skillPending ||
       this.slotPending ||
       this.shopPending ||
       performance.now() < this.nextMesoAt
@@ -1038,7 +1047,7 @@ export class ClientSession {
   async increaseAbility(field: Ability): Promise<void> {
     if (!this.gameLink || !this.self)
       throw new Error("AP requires an active field");
-    if (this.abilityPending || this.mesoPending)
+    if (this.abilityPending || this.mesoPending || this.skillPending || performance.now() < this.nextSkillAt)
       throw new Error("AP request already pending");
     const packet = encodeAbilityRequest(field);
     this.abilityPending = true;
@@ -1048,6 +1057,17 @@ export class ClientSession {
       this.abilityPending = false;
       throw error;
     }
+  }
+
+  async increaseSkill(skillId: number): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0 || this.self.sp <= 0)
+      throw new Error("SP requires a living character with available points");
+    if (this.skillPending || this.abilityPending || this.mesoPending || this.slotPending || this.shopPending || performance.now() < this.nextSkillAt)
+      throw new Error("another stat/item request is pending or too soon");
+    const packet = encodeSkillRequest(skillId);
+    this.skillPending = true;
+    try { await this.gameLink.send(packet); }
+    catch (error) { this.skillPending = false; throw error; }
   }
 
   async emotion(value: number): Promise<void> {
@@ -1102,6 +1122,7 @@ export class ClientSession {
     )
       throw new Error("invalid change-slot fields");
     if (
+      this.skillPending ||
       this.slotPending ||
       this.mesoPending ||
       this.shopPending ||
@@ -1166,7 +1187,7 @@ export class ClientSession {
     }
     if (!this.self || this.self.hp <= 0)
       throw new Error("shop trade needs a living character in a field");
-    if (this.shopPending || this.slotPending || this.mesoPending)
+    if (this.skillPending || this.shopPending || this.slotPending || this.mesoPending)
       throw new Error("inventory or shop request pending");
     const position = request.kind === "buy" ? request.row : request.slot;
     if (
@@ -1335,6 +1356,8 @@ export class ClientSession {
     this.link?.close();
     this.gameLink = undefined;
     this.link = undefined;
+    this.skillPending = false;
+    this.nextSkillAt = 0;
     this.slotPending =
       this.shopPending =
       this.mesoPending =
@@ -1350,6 +1373,8 @@ export class ClientSession {
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
           this.abilityPending = false;
+          this.skillPending = false;
+          this.nextSkillAt = 0;
           this.mesoPending = false;
           this.nextMesoAt = 0;
           this.slotPending = false;
@@ -1376,6 +1401,26 @@ export class ClientSession {
             kind: "inventory",
             inventory: inventoryViewOf(field.character.items),
           });
+          this.emit({ kind: "skills", skills: learnedSkills(field.character.items?.map32) });
+          return;
+        }
+        case SKILL_UPDATE_OPCODE: {
+          const update = readSkillUpdate(new PacketReader(plain, 1));
+          if (this.latest) {
+            const items = this.latest.items ?? emptyCharacterItems();
+            for (const change of update.changes) {
+              items.map32 = items.map32.filter((r) => r.key !== change.skillId);
+              if (change.level > 0) items.map32.push({ key: change.skillId, value: change.level });
+            }
+            this.latest.items = items;
+            this.latest.flags |= 0x20;
+            this.emit({ kind: "skills", skills: learnedSkills(items.map32) });
+          }
+          if (update.ack && this.skillPending) {
+            this.skillPending = false;
+            this.nextSkillAt = performance.now() + 500;
+            this.emit({ kind: "skill-result", changed: update.changes.length > 0 });
+          }
           return;
         }
         case INVENTORY_OPCODE: {
@@ -1785,6 +1830,8 @@ export const CLIENT_EVENT_KINDS = [
   "request-release",
   "self",
   "ability-result",
+  "skill-result",
+  "skills",
   "meso-drop-result",
   "user-enter",
   "user-leave",

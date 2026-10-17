@@ -1,3 +1,4 @@
+import * as skills from "./skills.ts";
 /**
  * The protocol catalogue: **one machine-readable list of every packet this repo can actually
  * decode**, with the fields that are known and the function that proves them.
@@ -963,7 +964,17 @@ export const PACKETS: readonly PacketSchema[] = [
     status: "byte-exact",
     evidence: "FINDINGS 4.42; CUIStat sub_4F2D70 -> sub_55CF60 (opcode 27 + u32 mask)",
     codecs: ["encodeAbilityRequest", "readAbilityRequest", "describeAbilityRequest"],
-    fields: [{ name: "mask", type: "u32", note: "STR=0x40, DEX=0x80, INT=0x100, LUK=0x200, maxHP=0x800, maxMP=0x2000; HP/MP server growth not implemented" }],
+    fields: [{ name: "mask", type: "u32", note: "STR=0x40, DEX=0x80, INT=0x100, LUK=0x200, maxHP=0x800, maxMP=0x2000; HP/MP growth: sub_4C7450 / game/growth.ts" }],
+  },
+  {
+    opcode: skills.SKILL_REQUEST_OPCODE, direction: "c2s", stage: "field", name: "skillUp",
+    status: "byte-exact", evidence: "sub_4EE1B0 -> sub_55ABE0 -> sub_55D140; docs/SKILLS.md",
+    codecs: ["encodeSkillRequest", "readSkillRequest", "describeSkillRequest"], fields: [{ name: "skillId", type: "u32" }],
+  },
+  {
+    opcode: skills.SKILL_UPDATE_OPCODE, direction: "s2c", stage: "field", name: "skillUpdate",
+    status: "byte-exact", evidence: "sub_55A900 case14 -> sub_55B6A0; docs/SKILLS.md",
+    codecs: ["encodeSkillUpdate", "readSkillUpdate", "describeSkillUpdate"], fields: [{ name: "ack", type: "u8" }, { name: "count", type: "u16" }, { name: "changes", type: "{u32 skillId,s32 level}[count]", note: "level<=0 removes; no expiry field" }],
   },
   {
     opcode: field.CLIENT_FIELD_OPCODE.statReport,
@@ -1390,6 +1401,7 @@ export const PACKETS: readonly PacketSchema[] = [
 const CODEC_MODULES: readonly Record<string, unknown>[] = [
   mesodrop,
   ability,
+  skills,
   chardata,
   drop,
   field,

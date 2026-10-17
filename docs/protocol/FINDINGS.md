@@ -4391,3 +4391,20 @@ WZ1462000 shoot2/body有五幀150,150,250,100,100，speed4逐格取整後168,168
 server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現近似公式皆有政策界線，
 不能由client程式證明原server，也不代表技能／完整職業已完成。見`docs/BASIC_ATTACKS.md`／ADR-046。
 使用者要求不測試，新增回歸來源未執行，非PASS紀錄。
+
+
+## 補充：CUISkill／SP 學習（2026-10-17；新增實作未測試）
+
+- 55D140送c2s0x1D＋u32 skillId；4EE1B0檢查HP／SP／pending／500ms，再用55ABE0的三態：
+  前置不足0、已達max -1、其他1。沒有添加後期角色等級限制。
+- CWvsApp55A900 **case14**→55B6A0才是技能map更新：u8 release、u16 count、每筆u32id＋signed32level，
+  level>0寫CharacterData+382，否則移除；release非零解鎖並更新計時。**不是0x0F**、不帶expiry。
+- 43FF00／PE VA5B40D4原名字表以CP949讀取：100검사、110전사、200매지션、230성직자等；
+  43FFB0生成職業book祖先，job0不產生書。讀真WZ存在book，不填後期初心者技能。
+- CUISkill4EC910為176×315；4ECD40 tab(3,52,w170)、scroll(161,116,h162)、close(128,9)；
+  4ED8E0四個154×38 row在(5,119+40i)，icon(8,122+40i)，SP-up(139,137+40i)，SP(68,282)。
+  4EE5E0一般row命中排除每列2px間隙；拖曳icon另是32×32。max仍用正常icon／skill1，僅req不足用disabled。
+- 實作map32保存／完整進場snapshot與1000001／2000001成長讀取共用；不另建假技能等級。
+  原codec之外，server權威交易／保存／SP stat回包順序是重建政策，非已擷取原伺服器序列。
+- 本輪未執行任何test／typecheck／browser／VM／probe。主動施放、其他被動／buff、自然AP/SP及轉職未接；
+  tooltip是簡化版。詳見`docs/SKILLS.md`／ADR-048，不把學習紀錄當成所有技能效果完成。

@@ -103,6 +103,7 @@ const STUB_ART = {
 };
 globalThis.fetch = async (url) => {
   const path = String(url);
+  if (path.startsWith("/api/skills/")) return {ok:true,status:200,json:async()=>({job:0,books:[]})};
   let body = STUB_MAP;
   if (path === '/api/creation') {
     const make = (sets) => sets.map((set) => set.map((id) => ({ id, name: `option ${id}` })));
@@ -139,9 +140,11 @@ Object.assign(globalThis, await import("../../client/selection.mjs"));
 Object.assign(globalThis, await import("../../client/creation.mjs"));
 Object.assign(globalThis, await import("../../client/scene.mjs"));
 Object.assign(globalThis, await import("../../client/statwindow.mjs"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+Object.assign(globalThis, await import("../../client/skills.mjs"));
+Object.assign(globalThis, await import("../../client/jobs.mjs"));
+runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
-  itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
+  skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},
   runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt, itemTooltipLines,
   get scroll() { return { ...shopScroll }; },
@@ -641,3 +644,23 @@ const remote=clientProbe.remoteUsers.get('22');remote.probePath={kept:true};
 activeSocket.push({t:'user-look',characterId:22,avatarItems:[30000,1002008]});
 assert.equal(clientProbe.remoteUsers.get('22'),remote);assert.deepEqual(remote.probePath,{kept:true});assert.equal(remote.face,20000);assert.deepEqual(remote.avatarItems,[30000,1002008]);
 console.log('EQUIPMENT REQUIREMENTS / ACK / AUTHORITATIVE LOOK / REMOTE PATH REGRESSIONS OK');
+
+// New skill UI regression source only: not executed for this delivery.
+assert.equal(skillRowAt(5,119,8),0);
+assert.equal(skillRowAt(158,156,8),0);
+assert.equal(skillRowAt(5,157,8),-1,"38px native row, not the two-pixel gap");
+assert.equal(skillRowAt(5,158,8),-1);
+assert.equal(skillRowAt(5,159,8,2),3);
+assert.equal(skillRowAt(5,277,8),-1);
+assert.equal(skillRowAt(159,122,8),-1);
+const skillFixture={id:1000001,maxLevel:10,requirements:[{skillId:1000000,level:5}]};
+assert.equal(skillState(skillFixture,new Map()),0);
+assert.equal(skillState(skillFixture,new Map([[1000000,5]])),1);
+assert.equal(skillState(skillFixture,new Map([[1000000,5],[1000001,10]])),-1);
+clientProbe.skillPanel.toggle(true);await render();
+assert.equal(elements.get("skill-window").classList.contains("hidden"),false);
+assert.ok(stamp("UI/UIWindow.img/Skill/backgrnd",96,96));
+assert.equal(elements.get("sp-up-0").hidden,true,"native beginners have no skill book");
+elements.get("skill-close").fire("click");
+assert.equal(clientProbe.skillPanel.open,false);
+console.log("SKILL BOOK / NATIVE ROW / EMPTY BEGINNER REGRESSION SOURCES OK");

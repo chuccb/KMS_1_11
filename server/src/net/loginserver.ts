@@ -1,3 +1,5 @@
+import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
+import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
 import { spendBasicAmmo, type BasicAttackProvider } from "../game/basicattack.ts";
 import {
   MESO_DROP_OPCODE,
@@ -927,6 +929,7 @@ export interface GameEntryServerOptions {
   basicAttack?: BasicAttackProvider;
   /** Actual learned HP/MP passive x/y values from Skill/100.img and Skill/200.img. */
   growthSkill?: GrowthSkillProvider;
+  skills?: SkillCatalog;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -1545,6 +1548,24 @@ export class GameEntryServer {
     // Refusals must release the same native gate as success; no silent hang with zero AP.
     session.send(encodeStatUpdate({ ack: true, diff }));
     if (Object.keys(diff).length) this.persist();
+  }
+
+  /** 55D140 -> 55B6A0: one SP, authoritative req/max/book checks and a nonzero release on refusal. */
+  private handleSkillUp(session: FieldSession, plain: Uint8Array): void {
+    let change: SkillChange | undefined;
+    try {
+      const skillId = readSkillRequest(new PacketReader(plain, 1));
+      const now = performance.now(), last = this.abilityTimes.get(session);
+      if (last === undefined || now - last >= 500) {
+        this.abilityTimes.set(session, now); // AP and SP share the native gate/rate window.
+        change = spendSkillPoint(session.character, skillId, this.options.skills);
+      }
+    } catch (error) { this.options.log?.(`game: SP request refused: ${String(error)}`); }
+    if (change) {
+      this.persist();
+      session.send(encodeStatUpdate({ ack: false, diff: { sp: session.character.stats.sp } }));
+    }
+    session.send(encodeSkillUpdate({ ack: true, changes: change ? [change] : [] }));
   }
 
   /**
@@ -2539,6 +2560,10 @@ export class GameEntryServer {
         // the client and answered with the `0x0D` that moves the bar (see `handleStatReport`).
         if (session !== undefined && opcode === MESO_DROP_OPCODE) {
           this.handleMesoDrop(session, event.plain);
+          continue;
+        }
+        if (session !== undefined && opcode === SKILL_REQUEST_OPCODE) {
+          this.handleSkillUp(session, event.plain);
           continue;
         }
         if (session !== undefined && opcode === ABILITY_REQUEST_OPCODE) {

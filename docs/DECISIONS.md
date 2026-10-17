@@ -2062,3 +2062,23 @@ buff／Detail、技能學習／SP操作與轉職仍缺。伺服器權威接線�
 **驗證**：僅原始碼／PE／WZ閱讀與靜態審閱；新增／更新回歸來源未執行。
 依使用者要求不跑 test/check/typecheck/browser/VM/probe，只啟動0.0.0.0預覽服務供其自行操作。
 完整原表與已知差異見 `STAT_GROWTH.md`。
+
+
+## ADR-048：原 CUISkill、SP 單點交易與共用已學紀錄（2026-10-17）
+
+**來源**：43FF00／PE VA5B40D4 原職業指標表與43FFB0 ancestry；4EC910／4ECD40／4ED8E0／4EE5E0
+的176×315四列UI；4BAD60／Skill WZ loader，55ABE0前置／max，4EE1B0／55D140請求，
+55A900 case14→55B6A0更新。明確不是s2c0F，也沒有後期expiry／master level。
+
+**決定**：server／browser共用原職業表；只用原WZ書。SP經0x1D單id、server檢查alive／SP／book／req／max、
+map32寫回、旗標0x20、保存、0x0D SP與0x0E技能回包。成功扣1，拒絕不突變且有ack解除pending。
+AP／SP共用server500ms窗口，現有AP／物品／商店gate加SP防線；不宣稱CWvsApp全域gate已全部還原。
+瀏覽器原圖四列／tabs／scroll／拖窗／K與HUD／ARIA；原38px命中區不含2px列間距。
+
+**界線**：只有已接的HP1000001／MP2000001成長效果隨紀錄生效；其他被動、主動施放／快捷鍵／buff仍缺。
+Tooltip是明示的簡化版，沒有像素驗收；server保存／回包順序是重建政策，不冒充原服capture。
+自然AP／SP及轉職仍未知／未接，不套5／3。原初心者無book，不以後期新手技能填空；不改隔離角色job或SP。
+
+**交付狀態**：新增codec／catalog／SP／save／bridge／UI回歸來源，依使用者要求**全部未執行**，
+未跑check/typecheck/browser/VM/probe。提交[skip ci]，重啟同隔離存檔服務供使用者操作，不重seed。
+細節與證據表見 `SKILLS.md`；ADR-047「技能學習缺口」由本輪接線，不追溯改寫其當時的未測狀態。

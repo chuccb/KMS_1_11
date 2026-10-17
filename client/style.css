@@ -705,3 +705,7 @@ body {
   clip-path: inset(50%);
   margin: 0;
 }
+
+/* CUISkill owns its whole native rectangle, including blank space: no field/item click-through. */
+#skill-window { position: absolute; z-index: 5; pointer-events: auto; touch-action: none; }
+#skill-values { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

@@ -1,3 +1,5 @@
+import { nativeSkillBooks } from "../../../client/jobs.mjs";
+import type { SkillCatalog } from "../game/skills.ts";
 import {
   firstBasicAmmo,
   type BasicAttackProvider,
@@ -93,6 +95,7 @@ export interface WebClientOptions {
    * really carried.
    */
   itemCatalog?: ItemCatalog;
+  skills?: SkillCatalog;
   /**
    * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
    * frames (`game/sprites.ts`). Without them the page still draws the geometry, in flat colours -
@@ -301,6 +304,7 @@ function artJson(art: MapArt): unknown {
  */
 const ART_ROOTS = [
   "Map/",
+  "Skill/",
   "Character/",
   "Mob/",
   "Npc/",
@@ -541,6 +545,8 @@ class BrowserSession {
           return await this.require().warpTo(Number(message.mapId));
         case "portal":
           return await this.usePortal(String(message.name ?? ""));
+        case "skill-up":
+          return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {
           const field = String(message.field);
           if (!ABILITY_FIELDS.includes(field as Ability))
@@ -1300,6 +1306,17 @@ export function startWebClient(
         templateId: mob.templateId,
         actions: mob.actions,
       });
+      return;
+    }
+    if (url.pathname.startsWith("/api/skills/")) {
+      const job = Number(url.pathname.slice("/api/skills/".length));
+      if (!Number.isInteger(job) || job < 0 || job > 0x7fff || !options.skills) {
+        sendJson(response, 404, { error: "skill catalogue unavailable or invalid job" });
+        return;
+      }
+      sendJson(response, 200, { job, books: nativeSkillBooks(job).flatMap((id) => {
+        const book = options.skills?.book(id); return book ? [book] : [];
+      }) });
       return;
     }
     if (url.pathname.startsWith("/api/item/")) {

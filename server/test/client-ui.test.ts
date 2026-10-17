@@ -11,6 +11,7 @@ test("browser canvas UI: title login, shop buy/sell, scroll, drag, inventory upd
   assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /PORTAL COMMAND \/ CHAT FOCUS REGRESSIONS OK/);
   assert.match(result.stdout, /STAT\/AP REGRESSIONS OK/);
+  assert.match(result.stdout, /SKILL BOOK \/ NATIVE ROW \/ EMPTY BEGINNER REGRESSION SOURCES OK/);
   assert.match(result.stdout, /SHOP REGRESSIONS OK/);
   assert.match(result.stdout, /TITLE REGRESSIONS OK/);
 });

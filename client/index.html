@@ -97,6 +97,20 @@
           Close
         </button>
       </section>
+      <section id="skill-window" class="hidden" role="dialog" aria-label="技能；K 開關" aria-describedby="skill-values">
+        <div role="tablist" aria-label="原職業技能書">
+          <button id="skill-tab-0" class="sprite-hit" type="button" role="tab" hidden>I</button>
+          <button id="skill-tab-1" class="sprite-hit" type="button" role="tab" hidden>II</button>
+          <button id="skill-tab-2" class="sprite-hit" type="button" role="tab" hidden>III</button>
+          <button id="skill-tab-3" class="sprite-hit" type="button" role="tab" hidden>IV</button>
+        </div>
+        <button id="skill-close" class="sprite-hit" type="button" aria-label="關閉技能視窗">Close</button>
+        <button id="sp-up-0" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
+        <button id="sp-up-1" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
+        <button id="sp-up-2" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
+        <button id="sp-up-3" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
+        <p id="skill-values"></p>
+      </section>
       <div
         id="minimap-window"
         class="hidden"
@@ -129,7 +143,7 @@
           id="ap-maxHp"
           class="sprite-hit"
           type="button"
-          aria-label="增加最大 HP（成長規則尚未還原）"
+          aria-label="增加最大 HP"
           disabled
         >
           HP
@@ -138,7 +152,7 @@
           id="ap-maxMp"
           class="sprite-hit"
           type="button"
-          aria-label="增加最大 MP（成長規則尚未還原）"
+          aria-label="增加最大 MP"
           disabled
         >
           MP

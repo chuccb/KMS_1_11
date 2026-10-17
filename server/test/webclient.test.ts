@@ -1,3 +1,4 @@
+import { skillCatalogOf } from "../src/game/skills.ts";
 import { ClientSession } from "../src/client/session.ts";
 import { creationCatalogOf } from "../src/game/creation.ts";
 import { MemorySaveStore, readSave } from "../src/game/save.ts";
@@ -232,6 +233,7 @@ interface World {
 interface WorldOptions {
   mapCommands?: boolean;
   ability?: boolean;
+  skills?: boolean;
   /** Gives NPC 2003 a shop - the click path that opens `0x4A`. */
   shop?: boolean;
   /** Gives NPC 2003 two lines of `info/speak` instead - the click path that opens `0x47`. */
@@ -273,6 +275,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     stats.mp = 30;
     stats.maxMp = 30;
     if (options.ability) Object.assign(stats, {ap: user === "admin" ? 3 : 2, int: 4, luk: 4});
+    if (options.skills) Object.assign(stats, {job:100,sp:10});
     stats.mapId = 1000000;
     stats.mesos = 100;
     const items = startingCharacterItems();
@@ -291,6 +294,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
   const store = new MemorySaveStore();
   const game = new GameEntryServer({
     persist:()=>store.save(accounts),
+    ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
     handoffs,
     online,
     mapId: 1000000,
@@ -342,6 +346,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     mapProvider,
     mapCatalog:()=>[STUB_MAP,TOWN_MAP].map(({id,name,streetName})=>({id,name,streetName})),
     itemCatalog: STUB_CATALOG,
+    ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
     ...(ART_ARCHIVE !== null ? { art: artProviderOf(ART_ARCHIVE), audio: audioProviderOf(ART_ARCHIVE) } : {}),
   });
   t.after(async () => {
@@ -1079,4 +1084,41 @@ test("HP/MP AP bridge spends one point, keeps current vitals, isolates observers
   t.after(() => again.close());
   const self = reentered.self as Record<string, number>;
   assert.deepEqual([self.maxHp, self.maxMp, self.hp, self.mp, self.ap], [hp.maxHp, mp.maxMp, initial.hp, initial.mp, 1]);
+});
+
+/** Added as regression sources only; not run for this delivery. */
+test("SP browser bridge: native book catalogue, initial snapshot, one point, refusal and persisted re-entry", {timeout:20000, skip:!ART_ARCHIVE}, async t=>{
+  const world=await startWorld(t,{skills:true});
+  const beginner=await (await fetch(`http://127.0.0.1:${world.webPort}/api/skills/0`)).json() as {books:unknown[]};
+  assert.deepEqual(beginner.books,[]);
+  const catalog=await (await fetch(`http://127.0.0.1:${world.webPort}/api/skills/100`)).json() as {books:{id:number}[]};
+  assert.deepEqual(catalog.books.map(b=>b.id),[100]);
+  const {browser}=await enterGame(world.webPort,"admin","admin");t.after(()=>browser.close());
+  assert.deepEqual((await browser.nextKind("skills")).skills,[]);
+  browser.send({t:"skill-up",skillId:1000000});
+  const self=(await browser.nextKind("self")).self as {sp:number};assert.equal(self.sp,9);
+  assert.deepEqual((await browser.nextKind("skills")).skills,[{skillId:1000000,level:1}]);
+  assert.equal((await browser.nextKind("skill-result")).changed,true);
+  await new Promise(r=>setTimeout(r,510));
+  browser.send({t:"skill-up",skillId:2000000});
+  assert.equal((await browser.nextKind("skill-result")).changed,false);
+  assert.equal(world.accounts.get("admin")!.characters[0]!.stats.sp,9);
+  await browser.close();
+  const {browser:again,field}=await enterGame(world.webPort,"admin","admin");t.after(()=>again.close());
+  assert.equal((field.self as {sp:number}).sp,9);
+  assert.deepEqual((await again.nextKind("skills")).skills,[{skillId:1000000,level:1}]);
+});
+
+test("ClientSession SP pending blocks duplicate learning and AP; skill diff updates its persistent snapshot", {timeout:20000,skip:!ART_ARCHIVE}, async t=>{
+  const world=await startWorld(t,{skills:true}),session=new ClientSession({loginPort:world.loginPort,gamePort:world.gamePort});t.after(()=>session.close());
+  await session.login("admin","admin");const list=await session.selectWorld(0);const redirect=await session.selectCharacter(list.characters[0]!.stats.id);await session.enterGame(redirect);
+  const done=new Promise<void>(resolve=>session.onEvent(event=>{if(event.kind==="skill-result"){assert.equal(event.changed,true);resolve();}}));
+  const first=session.increaseSkill(1000000);
+  await assert.rejects(session.increaseSkill(1000000),/pending/);
+  await assert.rejects(session.increaseAbility("str"),/pending/);
+  await first;await done;
+  assert.equal(session.character!.stats.sp,9);
+  assert.deepEqual(session.character!.items!.map32,[{key:1000000,value:1}]);
+  assert.equal(session.character!.flags & 0x20,0x20);
+  await assert.rejects(session.increaseSkill(1000000),/too soon/);
 });
