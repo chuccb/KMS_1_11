@@ -31,6 +31,7 @@
  */
 import { ClientRandom } from "../protocol/random.ts";
 import { DROP_KIND, encodeDropAppear, type DropAppear } from "../protocol/drop.ts";
+import type { ItemSlot } from "../protocol/itemslot.ts";
 import { footholdChain, footholdYAt, type FootholdSegment, type FootholdSegments } from "../wz/archive.ts";
 
 /** Chance (out of 1000) that a killed monster leaves mesos. */
@@ -135,6 +136,17 @@ export interface DropSource {
   foothold: number;
 }
 
+/** What a player threw away: the item, how many of it, and where they stood. */
+export interface DropThrow {
+  /** The item that leaves the inventory, exactly as it was (`Item/*.img` or `Character/<type>/`). */
+  slot: ItemSlot;
+  /** How many left the slot; at least 1, and never more than the stack had. */
+  count: number;
+  /** Where the thrower stood: the drop's own landing spot. */
+  x: number;
+  y: number;
+}
+
 /** One thing a monster leaves behind. `money` and `itemId` are alternatives, as in `0x43`. */
 export interface DropRoll {
   /** An amount of mesos. */
@@ -166,10 +178,25 @@ export function defaultDropPolicy(source: DropSource, random: RandomSource): Dro
   return rolls;
 }
 
-/** One drop lying in a field. */
+/**
+ * One drop lying in a field.
+ *
+ * `kind` is the `0x43` shape this drop uses, and it is the drop's *history* rather than its state:
+ * `fromMob` carries the monster block (and makes the client animate the item out of the monster),
+ * `placed` has no such block at all - which is the only shape a player's throw-away can use
+ * (`DROP_KIND.placed`).
+ */
 export interface DropEntry {
   /** The `0x43`/`0x44` pool key; unique inside the field, handed out from 1. */
   dropId: number;
+  /** `DROP_KIND.fromMob` for a killed monster's loot, `DROP_KIND.placed` for a throw-away. */
+  kind: number;
+  /**
+   * The item itself, for a drop a player threw: the ground keeps the object rather than only its id,
+   * so picking it back up gives back the same weapon (scrolls and all). A monster's loot has no
+   * template - there is no item yet, only a roll (`spawnFromDeath`).
+   */
+  slot?: ItemSlot;
   /** `true` = `amount` mesos, `false` = `itemId`. */
   money: boolean;
   /** Meso amount (`money`), else 0. */
@@ -252,6 +279,7 @@ export class DropField {
       const ground = chain === undefined ? undefined : footholdYAt(chain, x);
       const entry: DropEntry = {
         dropId: this.nextDropId++,
+        kind: DROP_KIND.fromMob,
         money: roll.money !== undefined,
         amount: roll.money ?? 0,
         itemId: roll.itemId ?? 0,
@@ -269,19 +297,52 @@ export class DropField {
     return spawned;
   }
 
-  /** The `0x43` body of one drop: kind 0, i.e. with the monster it came out of. */
+  /**
+   * Put an item on the ground where the player stands: the throw-away half of the inventory window
+   * (`0x17` with `toSlot = 0`, FINDINGS 4.36).
+   *
+   * No spread and no monster: the packet is the drop's own position, `kind = DROP_KIND.placed`, and
+   * the client simply draws it there. The inventory side (how much left the slot) is the caller's -
+   * this module only knows the thing on the ground.
+   */
+  dropFromPlayer(source: DropThrow, now: number): DropEntry {
+    const entry: DropEntry = {
+      dropId: this.nextDropId++,
+      kind: DROP_KIND.placed,
+      money: false,
+      amount: 0,
+      itemId: source.slot.itemId,
+      count: Math.max(1, source.count),
+      slot: { ...source.slot },
+      x: source.x,
+      y: source.y,
+      // No monster block is written for this kind, so the three fields are only here to keep the
+      // record's shape the same for every drop.
+      mobId: 0,
+      mobX: source.x,
+      mobY: source.y,
+      bornAt: now,
+    };
+    this.drops.push(entry);
+    return entry;
+  }
+
+  /** The `0x43` body of one drop: the monster block only for the kinds that carry it. */
   appearBody(entry: DropEntry): DropAppear {
-    return {
+    const body: DropAppear = {
       dropId: entry.dropId,
-      kind: DROP_KIND.fromMob,
+      kind: entry.kind,
       money: entry.money,
       value: entry.money ? entry.amount : entry.itemId,
       x: entry.x,
       y: entry.y,
-      mobId: entry.mobId,
-      mobX: entry.mobX,
-      mobY: entry.mobY,
     };
+    if (entry.kind <= DROP_KIND.fromMobAlt) {
+      body.mobId = entry.mobId;
+      body.mobX = entry.mobX;
+      body.mobY = entry.mobY;
+    }
+    return body;
   }
 
   /** The `0x43` packet of one drop. */
@@ -293,13 +354,21 @@ export class DropField {
    * The drop a player standing at `(x, y)` can take: the nearest one inside the reach, or `undefined`
    * when there is none. "Nearest" is what makes a pile come off one item at a time, in the order the
    * player walked into it.
+   *
+   * `movedAt` is when that player last moved (or entered the field), and only a drop that was already
+   * lying there then can be walked onto. That rule is what makes the two cases work at once: a
+   * throw-away lands on the thrower's own feet and must not come back on the next tick, and a monster
+   * killed at a player's feet leaves its loot to be *stepped* on. A drop that appears under a player
+   * who is standing still is therefore not taken until they move - which is also what gives the client
+   * time to draw the item flying out of the monster first.
    */
-  reachable(x: number, y: number): DropEntry | undefined {
+  reachable(x: number, y: number, movedAt: number): DropEntry | undefined {
     const rangeX = this.options.pickupRangePx ?? PICKUP_RANGE_PX;
     const rangeY = this.options.pickupRangeY ?? PICKUP_RANGE_Y_PX;
     let best: DropEntry | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const drop of this.drops) {
+      if (drop.bornAt > movedAt) continue;
       const dx = Math.abs(drop.x - x);
       const dy = Math.abs(drop.y - y);
       if (dx > rangeX || dy > rangeY) continue;

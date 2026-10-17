@@ -302,15 +302,57 @@ test("0x43 for a drop carries the monster it fell out of, kind 0", () => {
   assert.equal(read.y, drop!.y);
 });
 
+test("a player's throw-away lands where they stand, with no monster and no spread", () => {
+  // `spreadPx` is for monster loot; a throw-away is exactly where the player is, or the thing would
+  // land somewhere the player's own client never drew it.
+  const field = new DropField({ policy: () => [], spreadPx: 24 });
+  const entry = field.dropFromPlayer(
+    { slot: nonEquipSlot(2000000, 4), count: 4, x: 12, y: -3 },
+    1000,
+  );
+  assert.deepEqual(
+    [entry.kind, entry.itemId, entry.count, entry.x, entry.y, entry.bornAt],
+    [DROP_KIND.placed, 2000000, 4, 12, -3, 1000],
+  );
+  // The three fields of the monster block are not written at all for this kind: the body has no
+  // `mobId`, and the packet is 15 bytes (opcode + 14), the shape FINDINGS 4.18.2 measured.
+  assert.deepEqual(field.appearBody(entry), {
+    dropId: entry.dropId,
+    kind: DROP_KIND.placed,
+    money: false,
+    value: 2000000,
+    x: 12,
+    y: -3,
+  });
+  assert.equal(field.appearPacket(entry).length, 15);
+
+  // It can be walked onto by whoever moved after it landed - the thrower included, but only once
+  // they moved, which is what keeps a throw-away from coming straight back (`reachable`).
+  assert.equal(field.reachable(12, -3, 999), undefined, "nobody who has not moved since can take it");
+  assert.equal(field.reachable(12, -3, 1000), entry);
+
+  // The ground keeps the item, not just its id: a weapon that was dropped with scrolls on it comes
+  // back with them (`freshSlot`), which is what the pickup reads the template for.
+  const scrolled = equipSlot(1302000, { ruc: 4, str: 7 });
+  const weapon = field.dropFromPlayer({ slot: scrolled, count: 1, x: 0, y: 0 }, 2000);
+  assert.deepEqual(weapon.slot, scrolled, "the dropped object is kept as it was");
+  const kept = field.drop(weapon.dropId)?.slot;
+  assert.equal(kept !== undefined && kept.kind === "equip" ? kept.ruc : -1, 4);
+  // Mesos are never a player's own drop (the client has no such sender), so the body is an item.
+  assert.equal(field.appearBody(entry).money, false);
+});
+
 test("a pickup needs the player on the drop, and the drop inside the reach", () => {
   const field = new DropField({ policy: () => [{ money: 1 }, { money: 2 }], spreadPx: 0 });
   const [first] = field.spawnFromDeath({ ...snail, x: 0, y: 0 }, 0);
-  assert.equal(field.reachable(1000, 0), undefined); // far away: nothing
-  assert.equal(field.reachable(0, 0), first); // standing on it
-  assert.equal(field.reachable(39, 0), first); // inside the x reach (40)
-  assert.equal(field.reachable(41, 0), undefined); // outside it
-  assert.equal(field.reachable(0, 59), first); // inside the y reach (60)
-  assert.equal(field.reachable(0, 61), undefined); // outside it
+  // `deadline` stand a player who moved after the drop appeared: the reach is all that is left to test.
+  const deadline = 1;
+  assert.equal(field.reachable(1000, 0, deadline), undefined); // far away: nothing
+  assert.equal(field.reachable(0, 0, deadline), first); // standing on it
+  assert.equal(field.reachable(39, 0, deadline), first); // inside the x reach (40)
+  assert.equal(field.reachable(41, 0, deadline), undefined); // outside it
+  assert.equal(field.reachable(0, 59, deadline), first); // inside the y reach (60)
+  assert.equal(field.reachable(0, 61, deadline), undefined); // outside it
   assert.equal(field.take(first!), first);
   assert.equal(field.drop(first!.dropId), undefined);
   assert.equal(field.take(first!), undefined);

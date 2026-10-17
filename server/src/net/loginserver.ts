@@ -1139,12 +1139,16 @@ export class GameEntryServer {
 
   /**
    * A drag in the inventory window: `0x17`, `[u8 tab][s16 from][s16 to][s16 count]` (FINDINGS 4.36,
-   * `game/inventory.ts`). Equipping, unequipping and moving a stack all arrive here.
+   * `game/inventory.ts`). Equipping, unequipping, moving a stack and throwing one away all arrive
+   * here - which of the four it is, is the sign of the two slots and whether the destination is 0.
    *
    * The client moved nothing itself, so the window follows this answer and only this answer:
    *
    *   `0x0B`  the item's new slot. An equip travels as a `put` at the **negative** slot of the equip
-   *           tab, which is the worn item itself - that is what puts it on the avatar.
+   *           tab, which is the worn item itself - that is what puts it on the avatar. A throw-away
+   *           leaves as a `clear` (the whole stack went) or as a `put` of what is left.
+   *   `0x43`  when the ground was the destination: the item is on the ground where the player stands,
+   *           and the field's own packet says so (`FieldInstance.dropItem`) - `kind 2`, no monster.
    *   `0x28`  when the worn set moved: everybody else's copy of this player's look, built from the
    *           record the same way `0x1C` is (`avatarItemsOf`). The user's own client needs nothing
    *           more than the `0x0B` - it draws itself from the record it holds.
@@ -1177,8 +1181,16 @@ export class GameEntryServer {
       return;
     }
     session.send(encodeInventoryChange(outcome.changes));
+    // A throw-away leaves the bag here and lands in the field: the ground half belongs to
+    // `game/drops.ts`, exactly like a monster's loot (`FieldInstance.dropItem`), and the whole map -
+    // the thrower included - is told with the `0x43` that carries no monster (FINDINGS 4.36).
+    let note = "";
+    if (outcome.kind === "drop") {
+      session.instance.dropItem(session, outcome.slot, outcome.count, Date.now());
+      note = ` - dropped item ${outcome.slot.itemId} x${outcome.count} at the player's feet`;
+    }
     if (!outcome.lookChanged) {
-      this.options.log?.(`game: ${label} by "${session.name}"`);
+      this.options.log?.(`game: ${label} by "${session.name}"${note}`);
       return;
     }
     // The field's copy first: a player who enters *after* this has to be drawn with the new equip,
@@ -1189,8 +1201,8 @@ export class GameEntryServer {
       session.characterId,
     );
     this.options.log?.(
-      `game: ${label} by "${session.name}" - look changed, ${session.avatarItems.length} item(s) sent to ` +
-        `the rest of map ${session.instance.mapId}`,
+      `game: ${label} by "${session.name}"${note} - look changed, ${session.avatarItems.length} item(s) ` +
+        `sent to the rest of map ${session.instance.mapId}`,
     );
   }
 
@@ -1547,7 +1559,10 @@ export class GameEntryServer {
     const at = session.at;
     if (at === undefined) return;
     const instance = session.instance;
-    const drop = instance.drops.reachable(at.x, at.y);
+    // Only a drop that was already there when this player last moved can be walked onto, which is
+    // what keeps a throw-away from landing on the thrower's own feet and coming straight back
+    // (`DropField.reachable`). A session with no stamp at all is treated as just having arrived.
+    const drop = instance.drops.reachable(at.x, at.y, session.lastMoveAt ?? Date.now());
     if (drop === undefined) return;
     const items = session.character.items ?? emptyCharacterItems();
     const before = { ...session.character.stats };

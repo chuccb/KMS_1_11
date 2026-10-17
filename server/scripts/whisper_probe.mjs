@@ -50,6 +50,7 @@ import {
   encodeClientChangeSlot,
   encodeClientUseItem,
   encodeClientEmotion,
+  encodeClientUserMove,
   readUserAttack,
   readUserEmotion,
   readUserEnterField,
@@ -57,6 +58,15 @@ import {
 } from "../src/protocol/field.ts";
 import { FIELD_OPCODE } from "../src/protocol/field.ts";
 import { INVENTORY_OP, INVENTORY_OPCODE, readInventoryChange } from "../src/protocol/inventory.ts";
+import {
+  DROP_KIND,
+  DROP_OPCODE,
+  DROP_REMOVE_KIND,
+  LOOT_OPCODE,
+  readDropAppear,
+  readDropRemove,
+  readLootNotice,
+} from "../src/protocol/drop.ts";
 import { NPC_OPCODE, readNpcEnterField } from "../src/protocol/npc.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
@@ -648,6 +658,78 @@ if (!together) {
       await new Promise((r) => setTimeout(r, 20));
     }
     expect(lookEchoes === 0, `the wearer is not echoed his own 0x28 (saw ${lookEchoes})`);
+
+    // --- a throw-away: 0x17 with `toSlot = 0` out, 0x0B + 0x43 for the whole field (FINDINGS 4.36) --
+    // `sub_463BE0` sends `tab, from, 0, 數量` - and for the equip tab the number is a literal 1, because
+    // the "몇 개나 버리시겠습니까?" prompt is skipped there. The client never drew the item anywhere but
+    // the slot, so two packets have to come back: the `0x0B` that empties it, and the field's `0x43`
+    // with **no monster block** (kind 2), which is the only thing that puts it on the ground - for the
+    // thrower just as much as for everybody else. It lands at the thrower's feet, and `reachable` only
+    // takes a drop that was already there when the player last moved, so it does not come straight
+    // back: the thrower has to step off it and back on.
+    hero.game.send(encodeClientChangeSlot({ tab: 1, fromSlot: -11, toSlot: 0, count: 1 }));
+    const thrown = readInventoryChange(new PacketReader(await takeKeeping(hero.game, INVENTORY_OPCODE), 1)).changes;
+    expect(
+      thrown.length === 1 && thrown[0]?.op === INVENTORY_OP.clear && thrown[0].slot === -11,
+      "throwing the worn weapon away clears the worn slot with 0x0B",
+    );
+    const onGround = readDropAppear(new PacketReader(await takeKeeping(hero.game, DROP_OPCODE.appear), 1));
+    expect(onGround.kind === DROP_KIND.placed, `the drop is kind 2 - placed, no monster (got ${onGround.kind})`);
+    expect(onGround.money === false && onGround.value === wornWeapon, `and it is the weapon (${onGround.value})`);
+    const othersSaw = readDropAppear(new PacketReader(await alt.game.take(DROP_OPCODE.appear), 1));
+    expect(othersSaw.dropId === onGround.dropId, "the thrower is not the only one told: the field gets the same 0x43");
+    const bare = readUserLook(new PacketReader(await alt.game.take(FIELD_OPCODE.userLook), 1));
+    expect(bare.avatarItems?.includes(wornWeapon) !== true, "and 0x28 takes it off the others' copy of the look");
+
+    // Standing on it is not a pickup: the drop landed after this player last moved.
+    await new Promise((r) => setTimeout(r, 600));
+    expect(
+      hero.game.queue.filter((packet) => packet[0] === DROP_OPCODE.remove).length === 0,
+      "the thrower does not pick his own throw-away back up while standing still",
+    );
+
+    /** One `0x0E`: the first element of a move path is where the server puts the player. */
+    const walk = (x, y) =>
+      hero.game.send(
+        encodeClientUserMove({
+          stageByte: 0,
+          path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+        }),
+      );
+    // 80 px away is outside the 40 px reach, and stepping back on is what takes it - on the next tick.
+    walk(onGround.x + 80, onGround.y);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(
+      hero.game.queue.filter((packet) => packet[0] === DROP_OPCODE.remove).length === 0,
+      "and neither does it fly into his bag from 80 px away",
+    );
+    walk(onGround.x, onGround.y);
+    const taken = readDropRemove(new PacketReader(await takeKeeping(hero.game, DROP_OPCODE.remove), 1));
+    expect(
+      taken.kind === DROP_REMOVE_KIND.taken && taken.characterId === hero.characterId,
+      `walking back onto it takes it (0x44 kind ${taken.kind}, by ${taken.characterId})`,
+    );
+    const pickedUp = readInventoryChange(new PacketReader(await takeKeeping(hero.game, INVENTORY_OPCODE), 1)).changes;
+    expect(
+      pickedUp[0]?.op === INVENTORY_OP.put && pickedUp[0].item.itemId === wornWeapon,
+      `and the item goes to a bag slot, not back on the body (slot ${pickedUp[0]?.slot})`,
+    );
+    const lootLine = readLootNotice(new PacketReader(await takeKeeping(hero.game, LOOT_OPCODE), 1));
+    expect(
+      lootLine.kind === "item" && lootLine.itemId === wornWeapon,
+      `with the 0x11 line for the item (${lootLine.itemId} x${lootLine.count})`,
+    );
+
+    // Put it back on, so the shop section below starts where this one found the character: a drag is
+    // the only thing that wears something.
+    hero.game.send(encodeClientChangeSlot({ tab: 1, fromSlot: pickedUp[0].slot, toSlot: -11, count: -1 }));
+    const dressedAgain = readInventoryChange(new PacketReader(await takeKeeping(hero.game, INVENTORY_OPCODE), 1)).changes;
+    expect(
+      dressedAgain[0]?.op === INVENTORY_OP.put && dressedAgain[0].slot === -11,
+      "dragging the picked-up weapon back on answers with the worn slot",
+    );
+    const dressedLook = readUserLook(new PacketReader(await alt.game.take(FIELD_OPCODE.userLook), 1));
+    expect(dressedLook.avatarItems?.includes(wornWeapon) === true, "and the others see it worn again");
   }
 
 }

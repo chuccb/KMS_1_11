@@ -105,7 +105,14 @@ export const DROP_KIND = {
   fromMob: 0,
   /** Same shape as `fromMob`, different `+5` byte. Role not located. */
   fromMobAlt: 1,
-  /** No extra block at all: the drop is simply placed. Role of the `+5` byte / `+3` state open. */
+  /**
+   * No extra block at all: the drop is simply *placed* where the packet says.
+   *
+   * This is the only one of the three the client can be told without a monster (the other two make it
+   * read a `mobId` and two fallback coordinates), so it is what a player's own throw-away uses - the
+   * `0x17` with `toSlot = 0` that `sub_463BE0` sends (FINDINGS 4.36). What the client does
+   * differently is its own `+5` byte (`kind == 1 || kind == 2`); the codec here only writes the shape.
+   */
   placed: 2,
 } as const;
 

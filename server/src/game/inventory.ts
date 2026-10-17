@@ -31,9 +31,15 @@
  *    game). A swap is only accepted while the displaced item can sit where it is being put.
  * 3. **`count` has to be `-1` for anything but a throw-away.** All three move senders pass the
  *    literal -1; a positive count only appears with `toSlot = 0`, which is the ground.
- * 4. **A throw-away is refused** (`dropNotImplemented`): the drop belongs to the field (`game/drops.ts`),
- *    and the ground half of this packet needs the "whose item is it and for how long" rules a pickup
- *    does not have yet. Refusing is safe *because* the client never moved the item itself.
+ * 4. **A throw-away leaves the inventory here and the ground is the caller's** (`kind: "drop"`): the
+ *    item (or `count` of it, or the whole stack) leaves the slot, and *where it lands* is
+ *    `game/drops.ts` - the same split a monster's loot has. `count` is the client's own number: it is
+ *    the stack size for a stack (asked for when there is more than one, `sub_463BE0`) and always 1 for
+ *    a worn item or anything in the equip tab, and it is checked against the stack here.
+ *    A **cash item is refused** (`cashItem`): the client refuses to send one itself - `sub_47A420`
+ *    reads the archive's `info/cash` and `sub_463BE0` also refuses an item whose own cash serial is
+ *    set - and a drop on the ground can only carry an item id and a count, so the serial would be
+ *    lost.
  * 5. **Cash equips are not handled**: `sub_4636B0`'s table sends `111xxxx` to part 12/13, and the
  *    client's second worn group (`wornCash`) is a different array. Neither is touched here.
  *
@@ -64,7 +70,7 @@ export type ChangeSlotFailure =
   | "wrongPart"
   | "displacedItemDoesNotFit"
   | "badCount"
-  | "dropNotImplemented";
+  | "cashItem";
 
 /** What one accepted `0x17` did. */
 export interface ChangeSlotDone {
@@ -76,7 +82,26 @@ export interface ChangeSlotDone {
   lookChanged: boolean;
 }
 
-export type ChangeSlotOutcome = ChangeSlotDone | { kind: "failed"; reason: ChangeSlotFailure };
+/** What one accepted throw-away (`toSlot = 0`) did: the item leaves, the ground is the caller's. */
+export interface ChangeSlotDrop {
+  kind: "drop";
+  /**
+   * The item that is now on the ground, exactly as it was - the ground keeps the object, so a
+   * scrolled weapon is picked back up with its scrolls (`game/rewards.ts` `freshSlot`).
+   */
+  slot: ItemSlot;
+  /** How many left the slot (1 for an equip). */
+  count: number;
+  /** The `0x0B` entries: a `clear` when the stack ran out, otherwise the remainder `put` again. */
+  changes: InventoryChange[];
+  /** The item left a *worn* slot, so everybody else needs a `0x28`. */
+  lookChanged: boolean;
+}
+
+export type ChangeSlotOutcome =
+  | ChangeSlotDone
+  | ChangeSlotDrop
+  | { kind: "failed"; reason: ChangeSlotFailure };
 
 /**
  * Applies one `0x17` to a character's items, in place.
@@ -88,35 +113,16 @@ export type ChangeSlotOutcome = ChangeSlotDone | { kind: "failed"; reason: Chang
 export function applyChangeSlot(items: CharacterItems, request: ClientChangeSlot): ChangeSlotOutcome {
   const { tab, fromSlot, toSlot, count } = request;
   if (tab < 1 || tab > 4) return fail("unknownTab");
-  // `toSlot = 0` is the ground (`sub_463BE0` sends `tab, from, 0, numberOfItems`) - see the header.
-  if (toSlot === 0) return fail("dropNotImplemented");
   if (fromSlot === 0 || toSlot < -WORN_SLOT_LIMIT) return fail("slotOutOfRange");
   // A negative slot is a worn item, and only the equip tab has one (the client's `0x0B` encoder says
   // the same thing: a negative slot on another tab is not a slot that client can address).
   if ((fromSlot < 0 || toSlot < 0) && tab !== INVENTORY_TAB.equip) return fail("slotOutOfRange");
-  // The three move senders always pass -1; only the throw-away path passes a count.
-  if (count !== -1) return fail("badCount");
-  // Dropped back where it was picked up: a no-op, but an answered one (an empty `0x0B`).
-  if (fromSlot === toSlot) return { kind: "done", changes: [], lookChanged: false };
-
+  // Everything past here needs the slot, and a throw-away needs the item before it can be priced.
   const tabItems = items.inventories[tab - 1]!;
   const read = (slot: number): ItemSlot | undefined =>
     slot < 0 ? items.worn.get(-slot) : tabItems.items.get(slot);
   const fits = (item: ItemSlot, slot: number): boolean =>
     slot < 0 ? wornSlotOfItem(item.itemId) === -slot : inventoryTabOfItemId(item.itemId) === tab;
-
-  const source = read(fromSlot);
-  if (source === undefined) return fail("emptySlot");
-  // A slot number the client made up: the tab's capacity is what its own window has.
-  if (fromSlot > tabItems.capacity || toSlot > tabItems.capacity) return fail("slotOutOfRange");
-  if (!fits(source, fromSlot)) return fail(fromSlot < 0 ? "wrongPart" : "itemNotInTab");
-  // The destination has to hold it too. For a worn slot that one test *is* "it is an equip and it
-  // belongs to that body part" - `wornSlotOfItem` answers `null` for anything else, so no separate
-  // "is this even an equip" branch exists.
-  if (!fits(source, toSlot)) return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
-  const displaced = read(toSlot);
-  if (displaced !== undefined && !fits(displaced, fromSlot)) return fail("displacedItemDoesNotFit");
-
   const write = (slot: number, item: ItemSlot): void => {
     if (slot < 0) items.worn.set(-slot, item);
     else tabItems.items.set(slot, item);
@@ -125,6 +131,51 @@ export function applyChangeSlot(items: CharacterItems, request: ClientChangeSlot
     if (slot < 0) items.worn.delete(-slot);
     else tabItems.items.delete(slot);
   };
+
+  const source = read(fromSlot);
+  if (source === undefined) return fail("emptySlot");
+  // A slot number the client made up: the tab's capacity is what its own window has.
+  if (fromSlot > tabItems.capacity) return fail("slotOutOfRange");
+  if (!fits(source, fromSlot)) return fail(fromSlot < 0 ? "wrongPart" : "itemNotInTab");
+
+  // `toSlot = 0` is the ground (`sub_463BE0` sends `tab, from, 0, numberOfItems`): the item leaves and
+  // the field is told (`FieldInstance.dropItem`). The count is the client's own choice, so it is
+  // checked against the stack: at least one, no more than there are, and 1 for an equip.
+  if (toSlot === 0) {
+    if (source.cash !== null) return fail("cashItem");
+    const stack = "quantity" in source ? source.quantity : 1;
+    if (!Number.isInteger(count) || count <= 0 || count > stack) return fail("badCount");
+    const changes: InventoryChange[] = [];
+    if (count === stack) {
+      clear(fromSlot);
+      changes.push({ op: INVENTORY_OP.clear, inventory: tab, slot: fromSlot });
+    } else if ("quantity" in source) {
+      // Only a stack can be split, so this branch is the same test as `count < stack`.
+      const left: ItemSlot = { ...source, quantity: stack - count };
+      write(fromSlot, left);
+      changes.push({ op: INVENTORY_OP.put, inventory: tab, slot: fromSlot, item: left });
+    }
+    return {
+      kind: "drop",
+      slot: { ...source, ...("quantity" in source ? { quantity: count } : {}) },
+      count,
+      changes,
+      lookChanged: tab === INVENTORY_TAB.equip && fromSlot < 0,
+    };
+  }
+
+  // The three move senders always pass -1; only the throw-away path passes a count.
+  if (count !== -1) return fail("badCount");
+  // Dropped back where it was picked up: a no-op, but an answered one (an empty `0x0B`).
+  if (fromSlot === toSlot) return { kind: "done", changes: [], lookChanged: false };
+
+  if (toSlot > tabItems.capacity) return fail("slotOutOfRange");
+  // The destination has to hold it too. For a worn slot that one test *is* "it is an equip and it
+  // belongs to that body part" - `wornSlotOfItem` answers `null` for anything else, so no separate
+  // "is this even an equip" branch exists.
+  if (!fits(source, toSlot)) return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
+  const displaced = read(toSlot);
+  if (displaced !== undefined && !fits(displaced, fromSlot)) return fail("displacedItemDoesNotFit");
 
   const changes: InventoryChange[] = [];
   write(toSlot, source);

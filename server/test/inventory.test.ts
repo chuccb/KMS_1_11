@@ -39,9 +39,9 @@ function itemIdAt(block: CharacterItems, slot: number): number | undefined {
   return item?.itemId;
 }
 
-/** The `(op, slot, itemId)` triples an answer carries - what the client would apply. */
+/** The `(op, slot, itemId)` triples an answer carries - what the client's `0x0B` would apply. */
 function shape(outcome: ChangeSlotOutcome): Array<[number, number, number]> {
-  if (outcome.kind !== "done") assert.fail(`expected a done outcome, got ${JSON.stringify(outcome)}`);
+  if (outcome.kind === "failed") assert.fail(`expected an accepted outcome, got ${outcome.reason}`);
   return outcome.changes.map((change) => [
     change.op,
     change.slot,
@@ -162,7 +162,9 @@ test("the destination has to be able to hold what is being displaced", () => {
 });
 
 test("the requests the client never sends are refused too", () => {
-  assert.equal(refusal(items([[1, CAP]]), equip(1, 0)), "dropNotImplemented");
+  // A throw-away always carries the number the player answered to "몇 개나 버리시겠습니까?" - `sub_463BE0`
+  // passes what `sub_4643F0` returned, and 1 for an equip - so the three `-1` senders cannot ask for one.
+  assert.equal(refusal(items([[1, CAP]]), equip(1, 0)), "badCount");
   assert.equal(refusal(items([[1, CAP]]), equip(0, -1)), "slotOutOfRange");
   assert.equal(refusal(items([[1, CAP]]), equip(1, -1, 3)), "badCount");
   assert.equal(refusal(items([[1, CAP]]), { tab: 5, fromSlot: 1, toSlot: 2, count: -1 }), "unknownTab");
@@ -181,6 +183,50 @@ test("the requests the client never sends are refused too", () => {
   // slot holds - the item's own tab is what it has to agree with.
   assert.equal(refusal(items([[1, POTION]]), equip(1, -1)), "itemNotInTab");
   assert.equal(refusal(items([[1, POTION]]), equip(1, 2)), "itemNotInTab");
+});
+
+test("a throw-away takes the items out of the slot and leaves the ground to the caller", () => {
+  // Some of a stack: the slot keeps the rest and the answer is one `put` of what is left.
+  const block = items([], [[3, POTION]]);
+  const partial = applyChangeSlot(block, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 3 });
+  assert.equal(partial.kind, "drop");
+  if (partial.kind !== "drop") return;
+  assert.deepEqual([partial.slot.itemId, partial.count, partial.lookChanged], [POTION, 3, false]);
+  // The item itself travels with the answer, at the count that left: the ground keeps the object.
+  assert.equal(partial.slot.kind === "nonequip" && partial.slot.quantity, 3);
+  assert.deepEqual(shape(partial), [[INVENTORY_OP.put, 3, POTION]]);
+  const left = tab(block, INVENTORY_TAB.consume).items.get(3);
+  assert.equal(left !== undefined && "quantity" in left ? left.quantity : 0, 7, "seven of the ten stay");
+
+  // All of it (the client asks the stack size when there is more than one): the slot is cleared.
+  const all = applyChangeSlot(block, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 7 });
+  assert.equal(all.kind === "drop" && all.count, 7);
+  assert.deepEqual(shape(all), [[INVENTORY_OP.clear, 3, 0]]);
+  assert.equal(tab(block, INVENTORY_TAB.consume).items.has(3), false);
+
+  // A worn cap: `count` is always 1 there (`sub_463BE0` skips the question for the equip tab), and the
+  // look moved - the caller's `0x28`.
+  const dressed = items();
+  dressed.worn.set(1, equipSlot(CAP));
+  const worn = applyChangeSlot(dressed, equip(-1, 0, 1));
+  assert.equal(worn.kind === "drop" && worn.lookChanged, true);
+  assert.deepEqual(shape(worn), [[INVENTORY_OP.clear, -1, 0]]);
+  assert.equal(dressed.worn.has(1), false);
+
+  // What cannot be thrown away, and what cannot be dropped at all: nothing is written either way.
+  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 11 }), "badCount");
+  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 0 }), "badCount");
+  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 1.5 }), "badCount");
+  assert.equal(refusal(items([[1, CAP]]), equip(1, 0, 2)), "badCount", "an equip is never a stack");
+  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 1 }), "emptySlot");
+  // A cash item carries a serial number a drop cannot: the client refuses to send one itself
+  // (`sub_47A420` reads `info/cash`, `sub_463BE0` checks the item's own serial).
+  const cash = items([], [[3, POTION]]);
+  tab(cash, INVENTORY_TAB.consume).items.set(3, nonEquipSlot(POTION, 2, { cash: { sn: 7n, unknown18: 0, unknown1A: 0n } }));
+  assert.equal(
+    refusal(cash, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 1 }),
+    "cashItem",
+  );
 });
 
 test("a drag that lands back on its own slot is an answered no-op", () => {

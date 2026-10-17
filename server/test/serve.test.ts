@@ -55,6 +55,7 @@ import {
 import { encodeCp949 } from "../src/protocol/cp949.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import {
+  DROP_KIND,
   DROP_OPCODE,
   DROP_REMOVE_KIND,
   LOOT_OPCODE,
@@ -1867,6 +1868,146 @@ test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the m
   );
 });
 
+test("a throw-away answers 0x0B and puts the item on the ground for the whole map", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    // A monster with nothing to drop: the only thing that lands here is what the player throws.
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 500, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [],
+    // The field's own tick, which is what takes a drop a player is standing on.
+    mobTickMs: 20,
+    handshake: { clientSendSeed: 0x0a0b0c0d, clientRecvSeed: 0x01020304 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  // A pile of ten potions in consume slot 4: enough to throw some away and keep the rest.
+  const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, startingCharacterItems());
+  heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Hero", character: heroRecord }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  /** The `0x43` of a drop: the monster block is what a throw-away must not have. */
+  const dropBody = (packet: Uint8Array): void => {
+    assert.equal(packet.length, 15, "kind 2 is 15 bytes on the wire - no monster block (FINDINGS 4.18.2)");
+  };
+
+  // Four of the ten go on the ground. The client's own sender is `sub_463BE0`: the tab and the slot
+  // it was dragged from, `toSlot = 0`, and the number the player answered to "몇 개나 버리시겠습니까?".
+  const throwAway = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 4 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: throwAway.slice(1) });
+
+  // The thrower's window: the slot now holds six, and that is the whole `0x0B` - one `put`.
+  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+  const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
+  assert.deepEqual(change.changes, [
+    {
+      op: INVENTORY_OP.put,
+      inventory: INVENTORY_TAB.consume,
+      slot: 4,
+      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
+    },
+  ]);
+  // The ground, for everyone: the thrower's own client never drew the item anywhere but the slot, so
+  // this 0x43 is the only thing that puts it on the map.
+  const fromHero = await hero.takeOpcode(DROP_OPCODE.appear);
+  const heroSaw = fromHero[fromHero.length - 1]!;
+  dropBody(heroSaw);
+  const drop = readDropAppear(new PacketReader(heroSaw, 1));
+  assert.deepEqual(
+    [drop.kind, drop.money, drop.value, drop.mobId],
+    [DROP_KIND.placed, false, 2000000, undefined],
+    "a placed drop names the item, no mesos, and no monster",
+  );
+  const fromAlt = await alt.takeOpcode(DROP_OPCODE.appear);
+  assert.equal(readDropAppear(new PacketReader(fromAlt[fromAlt.length - 1]!, 1)).dropId, drop.dropId);
+  assert.ok(log.some((line) => line.includes("dropped item 2000000 x4")), log.join("\n"));
+
+  // It is under the thrower's feet, and the field leaves it there: the packet's own coordinates are
+  // the player's, and `DropField.reachable` only takes a drop that was already there when the player
+  // last moved. Without that rule a throw-away would come straight back on the next tick.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.deepEqual(
+    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
+    [],
+    "the thrower does not re-take it while standing still",
+  );
+
+  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+  const walkTo = (x: number, y: number): void => {
+    const move = encodeClientUserMove({
+      stageByte: 0,
+      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+  };
+
+  // Stepping off it is not a pickup either, and stepping back on is one: the item goes back into the
+  // slot with the count it was thrown with, which is how the throw's number is shown to survive.
+  walkTo(drop.x + 80, drop.y);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(
+    (await hero.drainOpcodes(50)).filter((opcode) => opcode === DROP_OPCODE.remove),
+    [],
+    "80 px away is outside the reach",
+  );
+  walkTo(drop.x, drop.y);
+  const back = await hero.takeOpcode(DROP_OPCODE.remove);
+  assert.deepEqual(readDropRemove(new PacketReader(back[back.length - 1]!, 1)), {
+    dropId: drop.dropId,
+    kind: DROP_REMOVE_KIND.taken,
+    characterId: 9,
+  });
+  const pickup = await hero.takeOpcode(INVENTORY_OPCODE);
+  const taken = readInventoryChange(new PacketReader(pickup[pickup.length - 1]!, 1));
+  assert.deepEqual(taken.changes, [
+    {
+      op: INVENTORY_OP.put,
+      inventory: INVENTORY_TAB.consume,
+      slot: 4,
+      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
+    },
+  ]);
+  const notice = await alt.takeOpcode(DROP_OPCODE.remove);
+  assert.equal(readDropRemove(new PacketReader(notice[notice.length - 1]!, 1)).characterId, 9);
+
+  // A count of zero is not a throw-away the client can send, and it is refused the same way every
+  // other impossible drag is: an empty `0x0B`, and nothing on the ground.
+  const zero = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 0 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
+  const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
+  assert.deepEqual(readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes, []);
+  assert.ok(log.some((line) => line.includes("refused (badCount)")), log.join("\n"));
+  assert.deepEqual(
+    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+    [],
+    "a refused throw-away leaves the ground as it was",
+  );
+});
+
 test("a shot goes out as 0x24 with the projectile id, and a cast as 0x25", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
   const handoffs = new HandoffRegistry();
@@ -3187,4 +3328,256 @@ test("using a USE-tab item: 0x18 restores and consumes it, 0x19 changes the map"
   use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
   assert.equal(readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length, 0);
   assert.deepEqual(await client.drainOpcodes(120), [], "no second 0x16");
+});
+
+/**
+ * The inventory window's drag, over real sockets (FINDINGS 4.36, ADR-029).
+ *
+ * The client moves nothing itself (`sub_55ACB0` only builds the packet and arms a one-request gate), so
+ * the window follows the server's `0x0B` and only that - which is why both halves matter here: the `put`
+ * at the **negative slot** of the equip tab, which is what wears the cap, and the `0x28` the rest of the
+ * map gets so that everybody's copy of this player's look changes. The wearer is not sent their own
+ * `0x28`: their client draws them from the record it holds.
+ */
+test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [],
+    mobTickMs: 10_000,
+    handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x44332211 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  // A record the create dialog could have produced - face, hair and the four clothes it wears - plus one
+  // more cap that is *not* worn: it sits in the equip tab's second slot, which is what gets dragged.
+  const heroItems = withWorn(startingCharacterItems(), wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 7]));
+  heroItems.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
+  const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, heroItems);
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: heroRecord }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+  });
+  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
+  assert.equal(aboutHero.avatarItems?.includes(1002000), false, "the cap is in the bag, not on the head");
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // Double-clicking the cap: `sub_4636B0` sends tab 1, the bag slot, the part its caller read off the
+  // item id (1002000 -> a hat -> part 1, written the way a worn slot is: negative) and -1 for "all of it".
+  const equip = encodeClientChangeSlot({ tab: 1, fromSlot: 2, toSlot: -1, count: -1 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
+
+  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+  const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
+  assert.deepEqual(
+    change.changes.map((entry) => [entry.op, entry.slot]),
+    [
+      [INVENTORY_OP.put, -1],
+      [INVENTORY_OP.clear, 2],
+    ],
+    "the cap is put at the worn part and the bag slot is cleared",
+  );
+  assert.equal(
+    change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
+    1002000,
+    "the put carries the item that moved",
+  );
+  assert.equal(change.result, 1, "the result byte is the client's own timing flag, not a status");
+
+  // Everybody else: one `0x28` with the new list and no face (flags 0 means \"the head did not change\"),
+  // and the wearer gets none - their client already drew it.
+  const lookPacket = await alt.takeOpcode(FIELD_OPCODE.userLook);
+  const look = readUserLook(new PacketReader(lookPacket[lookPacket.length - 1]!, 1));
+  assert.deepEqual(
+    [look.characterId, look.face, look.avatarItems],
+    [7, undefined, [30000, 1040001, 1060001, 1071000, 1302000, 1002000]],
+    "the list is the avatarItems a 0x1C would have carried",
+  );
+  assert.deepEqual(
+    (await hero.drainOpcodes(200)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+    [],
+    "the wearer is not echoed their own look",
+  );
+
+  // The record itself moved (this is the object the account table holds, ADR-017): the worn part is the
+  // cap now, and the bag slot it came from is empty.
+  assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000);
+  assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
+
+  // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
+  // an empty one. `sub_55ACB0` armed the client's one-request gate as it sent, and only a `0x0B` clears
+  // it, so a refusal that stayed silent would freeze the whole window (FINDINGS 4.6).
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
+  const refused = await hero.takeOpcode(INVENTORY_OPCODE);
+  assert.deepEqual(readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1)).changes, []);
+  assert.ok(log.some((line) => line.includes("refused (emptySlot)")), log.join("\n"));
+  assert.deepEqual(
+    (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+    [],
+    "and a refused drag tells the map nothing",
+  );
+});
+
+/**
+ * Throwing something away: the same `0x17` with `toSlot = 0` (`sub_463BE0`), and the field's own `0x43`.
+ *
+ * Two packets have to come back for one throw: the `0x0B` that takes the item out of the window (the
+ * client never moved it itself) and the `0x43` that puts it on the ground - for the thrower as much as
+ * for the rest of the map, because their own client has never drawn the item anywhere but the slot.
+ * What picks it back up is walking onto it, and only after a move: the drop landed *after* this player
+ * last moved, so standing on it is not enough (`DropField.reachable`, FINDINGS 4.18.6).
+ */
+test("a throw-away answers 0x0B and puts the item on the ground for the whole map", { timeout: 20000 }, async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  const game = new GameEntryServer({
+    handoffs,
+    mapId: 1000000,
+    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
+    dropPolicy: () => [],
+    // The field's own tick, which is what takes a drop a player is standing on.
+    mobTickMs: 20,
+    handshake: { clientSendSeed: 0x01020304, clientRecvSeed: 0x04030201 },
+    log: (line) => log.push(line),
+  });
+  const gameInfo = await game.listen(0);
+  t.after(async () => {
+    await game.close();
+  });
+
+  // Ten potions in the USE tab: enough to throw some away and keep the rest.
+  const heroItems = startingCharacterItems();
+  heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
+  const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, heroItems);
+  const hero = await FakeClient.connect(gameInfo.port);
+  t.after(() => hero.close());
+  hero.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Hero", character: heroRecord }),
+  });
+  await hero.take(4);
+
+  const alt = await FakeClient.connect(gameInfo.port);
+  t.after(() => alt.close());
+  alt.send({
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
+  });
+  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+  // Four of the ten, dragged onto the ground: the tab, the slot, `toSlot = 0` and the number the player
+  // answered to the "how many" prompt.
+  const throwAway = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 4 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: throwAway.slice(1) });
+
+  // The thrower's window first: the slot holds six now, and that is the whole `0x0B`.
+  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+  assert.deepEqual(readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1)).changes, [
+    {
+      op: INVENTORY_OP.put,
+      inventory: INVENTORY_TAB.consume,
+      slot: 4,
+      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
+    },
+  ]);
+
+  // Then the ground, to the thrower and to the map: `kind 2` is the only shape without a monster block.
+  const heroDrop = await hero.takeOpcode(DROP_OPCODE.appear);
+  const onGround = readDropAppear(new PacketReader(heroDrop[heroDrop.length - 1]!, 1));
+  assert.equal(heroDrop[heroDrop.length - 1]!.length, 15, "kind 2 is opcode + 14 bytes (FINDINGS 4.18.2)");
+  assert.deepEqual(
+    [onGround.kind, onGround.money, onGround.value, onGround.mobId],
+    [DROP_KIND.placed, false, 2000000, undefined],
+    "the item, no mesos, and no monster",
+  );
+  const altDrop = await alt.takeOpcode(DROP_OPCODE.appear);
+  assert.equal(readDropAppear(new PacketReader(altDrop[altDrop.length - 1]!, 1)).dropId, onGround.dropId);
+  assert.ok(log.some((line) => line.includes("dropped item 2000000 x4")), log.join("\n"));
+
+  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+  const walkTo = (x: number, y: number): void => {
+    const move = encodeClientUserMove({
+      stageByte: 0,
+      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+  };
+
+  // It is under the thrower's feet, and it stays there: the drop is younger than the last move, so not
+  // even the tick that follows takes it (a throw-away must not come straight back).
+  assert.deepEqual(
+    (await hero.drainOpcodes(200)).filter((opcode) => opcode === DROP_OPCODE.remove),
+    [],
+    "standing on it is not a pickup",
+  );
+  // 80 px away is outside the 40 px reach; stepping back onto it is what takes it - with the count the
+  // throw carried, which is only visible on the way back in.
+  walkTo(onGround.x + 80, onGround.y);
+  assert.deepEqual(
+    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
+    [],
+    "and neither is 80 px away",
+  );
+  walkTo(onGround.x, onGround.y);
+  const taken = await hero.takeOpcode(DROP_OPCODE.remove);
+  assert.deepEqual(readDropRemove(new PacketReader(taken[taken.length - 1]!, 1)), {
+    dropId: onGround.dropId,
+    kind: DROP_REMOVE_KIND.taken,
+    characterId: 9,
+  });
+  const back = await hero.takeOpcode(INVENTORY_OPCODE);
+  assert.deepEqual(readInventoryChange(new PacketReader(back[back.length - 1]!, 1)).changes, [
+    {
+      op: INVENTORY_OP.put,
+      inventory: INVENTORY_TAB.consume,
+      slot: 4,
+      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
+    },
+  ]);
+  const notice = await hero.takeOpcode(LOOT_OPCODE);
+  assert.deepEqual(readLootNotice(new PacketReader(notice[notice.length - 1]!, 1)), {
+    kind: "item",
+    itemId: 2000000,
+    count: 4,
+  });
+  const altSaw = await alt.takeOpcode(DROP_OPCODE.remove);
+  assert.equal(readDropRemove(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId, 9);
+
+  // A throw-away of zero is not something the client can send (`sub_463BE0` asks the stack size), and it
+  // is refused the way every other impossible drag is: an empty `0x0B`, and nothing on the ground.
+  const zero = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 0 });
+  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
+  const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
+  assert.deepEqual(readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes, []);
+  assert.ok(log.some((line) => line.includes("refused (badCount)")), log.join("\n"));
+  assert.deepEqual(
+    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+    [],
+    "and the refused throw-away leaves the ground as it was",
+  );
 });

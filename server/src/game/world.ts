@@ -37,7 +37,8 @@ import {
 } from "../protocol/field.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 import { footholdUnderPoint } from "../wz/archive.ts";
-import { DropField, type DropFieldOptions, type DropPolicy } from "./drops.ts";
+import { DropField, type DropEntry, type DropFieldOptions, type DropPolicy } from "./drops.ts";
+import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { MapData, MapPortal } from "./map.ts";
 import { MobField, type MobFieldOptions, type MobTemplate } from "./mobs.ts";
 import { NpcField, type NpcTemplate } from "./npcs.ts";
@@ -85,6 +86,12 @@ export interface FieldMember {
   avatarItems: number[];
   /** Where the player is. The field fills it in at spawn and updates it on every `0x22` it sends. */
   at?: FieldPosition;
+  /**
+   * When this player last moved (or entered the field). A drop can only be taken by a player who has
+   * moved since it appeared - "walking onto it" - which is what keeps a throw-away from landing on
+   * the thrower's own feet and coming straight back (`DropField.reachable`).
+   */
+  lastMoveAt?: number;
   send(packet: Uint8Array): void;
 }
 
@@ -235,6 +242,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       this.leave(member.characterId);
     }
     if (member.at === undefined) member.at = this.spawnAt();
+    // Standing here counts as having arrived: loot that was already on the ground is takeable now.
+    if (member.lastMoveAt === undefined) member.lastMoveAt = Date.now();
     for (const packet of this.mobs.spawnPackets()) member.send(packet);
     for (const packet of this.npcs.enterPackets()) member.send(packet);
     for (const drop of this.drops.drops) member.send(this.drops.appearPacket(drop));
@@ -275,6 +284,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     if (member === undefined) return;
     const first = path.elements[0];
     if (first !== undefined) member.at = { ...member.at, x: first.x, y: first.y };
+    // The same clock the tick uses: a pickup compares this against a drop's `bornAt`.
+    member.lastMoveAt = Date.now();
     const packet = encodeUserMove({ characterId, path });
     for (const other of this.members.values()) {
       if (other.characterId !== characterId) other.send(packet);
@@ -292,6 +303,25 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   /** Several world packets, in order, to everyone (a hit's `0x34` and `0x30`, say). */
   broadcastAll(packets: Iterable<Uint8Array>, exceptCharacterId?: number): void {
     for (const packet of packets) this.broadcast(packet, exceptCharacterId);
+  }
+
+  /**
+   * A player throws something away (`0x17` with `toSlot = 0`, FINDINGS 4.36): the item is put on the
+   * ground where they stand and the whole field - the thrower included - is told with the `0x43` that
+   * has no monster in it (`DROP_KIND.placed`).
+   *
+   * The inventory side is the caller's: this only knows the thing on the ground, the same split the
+   * monster loot has (a kill rolls here, `0x0B`/`0x11` belong to the session that takes it).
+   */
+  dropItem(member: M, slot: ItemSlot, count: number, now: number): DropEntry {
+    const at = member.at ?? this.spawnAt();
+    const entry = this.drops.dropFromPlayer({ slot, count, x: at.x, y: at.y }, now);
+    for (const other of this.members.values()) other.send(this.drops.appearPacket(entry));
+    this.log?.(
+      `world: "${member.name}" dropped item ${slot.itemId} x${count} in map ${this.mapId} ` +
+        `(drop ${entry.dropId} at ${entry.x},${entry.y})`,
+    );
+    return entry;
   }
 
   /** The `0x44` that takes a drop off the ground: `kind 2`, with the id of whoever took it. */

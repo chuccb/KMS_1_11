@@ -91,7 +91,27 @@ export interface GrantedItem {
  * `undefined` means the tab has no room, and then nothing is granted - the caller leaves the drop on
  * the ground, which is what a full bag should do.
  */
-export function grantItem(items: CharacterItems, itemId: number, count = 1): GrantedItem | undefined {
+/**
+ * The item object a fresh slot gets: the template when the caller has one (a throw-away coming back
+ * off the ground), otherwise the default object for that id.
+ *
+ * An item on the ground is the item, not a copy of its id: a weapon that was dropped with scrolls on
+ * it is picked back up with them. The template's own id has to match - a caller that hands over
+ * something else is a bug, and the default is the safe answer.
+ */
+function freshSlot(itemId: number, count: number, template?: ItemSlot): ItemSlot {
+  if (template !== undefined && template.itemId === itemId) {
+    return "quantity" in template ? { ...template, quantity: count } : { ...template };
+  }
+  return isEquipItemId(itemId) ? equipSlot(itemId) : nonEquipSlot(itemId, count);
+}
+
+export function grantItem(
+  items: CharacterItems,
+  itemId: number,
+  count = 1,
+  template?: ItemSlot,
+): GrantedItem | undefined {
   const tab = inventoryTabOfItemId(itemId);
   const inventory = items.inventories[tab - 1]!;
   const stack = stackableSlot(inventory, itemId, count);
@@ -106,7 +126,7 @@ export function grantItem(items: CharacterItems, itemId: number, count = 1): Gra
   if (slot === undefined) return undefined;
   // Which object the client builds for the slot follows the *tab* (`sub_45E6A0`), so the item has to
   // match it: an equip id gets a `GW_ItemSlotEquip`, everything else a non-equip with a quantity.
-  const item: ItemSlot = isEquipItemId(itemId) ? equipSlot(itemId) : nonEquipSlot(itemId, count);
+  const item: ItemSlot = freshSlot(itemId, count, template);
   inventory.items.set(slot, item);
   return { inventory: tab, slot, change: { op: INVENTORY_OP.put, inventory: tab, slot, item } };
 }
@@ -154,12 +174,17 @@ export type PickupResult =
   | { kind: "item"; notice: LootNotice; itemId: number; count: number; inventory: number; slot: number; change: InventoryChange }
   | { kind: "no-room"; notice: LootNotice; itemId: number };
 
-/** The parts of a drop this module cares about (`FieldDrop` satisfies it). */
+/** The parts of a drop this module cares about (`DropEntry` satisfies it). */
 export interface Pickup {
   money: boolean;
   amount: number;
   itemId: number;
   count: number;
+  /**
+   * The item itself when the ground knows it - a throw-away does, a monster's roll does not - so the
+   * picked-up object is the dropped one (see `freshSlot`).
+   */
+  slot?: ItemSlot;
 }
 
 /**
@@ -176,7 +201,7 @@ export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWall
     const total = wallet.earn(drop.amount);
     return { kind: "mesos", notice: { kind: "mesos", amount: drop.amount }, amount: drop.amount, total };
   }
-  const granted = grantItem(items, drop.itemId, drop.count);
+  const granted = grantItem(items, drop.itemId, drop.count, drop.slot);
   if (granted === undefined) {
     return { kind: "no-room", notice: { kind: "rejected" }, itemId: drop.itemId };
   }
