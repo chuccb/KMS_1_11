@@ -57,6 +57,10 @@ export interface ItemInfo {
   price?: number;
   /** `info/desc` - the multi-line tooltip body, with the archive's own `\n` escapes. */
   desc?: string;
+  /** `info/iconRaw` (or `info/icon`), the node `sub_47CE40` draws for a drop. */
+  iconRaw?: ItemIcon;
+  /** `info/incPAD` - a weapon's or glove's attack. The only number a damage roll needs. */
+  incPAD?: number;
 }
 
 /** Where one item id's `info` node lives: the image, and the child of its root (null = the root itself). */
@@ -98,6 +102,21 @@ export function locateItemImage(
   return undefined;
 }
 
+/**
+ * Where an item's own picture is, and how to draw it.
+ *
+ * An icon is a canvas with an `origin`, and the origin is not decoration: a ground drop and a shop
+ * row both anchor the icon by it, and item icons do not agree on it (`-4,27` for a snail shell,
+ * `-3,30` for a red potion). The path is the archive path `/api/png` already serves.
+ */
+export interface ItemIcon {
+  path: string;
+  width: number;
+  height: number;
+  ox: number;
+  oy: number;
+}
+
 /** The catalog a browser (or any other client) can ask about item ids. */
 export interface ItemCatalog {
   /** `undefined` when the archive does not carry the item at all. */
@@ -129,7 +148,10 @@ function infoNodeOf(root: WzObject | undefined, location: ItemLocation): Record<
  * A canvas arrives as a `WzNode` of kind `canvas` whose `value` is the `WzCanvas` (the tree is
  * typed that way so a `props` node and a `canvas` node share a shape); the unwrap is `WzNode.canvas`.
  */
-function iconCanvasOf(root: WzObject | undefined, location: ItemLocation): WzCanvas | undefined {
+function iconCanvasOf(
+  root: WzObject | undefined,
+  location: ItemLocation,
+): { canvas: WzCanvas; name: string } | undefined {
   if (root === undefined) return undefined;
   const node = location.nodeName === null ? root : propertyOf(root, location.nodeName);
   if (node === undefined || node === null) return undefined;
@@ -138,7 +160,7 @@ function iconCanvasOf(root: WzObject | undefined, location: ItemLocation): WzCan
     const value = propertyOf(info, name);
     if (value instanceof WzNode) {
       const canvas = value.canvas;
-      if (canvas !== undefined) return canvas;
+      if (canvas !== undefined) return { canvas, name };
     }
   }
   return undefined;
@@ -166,6 +188,37 @@ export function itemCatalogOf(source: ItemSource | undefined): ItemCatalog | und
     if (!roots.has(path)) roots.set(path, source.objects(path)[0]);
     return roots.get(path);
   };
+  const iconMetas = new Map<number, ItemIcon | undefined>();
+  const iconMetaOf = (itemId: number): ItemIcon | undefined => {
+    if (iconMetas.has(itemId)) return iconMetas.get(itemId);
+    let meta: ItemIcon | undefined;
+    const location = locate(itemId);
+    if (location !== undefined && source.has(location.imagePath)) {
+      const found = iconCanvasOf(rootOf(location.imagePath), location);
+      if (found !== undefined) {
+        let ox = 0;
+        let oy = 0;
+        for (const entry of found.canvas.props) {
+          if (entry.name !== "origin") continue;
+          const origin = entry.value;
+          if (origin instanceof WzNode && Array.isArray(origin.value)) {
+            const [x, y] = origin.value as [number, number];
+            if (typeof x === "number" && typeof y === "number") [ox, oy] = [x, y];
+          }
+        }
+        const parent = location.nodeName === null ? location.imagePath : `${location.imagePath}/${location.nodeName}`;
+        meta = {
+          path: `${parent}/info/${found.name}`,
+          width: found.canvas.width,
+          height: found.canvas.height,
+          ox,
+          oy,
+        };
+      }
+    }
+    iconMetas.set(itemId, meta);
+    return meta;
+  };
 
   return {
     info(itemId: number): ItemInfo | undefined {
@@ -176,11 +229,15 @@ export function itemCatalogOf(source: ItemSource | undefined): ItemCatalog | und
       const name = asText(info.name, "");
       const price = asNumber(info.price, Number.NaN);
       const desc = asText(info.desc, "");
+      const incPAD = asNumber(info.incPAD, Number.NaN);
+      const iconMeta = iconMetaOf(itemId);
       return {
         id: itemId,
         ...(name === "" ? {} : { name }),
         ...(Number.isFinite(price) ? { price } : {}),
         ...(desc === "" ? {} : { desc }),
+        ...(Number.isFinite(incPAD) ? { incPAD } : {}),
+        ...(iconMeta === undefined ? {} : { iconRaw: iconMeta }),
       };
     },
 
@@ -189,7 +246,7 @@ export function itemCatalogOf(source: ItemSource | undefined): ItemCatalog | und
       let png: Uint8Array | undefined;
       const location = locate(itemId);
       if (location !== undefined && source.has(location.imagePath)) {
-        const canvas = iconCanvasOf(rootOf(location.imagePath), location);
+        const canvas = iconCanvasOf(rootOf(location.imagePath), location)?.canvas;
         if (canvas !== undefined) {
           const rgba = canvasToRgba(canvas);
           if (rgba !== null) png = encodePng(rgba);

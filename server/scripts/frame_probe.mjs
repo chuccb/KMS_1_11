@@ -76,7 +76,7 @@ const windowListeners = {};
 globalThis.window = { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600, addEventListener(t, fn) { (windowListeners[t] ??= []).push(fn); } };
 let frames = 0;
 const waiting = [];
-globalThis.requestAnimationFrame = (fn) => { if (frames < 3) { frames++; waiting.push(fn); } return frames; };
+globalThis.requestAnimationFrame = (fn) => { if (frames < 60) { frames++; waiting.push(fn); } return frames; };
 globalThis.location = { protocol: "http:", host: BASE.replace("http://", "") };
 
 // Images that "load" immediately, like a cached PNG: the renderer must then draw them.
@@ -106,6 +106,10 @@ globalThis.WebSocket = class extends NativeWebSocket {
     super(url);
     sockets.push(this);
     this.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+  }
+  /** Hands the page a message the server did not send - the probe's way of staging a scene. */
+  inject(message) {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
   }
 };
 
@@ -162,6 +166,25 @@ const npc = drawn.some((d) => String(d.src).includes("Npc%2F"));
 const blobs = drawn.filter((d) => String(d.src).startsWith("blob:")).length;
 console.log(JSON.stringify({ back, tiles, npc, avatarBlobs: blobs }));
 if (!back || !tiles || blobs === 0) throw new Error("one of the layers never drew");
+
+// `0x43` twice: the junk a snail leaves, and a meso pile. Both are pictures the page looks up from
+// the packet alone - the item's `iconRaw` through `/api/item`, the pile through `/api/canvas` - so
+// this is what proves the drop path from wire to pixels.
+// The page spawns the character on the map's `sp` portal (`0x16` carries no position), and the
+// camera follows it, so a drop next to that portal is a drop on screen.
+const mapJson = await (await fetch(`${BASE}/api/map/${field.mapId}`)).json();
+const spawn = mapJson.portals.find((portal) => portal.name === "sp") ?? mapJson.footholds[0];
+const at = { x: spawn.x ?? spawn.x1, y: spawn.y ?? spawn.y1 };
+socket.inject({ t: "drop-enter", drop: { dropId: 1, kind: 0, money: false, value: 4000019, x: at.x + 20, y: at.y, mobId: 0 } });
+socket.inject({ t: "drop-enter", drop: { dropId: 2, kind: 2, money: true, value: 120, x: at.x - 20, y: at.y } });
+await tick(600);
+await pumpFrames(6);
+console.log("after inject:", seen.filter((m) => String(m.t).startsWith("drop")).length, "item fetches:", imageRequests);
+console.log("tail:", drawn.slice(-3).map((d) => String(d.src).slice(0, 70)));
+const itemDrop = drawn.some((d) => String(d.src).includes("Item%2FEtc%2F0400.img"));
+const mesoDrop = drawn.some((d) => String(d.src).includes("Item%2FSpecial%2F0900.img"));
+console.log(JSON.stringify({ itemDrop, mesoDrop }));
+if (!itemDrop || !mesoDrop) throw new Error("a drop never drew");
 console.log("FRAME SMOKE OK");
 socket.close();
 process.exit(0);

@@ -1881,3 +1881,47 @@ frame 的 `delay` 是 WZ 自己的。
   （`websocket.test.ts` 的半關閉、`webclient.test.ts` 的「消失的分頁要放掉帳號」），總數 **506**。
 - 誠實的缺口：小地圖與天氣（`MapHelper` 的 `mark`／`weather`）還沒畫；角色只有 `stand1`／`walk1`；
   表情還是文字。都寫在 `docs/CLIENT.md` 的「刻意沒有的東西」。
+
+## ADR-040：瀏覽器自己按下 Ctrl 揮擊，傷害公式收在一個地方
+
+**背景.** 到 ADR-039 為止，頁面能走、能聊、能買、能用道具、能點 NPC、能過傳送門，卻**不能打怪**：
+`0x1B` 的送出端只在測試與探針裡。這讓怪物只是裝飾，也讓上一輪的掉落顯示（`0x43`／`0x44`）
+在真實遊玩中永遠不會出現——掉落是打怪掉的。
+
+**決定.**
+
+1. **打的動作是頁面的，數字也是頁面的。** 1.11 的客戶端沒有伺服器可驗的傷害模型：`0x1B` 的每個目標
+   記錄帶的就是客戶端自己畫在螢幕上的數字（FINDINGS 4.13.1、ADR-021），公式住在沒被定位的
+   client 程式碼裡。瀏覽器既然是 client，就得自己擲骰；伺服器照舊**信任**封包裡的數字。
+2. **公式放在 `game/combat.ts`，並且標成「選擇」。** 形狀是 Big Bang 前所有資料都同意的那兩行：
+   `max = (主屬性*4 + 副屬性) * watk / 100`、`min = max / 10`、均勻骰。mastery 與怪物防禦不建模
+   （這個伺服器兩者都沒有資料）。`incPAD` 是真資料：武器 `info/incPAD`（검 = 17）。
+   跟 `PATROL_SPEED_PX_PER_SEC`、掉落率同一個等級的常數，集中在一個檔案、一個測試裡。
+3. **誰來擲？** web bridge。瀏覽器沒有 WZ 可讀 `incPAD`，所以頁面只說「打哪一隻、面向哪邊」
+   （`{t:"attack", mobId, facingLeft}`），bridge 用角色記錄與 `iteminfo` 算出範圍、擲出數字，再用
+   `ClientSession.attack()` 送真正的 `0x1B`。送完回一行 `{t:"hit", mobId, damage}` 給頁面畫數字——
+   線路上沒有這個封包（原版客戶端是在組封包時自己畫的）。
+4. **命中判定在頁面：** 面向、`|dx| <= 90`、`dy` 在 `-72..36`，取最近一隻。揮空**不送封包**（原版
+   也是先播動作），所以沒有目標時场內不會多出空包。
+5. **別人的揮擊**（`0x23`）：`ClientSession` 現在會解 `readUserAttack`，頁面讓那個角色播
+   `swingO1..3`、被點名的怪閃 `hit1`、並把對方送來的數字畫出來。這正是 relay 封包的全部內容。
+
+**被否決的選項：**
+
+- **在伺服器（field）算傷害**：等於讓 field 開始相信一個它沒有證據的公式，也違反 ADR-021 的
+  「不驗算」；`0x1B` 的欄位本來就是客戶端的數字。
+- **不做攻擊、只留掉落顯示**：掉落變成只有探針看得到的東西，頁面永遠玩不到自己掉寶。
+- **把 `incPAD` 加進 `/api/avatar`**：avatar 是像素端點，`watk` 是戰鬥資料；`/api/item/<id>` 已經
+  是道具事實的來源，`incPAD` 放在那裡（順便讓商店/背包看得到「攻擊力 +17」的未來）。
+
+**後果：**
+
+- 新模組 `game/combat.ts`（`damageStatsOf`／`watkOf`／`damageRangeOf`／`damageRangeFor`／`rollDamage`）；
+  `ItemInfo.incPAD`；`ClientSession.attack()` 與 `mob()`；`ClientEvent` 新增 `user-attack`、
+  `drop-enter`、`drop-leave`。頁面：Ctrl 揮擊、`swingO*` 動作（缺圖退回 `stand1`）、`hit1` 閃光、
+  傷害數字上飄、`Ctrl 攻擊` 提示。
+- 測試：`webclient.test.ts` 一則打到死的整合測試（揮擊 → `hit` → `mob-die` → `drop-enter`，並確認
+  打不存在的怪是 `error` 不是斷線），`mobLeaveEvent` 一則釘住 `0x30` 的兩種語義，`combat.ts` 的
+  範圍與骰子由同一個檔案覆蓋；總數 **509**。
+- 誠實的缺口：命中判定用頁面的矩形近似（原版用武器的 `range`／`attackSpeed`）；沒有技能、沒有
+  暴擊、怪物不會反擊（那是 `0x2C`／`0x1C`，見 ADR-021）。

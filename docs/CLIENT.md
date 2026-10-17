@@ -70,6 +70,7 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色畫在 layer 0–2 之後、layer 3 之前（`CHARACTER_LAYER`） |
 | 傳送門 | `MapHelper.img/portal/game/pv` 的動畫 | 只畫 `pt == 2` 的可見傳送門（`pt == 0` 是出生點、`pt == 1` 是隱藏通道，原版都不畫） |
 | 選角畫面 | `/api/avatar.png?face&hair&items&stance=stand1&frame=0` | 每個角色列都放上他自己的站立幀（`0x02` 的角色清單已帶 face／hair／worn ids），不是文字佔位 |
+| 一張圖的尺寸與原點 | `/api/canvas/<archive path>` | 沒有 frame 表的圖（掉落的金幣堆 `Item/Special/0900.img/0900000X/iconRaw/N`）需要 `width/height/ox/oy`，PNG 本身帶不了 |
 | 自己與其他玩家 | `/api/avatar.png?face&hair&items&stance&frame&flip` | 伺服器用 `Character/*` 的 canvas 依**身體的錨點**（`navel`／`neck`／`hand`／`brow`）組出一張 PNG，回傳的 `x-frame-dx`／`x-frame-dy` 是它相對腳底的位置 |
 | 怪物 | `/api/mob/<id>` ＋ `/api/png/<path>` | `move`／`stand`／`hit` 動作表，延遲是 WZ 的 `delay`；朝向來自 `0x2F`／`0x30`（`facing` 0＝右、1＝左） |
 | NPC | `/api/npc/<id>` ＋ `/api/png/<path>` | 站著不動（`0x3B` 的走動沒有畫）；朝向是地圖 `life/f` |
@@ -120,6 +121,7 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 | 關商店 | `{t:"shop",action:"close"}` | c2s `0x16` 的 close → **不回包**（2003 client 的 close 不 arm flag） |
 | 回答對話 | `{t:"talk",answer}` | c2s `0x15`（answer 1＝下一句、0＝結束） |
 | 用消耗品（雙擊） | `{t:"use",slot,itemId}` | c2s `0x18`（203 家族 `0x19`）→ s2c `0x0B`（少一瓶）＋`0x0D`（HP／MP 動了）；被拒絕時是空 `0x0B` |
+| 揮擊（Ctrl） | `{t:"attack",mobId,facingLeft}` | c2s `0x1B` → s2c `0x34`（怪的 stat）／`0x30`（倒下動畫）／`0x31`（屍體消失），傷害數字在送的人自己的封包裡 |
 | 升級特效（別人的） | — | s2c `0x29` |
 
 ## JSON 協定（我們的設計，不是證據）
@@ -141,7 +143,13 @@ chat         { name, text }                              ← 0x1A/0x12（場地�
 whisper-answer { name, delivered }                        ← 0x1A/0x0A（送的人收到的回覆；沒有文字）
 find-answer  { name, mapId }                              ← 0x1A/0x09（mapId -1 ＝ 找不到）
 level-up     { characterId }
-mob-enter    { mob }         mob-move { mobId, x, y }     mob-leave { mobId }
+mob-enter    { mob }         mob-move { mobId, x, y }
+mob-die      { mobId }                                   ← 0x30 的正延遲：屍體演動畫，0x31 才移除
+mob-leave    { mobId }
+user-attack  { characterId, facingLeft, targets[] }       ← 0x23（別人的揮擊，含他們骰的數字）
+drop-enter   { drop }                                    ← 0x43（money/value/x/y/mobId）
+drop-leave   { dropId, reason, characterId? }             ← 0x44（taken 時 page 把圖示飛向那個人）
+hit          { mobId, damage }                            ← 橋自己回的：這一下的數字（線路上沒有）
 npc-enter    { npc }         npc-leave { npcId }
 unknown      { opcode, bytes }                            ← 這個殼沒讀的封包
 created      { ok, name, id?, reason? }                    ← 建立角色（0x05）的結果
@@ -149,8 +157,8 @@ disconnect   { reason }
 error        { message }
 ```
 
-頁面 → 伺服器只有十四種：`login`／`world`／`character`／`create`／`say`／`move`／`portal`／`emotion`／
-`whisper`／`find`／`use`／`click`／`shop`／`talk`（上表）。
+頁面 → 伺服器只有十五種：`login`／`world`／`character`／`create`／`say`／`move`／`portal`／`emotion`／
+`whisper`／`find`／`use`／`click`／`shop`／`talk`／`attack`（上表）。
 
 ## 文字編碼（CP949，不是 UTF-8）
 
@@ -165,7 +173,11 @@ error        { message }
 
 ## 刻意沒有的東西
 
-- **傷害與怪物 AI**：2003 client 自己算（FINDINGS §4.20／ADR-008），這個殼不算，所以打不到怪。
+- **怪物 AI 與怪物打你**：2003 client 自己跑怪的 AI（FINDINGS §4.20／ADR-008），頁面只畫伺服器
+  送來的 `0x30`／`0x31`，怪不會主動攻擊、玩家不會掉血。衝擊（`0x1C`）與死亡／復活是伺服器側
+  已有的路徑（ADR-021），頁面沒有接。
+- **技能的傷害公式**：`0x1B` 的數字是頁面骰的（ADR-040）：`(主屬*4+副屬)*watk/100`、下限十分之一，
+  mastery／防禦／暴擊都不建模。這是選擇，不是證據。
 - **密語的「對方是不是在密你」**：線路上分不出來——送達的密語就是 `0x1A` 的 `0x12`，跟場地聊天同一包
   （FINDINGS 4.31）。頁面照實顯示，不假裝知道。
 - **賣出／交易／組隊／郵件**：伺服器都有（`0x16` 的 sell、`0x25`／`0x26`／`0x24`），頁面沒有介面；
@@ -175,8 +187,8 @@ error        { message }
   目的地，頁面還沒接——所以 worn 欄只會在伺服器送負 slot 時才有東西。
 - **卷軸（204）**：`0x1A` 需要點一件裝備當目標，面板沒有拖放就沒有目標，頁面不送它。
 - **小地圖／天氣／霧**：`Map/MapHelper.img` 的 `mark`、`weather` 讀得到，但頁面還沒有小地圖與天氣層。
-- **角色動作**：只有 `stand1`／`walk1`（移動與否決定），沒有攻擊、跳躍、繩索與坐下——那些動作的
-  canvas 都在，等有對應的封包再畫。
+- **角色動作**：`stand1`／`walk1` 之外多了 `swingO1..3`（Ctrl 揮擊，缺圖退回 `stand1`）；跳躍、繩索
+  與坐下還沒有——移動是直線步進，沒有物理。
 - **這份 `Data.wz` 沒有的圖塊組**：`Map/Tile` 只有 9 組，`grassySoil`／`dryRock`／`darkWood` 不在裡面；
   用到它們的地圖沒有地面，頁面改畫腳踏點的土 platform（見上面 `missingTiles`）。這是資料的缺口，
   不是繪圖的近似。

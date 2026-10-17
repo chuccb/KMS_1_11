@@ -682,3 +682,11 @@ body {
 #character-list .character-text small {
   opacity: 0.75;
 }
+
+/* The keys the 2003 client's own key map puts on the player (Ctrl is the attack). */
+#hud .keys {
+  margin-top: 7px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  opacity: 0.55;
+}

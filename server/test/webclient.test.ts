@@ -18,8 +18,10 @@ import { LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
 import { GameEntryServer } from "../src/net/loginserver.ts";
 import { OnlineAccounts } from "../src/net/online.ts";
 import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
+import { equipSlot } from "../src/protocol/itemslot.ts";
 import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
+import { mobLeaveEvent } from "../src/client/session.ts";
 import type { ItemCatalog } from "../src/game/iteminfo.ts";
 import { grantItem } from "../src/game/rewards.ts";
 import { artProviderOf } from "../src/game/art.ts";
@@ -132,6 +134,11 @@ class Browser {
     return this.next((message) => message.t === kind, timeoutMs);
   }
 
+  /** Whether a message matching `match` is already in hand, without waiting for one. */
+  saw(match: (message: Record<string, unknown>) => boolean): boolean {
+    return this.queue.some(match);
+  }
+
   /** Collects everything that arrives for `ms` - the cheapest "and nothing else happened" check. */
   async quiet(ms = 200): Promise<Record<string, unknown>[]> {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -163,6 +170,8 @@ const STUB_CATALOG: ItemCatalog = {
   info: (itemId) =>
     itemId === 2000000
       ? { id: itemId, name: "빨간 포션", price: 25, desc: "HP를 약 50 회복시킨다." }
+      : itemId === 1302000
+        ? { id: itemId, name: "검", incPAD: 17 }
       : itemId === 2000001
         ? { id: itemId, name: "주황 포션", price: 80 }
         : undefined,
@@ -223,6 +232,11 @@ interface WorldOptions {
    * `spec/hp = 50` behind it - the state a double-click on the potion is supposed to change.
    */
   damaged?: boolean;
+  /**
+   * A stub monster with 10 HP and a 40 ms corpse, plus one guaranteed meso drop per kill - the
+   * shortest path from a swing to a drop on the ground.
+   */
+  combat?: boolean;
 }
 
 /** A world with two accounts, one character each, and a browser bridge in front of it. */
@@ -241,6 +255,9 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     stats.id = id;
     stats.name = name;
     stats.level = 12;
+    // A beginner's own numbers, so a swing has something to roll with (`game/combat.ts`).
+    stats.str = 12;
+    stats.dex = 5;
     stats.hp = 50;
     stats.maxHp = 50;
     stats.mp = 30;
@@ -248,6 +265,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     stats.mapId = 1000000;
     stats.mesos = 100;
     const items = startingCharacterItems();
+    if (options.combat === true && user === "admin") items.worn.set(1, equipSlot(1302000));
     if (options.damaged === true && user === "admin") {
       stats.hp = 20;
       items.inventories[1]!.items.set(1, { kind: "nonequip", itemId: 2000000, quantity: 3, cash: null });
@@ -267,6 +285,23 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
     // The archive's `Item/Consume/0200.img/02000000/spec` in one line: a flat 50 HP.
     ...(options.damaged === true ? { consumeSpec: () => ({ hp: 50, unapplied: [] }) } : {}),
+    ...(options.combat === true
+      ? {
+          mobTemplate: () => ({
+            templateId: 120100,
+            name: "stub",
+            level: 1,
+            maxHP: 10,
+            maxMP: 0,
+            exp: 1,
+            speedPercent: 0,
+            dieMs: 40,
+          }),
+          mobTickMs: 20,
+          mobRespawnMs: 5000,
+          dropPolicy: () => [{ money: 25 }],
+        }
+      : {}),
     ...(options.shop === true ? { shops: STUB_SHOP } : {}),
     ...(options.guide === true
       ? { npcDialogue: (templateId: number) => (templateId === 2003 ? { templateId, name: "로빈", lines: ["first line", "second line"] } : undefined) }
@@ -697,6 +732,52 @@ test("two browsers in one map see each other: enter, move and chat", { timeout: 
   assert.equal(left.characterId, (hero.field.self as { characterId: number }).characterId);
 
   alt.browser.close();
+});
+
+test("a browser's Ctrl swing kills a mob: the hit, the death and the drop", { timeout: 25000 }, async (t) => {
+  const world = await startWorld(t, { combat: true });
+  const { browser } = await enterGame(world.webPort, "admin", "admin");
+  // The field's own spawn burst puts the stub monster on the ground; `mob-enter` is its id.
+  const mob = (await browser.nextKind("mob-enter")).mob as { mobId: number };
+
+  // The stub monster has 10 HP and the beginner's range is 1..9, so this may take a few swings -
+  // which is the point: every swing is a real 0x1B, and the field answers each one.
+  let damage = 0;
+  for (let swing = 0; swing < 20; swing++) {
+    browser.send({ t: "attack", mobId: mob.mobId, facingLeft: false });
+    const hit = await browser.next((message) => message.t === "hit" && message.mobId === mob.mobId);
+    damage = Number(hit.damage);
+    assert.ok(damage >= 1, "a swing always hurts");
+    if (browser.saw((message) => message.t === "mob-die")) break;
+  }
+  const die = await browser.next((message) => message.t === "mob-die" && message.mobId === mob.mobId);
+  assert.equal(die.mobId, mob.mobId);
+
+  // The kill's loot: one meso pile, flying out of the monster that dropped it.
+  const drop = await browser.next((message) => message.t === "drop-enter");
+  const body = drop.drop as { money: boolean; value: number; x: number; y: number; mobId?: number };
+  assert.equal(body.money, true);
+  assert.equal(body.value, 25);
+  assert.equal(body.mobId, mob.mobId, "a mobile drop names the monster it came from");
+
+  // Nothing is in reach of a character standing on the spawn portal, so the pile stays on the
+  // ground; asking to hit a monster the field does not have is an answer, not a crash.
+  browser.send({ t: "attack", mobId: 999999, facingLeft: false });
+  const refusal = await browser.next((message) => message.t === "error");
+  assert.match(String(refusal.message), /999999/);
+
+  browser.close();
+});
+
+test("0x30 is a death animation while the corpse is still there, and a removal only at delay < 0", () => {
+  // The positive form is what a kill sends (FINDINGS 4.17): 0x31 is still to come, so the monster
+  // has to stay in the page's own pool and play `die1` - losing it here would make the corpse pop.
+  assert.deepEqual(mobLeaveEvent({ mobId: 7, delayMs: 720 }, true), { kind: "mob-die", mobId: 7 });
+  // The "already gone" form really is the removal.
+  assert.deepEqual(mobLeaveEvent({ mobId: 7, delayMs: -1 }, true), { kind: "mob-leave", mobId: 7 });
+  // A 0x30 for a monster the pool never had says nothing: no phantom corpse, no double leave.
+  assert.equal(mobLeaveEvent({ mobId: 8, delayMs: 720 }, false), undefined);
+  assert.equal(mobLeaveEvent({ mobId: 8, delayMs: -1 }, false), undefined);
 });
 
 test("a browser that disappears releases its account, so the next login is not refused", { timeout: 20000 }, async (t) => {

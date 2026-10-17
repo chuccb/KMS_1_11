@@ -51,10 +51,20 @@ import {
 } from "../protocol/shop.ts";
 import { QUEST_TALK_OPCODE, encodeQuestReply, readQuestTalk } from "../protocol/quest.ts";
 import {
+  DROP_OPCODE,
+  LOOT_OPCODE,
+  readDropAppear,
+  readDropRemove,
+  readLootNotice,
+  type DropAppear,
+  type LootNotice,
+} from "../protocol/drop.ts";
+import {
   FIELD_OPCODE,
   encodeClientChat,
   encodeClientEmotion,
   encodeClientInteract,
+  encodeClientAttack,
   encodeClientUserMove,
   encodeClientUserRequest,
   encodeClientUseItem,
@@ -63,6 +73,9 @@ import {
   readUserChat,
   readUserEffect,
   readUserEmotion,
+  readUserAttack,
+  type ClientAttack,
+  type ClientAttackTarget,
   readUserEnterField,
   readUserFindAnswer,
   readUserMove,
@@ -79,6 +92,8 @@ import {
   readMobLeaveDelayed,
   readMobMove,
   readMobPresence,
+  readMobStat,
+  type MobLeaveDelayed,
 } from "../protocol/mob.ts";
 import { NPC_OPCODE, readNpcEnterField, readNpcId } from "../protocol/npc.ts";
 import { STAT_OPCODE, readStatUpdate, type StatDiff } from "../protocol/stat.ts";
@@ -251,7 +266,17 @@ export type ClientEvent =
   | { kind: "level-up"; characterId: number }
   | { kind: "mob-enter"; mob: MobView }
   | { kind: "mob-move"; mobId: number; x: number; y: number }
+  /** `0x30`: the monster was hit; its `die1` frames are the corpse. */
+  | { kind: "mob-die"; mobId: number }
   | { kind: "mob-leave"; mobId: number }
+  /** `0x23`: another user's swing, relayed with the mob ids and the numbers they rolled. */
+  | { kind: "user-attack"; characterId: number; facingLeft: boolean; targets: { mobId: number; hitAnimation: number; damages: number[] }[] }
+  /** `0x43`: a drop landed (`drop.money` picks the meso pile, otherwise `drop.value` is an item id). */
+  | { kind: "drop-enter"; drop: DropAppear }
+  /** `0x44`: it expired (`gone`), vanished, or was taken by `characterId` (the page flies it there). */
+  | { kind: "drop-leave"; dropId: number; reason: "gone" | "vanished" | "taken"; characterId?: number }
+  /** `0x11`: the line the client prints for a pickup - mesos, an item, or "no more room". */
+  | { kind: "loot"; notice: LootNotice }
   | { kind: "npc-enter"; npc: NpcView }
   | { kind: "npc-leave"; npcId: number }
   | { kind: "unknown"; opcode: number; bytes: number }
@@ -471,6 +496,8 @@ export class ClientSession {
   private readonly mobs = new Map<number, MobView>();
   private readonly npcs = new Map<number, NpcView>();
   private latest: CharacterData | undefined;
+  /** `0x1B`'s per-swing `sequence`: it only has to differ between swings. */
+  private attackSequence = 0;
 
   constructor(options: ClientSessionOptions) {
     this.options = options;
@@ -622,9 +649,47 @@ export class ClientSession {
     this.latest = character;
   }
 
+  /** One monster in the field's pool, or `undefined` when this session has never seen it. */
+  mob(mobId: number): MobView | undefined {
+    return this.mobs.get(mobId);
+  }
+
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
     return this.latest;
+  }
+
+  /**
+   * One swing (`0x1B`), built the way the 2003 client builds it: one target record per mob, one hit
+   * per target, the damage the caller already rolled (the field takes it on trust - see
+   * `game/combat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
+   */
+  async attack(
+    targets: { mobId: number; x: number; y: number; damage: number; hitAnimation?: number }[],
+    facingLeft = false,
+  ): Promise<void> {
+    const link = this.gameLink;
+    if (link === undefined) throw new Error("attack() needs a session in a field");
+    if (targets.length === 0) return;
+    this.attackSequence = (this.attackSequence + 1) & 0xff;
+    const records: ClientAttackTarget[] = targets.slice(0, 6).map((target) => ({
+      mobId: target.mobId,
+      hitAnimation: target.hitAnimation ?? 0,
+      x: target.x,
+      y: target.y,
+      sequence: this.attackSequence,
+      damages: [target.damage],
+    }));
+    const attack: ClientAttack = {
+      hits: 1,
+      targetCount: records.length,
+      skillId: 0,
+      facingLeft,
+      action: 0,
+      speed: 1,
+      targets: records,
+    };
+    await link.send(encodeClientAttack(attack));
   }
 
   /** Sends a field chat line. The 2003 client writes CP949; the adapter pre-encodes. */
@@ -996,15 +1061,63 @@ export class ClientSession {
           return;
         }
         case MOB_OPCODE.leaveDelayed: {
-          // 0x30 starts the die animation; 0x31 removes the mob. The view just drops it when the
-          // pool does, but a 0x30 with no 0x31 (a mob that is already dying) is still a removal.
           const leave = readMobLeaveDelayed(new PacketReader(plain, 1));
-          if (leave.delayMs < 0) this.removeMob(leave.mobId);
+          const effect = mobLeaveEvent(leave, this.mobs.has(leave.mobId));
+          if (effect === undefined) return;
+          if (effect.kind === "mob-leave") this.mobs.delete(leave.mobId);
+          this.emit(effect);
           return;
         }
         case MOB_OPCODE.presence: {
           const presence = readMobPresence(new PacketReader(plain, 1));
           if (presence.flag === 0) this.removeMob(presence.mobId);
+          return;
+        }
+        case FIELD_OPCODE.userAttack: {
+          // `0x23`: the others' half of a swing. The attacker's own client already drew it, so this
+          // only ever arrives for somebody else (`relayAttack`).
+          const attack = readUserAttack(new PacketReader(plain, 1));
+          this.emit({
+            kind: "user-attack",
+            characterId: attack.characterId,
+            facingLeft: attack.facingLeft,
+            targets: attack.targets.map((target) => ({
+              mobId: target.mobId,
+              hitAnimation: target.hitAnimation,
+              damages: [...target.damages],
+            })),
+          });
+          return;
+        }
+        case DROP_OPCODE.appear: {
+          // A v1.11 client has no pickup request (FINDINGS 4.18): the field decides who gets a drop
+          // and tells everyone, and this page only has to show it land.
+          const drop = readDropAppear(new PacketReader(plain, 1));
+          this.emit({ kind: "drop-enter", drop });
+          return;
+        }
+        case DROP_OPCODE.remove: {
+          const remove = readDropRemove(new PacketReader(plain, 1));
+          const reason = remove.kind === 2 ? "taken" : remove.kind === 1 ? "vanished" : "gone";
+          this.emit({
+            kind: "drop-leave",
+            dropId: remove.dropId,
+            reason,
+            ...(remove.characterId === undefined ? {} : { characterId: remove.characterId }),
+          });
+          return;
+        }
+        case LOOT_OPCODE: {
+          // `0x11` is CWvsApp-level, not CField: it is the chat line for what was just picked up
+          // (`sub_55C130`). The client builds the sentence itself from its own archive.
+          this.emit({ kind: "loot", notice: readLootNotice(new PacketReader(plain, 1)) });
+          return;
+        }
+        case MOB_OPCODE.stat: {
+          // `0x34`: the mob's stat block. This build sends only its MP, and the page has no HP/MP
+          // bar over a monster - the flash it draws is the client's own `hit1`. Consume it quietly
+          // instead of reporting the opcode as unknown on every hit.
+          readMobStat(new PacketReader(plain, 1));
           return;
         }
         case NPC_OPCODE.enterField: {
@@ -1088,3 +1201,19 @@ export const CLIENT_EVENT_KINDS = [
   "unknown",
   "disconnect",
 ] as const satisfies readonly ClientEvent["kind"][];
+
+/**
+ * `0x30` is two packets wearing one opcode: a positive delay means "start the death animation"
+ * (the monster stays in the pool until `0x31` takes the corpse), and a negative one means "it is
+ * already gone". The 2003 client plays `Mob/<id>.img/die1` for the first - a picture, not a removal,
+ * so the page is told about it instead of silently losing the monster.
+ */
+export function mobLeaveEvent(
+  leave: MobLeaveDelayed,
+  present: boolean,
+): ClientEvent | undefined {
+  if (leave.delayMs < 0) return present ? { kind: "mob-leave", mobId: leave.mobId } : undefined;
+  // The 0x30 delay is 0 for "starts now"; how long the animation runs is the monster's own
+  // `die1` frames, which is the same sum the field's `dieMs` is made of (`game/mobs.ts`).
+  return present ? { kind: "mob-die", mobId: leave.mobId } : undefined;
+}

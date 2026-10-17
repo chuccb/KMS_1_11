@@ -33,6 +33,7 @@ import { ClientSession, type ClientEvent } from "../client/session.ts";
 import { encodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
+import { damageRangeFor, rollDamage } from "../game/combat.ts";
 import type { MapData } from "../game/map.ts";
 import type { MapArt } from "../game/mapart.ts";
 import type { AvatarFrame } from "../game/avatar.ts";
@@ -238,23 +239,30 @@ function artJson(art: MapArt): unknown {
  */
 const ART_ROOTS = ["Map/", "Character/", "Mob/", "Npc/", "Effect/", "Item/", "UI/"];
 
-function servePng(art: ArtProvider | undefined, rest: string, response: ServerResponse): void {
-  if (art?.reader === undefined) {
-    sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
-    return;
-  }
+/** Decodes and vets the `<archive path>` segment both canvas endpoints take; `undefined` = refused. */
+function artPathOf(rest: string, response: ServerResponse): string | undefined {
   // The path is percent-encoded as one segment; `decodeURIComponent` turns it back into slashes.
   let path: string;
   try {
     path = decodeURIComponent(rest);
   } catch {
     sendJson(response, 400, { error: "the path is not valid percent-encoding" });
-    return;
+    return undefined;
   }
   if (path.includes("..") || !ART_ROOTS.some((root) => path.startsWith(root)) || !path.includes(".img")) {
     sendJson(response, 404, { error: `"${path}" is not inside the art folders` });
+    return undefined;
+  }
+  return path;
+}
+
+function servePng(art: ArtProvider | undefined, rest: string, response: ServerResponse): void {
+  if (art?.reader === undefined) {
+    sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
     return;
   }
+  const path = artPathOf(rest, response);
+  if (path === undefined) return;
   const canvas = art.reader.at(path);
   if (canvas === undefined) {
     sendJson(response, 404, { error: `no canvas at ${path}` });
@@ -267,6 +275,35 @@ function servePng(art: ArtProvider | undefined, rest: string, response: ServerRe
     "cache-control": "public, max-age=86400",
   });
   response.end(Buffer.from(canvas.png));
+}
+
+/**
+ * `/api/canvas/<archive path>`: the same picture's size and origin.
+ *
+ * `/api/png` alone is enough for anything whose frame table already carries the origin (the map art
+ * does, and so do `/api/mob` and `/api/npc`). It is not enough for a picture the page looks up from
+ * data alone - a ground drop, whose path is built from the packet (`Item/Special/0900.img/0900000X`)
+ * or from an item id - so this answers the metadata that a PNG cannot.
+ */
+function serveCanvasMeta(art: ArtProvider | undefined, rest: string, response: ServerResponse): void {
+  if (art?.reader === undefined) {
+    sendJson(response, 404, { error: "this server was started without Data.wz (--data off)" });
+    return;
+  }
+  const path = artPathOf(rest, response);
+  if (path === undefined) return;
+  const canvas = art.reader.at(path);
+  if (canvas === undefined) {
+    sendJson(response, 404, { error: `no canvas at ${path}` });
+    return;
+  }
+  sendJson(response, 200, {
+    path,
+    width: canvas.width,
+    height: canvas.height,
+    ox: canvas.ox,
+    oy: canvas.oy,
+  });
 }
 
 /** `/api/avatar.png?face=&hair=&items=&stance=&frame=&flip=&emotion=`: one composed frame. */
@@ -356,6 +393,8 @@ class BrowserSession {
           return await this.say(String(message.text ?? ""));
         case "move":
           return await this.move(Number(message.x ?? 0), Number(message.y ?? 0), Number(message.foothold ?? 0));
+        case "attack":
+          return await this.attack(Number(message.mobId ?? 0), message.facingLeft === true);
         case "portal":
           return await this.usePortal(String(message.name ?? ""));
         case "emotion":
@@ -378,6 +417,30 @@ class BrowserSession {
     } catch (error) {
       this.fail(error);
     }
+  }
+
+  /**
+   * `{t:"attack", mobId}`: the page's Ctrl swing. The page names the monster and the direction; the
+   * numbers are the client's own, rolled here because the browser has no archive to read the
+   * weapon's `incPAD` from (`game/combat.ts` says why that is the honest place for the formula).
+   *
+   * The field is told with `0x1B`, exactly like a 2003 client would tell it, and the page gets the
+   * number back so it can draw the damage it just dealt (`{t:"hit"}`) - the wire has no such
+   * packet: the attacker's own client drew the number while it built the packet.
+   */
+  private async attack(mobId: number, facingLeft: boolean): Promise<void> {
+    const session = this.require();
+    const mob = session.mob(mobId);
+    if (mob === undefined) {
+      return this.send({ t: "error", message: `there is no mob ${mobId} in this field` });
+    }
+    const character = session.character;
+    if (character === undefined) return;
+    const worn = [...(character.items?.worn.values() ?? [])].map((slot) => slot.itemId);
+    const range = damageRangeFor(character.stats, worn, this.options.itemCatalog);
+    const damage = rollDamage(range);
+    await session.attack([{ mobId, x: mob.x, y: mob.y, damage }], facingLeft);
+    this.send({ t: "hit", mobId, damage });
   }
 
   private newSession(): ClientSession {
@@ -704,6 +767,10 @@ export function startWebClient(options: WebClientOptions): Promise<WebClientServ
     }
     if (url.pathname.startsWith("/api/png/")) {
       servePng(options.art, url.pathname.slice("/api/png/".length), response);
+      return;
+    }
+    if (url.pathname.startsWith("/api/canvas/")) {
+      serveCanvasMeta(options.art, url.pathname.slice("/api/canvas/".length), response);
       return;
     }
     if (url.pathname === "/api/avatar.png") {

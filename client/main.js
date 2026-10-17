@@ -267,6 +267,8 @@ function handle(message) {
       users.clear();
       mobs.clear();
       npcs.clear();
+      drops.clear();
+      dying.clear();
       for (const user of message.users) users.set(String(user.characterId), user);
       for (const mob of message.mobs) mobs.set(String(mob.mobId), mob);
       for (const npc of message.npcs) npcs.set(String(npc.npcId), npc);
@@ -415,9 +417,113 @@ function handle(message) {
       return;
     }
 
+    case "mob-die": {
+      // `0x30`: the monster is still on the field (its corpse is), and the 2003 client plays
+      // `Mob/<id>.img/die1` before `0x31` takes it away. Nothing else changes here - the loot and
+      // the exp are other packets, from the server.
+      dying.set(String(message.mobId), performance.now());
+      return;
+    }
+
     case "mob-leave":
       mobs.delete(String(message.mobId));
+      dying.delete(String(message.mobId));
       return;
+
+    case "loot": {
+      // `0x11`: the 2003 client prints the pickup itself (`sub_55C130`), in Korean, from its own
+      // archive. The page has the same archive behind `/api/item/<id>`, so it prints the same line.
+      const notice = message.notice;
+      if (notice?.kind === "mesos") {
+        chatLine("系統", `메소를 얻었습니다 (+${notice.amount})`);
+        return;
+      }
+      if (notice?.kind !== "item") {
+        if (notice?.kind === "rejected") chatLine("系統", "아이템을 더 이상 가질 수 없습니다");
+        return;
+      }
+      const itemId = Number(notice.itemId);
+      const count = Number(notice.count ?? 1);
+      const sentence = (label) =>
+        count >= 2 ? `아이템을 얻었습니다 (${label} ${count}개)` : `아이템을 얻었습니다 (${label})`;
+      // The name is an archive lookup, so a first-time item shows its id for a frame and the line
+      // is rewritten when the name lands. `icon.png`/`iconRaw` only exist if the id does, so a
+      // failed lookup leaves the id in place, which is what the client prints for an unnamed item.
+      const known = itemInfo.get(itemId);
+      const line = chatLine("系統", sentence(known?.name ?? String(itemId)));
+      describeItem(itemId);
+      if (known === undefined) {
+        void (async () => {
+          for (let i = 0; i < 40 && itemInfo.get(itemId) === undefined; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          const facts = itemInfo.get(itemId);
+          if (typeof facts?.name === "string") {
+            const text = line.lastChild;
+            if (text) text.textContent = sentence(facts.name);
+          }
+        })();
+      }
+      return;
+    }
+
+    case "hit": {
+      // The swing's own numbers: the wire has no packet for them (the 2003 client drew them while it
+      // built 0x1B), so the bridge answers the page with what it rolled and sent.
+      const mob = mobs.get(String(message.mobId));
+      const now = performance.now();
+      if (mob) {
+        mobHits.set(String(message.mobId), now);
+        damageMarks.push({ x: mob.x, y: mob.y, value: message.damage, start: now });
+      }
+      return;
+    }
+
+    case "user-attack": {
+      // Somebody else's swing (`0x23`): their character plays the motion, the mobs they named flash
+      // and show the numbers they sent - which is exactly what the relayed packet carries.
+      const user = users.get(String(message.characterId));
+      const now = performance.now();
+      if (user) user.swing = { stance: SWING_STANCES[swingCounter++ % SWING_STANCES.length], start: now };
+      for (const target of message.targets ?? []) {
+        const mob = mobs.get(String(target.mobId));
+        if (!mob) continue;
+        mobHits.set(String(target.mobId), now);
+        const total = (target.damages ?? []).reduce((sum, value) => sum + value, 0);
+        if (total > 0) damageMarks.push({ x: mob.x, y: mob.y, value: total, start: now });
+      }
+      return;
+    }
+
+    case "drop-enter": {
+      // The drop flies out of the monster that left it: the packet carries the monster and where the
+      // item came to rest, and the two are a hop apart.
+      const mob = message.drop.mobId === undefined ? undefined : mobs.get(String(message.drop.mobId));
+      const fromX = mob?.x ?? message.drop.mobX ?? message.drop.x;
+      const fromY = mob?.y ?? message.drop.mobY ?? message.drop.y;
+      drops.set(String(message.drop.dropId), {
+        drop: message.drop,
+        born: performance.now(),
+        fromX,
+        fromY,
+      });
+      return;
+    }
+
+    case "drop-leave": {
+      const key = String(message.dropId);
+      const record = drops.get(key);
+      if (record === undefined) return;
+      // `taken` is the only kind the original turns into an animation: the icon flies to the
+      // character in `characterId` (0x44's own field) and disappears when it gets there.
+      if (message.reason !== "taken" || message.characterId === undefined) {
+        drops.delete(key);
+        return;
+      }
+      record.takenAt = performance.now();
+      record.takenBy = message.characterId;
+      return;
+    }
 
     case "npc-enter":
       npcs.set(String(message.npc.npcId), message.npc);
@@ -693,6 +799,34 @@ const avatarFrames = new Map();
 /** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
 const npcArts = new Map();
 const mobArts = new Map();
+/** `mobId -> when its 0x30 (die) arrived`; the corpse plays the monster's own `die1` frames. */
+const dying = new Map();
+/**
+ * `dropId -> { drop, born, fromX, fromY }`: what `0x43` put on the ground.
+ *
+ * A v1.11 client has no pickup request, so this map is write-only from the wire's point of view:
+ * the field decides who gets a drop and sends `0x44` kind 2 with the taker's id, which is what the
+ * page animates (the icon flies to that character).
+ */
+const drops = new Map();
+/** Meso piles, one entry per tier: `[{path,ox,oy}]`, the four `iconRaw` frames of `0900.img`. */
+const mesoArt = new Map();
+/** The local character's current swing (`{stance, start}`), and the three the client cycles. */
+let selfSwing;
+let swingCounter = 0;
+/** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
+const damageMarks = [];
+const mobHits = new Map();
+
+/** Every swing lives this long; the three `swingO*` motions cover the weapon images this build has. */
+const SWING_MS = 480;
+const SWING_COOLDOWN_MS = 460;
+const SWING_STANCES = ["swingO1", "swingO2", "swingO3"];
+/** The 2003 client's reach for a one-handed swing, in px, and how far up/down a mob still counts. */
+const SWING_REACH_X = 90;
+const SWING_REACH_UP = 72;
+const SWING_REACH_DOWN = 36;
+let lastSwingAt = 0;
 /** Template ids whose art endpoint said 404 - stop asking. */
 const artMissing = new Set();
 /** The camera: world coordinate shown at the top-left of the 800x600 view. */
@@ -970,6 +1104,19 @@ function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
 
 /** The character's stance and frame from its movement, the way the page can see it. */
 function stanceOfEntity(entity, now) {
+  // A swing outranks walking: the 2003 client's attack motion is played to its end before the body
+  // goes back to standing, and both the local character and a relayed `0x23` use the same three
+  // `swingO*` motions. The frames are spread over the swing's own length.
+  const swing = entity === selfView ? selfSwing : entity.swing;
+  if (swing !== undefined) {
+    const elapsed = now - swing.start;
+    if (elapsed < SWING_MS) {
+      const frames = swing.frames ?? 3;
+      return { stance: swing.stance, frame: Math.min(frames - 1, Math.floor(elapsed / (SWING_MS / frames))) };
+    }
+    if (entity === selfView) selfSwing = undefined;
+    else delete entity.swing;
+  }
   // The wire only says where a character is, so "walking" is "a move arrived recently"; the body
   // image's own delays are 180 ms for `walk1`'s four frames and 500 ms for `stand1`'s three.
   const moving = now - (entity.movedAt ?? 0) < 360;
@@ -997,6 +1144,15 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
     ctx.drawImage(frame.img, Math.round(screenX + frame.dx), Math.round(screenY + frame.dy));
     return;
   }
+  if (state.stance !== "stand1") {
+    // A stance the archive cannot compose for this look (`swingO1` while the weapon's own PNG is
+    // still on the wire) falls back to standing rather than to a grey box.
+    const stand = avatarFrame(look, "stand1", 0, flip, emotionFace(entity.emotion, now));
+    if (stand.ready) {
+      ctx.drawImage(stand.img, Math.round(screenX + stand.dx), Math.round(screenY + stand.dy));
+      return;
+    }
+  }
   // Before the composed PNG arrives (or if the archive is off): a neutral placeholder at the same
   // spot, so the field is not empty while the first pictures load.
   ctx.fillStyle = "rgba(120, 170, 210, 0.35)";
@@ -1004,10 +1160,44 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
 }
 
 /** The NPC/mob sprite at `(x, y)`, with its own animation. */
-function drawEntitySprite(kind, templateId, x, y, facing, moving, now) {
+function drawEntitySprite(kind, templateId, x, y, facing, moving, now, corpseSince, entityKey) {
   ensureEntityArt(kind, templateId);
   const actions = (kind === "npc" ? npcArts : mobArts).get(templateId);
   const action = kind === "npc" ? "stand" : moving ? "move" : "stand";
+  // A hit flashes the monster's own `hit1` for a moment - the same frame the 2003 client plays when
+  // the damage it just dealt is applied (`sub_4882F0`, FINDINGS 4.13.1).
+  if (kind === "mob" && actions?.hit1 !== undefined) {
+    const hitAt = mobHits.get(entityKey);
+    if (hitAt !== undefined) {
+      const elapsed = now - hitAt;
+      if (elapsed < 240) {
+        const frame = actions.hit1[Math.min(actions.hit1.length - 1, Math.floor(elapsed / 120))];
+        if (frame !== undefined) drawArchiveImage(frame, x, y, facing === 1);
+        return;
+      }
+      mobHits.delete(entityKey);
+    }
+  }
+  // A monster that was hit (`0x30`) plays `die1` once and then holds its last frame until `0x31`:
+  // the 2003 client's corpse is the end of that animation, not a picture the server has to send.
+  if (corpseSince !== undefined && actions?.die1 !== undefined) {
+    // The frames' own delays, exactly like every other action: the field's `dieMs` is their sum, so
+    // the corpse lasts as long as the server keeps the monster in its pool.
+    const frames = actions.die1;
+    const total = frames.reduce((sum, frame) => sum + Math.max(1, frame.delay), 0);
+    let at = Math.min(Math.max(0, now - corpseSince), Math.max(0, total - 1));
+    let index = frames.length - 1;
+    for (let i = 0; i < frames.length; i++) {
+      at -= Math.max(1, frames[i].delay);
+      if (at < 0) {
+        index = i;
+        break;
+      }
+    }
+    const frame = frames[index];
+    if (frame !== undefined) drawArchiveImage(frame, x, y, facing === 1);
+    return;
+  }
   const frame = playAction(actions, action, now);
   if (frame === undefined) return;
   drawArchiveImage(frame, x, y, facing === 1);
@@ -1039,6 +1229,9 @@ function frame() {
   const front = sprites.filter((sprite) => (sprite.layer ?? 0) >= CHARACTER_LAYER);
   for (const sprite of behind) drawMapSprite(sprite, cameraX, cameraY, now, false);
   drawPortals(cameraX, cameraY, now);
+  // Loot lies on the ground, under everyone's feet: the original's reward pool draws before the
+  // characters, so a player standing on a drop hides it.
+  drawDrops(cameraX, cameraY, now);
 
   // Characters, back to front by their feet.
   const actors = [];
@@ -1055,7 +1248,8 @@ function frame() {
       drawEntitySprite("npc", actor.npc.templateId, x, y, actor.npc.facing ?? 0, false, now);
     } else if (actor.kind === "mob") {
       const moved = now - (actor.mob.movedAt ?? 0) < 400;
-      drawEntitySprite("mob", actor.mob.templateId, x, y, actor.mob.facing ?? 0, moved, now);
+      const doomed = dying.get(String(actor.mob.mobId));
+      drawEntitySprite("mob", actor.mob.templateId, x, y, actor.mob.facing ?? 0, moved, now, doomed, String(actor.mob.mobId));
     } else if (actor.kind === "self") {
       drawAvatarAt(selfView, x, y, now, selfView.facing === 1);
       drawName(selfView.name, x, y - 62);
@@ -1065,12 +1259,170 @@ function frame() {
     }
   }
 
+  // The numbers a swing rolled, over the mobs they landed on (white with a dark edge, rising).
+  for (let i = damageMarks.length - 1; i >= 0; i--) {
+    const mark = damageMarks[i];
+    const t = (now - mark.start) / 800;
+    if (t >= 1) {
+      damageMarks.splice(i, 1);
+      continue;
+    }
+    const x = mark.x - cameraX;
+    const y = mark.y - cameraY - 34 - t * 38;
+    ctx.font = "bold 14px 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+    ctx.strokeText(String(mark.value), x, y);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(String(mark.value), x, y);
+  }
+
   for (const sprite of front) drawMapSprite(sprite, cameraX, cameraY, now, false);
   for (const back of backs) if (back.front) drawBack(back, cameraX, cameraY);
 
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+/** How long a drop's flight out of the monster takes, and the pickup's flight to its taker. */
+const DROP_HOP_MS = 420;
+const DROP_PICKUP_MS = 260;
+/** The 2003 client draws a drop's icon 16 px above the ground line the packet names. */
+const DROP_LIFT_PX = 16;
+
+/** The four meso piles of `Item/Special/0900.img`, by amount (`sub_4A9C10`). */
+function mesoTier(amount) {
+  if (amount < 50) return 0;
+  if (amount < 100) return 1;
+  if (amount < 1000) return 2;
+  return 3;
+}
+
+/** The four `iconRaw` frames of one meso pile, asked for once; a partial list is used as it lands. */
+function mesoFrames(tier) {
+  let entry = mesoArt.get(tier);
+  if (entry !== undefined) return entry;
+  entry = { frames: [] };
+  mesoArt.set(tier, entry);
+  void (async () => {
+    for (let frame = 0; frame < 4; frame++) {
+      const path = `Item/Special/0900.img/0900000${tier}/iconRaw/${frame}`;
+      try {
+        const response = await fetch(`/api/canvas/${encodeURIComponent(path)}`);
+        if (!response.ok) return;
+        const meta = await response.json();
+        artImage(path);
+        entry.frames.push({ path, ox: meta.ox, oy: meta.oy });
+      } catch {
+        return;
+      }
+    }
+  })();
+  return entry;
+}
+
+/** The picture of one drop: an animated meso pile, or the item's own `iconRaw`. */
+function dropFrameOf(drop, now) {
+  if (drop.money) {
+    const frames = mesoFrames(mesoTier(drop.value)).frames;
+    if (frames.length === 0) return undefined;
+    return frames[Math.floor(now / 140) % frames.length];
+  }
+  // The item's icon and its origin come from the catalogue the shop and the inventory already use.
+  describeItem(drop.value);
+  const icon = itemInfo.get(drop.value)?.iconRaw;
+  return icon === undefined ? undefined : { path: icon.path, ox: icon.ox, oy: icon.oy };
+}
+
+/** Where a drop is right now: it hops out of the monster, then lies still (or flies to its taker). */
+function dropPosition(record, now) {
+  const drop = record.drop;
+  if (record.takenAt !== undefined) {
+    const t = Math.min(1, (now - record.takenAt) / DROP_PICKUP_MS);
+    const taker = record.takenBy === selfView?.characterId
+      ? self
+      : users.get(String(record.takenBy)) ?? undefined;
+    if (taker === undefined) return t >= 1 ? undefined : { x: drop.x, y: drop.y - DROP_LIFT_PX, t };
+    return {
+      x: drop.x + (taker.x - drop.x) * t,
+      y: drop.y - DROP_LIFT_PX + (taker.y - 30 - (drop.y - DROP_LIFT_PX)) * t,
+      t,
+    };
+  }
+  const t = Math.min(1, (now - record.born) / DROP_HOP_MS);
+  if (t >= 1) return { x: drop.x, y: drop.y - DROP_LIFT_PX, t: 1 };
+  // A small parabola between where the monster stood and where the item lands.
+  return {
+    x: record.fromX + (drop.x - record.fromX) * t,
+    y: record.fromY + (drop.y - record.fromY) * t - 28 * Math.sin(Math.PI * t),
+    t,
+  };
+}
+
+/** Every drop on the ground, and every one on its way to a taker. */
+function drawDrops(cameraX, cameraY, now) {
+  for (const [key, record] of drops) {
+    const at = dropPosition(record, now);
+    if (at === undefined) {
+      drops.delete(key);
+      continue;
+    }
+    if (record.takenAt !== undefined && at.t >= 1) {
+      drops.delete(key);
+      continue;
+    }
+    const x = at.x - cameraX;
+    const y = at.y - cameraY;
+    if (x < -80 || x > VIEW_W + 80 || y < -120 || y > VIEW_H + 120) continue;
+    const frame = dropFrameOf(record.drop, now);
+    if (frame === undefined) continue;
+    ctx.globalAlpha = record.takenAt === undefined ? 1 : 1 - at.t * 0.75;
+    drawArchiveImage(frame, x, y, false);
+    ctx.globalAlpha = 1;
+  }
+}
+
+/** The nearest monster a swing would reach: in front of the character, and close enough. */
+function mobInReach() {
+  if (!self || !selfView) return undefined;
+  const facingLeft = selfView.facing === 1;
+  let found;
+  let best = Infinity;
+  for (const mob of mobs.values()) {
+    const dx = mob.x - self.x;
+    const dy = mob.y - self.y;
+    if (Math.abs(dx) > SWING_REACH_X) continue;
+    if (dy < -SWING_REACH_UP || dy > SWING_REACH_DOWN) continue;
+    // A swing only hits what is in front of it; a monster on top of the character counts as in front.
+    if (dx !== 0 && (facingLeft ? dx > 0 : dx < 0)) continue;
+    const distance = dx * dx + dy * dy;
+    if (distance < best) {
+      best = distance;
+      found = mob;
+    }
+  }
+  return found;
+}
+
+/**
+ * Ctrl: the client's own attack key. The swing is played locally no matter what, and the packet
+ * only goes out when there is something in reach - a miss is a picture, not a message.
+ */
+function swing() {
+  if (!self || !selfView) return;
+  const now = performance.now();
+  if (now - lastSwingAt < SWING_COOLDOWN_MS) return;
+  lastSwingAt = now;
+  selfSwing = { stance: SWING_STANCES[swingCounter++ % SWING_STANCES.length], start: now };
+  const mob = mobInReach();
+  if (mob !== undefined) {
+    send({ t: "attack", mobId: mob.mobId, facingLeft: selfView.facing === 1 });
+    return;
+  }
+  // Nothing in reach: the swing still plays (the 2003 client does the same), so the field is not
+  // spammed with empty attack packets.
+}
 
 /** The layer the characters are drawn in: after layers 0-2, before layer 3 and the front backs. */
 const CHARACTER_LAYER = 3;
@@ -1142,6 +1494,7 @@ function chatLine(name, text) {
   line.append(who, document.createTextNode(text));
   ui.chatLines.append(line);
   while (ui.chatLines.children.length > 8) ui.chatLines.firstElementChild?.remove();
+  return line;
 }
 
 function logLine(text) {
@@ -1456,6 +1809,13 @@ window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "i") {
     event.preventDefault();
     toggleInventory();
+    return;
+  }
+  // Ctrl is the 2003 client's attack key (`sub_511E20`'s case 10 sits next to the emotes). A held
+  // key repeats, so the page swings on keydown and lets `swing()` own the cooldown.
+  if (event.key === "Control") {
+    event.preventDefault();
+    swing();
     return;
   }
   // A key pressed while the login fields are focused belongs to them, not to the character.
