@@ -374,6 +374,7 @@ function connect() {
     resetContact();
     deathFx.reset();
     visualFieldActive = false;
+    lastAttackTrace = undefined;
     ++mapGeneration;
     revivePanel.reset();
     selfSwing = undefined;
@@ -409,6 +410,7 @@ function handle(message) {
     deathFx.reset();
     ++mapGeneration;
     visualFieldActive = false;
+    lastAttackTrace = undefined;
     miniMapPanel.setMap(undefined);
     itemEpoch++;
     itemDialog.close(false);
@@ -903,6 +905,8 @@ function handle(message) {
     }
 
     case "hit": {
+      if (message.contactField !== undefined && message.contactField !== contactField) return;
+      lastAttackTrace = message.trace;
       scheduleAttackHit(
         message.mobId,
         message.damage,
@@ -4080,8 +4084,8 @@ function itemTooltipLines(item) {
     (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207)
   )
     lines.push(`數量 ${item.quantity}`);
-  if (item.ruc !== undefined && item.ruc > 0)
-    lines.push(`可升級次數 ${item.ruc}`);
+  const ruc = item.ruc ?? facts?.equipment?.ruc;
+  if (ruc > 0) lines.push(`可升級次數 ${ruc}`);
   if (item.cuc > 0) lines[0] += ` (+${item.cuc})`;
   const statNames = {
     str: "STR",
@@ -4106,8 +4110,8 @@ function itemTooltipLines(item) {
     for (const k of ["str", "dex", "int", "luk"])
       if (r[k]) lines.push(`需求 ${k.toUpperCase()} ${r[k]}`);
   }
-  for (const [k, value] of Object.entries(item.stats ?? {}))
-    if (value) lines.push(`${statNames[k] ?? k} +${value}`);
+  for (const [k, value] of Object.entries(item.stats ?? facts?.equipment?.stats ?? {}))
+    if (value) lines.push(`${statNames[k] ?? k} ${value > 0 ? "+" : ""}${value}`);
   if (facts?.desc) {
     // The archive stores the description with `\n` line breaks; the tooltip keeps them.
     for (const line of String(facts.desc)
@@ -5329,7 +5333,7 @@ const equipPanel = equipmentWindow({
   },
 });
 
-let selfDeathSettled = false, visualFieldActive = false;
+let selfDeathSettled = false, visualFieldActive = false, lastAttackTrace;
 const deathFx = deathEffects({
   image: artImage, log: logLine,
   sound: point => void audio.effect("Game/Tombstone", spatialVolume(point.x, point.y, self)),
@@ -5367,6 +5371,29 @@ const recovery = naturalRecovery({
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
 const testToolsPanel = testTools({
+  getCombat() {
+    if (!nativeBasis) return "尚未取得有效能力。";
+    const temporary = buffs.values(performance.now());
+    const worn = nativeWornFacts.find(item => item.slot === 11);
+    const pad = Math.max(0, Math.min(999, nativeBasis.secondary.pad + (temporary.pad ?? 0) + nativeAmmoPad));
+    let text = `唯讀戰鬥資料（非原版）：STR ${nativeBasis.basic.str}／DEX ${nativeBasis.basic.dex}／LUK ${nativeBasis.basic.luk}；` +
+      `有效武器 ${nativeBasis.weaponId || "無"}；裝備PAD ${nativeBasis.secondary.pad}＋藥水 ${temporary.pad ?? 0}＋彈藥 ${nativeAmmoPad}＝射擊PAD ${pad}。近戰不加彈藥。`;
+    if (worn && !nativeBasis.effectiveSlots.includes(11)) text += " 目前武器未通過原有效穿戴條件，不提供能力。";
+    if (worn?.stats.pad === 0) text += " 武器實例PAD為0；若是舊版全零起始裝備，可在確認後修復。";
+    text += " Detail第一列不是每次傷害或傷害上下限。";
+    const t = lastAttackTrace;
+    if (t) {
+      const number = value => Number.isFinite(value) ? value.toFixed(2) : "—";
+      text += ` 上次有目標攻擊：PAD ${t.pad}、動作 ${t.action}、等差 ${t.levelDifference}；`;
+      if (t.reason !== "miss") text += `mastery ${t.mastery}、原始 ${number(t.raw)}→等差後 ${number(t.afterLevel)}→屬性後 ${number(t.afterAttribute)}−防禦 ${number(t.defense)}，` +
+        `特殊倍率 ${number(t.criticalMultiplier)}→截整／限制前 ${number(t.beforeClamp)}→實際 ${t.damage}。`;
+      if (t.reason === "miss") text += ` 未命中：${number(t.hitRoll)} < EVA ${t.mobEva}，傷害0；未執行後續傷害算式，不是最低傷害1。`;
+      else if (t.reason === "zero-pad") text += " 原因：總PAD為0，成功命中仍被限制為1。";
+      else if (t.reason === "no-effective-weapon") text += " 原因：沒有有效武器。";
+      else if (t.reason === "minimum") text += " 本次低擲值／等差／防禦／特殊倍率後落在最低傷害區間。";
+    }
+    return text;
+  },
   getMovement(){
     if (loginStage!=="game") return;
     const now=performance.now();

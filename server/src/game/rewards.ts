@@ -20,6 +20,8 @@
  * (`GW_ItemSlotNonEquip`), so 65535 would fit, but the original server's limit is not in the binary.
  * `MAX_ITEM_STACK` is a named constant with one place to change it.
  */
+import type { ItemCatalog } from "./iteminfo.ts";
+import { equipmentFromTemplate } from "./equipment.ts";
 import {
   INVENTORY_OP,
   INVENTORY_TAB,
@@ -99,11 +101,13 @@ export interface GrantedItem {
  * it is picked back up with them. The template's own id has to match - a caller that hands over
  * something else is a bug, and the default is the safe answer.
  */
-function freshSlot(itemId: number, count: number, template?: ItemSlot): ItemSlot {
+function freshSlot(itemId: number, count: number, template?: ItemSlot, catalog?: ItemCatalog): ItemSlot | undefined {
   if (template !== undefined && template.itemId === itemId) {
     return "quantity" in template ? { ...template, quantity: count } : { ...template };
   }
-  return isEquipItemId(itemId) ? equipSlot(itemId) : nonEquipSlot(itemId, count);
+  return isEquipItemId(itemId)
+    ? catalog ? equipmentFromTemplate(itemId, catalog) : equipSlot(itemId)
+    : nonEquipSlot(itemId, count);
 }
 
 export function grantItem(
@@ -111,7 +115,9 @@ export function grantItem(
   itemId: number,
   count = 1,
   template?: ItemSlot,
+  catalog?: ItemCatalog,
 ): GrantedItem | undefined {
+  if (!Number.isInteger(count) || count <= 0 || isEquipItemId(itemId) && count !== 1) return undefined;
   const tab = inventoryTabOfItemId(itemId);
   const inventory = items.inventories[tab - 1]!;
   const stack = stackableSlot(inventory, itemId, count);
@@ -126,7 +132,8 @@ export function grantItem(
   if (slot === undefined) return undefined;
   // Which object the client builds for the slot follows the *tab* (`sub_45E6A0`), so the item has to
   // match it: an equip id gets a `GW_ItemSlotEquip`, everything else a non-equip with a quantity.
-  const item: ItemSlot = freshSlot(itemId, count, template);
+  const item = freshSlot(itemId, count, template, catalog);
+  if (!item) return undefined; // Known archive but missing/unsupported equip: do not create a zero-stat item.
   inventory.items.set(slot, item);
   return { inventory: tab, slot, change: { op: INVENTORY_OP.put, inventory: tab, slot, item } };
 }
@@ -196,13 +203,13 @@ export interface Pickup {
  * server does not, so a player standing on a drop with a full bag is not spammed every tick - see
  * `loginserver.ts` - and the message is left for the day pickups have a request to answer).
  */
-export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWallet): PickupResult {
+export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWallet, catalog?: ItemCatalog): PickupResult {
   if (drop.money) {
     if (wallet.balance + drop.amount > 0xffffffff) return { kind: "no-room", notice: { kind: "rejected" }, itemId: 0 };
     const total = wallet.earn(drop.amount);
     return { kind: "mesos", notice: { kind: "mesos", amount: drop.amount }, amount: drop.amount, total };
   }
-  const granted = grantItem(items, drop.itemId, drop.count, drop.slot);
+  const granted = grantItem(items, drop.itemId, drop.count, drop.slot, catalog);
   if (granted === undefined) {
     return { kind: "no-room", notice: { kind: "rejected" }, itemId: drop.itemId };
   }

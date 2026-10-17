@@ -505,6 +505,8 @@
           <label><input id="qa-open-skills" type="checkbox" checked /> 套用後開啟原技能視窗</label>
           <button id="qa-apply" type="button" disabled>套用體驗配置（不是原版轉職）</button>
           <div class="qa-buttons"><button id="qa-heal" type="button" disabled>補滿 HP／MP</button><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button><button id="qa-near-death" type="button" disabled>HP設為1（碰怪看死亡演出）</button></div>
+          <button id="qa-repair-starters" type="button" disabled>修復舊全零起始裝備（原WZ值）</button>
+          <p>修復只針對原建角清單中、全部能力與升級次數皆為0的裝備；保留非全零／已升級實例。這是明示的舊版資料修復，不是原遊戲功能，且不由能力還原點回溯。</p>
           <button id="qa-speed-potions" type="button" disabled>領取 3 瓶原 WZ 加速藥水（會存檔）</button>
           <button id="qa-evasion-potions" type="button" disabled>領取 3 瓶原 WZ 迴避藥水（會存檔）</button>
           <button id="qa-combat-potions" type="button" disabled>領取攻擊／命中藥水各 3 瓶（會存檔）</button>
@@ -512,6 +514,7 @@
           <div class="qa-buttons"><button id="qa-checkpoint" type="button" disabled>建立能力／技能還原點</button><button id="qa-restore" type="button" disabled>還原能力／技能</button></div>
         </fieldset>
         <fieldset><legend>3 · 操作提示</legend>
+          <p id="qa-combat" aria-live="off">戰鬥資料讀取中…</p>
           <p id="qa-movement" aria-live="off">移動狀態讀取中…</p>
           <ol><li>先去無怪城鎮，再套用戰士／法師配置；初心者原本沒有技能書。</li><li>用技能窗的 SP 按鈕學習；前置與最高等級仍由伺服器依原 WZ 檢查。</li><li>戰士 HP 회복력 향상：提高站立回血；學到前置後，인듀어 可在繩梯靜止回血。</li><li>法師 MP 회복력 향상：提高回魔。站立回血約10秒，回魔不要求站立；不是吃藥。</li><li>用「降至半血／半魔」觀察；S 配 AP、K 技能、I 背包、E 裝備、M 小地圖、↑ 進門、Ctrl 基本攻擊。</li><li>S→Detail 可看有效裝備能力、命中／迴避、速度；弓手 아마존의 축복、盜賊 님블 바디 已接能力合計。攻擊／命中藥水已接普通物理攻擊。怪物碰撞已接迴避／受傷、紫色數字與 MISS、擊退及 1.5 秒保護；迴避藥水 EVA+5／180秒。原傷害依此版 PA 欄位，不套後期 PADamage。死亡後約2.2秒出現原復活視窗，Enter／OK 返回原 returnMap。主動施放、快捷鍵拖放、其他未列被動與技能 buff 仍未完成。</li><li>還原只涵蓋能力／已學技能；角色升級後拒絕套回舊點。還原點不跨服務重啟。</li></ol>
           <button id="qa-skills" type="button">關閉工具並開啟技能窗</button>

@@ -13,6 +13,27 @@ export interface PhysicalMobStats {
   eva?: number;
   physicalAttribute?: number;
 }
+/** Read-only browser/operator breakdown, NOT a native opcode or a new damage rule. */
+export interface PhysicalAttackTrace {
+  weaponId: number;
+  action: number;
+  basePad: number;
+  temporaryPad: number;
+  ammoPad: number;
+  pad: number;
+  hitRoll: number;
+  mobEva: number;
+  levelDifference: number;
+  mastery: number;
+  raw: number;
+  afterLevel: number;
+  afterAttribute: number;
+  defense: number;
+  criticalMultiplier: number;
+  beforeClamp: number;
+  damage: number;
+  reason: "miss" | "zero-pad" | "no-effective-weapon" | "minimum" | "hit";
+}
 const clamp = (n: number, lo = 0, hi = 999) => Math.max(lo, Math.min(hi, n));
 /** 4C9270 sorts the endpoints; equality still consumes the pre-drawn random slot. */
 export function nativeUniform(word: number, a: number, b: number): number {
@@ -55,6 +76,7 @@ export function rollNativePhysical(
   ammoId: number,
   skills: SkillCatalog | undefined,
   next: () => number,
+  report?: (trace: PhysicalAttackTrace) => void,
 ): number {
   const random = Array.from({ length: 7 }, () => next());
   let cursor = 0;
@@ -69,11 +91,18 @@ export function rollNativePhysical(
     branch === 3
       ? uniform(accuracy * 0.4, accuracy * 0.8)
       : uniform(accuracy * 0.5, accuracy * 1.5);
-  if (hit < clamp(mob.eva ?? 0)) return 0;
-  const pad = clamp(totals.pad! + ammoPad),
-    factor =
-      (mastery(character, skills, weapon, ammoId !== 0) * 5 + 10) *
-      0.009000000000000001;
+  const pad = clamp(totals.pad! + ammoPad), mobEva = clamp(mob.eva ?? 0);
+  const trace: PhysicalAttackTrace = {
+    weaponId: basis.weaponId, action, basePad: basis.secondary.pad!,
+    temporaryPad: totals.pad! - basis.secondary.pad!, ammoPad, pad,
+    hitRoll: hit, mobEva, levelDifference: diff, mastery: 0,
+    raw: 0, afterLevel: 0, afterAttribute: 0, defense: 0,
+    criticalMultiplier: 1, beforeClamp: 0, damage: 0, reason: "miss",
+  };
+  if (hit < mobEva) { report?.(trace); return 0; }
+  const masteryLevel = mastery(character, skills, weapon, ammoId !== 0);
+  trace.mastery = masteryLevel;
+  const factor = (masteryLevel * 5 + 10) * 0.009000000000000001;
   const swing = action >= 5 && action <= 15;
   let raw = 0;
   if (
@@ -118,12 +147,17 @@ export function rollNativePhysical(
         break;
     }
   }
+  trace.raw = raw;
   raw *= (100 - diff) * 0.01;
+  trace.afterLevel = raw;
   if (mob.physicalAttribute === 1) raw *= 0.5;
   else if (mob.physicalAttribute === 2)
     raw = Math.min(9999, Math.max(raw, raw * 1.5));
+  trace.afterAttribute = raw;
   const pd = clamp(mob.pd ?? 0);
-  let damage = raw - uniform(pd * 0.5, pd * 0.6);
+  const defense = uniform(pd * 0.5, pd * 0.6);
+  trace.defense = defense;
+  let damage = raw - defense;
   const critId =
     ammoId !== 0
       ? [45, 46].includes(weapon)
@@ -141,8 +175,17 @@ export function rollNativePhysical(
     : 0;
   // This early client's surprising > threshold and level*5% multiplier are intentional:
   // PE 4C88B5..4C88CE agrees with the decompilation; do not substitute a later-version crit rule.
-  if (level > 0 && uniform(0, 100) > 3 * level) damage *= 5 * level * 0.01;
-  return Math.trunc(clamp(damage, 1, 9999));
+  if (level > 0 && uniform(0, 100) > 3 * level) {
+    trace.criticalMultiplier = 5 * level * 0.01;
+    damage *= trace.criticalMultiplier;
+  }
+  trace.beforeClamp = damage;
+  const result = Math.trunc(clamp(damage, 1, 9999));
+  trace.damage = result;
+  trace.reason = !basis.weaponId ? "no-effective-weapon" : pad === 0 ? "zero-pad"
+    : damage < 2 ? "minimum" : "hit";
+  report?.(trace);
+  return result; // Observers cannot change the computed attack through the trace object.
 }
 
 /** Touch damage, 4C8ED0. Independent second RNG stream; MISS consumes only the EVA draw.

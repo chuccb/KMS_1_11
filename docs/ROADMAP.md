@@ -1,6 +1,10 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：接原Tomb／ghost／remote死亡、
+> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：定位Detail29／傷害1為起始裝備PAD0生成漏接。
+> 補原15項裝備值／tuc、新建角／新掉落／商店工廠、Character裝備價格／count與tooltip區分；提供受限confirmed修復及同次傷害trace。
+> 不自動重寫舊裝備、不硬調公式；沿用既有save／角色，冷備份後重啟。見 `NATIVE_EQUIPMENT_DAMAGE_FIX.md`／ADR-054。
+
+> 前輪交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：接原Tomb／ghost／remote死亡、
 > canvas alpha繼承與one-shot、portal120ms、field clock與同圖重進guard；補HTTP bodyAttack重大漏接，
 > attr2原move relay、0ms record及facing；新增confirmed 1HP工具。仍非完整CVecCtrl／CShape2D／30ms同步。
 > 新LIVE為新的獨立進度。原檔證據／操作／未執行回歸見 `NATIVE_DEATH_ANIMATION.md`／ADR-053。

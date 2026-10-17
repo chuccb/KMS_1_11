@@ -31,6 +31,7 @@ export interface TestCheckpoint {
 export interface TestToolResult {
   enabled: boolean;
   message: string;
+  equipmentRepairCount?: number;
   checkpoint: boolean;
   canMap: boolean;
   restoreAvailable: boolean;

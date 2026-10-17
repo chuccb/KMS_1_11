@@ -4,7 +4,16 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：Tomb／ghost、canvas alpha 與外力 relay（2026-10-18，未測試）
+## 最新實作：全零起始裝備／傷害資料鏈修補（2026-10-18，未測試）
+
+原案例STR29但起始劍PAD0，Detail只剩29，原傷害公式乘0後clamp為1；不是把最低傷害強行調高。
+補478270→47A740的tuc及15項inc*，新建角／新掉落／商店用同一WZ裝備工廠，既有實例仍保留。
+修Character裝備價格與單件count；商店tooltip可看模板，背包／穿戴物即使0值也不以模板替換。
+工具新增需確認的「修復舊全零起始裝備」，只限MakeCharInfo清單與全零／無升級特徵；不自動migration。
+另顯示有效PAD及同次傷害trace，分辨MISS／PAD0／防禦等原因，不改原Detail與傷害算式。
+沿用原save／角色；未執行測試或瀏覽器驗證。見 [NATIVE_EQUIPMENT_DAMAGE_FIX.md](NATIVE_EQUIPMENT_DAMAGE_FIX.md)／ADR-054。
+
+## 前輪實作：Tomb／ghost、canvas alpha 與外力 relay（2026-10-18，未測試）
 
 補原fall前800ms→land全1050ms→持末格；avatar繞行2000ms、淡出2500ms，新死亡立即spatial音效，
 既死進場不重播。遠端action18優先於swing、leave／field／close清狀態；Tomb進原z-space scene。
@@ -185,10 +194,10 @@ etc 順序）。圖上第一格分頁是「亮起」的版本，頁面把同一�
 **雙擊一般裝備**穿戴，或拖到E裝備窗的對應部位；已穿戴物拖回空格卸下。
 **拖曳格內道具**可換位／互換，**拖曳視窗背景**可移動（位置存在 `localStorage`，對應原版存在 registry 的版面表）。喝不喝得到藥是
 **伺服器**決定的，畫面只跟著回來的 `0x0B`（少一瓶）與 `0x0D`（HP 動了）走。數量與可升級次數
-（`ruc` 是 0 的新裝備不印那個 0——starter 裝每一件都是 0）畫在格子右下角。名字、描述與圖示不在
+（`ruc` 是 0 時不印那個 0；先前starter全為0是生成漏接，本輪已補WZ值）畫在格子右下角。名字、描述與圖示不在
 線路上：`0x0B`帶id／數量與裝備instance能力，但不帶名稱／描述，所以頁面向 `GET /api/item/<id>` 與
 `GET /api/item/<id>/icon.png` 問，伺服器讀的是同一份 `Data.wz`（ADR-037）。查不到就只印 id——
-不猜名字。
+不猜名字。裝備模板另含equipment.stats／ruc，僅供新物品與無實例的商店tooltip；背包與穿戴仍以原實例為準。
 
 ## 原版登入主畫面
 

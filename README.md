@@ -5,7 +5,13 @@
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：補原 Tomb 落下／落地／持末格、死亡 avatar 2000ms 繞行與 2500ms 淡出、
+- **本輪（2026-10-18，未測試）**：修正「Detail29、打怪全是1」的根因：起始劍實例PAD被建為0，原WZ應為17／可升級7次。
+  新建角、無既有實例的掉落與商店裝備共用15項能力／tuc工廠；既有卷過／骰過實例不被模板覆蓋。
+  補Character裝備價格、單件購買、tooltip模板／實例區分；新增明確確認的**舊全零起始裝備修復**及唯讀傷害分解。
+  原Detail仍不是傷害上下限，未硬調最低傷害。沿用已有獨立save／角色，停服冷備份後重開，不自動修復／重seed。
+  [原始證據、原因、操作與界線](docs/NATIVE_EQUIPMENT_DAMAGE_FIX.md)。未跑test/check/typecheck/browser/VM/probe。
+
+- **前輪（2026-10-18，未測試）**：補原 Tomb 落下／落地／持末格、死亡 avatar 2000ms 繞行與 2500ms 淡出、
   遠端／已死進場生命週期、立即 spatial Tombstone 音效；補原 canvas `a0/a1` 插值及繼承、portal 缺省120ms、field動畫clock。
   修正 **`bodyAttack` 未進HTTP而使網頁排除全部接觸怪物** 的前輪漏接；補 attr2 外力原 move relay、0ms record與反向位移 facing。
   新增需確認的 **「HP設為1」** 入口；未自動建角或改進度。地圖請求亦加同圖重進 generation guard。

@@ -22,6 +22,8 @@
  * this table and the archive would show up on screen - `shopLines` therefore refuses to build a row
  * whose price it cannot read, instead of sending 0.
  */
+import { itemCatalogOf } from "./iteminfo.ts";
+import { isEquipItemId } from "../protocol/itemslot.ts";
 import { entriesOf, infoOf, propertyOf } from "../wz/props.ts";
 import { itemImagePath } from "../wz/paths.ts";
 import type { WzArchive } from "../wz/archive.ts";
@@ -77,9 +79,8 @@ export interface ShopDef {
  * `1010100` 리나 (헤네시스, map 100000000), `2003` 로빈 (달팽이사냥터, map 40000) and `12100` 마이
  * (암허스트, map 1010000) are NPCs `life` puts in those maps; *that* they keep a shop is this
  * table's decision, and they sell the potions and the two town scrolls the archive prices.
- * Equipment is deliberately absent: in this build equipment images live under
- * `Character/<type>/<id>.img`, not `Item/`, and nothing located says how a shop row for one is
- * priced.
+ * Existing stock remains unchanged. Equipment metadata lives under Character/, now read through
+ * the shared catalog rather than the old Item/-only price path. Stock is still server policy.
  *
  * 암허스트's shop is the one a **new player** can reach: `--map` starts a character in 1000000
  * (암허스트서쪽필드, which has no shop NPC of its own) and the first town the data leads to is
@@ -202,8 +203,8 @@ export function unpricedShopItems(
  * follows.
  */
 export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
-  const priceOf = (itemId: number): number | undefined =>
-    itemPrice(archive, itemId);
+  const catalog = itemCatalogOf(archive);
+  const priceOf = (itemId: number): number | undefined => catalog?.info(itemId)?.price;
   const sellPriceOf = (itemId: number): number | undefined => {
     const price = priceOf(itemId);
     if (price === undefined) return undefined;
@@ -267,7 +268,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
         itemId: entry.itemId,
         price,
         maxCount:
-          recharge?.maxCount ?? entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT,
+          isEquipItemId(entry.itemId) ? 1 : recharge?.maxCount ?? entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT,
       });
     }
     // 4B3780: every 207 row enters the recharge list; only nonzero-price rows enter the buy list.
@@ -300,12 +301,13 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
         : (entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT);
       if (!Number.isInteger(count) || count <= 0)
         return { kind: "failed", reason: "badRequest" };
+      if (isEquipItemId(itemId) && count !== 1) return { kind: "failed", reason: "badRequest" };
       if (count > maxCount) return { kind: "failed", reason: "badRequest" };
       const total = price * count;
       if (wallet.balance < total)
         return { kind: "failed", reason: "notEnoughMesos" };
       const grantedCount = recharge?.maxCount ?? count;
-      const granted = grantItem(items, itemId, grantedCount);
+      const granted = grantItem(items, itemId, grantedCount, undefined, catalog);
       if (granted === undefined)
         return { kind: "failed", reason: "notEnoughSlots" };
       // The balance was checked above, so this cannot fail; if it ever did, the grant would have to
@@ -418,13 +420,7 @@ export function itemPrice(
   archive: WzArchive | undefined,
   itemId: number,
 ): number | undefined {
-  if (archive === undefined) return undefined;
-  const path = itemImagePath(itemId);
-  if (!archive.has(path)) return undefined;
-  const root = archive.objects(path)[0];
-  const node = propertyOf(root, String(itemId).padStart(8, "0"));
-  const info = infoOf(node);
-  return typeof info.price === "number" ? info.price : undefined;
+  return itemCatalogOf(archive)?.info(itemId)?.price;
 }
 
 /**

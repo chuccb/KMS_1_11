@@ -3,6 +3,7 @@ export function testTools({
   send,
   getSelf,
   getMovement = () => undefined,
+  getCombat = () => "",
   isInGame,
   onOpen,
   openSkills,
@@ -18,6 +19,7 @@ export function testTools({
     restoreAvailable = false,
     canMap = false,
     jobs = [],
+    repairCount = 0,
     maps = [],
     lastRequest,
     lastMovementAt = -Infinity;
@@ -25,6 +27,7 @@ export function testTools({
     el("test-tools-status").textContent = text;
   };
   function movementStatus() {
+    el("qa-combat").textContent = getCombat();
     const state = getMovement();
     el("qa-movement").textContent = state
       ? `唯讀快照（非原版工具）：速度 ${state.speedPercent}%／跳躍 ${state.jumpPercent}%／EVA ${state.eva ?? "—"}／PDD ${state.pdd ?? "—"}` +
@@ -57,6 +60,8 @@ export function testTools({
       "qa-evasion-potions",
     ])
       el(id).disabled = !ready;
+    el("qa-repair-starters").disabled = !ready || repairCount === 0;
+    el("qa-repair-starters").textContent = `修復舊全零起始裝備（${repairCount}件；原WZ值）`;
     el("qa-restore").disabled = !ready || !restoreAvailable;
     for (const id of ["qa-map-go", "qa-town", "qa-hunt"])
       el(id).disabled = !enabled || busy || !canMap;
@@ -179,6 +184,7 @@ export function testTools({
     "heal",
     "drain",
     "near-death",
+    "repair-starters",
     "checkpoint",
     "restore",
     "speed-potions",
@@ -212,6 +218,7 @@ export function testTools({
     receive(message) {
       if (message.t === "test-tools") {
         enabled = message.enabled;
+        repairCount = message.equipmentRepairCount ?? 0;
         busy = false;
         checkpoint = message.checkpoint;
         restoreAvailable = message.restoreAvailable;

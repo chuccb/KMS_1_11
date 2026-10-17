@@ -26,7 +26,8 @@ import { equipSlot } from "../src/protocol/itemslot.ts";
 import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import { mobLeaveEvent } from "../src/client/session.ts";
-import type { ItemCatalog } from "../src/game/iteminfo.ts";
+import { starterEquipmentIds } from "../src/game/equipment.ts";
+import { itemCatalogOf, type ItemCatalog } from "../src/game/iteminfo.ts";
 import { grantItem } from "../src/game/rewards.ts";
 import { audioProviderOf } from "../src/game/audio.ts";
 import { artProviderOf } from "../src/game/art.ts";
@@ -235,6 +236,8 @@ interface WorldOptions {
   ability?: boolean;
   skills?: boolean;
   testTools?: boolean;
+  /** New source-only regression: exercise real WZ equipment creation and opt-in repair. */
+  nativeEquipment?: boolean;
   /** Gives NPC 2003 a shop - the click path that opens `0x4A`. */
   shop?: boolean;
   /** Gives NPC 2003 two lines of `info/speak` instead - the click path that opens `0x47`. */
@@ -283,6 +286,10 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     stats.mesos = 100;
     const items = startingCharacterItems();
     if (options.combat === true && user === "admin") items.worn.set(1, equipSlot(1302000));
+    if (options.nativeEquipment && user === "admin") {
+      items.worn.clear();items.worn.set(11,equipSlot(1302000));
+      Object.assign(stats,{str:29,dex:8,int:4,luk:4,job:100,level:1});
+    }
     if (options.damaged === true && user === "admin") {
       stats.hp = 20;
       items.inventories[1]!.items.set(1, { kind: "nonequip", itemId: 2000000, quantity: 3, cash: null });
@@ -300,7 +307,10 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     pa: 0, pd: 0, acc: options.touch === "miss" ? 0 : 999, eva: 0,
     bodyAttack: !!options.touch, exp: 1, speedPercent: 0, dieMs: 40,
   });
+  const nativeCatalog = options.nativeEquipment && ART_ARCHIVE ? itemCatalogOf(ART_ARCHIVE) : undefined;
+  const nativeCreation = options.nativeEquipment && ART_ARCHIVE ? creationCatalogOf(artProviderOf(ART_ARCHIVE).reader) : undefined;
   const game = new GameEntryServer({
+    ...(nativeCatalog ? {itemCatalog:nativeCatalog,starterEquipmentIds:starterEquipmentIds(nativeCreation)} : {}),
     persist:()=>store.save(accounts),
     ...(options.testTools ? {allowTestTools:(username:string)=>username==="admin"} : {}),
     ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
@@ -327,6 +337,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
   });
   const gameInfo = await game.listen(0);
   const login = new LoginServer({
+    ...(nativeCatalog ? {itemCatalog:nativeCatalog} : {}),
     accounts,
     persist: () => store.save(accounts),
     ...(ART_ARCHIVE ? { creationCatalog: creationCatalogOf(artProviderOf(ART_ARCHIVE).reader)! } : {}),
@@ -345,7 +356,7 @@ async function startWorld(t: { after(fn: () => Promise<void>): void }, options: 
     gameHost: "127.0.0.1",
     mapProvider,
     mapCatalog:()=>[STUB_MAP,TOWN_MAP].map(({id,name,streetName})=>({id,name,streetName})),
-    itemCatalog: STUB_CATALOG,
+    itemCatalog: nativeCatalog ?? STUB_CATALOG,
     ...(options.combat || options.touch ? { mobTemplate: stubMobTemplate } : {}),
     ...(options.testTools ? {testTools:(username:string,id:number,request:unknown)=>game.testTools(username,id,request)} : {}),
     ...(options.skills && ART_ARCHIVE ? {skills:skillCatalogOf(ART_ARCHIVE)} : {}),
@@ -1336,4 +1347,37 @@ test("browser external-force marker reaches native 0x0E/0x22 and arbitrary bits/
   assert.equal((climbing.path as {elements:{foothold:number}[]}).elements[0]!.foothold,0xffff);
   admin.send({t:"move",x:100,y:20,attr:128});await admin.nextKind("error");
   admin.send({t:"move",x:100.5,y:20});await admin.nextKind("error");
+});
+
+/** Source-only: no test/probe/browser execution during the equipment-fix delivery. */
+test("legacy blank sword repair is opt-in/authenticated, emits native inventory and basis; damage trace exposes zero PAD", {skip:!ART_ARCHIVE,timeout:20000}, async t=>{
+  const world=await startWorld(t,{nativeEquipment:true,testTools:true,combat:true});
+  const character=world.accounts.get("admin")!.characters[0]!;
+  const {browser,field}=await enterGame(world.webPort,"admin","admin");t.after(()=>browser.close());
+  const mob=(field.mobs as {mobId:number}[])[0]!;
+  const initial=await browser.nextKind("stat-basis");
+  assert.equal((initial.basis as {secondary:{pad:number}}).secondary.pad,0);
+  browser.send({t:"move",x:480,y:300,foothold:32,action:4});
+  await browser.nextKind("user-move");
+  browser.send({t:"attack",mobId:mob.mobId,action:5});
+  const blank=await browser.nextKind("hit");
+  assert.equal(blank.damage,1);assert.equal((blank.trace as {reason:string}).reason,"zero-pad");
+  browser.send({t:"test-tools",action:{kind:"state"}});
+  assert.equal((await browser.nextKind("test-tools")).equipmentRepairCount,1);
+  browser.send({t:"test-tools",action:{kind:"repair-starters"}});
+  await browser.nextKind("error");
+  assert.equal((character.items!.worn.get(11) as {pad:number}).pad,0);
+  const before=structuredClone(character.stats);
+  browser.send({t:"test-tools",action:{kind:"repair-starters",confirmed:true}});
+  assert.equal((await browser.nextKind("test-tools")).equipmentRepairCount,0);
+  const basis=await browser.next(m=>m.t==="stat-basis" && (m.basis as {secondary:{pad:number}}).secondary.pad===17);
+  assert.equal((basis.basis as {weaponId:number}).weaponId,1302000);
+  assert.deepEqual(character.stats,before,"repair does not reset abilities, skills, map or progress");
+  assert.equal((world.store.load()!.get("admin")!.characters[0]!.items!.worn.get(11) as {pad:number}).pad,17);
+  browser.send({t:"attack",mobId:mob.mobId,action:5});
+  const restored=await browser.nextKind("hit");
+  assert.ok(Number(restored.damage)>1);
+  assert.equal((restored.trace as {pad:number}).pad,17);
+  const {browser:alt}=await enterGame(world.webPort,"alt","alt");t.after(()=>alt.close());
+  alt.send({t:"test-tools",action:{kind:"repair-starters",confirmed:true}});await alt.nextKind("error");
 });

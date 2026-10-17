@@ -2216,3 +2216,32 @@ dead仍要求原Notice復活；自然恢復可以先回HP，工具不改原恢�
 **交付**：本輪全新獨立generated/preview-death-20261018.json；新帳號由使用者建角，不冒稱恢復前輪save。
 未執行test/check/typecheck/browser/VM/probe；新增回歸來源不是PASS。啟服與[skip ci]非force推送固定工作分支。
 完整CVecCtrl／CShape2D、active skill／magic及其餘未實作系統不在本輪冒稱完成。
+
+
+---
+
+## ADR-054：裝備空白結構不是生成工廠；修復需確認，傷害顯示同次計算
+
+**日期**：2026-10-18 ｜ **狀態**：已實作、未執行驗證；補充ADR-051／052，不推翻既有實例優先原則。
+
+**問題**：使用者回報Detail29但傷害全1。現有save的1302000為全零能力／ruc0，原WZ incPAD17／tuc7。
+Detail是STR+PAD，29只剩STR；4C7960乘0後clamp為1。前輪漏接新實例初始化，不能拿手造能力fixture背書。
+
+**依據**：478270讀tuc與15項inc*；47A740在建立GW_ItemSlotEquip後逐一拷貝，C／listing／PE相符。
+45E6A0的全零配置只是decode結構。原01302000.img與MakeCharInfo提供值與起始清單。完整證據見NATIVE_EQUIPMENT_DAMAGE_FIX.md。
+
+**決策**：game/equipment統一正常非cash模板生成，將原值寫進新建角／新無實例掉落／商店物品；
+未知模板拒絕，不用0能力遮掩。既有實例（含真0值）優先，不因讀模板而改卷過／骰過資料。
+原伺服器隨機品質未知，採確定WZ基準值，不捏造隨機範圍。修正Character裝備價格及count1，原貨單不另增。
+
+**舊資料**：不在login／load／save時migration。既有授權工具列候選數；confirmed且活角色，
+只修MakeCharInfo白名單、15項全0、ruc/cuc0、cash=null的實例。clone並預編碼原0x0B負slot後才套用／保存。
+不改ID／角色能力／技能／EXP／金錢／地圖，不自動補滿或復活；checkpoint不回溯裝備。
+全零不是可證來源，因此必須明示選擇，不能偷偷把全部0值當壞檔。
+
+**傷害**：不強行加高最低傷害，不把Detail當range。增加同次唯讀trace，不多抽RNG、不重骰；
+原TCP仍0x0F／0x10，trace只在既有browser view與非原版工具。附field token避免舊hit回覆污染新圖。
+
+**交付**：本輪保留既有preview-death-20261018.json／角色，停服後ignored冷備份再重啟，不重seed。
+新增工廠／原案例／0x0B／opt-in／保存／商店與HTTP bridge回歸來源，但不執行test/check/typecheck/browser/VM/probe。
+[skip ci]、非force推送固定分支；原裝備隨機品質、卷軸、active/magic與完整physics仍不宣稱完成。

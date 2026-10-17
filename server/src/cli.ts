@@ -27,6 +27,7 @@ import { npcTemplateProvider, npcWalkPolicy } from "./game/npcs.ts";
 import { DEFAULT_PING_MS } from "./net/heartbeat.ts";
 import { OnlineAccounts } from "./net/online.ts";
 import { npcDialogueProvider } from "./game/dialogue.ts";
+import { starterEquipmentIds } from "./game/equipment.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { startWebClient } from "./net/webclient.ts";
 import {
@@ -544,11 +545,13 @@ async function runServe(rest: string[]): Promise<number> {
   // One table for both halves: an account that is logged in is refused at 0x01, and a session in a
   // field keeps its account taken even after the login connection is gone (net/online.ts).
   const online = new OnlineAccounts();
+  const creationCatalog = art ? creationCatalogOf(art.reader) : undefined;
   const login = new LoginServer({
     accounts,
     worlds,
     gameServer: { ip: gameIp, port: gamePort ?? 0 },
-    ...(art ? { creationCatalog: creationCatalogOf(art.reader)! } : {}),
+    ...(creationCatalog ? { creationCatalog } : {}),
+    ...(itemCatalog ? { itemCatalog } : {}),
     startMapId: mapId,
     startMesos,
     handoffs,
@@ -567,6 +570,7 @@ async function runServe(rest: string[]): Promise<number> {
       online,
       pingMs,
       mapId,
+      starterEquipmentIds: starterEquipmentIds(creationCatalog),
       allowTestTools: username=>testPolicy!=="off"&&(testPolicy==="all"||testUsers.has(username)),
       allowMapCommand: (username) =>
         mapCommandPolicy !== "off" &&

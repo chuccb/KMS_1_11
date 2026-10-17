@@ -29,6 +29,7 @@
  * encoder `wz png` uses. A missing canvas is `undefined`, never a placeholder: a caller that draws a
  * placeholder is making a choice this module cannot make for it.
  */
+import type { EquipStat } from "../protocol/itemslot.ts";
 import type { WzCanvas, WzObject } from "../wz/img.ts";
 import { canvasToRgba, WzNode } from "../wz/img.ts";
 import { encodePng } from "../wz/png.ts";
@@ -48,6 +49,26 @@ export interface ItemSource {
   objects(path: string): WzObject[];
 }
 
+/** 478270 -> 47A740: template WORDs copied into a newly constructed equipment instance. */
+export interface EquipmentTemplate {
+  ruc: number;
+  stats: Record<EquipStat, number>;
+}
+export const EQUIPMENT_WZ_FIELDS: Readonly<Record<EquipStat, string>> = {
+  str: "incSTR", dex: "incDEX", int: "incINT", luk: "incLUK",
+  maxHp: "incMHP", maxMp: "incMMP", pad: "incPAD", mad: "incMAD",
+  pdd: "incPDD", mdd: "incMDD", acc: "incACC", eva: "incEVA",
+  craft: "incCraft", speed: "incSpeed", jump: "incJump",
+};
+function equipmentTemplate(info: Record<string, unknown>): EquipmentTemplate {
+  const integer = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
+  return {
+    ruc: integer(info.tuc) & 0xff,
+    stats: Object.fromEntries(Object.entries(EQUIPMENT_WZ_FIELDS).map(([stat, field]) =>
+      [stat, (integer(info[field]) << 16) >> 16])) as Record<EquipStat, number>,
+  };
+}
+
 /** The human-visible facts about one item id. Every field but `id` is optional: a WZ entry may not have it. */
 export interface ItemInfo {
   id: number;
@@ -64,6 +85,8 @@ export interface ItemInfo {
   iconRaw?: ItemIcon;
   /** `info/incPAD`: template metadata (including ammunition); worn attack uses instance PAD. */
   incPAD?: number;
+  /** Template only: never a replacement for an existing rolled/scrolled instance. */
+  equipment?: EquipmentTemplate;
   /** Original weapon sound family (info/sfx), e.g. swordL. */
   sfx?: string;
   /** Original WZ equip requirements, consumed by the client before sending 0x17. */
@@ -266,6 +289,7 @@ export function itemCatalogOf(
         id: itemId,
         ...(Math.floor(itemId / 1000000) === 1
           ? {
+              equipment: equipmentTemplate(info),
               requirements: {
                 level: asNumber(info.reqLevel),
                 job: asNumber(info.reqJob),

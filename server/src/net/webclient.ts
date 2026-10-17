@@ -50,7 +50,7 @@ import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import { characterStatBasis, statTotals } from "../game/characterstats.ts";
 import { intersects, playerContactRect, mobContactRect, type ContactPoint } from "../../../client/contact.mjs";
-import { rollNativePhysical, rollNativeTouch } from "../game/nativecombat.ts";
+import { rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
 import type { MobTemplate } from "../game/mobs.ts";
 import { temporaryStats } from "../../../client/temporarystats.mjs";
 import type { AudioProvider } from "../game/audio.ts";
@@ -689,10 +689,12 @@ class BrowserSession {
     totals.pad=basis.secondary.pad!+(temporary.pad??0);
     const template=mob ? this.options.mobTemplate?.(mob.templateId) : undefined;
     if(mob && (!template || !session.attackRandom)) return; // No invented monster defence.
+    const attackField = this.contactField;
+    let trace: PhysicalAttackTrace | undefined;
     const damage=mob && template && session.attackRandom ? rollNativePhysical(
       character,basis,totals,template,action?.action??5,
       ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0,ammo?.itemId??0,
-      this.options.skills,()=>session.attackRandom!.next(),
+      this.options.skills,()=>session.attackRandom!.next(), value => { trace = value; },
     ) : 0;
     await session.attack(
       mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage }],
@@ -704,7 +706,7 @@ class BrowserSession {
         ...(ammo === undefined ? {} : { projectileSlot: ammo.slot }),
       },
     );
-    if (mob !== undefined) {
+    if (mob !== undefined && attackField === this.contactField) {
       const release =
         shoot && action
           ? action.delays.reduce((sum, delay) => sum + delay, 0) -
@@ -725,7 +727,7 @@ class BrowserSession {
               ) * 1.5,
             )
           : 0);
-      this.send({ t: "hit", mobId, damage, delayMs });
+      this.send({ t: "hit", mobId, damage, delayMs, contactField: attackField, trace });
     }
   }
 
@@ -880,7 +882,7 @@ class BrowserSession {
         const character=session.character;
         const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
         const ammo=firstBasicAmmo(character.items);
-        this.send({t:"stat-basis",basis,wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:Object.fromEntries(["str","dex","int","luk"].map(k=>[k,item[k as "str"|"dex"|"int"|"luk"]])),requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
+        this.send({t:"stat-basis",basis,wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:{str:item.str,dex:item.dex,int:item.int,luk:item.luk,pad:item.pad},ruc:item.ruc,cuc:item.cuc,requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
       }
     });
     this.session = session;

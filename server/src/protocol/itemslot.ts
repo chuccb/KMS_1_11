@@ -159,7 +159,8 @@ export const EQUIP_STATS = [
 
 export type EquipStat = (typeof EQUIP_STATS)[number];
 
-/** A fresh equip slot: everything zero, the way `sub_45E6A0` builds one. */
+/** An EMPTY equip structure, as 45E6A0 allocates before decoding. NOT a gameplay item factory.
+ * Live item creation must populate template values (478270 -> 47A740) in game/equipment.ts. */
 export function equipSlot(itemId: number, fields: Partial<Omit<ItemSlotEquip, "kind" | "itemId">> = {}): ItemSlotEquip {
   return {
     kind: "equip",

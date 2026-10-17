@@ -1,5 +1,6 @@
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { characterStatBasis } from "../game/characterstats.ts";
+import { equipmentFromTemplate, planBlankStarterRepair } from "../game/equipment.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
@@ -212,6 +213,7 @@ import {
   characterDataOf,
   emptyCharacterItems,
   CHAR_FLAG_INVENTORY_2,
+  CHAR_FLAG_ITEMS,
   lookOf,
   startingCharacterItems,
   withDefaultLook,
@@ -312,6 +314,8 @@ export interface LoginServerOptions {
    */
   startMesos?: number;
   creationCatalog?: CreationCatalog;
+  /** Fresh creation only; never used to overwrite saved equipment on login. */
+  itemCatalog?: ItemCatalog;
   /** Cipher seeds and handshake body. Defaults: random seeds, 199 zero bytes. */
   handshake?: {
     clientSendSeed?: number;
@@ -430,10 +434,15 @@ export class LoginServer {
     });
     // A character without slots could never be handed anything: the capacity byte is what makes the
     // client allocate an inventory at all (see `startingCharacterItems`), so bags are the default.
-    const block = withWorn(
-      items ?? startingCharacterItems(),
-      wornOfLook(appearance),
-    );
+    const worn = wornOfLook(appearance);
+    if (this.options.itemCatalog) {
+      for (const [slot, item] of worn) {
+        const fresh = equipmentFromTemplate(item.itemId, this.options.itemCatalog);
+        if (!fresh) throw new Error(`Starting equipment ${item.itemId} has no supported WZ template`);
+        worn.set(slot, fresh);
+      }
+    }
+    const block = withWorn(items ?? startingCharacterItems(), worn);
     const stats = zeroStats();
     stats.id = id;
     stats.name = name;
@@ -939,6 +948,8 @@ export interface GameEntryServerOptions {
   growthSkill?: GrowthSkillProvider;
   skills?: SkillCatalog;
   itemCatalog?:ItemCatalog;
+  /** MakeCharInfo whitelist for explicit legacy-blank starter repair; absent means no candidates. */
+  starterEquipmentIds?: ReadonlySet<number>;
   /**
    * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). `npcWalkPolicy` turns
    * `--npc-walk` into this; absent means no NPC walks, which is the honest default - the mechanism is
@@ -1221,7 +1232,29 @@ export class GameEntryServer {
     let message=enabled?"體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
     if(enabled && kind!=="state") {
       if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
-      if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
+      if(kind === "repair-starters") {
+        if ((request as {confirmed?: unknown}).confirmed !== true) throw new Error("請勾選確認後才修復舊起始裝備。");
+        if (session.character.stats.hp <= 0) throw new Error("請先以原復活窗復活。");
+        const plan = planBlankStarterRepair(session.character.items ?? emptyCharacterItems(),
+          this.options.itemCatalog, this.options.starterEquipmentIds ?? new Set());
+        // Pre-encode before touching the authoritative record. No IDs/rolled values/skills are reset.
+        const packet = encodeInventoryChange(plan.changes);
+        if (plan.changes.length) {
+          const future = {...session.character, items: plan.items, stats: {...session.character.stats}};
+          const diff = applyVitalReport(future.stats, {hpDelta:0, mpDelta:0},
+            characterStatBasis(future, this.options.itemCatalog).basic);
+          const statPacket = encodeStatUpdate({diff});
+          session.character.items = plan.items;
+          session.character.flags |= CHAR_FLAG_ITEMS;
+          Object.assign(session.character.stats, diff);
+          session.send(packet);
+          if (Object.keys(diff).length) session.send(statPacket);
+          this.persist();
+        }
+        message = plan.changes.length
+          ? `已明確修復 ${plan.changes.length} 件舊全零起始裝備為原WZ值（含攻擊／防禦／可升級次數）。未改物品ID、職業、AP/SP、EXP、金錢或地圖；還原點不回溯裝備。`
+          : "沒有符合條件的全零起始裝備；未更動角色。非全零／已升級／非MakeCharInfo道具不會重設。";
+      } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
         const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:[2002004,2002005];
         const items=structuredClone(session.character.items??emptyCharacterItems());
@@ -1264,7 +1297,10 @@ export class GameEntryServer {
       this.options.log?.(`test-tools: ${username} character ${characterId} ${kind} (explicit development action)`);
     }
     const checkpoint=enabled?this.testCheckpoints.get(key):undefined;
-    return {enabled,message,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
+    const repairable = enabled ? planBlankStarterRepair(session.character.items ?? emptyCharacterItems(),
+      this.options.itemCatalog, this.options.starterEquipmentIds ?? new Set()).changes.length : 0;
+    if (kind === "state" && repairable) message += ` 發現 ${repairable} 件疑似舊版生成的全零起始裝備；可勾選同意後使用修復按鈕，不會自動修復。`;
+    return {enabled,message,equipmentRepairCount:repairable,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
       canMap:enabled&&this.options.allowMapCommand?.(username)===true,
       jobs:enabled?[...NATIVE_JOB_NAMES].filter(([id])=>available(id)).map(([id,name])=>({id,name})):[]};
   }
@@ -2217,7 +2253,7 @@ export class GameEntryServer {
     if (drop === undefined) return;
     const items = session.character.items ?? emptyCharacterItems();
     const before = { ...session.character.stats };
-    const outcome = pickUpDrop(drop, items, session.wallet);
+    const outcome = pickUpDrop(drop, items, session.wallet, this.options.itemCatalog);
     if (outcome.kind === "no-room") {
       this.options.log?.(
         `game: drop ${drop.dropId} (item ${drop.itemId}) is under ${session.characterId} but the ` +
