@@ -520,6 +520,12 @@ async function loadMapArt(mapId) {
     for (const sprite of art.sprites) for (const frame of sprite.frames) wanted.add(frame.path);
     for (const path of wanted) artImage(path);
     logLine(`art ${mapId}: ${art.backs.length} back(s), ${art.sprites.length} sprite(s)`);
+    if ((art.missingTiles ?? 0) > 0) {
+      logLine(
+        `art ${mapId}: ${art.missingTiles} tile(s) are not in Data.wz ` +
+          `(${(art.missingTileSets ?? []).join(", ")}) - drawing the footholds instead`,
+      );
+    }
   } catch (error) {
     logLine(`art ${mapId}: ${String(error)}`);
   }
@@ -894,6 +900,55 @@ function drawBack(back, cameraX, cameraY) {
   ctx.globalAlpha = 1;
 }
 
+/**
+ * The fallback ground, drawn only when the archive cannot draw the map's own tiles.
+ *
+ * `Data.wz` in this repository is a subset: it carries nine of the tile sets, and the maps that are
+ * built from `grassySoil`, `dryRock` or `darkWood` have no tile canvases at all. Drawing sky under
+ * the player would read as "the client is broken", so those maps get their footholds drawn instead -
+ * a thin line exactly where the 2003 client's collision is. Maps whose tiles are in the archive
+ * never see this function.
+ */
+function drawFootholds(cameraX, cameraY) {
+  if (!map) return;
+  // Each foothold segment becomes a slab: the line the 2003 client lets a character stand on, with
+  // the earth that would be under it and a grass lip on top. A platform stays a platform (the slab
+  // is 18 px deep, not a wall), and a floor reads as a floor.
+  const DEPTH = 18;
+  for (const segment of map.footholds) {
+    const x1 = segment.x1 - cameraX;
+    const y1 = segment.y1 - cameraY;
+    const x2 = segment.x2 - cameraX;
+    const y2 = segment.y2 - cameraY;
+    if (Math.max(x1, x2) < -40 || Math.min(x1, x2) > VIEW_W + 40) continue;
+    if (Math.min(y1, y2) > VIEW_H + 40 || Math.max(y1, y2) < -60) continue;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.lineTo(x2, y2 + DEPTH);
+    ctx.lineTo(x1, y1 + DEPTH);
+    ctx.closePath();
+    ctx.fillStyle = "#6b5232";
+    ctx.fill();
+    ctx.strokeStyle = "#3b2d1c";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // The grass: a soft band along the surface, the lighter one a touch above the darker.
+    ctx.strokeStyle = "#3f7a33";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1 - 1);
+    ctx.lineTo(x2, y2 - 1);
+    ctx.stroke();
+    ctx.strokeStyle = "#66a94c";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1 - 2);
+    ctx.lineTo(x2, y2 - 2);
+    ctx.stroke();
+  }
+}
+
 /** One tile/object, its animation frame picked from the map's clock. */
 function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
   const frame = loopFrame(sprite.frames, now);
@@ -966,6 +1021,7 @@ function frame() {
 
   const backs = mapArt?.backs ?? [];
   for (const back of backs) if (!back.front) drawBack(back, cameraX, cameraY);
+  if ((mapArt?.missingTiles ?? 0) > 0) drawFootholds(cameraX, cameraY);
 
   const sprites = mapArt?.sprites ?? [];
   const behind = sprites.filter((sprite) => (sprite.layer ?? 0) < CHARACTER_LAYER);

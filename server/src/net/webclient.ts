@@ -199,6 +199,8 @@ function mapJson(map: MapData): unknown {
 function artJson(art: MapArt): unknown {
   return {
     portalFrames: art.portalFrames,
+    missingTiles: art.missingTiles,
+    missingTileSets: art.missingTileSets,
     backs: art.backs.map((back) => ({
       path: back.path,
       ox: back.ox,

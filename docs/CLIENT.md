@@ -84,10 +84,17 @@ client 的 `sub_462DC0` 同一個分流；喝不喝得到藥是**伺服器**決�
 
 | 端點 | 回什麼 |
 |---|---|
-| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,ox,oy}]}`，已照 `30000*layer - 10*zM + z` 排好；`bounds` 是相機可以顯示的矩形 |
 | `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
 | `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |
 | `GET /api/npc/<id>`、`GET /api/mob/<id>` | `{templateId, actions}`，`actions` 是 `move`／`stand`／`hit` 各自的 `frames[]`；WZ 沒有的模板是 404 |
+
+`missingTiles` 是「這張圖放了、但這份 `Data.wz` 裡沒有的圖塊」數量：這個 repo 的 `Data.wz` 是
+**子集**，`Map/Tile` 只有 9 組（`brownBrick`／`coalMine`／`deepCave`／`dirtMine`／`holeBrick`／
+`logMarble`／`wetWood`／`whiteMarble`／`woodMarble`），所以用 `grassySoil`／`dryRock`／`darkWood`
+鋪地的圖（例如 암허스트서쪽필드 `1000000`）沒有地面 canvas 可畫。頁面在這種圖上改畫**腳踏點**的土
+ platform（沒有「乾脆不畫」的選項——畫天空比畫土更誤導），並在日誌印一行缺哪幾組；`backs` 與
+`obj` 照常畫。
 
 這些端點都只**讀** `Data.wz`；`--data` 沒給就沒有圖，頁面記一行 `no art` 並只畫幾何（`/api/map/<id>`
 仍然可用）。
@@ -169,6 +176,9 @@ error        { message }
 - **小地圖／天氣／霧**：`Map/MapHelper.img` 的 `mark`、`weather` 讀得到，但頁面還沒有小地圖與天氣層。
 - **角色動作**：只有 `stand1`／`walk1`（移動與否決定），沒有攻擊、跳躍、繩索與坐下——那些動作的
   canvas 都在，等有對應的封包再畫。
+- **這份 `Data.wz` 沒有的圖塊組**：`Map/Tile` 只有 9 組，`grassySoil`／`dryRock`／`darkWood` 不在裡面；
+  用到它們的地圖沒有地面，頁面改畫腳踏點的土 platform（見上面 `missingTiles`）。這是資料的缺口，
+  不是繪圖的近似。
 - **實體碰撞**：走過去不會撞牆、不會掉下去，位置由瀏覽器自己算。傳送門是**用點的**（見下），
   不是走上去觸發——那正好是 2003 client 自己的 `0x0D` 觸發方式（ADR-035）。
 

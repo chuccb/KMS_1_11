@@ -251,6 +251,18 @@ test("the map's art has the background stack and the layers of a real map", need
     );
   }
   assert.ok(art.bounds.right > art.bounds.left && art.bounds.bottom > art.bounds.top);
+  assert.equal(art.missingTiles, 0, "every tile Henesys places is in this Data.wz (woodMarble)");
+});
+
+test("a map whose tile set the archive does not carry reports the tiles it cannot draw", needsArchive, () => {
+  // 이 Data.wz is a subset: it ships nine `Map/Tile` images, and 암허스트서쪽필드 is built from
+  // `grassySoil`, which is not one of them. The page must be told, or it would draw sky under the
+  // player; the objects and backs of the same map are still drawable and still reported.
+  const art = mapArtFrom(archive!.objects("Map/Map/001000000.img")[0], artReaderOf(archive!)!);
+  assert.ok(art.missingTiles > 0);
+  assert.deepEqual(art.missingTileSets, ["grassySoil"]);
+  assert.ok(art.sprites.length > 0, "the objects of that map are still drawn");
+  assert.ok(art.backs.length > 0);
 });
 
 // ---------------------------------------------------------------- avatar

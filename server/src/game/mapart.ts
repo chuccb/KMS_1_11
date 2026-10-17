@@ -87,6 +87,15 @@ export interface MapArt {
   sprites: MapSprite[];
   bounds: MapBounds;
   /**
+   * Tiles the map places whose canvas this archive does not have. The shipped `Data.wz` is a
+   * subset - it carries nine of the tile sets (`grassySoil`, `dryRock` and `darkWood` are among the
+   * missing ones) - so a map that is drawn with them has holes where its ground should be. The page
+   * uses the count to fall back to the footholds instead of showing sky under the player.
+   */
+  missingTiles: number;
+  /** The tile sets the map asks for that the archive does not have, for the log line. */
+  missingTileSets: string[];
+  /**
    * The blue swirl the client draws on a warp portal (`Map/MapHelper.img/portal/game/pv`), shared by
    * every map. Its frames have no `delay` of their own; the 2003 client steps them at 100 ms.
    */
@@ -159,7 +168,14 @@ function framesOf(reader: ArtReader, path: string): MapFrame[] {
  * object names all three folders itself (`oS`/`l0`/`l1`/`l2`).
  */
 export function mapSprites(root: unknown, reader: ArtReader): MapSprite[] {
+  return mapSpriteScan(root, reader).sprites;
+}
+
+/** `mapSprites` plus what it could not draw, for `mapArtFrom`. */
+function mapSpriteScan(root: unknown, reader: ArtReader): { sprites: MapSprite[]; missingTiles: number; missingTileSets: string[] } {
   const out: MapSprite[] = [];
+  let missingTiles = 0;
+  const missingTileSets = new Set<string>();
   for (let layer = 0; layer < 8; layer++) {
     const node = entriesOf(root).find((entry) => entry.name === String(layer))?.value;
     if (node === undefined || (node as WzNode).kind !== "props") continue;
@@ -174,7 +190,11 @@ export function mapSprites(root: unknown, reader: ArtReader): MapSprite[] {
       if (u === "") continue;
       const path = `Map/Tile/${tileSet}.img/${u}/${asNumber(fields.no)}`;
       const frames = framesOf(reader, path);
-      if (frames.length === 0) continue;
+      if (frames.length === 0) {
+        missingTiles++;
+        if (reader.node(`Map/Tile/${tileSet}.img`) === undefined) missingTileSets.add(tileSet);
+        continue;
+      }
       const canvasZ = reader.at(frames[0].path)?.z;
       out.push({
         kind: "tile",
@@ -206,7 +226,7 @@ export function mapSprites(root: unknown, reader: ArtReader): MapSprite[] {
     }
   }
   out.sort((left, right) => left.z - right.z || left.y - right.y);
-  return out;
+  return { sprites: out, missingTiles, missingTileSets: [...missingTileSets].sort() };
 }
 
 /** Where the camera may go: the map's `VR*` when it has them, otherwise the art's own extent. */
@@ -262,11 +282,14 @@ export function mapBounds(root: unknown, reader: ArtReader): MapBounds {
 
 /** Everything the page needs to draw one map's static art. */
 export function mapArtFrom(root: unknown, reader: ArtReader): MapArt {
+  const scan = mapSpriteScan(root, reader);
   return {
     backs: mapBacks(root, reader),
-    sprites: mapSprites(root, reader),
+    sprites: scan.sprites,
     bounds: mapBounds(root, reader),
     portalFrames: portalFrames(reader),
+    missingTiles: scan.missingTiles,
+    missingTileSets: scan.missingTileSets,
   };
 }
 
