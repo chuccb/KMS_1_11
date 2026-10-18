@@ -1,15 +1,27 @@
 /** Basic attacks only. Native selectors: 427F60 / 427FE0; ammo scan: 511630.
  * Skill costs, Soul Arrow and multi-shot must not be inferred from this one-round path.
  */
-import type { CharacterItems } from "../protocol/chardata.ts";
+import type { ClientAttack } from "../protocol/field.ts";
+import type { CharacterData, CharacterItems } from "../protocol/chardata.ts";
 import {
   INVENTORY_OP,
   INVENTORY_TAB,
   type InventoryChange,
 } from "../protocol/inventory.ts";
+import { basicAttackAction, scaledAttackDelays } from "../../../client/attack-timing.mjs";
+import type { SkillCatalog } from "./skills.ts";
+import { skillValues } from "./characterstats.ts";
+import { nativeBodyFrameDelay } from "./avatarmotion.ts";
 import type { ArtReader } from "./wzart.ts";
 import { frameNames, nodeRecord, vectorOf } from "./wzart.ts";
 import { spriteFrames, type SpriteFrame } from "./sprites.ts";
+export { basicAttackAction };
+
+/** Reconstruction transport/resource policy, NOT constants recovered from the original server. */
+export const BASIC_ATTACK_TRANSPORT_GRACE_MS = 30;
+export const BASIC_SHOT_POSITION_SLOP_X = 65;
+export const BASIC_SHOT_POSITION_SLOP_Y = 100;
+const PROFILE_CACHE_LIMIT = 64;
 
 /** Attack action ids, NOT the movement action byte. 43FC80 aliases 24..26 to swingO1..3. */
 export const BASIC_ATTACK_STANCES: Readonly<Record<number, string>> = {
@@ -30,6 +42,7 @@ export const BASIC_ATTACK_STANCES: Readonly<Record<number, string>> = {
   24: "swingO1",
   25: "swingO2",
   26: "swingO3",
+  32: "proneStab",
 };
 // PE VA 005B2144: seven groups, two rows/group, six u32/row; normal rows only.
 const MELEE_ACTIONS: Readonly<Record<number, readonly number[]>> = {
@@ -54,6 +67,8 @@ export interface BasicAttackAction {
   delays: number[];
   /** Unscaled delays, so a relayed buffed speed does not round an already rounded value. */
   baseDelays: number[];
+  /** Numeric WZ frame keys, not a guessed 0..N loop. */
+  frameIndices?: number[];
   /** Native left-facing Afterimage/0 hit rectangle, when the archive supplies it. */
   bounds?: { left: number; top: number; right: number; bottom: number };
   /** Afterimage/0/<stance>/<body frame>/<effect frame>; never the inventory icon. */
@@ -63,8 +78,41 @@ export interface BasicAttackProfile {
   weaponId: number;
   group: number;
   speed: number;
+  /** WZ info/sfx, loaded with the profile so a cold item tooltip cannot mute the first swing. */
+  sfx?: string;
   melee: BasicAttackAction[];
   shoot: BasicAttackAction[];
+  /** 512F90 action32: never a member of the standing random melee table. */
+  prone?: BasicAttackAction;
+}
+/** Native local input/512F90 contract, enforced here as an archive-backed SERVER policy.
+ * action32 is an attack id, movement10/11 is prone; neither is a skill opcode.
+ */
+export function basicAttackPostureAllows(action: number, shoot: boolean, movement: number): boolean {
+  const state = movement & ~1;
+  if (state === 14 || state === 16 || state === 18) return false;
+  return state === 10 ? !shoot && action === 32 : action !== 32;
+}
+/** Supported LIVE attack contract. Original server validation is unavailable; reject unsupported
+ * skills/magic elsewhere, and do not let unknown actions skip timing/ammo checks here.
+ */
+export function validatedBasicAttack(
+  profile: BasicAttackProfile | undefined, attack: ClientAttack, shoot: boolean, movement: number,
+): BasicAttackAction | undefined {
+  if (!profile || attack.skillId !== 0 || attack.hits !== 1 || attack.targets.length > 1 ||
+      attack.targetCount !== attack.targets.length || attack.speed !== profile.speed ||
+      attack.targets.some(target => target.damages.length !== 1 || target.damages.some(
+        damage => !Number.isInteger(damage) || damage < 0 || damage > 9999)) || // 4C7960 output domain.
+      !basicAttackPostureAllows(attack.action, shoot, movement)) return undefined;
+  return basicAttackAction(profile, attack.action, shoot);
+}
+/** 513C80: far endpoint is character X +/- (200 + learned WZ range), NOT near+200.
+ * 4BC590/listing4BD3C1 stores range at level+76 == 120*level-44. No current-job filter.
+ */
+export function basicShotRange(character: CharacterData, skills?: SkillCatalog): number {
+  const family = Math.trunc((character.items?.worn.get(11)?.itemId ?? 0) / 10000);
+  const skill = family === 145 || family === 146 ? 3000002 : family === 147 ? 4000001 : 0;
+  return 200 + (skill ? Math.trunc(skillValues(character, skills, skill).range ?? 0) : 0);
 }
 export type BasicAttackProvider = (
   weaponId: number,
@@ -98,13 +146,9 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
         const body = `Character/00002000.img/${stance}`;
         const frames = frameNames(reader.node(body));
         const delays = frames.map(
-          (frame) => nodeRecord(reader.node(`${body}/${frame}`)).delay,
+          (frame) => nativeBodyFrameDelay(nodeRecord(reader.node(`${body}/${frame}`)).delay),
         );
-        if (
-          frames.length === 0 ||
-          delays.some((delay) => typeof delay !== "number" || delay <= 0)
-        )
-          return [];
+        if (frames.length === 0) return [];
         const effect =
           typeof info.afterImage === "string"
             ? `Character/Afterimage/${info.afterImage}.img/0/${stance}`
@@ -123,10 +167,9 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
           {
             action,
             stance,
-            baseDelays: delays as number[],
-            delays: (delays as number[]).map((delay) =>
-              Math.trunc((delay * (speed + 5)) / 8),
-            ),
+            frameIndices: frames.map(Number),
+            baseDelays: delays,
+            delays: scaledAttackDelays(delays, speed),
             ...(lt && rb
               ? {
                   bounds: {
@@ -148,9 +191,13 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
             weaponId,
             group,
             speed,
+            ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),
             melee: actionsOf(MELEE_ACTIONS[group]!),
             shoot: actionsOf(SHOOT_ACTIONS[group] ?? []),
+            prone: actionsOf([32])[0],
           };
+    // Resource bound, not an original gameplay limit; all parsing is synchronous here.
+    if (cache.size >= PROFILE_CACHE_LIMIT) cache.delete(cache.keys().next().value!);
     cache.set(weaponId, profile);
     return profile;
   };

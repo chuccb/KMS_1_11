@@ -676,6 +676,7 @@ export class ClientSession {
   private self: SelfView | undefined;
   private mapId = 0;
   private lastPosition = { x: 0, y: 0 };
+  private lastMovement = { action: 6, foothold: 0 };
   private readonly users = new Map<number, UserView>();
   private readonly mobs = new Map<number, MobView>();
   private readonly npcs = new Map<number, NpcView>();
@@ -914,6 +915,9 @@ export class ClientSession {
   get selfPosition(): { x: number; y: number } {
     return { ...this.lastPosition };
   }
+
+  /** Latest locally published posture, kept separate from XY for existing consumers. */
+  get selfMovement(): { action: number; foothold: number } { return { ...this.lastMovement }; }
 
   /** First native stream (CWvsApp+632); reseeded by 0x16. */
   attackRandom: ClientRandom | undefined;
@@ -1371,6 +1375,7 @@ export class ClientSession {
     };
     await link.send(encodeClientUserMove({ stageByte: 0, path }));
     this.lastPosition = { x, y };
+    this.lastMovement = { action, foothold };
     const self = this.self;
     if (self !== undefined) {
       // The server does not echo a move back to the mover, so the local view moves itself - the same
@@ -1480,6 +1485,7 @@ export class ClientSession {
           this.self = selfOf(field.character);
           this.mapId = field.character.stats.mapId;
           this.lastPosition = { x: 0, y: 0 };
+          this.lastMovement = { action: 6, foothold: 0 };
           this.users.clear();
           this.mobs.clear();
           this.npcs.clear();

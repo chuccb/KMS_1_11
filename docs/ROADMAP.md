@@ -16,6 +16,7 @@
 | 背包／穿脫／丟棄／商店／補充、消耗品與部分暫時能力 | [道具操作](INVENTORY_OPERATIONS.md)、[補充](MESO_RECHARGE.md)、[temp](TEMPORARY_STATS.md) |
 | 受擊／死亡／復活、HUD／小地圖／聊天／快捷道具 | [死亡](NATIVE_DEATH_ANIMATION.md)、[HUD](NATIVE_HUD_CHAT_QUICKSLOTS.md)、[小地圖](DISPLAY_MINIMAP_VALIDATION.md) |
 | 系統選單／設定、游標、NPC controller／對話圖文、三類 tooltip | [選單](NATIVE_SYSTEM_UI.md)、[NPC](NATIVE_NPC_BEHAVIOR.md)、[圖文](NATIVE_DIALOGUE_RICHTEXT.md)、[tip](NATIVE_RICH_TOOLTIPS.md) |
+| 蹲下／蹲刺／警戒、攻擊雙時鐘、恢復body ID、被動射程／原常數分類 | [姿勢與攻擊鏈](NATIVE_POSTURE_ATTACK.md)，完整幾何／技能仍缺 |
 | 普通身體動作／WZ序列／原武器姿勢／繩梯停格 | [普通動作](NATIVE_AVATAR_MOTION.md)，有唯讀閱覽；非完整CVecCtrl |
 | 臉部獨立時鐘／眨眼／F鍵／101臉飾／remote attr2 hit | [臉部證據與界線](NATIVE_FACE_ANIMATION.md)，沒有改全部原生movement幾何 |
 | 方便體驗入口 | [非原版工具](RECOVERY_TEST_TOOLS.md)，唯讀範例與授權寫入操作分開 |

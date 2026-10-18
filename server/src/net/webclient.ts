@@ -1,10 +1,11 @@
+import { shotRelease } from "../../../client/attack-timing.mjs";
 import type { AvatarMotionProfile } from "../game/avatarmotion.ts";
 import { FACE_EMOTIONS, type FaceAnimation } from "../game/face.ts";
 import type { TestToolResult } from "../game/testtools.ts";
 import { nativeSkillBooks } from "../../../client/jobs.mjs";
 import type { SkillCatalog } from "../game/skills.ts";
 import {
-  firstBasicAmmo,
+  firstBasicAmmo, basicShotRange, basicAttackAction, basicAttackPostureAllows,
   type BasicAttackProvider,
 } from "../game/basicattack.ts";
 import type { SpriteFrame } from "../game/sprites.ts";
@@ -494,6 +495,16 @@ class BrowserSession {
   private lastContactId = 0;
   private touchReadyAt = 0;
   private touchBusy = false;
+  /** Ordered move/attack writes; a field transition invalidates queued operations. */
+  private motionWrites: Promise<void> = Promise.resolve();
+  private serialMotion(operation: () => Promise<void>): Promise<void> {
+    const field = this.contactField, session = this.session;
+    const next = this.motionWrites.then(async () => {
+      if (this.contactField === field && this.session === session && session) await operation();
+    });
+    this.motionWrites = next.catch(() => undefined);
+    return next;
+  }
   private readonly dyingMobs = new Set<number>();
 
   constructor(socket: WebSocket, options: WebClientOptions) {
@@ -568,7 +579,7 @@ class BrowserSession {
         case "say":
           return await this.say(String(message.text ?? ""));
         case "move":
-          return await this.move(
+          return await this.serialMotion(() => this.move(
             Number(message.x ?? 0),
             Number(message.y ?? 0),
             Number(message.foothold ?? 0),
@@ -576,16 +587,16 @@ class BrowserSession {
             Number(message.vx ?? 0),
             Number(message.vy ?? 0),
             Number(message.attr ?? 0),
-          );
+          ));
         case "attack":
-          return await this.attack(
+          return await this.serialMotion(() => this.attack(
             Number(message.mobId ?? 0),
             message.facingLeft === true,
             message.mode === "shoot",
             Number(message.action),
             Number(message.targetX),
             Number(message.targetY),
-          );
+          ));
         case "warp-map":
           return await this.require().warpTo(Number(message.mapId));
         case "portal":
@@ -664,8 +675,8 @@ class BrowserSession {
 
   /**
    * `{t:"attack", mobId}`: the page's Ctrl swing. The page names the monster and the direction; the
-   * numbers are the client's own, rolled here because the browser has no archive to read the
-   * weapon's `incPAD` from (`game/combat.ts` says why that is the honest place for the formula).
+   * numbers use nativecombat.ts and effective equipment instances, not the legacy combat fixture.
+   * Prone32 is accepted separately, uses the native weak STR branch, and never spends ammunition.
    *
    * The field is told with `0x0F`/`0x10`, including empty attacks; the page gets the
    * number back so it can draw the damage it just dealt (`{t:"hit"}`) - the wire has no such
@@ -684,11 +695,10 @@ class BrowserSession {
     if (!character || character.stats.hp <= 0) return;
     const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
     const profile = this.options.art?.attackProfile?.(weaponId);
-    const actions = shoot ? profile?.shoot : profile?.melee;
-    const action = actions?.find((entry) => entry.action === actionId);
+    const action = basicAttackAction(profile, actionId, shoot);
     // 512F90/427F60 rejects unsupported weapon groups/actions. Never translate a browser pose
     // silently to a different attack or a fabricated 480ms bare-hand sword swing.
-    if (!profile || !action) return;
+    if (!profile || !action || !basicAttackPostureAllows(actionId, shoot, session.selfMovement.action)) return;
     const ammo = shoot ? firstBasicAmmo(character.items) : undefined;
     if (shoot && (!ammo || !action)) return;
     const knownMob = mobId === 0 ? undefined : session.mob(mobId);
@@ -738,11 +748,7 @@ class BrowserSession {
       },
     );
     if (mob !== undefined && attackField === this.contactField) {
-      const release =
-        shoot && action
-          ? action.delays.reduce((sum, delay) => sum + delay, 0) -
-            (action.delays.at(-1) ?? 0)
-          : 0;
+      const release = shoot ? shotRelease(action) : 0;
       // Browser-local predicted numbers, not an invented TCP acknowledgement.
       const bounds = profile?.melee[0]?.bounds;
       const near = bounds
@@ -913,7 +919,7 @@ class BrowserSession {
         const character=session.character;
         const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
         const ammo=firstBasicAmmo(character.items);
-        this.send({t:"stat-basis",basis,wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:{str:item.str,dex:item.dex,int:item.int,luk:item.luk,pad:item.pad},ruc:item.ruc,cuc:item.cuc,requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
+        this.send({t:"stat-basis",basis,shotRange:basicShotRange(character,this.options.skills),wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:{str:item.str,dex:item.dex,int:item.int,luk:item.luk,pad:item.pad},ruc:item.ruc,cuc:item.cuc,requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
       }
     });
     this.session = session;

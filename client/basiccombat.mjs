@@ -16,36 +16,17 @@ export function basicAmmo(inventory, weaponId) {
           : category === 147 && Math.trunc(item.itemId / 10000) === 207;
     });
 }
-export function attackDuration(motion) {
-  return (motion?.delays ?? [160, 160, 160]).reduce(
-    (sum, delay) => sum + delay,
-    0,
-  );
-}
-export function attackFrame(motion, now) {
-  let elapsed = now - motion.start;
-  if (elapsed < 0) return -1;
-  const delays = motion.delays ?? [160, 160, 160];
-  for (let i = 0; i < delays.length; i++) {
-    elapsed -= delays[i];
-    if (elapsed < 0) return i;
-  }
-  return -1;
-}
-/** 513C80: release = total action time - last frame's delay (array length - 1). */
-export function shotRelease(motion) {
-  return attackDuration(motion) - (motion?.delays?.at(-1) ?? 160);
-}
+export { attackDuration, attackFrame, shotRelease } from './attack-timing.mjs';
 /** Native shot range starts at the near swing boundary, clipped to 65 by 512F90. */
 export function shotNear(motion) {
   const bounds = motion?.bounds;
   return bounds ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1) : 65;
 }
-export function projectileLeg(x, y, facingLeft, mob, near = 65) {
+export function projectileLeg(x, y, facingLeft, mob, near = 65, range = 200) {
   const x0 = x + (facingLeft ? -near : near),
     y0 = y - 25;
   // Target centre is a browser policy until the CShape2D mob pool is ported.
-  const x1 = mob?.x ?? x + (facingLeft ? -200 : 200);
+  const x1 = mob?.x ?? x + (facingLeft ? -range : range);
   const y1 = mob ? mob.y - 20 : y0;
   return {
     x0,

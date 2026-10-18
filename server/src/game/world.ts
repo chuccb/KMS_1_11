@@ -58,6 +58,8 @@ export interface FieldPosition {
   x: number;
   y: number;
   foothold?: number;
+  /** Last reported movement byte, including facing; never an attack action id. */
+  action?: number;
 }
 
 /**
@@ -329,7 +331,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     const member = this.members.get(characterId);
     if (member === undefined) return;
     const first = path.elements[0];
-    if (first !== undefined) member.at = { ...member.at, x: first.x, y: first.y };
+    if (first !== undefined) member.at = { ...member.at, x: first.x, y: first.y,
+      foothold: first.foothold, action: first.action };
     // The same clock the tick uses: a pickup compares this against a drop's `bornAt`.
     member.lastMoveAt = Date.now();
     const packet = encodeUserMove({ characterId, path });
@@ -422,9 +425,9 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
    * draws: it is the user's face id (`CharacterData.appearanceA`), and 0 would leave the user
    * faceless. Three fields are the client's own shape, not this server's knowledge: `unknown64` (a
    * byte stored at `CUser+64`) and the two u32s after the face, which the client reads and drops
-   * without storing. None of them is located, so all three go out as 0. `action` is the same story:
-   * the stance byte of `CUser+180`, whose value table is not decoded, so a remote user always
-   * arrives standing.
+   * without storing. None of them is located, so all three go out as 0.
+   * Movement action/foothold now retain the reported state, so a late join sees prone/rope/facing.
+   * With no report, stand4 is the explicit server spawn policy, not an observed original server byte.
    */
   private enterPacket(member: M): Uint8Array {
     const at = member.at ?? this.spawnAt();
@@ -438,7 +441,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       avatarItems: member.avatarItems,
       x: at.x,
       y: at.y,
-      action: 0,
+      action: at.action ?? 4,
       foothold: at.foothold ?? 0,
     });
   }

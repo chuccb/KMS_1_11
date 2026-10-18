@@ -154,7 +154,11 @@ Object.assign(globalThis, await import("../../client/tooltip.mjs"));
 Object.assign(globalThis, await import("../../client/tooltip-preview.mjs"));
 Object.assign(globalThis, await import("../../client/faces.mjs"));
 Object.assign(globalThis, await import("../../client/avatar-motion.mjs"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:avatar-motion|faces|motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+// ADR-069 import shim maintenance only; this historical VM harness was NOT executed/certified.
+Object.assign(globalThis, await import("../../client/posture.mjs"));
+Object.assign(globalThis, await import("../../client/attack-timing.mjs"));
+Object.assign(globalThis, await import("../../client/combat-assets.mjs"));
+runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:combat-assets|posture|attack-timing|avatar-motion|faces|motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
   testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},

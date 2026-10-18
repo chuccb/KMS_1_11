@@ -1,3 +1,7 @@
+> 2026-10-18後續（未測試）：本機prone／32蹲刺、攻擊接受時起3000警戒、強制動作逐幀30ms與raw release拆分、
+> 恢復body ID、原被動射程與資源／封包生命週期見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)／ADR-069。
+> 下方是前輪紀錄，其「尚未實作」與raw攻擊時間敘述須按後續更正閱讀。
+
 > 2026-10-18 圖層後續（未測試）：原avatar雙面／afterimage child1中層、bullet發射來源root z、
 > remote資源ready與過期guard見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)。不是完整CShape2D／技能實作。
 

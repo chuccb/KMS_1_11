@@ -1,3 +1,6 @@
+import { combatAssets } from "./combat-assets.mjs";
+import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
+import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackFrameStart } from "./attack-timing.mjs";
 import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.mjs";
 import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.mjs";
 import {tooltipPreview} from "./tooltip-preview.mjs";
@@ -287,7 +290,7 @@ let pendingUse;
  */
 let inventoryTab = 0;
 /** Native WZ-derived base; temporary values stay in the client timer model. */
-let nativeBasis, nativeAmmoPad = 0, nativeWornFacts = [];
+let nativeBasis, nativeShotRange = 200, nativeAmmoPad = 0, nativeWornFacts = [];
 const effectiveSelf = () => selfView && nativeBasis ? {...selfView,maxHp:nativeBasis.basic.maxHp,maxMp:nativeBasis.basic.maxMp} : selfView;
 function effectiveMovement(now) {
   const totals=nativeBasis && statTotals(nativeBasis,buffs.values(now));
@@ -347,7 +350,7 @@ function setLoginPending(pending) {
 function connect() {
   if (loginPending) return;
   quitToTitle=false;
-  buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
+  buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
   showPanel(ui.connect);
   setLoginPending(true);
   ui.status.textContent = "連線中…";
@@ -382,6 +385,8 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
+    combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
+    clearAttackAlert(playerBody);
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -399,7 +404,7 @@ function connect() {
     ui.where.textContent = "斷線";
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
-    buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
+    buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
     closeDialogue(false);
     logLine("websocket closed");
     if (quitToTitle) {
@@ -453,7 +458,7 @@ function handle(message) {
     itemDialog.close(false);
     inventoryScrollDrag = undefined;
     shopPending = false;
-    if (message.t !== "field") { inventoryScroll.fill(0); buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[]; }
+    if (message.t !== "field") { inventoryScroll.fill(0); buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[]; }
     itemDrag = undefined;
     slotPending = mesoPending = false;
     mesoNextAt = 0;
@@ -596,6 +601,7 @@ function handle(message) {
       self = { x: 0, y: 0, mapId: message.mapId };
       users.clear();
       selfSwing = undefined;
+      nativeShotRange = 200;
       combatEpoch++;
       nextSwingAt = 0;
       projectiles.length = 0;
@@ -627,7 +633,7 @@ function handle(message) {
       return;
 
     case "stat-basis":
-      nativeBasis=message.basis; nativeAmmoPad=message.ammoPad; nativeWornFacts=message.wornFacts??[];
+      nativeBasis=message.basis; nativeShotRange=Number.isInteger(message.shotRange) ? message.shotRange : 200; nativeAmmoPad=message.ammoPad; nativeWornFacts=message.wornFacts??[];
       return;
 
     case "touch-result": {
@@ -680,6 +686,7 @@ function handle(message) {
         if (playerBody && map?.id === self?.mapId)
           deathFx.observe(message.self.characterId, true, self, performance.now());
         selfSwing = undefined;
+        clearAttackAlert(playerBody);
         combatEpoch++;
         keys.clear();
       }
@@ -1748,7 +1755,7 @@ const dying = new Map();
 const drops = new Map();
 /** Meso piles, one entry per tier: `[{path,ox,oy}]`, the four `iconRaw` frames of `0900.img`. */
 const mesoArt = new Map();
-/** The local character's current swing (`{stance, start}`), and the three the client cycles. */
+/** The local forced attack: real WZ action, scaled delays, indices and acceptance time. */
 let selfSwing;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
 const damageMarks = [];
@@ -1843,16 +1850,16 @@ function updateContact(now) {
   }
 }
 
-/** No-WZ/unarmed fallback only; real weapon actions and delays come from /api/attack. */
-/** Legacy fallback reach, NOT a claimed native rectangle. WZ-equipped actions use lt/rb below. */
-const SWING_REACH_X = 90;
-const SWING_REACH_UP = 72;
-const SWING_REACH_DOWN = 36;
 let nextSwingAt = 0;
 let swingLoading = false;
 let combatEpoch = 0, localActionEpoch = 0;
-const attackProfiles = new Map();
-const projectileFrames = new Map();
+const combatCatalog = combatAssets({
+  onAttack(profile) {
+    for (const action of [...profile.melee, ...profile.shoot, ...(profile.prone ? [profile.prone] : [])])
+      for (const frames of Object.values(action.effects ?? {})) for (const frame of frames) artImage(frame.path);
+  },
+  onProjectile(frames) { for (const frame of frames) artImage(frame.path); },
+});
 const attackLooks = new Set();
 const projectiles = [];
 /** Template ids whose art endpoint said 404 - stop asking. */
@@ -2414,7 +2421,7 @@ function warmBodyLook(look, profile) {
   if (!avatarWarmLooks.has(key) || bodyWarmLooks.has(key)) return;
   if (bodyWarmLooks.size >= 64) bodyWarmLooks.delete(bodyWarmLooks.values().next().value);
   bodyWarmLooks.add(key);
-  for (const stance of new Set([profile.walk, profile.stand, "jump", "ladder", "rope", "dead", "alert"])) {
+  for (const stance of new Set([profile.walk, profile.stand, "jump", "ladder", "rope", "dead", "alert", "prone"])) {
     for (const index of new Set((profile.actions[stance]?.frames ?? []).map(f => f.index))) {
       for (const flip of [false,true]) avatarFrame(look, stance, index, flip, undefined, true);
     }
@@ -2441,8 +2448,8 @@ function preloadAvatar(look, retainedProfile) {
     if (attackLooks.size >= 128) attackLooks.clear();
     attackLooks.add(key);
     void ensureAttackProfile(look).then((profile) => {
-      for (const action of [...(profile?.melee ?? []), ...(profile?.shoot ?? [])]) {
-        for (let frame = 0; frame < action.delays.length; frame++) {
+      for (const action of [...(profile?.melee ?? []), ...(profile?.shoot ?? []), ...(profile?.prone ? [profile.prone] : [])]) {
+        for (const frame of action.frameIndices) {
           avatarFrame(look, action.stance, frame, false, undefined, true);
           avatarFrame(look, action.stance, frame, true, undefined, true);
         }
@@ -2601,7 +2608,7 @@ function stanceOfEntity(entity, now) {
     const frame = attackFrame(swing, now);
     if (frame >= 0) {
       delete entity.animation; // 508700 changes actions; returning to idle starts its first frame.
-      return { stance: swing.stance, frame };
+      return { stance: swing.stance, frame: attackCanvasFrame(swing, frame) };
     }
     if (entity === selfView) selfSwing = undefined;
     else delete entity.swing;
@@ -2642,9 +2649,9 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
   // Gr2D's overlay comparator walks parents first: these are NOT world z+1 / z+2.
   drawAvatarBodyAt(entity, screenX, screenY, now, direction, () => {
     if (!swing) return;
-    const index = attackFrame(swing, now), frames = swing.effects?.[String(index)];
+    const index = attackFrame(swing, now), frames = swing.effects?.[String(attackCanvasFrame(swing, index))];
     if (!frames?.length || index < 0) return;
-    const prior = swing.delays.slice(0, index).reduce((sum, delay) => sum + delay, 0);
+    const prior = attackFrameStart(swing, index);
     ctx.save();
     ctx.filter = "none"; // User contact tint affects avatar canvases, not the weapon's afterimage.
     drawArchiveImage(loopFrame(frames, now - swing.start - prior), screenX, screenY, direction);
@@ -2659,7 +2666,7 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   preloadAvatar(look, entity.bodyProfile?.weaponId === weaponIdOf(look) ? entity.bodyProfile : undefined);
   const face = sampleAvatarFace(entity, look, now);
   let frame = avatarFrame(look, state.stance, state.frame, flip, face.emotion, true, face.frame);
-  const attackPose = /^(swing|stab|shoot)/.test(state.stance);
+  const attackPose = /^(swing|stab|shoot|proneStab)/.test(state.stance);
   // Cold facial art must not replace the body action with stand1 or a gray box.
   if (!frame.ready) frame = avatarFrame(look, state.stance, state.frame, flip, undefined, true);
   const draw = (entry) => {
@@ -2931,6 +2938,8 @@ function frame() {
   lastPhysicsAt = now;
   if (playerBody && self && map?.id === self.mapId) {
     playerBody.dead = selfView?.hp <= 0;
+    if (playerBody.dead) clearAttackAlert(playerBody);
+    else advanceAttackAlert(playerBody, now);
     const blocked =
       portalPending ||
       (itemDialog.open || systemPanel.visible) ||
@@ -2940,7 +2949,7 @@ function frame() {
       talkingNpc !== undefined ||
       document.activeElement instanceof HTMLInputElement;
     const attackLocked =
-      selfSwing && attackFrame(selfSwing, now) >= 0 && playerBody.grounded;
+      selfSwing && attackFrame(selfSwing, now) >= 0;
     const wasGrounded = playerBody.grounded;
     const wasKnocked = playerBody.knockback !== undefined;
     advancePlayer(
@@ -2957,6 +2966,7 @@ function frame() {
             : Number(keys.has("arrowdown")) -
               Number(keys.has("arrowup") || keys.has("w")),
         jump: !blocked && !attackLocked && (keys.has("alt") || keys.has(" ")),
+        ...(!blocked && attackLocked ? forcedAttackInput(selfSwing.action) : {}),
         ...effectiveMovement(now),
       },
       terrain,
@@ -3266,33 +3276,11 @@ function drawDrop(key, record, cameraX, cameraY, now) {
   ctx.globalAlpha = 1;
 }
 
-/** The nearest monster a swing would reach: in front of the character, and close enough. */
-function mobInReach() {
-  if (!self || !selfView) return undefined;
-  const facingLeft = selfView.facing === 1;
-  let found;
-  let best = Infinity;
-  for (const mob of mobs.values()) {
-    const dx = mob.x - self.x;
-    const dy = mob.y - self.y;
-    if (Math.abs(dx) > SWING_REACH_X) continue;
-    if (dy < -SWING_REACH_UP || dy > SWING_REACH_DOWN) continue;
-    // A swing only hits what is in front of it; a monster on top of the character counts as in front.
-    if (dx !== 0 && (facingLeft ? dx > 0 : dx < 0)) continue;
-    const distance = dx * dx + dy * dy;
-    if (distance < best) {
-      best = distance;
-      found = mob;
-    }
-  }
-  return found;
-}
-
-function playWeaponSound(entity) {
+function playWeaponSound(entity, profile) {
   const weapon = lookOf(entity).items.find(
     (id) => id >= 1300000 && id < 2000000,
   );
-  const sfx = itemInfo.get(weapon)?.sfx;
+  const sfx = profile?.sfx ?? itemInfo.get(weapon)?.sfx;
   if (sfx)
     void audio.effect(
       `Weapon/${sfx}/Attack`,
@@ -3304,45 +3292,9 @@ function playWeaponSound(entity) {
     );
 }
 
-/** Fetch native weapon action choices, body delays and sparse afterimage canvases, once/id. */
-function ensureAttackProfile(look) {
-  const id = weaponIdOf(look);
-  if (!id) return Promise.resolve(undefined);
-  if (!attackProfiles.has(id)) {
-    attackProfiles.set(
-      id,
-      fetch(`/api/attack/${id}`)
-        .then((response) => (response.ok ? response.json() : undefined))
-        .then((profile) => {
-          if (!profile) { attackProfiles.delete(id); return undefined; }
-          for (const action of [
-            ...(profile?.melee ?? []),
-            ...(profile?.shoot ?? []),
-          ])
-            for (const frames of Object.values(action.effects ?? {}))
-              for (const frame of frames) artImage(frame.path);
-          return profile;
-        })
-        .catch(() => { attackProfiles.delete(id); return undefined; }),
-    );
-  }
-  return attackProfiles.get(id);
-}
-function ensureProjectileFrames(itemId) {
-  if (!projectileFrames.has(itemId)) {
-    projectileFrames.set(
-      itemId,
-      fetch(`/api/projectile/${itemId}`)
-        .then((response) => (response.ok ? response.json() : []))
-        .then((frames) => {
-          for (const frame of frames) artImage(frame.path);
-          return frames;
-        })
-        .catch(() => []),
-    );
-  }
-  return projectileFrames.get(itemId);
-}
+/** Shared bounded metadata only. No promise captures an actor or resurrects a cleared cache. */
+function ensureAttackProfile(look) { return combatCatalog.attack(weaponIdOf(look)); }
+function ensureProjectileFrames(itemId) { return combatCatalog.projectile(itemId).then(frames => frames ?? []); }
 function scheduleAttackHit(mobId, damage, at) {
   const field = self,
     epoch = combatEpoch;
@@ -3368,7 +3320,7 @@ function launchProjectile(entity, itemId, motion, mob, now, near) {
   const local = entity === selfView;
   const at = local ? self : entity;
   if (!at) return;
-  const leg = projectileLeg(at.x, at.y, motion.facingLeft, mob, near);
+  const leg = projectileLeg(at.x, at.y, motion.facingLeft, mob, near, local ? nativeShotRange : 200);
   // 513C80 passes 515C70(source avatar main layer) through 41B630 -> 41BF60.
   // A bullet keeps its launch root depth; moving the shooter later must not drag its z around.
   const z = actorDepth(local ? (playerBody ?? at) : at, terrain, local ? "self" : "user");
@@ -3405,15 +3357,11 @@ async function receiveUserAttack(message, now) {
     ["dead", "ladder", "rope"].includes(remoteStance(user)) || user.attackTicket !== ticket || JSON.stringify(lookOf(user)) !== lookKey
   )
     return;
-  const action = (message.shoot ? profile?.shoot : profile?.melee)?.find(
-    (entry) => entry.action === message.action,
-  );
+  const action = basicAttackAction(profile, message.action, message.shoot);
   if (!action) return; // Do not turn an unknown/skill action into a fabricated one-handed swing.
   const speed = Math.max(0, Math.min(6, message.speed));
   // The relay owns speed; scale original WZ delays, never an already rounded profile.
-  const delays = action.baseDelays.map((delay) =>
-    Math.max(1, Math.trunc((delay * (speed + 5)) / 8)),
-  );
+  const delays = scaledAttackDelays(action.baseDelays, speed);
   user.facing = message.facingLeft ? 1 : 0;
   const motion = {
     ...action,
@@ -3421,7 +3369,7 @@ async function receiveUserAttack(message, now) {
     start: now,
     facingLeft: message.facingLeft,
   };
-  playWeaponSound(user);
+  playWeaponSound(user, profile);
   const target = mobs.get(String(message.targets?.[0]?.mobId));
   const near = shotNear(profile.melee[0]);
   if (message.shoot && message.projectileItemId)
@@ -3447,7 +3395,7 @@ async function receiveUserAttack(message, now) {
   }
   // Preserve the received attack clock / hit scheduling. A cold remote action is not exposed to
   // the renderer as an unready gray box, and isn't restarted late after it already finished.
-  const frames = delays.map((_, frame) => avatarFrame(look, motion.stance, frame,
+  const frames = delays.map((_, frame) => avatarFrame(look, motion.stance, attackCanvasFrame(motion, frame),
     !message.facingLeft, undefined, true));
   const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
   await Promise.all([...frames, ...effects].map((frame) => frame.loading));
@@ -3461,7 +3409,7 @@ async function receiveUserAttack(message, now) {
 function mobInAttackRect(bounds, facingLeft, clampNear = false) {
   let found,
     best = Infinity;
-  const left = clampNear ? Math.max(bounds.left, -65) : bounds.left;
+  const left = clampNear ? Math.min(Math.max(bounds.left, -65), bounds.right - 1) : bounds.left;
   const right = bounds.right;
   const x0 = self.x + (facingLeft ? left : -right);
   const x1 = self.x + (facingLeft ? right : -left);
@@ -3478,12 +3426,15 @@ function mobInAttackRect(bounds, facingLeft, clampNear = false) {
   }
   return found;
 }
-/** Ctrl: melee at close range/no ammo, otherwise a basic shot; empty attacks still go on the wire. */
+/** Ctrl: prone32; otherwise melee near/no ammo or a basic shot. Empty attacks still go on wire. */
 async function swing() {
   if (
     !self ||
     !selfView ||
     !playerBody ||
+    !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN ||
+    testToolsPanel.open || npcDialog.open || tooltipViewer.open ||
+    document.activeElement instanceof HTMLInputElement ||
     map?.id !== self.mapId ||
     playerBody?.ladder ||
     selfView.hp <= 0 ||
@@ -3526,25 +3477,27 @@ async function swing() {
       mesoPending
     )
       return;
-    if (weaponIdOf(lookOf(entity)) && !profile?.melee.length) {
+    const prone = locomotion(playerBody) === "prone";
+    if (!profile || (prone ? !profile.prone : !profile.melee.length)) {
       logLine("無法取得此武器的原始攻擊資料；暫不以其他武器動作替代。");
       return;
     }
     if (performance.now() < nextSwingAt) return;
     const pick = (actions) =>
       actions?.[Math.floor(Math.random() * actions.length)];
-    let action = pick(profile?.melee);
-    let ammo = basicAmmo(inventory, weaponIdOf(lookOf(entity)));
+    let action = prone ? profile?.prone : pick(profile?.melee);
+    // 511E20 skips the ammunition/shoot branch while prone; do not consume a star/arrow.
+    let ammo = prone ? undefined : basicAmmo(inventory, weaponIdOf(lookOf(entity)));
     let mob = action?.bounds
       ? mobInAttackRect(action.bounds, entity.facing === 1, !!ammo)
-      : mobInReach();
+      : undefined;
     const shoot = !!ammo && !!profile?.shoot.length && !mob;
     const near = shotNear(action);
     if (shoot) {
       action = pick(profile.shoot);
-      // 513C80: near boundary to character x +/- 200, along y-25; CShape2D is not yet ported.
+      // 513C80: far = character x +/- (200 + learned WZ range), along y-25; shape pool not yet ported.
       mob = mobInAttackRect(
-        { left: -200, right: -near, top: -25, bottom: -24 },
+        { left: -nativeShotRange, right: -near, top: -25, bottom: -24 },
         entity.facing === 1,
       );
     }
@@ -3552,7 +3505,7 @@ async function swing() {
     const motion = action;
     const look = lookOf(entity), facingLeft = entity.facing === 1;
     const frames = motion.delays.map((_, frame) => avatarFrame(
-      look, motion.stance, frame, facingFlip(entity.facing), undefined, true));
+      look, motion.stance, attackCanvasFrame(motion, frame), facingFlip(entity.facing), undefined, true));
     const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
     await Promise.all([...frames, ...effects].map((frame) => frame.loading));
     entity = selfView;
@@ -3560,7 +3513,11 @@ async function swing() {
       || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
       || !playerBody || playerBody.ladder || map?.id !== self.mapId || portalPending
       || shop || shopPending || talkingNpc || (itemDialog.open || systemPanel.visible) || slotPending || mesoPending
-      || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt) return;
+      || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt
+      || (locomotion(playerBody) === "prone") !== prone
+      || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
+      || testToolsPanel.open || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
+      || document.activeElement instanceof HTMLInputElement) return;
     if ([...frames, ...effects].some((frame) => !frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
       return;
@@ -3571,12 +3528,16 @@ async function swing() {
       ammo = readyAmmo;
     }
     // Loading may take time on a cold look: choose the target again from current sampled positions.
-    mob = shoot ? mobInAttackRect({left:-200,right:-near,top:-25,bottom:-24}, facingLeft)
-      : action?.bounds ? mobInAttackRect(action.bounds, facingLeft, !!ammo) : mobInReach();
+    mob = shoot ? mobInAttackRect({left:-nativeShotRange,right:-near,top:-25,bottom:-24}, facingLeft)
+      : action?.bounds ? mobInAttackRect(action.bounds, facingLeft, !!ammo) : undefined;
     const now = performance.now();
+    // Flush actual posture BEFORE the attack; the 10Hz publisher may not yet have sent Down.
+    // This ordering is a bridge policy, using existing movement packets, not a new native opcode.
+    if (!publishPlayerMotion()) return;
     selfSwing = { ...motion, start: now, facingLeft };
+    beginAttackAlert(playerBody, now);
     nextSwingAt = now + attackDuration(motion);
-    playWeaponSound(entity);
+    playWeaponSound(entity, profile);
     if (shoot) launchProjectile(entity, ammo.itemId, selfSwing, mob, now, near);
     send({
       t: "attack",
@@ -5339,7 +5300,7 @@ window.addEventListener("keydown", (event) => {
     toggleInventory();
     return;
   }
-  // Ctrl is the 2003 client's attack key (`sub_511E20`'s case 10 sits next to the emotes). A held
+  // Ctrl is the 2003 client's attack key (511E20's basic-attack dispatch, not its F-key/emote branch). A held
   // key repeats, so the page swings on keydown and lets `swing()` own the cooldown.
   if (event.key === "Control") {
     event.preventDefault();
@@ -5372,16 +5333,16 @@ window.addEventListener("keyup", (event) =>
   keys.delete(event.key.toLowerCase()),
 );
 
-// Physics is stepped by requestAnimationFrame. The network only publishes snapshots at 10Hz.
-setInterval(() => {
+// Physics runs in RAF. Publish at 10Hz and flush ordered posture before an attack.
+function publishPlayerMotion() {
   if (
     !self ||
     !selfView ||
     !playerBody ||
     portalPending ||
-    map?.id !== self.mapId
+    map?.id !== self.mapId || socket?.readyState !== WebSocket.OPEN
   )
-    return;
+    return false;
   const packet = {
     t: "move",
     x: Math.round(self.x),
@@ -5393,12 +5354,13 @@ setInterval(() => {
     vy: Math.round(playerBody.vy),
   };
   const state = JSON.stringify(packet);
-  if (state === lastSentMotion && !packet.attr) return;
-  if (socket?.readyState !== WebSocket.OPEN) return;
+  if (state === lastSentMotion && !packet.attr) return true;
   lastSentMotion = state;
   send(packet);
   playerBody.moveAttr = 0;
-}, MOVE_TICK_MS);
+  return true;
+}
+setInterval(publishPlayerMotion, MOVE_TICK_MS);
 window.addEventListener("blur", () => {
   recovery.reset();
   previousContactPlayer = undefined; previousContactMobs.clear();
@@ -5654,7 +5616,7 @@ const revivePanel = reviveWindow({
 
 const recovery = naturalRecovery({
   getSelf:effectiveSelf, getBody:()=>playerBody, getMap:()=>map,
-  getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
+  getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : nativeBodyAction(playerBody, selfView?.bodyProfile),
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
 /** Read-only ordinary-action inspector: its actor/look/virtual rope Y are NOT the field actor. */
@@ -5667,22 +5629,55 @@ function drawAvatarPreview(now, controls) {
   const canvas = document.getElementById("qa-motion-canvas"), painter = canvas?.getContext?.("2d");
   if (!painter || !selfView) return "尚未進入場地。";
   const current = lookOf(selfView), selected = controls.weapon === "self" ? weaponIdOf(current) : Number(controls.weapon);
-  if (controls.weapon !== "self" && ![0,1302000,1402000,1412000].includes(selected)) return "未知閱覽模板。";
+  if (controls.weapon !== "self" && ![0,1302000,1402000,1412000,1452000,1462000,1472000].includes(selected)) return "未知閱覽模板。";
   const look = controls.weapon === "self" ? {...current,items:[...current.items]} : {...current,
     items:[...current.items.filter(id => !(id>=1300000 && id<1500000) && Math.floor(id/10000)!==109),...(selected?[selected]:[])]};
   const elapsed = avatarPreviewLast === undefined ? 0 : Math.max(0,Math.min(250,now-avatarPreviewLast));
   avatarPreviewLast = now;
   if (["rope","ladder"].includes(controls.action) && controls.climbing) avatarPreviewActor.y += elapsed * 0.1;
   const direction = controls.left ? 1 : 0;
-  const pose = sampleAvatarMotion(avatarPreviewActor,look,controls.action,now,avatarPreviewActor.y,direction);
-  const face = sampleAvatarFace(avatarPreviewActor,look,now);
-  let image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction),face.emotion,false,face.frame);
-  if (!image.ready) image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction));
+  let pose, attack, attackOrdinal;
+  const attackPreview = ["basicMelee", "basicShoot", "proneStab"].includes(controls.action);
   painter.clearRect(0,0,canvas.width,canvas.height); painter.imageSmoothingEnabled = false;
-  if (image.ready) painter.drawImage(image.img,120+image.dx,118+image.dy);
+  if (attackPreview) {
+    // Read-only deterministic loop: no gameplay RNG, sound, ammo, attack command or actor mutation.
+    void ensureAttackProfile(look);
+    const profile = combatCatalog.peekAttack(selected);
+    if (!profile) return selected ? "攻擊metadata載入中／失敗後5秒重試。" : "原版此路徑不提供徒手假劍揮。";
+    const action = controls.action === "proneStab" ? profile.prone
+      : controls.action === "basicShoot" ? profile.shoot[0] : profile.melee[0];
+    if (!action) return "此WZ武器沒有所選普通攻擊；不拿其他姿勢替代。";
+    const key = `${JSON.stringify(look)}|${direction}|${controls.action}`;
+    attack = avatarPreviewActor.previewAttack;
+    if (!attack || attack.key !== key || attackFrame(attack, now) < 0)
+      attack = avatarPreviewActor.previewAttack = {...action, key, start:now};
+    delete avatarPreviewActor.animation;
+    attackOrdinal = attackFrame(attack, now);
+    pose = {stance:attack.stance, frame:attackCanvasFrame(attack, attackOrdinal)};
+  } else {
+    delete avatarPreviewActor.previewAttack;
+    pose = sampleAvatarMotion(avatarPreviewActor,look,controls.action,now,avatarPreviewActor.y,direction);
+  }
+  const face = sampleAvatarFace(avatarPreviewActor,look,now);
+  let image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction),face.emotion,true,face.frame);
+  if (!image.ready) image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction),undefined,true);
+  if (image.ready) {
+    const h=image.planeHeight,w=image.img.naturalWidth,x=120+image.dx,y=118+image.dy;
+    const planes=h>0 && image.img.naturalHeight===h*2;
+    if (planes) painter.drawImage(image.img,0,0,w,h,x,y,w,h);
+    else painter.drawImage(image.img,x,y);
+    const effect=attack && loopFrame(attack.effects?.[String(pose.frame)],now-attack.start-attackFrameStart(attack,attackOrdinal));
+    const effectImage=effect && artImage(effect.path);
+    if(effectImage?.ready) {
+      painter.save();painter.translate(120,118);if(facingFlip(direction))painter.scale(-1,1);
+      painter.globalAlpha=effect.alpha??1;painter.drawImage(effectImage.img,-effect.ox,-effect.oy);painter.restore();
+    }
+    if(planes) painter.drawImage(image.img,0,h,w,h,x,y,w,h);
+  }
   const metadata=avatarPreviewActor.bodyProfile?.weaponId === selected ? avatarPreviewActor.bodyProfile : avatarMotionCatalog.get(selected)?.data;
+  const timing=attack ? `；動作${attack.action}，原始縮放delay [${attack.delays.join(",")}]，身體倒數總長${attackDuration(attack)}ms` : "";
   return `唯讀模板 ${selected || "無武器"}：${metadata ? `${metadata.walk}／${metadata.stand}` : "metadata載入中／失敗後5秒重試"}；`+
-    `${pose.stance}/${pose.frame}；${image.ready ? "原PNG" : "PNG載入中"}。`;
+    `${pose.stance}/${pose.frame}；${image.ready ? "原PNG" : "PNG載入中"}${timing}。`;
 }
 
 const testToolsPanel = testTools({
@@ -5708,7 +5703,10 @@ const testToolsPanel = testTools({
       `有效武器 ${nativeBasis.weaponId || "無"}；裝備PAD ${nativeBasis.secondary.pad}＋藥水 ${temporary.pad ?? 0}＋彈藥 ${nativeAmmoPad}＝射擊PAD ${pad}。近戰不加彈藥。`;
     if (worn && !nativeBasis.effectiveSlots.includes(11)) text += " 目前武器未通過原有效穿戴條件，不提供能力。";
     if (worn?.stats.pad === 0) text += " 武器實例PAD為0；若是舊版全零起始裝備，可在確認後修復。";
-    text += " Detail第一列不是每次傷害或傷害上下限。";
+    text += ` Detail第一列不是每次傷害或傷害上下限。射擊遠界 ${nativeShotRange}px（200＋原被動range）。`;
+    if (playerBody) text += ` 移動byte ${actionOf(playerBody)}／普通body action ${nativeBodyAction(playerBody,selfView?.bodyProfile)}`+
+      `／強制攻擊 ${selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : "無"}`+
+      `／警戒倒數 ${playerBody.attackAlert?.remaining??0}ms。`;
     const t = lastAttackTrace;
     if (t) {
       const number = value => Number.isFinite(value) ? value.toFixed(2) : "—";

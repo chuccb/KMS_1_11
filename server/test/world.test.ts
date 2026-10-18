@@ -519,3 +519,19 @@ test("a second map is a second field: its own spawn point, its own mobs, and it 
   assert.equal(registry.of(2000000), alt);
   assert.equal(registry.size, 1, "and asking for it again is still the same field");
 });
+
+// Latest posture regression SOURCE ONLY, not executed/typechecked for this delivery.
+test("late join retains the mover's prone/rope movement byte, facing and reported foothold",()=>{
+  const field=stubField(),hero=new FakeMember(1,"Hero");field.join(hero);
+  const prone=stubMove(300,290);prone.elements[0]!.action=11;prone.elements[0]!.foothold=32;
+  field.reportMove(1,prone);
+  const alt=new FakeMember(2,"Alt");field.join(alt);
+  const user=readUserEnterField(new PacketReader(alt.of(FIELD_OPCODE.userEnterField)[0]!,1));
+  assert.equal(user.action,11);assert.equal(user.foothold,32);
+  assert.equal(field.member(1)?.at?.action,11);
+  const rope=stubMove(350,240);rope.elements[0]!.action=17;rope.elements[0]!.foothold=65529;
+  field.reportMove(1,rope);
+  const third=new FakeMember(3,"Third");field.join(third);
+  const remote=third.of(FIELD_OPCODE.userEnterField).map(p=>readUserEnterField(new PacketReader(p,1))).find(u=>u.characterId===1)!;
+  assert.equal(remote.action,17);assert.equal(remote.foothold,65529);
+});

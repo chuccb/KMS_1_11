@@ -1,3 +1,4 @@
+import { attackDuration, shotRelease } from "../../../client/attack-timing.mjs";
 import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
 import {encodeSystemNotice} from '../protocol/notice.ts';
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
@@ -8,7 +9,8 @@ import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
 import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
-import { spendBasicAmmo, type BasicAttackProvider } from "../game/basicattack.ts";
+import { spendBasicAmmo, basicShotRange, validatedBasicAttack,
+  BASIC_ATTACK_TRANSPORT_GRACE_MS, BASIC_SHOT_POSITION_SLOP_X, BASIC_SHOT_POSITION_SLOP_Y, type BasicAttackProvider } from "../game/basicattack.ts";
 import {
   MESO_DROP_OPCODE,
   MESO_DROP_MIN,
@@ -2318,8 +2320,8 @@ export class GameEntryServer {
     try {
       const reader = new PacketReader(plain, 1);
       attack = readClientAttack(reader, opcode);
-      if (opcode === CLIENT_FIELD_OPCODE.shootAttack && reader.remaining !== 0)
-        throw new RangeError("trailing shot bytes");
+      if ((this.options.basicAttack || opcode === CLIENT_FIELD_OPCODE.shootAttack) && reader.remaining !== 0)
+        throw new RangeError("trailing attack bytes");
     } catch (error) {
       this.options.log?.(
         `game: 0x${hex(opcode)} attack unreadable: ${(error as Error).message}`,
@@ -2334,27 +2336,22 @@ export class GameEntryServer {
     )
       return;
     const now = Date.now();
-    if (now + 30 < (session.attackReadyAt ?? 0)) return; // Transport tolerance is server policy.
+    if (now + BASIC_ATTACK_TRANSPORT_GRACE_MS < (session.attackReadyAt ?? 0)) return; // Transport tolerance is server policy.
     const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
     const profile = this.options.basicAttack?.(weaponId);
-    if (opcode === CLIENT_FIELD_OPCODE.shootAttack) {
+    const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
+    // LIVE only implements ordinary physical attacks. Unknown motion/skill/magic must not bypass
+    // cooldown and cause free damage. Metadata-free protocol fixtures retain their legacy path.
+    const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4);
+    if (this.options.basicAttack && ((opcode !== CLIENT_FIELD_OPCODE.attack && !shoot) || !basicMotion)) return;
+    if (shoot) {
       // This path is a basic one-round attack, not an accidental free skill/multi-shot service.
-      const motion = profile?.shoot.find(
-        (entry) => entry.action === attack.action,
-      );
-      if (
-        attack.skillId !== 0 ||
-        attack.hits !== 1 ||
-        attack.targets.length > 1 ||
-        !motion ||
-        attack.speed !== profile?.speed ||
-        attack.projectileSlot === undefined ||
-        !session.at
-      )
-        return;
-      const duration = motion.delays.reduce((sum, delay) => sum + delay, 0);
-      const release = duration - (motion.delays.at(-1) ?? 0);
+      const motion = basicMotion;
+      if (!motion || attack.projectileSlot === undefined || !session.at) return;
+      const duration = attackDuration(motion);
+      const release = shotRelease(motion);
       const direction = attack.facingLeft ? -1 : 1;
+      const range = basicShotRange(session.character, this.options.skills);
       // Selection geometry remains a bounded server policy until the native mob shape pool is ported.
       const targets = attack.targets.filter((target) => {
         const mob = session.instance.mobs.mob(target.mobId);
@@ -2362,8 +2359,8 @@ export class GameEntryServer {
         return (
           mob?.alive &&
           dx >= 0 &&
-          dx <= 265 &&
-          Math.abs(mob.y - session.at!.y) <= 100
+          dx <= range + BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(mob.y - session.at!.y) <= BASIC_SHOT_POSITION_SLOP_Y
         );
       });
       const items = session.character.items;
@@ -2409,12 +2406,7 @@ export class GameEntryServer {
       }
       return;
     }
-    const motion = profile?.melee.find(
-      (entry) => entry.action === attack.action,
-    );
-    if (motion)
-      session.attackReadyAt =
-        now + motion.delays.reduce((sum, delay) => sum + delay, 0);
+    if (basicMotion) session.attackReadyAt = now + attackDuration(basicMotion);
     this.resolveAttackDamage(session, opcode, attack, now, true);
   }
 

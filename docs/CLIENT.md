@@ -1,5 +1,17 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：蹲下／蹲刺／警戒、攻擊雙時鐘與被動射程（未測試）
+
+交叉原5426F0、50D700、512EE0／512F90、508690／508700／50B590、4BD3C1／513C80及WZ。
+地面Down→prone；Down＋Ctrl→獨立32，不隨機混進站立攻擊、不耗彈、不假造徒手劍揮。
+普通／射擊／空中強制攻擊遮蔽輸入，32保留Down但原guard禁止誤抓平台頂繩梯；警戒從接受攻擊起倒數3000。
+拆開30ms逐幀身體時長與raw release；server／remote一起接；移除假160×3動畫／90×72×36範圍。
+自然恢復讀body ID，修正繩梯36/37與jump35的編碼；原range被動接射程，不再永遠200。
+補動作／姿勢合法性、move→attack寫入排序、晚加入姿勢／foothold、資源快取與冷攻擊sfx；不改玩家存檔。
+`/tools`的唯讀閱覽加入普通近戰／32／射擊與弓弩拳套、分層特效／時間數值，無發包／耗彈／音效。
+詳細硬編碼分類、證據、未知與server政策見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)／ADR-069。
+仍非完整CVecCtrl／CShape2D／技能／全global30ms相位；未執行測試、typecheck、語法、browser、VM或probe。
+
 ## 2026-10-18：普通身體動作／武器姿勢／繩梯停格（未測試）
 
 原武器info.walk／info.stand獨立決定walk1/2與stand1/2，雙手劍不是一律walk2。

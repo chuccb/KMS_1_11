@@ -1,3 +1,4 @@
+import { playerPosture } from './posture.mjs';
 /**
  * Browser locomotion, in world pixels and seconds (not pixels per timer callback).
  * Baseline constants from CVecCtrl: sub_5378D0 (-555 jump), sub_537CA0
@@ -169,12 +170,16 @@ function step(body, input, world, dt, mob = false) {
   const jumpSpeed = PHYSICS.jumpSpeed * jumpScale;
   const horizontal = clamp(input.horizontal ?? 0, -1, 1);
   const vertical = clamp(input.vertical ?? 0, -1, 1);
+  // Keep the controller input distinct from residual velocity (50D700).
+  body.moveX = horizontal;
+  body.moveY = vertical;
   const jumping = Boolean(input.jump) && !body.jumpHeld;
   body.jumpHeld = Boolean(input.jump);
   if (horizontal) body.facing = horizontal < 0 ? 1 : 0;
   body.ignoreMs -= dt * 1000;
   if (body.ignoreMs <= 0) body.ignored.clear();
-  if (!knocked && !body.ladder && vertical && !input.jump) {
+  // 5426F0 / listing542AF5: forced32's Down is posture only, not a ladder-grab request.
+  if (!knocked && input.allowClimb !== false && !body.ladder && vertical && !input.jump) {
     const ladder = world.ladders.find((l) => Math.abs(body.x - l.x) <= 8
       && body.y >= l.y1 - (body.grounded && vertical > 0 ? 5 : 0) && body.y <= l.y2 + (body.grounded && vertical < 0 ? 5 : 0)
       && !(body.grounded && vertical > 0 && body.y >= l.y2 - 1));
@@ -269,16 +274,13 @@ export function advanceMob(body, input, world, elapsedMs) {
   return body;
 }
 export function locomotion(body) {
-  if (body.dead) return "dead";
-  if (body.ladder) return body.ladder.ladder ? "ladder" : "rope";
-  if (!body.grounded) return "jump";
-  return Math.abs(body.vx) > 1 ? "walk1" : "stand1";
+  return playerPosture(body);
 }
 export function actionOf(body) {
   // 508FC0 decodes the MOVEMENT state, then selects an avatar action. Those are two tables:
-  // y>>1: walk=1, stand=2, jump=3, alert=4, ladder=7, rope=8, dead=9.
+  // y>>1: walk=1, stand=2, jump=3, alert=4, prone=5, ladder=7, rope=8, dead=9.
   // 35/36/37 (body jump/ladder/rope action ids) must NOT be doubled onto the movement wire.
-  return ({ walk1: 2, stand1: 4, dead: 18, jump: 6, ladder: 14, rope: 16 }[locomotion(body)]) | body.facing;
+  return ({ walk1: 2, stand1: 4, alert: 8, prone: 10, dead: 18, jump: 6, ladder: 14, rope: 16 }[locomotion(body)]) | body.facing;
 }
 
 /** CVecCtrl retains page/group from each contacted foothold even if a later fragment is airborne. */

@@ -11,7 +11,7 @@
 | [ROADMAP](ROADMAP.md) | 現況入口、未完成玩法、工程優先序與交付界線 |
 | [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md) | 原檔／listing／WZ證據優先序、保護規則與研究入口 |
 | [TOOLCHAIN](TOOLCHAIN.md) | 最新正式版鎖定、安裝／啟用、CI與未驗證風險 |
-| [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066、臉部／新隔離體驗見067、普通動作見068，舊編號不重編 |
+| [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066、臉部／新隔離體驗見067、普通動作見068、蹲刺／時序／射程見069，舊編號不重編 |
 | [server README](../server/README.md) | CLI、模組、協定／保存細節與歷史結果 |
 | [CLIENT](CLIENT.md) | 瀏覽器操作、各輪功能與界線；歷史「最新」不能蓋過後續更正 |
 | [RECOVERY_TEST_TOOLS](RECOVERY_TEST_TOOLS.md) | 非原版體驗工具、唯讀UI範例、授權寫入與還原點保護 |
@@ -27,6 +27,7 @@
 
 | 主題 | 文件 |
 |---|---|
+| 本機姿勢／蹲刺／警戒／攻擊雙時鐘／恢復編碼／射程與硬編碼分類 | [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md) |
 | 普通身體動作／武器walk/stand／繩梯停格／唯讀閱覽 | [NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md) |
 | 臉部獨立動畫／眨眼／F鍵／臉飾／遠端受傷 | [NATIVE_FACE_ANIMATION](NATIVE_FACE_ANIMATION.md) |
 | 原tooltip三類版型／實例需求／技能當前下一級 | [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md) |

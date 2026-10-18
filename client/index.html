@@ -533,18 +533,22 @@
             <option value="self">目前穿戴外觀</option><option value="0">無武器</option>
             <option value="1302000">1302000 · 單手劍</option><option value="1402000">1402000 · 雙手劍</option>
             <option value="1412000">1412000 · 雙手斧</option>
+            <option value="1452000">1452000 · 弓</option><option value="1462000">1462000 · 弩</option>
+            <option value="1472000">1472000 · 拳套</option>
           </select></label>
           <label>身體動作 <select id="qa-motion-action">
             <option value="stand1">站立（依武器stand）</option><option value="walk1">走路（依武器walk）</option>
             <option value="alert">警戒姿勢</option><option value="jump">跳躍姿勢</option>
             <option value="ladder">梯子</option><option value="rope">繩索</option>
+            <option value="basicMelee">普通近戰（首動作）</option><option value="proneStab">蹲刺（action32）</option>
+            <option value="basicShoot">普通射擊（首動作，無飛彈）</option>
             <option value="prone">趴下姿勢</option><option value="fly">fly姿勢</option><option value="dead">dead身體姿勢</option>
           </select></label>
           <label><input id="qa-motion-left" type="checkbox" /> 面向左</label>
           <label><input id="qa-motion-climbing" type="checkbox" /> 閱覽器攀爬中（取消可看停格／恢復）</label>
           <canvas id="qa-motion-canvas" width="240" height="140" aria-label="原角色PNG動作閱覽"></canvas>
           <p id="qa-motion-status" aria-live="off"></p>
-          <p>攀爬座標是閱覽器虛擬Y；不移動真角色。這是身體動作閱覽，不是假裝施放飛行技能或觸發死亡／Tomb／音效。</p>
+          <p>攀爬座標是閱覽器虛擬Y；不移動真角色。攻擊僅循環閱覽原PNG／分層特效，不選敵、不耗彈、不發攻擊封包、不出聲；也不假裝施放飛行技能或觸發死亡／Tomb。</p>
         </details>
         <p class="qa-warning">下列寫入操作只操作目前登入角色。能力配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。</p>
         <p id="qa-checkpoint-note"></p>

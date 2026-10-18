@@ -2595,3 +2595,32 @@ prone／fly增加原remote姿勢解碼，不代表新增其操作／物理。
 新增native-avatar-motion及HTTP來源，更新舊motion／jump／client probe來源；全部未執行。
 沿用同preview-faces save，停服冷備後開web8515；不seed／重設角色。啟服非功能PASS。
 提交[skip ci]，只非force推目前Arena分支。詳NATIVE_AVATAR_MOTION.md。
+
+
+## ADR-069：本機姿勢／蹲刺接完整鏈，強制身體與射彈排程分開，硬編碼依證據分類
+
+**日期**：2026-10-18 ｜ **狀態**：程式與回歸來源已編輯；未測試／check／typecheck／語法／browser／VM／probe。
+
+**證據**：vtable5875EC→512EE0→50D700、5426F0與listing542AF5、512F90／4280A0、
+508690／508700／50B590、4C7960、4BC590/listing4BD3C1與513C80；body／14種武器／Afterimage／技能range／sfx WZ。
+
+**決策**：地面姿勢由controller水平／垂直輸入選，不再由vx殘值決定；獨立prone32不污染普通隨機表，
+不用彈藥／徒手假揮；bridge／server／remote／分層Afterimage／冷圖／音效與操作生命週期一起接。
+forced輸入遮蔽含空中，32保留Down但不允許抓梯繩。alert3000從接受攻擊開始，不是結束後才開始。
+抽出共用attack timing：每frame整數縮放後各自30ms倒數丟overshoot，release仍用raw sum-last。
+移除160×3假動畫與舊近戰reach fallback；普通recovery讀body action，不能混用movement>>1。
+本人射程由200＋WZ learned range，弓弩3000002／拳套4000001，不猜文字／不按當前job清除已存被動。
+移動先flush，bridge有field/session守衛的串行move/attack；世界snapshot保留action／foothold，無報告stand4標為server政策。
+LIVE拒絕未支援skill／magic／unknown-action的免費扣血路徑；metadata-free舊fixture保留，不當成營運功能。
+metadata64／retry5秒／server slop65/100／grace30與8ms物理／10Hz發布都是明示重建政策，不冒充原server。
+
+**方便入口**：唯讀viewer加入普通近戰／32／射擊與弓弩拳套、原分層圖／delay／總長；無選敵／耗彈／音效／發包／save寫入。
+唯讀戰鬥資料顯示movement/body/forced三種編碼、alert倒數與射程。
+
+**界線**：未完成全CVecCtrl／CShape2D、原global tick/RNG、全部Gr2D、active buff／技能消耗／AI／正式反作弊。
+remote無別人學技表，空射視覺保留基本200不猜被動。原server未知，驗證／容差規則明示為政策。
+快取clear abort與late result、look/facing/prone/field/modal/生命守衛；不以歷史PASS或啟服當功能通過。
+
+新增posture/timing與cache回歸來源，擴充WZ／弱STR傷害／wire32／range／晚加入姿勢／forced梯頂guard；
+只維護歷史VM import shim，未認證／執行。沿用已有遊玩進度的preview-faces檔，停服冷備後同檔重啟web8515。
+提交[skip ci]，只非force推目前Arena分支。詳 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)。

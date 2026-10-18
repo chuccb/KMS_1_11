@@ -210,7 +210,7 @@ test("linked mob takes action ability/death/art but not HP/name/speed/bodyAttack
 
 
 test("508FC0 movement states are not doubled avatar-action ids; mob hit1 is NOT a user ladder", () => {
-  assert.equal(actionOf({grounded:true,vx:125,facing:1}),3);
+  assert.equal(actionOf({grounded:true,vx:125,moveX:-1,facing:1}),3);
   assert.equal(actionOf({grounded:true,vx:0,facing:0}),4);
   assert.equal(actionOf({grounded:false,vx:0,facing:1}),7);
   assert.equal(actionOf({ladder:{ladder:true},facing:0}),14);

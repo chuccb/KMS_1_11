@@ -142,3 +142,13 @@ LIVE入口是web8495，不是login8496／game8497。已有角色與其他最新�
 不自動發、不重seed、不扣錢。I→消耗欄連點使用原藥水；速度+8／180秒、同欄刷新不疊加。
 工具內有唯讀速度／跳躍百分比與剩餘秒數，一般遊戲畫面只畫原raw圖示。
 這是獨立於能力／技能plan的固定道具體驗發放；來源、到期及斷線政策見 [TEMPORARY_STATS](TEMPORARY_STATS.md)。
+
+## 後續：唯讀普通攻擊與姿勢資料（2026-10-18，未測試）
+
+既有身體閱覽增加弓／弩／拳套、近戰首動作、蹲刺32、射擊首動作，原前後plane之間畫Afterimage。
+顯示真frame／raw縮放delay／30ms倒數身體總長；循環僅為工具，不出聲／飛彈／選敵／耗彈／寫入或發攻擊。
+無武器或不支援該動作時明示，不借用其他武器圖片。仍為look副本與獨立actor。
+唯讀戰鬥欄新增movement byte、body ID、forced action、alert剩餘與200＋WZ被動range；
+自然恢復主線也改傳正確body ID，繩梯36/37不是movement7/8。
+原碼證據、硬編碼意義、server政策與未完成範圍見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)。
+沿用已有遊玩進度的preview-faces存檔；本輪僅停服冷備，不重seed／重置等級或物品。全部回歸來源未執行。

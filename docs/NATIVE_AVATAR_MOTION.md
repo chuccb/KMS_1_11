@@ -1,3 +1,7 @@
+> 2026-10-18後續（未測試）：本機prone／32蹲刺、攻擊接受時起3000警戒、強制動作逐幀30ms與raw release拆分、
+> 恢復body ID、原被動射程與資源／封包生命週期見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)／ADR-069。
+> 下方是前輪紀錄，其「尚未實作」與raw攻擊時間敘述須按後續更正閱讀。
+
 # 原角色普通動作：武器姿勢、WZ幀序列、30ms倒數與繩梯停格
 
 2026-10-18，ADR-068。**本輪沒有執行test／check／typecheck／語法檢查／browser／VM／HTTP／登入或遊戲probe。**

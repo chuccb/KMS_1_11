@@ -118,3 +118,15 @@ test("fresh drop/shop equips use templates; thrown/scrolled objects retain exact
   assert.equal(keeper.buy(items,wallet,shop,1302000,1).kind,"bought");assert.equal(wallet.balance,9);
   assert.equal((items.inventories[0]!.items.get(3) as {pad:number}).pad,17);
 });
+
+// Prone chain regression SOURCE ONLY, not executed in this delivery.
+test("action32 uses the original weak STR branch, not normal sword coefficient or ammunition",needsWz,()=>{
+  const catalog=itemCatalogOf(WzArchive.open(data))!,c=fixture();
+  c.items!.worn.set(11,equipmentFromTemplate(1302000,catalog)!);
+  const basis=characterStatBasis(c,catalog),totals=statTotals(basis);
+  let trace:PhysicalAttackTrace|undefined,draws=0;
+  const damage=rollNativePhysical(c,basis,totals,{level:1,pd:0,eva:0},32,0,0,undefined,
+    ()=>{draws++;return 9999999;},value=>{trace=value;});
+  assert.equal(damage,3);assert.equal(trace!.action,32);assert.equal(trace!.ammoPad,0);assert.equal(draws,7);
+  assert.equal(rollNativePhysical(c,basis,totals,{level:1,pd:0,eva:0},5,0,0,undefined,()=>9999999),21);
+});

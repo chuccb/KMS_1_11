@@ -43,7 +43,7 @@ test('jump rises, falls and lands; a held jump does not repeatedly bounce', () =
   run(b, { jump: true }, flat, 160);
   assert.ok(b.y < 40);
   assert.equal(locomotion(b), 'jump');
-  assert.equal(actionOf(b), 70);
+  assert.equal(actionOf(b), 6); // movement jump3, NOT avatar jump35 doubled; source-only update.
   run(b, { jump: true }, flat, 1840);
   assert.equal(b.y, 100);
   assert.equal(b.grounded, true);
