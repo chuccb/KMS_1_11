@@ -12,6 +12,7 @@
 |---|---|
 | 找功能與歷史紀錄 | [文件索引](docs/README.md) |
 | 理解實際目錄、資料流與技術債 | [現行架構](docs/ARCHITECTURE.md) |
+| 看與原版仍有哪些差異／遺漏 | [現況總盤點](docs/ORIGINAL_PARITY_AUDIT.md)（含部分完成／未接／未知與程式入口） |
 | 看下一步與已知缺口 | [路線圖](docs/ROADMAP.md) |
 | 查還原方法與證據規則 | [還原原則](docs/REBUILD_PRINCIPLES.md) |
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
@@ -118,7 +119,7 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 | ↑／↓ | 繩梯；地面靠門 ↑ 使用，type3 自動門靠近觸發 |
 | F1–F7／上方表情按鈕 | hit／smile／troubled／cry／angry／bewildered／stunned，長按不重送 |
 | Ctrl | 普通近戰／蹲刺／基本射擊 |
-| K技能列雙擊／圖示拖到七鍵 | 本批十個主動技能；原七快捷鍵與藥水共用格，見[技能範圍](docs/NATIVE_RANGED_SKILLS.md) |
+| K技能列雙擊／圖示拖到七鍵 | 目前12個主動技能白名單；原七快捷鍵與藥水共用格，見[遠距](docs/NATIVE_RANGED_SKILLS.md)／[魔法](docs/NATIVE_MAGIC_SKILLS.md) |
 | I／E／S／K／M | 背包／裝備／能力／技能／小地圖 |
 | 背包雙擊／拖放 | 支援的消耗品、穿脫、換位；拖到真正場景可能丟棄 |
 | 背包金幣鈕／商店충전 | 楓幣丟棄／飛鏢補充，確認後由服務端落帳 |
@@ -139,7 +140,7 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 
 - 本輪射擊技能與彈藥交易、原攻速欄識別／換武器失效、ACK時鐘更正已實作；沒有猜Booster施放幅度或Magic Guard的server規則。
 
-- 十個主動技能：原七技＋Arrow Blow／Double Shot／Lucky Seven、多彈藥／獨立公式／真彈體／攻速消費鏈：[本輪證據](docs/NATIVE_RANGED_SKILLS.md)／ADR-071、[第一批](docs/ACTIVE_SKILLS.md)，**未測試**。
+- 遠距技能階段（當時十招；後接兩魔法共12招）：原七技＋Arrow Blow／Double Shot／Lucky Seven、多彈藥／獨立公式／真彈體／攻速消費鏈：[本輪證據](docs/NATIVE_RANGED_SKILLS.md)／ADR-071、[第一批](docs/ACTIVE_SKILLS.md)，**未測試**。
 
 - 原道具／裝備／技能 tooltip：normal icon 2×、需求圖字、真正 instance stats、當前／下一級 hs。
   [交付與原版證據](docs/NATIVE_RICH_TOOLTIPS.md)／ADR-064，**未測試**。

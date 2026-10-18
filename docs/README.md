@@ -8,6 +8,7 @@
 | 文件 | 用途 |
 |---|---|
 | [ARCHITECTURE](ARCHITECTURE.md) | 實際瀏覽器／Node資料流、目錄、共用規則與技術債 |
+| [ORIGINAL_PARITY_AUDIT](ORIGINAL_PARITY_AUDIT.md) | 對原版的現行差異／部分完成／未接／未知總盤點、程式入口與優先序（基準4f9ad1b；未執行驗證） |
 | [ROADMAP](ROADMAP.md) | 現況入口、未完成玩法、工程優先序與交付界線 |
 | [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md) | 原檔／listing／WZ證據優先序、保護規則與研究入口 |
 | [TOOLCHAIN](TOOLCHAIN.md) | 最新正式版鎖定、安裝／啟用、CI與未驗證風險 |
@@ -49,7 +50,7 @@
 | 裝備能力／傷害鏈修補 | [NATIVE_EQUIPMENT_DAMAGE_FIX](NATIVE_EQUIPMENT_DAMAGE_FIX.md) |
 | 有效能力／Detail／普通物理 | [NATIVE_STATS_COMBAT](NATIVE_STATS_COMBAT.md) |
 | HP／MP成長與AP | [STAT_GROWTH](STAT_GROWTH.md) |
-| 十個主動技能／七鍵／多彈藥／Lucky Seven／攻速消費鏈 | [NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)、[第一批七技](ACTIVE_SKILLS.md) |
+| 遠距階段十招／七鍵／多彈藥／Lucky Seven／攻速消費鏈（後接兩魔法共12招） | [NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)、[第一批七技](ACTIVE_SKILLS.md) |
 | 技能書／SP／前置與滿級 | [SKILLS](SKILLS.md) |
 | 暫時能力／消耗品 | [TEMPORARY_STATS](TEMPORARY_STATS.md) |
 | 受擊／擊退／復活 | [NATIVE_CONTACT_REVIVE](NATIVE_CONTACT_REVIVE.md) |
