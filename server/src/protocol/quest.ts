@@ -16,7 +16,7 @@
  *   u8  unknown      read first, never used again (see below)
  *   u32 npcId        read, never used again
  *   u8  subOp        0..4; anything else is dropped without a word
- *   <body>           per subOp; the handler builds a `CUtilDlg` (0x3E4 bytes) and **runs it
+ *   <body>           per subOp; the handler builds a `CUtilDlgEx` (0x3E4 bytes) and **runs it
  *                    modally** (`sub_461DD0` = `sub_5526D0(n3000, dlg+84)` loop, return `dlg+80`),
  *                    so the packet is fully consumed before the client answers.
  *
@@ -61,7 +61,9 @@
  *                     50000))`. So the three `u32`s are read in that order.
  *   kind 4 (subOp 4)  answer `1` plus a `u32` from the dialog's selection field, which
  *                     `sub_535AC0` initialises to `-1`; nothing local builds this type, so what it
- *                     shows is *not* decoded - this codec keeps it, the game layer never sends it.
+ *                     shows is #L<number>#..#l selection runs (5338A0 / 533350 / 5333D0).
+ *                     532E60 failed decompilation, but .lst shows it draws only the text frame;
+ *                     the shared header Close remains. This game layer does not run menu scripts.
  *
  * The answer itself (`sub_4A1EA0(&buf, 21, 0)` + `sub_43AD50`, i.e. opcode **0x15**) is
  * `u8 subOp`, `u8 answer`, then the string / the u32 for the two shapes that carry one. `0xFF` is
@@ -91,7 +93,7 @@ export const QUEST_TALK = {
   askText: 2,
   /** Dialog kind 2: number input - the answer carries the number the player typed. */
   askNumber: 3,
-  /** Dialog kind 4: its shape is decoded, its contents are not; this server never sends it. */
+  /** Dialog kind 4: #L<number># selection runs; the game layer has no original quest scripts. */
   menu: 4,
 } as const;
 
@@ -114,11 +116,11 @@ export interface QuestTalkSay {
   kind: "say";
   message: string;
   /**
-   * The two `u8`s of `sub_535C60(dlg, a, b)`, which stores them in the dialog. Their meaning is not
-   * decoded: the client's own notice box (`sub_535C60(dlg, 0, 0)`, 338651) passes zeroes, and this
-   * server does the same - the button labels are the dialog's own.
+   * sub_535C60 -> +128 -> 532500: nonzero shows BtPrev (reply 0).
+   * Legacy field name retained for codec/capture compatibility; this byte is NOT ignored.
    */
   unknownA?: number;
+  /** +132: nonzero chooses BtNext; zero chooses BtOK. Either replies 1. */
   unknownB?: number;
 }
 
@@ -154,7 +156,7 @@ export interface QuestTalkAskNumber {
   max: number;
 }
 
-/** Dialog kind 4 (`sub_535E30`): decoded, but never built by this server - see the header. */
+/** Dialog kind 4 (`sub_535E30`): selection markup, currently never built by game quest scripts. */
 export interface QuestTalkMenu {
   kind: "menu";
   message: string;

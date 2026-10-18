@@ -1,3 +1,5 @@
+import {dialogueExample} from "./dialogue-examples.mjs";
+import {npcDialogue} from "./npcdialogue.mjs";
 import {nativeCursor} from "./cursor.mjs";
 import {npcContains, releaseOnInterrupt} from "./pointer.mjs";
 import {drawTextTooltip} from "./tooltip.mjs";
@@ -147,15 +149,6 @@ const ui = {
     document.getElementById("log-toggle")
   ),
   dialogue: /** @type {HTMLElement} */ (document.getElementById("dialogue")),
-  dialogueText: /** @type {HTMLElement} */ (
-    document.getElementById("dialogue-text")
-  ),
-  dialogueOk: /** @type {HTMLButtonElement} */ (
-    document.getElementById("dialogue-ok")
-  ),
-  dialogueClose: /** @type {HTMLButtonElement} */ (
-    document.getElementById("dialogue-close")
-  ),
 };
 
 const gameCursor = nativeCursor({
@@ -297,7 +290,7 @@ const itemInfo = new Map();
 const itemInfoPending = new Map();
 /** The shop `0x4A` opened, or undefined when no NPC's window is up. */
 let shop;
-/** The NPC whose `0x47` line is on screen, or undefined when the dialog is closed. */
+/** Modal sentinel for a 0x47 dialog or explicitly marked local UI example; otherwise undefined. */
 let talkingNpc;
 
 /** The four tabs of the sheet, in the order `sub_4DA440` adds them to its `CCtrlTab`. */
@@ -405,6 +398,7 @@ function connect() {
     ui.status.textContent = "連線結束。重新載入頁面再試一次。";
     ui.status.classList.add("bad");
     buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
+    closeDialogue(false);
     logLine("websocket closed");
     if (quitToTitle) {
       quitToTitle = false;
@@ -729,9 +723,9 @@ function handle(message) {
       return;
 
     case "npc-say":
-      talkingNpc = message.npcId;
-      ui.dialogueText.textContent = String(message.message);
-      ui.dialogue.classList.remove("hidden");
+      if (npcDialog.preview) closeDialogue(false); // Real server dialog always supersedes a local example.
+      if (!npcDialog.show(message.npcId, message.body ?? {kind:"say",message:String(message.message)}))
+        logLine("NPC dialog already open; did not replace the current modal.");
       return;
 
     case "user-enter":
@@ -1022,6 +1016,7 @@ function handle(message) {
       return;
 
     case "disconnect":
+      closeDialogue(false);
       portalPending = false;
       setLoginPending(false);
       ui.status.textContent = `伺服器斷線：${message.reason}`;
@@ -1223,7 +1218,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
-    itemDialog.open || systemPanel.visible || testToolsPanel.open ||
+    itemDialog.open || systemPanel.visible || testToolsPanel.open || talkingNpc !== undefined ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -3109,6 +3104,7 @@ function frame() {
   drawQuickDrag();
   systemPanel.draw();
   itemDialog.draw();
+  npcDialog.draw();
   revivePanel.draw(now);
   requestAnimationFrame(frame);
 }
@@ -5075,16 +5071,10 @@ function closeShop(notify = true) {
   if (notify) send({ t: "shop", action: "close" });
 }
 
-/**
- * The NPC dialog (`0x47`). `確定` sends the primary answer, which the server advances on; `關閉`
- * sends the secondary one, which ends the conversation - exactly the two buttons the 2003 client
- * offers. The box closes on either, and reappears if the server sent another line.
- */
-function closeDialogue(notify = true, answer = 0) {
-  ui.dialogue.classList.add("hidden");
-  if (talkingNpc === undefined) return;
-  talkingNpc = undefined;
-  if (notify) send({ t: "talk", answer });
+/** ESC/header close is 0xFF for say/confirm, not the previous-page answer (0). */
+function closeDialogue(notify = true) {
+  npcDialog.close(notify);
+  if (!notify) talkingNpc = undefined;
 }
 
 /**
@@ -5241,8 +5231,6 @@ ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 document
   .getElementById("inv-toggle")
   ?.addEventListener("click", () => toggleInventory());
-ui.dialogueOk.addEventListener("click", () => closeDialogue(true, 1));
-ui.dialogueClose.addEventListener("click", () => closeDialogue(true, 0));
 
 // The 2003 client sends these from F1..F7 (`sub_511E20` case 10); a browser cannot take those keys
 // (F1 is help, F5 reloads), so the page offers the same seven faces as buttons.
@@ -5269,7 +5257,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
     return;
   }
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     document.activeElement instanceof HTMLInputElement &&
@@ -5563,7 +5551,7 @@ const statPanel = statWindow({
 const skillPanel = skillWindow({
   ctx, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
-  log: logLine, isModal: () => (itemDialog.open || systemPanel.visible) || testToolsPanel.open,
+  log: logLine, isModal: () => (itemDialog.open || systemPanel.visible) || testToolsPanel.open || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5672,6 +5660,7 @@ const testToolsPanel = testTools({
   },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
   onOpen(){localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
+  openDialogue:openDialogueExample,
 });
 document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();if(document.hidden){keys.clear();lastPhysicsAt=undefined;}});
 
@@ -5689,6 +5678,36 @@ const itemDialog = itemDialogs({
   },
 });
 
+
+const npcDialog = npcDialogue({ctx,image:artImage,audio,point:viewPoint,
+  onOpen() {
+    talkingNpc = true; // Modal sentinel only; native code does not use the packet NPC id.
+    localActionEpoch++;keys.clear();ui.say.blur();
+    itemDialog.close(false);systemPanel.close(false,false);testToolsPanel.close();
+    chatHistoryPanel.cancelDrag();quickDrag=itemDrag=undefined;
+    inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
+    inventoryPick=inventoryHover=equipHover=pointerAt=undefined;
+  },
+  onReply(reply, context) {
+    talkingNpc=undefined;
+    if(context?.preview) {
+      logLine(`UI 範例（未送封包）：${JSON.stringify(reply)}`);
+      if(reply.kind === "say" && reply.answer !== 255 &&
+          ((context.page === 0 && reply.answer === 1) || (context.page === 1 && reply.answer === 0)))
+        openDialogueExample("say",reply.answer === 1 ? 1 : 0);
+      return;
+    }
+    send({t:"talk",...reply});
+  },
+});
+
+function openDialogueExample(kind, page = 0) {
+  const body=dialogueExample(kind,page);
+  if(!body || loginStage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
+      talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible ||
+      shop!==undefined || shopPending || slotPending || mesoPending || portalPending)return false;
+  return npcDialog.show(0,body,{preview:true,page});
+}
 
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),

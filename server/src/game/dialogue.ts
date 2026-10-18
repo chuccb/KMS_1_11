@@ -1,29 +1,11 @@
 /**
  * Talking to an NPC: where the words come from, and the little state one conversation has.
  *
- * The `0x47` packet carries the text itself (`protocol/quest.ts`), so the server has to *have* the
- * text. It does not have to invent it: this build keeps every NPC's lines in the NPC's own image.
- *
- *   Npc/<7-digit id>.img
- *     info
- *       name    "로빈"
- *       quest   "begin5"          <- the script name this build carries for the NPC
- *       speak   0 = "여기는 몬스터들이 나오니까 특히 조심해야 해!"
- *               1 = "왼쪽 ctrl 키를 누르면 ..."
- *               ...               <- the lines, in index order
- *
- * (`wz dump Npc/0002003.img` prints exactly that; the animation groups below `info` each carry a
- * `speak` list of their own, which is what the client shows while the NPC is in that animation -
- * a wrinkle for the day the server drives NPC animation, not for `info/speak`, which is the "just
- * standing there" list this server uses.)
- *
- * `info/quest` is read but never interpreted: what a script name means is the business of a quest
- * system, and this client has none (its `0x46`/`0x48` have no handler and `0x47` is dialogs only,
- * FINDINGS 4.23). Carrying it in the template means the day one is found, the data is already here.
- *
- * The same `Npc/<id>.img` rule `game/npcs.ts` applies holds: an image that is not in the archive is
- * a data problem, and a `life` entry that has one but no `speak` list simply says nothing - the
- * server then answers a click with the release byte alone rather than with an empty dialog.
+ * The WZ lines below are the original idle-speech pool (49A0C0 / 499C00), NOT quest scripts.
+ * This reconstruction exposes that pool as a paged click conversation as a LOCAL SERVER POLICY.
+ * That makes the original words readable without pretending to have recovered info.quest scripts.
+ * info.quest is retained as data only. Per-action speak belongs to idle animation, not these pages.
+ * Missing images/speech do not cause invented text or a fabricated quest reward.
  */
 import type { WzArchive } from "../wz/archive.ts";
 import { asText, entriesOf, infoOf } from "../wz/props.ts";
@@ -88,7 +70,7 @@ export function npcDialogueProvider(archive: WzArchive): (templateId: number) =>
 /**
  * One conversation: the NPC, its lines, and how far the player has read.
  *
- * The client runs a `CUtilDlg` **modally** inside the `0x47` handler and refuses a second `0x47`
+ * The client runs a `CUtilDlgEx` **modally** inside the `0x47` handler and refuses a second `0x47`
  * while it is up (`CQuestMan+4`, FINDINGS 4.23), so a conversation is a strict turn-taking pair:
  * one packet out, one `0x15` in. That is exactly what this class holds - the current line, and the
  * next one to send - and nothing else: no timers, no ids, no copy of what the client shows.
@@ -126,8 +108,16 @@ export class NpcTalk {
     return encodeQuestTalk({
       unknownA: 0,
       npcId: this.npcId,
-      body: { kind: "say", message: this.lines[this.index]! },
+      body: { kind: "say", message: this.lines[this.index]!,
+        unknownA:this.index > 0 ? 1 : 0, unknownB:this.index + 1 < this.lines.length ? 1 : 0 },
     });
+  }
+
+  /** The secondary say button is previous, not cancellation. No underflow on the first page. */
+  previous(): Uint8Array | undefined {
+    if (this.index === 0) return undefined;
+    this.index -= 1;
+    return this.packet();
   }
 
   /**

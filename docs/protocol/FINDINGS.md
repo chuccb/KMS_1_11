@@ -2394,8 +2394,8 @@ u8 3 close     （沒有了）                                  // 關窗
 ### 4.23 ✅ NPC 對話：`0x47`（s2c）與 `0x15`（c2s）
 
 「跟 NPC 說話」在這份 build 裡就是**一個對話框封包**：伺服器把要說的話放進 `0x47`，client 用
-`CUtilDlg` 把字畫出來、跑成 modal、把玩家的選擇用 `0x15` 送回來。沒有任務狀態、沒有腳本下載 ——
-client 連任務 UI 都沒有，`0x46`／`0x48` 連 handler 都不存在（下表）。
+`CUtilDlgEx` 把字畫出來、跑成 modal、把玩家的選擇用 `0x15` 送回來。沒有在這條封包找到任務狀態或腳本下載；`0x46`／`0x48` 沒有 handler（下表），
+**但這不代表原伺服器沒有任務腳本**。info.quest 的原腳本仍未重建。
 
 #### 4.23.1 分派與欄位
 
@@ -2434,7 +2434,7 @@ body（`sub_432680`／`sub_45DC40`／`sub_45DC80`／`sub_45DCC0` 的讀取順序
 | 4 `kind 4` | 4 | `str message` | `u8 4`、`u8 answer`［= 1 時再接 `u32`］|
 
 五個 handler（`sub_4A5A80`／`4A5D00`／`4A5F40`／`4A6320`／`4A65C0`，175089-175760）都是同一個形狀：
-`sub_535AC0(dlg, kind, 1, message)` 開一個 `CUtilDlg`（0x3E4 bytes），再呼叫**一個** setter
+`sub_535AC0(dlg, kind, 1, message)` 開一個 `CUtilDlgEx`（0x3E4 bytes），再呼叫**一個** setter
 （`sub_535C60`／`sub_535C80`／`sub_535CE0`／`sub_535C90`／`sub_535E30`，即上表的 kind）、
 `sub_530CE0` 置中顯示，然後 `sub_461DD0` **把對話框跑成 modal**（`sub_5526D0(n3000, dlg+84)` 迴圈，
 回傳 `dlg+80`）。所以：封包一定先被完整讀完，玩家的回答才可能送出；`sub_4A5910` 在回包之後把
@@ -2464,8 +2464,8 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
 | 4 | **沒有本地呼叫者** | — | `dlg+164`（`sub_535AC0` 初始化成 `-1`；`sub_5333D0` 在列上取值時寫入的是「列的 `+36`」）|
 
 ⇒ kind 2 = **輸入數字**（回一個 `u32`）、kind 3 = **輸入文字**（回一個字串，兩個 `s16` 是長度範圍、
-`-1` 也合法）、kind 0 = 有主要按鈕的文字框、kind 1 = 是／否。kind 4 只有「回傳 `u32`」是確定的，
-內容沒有本地對照組，**本伺服器不送它**（codec 有，遊戲層沒有呼叫者）。
+`-1` 也合法）、kind 0 = 有主要按鈕的文字框、kind 1 = 是／否。kind 4 是 `#L<number>#..#l` 選項（2026-10-18再交叉5338A0／533350／5333D0）。
+`532E60` 反編譯失敗但listing完整：只畫文字框，沒有額外OK／Cancel；共享header Close仍在。遊戲層尚無原任務呼叫者。
 
 #### 4.23.3 我們這一側（`protocol/quest.ts`／`game/dialogue.ts`／`protocol/cp949.ts`）
 
@@ -2474,9 +2474,10 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
   煙霧測試用）與 read（伺服器用）。golden bytes 在 `server/test/quest.test.ts`。
 - `game/dialogue.ts`：台詞**不是我們編的**，是 `Npc/<7 位 id>.img -> info/speak`
   （數字鍵的 property 清單，`0`、`1`、…；`info/quest` 例如 `begin5`／`rina` 原樣帶著不解釋）。
+  **這是原待機自言自語池，不是任務腳本**（49A0C0／499C00）；點擊分頁屬本地政策。
   `NpcTalk` 只記「這隻 NPC、這幾句、講到第幾句」。
 - 遊戲層接法（**我們的選擇**，binary 裡沒有伺服器可以對照）：`0x33` 點 NPC → 有商店 → `0x4A`；
-  沒商店 → `0x47 say` 的第一句；`0x15` 的 `answer == 1` → 下一句，其餘（第二個按鈕／ESC／關窗）→ 結束；
+  沒商店 → `0x47 say` 的第一句；`0x15` 的 `answer == 1` → 下一句，`answer == 0` → 上一頁，FF（ESC／關窗）→ 結束；
   NPC 沒有 `info/speak`（出貨資料裡的「메이플운수 중형택시」就是）→ 只回 `0x19`。
   對話進行中再點一次同一個 NPC 只回 `0x19`（送第二個 `0x47` 會讓 client 丟例外）。
 - `protocol/cp949.ts`：**字要送出去就得是 CP949**。client 的 `sub_432680` 是 `u16 長度` + 原始 bytes，
@@ -2484,6 +2485,20 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
   的編碼）。Node 只有 CP949 的**解碼器**（`TextDecoder("euc-kr")`），所以反向表是第一次用到時
   「把 126 × 190 個合法 lead/trail 解一次再反轉」建出來的；編不出來的字元**丟例外**而不是送出去變亂碼
   （Latin-1 的重音字母不在這個字碼頁裡、emoji 也不在；漢字／假名／希臘／西里爾在）。
+
+#### 4.23.4 2026-10-18交叉補充（ADR-061，實作／回歸來源未執行）
+
+- `535C60` 的body兩byte不是ignored：+128非零出BtPrev，+132非零出BtNext、零出BtOK（532500）。
+- `52FEB0`明設CUtilDlgEx vtable。`.lst 005BE990` 的連續UTF-16為完整`UI/UIWindow.img/UtilDlgEx`，
+  不是.c切開後的`UI`。5309B0在serverFlag=1時加2，故為Ex2；header同理為BtUIClose2。
+- 531FB0 `.lst` ret10h僅四個stack args，.c的多餘args是反編譯錯誤；七筆FillRect與五色從push順序交叉還原。
+- 530C20／530CA0／535E40／535EF0給出width300/230、padding8/2、240普通文字上限、8px scroll步及各kind高度。
+- Browser/session現在保留所有五種body並依當前kind回0x15；現有game仍只產say。
+  對話窗範例為明示本地唯讀工具，不發任務封包或角色寫入。
+- 40C730的NPC預設delay180，已修掉1000ms。49A0C0 idle4–12秒抽選與499C00 speech5000ms已定位，
+  但0x2F/0x3D action index疑點與controller／移動同步仍未完成，不臆造wire。
+- 完整表格、原色、操作入口、markup／browser字型限制與保存見[原NPC對話](../NATIVE_NPC_DIALOGUE.md)。
+  **沒有執行測試、typecheck或browser/probe。**
 
 ### 4.24 ✅ 一張地圖上的多個玩家：哪些封包是「世界的事實」（`game/world.ts`，ADR-012）
 

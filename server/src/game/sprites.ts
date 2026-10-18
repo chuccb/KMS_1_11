@@ -78,7 +78,7 @@ export function spriteFrames(
             : frameDelay(
                 node,
                 name,
-                defaultDelay ?? (image.startsWith("Mob/") || candidate === "move" ? 180 : 1000),
+                defaultDelay ?? (image.startsWith("Mob/") || image.startsWith("Npc/") || candidate === "move" ? 180 : 1000),
               ),
         ox: art.ox,
         oy: art.oy,

@@ -628,19 +628,24 @@ test("clicking a talking NPC walks its lines, and 0x15 ends the conversation", {
   const first = await browser.nextKind("npc-say");
   assert.equal(first.npcId, npc.npcId);
   assert.equal(first.message, "first line");
+  assert.deepEqual(first.body,{kind:"say",message:"first line",unknownA:0,unknownB:1});
 
   // The primary button advances; the dialog is modal, so the server sends exactly one line per
   // answer and nothing at all after the last one.
   browser.send({ t: "talk", answer: 1 });
   assert.equal((await browser.nextKind("npc-say")).message, "second line");
+  browser.send({t:"talk",answer:0});
+  assert.equal((await browser.nextKind("npc-say")).message,"first line");
+  browser.send({t:"talk",answer:1});
+  assert.equal((await browser.nextKind("npc-say")).message,"second line");
   browser.send({ t: "talk", answer: 1 });
   const quiet = await browser.quiet(200);
   assert.deepEqual(quiet.filter((message) => message.t === "npc-say"), []);
 
-  // A second click starts a new conversation from the first line; the secondary button ends it.
+  // A second click starts at the first line; header Close/ESC is FF, not Prev (0).
   browser.send({ t: "click", objectId: npc.npcId });
   assert.equal((await browser.nextKind("npc-say")).message, "first line");
-  browser.send({ t: "talk", answer: 0 });
+  browser.send({ t: "talk", answer: 255 });
   browser.send({ t: "talk", answer: 7 });
   assert.match(String((await browser.nextKind("error")).message), /talk answer must be 0 or 1/);
 

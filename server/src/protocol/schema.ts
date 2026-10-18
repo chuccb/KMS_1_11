@@ -1385,10 +1385,10 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "unknownA", type: "u8", note: "the packet opens with it; read by the client and never used again" },
       { name: "npcId", type: "u32", note: "ignored by the client just like unknownA; this server puts the NPC's pool id here" },
-      { name: "subOp", type: "u8", note: "0 say, 1 confirm, 2 askText, 3 askNumber, 4 kind 4; >4 is dropped" },
+      { name: "subOp", type: "u8", note: "0 say, 1 confirm, 2 askText, 3 askNumber, 4 selection menu; >4 is dropped" },
       { name: "message", type: "string", note: "every sub-op; CP949 bytes behind a u16 length" },
-      { name: "unknownA", type: "u8", note: "sub-op 0 only, stored by sub_535C60; meaning not decoded" },
-      { name: "unknownB", type: "u8", note: "sub-op 0 only, stored by sub_535C60; meaning not decoded" },
+      { name: "unknownA", type: "u8", note: "sub-op 0 only: nonzero shows BtPrev, secondary answer 0 (535C60 / 532500)" },
+      { name: "unknownB", type: "u8", note: "sub-op 0 only: nonzero BtNext, zero BtOK; either primary answer 1" },
       { name: "defaultText", type: "string", note: "sub-op 2 only: the edit box's initial text" },
       { name: "minLength", type: "s16", note: "sub-op 2 only, with maxLength; the client's own caller passes (4, 12)" },
       { name: "maxLength", type: "s16", note: "sub-op 2 only" },

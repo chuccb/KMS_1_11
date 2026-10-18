@@ -53,7 +53,7 @@ function roundTrip(packet: QuestTalk): QuestTalk {
 // 0x47: the five shapes
 // ---------------------------------------------------------------------------
 
-test("0x47 say: u8 unknown, u32 npcId, u8 sub-op, CP949 text, two ignored bytes", () => {
+test("0x47 say: u8 unknown, u32 npcId, u8 sub-op, CP949 text, Prev/Next bytes", () => {
   const bytes = encodeQuestTalk({
     unknownA: 0,
     npcId: 7,
@@ -337,7 +337,7 @@ test("NpcTalk walks the lines and stops at the last one", () => {
   assert.equal(talk.lineCount, 2);
   assert.equal(talk.lineIndex, 0);
   const first = readQuestTalk(new PacketReader(talk.packet(), 1));
-  assert.deepEqual(first, { unknownA: 0, npcId: 4, body: { kind: "say", message: "one", unknownA: 0, unknownB: 0 } });
+  assert.deepEqual(first, { unknownA: 0, npcId: 4, body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 } });
 
   const second = talk.advance();
   assert.ok(second);

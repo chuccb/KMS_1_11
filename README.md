@@ -1,15 +1,20 @@
 # KMS 1.11 重建工作區
 
-最新還原（2026-10-18，未測試）：原版 arrow 游標與熱點、遊戲／DOM 控件統一游標、NPC 原 dc 命中框／黃色名牌／linked 素材，
-原提示框 frame、Canvas 按鈕狀態／音效與拖曳／失焦清理。
-[原檔交叉證據、實作界線與保存紀錄](docs/NATIVE_CURSOR_NPC_POINTER.md)／ADR-060；啟服不代表功能 PASS。
+最新還原（2026-10-18，未測試）：原 NPC frame 缺省180ms、CUtilDlgEx2 原素材／尺寸與色框、
+Prev／Next／OK、ESC正確回覆、五種對話body與CP949輸入／選項驗證、modal隔離及唯讀範例入口。
+[原檔交叉證據、操作入口與未完成界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；原NPC任務腳本及待機自言自語同步仍未恢復，啟服不是PASS。
 
 以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
 瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：依原 EXE／listing／Gr2D／WZ 補單張 arrow 游標，覆蓋登入／選角／遊戲及原生 DOM 控件，隨既有顯示縮放。
+- **本輪（2026-10-18，未測試）**：以反編譯／listing／WZ交叉補原CUtilDlgEx2對話框，修Prev=0／ESC=FF、長文scroll、五種body與實際sub-op回覆。
+  補CP949 bytes／number／menu驗證、modal焦點與IME／失焦保護，修NPC缺省frame180ms。
+  工具列「體驗工具」新增五種唯讀UI範例，明示非任務、不發0x15、不改角色；原quest腳本和NPC idle同步仍缺。
+  [完整來源、入口及界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；未執行test/check/typecheck/browser/VM/probe，同save冷備份後重開LIVE。
+
+- **前輪（2026-10-18，未測試）**：依原 EXE／listing／Gr2D／WZ 補單張 arrow 游標，覆蓋登入／選角／遊戲及原生 DOM 控件，隨既有顯示縮放。
   NPC 改讀原 dc 框與 name，補黃色名牌與 linked 動作圖；提示框改原 A0000040／切角／邊界，item／skill 完整排版仍未完成。
   補 Canvas 按鈕 hover 音效／CLOSE states、logical-button 配對，修重複 mouseup 與拖窗誤點；失焦／取消／隱藏分頁取消拖曳。
   [完整交叉來源與界線](docs/NATIVE_CURSOR_NPC_POINTER.md)／ADR-060；保留同 save，冷備份再開 LIVE，不 seed 或修角色。

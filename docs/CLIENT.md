@@ -4,7 +4,17 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原游標、NPC 命中／名牌與滑鼠互動（2026-10-18，未測試）
+## 最新實作：NPC原動畫時間、CUtilDlgEx2與對話回覆（2026-10-18，未測試）
+
+NPC缺省frame180ms；原Ex2八片邊框／七筆FillRect／Close2／按鈕／普通300及輸入230文字區。
+保留say兩旗標，Prev回0、Next或OK回1、ESC／Close回FF。五種body完整到JSON，實際kind回0x15，
+補CP949 byte-length、-1無上限、number／menu驗證、長文scroll、焦點／IME／modal隔離。
+點擊info.speak逐頁是本地政策，不是原quest腳本；原NPC待機自言自語／controller同步仍缺。
+體驗工具→「對話窗範例」可直接開五類唯讀UI；標示非原版，不發0x15或角色寫入。
+來源、browser替代與完整未完成界線見 [NATIVE_NPC_DIALOGUE](NATIVE_NPC_DIALOGUE.md)／ADR-061。
+**未執行測試／check／typecheck／browser／VM／probe；啟服不是PASS。**
+
+## 前輪實作：原游標、NPC 命中／名牌與滑鼠互動（2026-10-18，未測試）
 
 原 `UI/Basic.img/Cursor/arrow`，24×23／origin 0,0；此版本沒有後期 hand/pressed/move。
 透過 browser cursor plane 顯示，覆蓋遊戲與透明 DOM 控件，沿用既有 CSS scale，不做 RAF 追鼠 sprite。
@@ -302,7 +312,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | 狀態列（HP／MP／EXP） | `UI/StatusBar.img` 的 `base/0`／`base/1`／`base/2` 與 `gauge/hp|mp|exp`（`/api/png`） | 完全是 2003 client 的版面：`CUIStatusBar` 是 (0,392) 的 800×208 視窗，左邊 243×208 面板、下面 446×27 聊天列、右邊 111×136 鍵盤圖；儀表是 1 px 條帶拉到 `163 × value / max`（`sub_4FA5E0`）。等級／職業／名字依 `sub_4FA170` 的 (54,116)／右對齊 136／(153,111) 畫。數字本身來自伺服器的 `self` 事件（`hp/maxHp/mp/maxMp/exp/expToNext`） |
 | 聊天 | `0x1A` sub-op `0x12` | 場地聊天與**收到的密語**是同一包，所以畫面上長得一樣（線路上就是分不出來）；輸入框是 `base/1` 的白框上的一個透明 `<input>`，靠 `#game-ui` 跟畫布一起縮放 |
 | 商店視窗（點 NPC） | `UI/UIWindow.img/Shop/backgrnd`／`buy`／`sell`／`Bt*` 與 `0x4A` 的列（價格來自 `info/price`）＋`/api/item/<id>` 的名字與圖示 | 原版 407×291、置中 (196,154)：左欄 6 列店貨、右欄 5 列背包（分類頁籤 장비／소비／설치／기타 用 `UI/Basic.img/Tab` 拼），選取臉是 `Shop/buy`／`sell`，捲軸是 `VScr`；買／賣／충전 都走 `{t:"shop"}`。買成功時是 `0x4B`＋`0x0B`＋`0x0D` |
-| NPC 對話框 | `0x47` 的 `say` 台詞（`info/speak` 原文） | 「確定」送 `0x15` answer 1（下一句），「關閉」送 0（結束） |
+| NPC 對話框 | `0x47` 五種body；現有game只送say（info.speak分頁是本地政策） | Prev=0、Next／OK=1、ESC／Close=FF；原Ex2素材，非完整quest腳本 |
 | 背包視窗（`I`） | `UI/UIWindow.img/Item/backgrnd` ＋ `activeIcon` ＋ 每個 `0x0B` | 視窗、格子、分頁與 meso 欄都是原版圖；分頁用同一張圖的亮起／平常版本蓋上去，標籤依 `sub_4DA440` 的表。數量是線路的；名字／描述／圖示是 `/api/item/<id>` 從 `Data.wz` 讀的（ADR-037） |
 | 右上「日誌」 | 所有事件 | 沒實作的封包會以 `unhandled packet 0x..` 出現 |
 
@@ -360,7 +370,7 @@ self         { self }                                     ← 0x0D 之後的完�
 inventory    { worn[], wornCash[], tabs[4] }              ← 0x16 之後一則，此後每個 0x0B 一則
 shop-open    { shop: { shopId, items[] } }                ← 0x4A（價格與 maxCount 都是伺服器的）
 shop-result  { code, message }                            ← 0x4B（0＝silent，成功）
-npc-say      { npcId, message }                           ← 0x47 的 say（台詞來自 info/speak）
+npc-say      { npcId, message, body }                     ← 0x47 五種body（保留legacy事件名）
 user-enter   { user }        user-leave { characterId }
 user-move    { characterId, x, y, action, foothold }
 user-emotion { characterId, emotion }

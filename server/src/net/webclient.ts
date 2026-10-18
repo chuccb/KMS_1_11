@@ -625,7 +625,7 @@ class BrowserSession {
         case "shop":
           return await this.shopRequest(message);
         case "talk":
-          return await this.talk(Number(message.answer ?? 0));
+          return await this.talk(message);
         default:
           return this.send({
             t: "error",
@@ -1187,11 +1187,14 @@ class BrowserSession {
     await this.require().shop({ kind: "sell", slot, itemId, count });
   }
 
-  /** One answer to an NPC's dialog: `1` is the primary button, `0` the secondary (which ends it). */
-  private async talk(answer: number): Promise<void> {
-    if (answer !== 0 && answer !== 1)
-      return this.send({ t: "error", message: "talk answer must be 0 or 1" });
-    await this.require().talk(answer);
+  /** The session owns the current kind/ranges. Never coerce arbitrary browser input to a reply. */
+  private async talk(message: Record<string, unknown>): Promise<void> {
+    if (typeof message.answer !== "number" || ![0,1,255].includes(message.answer))
+      throw new RangeError("talk answer must be 0 or 1 or 255");
+    if (message.kind !== undefined && typeof message.kind !== "string")
+      throw new RangeError("talk kind must be a string");
+    await this.require().talk(message.answer, {kind:message.kind as string | undefined,
+      text:message.text,value:message.value});
   }
 
   private async useItem(slot: number, itemId: number): Promise<void> {

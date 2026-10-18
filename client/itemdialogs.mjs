@@ -1,3 +1,4 @@
+import {drawUtilFrame} from "./utildialog.mjs";
 import {releaseOnInterrupt} from "./pointer.mjs";
 /** CUtilDlgEx numeric input: 4643F0 / 4B7960 / 535EF0 / 532A80 / 531110.
  * Native art on canvas, DOM only for text/numeric editing, focus and hit targets.
@@ -251,26 +252,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
       const { x, y, width: w, height: h } = c;
       ctx.save();
       if (c.mode !== "confirm") {
-        // 531110: white interior, Border/1+6 horizontal, /3+4 vertical, four native corners.
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x, y + 13, w, h - 13);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x + 7, y + 13, w - 15, h - 13);
-        ctx.clip();
-        for (let px = 7; px < w - 8; px += 4) {
-          stamp("UI/UIWindow.img/UtilDlgEx/Border/1", x + px, y + 13);
-          stamp("UI/UIWindow.img/UtilDlgEx/Border/6", x + px, y + h - 18);
-        }
-        ctx.restore();
-        for (let py = 31; py < h - 18; py += 4) {
-          stamp("UI/UIWindow.img/UtilDlgEx/Border/3", x, y + py);
-          stamp("UI/UIWindow.img/UtilDlgEx/Border/4", x + w - 8, y + py);
-        }
-        stamp("UI/UIWindow.img/UtilDlgEx/Border/0", x, y + 13);
-        stamp("UI/UIWindow.img/UtilDlgEx/Border/2", x + w - 54, y);
-        stamp("UI/UIWindow.img/UtilDlgEx/Border/5", x, y + h - 18);
-        stamp("UI/UIWindow.img/UtilDlgEx/Border/7", x + w - 8, y + h - 18);
+        drawUtilFrame(ctx, image, x, y, w, h);
         // 532A80: input border at (13,textHeight+35), inner white face (14,+36).
         ctx.fillStyle = "#000000";
         ctx.fillRect(x + 13, y + c.textHeight + 35, w - 25, 18);

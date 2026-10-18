@@ -1,3 +1,4 @@
+import {questReplyFor, type QuestReplyDetail} from "./questreply.ts";
 import {SYSTEM_NOTICE_OPCODE,readSystemNotice} from '../protocol/notice.ts';
 import { ClientRandom } from "../protocol/random.ts";
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
@@ -77,6 +78,7 @@ import {
   QUEST_TALK_OPCODE,
   encodeQuestReply,
   readQuestTalk,
+  type QuestTalkBody,
 } from "../protocol/quest.ts";
 import {
   DROP_OPCODE,
@@ -396,7 +398,7 @@ export type ClientEvent =
   | { kind: "inventory"; inventory: InventoryView; ack?: boolean }
   | { kind: "shop-open"; shop: ShopView }
   | { kind: "shop-result"; code: number; message: string }
-  | { kind: "npc-say"; npcId: number; message: string }
+  | { kind: "npc-say"; npcId: number; message: string; body: QuestTalkBody }
   | { kind: "whisper-answer"; name: string; delivered: boolean }
   | { kind: "find-answer"; name: string; mapId: number }
   | { kind: "level-up"; characterId: number }
@@ -673,6 +675,8 @@ export class ClientSession {
   private readonly users = new Map<number, UserView>();
   private readonly mobs = new Map<number, MobView>();
   private readonly npcs = new Map<number, NpcView>();
+  private activeQuest: QuestTalkBody | undefined;
+  private questGeneration = 0;
   private latest: CharacterData | undefined;
   /** `0x0F`'s per-swing `sequence`: it only has to differ between swings. */
   private attackSequence = 0;
@@ -867,7 +871,7 @@ export class ClientSession {
       port,
       host,
       (plain) => this.handleFieldPacket(plain),
-      (reason) => this.emit({ kind: "disconnect", reason }),
+      (reason) => {this.activeQuest=undefined;this.questGeneration++;this.emit({kind:"disconnect",reason});},
     );
     this.gameLink = link;
     await link.handshakeDone;
@@ -1268,19 +1272,21 @@ export class ClientSession {
     }
   }
 
-  /**
-   * One answer to an NPC's `0x47` dialog: `0x15` `[op][u8 subOp][u8 answer]`.
-   *
-   * The 2003 client runs the dialog modally and only sends the two answers (`1` primary, `0`
-   * secondary); the server walks to its next line on `1` and ends the conversation on anything else.
-   * This session only ever opens `say` dialogs (that is all the server sends), so the sub-op is the
-   * say one.
-   */
-  async talk(answer: number): Promise<void> {
-    const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("talk() needs a session in a field");
-    await link.send(encodeQuestReply({ kind: "say", answer }));
+  /** One validated answer to the currently open 0x47; preserve its sub-op, not always say. */
+  async talk(answer: number, detail: QuestReplyDetail = {}): Promise<void> {
+    const link = this.gameLink, body = this.activeQuest;
+    if (link === undefined) throw new Error("talk() needs a session in a field");
+    if (body === undefined) throw new Error("talk() needs an open NPC dialog");
+    const reply = questReplyFor(body, answer, detail);
+    const packet = encodeQuestReply(reply), generation = this.questGeneration;
+    // Release before the write: a next-page 0x47 can arrive before the Promise continuation.
+    this.activeQuest = undefined;
+    try { await link.send(packet); }
+    catch (error) {
+      if (this.gameLink === link && this.questGeneration === generation && this.activeQuest === undefined)
+        this.activeQuest = body;
+      throw error;
+    }
   }
 
   /**
@@ -1423,6 +1429,7 @@ export class ClientSession {
     this.gameLink?.close();
     this.link?.close();
     this.gameLink = undefined;
+    this.activeQuest = undefined;this.questGeneration++;
     this.link = undefined;
     this.skillPending = false;
     this.nextSkillAt = 0;
@@ -1464,6 +1471,7 @@ export class ClientSession {
           this.users.clear();
           this.mobs.clear();
           this.npcs.clear();
+          this.activeQuest = undefined;this.questGeneration++;
           this.emit({
             kind: "field",
             mapId: this.mapId,
@@ -1575,20 +1583,14 @@ export class ClientSession {
           return;
         }
         case QUEST_TALK_OPCODE: {
-          // An NPC's own line (`Npc/<id>.img -> info/speak`). The server only opens `say` dialogs,
-          // so anything else is answered with a log line rather than an event a view cannot draw.
+          // The packet carries its own text and one of five CUtilDlgEx bodies. The local game
+          // currently sends say pages, but the bridge must not discard other original sub-ops.
           const talk = readQuestTalk(new PacketReader(plain, 1));
-          if (talk.body.kind === "say") {
-            this.emit({
-              kind: "npc-say",
-              npcId: talk.npcId,
-              message: talk.body.message,
-            });
-          } else {
-            this.log(
-              `0x47 ${talk.body.kind}: this server only opens say dialogs`,
-            );
-          }
+          if (this.activeQuest !== undefined) throw new Error("second 0x47 while an NPC dialog is open");
+          this.activeQuest = talk.body;
+          this.questGeneration++;
+          // Keep the legacy event name for CLI/bridge subscribers, but retain all five bodies.
+          this.emit({kind:"npc-say",npcId:talk.npcId,message:talk.body.message,body:talk.body});
           return;
         }
         case FIELD_OPCODE.requestRelease: {

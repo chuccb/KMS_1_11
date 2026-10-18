@@ -7,6 +7,7 @@ export function testTools({
   isInGame,
   onOpen,
   openSkills,
+  openDialogue = () => false,
   log,
 }) {
   const el = (id) => document.getElementById(id),
@@ -204,6 +205,11 @@ export function testTools({
     close();
     openSkills();
   });
+  for (const kind of ['say','confirm','askText','askNumber','menu'])
+    el(`qa-dialogue-${kind}`).addEventListener('click', () => {
+      close();
+      if (!openDialogue(kind)) log('對話窗範例未開啟：請先結束對話／商店或等待目前操作完成。');
+    });
   sync();
   return {
     get open() {

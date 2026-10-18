@@ -25,14 +25,6 @@
       <button id="log-toggle" type="button">日誌</button>
     </header>
 
-    <aside id="dialogue" class="hidden">
-      <p id="dialogue-text"></p>
-      <div class="dialogue-buttons">
-        <button id="dialogue-ok" type="button">確定</button>
-        <button id="dialogue-close" type="button">關閉</button>
-      </div>
-    </aside>
-
     <aside id="log" class="hidden">
       <h3>事件</h3>
       <ol id="log-lines"></ol>
@@ -47,6 +39,12 @@
       <section id="revive-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="revive-text">
         <p id="revive-text" class="accessible-only">확인을 누르시면 부활하게 됩니다. 부활을 하시면 안전한 마을로 이동됩니다.</p>
         <button id="revive-ok" class="sprite-hit" type="button" aria-label="부활 확인 / 確定復活；Enter">OK</button>
+      </section>
+      <section id="dialogue" class="hidden" role="dialog" aria-modal="true" aria-labelledby="dialogue-text">
+        <p id="dialogue-text" class="accessible-only"></p>
+        <input id="dialogue-input" class="hidden" type="text" autocomplete="off" spellcheck="false" aria-labelledby="dialogue-text" aria-describedby="dialogue-error" />
+        <p id="dialogue-error" class="accessible-only" role="status" aria-live="polite"></p>
+        <div id="dialogue-controls"></div>
       </section>
       <section
         id="item-dialog"
@@ -497,6 +495,17 @@
       <aside id="test-tools-panel" role="dialog" aria-modal="true" aria-labelledby="qa-heading">
         <div class="qa-heading"><h2 id="qa-heading">體驗工具 · 非原版功能</h2><button id="qa-close" type="button" aria-label="關閉體驗工具">關閉</button></div>
         <p id="qa-character"></p>
+        <fieldset>
+          <legend>對話窗範例 · 非原版工具／唯讀</legend>
+          <p>僅開啟本地 UI 範例，不執行任務、不發送 0x15、不變更角色或存檔。真 NPC 的任務腳本尚未還原；工具不暫停場景。</p>
+          <div class="qa-buttons">
+            <button id="qa-dialogue-say" type="button">翻頁／長文捲動</button>
+            <button id="qa-dialogue-confirm" type="button">是／否</button>
+            <button id="qa-dialogue-askText" type="button">文字輸入</button>
+            <button id="qa-dialogue-askNumber" type="button">數字輸入</button>
+            <button id="qa-dialogue-menu" type="button">選單</button>
+          </div>
+        </fieldset>
         <p class="qa-warning">只操作目前登入角色。所有配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。</p>
         <p id="qa-checkpoint-note"></p>
         <p id="test-tools-status" role="status" aria-live="polite"></p>

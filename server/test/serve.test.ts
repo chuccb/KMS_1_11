@@ -1540,7 +1540,7 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
   assert.deepEqual(first, {
     unknownA: 0,
     npcId: 1,
-    body: { kind: "say", message: "one", unknownA: 0, unknownB: 0 },
+    body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 },
     }, "the pool id the client clicked, not the template id");
   assert.equal(client.headersOk, true);
 
@@ -1554,7 +1554,7 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
   assert.deepEqual([refused[0]![0]], [FIELD_OPCODE.requestRelease], "the release byte, and no second dialog");
   assert.ok(log.some((line) => line.includes("still talking")), log.join("\n"));
 
-  // The primary answer walks to the next line; the second button ends the conversation.
+  // The primary answer advances; Prev goes back, header Close/ESC ends the conversation.
   client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
   const second = await client.take(1);
   assert.equal(second[0]![0], QUEST_TALK_OPCODE);
@@ -1591,12 +1591,12 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
   assert.equal(again[1]![0], QUEST_TALK_OPCODE);
   assert.equal(readQuestTalk(new PacketReader(again[1]!, 1)).body.message, "one", "a new talk starts at the first line");
 
-  // The second button (answer 0) closes it without another packet.
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 0 }).slice(1) });
+  // Header Close/ESC (answer FF) closes it without another packet.
+  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 255 }).slice(1) });
   assert.equal(
     (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
     false,
-    "the secondary button ends the talk",
+    "header Close ends the talk",
   );
   assert.ok(log.some((line) => line.includes("conversation ended")), log.join("\n"));
   client.close();

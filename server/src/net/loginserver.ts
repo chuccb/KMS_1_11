@@ -2109,6 +2109,12 @@ export class GameEntryServer {
       this.options.log?.(`${stopped}: this server only opens say dialogs`);
       return;
     }
+    if (reply.answer === QUEST_ANSWER.secondary) {
+      const previous = talk.previous();
+      if (previous !== undefined) session.send(previous);
+      else this.options.log?.(`game: NPC ${talk.npcId} previous requested on first page - ignored`);
+      return;
+    }
     if (reply.answer !== QUEST_ANSWER.primary) {
       session.talk = undefined;
       this.options.log?.(stopped);

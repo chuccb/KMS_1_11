@@ -2410,3 +2410,31 @@ releaseOnInterrupt統一blur/pointercancel/hidden-tab，取消視窗／物品／
 
 新增native-cursor-npc-tooltip與HTTP serializer回歸來源，**均未執行**，亦未執行test/check/typecheck/browser/VM/probe。
 詳NATIVE_CURSOR_NPC_POINTER.md；沿用同save停服冷備份再開LIVE、提交[skip ci]、非force推送目前Arena分支。
+
+
+## ADR-061：原CUtilDlgEx2、五種對話body與回覆邊界，一併修NPC預設動畫時間
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作與回歸來源，未執行驗證。
+
+4A5910／52FEB0／5309B0／532500與listing/WZ交叉確認server對話使用CUtilDlgEx2。
+.c把完整UTF-16資源路徑切成UI＋後綴，不能據此猜namespace或缺素材；Close同理為BtUIClose2。
+531FB0的.c多出參數與未初始化值，但.lst ret10h及push順序可還原四參數／七筆FillRect。
+補原八片border、Ex2 palette／32×15 Close／50×23 buttons、300/230文字寬及row/padding/scroll尺寸。
+
+say兩個byte是Prev／Next旗標，不再丟棄；0是上一頁、1是Next或OK、FF才是ESC／Close。
+本地NpcTalk同步前後分頁及旗標；info.speak是原idle自言自語池，點擊分頁為本地政策，不是原info.quest腳本。
+JSON legacy npc-say加完整body，不破壞舊訂閱；session保留當前kind，五種reply各用原sub-op，
+驗證CP949 byte長度／未trim輸入／-1上限、number範圍、實際menu選項及重複／錯kind。
+先釋放舊body再async write，generation避免舊write失敗回滾覆蓋新頁或新場地。
+
+browser補modal焦點、IME、Enter/ESC/Y/N/Tab、wheel／原VScr圖片、主鍵press/release與失焦取消。
+共用utildialog外框供既有物品輸入沿用；沒有改寫道具／角色操作規則。
+新增明示「非原版／唯讀」的五種UI範例入口，只本地顯示及日誌，不送0x15、不寫角色；真0x47優先。
+沒有為了讓範例出現而加假任務、獎勵、seed或自動補血。
+
+40C730確證NPC預設frame180ms，限定Npc修正、保明示delay及Map缺省。
+NPC4–12秒idle抽選／五秒speech已定位，但0x2F/0x3D索引與controller仍有未解疑點，沒有臆造同步或各client獨立亂播。
+完整原腳本／macro/icon／GDI字型與byte-token斷行／CWndMan／scroll按住連續或caption drag仍缺，不能聲稱全UI或NPC已1:1。
+
+新增native-npc-dialogue回歸來源並更新quest／serve／webclient舊fixture，**均未執行**；亦未執行test/check/typecheck/browser/VM/probe。
+詳NATIVE_NPC_DIALOGUE.md；同save停服冷備份再開LIVE，啟服非PASS，[skip ci]提交並非force推送Arena當前分支。

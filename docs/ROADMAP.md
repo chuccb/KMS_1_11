@@ -1,6 +1,11 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行 test/check/typecheck/browser/VM/probe**）：原 arrow cursor-plane／hotspot、DOM 與 Canvas 統一，
+> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：原NPC缺省frame180ms、CUtilDlgEx2素材／尺寸／字框，
+> Prev／Next／OK與ESC正確回覆、五種body保留、CP949／number／menu驗證、modal隔離及唯讀UI範例入口。
+> 原quest腳本、NPC idle/speak controller同步仍缺；[NATIVE_NPC_DIALOGUE](NATIVE_NPC_DIALOGUE.md)／ADR-061。
+> 沿用同save停服冷備份後開LIVE；不seed或自動修角色，啟服不是PASS。
+
+> 前輪交付2026-10-18（**未執行 test/check/typecheck/browser/VM/probe**）：原 arrow cursor-plane／hotspot、DOM 與 Canvas 統一，
 > NPC dc 命中框／原黃色名字／linked 素材、原提示 frame／邊界、Canvas 按鈕狀態與音效、拖曳 release／失焦清理。
 > 不宣稱完整 item/skill tooltip 排版、NPC 隨機動作／自言自語或 CWndMan；[NATIVE_CURSOR_NPC_POINTER](NATIVE_CURSOR_NPC_POINTER.md)／ADR-060。
 > 保留同 save，停服冷備份後開 LIVE；啟服非功能 PASS。
