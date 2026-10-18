@@ -34,7 +34,7 @@ body {
 
 /*
  * The game view is the 2003 client's 800x600 surface, scaled up by CSS and letterboxed inside the
- * window. display.mjs aligns to the device-pixel grid (including OS/browser zoom).
+ * window. display.ts aligns to the device-pixel grid (including OS/browser zoom).
  * Default pixel mode avoids non-uniform 1.25x/1.5625x source pixel widths; explicit fit is optional.
  */
 #view {

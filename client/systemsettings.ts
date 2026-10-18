@@ -52,7 +52,7 @@ export function soundProfile(
   save(value: unknown): SoundSettings;
 } {
   const key = "kms111.soundSettings";
-  let value;
+  let value: unknown;
   try {
     value = JSON.parse(storage?.getItem(key) ?? "null");
   } catch {}

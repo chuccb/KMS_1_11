@@ -1,4 +1,4 @@
-/** ADR-075 regression SOURCES ONLY. Not executed/typechecked/syntax/browser/VM/probe validated. */
+/** ADR-075 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";

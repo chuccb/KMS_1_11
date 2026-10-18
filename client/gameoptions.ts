@@ -32,15 +32,16 @@ export function gameProfile(storage?: {
   values(): GameSettings;
   save(value: unknown): GameSettings;
 } {
-  let raw;
+  let raw: unknown;
   try {
     raw = JSON.parse(storage?.getItem("kms111.gameSettings") ?? "null");
   } catch {}
   // Respect a user's earlier explicit M choice when migrating the browser-only minimap profile.
   if (!raw || typeof raw !== "object") {
-    let minimap;
+    let minimap: unknown;
     try {
-      minimap = JSON.parse(storage?.getItem("kms111.minimap") ?? "null")?.shown;
+      const stored: unknown = JSON.parse(storage?.getItem("kms111.minimap") ?? "null");
+      if (stored && typeof stored === "object" && "shown" in stored) minimap = stored.shown;
     } catch {}
     raw = { minimap };
   }

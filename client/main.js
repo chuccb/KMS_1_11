@@ -1,4 +1,4 @@
-import {mobAttackPreview} from "./mob-attack-preview.mjs";
+import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
 import {nativeMobActions} from "./mob-reaction.ts";
@@ -6,7 +6,7 @@ import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,at
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.ts";
 import {attackPredictions} from './attack-predictions.ts';
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout,activeMagicActions,activeMagicSpeed} from './active-skills.ts';
-import { combatAssets } from "./combat-assets.mjs";
+import { combatAssets } from "./combat-assets.ts";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.ts";
 import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackHitDelay } from "./attack-timing.ts";
 import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.ts";
@@ -14,21 +14,21 @@ import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } 
 import {tooltipPreview} from "./tooltip-preview.ts";
 import {npcPresentation} from "./npcmotion.ts";
 import {dialogueExample} from "./dialogue-examples.ts";
-import {npcDialogue} from "./npcdialogue.mjs";
+import {npcDialogue} from "./npcdialogue.ts";
 import {nativeCursor} from "./cursor.ts";
 import {npcContains, releaseOnInterrupt} from "./pointer.ts";
 import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.ts";
 import { backgroundLayout } from "./background.ts";
 import { mobLocomotion } from "./mobmotion.ts";
-import { systemMenu } from "./systemmenu.mjs";
+import { systemMenu } from "./systemmenu.ts";
 import { whisperNameError } from "./whisper.ts";
-import {chatBalloons} from "./chatballoons.mjs";
-import { chatHistory } from "./chatlog.mjs";
+import {chatBalloons} from "./chatballoons.ts";
+import { chatHistory } from "./chatlog.ts";
 import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.ts";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.ts";
 import { animationFrame } from "./animation.ts";
 import { deathEffects, deathPose } from "./death.ts";
-import { reviveWindow } from "./revive.mjs";
+import { reviveWindow } from "./revive.ts";
 import {
   contactClock,
   contactImpulse,
@@ -40,9 +40,9 @@ import {
 import { damageNumbers } from "./damage-render.ts";
 import { statTotals } from "./characterstats.ts";
 import { temporaryStats, drawTemporaryStats } from "./temporarystats.ts";
-import { naturalRecovery } from "./recovery.mjs";
-import { testTools } from "./testtools.mjs";
-import { skillWindow } from "./skills.mjs";
+import { naturalRecovery } from "./recovery.ts";
+import { testTools } from "./testtools.ts";
+import { skillWindow } from "./skills.ts";
 import { NATIVE_JOB_NAMES } from "./jobs.ts";
 import {
   weaponIdOf,
@@ -52,15 +52,15 @@ import {
   shotRelease,
   shotNear,
   projectileLeg,
-} from "./basiccombat.mjs";
-import { itemDialogs } from "./itemdialogs.mjs";
-import { equipmentWindow, bodyPart, canWear } from "./equipment.mjs";
-import { miniMapWindow } from "./minimap.mjs";
-import { viewLayout, DISPLAY_MODES } from "./display.mjs";
-import { movementPortal, arrivalPortal } from "./portals.mjs";
-import { statWindow } from "./statwindow.mjs";
-import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.mjs";
-import { characterDialogs } from "./creation.mjs";
+} from "./basiccombat.ts";
+import { itemDialogs } from "./itemdialogs.ts";
+import { equipmentWindow, bodyPart, canWear } from "./equipment.ts";
+import { miniMapWindow } from "./minimap.ts";
+import { viewLayout, DISPLAY_MODES } from "./display.ts";
+import { movementPortal, arrivalPortal } from "./portals.ts";
+import { statWindow } from "./statwindow.ts";
+import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.ts";
+import { characterDialogs } from "./creation.ts";
 import {
   WORLD_UI,
   CHARACTER_UI,
@@ -68,7 +68,7 @@ import {
   characterSlot,
   worldPopulation,
 } from "./selection.ts";
-import { createAudio, spatialVolume } from "./audio.mjs";
+import { createAudio, spatialVolume } from "./audio.ts";
 import {
   collisionWorld,
   createPlayer,

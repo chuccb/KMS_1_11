@@ -1,4 +1,4 @@
-/** ADR-062 SOURCE ONLY: NOT executed, typechecked, syntax-checked, browser/VM/HTTP/login probed. */
+/** ADR-062 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ClientSession, type ClientEvent } from "../src/client/session.ts";

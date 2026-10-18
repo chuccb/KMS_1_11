@@ -1,4 +1,4 @@
-/** SOURCE ONLY — deliberately NOT executed/typechecked/browser-probed, 2026-10-18 / ADR-060. */
+/** ADR-060 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";

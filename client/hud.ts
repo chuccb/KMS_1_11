@@ -1,5 +1,5 @@
 import type { MapTitleArt } from "../server/src/game/mapart.ts";
-import type { CanvasImage } from "./render-types.ts";
+import type { HtmlImageLookup } from "./ui-types.ts";
 /** CUIStatusBar 4FA5E0/4FB440 and CField 46DA30, KMS 1.11 (not modern UI). */
 export const HUD_FONT: string = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
 export const STATUS_GAUGES: Readonly<
@@ -47,7 +47,7 @@ export function mapTitleLayout(
 }
 export function drawMapTitle(
   ctx: CanvasRenderingContext2D,
-  image: (path: string) => CanvasImage & { img: HTMLImageElement },
+  image: HtmlImageLookup,
   title: MapTitleArt | undefined,
 ): void {
   if (!title || (!title.streetName && !title.mapName)) return;
@@ -79,7 +79,7 @@ export function drawMapTitle(
 /** 4FC440 -> 525AE0, zero spacing: advance by each ORIGINAL ItemNo canvas width. */
 export function drawItemCount(
   ctx: CanvasRenderingContext2D,
-  image: (path: string) => CanvasImage & { img: HTMLImageElement },
+  image: HtmlImageLookup,
   value: number,
   x: number,
   y: number,

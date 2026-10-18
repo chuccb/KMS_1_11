@@ -1,4 +1,4 @@
-/** SOURCE ONLY; not executed/typechecked/browser/VM/probe validated in this delivery. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -198,12 +198,12 @@ test("integration source: field/offscreen, selection, creation and reset all sha
   const source = (path: string) =>
     readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
   const main = source("../../client/main.js"),
-    creation = source("../../client/creation.mjs");
+    creation = source("../../client/creation.ts");
   assert.match(main, /bodyPose: sampleAvatarMotion/);
   assert.match(main, /sampleAvatarMotion\(character, look,/);
   assert.match(main, /stanceOfEntity\(user, now\);.*off-screen/);
   assert.match(main, /resetAvatarMotion\(selfView\)/);
-  assert.match(creation, /bodyPose\(previewActor, look, 'stand1', now\)/);
+  assert.match(creation, /bodyPose\(previewActor,\s*look,\s*["']stand1["'],\s*now\)/);
   assert.doesNotMatch(main, /selectedCharacterSince/);
   assert.doesNotMatch(creation, /Math\.floor\(now \/ 500\) % 3/);
   const inspector = main.slice(
@@ -213,7 +213,7 @@ test("integration source: field/offscreen, selection, creation and reset all sha
   assert.doesNotMatch(inspector, /\bsend\(/, "read-only canvas must not send a gameplay command");
   assert.match(inspector, /items:\[\.\.\.current.items/);
   const html = source("../../client/index.html"),
-    tools = source("../../client/testtools.mjs");
+    tools = source("../../client/testtools.ts");
   assert.match(html, /qa-motion-canvas/);
   assert.match(html, /不修改角色或存檔/);
   assert.match(tools, /resetMotionPreview\(\)/);

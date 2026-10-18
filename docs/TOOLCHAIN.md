@@ -39,14 +39,16 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  **剩餘 `client/main.js`、`.mjs` 及 probe 並未因此獲得嚴格型別驗證**，仍必須實際遷移。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 68 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  **`client/main.js` 及 server/scripts 剩餘 16 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
 - `bun run build` 用 Bun 的 browser/ESM bundler 輸出 ignored `dist/client`，複製 HTML、CSS 與字型。
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
-- 目前全專案遷移尚欠主瀏覽器入口、其餘 `.mjs` 與手動 probe 的實作型別，不能以能 bundle 代替完成。
+- 9 支純規則 probe 已移至 `server/test/presentation-*.test.ts`，連同新增 recovery／typed UI／WZ HTTP 測試納入根 suite。
+  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 16 支工具／fixture，不能以能 bundle 代替完成。
 
 ## 工具遷移與原證
 
@@ -86,9 +88,11 @@ bun tools/serve-existing-save.ts generated/<真正存在的存檔>.json
 
 ## 實際驗證狀態
 
-來源凍結後，所有 TS 的嚴格型別、格式與 browser build 均通過。完整回歸為 **828 pass / 45 fail**；
-同版 Bun 執行 d311622 隔離原始碼為 **823 pass / 45 fail**，按檔名／標題／重複次數比較，失敗完全相同。
-工具／HTTP 新增的五項全部通過（包含原 manifest 全 image checksum 與整個 browser import graph）。
-**45 個失敗仍阻擋驗收，這不是全專案完成；也不能從 Bun 參照推論原 Node 一樣失敗。**
-詳本次遷移記錄 [BUN_MIGRATION](BUN_MIGRATION.md)。
-CI 使用同一組 Bun 命令，不靠 `continue-on-error`、篩掉失敗案例或縮小型別設定讓結果變綠。
+來源凍結後，frozen lockfile 安裝、全部 TS 的嚴格型別、格式與 browser build 均通過。
+完整回歸為 **902 pass / 44 fail，946 tests / 102 files**；上一凍結點為 828/45，d311622 同版 Bun 參照為 823/45。
+逐一比對檔名／標題／重複次數：原 browser-motion wrapper 轉綠，**其餘 44 項完全相同，新增失敗 0**。
+9 支 pure presentation tests 與 wrapper 為 63/0；另增 recovery 4 項、typed UI 5 項、真 WZ HTTP／非法 metadata 2 項均通過，完整 suite 也全部包含。
+原 manifest 全 image checksum、獨立 HTTP import graph 均通過；既有 LIVE 僅作 static GET 檢查，index 200、66 個模組 HTTP／MIME／JS parser 通過，沒有登入／操作角色或重啟。
+**44 個失敗仍阻擋驗收，這不是全專案完成；不能從 Bun 參照推論原 Node 一樣失敗。**
+詳細 fixture 原證、剩餘來源與完整失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+CI 使用同一組 Bun 命令，不靠 continue-on-error、篩掉案例或縮小型別設定讓結果變綠。

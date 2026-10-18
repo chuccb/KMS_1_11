@@ -1,4 +1,4 @@
-/** Regression SOURCES ONLY — not run, typechecked, browser-driven or probed for this delivery. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";

@@ -1,4 +1,4 @@
-/** SOURCE ONLY / ADR-064. NOT executed, checked, typechecked, browser/VM/HTTP-probed. */
+/** ADR-064 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -333,7 +333,7 @@ test("integration source removes fabricated price/quantity, re-hits live instanc
   const source = (name: string) =>
     readFileSync(fileURLToPath(new URL(`../../client/${name}`, import.meta.url)), "utf8");
   const main = source("main.js"),
-    skill = source("skills.mjs"),
+    skill = source("skills.ts"),
     viewer = source("tooltip-preview.ts");
   assert.doesNotMatch(main, /function itemTooltipLines|drawTextTooltip|nativeBasis\(\)/);
   assert.match(main, /const shopHit = shopWindowAt/);

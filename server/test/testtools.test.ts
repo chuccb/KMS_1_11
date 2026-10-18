@@ -1,4 +1,4 @@
-/** New regression sources only. Not executed for this delivery, per user instruction. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";

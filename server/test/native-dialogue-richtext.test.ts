@@ -1,4 +1,4 @@
-/** SOURCE ONLY / ADR-063: deliberately not executed, typechecked, browser/VM/HTTP-probed. */
+/** ADR-063 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -306,12 +306,12 @@ test("500F50 name tip uses whole-font height, +8/+6 padding, and 799/599 screen 
 });
 
 test("modal source keeps stale-page guards, input preservation, one Tab stop per selection, and cleanup", () => {
-  const source = readFileSync(new URL("../../client/npcdialogue.mjs", import.meta.url), "utf8");
-  assert.match(source, /current!==c \|\| c\.abort\.signal\.aborted/);
+  const source = readFileSync(new URL("../../client/npcdialogue.ts", import.meta.url), "utf8");
+  assert.match(source, /current\s*!==\s*c\s*\|\|\s*c\.abort\.signal\.aborted/);
   assert.match(source, /c\?\.abort\.abort\(\)/);
-  assert.match(source, /element\.tabIndex=seen\.has\(piece\.selection\)\?-1:0/);
-  assert.match(source, /c\.scroll=Math\.max\(0,Math\.min\(c\.maxScroll,c\.scroll\)\)/);
-  assert.match(source, /if\(current===c\)applyLayout\(c\)/);
-  assert.match(source, /piece\.height-1,piece\.width,1/);
+  assert.match(source, /element\.tabIndex\s*=\s*seen\.has\(piece\.selection\)\s*\?\s*-1\s*:\s*0/);
+  assert.match(source, /c\.scroll\s*=\s*Math\.max\(0,\s*Math\.min\(c\.maxScroll,\s*c\.scroll\)\)/);
+  assert.match(source, /if\s*\(current\s*===\s*c\)\s*applyLayout\(c\)/);
+  assert.match(source, /piece\.height\s*-\s*1,\s*piece\.width,\s*1/);
   assert.doesNotMatch(source, /innerHTML\s*=/);
 });

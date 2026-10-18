@@ -1,4 +1,4 @@
-/** ADR-076 regression SOURCES ONLY. Not run/typechecked/syntax/browser/VM/probe validated. */
+/** ADR-076 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -393,8 +393,8 @@ test("wiring: full body-frame admission, phase bridge, art-only callback and sep
   assert.match(bridge, /attacks:\s*mob\.attacks/);
   assert.match(bridge, /mobPresentation/);
   assert.doesNotMatch(effects, /rollNativeTouch|hpDelta|contactClock|contactImpulse|1500/);
-  const preview = source("client/mob-attack-preview.mjs");
+  const preview = source("client/mob-attack-preview.ts");
   assert.doesNotMatch(preview, /send\(|audio\.|Math\.random/);
   assert.match(source("client/index.html"), /qa-mob-canvas/);
-  assert.match(source("client/testtools.mjs"), /resetMobPreview/);
+  assert.match(source("client/testtools.ts"), /resetMobPreview/);
 });

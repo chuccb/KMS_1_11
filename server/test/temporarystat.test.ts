@@ -1,4 +1,4 @@
-/** Regression SOURCES only: not executed for this delivery, per user instruction. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PacketReader } from "../src/protocol/packet.ts";

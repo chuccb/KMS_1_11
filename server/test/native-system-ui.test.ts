@@ -1,4 +1,4 @@
-/** Regression SOURCE ONLY, 2026-10-18. Not run: user explicitly owns functional verification. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,8 +13,7 @@ import {
 import { moveQuickItem, clearQuickItem, quickItemProfile } from "../../client/quickslots.ts";
 import { whisperNameError } from "../../client/whisper.ts";
 
-// @ts-expect-error Browser module intentionally has no declaration (same as existing audio fixtures).
-import { createAudio } from "../../client/audio.mjs";
+import { createAudio } from "../../client/audio.ts";
 const source = (name: string) =>
   readFileSync(new URL(`../../client/${name}`, import.meta.url), "utf8");
 
@@ -109,7 +108,7 @@ test("audio settings update already-created gains, preserve BGM clock, separate 
       return gain;
     },
   };
-  const audio = createAudio({ createContext: () => context });
+  const audio = createAudio({ createContext: () => context as unknown as AudioContext });
   await audio.unlock();
   assert.equal(gains[0]!.gain.value, 0.8);
   assert.equal(gains[1]!.gain.value, 0.8);
@@ -125,12 +124,12 @@ test("audio settings update already-created gains, preserve BGM clock, separate 
   assert.equal(gains[0]!.gain.value, 0.8);
 });
 test("renderer/input wiring: original paths, preview/cancel, local stale-action ticket, item drag is not slot/drop packet", () => {
-  const menu = source("systemmenu.mjs"),
+  const menu = source("systemmenu.ts"),
     main = source("main.js"),
-    dialogs = source("itemdialogs.mjs");
-  assert.match(menu, /if\(accept\) profile\.save\(draft\)/);
-  assert.match(menu, /audio\.applySettings\(accept \? draft : original\)/);
-  assert.match(menu, /SysOpt'\}\/backgrnd/);
+    dialogs = source("itemdialogs.ts");
+  assert.match(menu, /if\s*\(accept\)\s*profile\.save\(soundDraft\)/);
+  assert.match(menu, /audio\.applySettings\(accept\s*\?\s*soundDraft\s*:\s*soundOriginal\)/);
+  assert.match(menu, /SysOpt["']\s*\}\/backgrnd/);
   assert.match(menu, /sliding\.x/);
   assert.match(menu, /stopImmediatePropagation/);
   assert.match(main, /localActionEpoch !== interaction/);

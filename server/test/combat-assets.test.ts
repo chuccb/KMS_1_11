@@ -1,9 +1,9 @@
-/** Regression SOURCE ONLY; not executed/typechecked/browser/VM/probe validated. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// @ts-expect-error Pure browser module has no declaration.
-import { combatAssets } from "../../client/combat-assets.mjs";
+import type { ResourceResponse } from "../../client/combat-assets.ts";
+import { combatAssets } from "../../client/combat-assets.ts";
 const action = {
   action: 32,
   stance: "proneStab",
@@ -12,7 +12,14 @@ const action = {
   frameIndices: [0, 1],
   effects: {},
 };
-const profile = (id: number) => ({ weaponId: id, speed: 2, melee: [], shoot: [], prone: action });
+const profile = (id: number) => ({
+  weaponId: id,
+  group: 1,
+  speed: 2,
+  melee: [],
+  shoot: [],
+  prone: action,
+});
 const response = (id: number) => ({ ok: true, json: async () => profile(id) });
 
 test("deduplicates pending metadata, retains immutable data, and never invents prone in standing table", async () => {
@@ -29,6 +36,8 @@ test("deduplicates pending metadata, retains immutable data, and never invents p
     b = cache.attack(1302000);
   assert.equal(a, b);
   const result = await a;
+  assert.ok(result);
+  assert.ok(result.prone);
   assert.equal(result.prone.action, 32);
   assert.deepEqual(result.melee, []);
   assert.equal(await cache.attack(1302000), result);
@@ -40,7 +49,7 @@ test("deduplicates pending metadata, retains immutable data, and never invents p
 test("failure retries after FIVE seconds, pending saturation never aborts old requests", async () => {
   let now = 0,
     calls = 0,
-    resolve: ((value: unknown) => void) | undefined,
+    resolve: ((value: ResourceResponse) => void) | undefined,
     signal: AbortSignal | undefined;
   const cache = combatAssets({
     limit: 1,
@@ -72,7 +81,7 @@ test("failure retries after FIVE seconds, pending saturation never aborts old re
 });
 
 test("clear aborts pending work; late successful response cannot populate/warm a new cache generation", async () => {
-  let resolve: ((value: unknown) => void) | undefined,
+  let resolve: ((value: ResourceResponse) => void) | undefined,
     signal: AbortSignal | undefined,
     warmed = 0;
   const cache = combatAssets({

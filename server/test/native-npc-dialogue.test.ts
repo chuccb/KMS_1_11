@@ -1,4 +1,4 @@
-/** SOURCE ONLY — not executed, typechecked, browser/VM/probed (2026-10-18 / ADR-061). */
+/** ADR-061 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -257,7 +257,7 @@ test("UI examples are local/read-only and real packets supersede them; source is
   for (const kind of ["say", "confirm", "askText", "askNumber", "menu"])
     assert.match(dialogueExample(kind)!.message, /UI PREVIEW - not an NPC quest/);
   const main = source("../../client/main.js"),
-    dialogue = source("../../client/npcdialogue.mjs");
+    dialogue = source("../../client/npcdialogue.ts");
   assert.match(main, /if \(npcDialog\.preview\) closeDialogue\(false\)/);
   assert.match(main, /context\?\.preview/);
   assert.match(main, /onReply\(reply, context\)/);

@@ -1,4 +1,4 @@
-/** SOURCE ONLY, 2026-10-18: not executed (user owns functional verification). ADR-059. */
+/** ADR-059 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -154,16 +154,16 @@ test("wiring: original GameOpt paths, unavailable social controls disabled, priv
   const file = (name: string) =>
     readFileSync(new URL(`../../client/${name}`, import.meta.url), "utf8");
   const main = file("main.js"),
-    menu = file("systemmenu.mjs"),
-    log = file("chatlog.mjs");
-  assert.match(menu, /x:317,y:177/);
-  assert.match(menu, /i>=2/);
-  assert.match(menu, /54,203,50,23/);
-  assert.match(menu, /applyGame\(accept\?draft:original\)/);
+    menu = file("systemmenu.ts"),
+    log = file("chatlog.ts");
+  assert.match(menu, /game:\s*\{\s*x:\s*317,\s*y:\s*177\s*\}/);
+  assert.match(menu, /i\s*>=\s*2/);
+  assert.match(menu, /54,\s*203,\s*50,\s*23/);
+  assert.match(menu, /applyGame\(accept\s*\?\s*gameDraft\s*:\s*gameOriginal\)/);
   assert.match(main, /systemPanel.gameSettings.whisper/);
   assert.match(main, /channel==='field'/);
   assert.match(main, /kind:'speech'.*z:250210/);
-  assert.match(log, /list.children.length>64/);
+  assert.match(log, /list\.children\.length\s*>\s*64/);
   assert.match(log, /wrapChatText/);
   assert.match(log, /lastScroll/);
 });

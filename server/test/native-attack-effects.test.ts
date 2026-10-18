@@ -1,4 +1,4 @@
-/** Regression SOURCES ONLY, 2026-10-18. NOT executed, typechecked or browser/VM/probe validated. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
@@ -23,13 +23,11 @@ import {
 import { animationFrame } from "../../client/animation.ts";
 import { shotRelease, attackDuration } from "../../client/attack-timing.ts";
 
-// @ts-expect-error Pure browser module has no declaration.
-import { projectileLeg } from "../../client/basiccombat.mjs";
+import { projectileLeg } from "../../client/basiccombat.ts";
 import { encodeUserAttack, readUserAttack, FIELD_OPCODE } from "../src/protocol/field.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 
-// @ts-expect-error Pure browser module has no declaration.
-import { createAudio } from "../../client/audio.mjs";
+import { createAudio } from "../../client/audio.ts";
 const data = resolve(import.meta.dirname, "../../Data.wz"),
   needs = { skip: !existsSync(data) };
 const archive = () => WzArchive.open(data);
@@ -230,7 +228,7 @@ test("audio validity is rechecked AFTER decoding and preloading does not play a 
     }),
   };
   const audio = createAudio({
-    createContext: () => context,
+    createContext: () => context as unknown as AudioContext,
     fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) }),
   });
   await audio.unlock();

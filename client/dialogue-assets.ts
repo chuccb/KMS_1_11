@@ -1,3 +1,4 @@
+import { isRecord, isFiniteNumber } from "./resource-validation.ts";
 import type { DialogueRun, DialogueIconRun, DialogueAsset } from "./npcdialogue-layout.ts";
 interface DialogueAssetOptions {
   fetch?: (url: string, options: { signal: AbortSignal }) => Promise<Response>;
@@ -40,8 +41,9 @@ export function dialogueAssets({
               { signal },
             );
             if (!response.ok) continue;
-            const info = await response.json();
+            const info: unknown = await response.json();
             if (signal.aborted) break;
+            if (!isRecord(info) || !isRecord(info.icon)) continue;
             const icon = info.icon;
             // HTTP resource facts still must match the requested id/family; never evaluate markup/HTML.
             if (
@@ -49,7 +51,9 @@ export function dialogueAssets({
               !icon ||
               typeof icon.path !== "string" ||
               !(run.kind === "item" ? /^(Item|Character)\// : /^Skill\//).test(icon.path) ||
+              !isFiniteNumber(icon.width) ||
               !Number.isInteger(icon.width) ||
+              !isFiniteNumber(icon.height) ||
               !Number.isInteger(icon.height) ||
               icon.width <= 0 ||
               icon.height <= 0 ||

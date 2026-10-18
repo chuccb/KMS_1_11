@@ -4,7 +4,7 @@ export interface EquipCandidate {
   cash?: unknown;
 }
 export interface EquipInventory {
-  worn: { slot: number; itemId: number }[];
+  worn: StatItem[];
   tabs: { tab: number; capacity: number; items: { slot: number }[] }[];
 }
 /** Pure native equipment admission, shared by browser and server safety policy. No DOM. */
@@ -51,7 +51,7 @@ export function firstBagSlot(inventory: EquipInventory | undefined, tab: number)
  * Do not re-filter after exclusion: dependent gear can retain its admission-time bonus. */
 export function canWear(
   item: EquipCandidate,
-  facts: { cash?: boolean; requirements?: StatRequirements } | undefined,
+  facts: { cash?: boolean; requirements?: StatRequirements } | null | undefined,
   self: (StatInput & { hp: number }) | undefined,
   inventory: EquipInventory | undefined,
   part: number = bodyPart(item.itemId),

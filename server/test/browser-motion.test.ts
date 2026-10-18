@@ -7,16 +7,18 @@ test("browser movement/audio/selection/scene: fixed-step physics, climbing, play
   const result = spawnSync(
     process.execPath,
     [
-      "--test",
-      fileURLToPath(new URL("../scripts/equipment_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/display_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/minimap_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/portal_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/motion_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/temporarystats_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/audio_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/selection_probe.mjs", import.meta.url)),
-      fileURLToPath(new URL("../scripts/scene_probe.mjs", import.meta.url)),
+      "test",
+      "--timeout",
+      "30000",
+      fileURLToPath(new URL("./presentation-equipment.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-display.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-minimap.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-portal.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-motion.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-temporarystats.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-audio.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-selection.test.ts", import.meta.url)),
+      fileURLToPath(new URL("./presentation-scene.test.ts", import.meta.url)),
     ],
     {
       encoding: "utf8",
@@ -25,5 +27,5 @@ test("browser movement/audio/selection/scene: fixed-step physics, climbing, play
     },
   );
   assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /# fail 0/);
+  assert.match(result.stdout + result.stderr, /0 fail/);
 });

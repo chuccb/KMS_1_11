@@ -1,4 +1,4 @@
-/** Regression SOURCES ONLY — deliberately not run/typechecked/browser-validated at user's request. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -16,8 +16,7 @@ import { drawCanvas, bitmapOf } from "../src/game/raster.ts";
 import { mapBacks } from "../src/game/mapart.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
 
-// @ts-expect-error Browser scene module has no declaration; source-only fixture.
-import { compareScene, prepareMapScene, mergeScene, sceneOrdering } from "../../client/scene.mjs";
+import { compareScene, prepareMapScene, mergeScene, sceneOrdering } from "../../client/scene.ts";
 
 import { actorDepth, collisionWorld, beginPath, sampleMotion } from "../../client/motion.ts";
 

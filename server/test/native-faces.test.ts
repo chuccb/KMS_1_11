@@ -1,4 +1,4 @@
-/** SOURCE ONLY. Not executed/typechecked/browser/VM/probe validated in this delivery. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -263,7 +263,7 @@ test(
 test("integration source: native F1..F7, no local echo reset, shared creation/selection clock, guarded requests", () => {
   const main = source("../../client/main.js"),
     web = source("../src/net/webclient.ts"),
-    creation = source("../../client/creation.mjs");
+    creation = source("../../client/creation.ts");
   assert.match(main, /\^F\[1-7\]/);
   assert.match(main, /!event\.repeat\) requestEmotion/);
   assert.match(main, /faceFrame=\$\{faceFrame\}/);

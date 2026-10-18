@@ -1,4 +1,4 @@
-/** Regression SOURCE ONLY: not run, typechecked, syntax-checked, browser/VM/probe validated. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -21,8 +21,7 @@ import {
   forcedAttackInput,
 } from "../../client/posture.ts";
 
-// @ts-expect-error Browser pure module has no declaration.
-import { recoveryTick } from "../../client/recovery.mjs";
+import { recoveryTick } from "../../client/recovery.ts";
 
 import { collisionWorld, createPlayer, advancePlayer } from "../../client/motion.ts";
 import {

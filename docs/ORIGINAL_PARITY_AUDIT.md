@@ -1,5 +1,7 @@
 # 與原版的差異、部分完成與未實作總盤點
 
+> 2026-10-18：僅同步已遷移的模組路徑；TypeScript 遷移不提升以下原版對等評級。實際遷移／驗證狀態見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+
 盤點日期：2026-10-18。程式基準：`4f9ad1b`（ADR-076 怪物主動攻擊交付之後）。
 續作更新：ADR-077補普通力學／抓繩／本地30ms有序path，ADR-078補有向整數crossing／雙接觸／physical bounds／碰撞時刻及特別KB連動；A01/A04/A05/B02如下更新。[普通力學](NATIVE_LOCOMOTION.md)、[地形原證與剩餘界線](NATIVE_TERRAIN.md)。其餘維持原盤點基準。
 
@@ -92,14 +94,14 @@
 
 | 編號／狀態 | 剩餘問題 | 現況與影響 | 入口 |
 |---|---|---|---|
-| D01 未接／未知 | 原任務全流程 | 對話codec／五類dialog／富文字已有；任務狀態、接受／完成條件、殺怪／交物計數、獎勵及持久化不是完整產品鏈 | `game/dialogue.ts`、`protocol/quest.ts`；`client/npcdialogue.mjs`、`systemmenu.mjs` |
+| D01 未接／未知 | 原任務全流程 | 對話codec／五類dialog／富文字已有；任務狀態、接受／完成條件、殺怪／交物計數、獎勵及持久化不是完整產品鏈 | `game/dialogue.ts`、`protocol/quest.ts`；`client/npcdialogue.ts`、`systemmenu.ts` |
 | D02 差異／未知 | 原掉落表／機率／金錢 | 現行defaultDropPolicy是金錢、對應雜物、按級藥水三種roll；60%／30%／5%、level×3金錢跨度等是本repo政策，不是原掉落表。原RNG演算法不會把自訂掉落機率變成官方機率 | `game/drops.ts` 的 constants／defaultDropPolicy |
 | D03 差異／未知 | 原商店庫存與回收價 | item price有WZ來源，但何NPC賣何物、庫存、數量上限、sell ratio=0.5及部分取整屬重建政策；買賣／飛鏢補充可用不等於原商店經濟完成 | `game/shops.ts`；[商店與補充](MESO_RECHARGE.md) |
 | D04 部分／未接／未知 | 組隊經驗、貢獻與掉落歸屬 | party名冊／邀請／指令與Rage收件者已有；awardKillExp仍對kill session發template.exp，沒有完整隊伍經驗分配與貢獻公式。完整掉落歸屬／分配規則亦未證明 | `net/loginserver.ts` 的 awardKillExp；`game/parties.ts`、`drops.ts` |
 | D05 部分／未知 | 人氣規則與配額持久化 | 有server與protocol；Lv15門檻、UTC日月與順序是policy，ledger不入save，重啟即重置。不能把它當已恢復原server日／月配額 | `game/fame.ts`；browser完整人物資訊／給人氣UI也未接全 |
-| D06 部分 | 交易／Messenger有server，不等於browser可用 | 邀請、交易房／道具金錢承諾及原子成交、三人聊天室已有規則／codec；ClientSession與完整瀏覽器操作／邀請／房間視窗沒有完整產品鏈 | `game/trades.ts`、`messenger.ts`；`net/loginserver.ts`；`client/systemmenu.mjs` |
+| D06 部分 | 交易／Messenger有server，不等於browser可用 | 邀請、交易房／道具金錢承諾及原子成交、三人聊天室已有規則／codec；ClientSession與完整瀏覽器操作／邀請／房間視窗沒有完整產品鏈 | `game/trades.ts`、`messenger.ts`；`net/loginserver.ts`；`client/systemmenu.ts` |
 | D07 未接／未知 | 倉庫／計程車／其他原NPC服務 | 沒有完整原服務腳本、條件、費用及流程；不能以/map或任意存取替代。已有trunk／taxi資料或對話素材不代表服務已實作 | `game/dialogue.ts`、`net/loginserver.ts`；[路線圖](ROADMAP.md) |
-| D08 未接／部分 | Cash／pet／小遊戲 | cash tab、序號或avatar某些資料欄存在，不等於商城流程、寵物控制／物品／互動、小遊戲房與UI已完成；範圍仍應限本版原證，不補後版系統 | `protocol/itemslot.ts`、`game/avatar.ts`、`systemmenu.mjs`；原C有CCashShop但非現行browser完整產品路徑 |
+| D08 未接／部分 | Cash／pet／小遊戲 | cash tab、序號或avatar某些資料欄存在，不等於商城流程、寵物控制／物品／互動、小遊戲房與UI已完成；範圍仍應限本版原證，不補後版系統 | `protocol/itemslot.ts`、`game/avatar.ts`、`systemmenu.ts`；原C有CCashShop但非現行browser完整產品路徑 |
 | D09 差異／部分 | 暫時狀態／房間的重啟行為 | buff、party／交易／Messenger、人氣配額等runtime state並非全部持久；跨圖重播剩餘buff已接，但重開清除等是明示政策，沒有完整原斷線／重連恢復規則 | `game/save.ts`、`fame.ts`、`parties.ts`、`trades.ts`；[技能生命週期](ACTIVE_SKILLS.md) |
 | D10 未接／部分 | 正式帳號／世界服務 | 原式登入／選世界／選角／建刪角已有；官方註冊／找回帳密／完整帳號服務、營運級世界服務／移交、所有重連失敗路徑沒有因此完成；本版是否另有頻道視窗需原證，不按後版直接列為確定缺失 | `client/selection.mjs`、`main.js` title流程；`net/loginserver.ts`、`save.ts` |
 
@@ -109,12 +111,12 @@
 |---|---|---|---|
 | E01 差異／未驗收 | 原字型與文字度量 | Gulim／Dotum依系統可用性，合法KMSCJK fallback不是原Win32 GDI／IWzFont。字寬、baseline、CP949 CharNextA、換行、tooltip及氣泡尺寸不能聲稱逐像素等價 | `client/fonts/README.md`、`tooltip.mjs`、`chatlayout.mjs`；[tooltip](NATIVE_RICH_TOOLTIPS.md) |
 | E02 部分／差異 | Gr2D混色、layer與avatar所有分支 | 真zmap、body front/back、child5殘影、世界FX與建立順序已有；native所有COM layer、blend／閃色、blocked-slot、同z同刻全域順序未全移植。remote全部受傷閃色／attr4家族也非完整 | `scene.mjs`、`game/avatar.ts`、`faces.mjs`；[圖層](NATIVE_LAYER_PRIORITY.md)、[臉部](NATIVE_FACE_ANIMATION.md) |
-| E03 部分／未接 | 全視窗管理與UI動畫 | 單個視窗能拖曳／關閉不等於原window manager、焦點／遮擋／Tab／modal全鏈。Menu hover仍只取mouseOver第0格，selector／部分disabled框由browser畫，非原CCtrl全等價 | `client/systemmenu.mjs`、`main.js`；[系統UI](NATIVE_SYSTEM_UI.md) |
-| E04 未接／部分 | 任務／Party／Community等完整視窗 | Menu的Quest／Party／Community仍停用；party指令／原式邀請不是完整party窗。交易、Messenger、人物資訊／人氣、原收件人選擇等UI未接全 | `systemmenu.mjs`、`gameoptions.mjs`、`session.ts` events；[聊天設定](NATIVE_GAME_OPTIONS_CHAT.md) |
+| E03 部分／未接 | 全視窗管理與UI動畫 | 單個視窗能拖曳／關閉不等於原window manager、焦點／遮擋／Tab／modal全鏈。Menu hover仍只取mouseOver第0格，selector／部分disabled框由browser畫，非原CCtrl全等價 | `client/systemmenu.ts`、`main.js`；[系統UI](NATIVE_SYSTEM_UI.md) |
+| E04 未接／部分 | 任務／Party／Community等完整視窗 | Menu的Quest／Party／Community仍停用；party指令／原式邀請不是完整party窗。交易、Messenger、人物資訊／人氣、原收件人選擇等UI未接全 | `systemmenu.ts`、`gameoptions.mjs`、`session.ts` events；[聊天設定](NATIVE_GAME_OPTIONS_CHAT.md) |
 | E05 未接／差異 | 中央公告、原取得道具提示 | 0x13目前只讀type0；type1中央公告尚未接。loot仍寫chat/log，沒有完整原4EB440螢幕提示 | `protocol/notice.ts`；`main.js` 的 system-notice／loot |
 | E06 未知／平台差異 | 完整按鍵對照與本機設定 | 七原快捷格、技能／藥水拖放已有；其餘完整按鍵對照仍需逐入口確認，是否另有獨立改鍵窗要原證，不能直接要求後版自由改鍵UI。localStorage取代native registry，跨瀏覽器／裝置不等同原設定機制 | `quickslots.mjs`、`gameoptions.mjs`、`systemsettings.mjs` |
-| E07 未接／平台差異 | 原DirectX畫質與截圖目的地 | SysOpt對應控制仍disabled；瀏覽器縮放／DPR不是soVideo，不能把browser截圖當原Win32路徑功能 | `systemmenu.mjs` 的 openSound；[SysOpt界線](NATIVE_SYSTEM_UI.md) |
-| E08 部分／差異／未驗收 | BGM／音效播放端與觸發覆蓋 | 原Sound_DX8 payload／MP3或PCM、BGM與多條動作音已有；播放端改Web Audio、需手勢解鎖、有16並發上限與冷載入deadline。未逐聲／逐事件重建DirectSound／ACM全部行為；不能說音訊都沒有，也不能說所有原聲時序已一致 | `game/audio.ts`、`client/audio.mjs`；[音訊歷史](CLIMB_AUDIO_VALIDATION.md) |
+| E07 未接／平台差異 | 原DirectX畫質與截圖目的地 | SysOpt對應控制仍disabled；瀏覽器縮放／DPR不是soVideo，不能把browser截圖當原Win32路徑功能 | `systemmenu.ts` 的 openSound；[SysOpt界線](NATIVE_SYSTEM_UI.md) |
+| E08 部分／差異／未驗收 | BGM／音效播放端與觸發覆蓋 | 原Sound_DX8 payload／MP3或PCM、BGM與多條動作音已有；播放端改Web Audio、需手勢解鎖、有16並發上限與冷載入deadline。未逐聲／逐事件重建DirectSound／ACM全部行為；不能說音訊都沒有，也不能說所有原聲時序已一致 | `game/audio.ts`、`client/audio.ts`；[音訊歷史](CLIMB_AUDIO_VALIDATION.md) |
 | E09 部分／未驗收 | 所有地圖／特殊場地完整行為 | tile／obj、背景平移／parallax、portal、foothold／繩梯、BGM已有，不能再稱人工地形或雲不動。MapData／MapArt並未涵蓋原CField所有環境／特殊流程；未逐地圖動態對照，不從「能載入」推定全部可等價遊玩 | `game/map.ts`、`mapart.ts`、`client/background.mjs`、`portals.mjs` |
 | E10 差異 | Browser便利入口不是原功能 | 上方工具／日誌、/map、可點portal、唯讀UI／角色／怪物閱覽皆是明示便利功能；不能把它們計入原流程完成，也不應混進原UI驗收 | `client/testtools.mjs`、`mob-attack-preview.mjs`、`main.js` |
 

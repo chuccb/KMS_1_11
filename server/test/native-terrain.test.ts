@@ -1,4 +1,4 @@
-/** ADR-078 regression SOURCES ONLY. Not run/check/typecheck/syntax/browser/VM/probe validated. */
+/** ADR-078 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import {

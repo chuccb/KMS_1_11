@@ -1,4 +1,4 @@
-/** Regression SOURCES ONLY: not executed/typechecked for this delivery, per user instruction. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";

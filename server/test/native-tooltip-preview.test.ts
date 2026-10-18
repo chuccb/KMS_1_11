@@ -1,4 +1,4 @@
-/** SOURCE ONLY / ADR-064. No execution, browser/VM/HTTP probe or character mutation. */
+/** ADR-064 Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { tooltipPreview } from "../../client/tooltip-preview.ts";

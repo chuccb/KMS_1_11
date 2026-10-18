@@ -1,4 +1,4 @@
-/** Regression SOURCES ONLY — no test/typecheck/browser/VM/probe run. */
+/** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { attackPredictions } from "../../client/attack-predictions.ts";
