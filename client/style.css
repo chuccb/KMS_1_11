@@ -768,3 +768,8 @@ body {
 #tooltip-preview button { margin:3px; padding:4px 7px; color:#fff; background:#354b68; border:1px solid #8393a9; border-radius:3px; }
 #tooltip-preview button[aria-pressed=true] { border-color:#ffcb66; background:#516988; }
 #tooltip-preview-status { margin:4px 0 0; min-height:3em; }
+
+/* Explicit read-only developer inspector, not a native game window/skin. */
+#qa-motion { border:1px solid #59687b; padding:10px; margin:14px 0; }
+#qa-motion summary { cursor:pointer; }
+#qa-motion-canvas { display:block; max-width:100%; background:#e5edf5; image-rendering:pixelated; }

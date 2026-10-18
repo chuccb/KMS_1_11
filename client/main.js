@@ -1,3 +1,4 @@
+import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.mjs";
 import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.mjs";
 import {tooltipPreview} from "./tooltip-preview.mjs";
 import {npcPresentation} from "./npcmotion.mjs";
@@ -175,7 +176,6 @@ let loginWorlds = [],
   loginCharacters = [];
 let selectedWorld = -1,
   selectedCharacter = -1;
-let selectedCharacterSince = 0;
 let worldScroll = 0,
   selectionPending = false;
 let selectionHover, selectionPressed;
@@ -260,6 +260,9 @@ let hoveredPortal;
 let lastPortalAt = -Infinity;
 let portalPending = false;
 /** Immutable face data and bounded pose warm-up markers; clocks live on visual actors. */
+const avatarMotionCatalog = avatarMotionProfiles();
+const bodyWarmLooks = new Set();
+let avatarPreviewActor = {y:0}, avatarPreviewLast;
 const faceCatalog = faceProfiles();
 const avatarWarmLooks = new Set();
 let emoteAvailable; // First presentation tick also disables buttons outside an active field.
@@ -381,6 +384,7 @@ function connect() {
     combatEpoch++;
     resetContact();
     resetFace(selfView);
+    resetAvatarMotion(selfView);
     deathFx.reset();
     speechBalloons.clear();
     npcVisuals.clear();
@@ -432,6 +436,7 @@ function handle(message) {
   if (["field", "disconnect", "login"].includes(message.t)) {
     resetContact();
     resetFace(selfView);
+    resetAvatarMotion(selfView);
     deathFx.reset();
     speechBalloons.clear();
     npcVisuals.clear();
@@ -511,7 +516,6 @@ function handle(message) {
                 loginCharacters.length - 1,
               )
             : -1;
-      selectedCharacterSince = performance.now();
       ui.characterList.replaceChildren(
         ...loginCharacters.map((character, index) => {
           const button = document.createElement("button");
@@ -753,6 +757,7 @@ function handle(message) {
       user.attackTicket = (user.attackTicket ?? 0) + 1;
       delete user.swing;
       resetFace(user);
+      resetAvatarMotion(user);
       preloadAvatar(lookOf(user));
       return;
     }
@@ -2080,7 +2085,6 @@ function connectLoginWorld() {
 function selectLoginCharacter(index) {
   if (selectionPending || creationDialogs.open || !loginCharacters[index])
     return;
-  if (selectedCharacter !== index) selectedCharacterSince = performance.now();
   selectedCharacter = index;
   void audio.effect("UI/CharSelect");
   updateSelectionControls();
@@ -2266,13 +2270,9 @@ function drawSelectionScreen(now) {
   } else {
     loginCharacters.forEach((character, index) => {
       const slot = characterSlot(index);
-      const stance = index === selectedCharacter ? "walk1" : "stand1";
-      const frame =
-        Math.floor(
-          (now - (index === selectedCharacter ? selectedCharacterSince : 0)) /
-            (stance === "walk1" ? 100 : 500),
-        ) % (stance === "walk1" ? 4 : 3);
       const look = {face: character.face ?? 20000, hair: character.hair ?? 30000, items: character.items ?? []};
+      const {stance, frame} = sampleAvatarMotion(character, look,
+        index === selectedCharacter ? "walk1" : "stand1", now);
       const face = sampleAvatarFace(character, look, now);
       let image = avatarFrame(
         look,
@@ -2375,7 +2375,7 @@ function avatarFrame(look, stance, frame, flip, emotion, planes = false, faceFra
   avatarFrames.set(key, entry);
   const query =
     `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&faceFrame=${faceFrame}&v=20261018-native-faces`;
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&faceFrame=${faceFrame}&v=20261018-native-body-motion`;
   entry.requested = true;
   entry.loading = fetch(`/api/avatar.png${query}`)
     .then(async (response) => {
@@ -2407,31 +2407,41 @@ function avatarFrame(look, stance, frame, flip, emotion, planes = false, faceFra
   return entry;
 }
 
-/** Warms the frames a look needs: idle (3) and the two walk cycles (4 each), both ways. */
-function preloadAvatar(look) {
+/** Ordinary pose prewarm uses metadata indices, including reverse idle entries and weapon stance2. */
+function warmBodyLook(look, profile) {
+  if (!profile) return;
   const key = `${look.face}|${look.hair}|${look.items.join(".")}`;
-  const faces = faceCatalog.get(look.face);
-  if (avatarWarmLooks.has(key)) return;
-  if (avatarWarmLooks.size >= 64) avatarWarmLooks.delete(avatarWarmLooks.values().next().value);
-  avatarWarmLooks.add(key);
-  const warmBlink = (profile) => {
-    for (const f of profile?.actions?.blink?.frames ?? []) {
-      for (const [stance, count] of [["stand1",3],["walk1",4],["jump",1]]) {
-        for (let bodyFrame = 0; bodyFrame < count; bodyFrame++) for (const flip of [false,true])
-          avatarFrame(look, stance, bodyFrame, flip, "blink", true, f.index);
-      }
+  if (!avatarWarmLooks.has(key) || bodyWarmLooks.has(key)) return;
+  if (bodyWarmLooks.size >= 64) bodyWarmLooks.delete(bodyWarmLooks.values().next().value);
+  bodyWarmLooks.add(key);
+  for (const stance of new Set([profile.walk, profile.stand, "jump", "ladder", "rope", "dead", "alert"])) {
+    for (const index of new Set((profile.actions[stance]?.frames ?? []).map(f => f.index))) {
+      for (const flip of [false,true]) avatarFrame(look, stance, index, flip, undefined, true);
     }
-  };
-  if (faces?.data) warmBlink(faces.data);
-  else if (faces?.promise) void faces.promise.then(warmBlink);
+  }
+  for (const stance of [profile.stand, "jump"]) for (const flip of [false,true])
+    avatarFrame(look, stance, 0, flip, "hit", true);
+}
+
+/** One archive-backed ordinary profile per weapon; attack profiles keep their own native speed. */
+function preloadAvatar(look, retainedProfile) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}`;
+  faceCatalog.get(look.face);
+  const body = retainedProfile ? {data:retainedProfile} : avatarMotionCatalog.get(weaponIdOf(look));
+  warmBodyLook(look, body?.data); // Also handles a retry succeeding after the first look warm-up.
+  if (avatarWarmLooks.has(key)) return;
+  if (avatarWarmLooks.size >= 64) {
+    const oldest = avatarWarmLooks.values().next().value;
+    avatarWarmLooks.delete(oldest); bodyWarmLooks.delete(oldest);
+  }
+  avatarWarmLooks.add(key);
+  if (body?.data) warmBodyLook(look, body.data);
+  else if (body?.promise) void body.promise.then(profile => warmBodyLook(look, profile));
   if (!attackLooks.has(key)) {
     if (attackLooks.size >= 128) attackLooks.clear();
     attackLooks.add(key);
     void ensureAttackProfile(look).then((profile) => {
-      for (const action of [
-        ...(profile?.melee ?? []),
-        ...(profile?.shoot ?? []),
-      ]) {
+      for (const action of [...(profile?.melee ?? []), ...(profile?.shoot ?? [])]) {
         for (let frame = 0; frame < action.delays.length; frame++) {
           avatarFrame(look, action.stance, frame, false, undefined, true);
           avatarFrame(look, action.stance, frame, true, undefined, true);
@@ -2439,26 +2449,7 @@ function preloadAvatar(look) {
       }
     });
   }
-  for (const stance of ["stand1", "jump"]) {
-    avatarFrame(look, stance, 0, false, "hit", true);
-    avatarFrame(look, stance, 0, true, "hit", true);
-  }
-  for (const item of look.items)
-    if (item >= 1300000 && item < 2000000) describeItem(item);
-  for (let frame = 0; frame < 3; frame++) {
-    avatarFrame(look, "stand1", frame, false, undefined, true);
-    avatarFrame(look, "stand1", frame, true, undefined, true);
-  }
-  for (const stance of ["jump", "ladder", "rope", "dead"]) {
-    for (let frame = 0; frame < (stance === "jump" || stance === "dead" ? 1 : 2); frame++) {
-      avatarFrame(look, stance, frame, false, undefined, true);
-      avatarFrame(look, stance, frame, true, undefined, true);
-    }
-  }
-  for (let frame = 0; frame < 4; frame++) {
-    avatarFrame(look, "walk1", frame, false, undefined, true);
-    avatarFrame(look, "walk1", frame, true, undefined, true);
-  }
+  for (const item of look.items) if (item >= 1300000 && item < 2000000) describeItem(item);
 }
 
 /** Fetches one NPC's or mob's frame table, once per template. */
@@ -2577,21 +2568,31 @@ function drawMapSprite(sprite, cameraX, cameraY, now, flipWorld) {
   drawArchiveImage(frame, sprite.x - cameraX, sprite.y - cameraY, worldFlip);
 }
 
+/** UI/field ordinary actions use original weapon walk/stand choices, not attack group heuristics. */
+function sampleAvatarMotion(entity, look, requested, now, y = entity?.y, facing = entity?.facing ?? 0) {
+  const weapon = weaponIdOf(look);
+  const profile = entity?.bodyProfile?.weaponId === weapon ? entity.bodyProfile : avatarMotionCatalog.get(weapon)?.data;
+  if (entity && profile) entity.bodyProfile = profile; // Immutable data only; no async actor mutation.
+  return animationPose(entity, avatarStance(requested, profile), false, now, {
+    profile, key:`${look.face}|${look.hair}|${look.items.join(".")}`, y, facing,
+  });
+}
+
 /** The character's stance and frame from its movement, the way the page can see it. */
 function stanceOfEntity(entity, now) {
   const body = entity === selfView ? playerBody : undefined;
   if ((entity === selfView && entity.hp <= 0) || (entity !== selfView && remoteStance(entity) === "dead")) {
     if (entity === selfView) selfSwing = undefined;
     else delete entity.swing;
-    return { stance: "dead", frame: 0 };
+    return sampleAvatarMotion(entity, lookOf(entity), "dead", now, body?.y ?? entity.y, body?.facing ?? entity.facing);
   }
   if (body?.ladder) {
     selfSwing = undefined; // an old attack must never draw standing parts over a climbing pose
-    return animationPose(entity, locomotion(body), Math.abs(body.vy) > 0, now);
+    return sampleAvatarMotion(entity, lookOf(entity), locomotion(body), now, body.y, body.facing);
   }
   if (!body && entity !== selfView && ["ladder", "rope"].includes(remoteStance(entity))) {
     delete entity.swing;
-    return animationPose(entity, remoteStance(entity), Math.abs(entity.vy ?? 0) > 0, now);
+    return sampleAvatarMotion(entity, lookOf(entity), remoteStance(entity), now);
   }
   // The wire carries the actual attack action. Use the body WZ's scaled delay per frame,
   // including every shoot2 frame, instead of stretching every motion into 480ms.
@@ -2606,12 +2607,8 @@ function stanceOfEntity(entity, now) {
     else delete entity.swing;
   }
   const stance = body ? locomotion(body) : remoteStance(entity);
-  return animationPose(
-    entity,
-    stance,
-    Math.abs(body?.vy ?? entity.vy ?? 0) > 0,
-    now,
-  );
+  return sampleAvatarMotion(entity, lookOf(entity), stance, now,
+    body?.y ?? entity.y, body?.facing ?? entity.facing);
 }
 
 /** One face clock for field actors, character slots and the creation preview. No body-clock reset. */
@@ -2658,8 +2655,8 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
 
 function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   const look = lookOf(entity);
-  preloadAvatar(look);
   const state = stanceOfEntity(entity, now);
+  preloadAvatar(look, entity.bodyProfile?.weaponId === weaponIdOf(look) ? entity.bodyProfile : undefined);
   const face = sampleAvatarFace(entity, look, now);
   let frame = avatarFrame(look, state.stance, state.frame, flip, face.emotion, true, face.frame);
   const attackPose = /^(swing|stab|shoot)/.test(state.stance);
@@ -2679,8 +2676,9 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
     }
   };
   if (frame.ready) { draw(frame); return; }
-  if (state.stance !== "stand1" && !attackPose) {
-    const stand = avatarFrame(look, "stand1", 0, flip, undefined, true);
+  const idleStance = entity.bodyProfile?.weaponId === weaponIdOf(look) ? entity.bodyProfile.stand : "stand1";
+  if (state.stance !== idleStance && !attackPose) {
+    const stand = avatarFrame(look, idleStance, 0, flip, undefined, true);
     if (stand.ready) { draw(stand); return; }
   }
   ctx.fillStyle = "rgba(120, 170, 210, 0.35)";
@@ -2989,9 +2987,11 @@ function frame() {
   for(const npc of npcs.values()) {
     sampleMotion(npc,now,terrain);npcVisuals.locomotion(npc.npcId,npc.action??npc.facing,now);
   }
+  if (selfView) stanceOfEntity(selfView, now);
   for (const user of users.values()) {
     movementFace(user, now);
     sampleMotion(user, now, terrain);
+    stanceOfEntity(user, now); // Native ordinary clocks also update off-screen, not only on draw.
     const dead = remoteStance(user) === "dead";
     if (dead) delete user.swing;
     if (visualFieldActive) deathFx.observe(user.characterId, dead, user, now);
@@ -5545,6 +5545,7 @@ const creationDialogs = characterDialogs({
   image: artImage,
   avatar: avatarFrame,
   face: sampleAvatarFace,
+  bodyPose: sampleAvatarMotion,
   send,
   audio,
   log: logLine,
@@ -5656,7 +5657,37 @@ const recovery = naturalRecovery({
   getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : actionOf(playerBody)>>1,
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
+/** Read-only ordinary-action inspector: its actor/look/virtual rope Y are NOT the field actor. */
+function resetAvatarPreview() {
+  avatarPreviewActor = {y:0}; avatarPreviewLast = undefined;
+  const canvas = document.getElementById("qa-motion-canvas");
+  canvas?.getContext?.("2d")?.clearRect?.(0,0,canvas.width,canvas.height);
+}
+function drawAvatarPreview(now, controls) {
+  const canvas = document.getElementById("qa-motion-canvas"), painter = canvas?.getContext?.("2d");
+  if (!painter || !selfView) return "尚未進入場地。";
+  const current = lookOf(selfView), selected = controls.weapon === "self" ? weaponIdOf(current) : Number(controls.weapon);
+  if (controls.weapon !== "self" && ![0,1302000,1402000,1412000].includes(selected)) return "未知閱覽模板。";
+  const look = controls.weapon === "self" ? {...current,items:[...current.items]} : {...current,
+    items:[...current.items.filter(id => !(id>=1300000 && id<1500000) && Math.floor(id/10000)!==109),...(selected?[selected]:[])]};
+  const elapsed = avatarPreviewLast === undefined ? 0 : Math.max(0,Math.min(250,now-avatarPreviewLast));
+  avatarPreviewLast = now;
+  if (["rope","ladder"].includes(controls.action) && controls.climbing) avatarPreviewActor.y += elapsed * 0.1;
+  const direction = controls.left ? 1 : 0;
+  const pose = sampleAvatarMotion(avatarPreviewActor,look,controls.action,now,avatarPreviewActor.y,direction);
+  const face = sampleAvatarFace(avatarPreviewActor,look,now);
+  let image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction),face.emotion,false,face.frame);
+  if (!image.ready) image = avatarFrame(look,pose.stance,pose.frame,facingFlip(direction));
+  painter.clearRect(0,0,canvas.width,canvas.height); painter.imageSmoothingEnabled = false;
+  if (image.ready) painter.drawImage(image.img,120+image.dx,118+image.dy);
+  const metadata=avatarPreviewActor.bodyProfile?.weaponId === selected ? avatarPreviewActor.bodyProfile : avatarMotionCatalog.get(selected)?.data;
+  return `唯讀模板 ${selected || "無武器"}：${metadata ? `${metadata.walk}／${metadata.stand}` : "metadata載入中／失敗後5秒重試"}；`+
+    `${pose.stance}/${pose.frame}；${image.ready ? "原PNG" : "PNG載入中"}。`;
+}
+
 const testToolsPanel = testTools({
+  drawMotionPreview: drawAvatarPreview,
+  resetMotionPreview: resetAvatarPreview,
   getNpcStatus() {
     const now=performance.now(),lines=[];
     for(const npc of [...npcs.values()].slice(0,8)) {

@@ -77,20 +77,27 @@ node server/src/cli.ts serve \
 恢復原檔可使用 `bash tools/serve-existing-save.sh <真實save路徑>`；檔案不存在／空白會拒絕啟動。
 這個保護入口不自行停服或冷備，必須先由操作者確認。
 
-## 這輪的隔離 LIVE（2026-10-18）
+## 此輪補齊：普通角色動作（未測試）
+
+原武器`info.walk`／`info.stand`分開選姿勢；普通動作改讀真WZ序列與原30ms倒數，
+補選角／創角同時鐘、繩梯整數Y停格與恢復、反向／換裝／場地生命週期及metadata／預熱。
+體驗工具新增**唯讀原角色動作閱覽**，可直接看單手劍／雙手劍／雙手斧與繩梯，不給物品、不改角色。
+詳[NATIVE_AVATAR_MOTION](docs/NATIVE_AVATAR_MOTION.md)／ADR-068；不是完整移動物理或全部原版動畫已完成。
+
+## 現行隔離 LIVE（2026-10-18）
 
 使用者已同意無舊save也繼續；此輪建立 **全新** `generated/preview-faces-20261018.json`，不是恢復舊角色。
 先用exclusive-create的 `node tools/create-isolated-preview.ts generated/<新的檔名>.json` 走WZ／原建角模板，
 再停服冷備／啟服；重跑seed遇既有檔案會拒絕，不重設已玩進度。
 
 - LIVE web **8515**，native login8516／game8517，全部綁0.0.0.0。
-- `preview / preview` → 新初心者Preview；`observer / observer` → 新初心者Observer。
+- `preview / preview` → Preview；`observer / observer` → Observer。建立時為新初心者，後續自行遊玩的進度沿同檔保存，不重新seed。
 - 初始101000000無怪城鎮是明示體驗安排，不是原版建角起點；沒有自動轉職／給技能／金錢。
 - 可兩個分頁觀察同圖；F1–F7或表情按鈕看一般表情／自行眨眼，選角與創角預覽也接獨立時鐘。
 - 「體驗工具（非原版）」可找地圖／前往獵場、唯讀UI；修改配置／領物仍需自行確認。
 - 僅確認啟服日誌與監聽狀態，沒有登入、測試、typecheck、browser、VM或probe，不代表驗收PASS。
 
-此輪原碼／listing／WZ證據、臉飾、旁觀者attr2、HTTP／cache與界線見 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
+前輪原碼／listing／WZ證據、臉飾、旁觀者attr2、HTTP／cache與界線見 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
 新save與冷備均ignored；**Git push不含進度，仍須另行保存重要save**。
 
 重啟既有新體驗檔（先停服、冷備；不要再seed）：

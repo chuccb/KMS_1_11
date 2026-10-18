@@ -128,11 +128,12 @@ test("46BDA0 + Shape2D 10010C40 accumulates type4 100px periods, in both directi
 
 test("427BF0/40D950 idle has mirrored middle frame, walks retain four frames", () => {
   const idle: Record<string,unknown>={};
+  const options={profile:{actions:{stand1:{frames:[0,1,2,1].map(index=>({index,delay:500}))}}}};
   const frames=[0];
-  animationPose(idle,"stand1",false,0);
-  for(let now=250;now<=2000;now+=250) {
-    const pose=animationPose(idle,"stand1",false,now);
-    if(now%500===0) frames.push(pose.frame);
+  animationPose(idle,"stand1",false,0,options);
+  for(let now=30;now<=2040;now+=30) {
+    const pose=animationPose(idle,"stand1",false,now,options);
+    if(now%510===0) frames.push(pose.frame);
   }
   assert.deepEqual(frames,[0,1,2,1,0]);
 });

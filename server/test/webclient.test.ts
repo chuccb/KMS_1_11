@@ -484,6 +484,19 @@ artTest("the map's art, its canvases and a composed avatar are served", { timeou
   assert.ok(Number(avatar.headers.get("x-frame-dy")) < 0);
 
   // Source-only facial chain addition (not executed): metadata, independent PNG cache and input gate.
+  // Ordinary body metadata source addition; no new packet or saved state.
+  for (const [id,walk,stand] of [[0,"walk1","stand1"],[1402000,"walk1","stand2"],[1412000,"walk2","stand2"]] as const) {
+    const response=await fetch(`http://127.0.0.1:${world.webPort}/api/avatar-motion/${id}`);
+    assert.equal(response.status,200);
+    const motion=await response.json() as {weaponId:number;walk:string;stand:string;actions:Record<string,{frames:{index:number;delay:number}[]}>};
+    assert.deepEqual([motion.weaponId,motion.walk,motion.stand],[id,walk,stand]);
+    assert.deepEqual(motion.actions.stand1!.frames.map(f=>f.index),[0,1,2,1]);
+    assert.deepEqual(motion.actions.rope!.frames.map(f=>f.delay),[250,250]);
+    assert.equal(motion.actions.dead!.frames[0]!.delay,150);
+  }
+  for (const id of ["abc","-1","1302000.5","9999999"]) {
+    assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/avatar-motion/${id}`)).status,404);
+  }
   const faceResponse = await fetch(`http://127.0.0.1:${world.webPort}/api/face/20000`);
   assert.equal(faceResponse.status,200);
   const faceBody = await faceResponse.json() as {actions:Record<string,{duration:number;frames:{index:number;delay:number}[]}>};

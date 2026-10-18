@@ -1,3 +1,4 @@
+import type { AvatarMotionProfile } from "../game/avatarmotion.ts";
 import { FACE_EMOTIONS, type FaceAnimation } from "../game/face.ts";
 import type { TestToolResult } from "../game/testtools.ts";
 import { nativeSkillBooks } from "../../../client/jobs.mjs";
@@ -125,6 +126,7 @@ export interface WebClientOptions {
 export interface ArtProvider {
   attackProfile?: BasicAttackProvider;
   face?(faceId: number): FaceAnimation | undefined;
+  avatarMotion?(weaponId: number): AvatarMotionProfile | undefined;
   projectile?(itemId: number): SpriteFrame[];
   /** `Map/Map/%09d.img` as a flat sprite list, or `undefined` when the map is not in the archive. */
   mapArt(mapId: number): MapArt | undefined;
@@ -1495,6 +1497,14 @@ export function startWebClient(
       const art = options.art?.reader && deathArtOf(options.art.reader);
       if (!art) return sendJson(response, 404, { error: "Original Effect/Tomb.img fall/land unavailable" });
       sendJson(response, 200, art);
+      return;
+    }
+    if (url.pathname.startsWith("/api/avatar-motion/")) {
+      const id = url.pathname.slice("/api/avatar-motion/".length);
+      if (!/^\d{1,7}$/.test(id) || (Number(id) !== 0 && (Number(id) < 1300000 || Number(id) >= 1500000)))
+        return sendJson(response, 404, { error: "invalid avatar weapon id" });
+      const profile = options.art?.avatarMotion?.(Number(id));
+      sendJson(response, profile ? 200 : 404, profile ?? { error: "avatar motion unavailable in Data.wz" });
       return;
     }
     if (url.pathname.startsWith("/api/face/")) {

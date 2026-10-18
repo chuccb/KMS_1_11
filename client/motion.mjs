@@ -361,23 +361,10 @@ export function actorDepth(entity, world, kind = "self") {
   return 30000 * (entity.layer ?? (kind === "drop" ? 0 : 7)) - 2 * (entity.group ?? 0) + (kind === "npc" ? 10009 : kind === "drop" ? 10011 : kind === "self" ? 10010 : 10008);
 }
 
-/** Body-frame delays from Character/00002000.img; climbing freezes its current frame, not frame 0. */
-export function animationPose(entity, stance, moving, now) {
-  const climbing = stance === 'rope' || stance === 'ladder';
-  if (!entity.animation || entity.animation.stance !== stance) entity.animation = { stance, elapsed: 0, last: now };
-  const state = entity.animation;
-  if (!climbing || moving) state.elapsed += Math.max(0, Math.min(250, now - state.last));
-  state.last = now;
-  const walking = stance === 'walk1' || stance === 'walk2';
-  const delay = climbing ? 250 : walking ? 180 : 500;
-  const count = climbing ? 2 : walking ? 4 : stance === 'jump' || stance === 'dead' ? 1 : 3;
-  // 427BF0 sets ping-pong for stand1/stand2/alert; 40D950 expands N to 2N-2.
-  const pingPong = stance === 'stand1' || stance === 'stand2' || stance === 'alert';
-  const index = Math.floor(state.elapsed / delay) % (pingPong ? 2 * count - 2 : count);
-  return { stance, frame: pingPong && index >= count ? 2 * count - 2 - index : index };
-}
+/** Ordinary avatar timing lives outside geometric locomotion. */
+export { animationPose } from "./avatar-motion.mjs";
 export function remoteStance(entity) {
-  return ({ 0: 'walk1', 2: 'walk1', 4: 'stand1', 6: 'jump', 8: 'alert', 14: 'ladder', 16: 'rope', 18: 'dead' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
+  return ({ 0: 'walk1', 2: 'walk1', 4: 'stand1', 6: 'jump', 8: 'alert', 10: 'prone', 12: 'fly', 14: 'ladder', 16: 'rope', 18: 'dead' })[typeof entity.action === 'number' ? entity.action & ~1 : -1]
     ?? (entity.motion ? 'walk1' : 'stand1');
 }
 

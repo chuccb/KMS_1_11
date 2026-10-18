@@ -49,6 +49,14 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 未來可獨立成共用目錄，但目前沒有建立 `shared/`，本輪也不搬路徑，以免破壞既有匯入與資源 URL。
 不能把此債務或未來方向描述成已完成的架構。
 
+## 普通身體動作與幾何分界
+
+`game/avatarmotion.ts`讀body幀表與武器walk/stand → ArtProvider／HTTP metadata →
+`client/avatar-motion.mjs`普通倒數 → `main.js`場地／selection／creation →既有avatar PNG compositor。
+`motion.mjs`保留幾何並re-export普通clock；不讓新身體時序改movement byte、傷害或attack forced override。
+actor持有clock與已完成的immutable weapon profile；64座metadata cache去重／退避，滿pending不逐RAF相互驅逐。
+只讀開發閱覽用獨立actor及look副本，不與selfView／inventory／save混用；見[NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md)。
+
 ## 呈現與資源
 
 - 800×600 邏輯畫面，Canvas 與 DOM 共用縮放／座標；原 WZ UI 畫在 Canvas，DOM 提供控制與可及性。

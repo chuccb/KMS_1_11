@@ -1,3 +1,4 @@
+import { nativeBodyFrameDelay, type AvatarMotionProfile } from "./avatarmotion.ts";
 /**
  * The avatar: the look the wire carries, turned into the picture the 2003 client draws.
  *
@@ -274,25 +275,25 @@ function stanceNode(reader: ArtReader, image: string, stance: string, frame: num
 /** How many frames a stance has (`stand1`: 3, `walk1`: 4) - the client's animation uses this. */
 export function frameCountOf(reader: ArtReader, stance: string): number {
   const node = reader.node(`${BODY_IMAGE}/${stance}`);
-  return Math.max(1, node === undefined ? 1 : frameNames(node).length);
+  return frameNames(node).length;
 }
 
 /** The delay of one body frame (`stand1/0` says 500, `walk1/0` says 180). */
 export function frameDelayOf(reader: ArtReader, stance: string, frame: number): number {
   const node = reader.node(`${BODY_IMAGE}/${stance}/${frame}`);
   const delay = node === undefined ? undefined : nodeRecord(node).delay;
-  return typeof delay === "number" && delay > 0 ? delay : 180;
+  return nativeBodyFrameDelay(delay);
 }
 
 /**
  * The stance the field shows: the body image's own name for what a character is doing.
  * `stand1` is idle, `walk1`/`walk2` the two walk cycles, `alert` the "!" pause, `jump` a jump.
  */
-export function stanceOf(action: number, moving: boolean): string {
-  // The wire's action byte is not the stance table (that table is client-side), so the viewer only
-  // distinguishes what it can see: moving or not.
-  void action;
-  return moving ? "walk1" : "stand1";
+export function stanceOf(action: number, moving: boolean, profile?: Pick<AvatarMotionProfile, "walk" | "stand">): string {
+  // Keep the old moving argument for consumers; a real movement action, NOT a body action id, wins.
+  if (!Number.isInteger(action)) return moving ? profile?.walk ?? "walk1" : profile?.stand ?? "stand1";
+  return ({1: profile?.walk ?? "walk1", 2: profile?.stand ?? "stand1", 3:"jump", 4:"alert", 5:"prone",
+    6:"fly", 7:"ladder", 8:"rope", 9:"dead"} as Record<number,string>)[action >> 1] ?? "walk1";
 }
 
 /**

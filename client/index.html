@@ -526,7 +526,27 @@
             <button id="qa-dialogue-richMenu" type="button">圖文／圖示選項</button>
           </div>
         </fieldset>
-        <p class="qa-warning">只操作目前登入角色。所有配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。</p>
+        <details id="qa-motion">
+          <summary>唯讀 · 原角色動作／武器姿勢閱覽（非原版工具）</summary>
+          <p>只讀WZ模板，不穿戴、不給道具、不修改角色或存檔。衣帽沿目前外觀；替代武器模板不帶盾牌。</p>
+          <label>武器 <select id="qa-motion-weapon">
+            <option value="self">目前穿戴外觀</option><option value="0">無武器</option>
+            <option value="1302000">1302000 · 單手劍</option><option value="1402000">1402000 · 雙手劍</option>
+            <option value="1412000">1412000 · 雙手斧</option>
+          </select></label>
+          <label>身體動作 <select id="qa-motion-action">
+            <option value="stand1">站立（依武器stand）</option><option value="walk1">走路（依武器walk）</option>
+            <option value="alert">警戒姿勢</option><option value="jump">跳躍姿勢</option>
+            <option value="ladder">梯子</option><option value="rope">繩索</option>
+            <option value="prone">趴下姿勢</option><option value="fly">fly姿勢</option><option value="dead">dead身體姿勢</option>
+          </select></label>
+          <label><input id="qa-motion-left" type="checkbox" /> 面向左</label>
+          <label><input id="qa-motion-climbing" type="checkbox" /> 閱覽器攀爬中（取消可看停格／恢復）</label>
+          <canvas id="qa-motion-canvas" width="240" height="140" aria-label="原角色PNG動作閱覽"></canvas>
+          <p id="qa-motion-status" aria-live="off"></p>
+          <p>攀爬座標是閱覽器虛擬Y；不移動真角色。這是身體動作閱覽，不是假裝施放飛行技能或觸發死亡／Tomb／音效。</p>
+        </details>
+        <p class="qa-warning">下列寫入操作只操作目前登入角色。能力配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。</p>
         <p id="qa-checkpoint-note"></p>
         <p id="test-tools-status" role="status" aria-live="polite"></p>
         <fieldset><legend>1 · 方便移動（沿用原地圖命令）</legend>

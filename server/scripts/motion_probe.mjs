@@ -140,14 +140,15 @@ test('actor depth uses the current foothold page/group instead of a hard-coded l
   assert.equal(actorDepth({ x: 50, y: 100 }, terrain, 'npc'), 60000 - 20 + 10009);
 });
 
-test('climbing keeps the current animation frame while stopped (250ms WZ delays)', () => {
+test('climbing keeps the current frame while stopped; WZ250 advances on a 30ms tick', () => {
   const b = {};
-  assert.equal(animationPose(b, 'rope', true, 0).frame, 0);
-  animationPose(b, 'rope', true, 200);
-  assert.equal(animationPose(b, 'rope', true, 300).frame, 1);
-  assert.equal(animationPose(b, 'rope', false, 400).frame, 1);
-  assert.equal(animationPose(b, 'rope', false, 900).frame, 1);
-  assert.equal(animationPose(b, 'rope', true, 1150).frame, 0);
+  const options = {profile:{actions:{rope:{frames:[{index:0,delay:250},{index:1,delay:250}]}}}};
+  assert.equal(animationPose(b, 'rope', true, 0, options).frame, 0);
+  animationPose(b, 'rope', true, 200, options);
+  assert.equal(animationPose(b, 'rope', true, 300, options).frame, 1);
+  assert.equal(animationPose(b, 'rope', false, 400, options).frame, 1);
+  assert.equal(animationPose(b, 'rope', false, 900, options).frame, 1);
+  assert.equal(animationPose(b, 'rope', true, 1150, options).frame, 0);
 });
 test('remote players preserve rope/jump actions, including a stopped rope pose', () => {
   assert.equal(remoteStance({}), 'stand1');

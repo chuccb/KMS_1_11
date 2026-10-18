@@ -15,7 +15,7 @@ export function rollCreationDice(random = Math.random) {
 }
 
 /** Paint native art; HTML is only transparent hit targets and the real name input. */
-export function characterDialogs({ ctx, image, avatar, face = () => ({emotion:undefined,frame:0}), send, audio, log = () => {}, busy, getSelected, isCharacterStage }) {
+export function characterDialogs({ ctx, image, avatar, face = () => ({emotion:undefined,frame:0}), bodyPose = () => ({stance:"stand1",frame:0}), send, audio, log = () => {}, busy, getSelected, isCharacterStage }) {
   const el = (id) => document.getElementById(id);
   const root = el('character-dialogs'), createRoot = el('new-character'), confirmRoot = el('character-confirm');
   const input = el('new-name'), choices = el('creation-options');
@@ -65,6 +65,7 @@ export function characterDialogs({ ctx, image, avatar, face = () => ({emotion:un
       groups = gender === 1 ? catalog.female : catalog.male;
       if (!Array.isArray(groups) || groups.length !== 6 || groups.some((g) => !g.length)) throw new Error('MakeCharInfo 的六組外觀不完整。');
       setBusy(false);
+      delete previewActor.animation; delete previewActor.faceClock; delete previewActor.emotion;
       picks = groups.map((g) => g[0].id); dice = rollCreationDice(); diceStep = 0; checkedName = ''; input.value = '';
       notice(CREATION_TEXT.warning, 'create');
     } catch (error) { setBusy(false); notice(error.message, 'closed'); }
@@ -187,9 +188,9 @@ export function characterDialogs({ ctx, image, avatar, face = () => ({emotion:un
         while (diceStep > 0 && now >= diceAt) { dice = rollCreationDice(); diceStep++; diceAt += 30; if (diceStep >= 12) { diceStep = 0; sync(); } }
         stamp('UI/Login.img/CharSelect/newDlg', 270, 88);
         const look = {face:picks[0],hair:picks[1],items:picks.slice(2)};
-        const pose = face(previewActor, look, now), bodyFrame = Math.floor(now / 500) % 3;
-        let preview = avatar(look, 'stand1', bodyFrame, true, pose.emotion, false, pose.frame);
-        if (!preview.ready) preview = avatar(look, 'stand1', bodyFrame, true);
+        const pose = face(previewActor, look, now), body = bodyPose(previewActor, look, 'stand1', now);
+        let preview = avatar(look, body.stance, body.frame, true, pose.emotion, false, pose.frame);
+        if (!preview.ready) preview = avatar(look, body.stance, body.frame, true);
         if (preview.ready) ctx.drawImage(preview.img, 411 + preview.dx, 211 + preview.dy);
         for (let i = 0; i < 6; i++) {
           const y = 248 + i * 20; ctx.fillStyle = '#c4d4e2'; ctx.fillRect(378, y, 127, 18);

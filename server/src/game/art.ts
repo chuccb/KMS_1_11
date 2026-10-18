@@ -7,6 +7,7 @@
  * tileset twice. This module is also where the *process-wide* caches live (the `z` table, the
  * composed avatar PNGs), so `net/webclient.ts` stays a thin HTTP layer.
  */
+import { avatarMotionOf, type AvatarMotionProfile } from "./avatarmotion.ts";
 import type { WzArchive } from "../wz/archive.ts";
 import { artReaderOf, type ArtReader } from "./wzart.ts";
 import { mapArtProvider, type MapArt } from "./mapart.ts";
@@ -25,10 +26,18 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
   const ranks = zRanksOf(archive);
   const reader = mapProvider.reader ?? library.reader;
   const avatars = new Map<string, AvatarFrame | undefined>();
+  const motions = new Map<number, AvatarMotionProfile | undefined>();
   const faces = new Map<number, FaceAnimation | undefined>();
 
   return {
     reader,
+    avatarMotion(weaponId: number) {
+      if (!motions.has(weaponId)) {
+        if (motions.size >= 64) motions.delete(motions.keys().next().value!);
+        motions.set(weaponId, avatarMotionOf(reader, weaponId));
+      }
+      return motions.get(weaponId);
+    },
     face(faceId: number) {
       if (!faces.has(faceId)) {
         if (faces.size >= 64) faces.delete(faces.keys().next().value!);

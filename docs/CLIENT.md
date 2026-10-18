@@ -1,5 +1,14 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：普通身體動作／武器姿勢／繩梯停格（未測試）
+
+原武器info.walk／info.stand獨立決定walk1/2與stand1/2，雙手劍不是一律walk2。
+讀原WZ幀序列／delay，站立與alert反向；依50B590與UI424740減30、到期換幀、捨棄overshoot。
+繩梯倒數耗盡後按實際整數Y持幀，不用vy殘值；轉向／換裝／死亡復活／場地／斷線與offscreen一起接。
+選角／創角共用，不再有100ms走路或500ms三格循環的第二套時鐘。
+體驗工具新增獨立actor的唯讀動作閱覽，可比較三種武器與繩梯；不送遊戲操作、不給物品、不改save。
+[NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md)／ADR-068；只呈現普通動作，不宣稱全部物理／強制技能／本機alert產生完成。
+
 ## 2026-10-18：臉部／眨眼／表情／臉飾（未測試）
 
 臉部不再固定emotion/0或跟body frame跑。依原509070／509560／50B590與Gr2D／WZ接獨立時鐘、

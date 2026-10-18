@@ -5,6 +5,8 @@ export function testTools({
   getMovement = () => undefined,
   getCombat = () => "",
   getNpcStatus = () => "",
+  drawMotionPreview = () => "",
+  resetMotionPreview = () => {},
   isInGame,
   onOpen,
   openSkills,
@@ -83,6 +85,7 @@ export function testTools({
   }
   function close() {
     opened = false;
+    resetMotionPreview();
     el("qa-confirm").checked = false;
     sync();
     if (root.contains(document.activeElement)) toggle.focus();
@@ -168,6 +171,7 @@ export function testTools({
       close();
     }
   });
+  el("qa-motion").addEventListener("toggle", () => { if (!el("qa-motion").open) resetMotionPreview(); });
   el("qa-confirm").addEventListener("change", sync);
   el("qa-warrior").addEventListener("click", () => preset(100));
   el("qa-magician").addEventListener("click", () => preset(200));
@@ -224,6 +228,13 @@ export function testTools({
       return opened;
     },
     tick(now) {
+      if (opened && el("qa-motion").open) {
+        const text = drawMotionPreview(now, {
+          weapon:el("qa-motion-weapon").value, action:el("qa-motion-action").value,
+          climbing:el("qa-motion-climbing").checked, left:el("qa-motion-left").checked,
+        });
+        if (el("qa-motion-status").textContent !== text) el("qa-motion-status").textContent = text;
+      }
       if (opened && now - lastMovementAt >= 250) {
         lastMovementAt = now;
         movementStatus();
@@ -272,6 +283,7 @@ export function testTools({
         status(String(message.message));
         sync();
       }
+      if (["shop-open","npc-say"].includes(message.t) || (message.t === "self" && message.self?.hp <= 0)) close();
       if (message.t === "self") queueMicrotask(sync);
       if (["field", "login", "disconnect"].includes(message.t)) {
         enabled = false;

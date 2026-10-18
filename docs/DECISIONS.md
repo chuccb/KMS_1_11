@@ -2568,3 +2568,30 @@ LIVE web8515/login8516/game8517，0.0.0.0；帳號與操作見根README。
 建立新save是已授權的資料準備，不是功能測試。新增native-faces與HTTP／雙人relay回歸僅來源。
 只憑啟服日誌確認2帳號／2新角色已讀入與三port監聽，未驗收功能；提交[skip ci]，只推目前Arena分支。
 詳NATIVE_FACE_ANIMATION.md。
+
+
+## ADR-068：普通身體動畫不再分裂三套時間，武器姿勢與繩梯倒數依原表
+
+**日期**：2026-10-18 ｜ **狀態**：實作與回歸來源已編輯，未測試／typecheck／browser／VM／probe。
+
+交叉407A10及listing407C8B（body缺省150）、427BF0／40D950 idle逆序、409C30→508290→508FC0
+及UI425060武器walk/stand、508700普通caller速度3、50B590／424740倒數、42E210選角2/4切換。
+WZ抽取確證walk180、stand500、rope250與各武器獨立walk／stand；雙手劍1402000為walk1/stand2。
+
+**決策**：body metadata保留真index／delay與idle反向；普通clock減30、到期換格、reload新delay捨棄overshoot。
+不乘weapon attackSpeed或Speed藥水；繩梯比較integer Y，停止仍耗盡倒數後持幀，再移動立即可換。
+自己／remote／offscreen／選角／創角共用；反向、換look、death/revive與場地／斷線重設，self快照保留。
+新HTTP只讀資源，沒有新opcode／寫入save欄位；cache64、退避5秒、pending飽和不互相abort、actor保留已完成profile。
+預熱含walk2/stand2與真數字幀，不猜4/3/2幀；普通clock不接管attack傷害／射彈排程。
+
+**便利入口**：體驗工具新增readonly body canvas，當前外觀／三種WZ武器模板／方向／繩梯虛擬Y。
+使用正式metadata／clock／compositor，但獨立actor／look副本；只GET素材，不試穿不給物品不改存檔。
+關閉／收合／真dialog／shop／death／field／disconnect清除預覽；非原版工具，非飛行或死亡技能模擬。
+
+**界線**：RAF起始相位與長背景250ms上限屬browser政策，多補償tick並無完整原生中間物理snapshot。
+非全域原30ms主迴圈；本機alert產生／3秒切換鏈、全部CVecCtrl、強制技能與Gr2D仍未宣稱完成。
+prone／fly增加原remote姿勢解碼，不代表新增其操作／物理。
+
+新增native-avatar-motion及HTTP來源，更新舊motion／jump／client probe來源；全部未執行。
+沿用同preview-faces save，停服冷備後開web8515；不seed／重設角色。啟服非功能PASS。
+提交[skip ci]，只非force推目前Arena分支。詳NATIVE_AVATAR_MOTION.md。
