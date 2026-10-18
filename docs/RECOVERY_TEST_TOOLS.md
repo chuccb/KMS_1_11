@@ -3,6 +3,13 @@
 **本輪沒有執行 test／check／typecheck／browser／VM／probe。** 新增的是實作與回歸來源，不是 PASS 報告。
 原版功能與方便體驗的開發工具分開；工具不算 1:1 原版 UI，也不代表轉職／自然發點規則已找到。
 
+## 2026-10-18 新增唯讀圖文入口（未測試）
+
+工具的「對話窗範例」新增 **原圖示／圖文長文** 與 **圖文／圖示選項**，使用同一個真封包對話 renderer。
+紅水27×30、短劍31×30、戰士技能32×32、原名稱tip／多高度行／長文scroll，含跨行與純圖選項。
+這兩項**不需要套用角色體驗配置**；結果只寫本地日誌，不送0x15、不給物品、不學技能、不改進度。
+仍標UI PREVIEW／非原NPC任務，世界不暫停。詳 [NATIVE_DIALOGUE_RICHTEXT](NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063。
+
 ## 直接操作，不必困在初心者的空技能窗
 
 1. 開 LIVE PREVIEW，沿用原帳號／角色登入；`preview / preview`，或 `demo / demo` 自行建立角色。

@@ -207,7 +207,7 @@ export function testTools({
     close();
     openSkills();
   });
-  for (const kind of ['say','confirm','askText','askNumber','menu'])
+  for (const kind of ['say','confirm','askText','askNumber','menu','rich','richMenu'])
     el(`qa-dialogue-${kind}`).addEventListener('click', () => {
       close();
       if (!openDialogue(kind)) log('對話窗範例未開啟：請先結束對話／商店或等待目前操作完成。');

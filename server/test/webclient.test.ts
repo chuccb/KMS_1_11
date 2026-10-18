@@ -1413,3 +1413,27 @@ test("HTTP NPC keeps its own name and native dc rectangle; cursor uses existing 
   assert.deepEqual([meta.width,meta.height,meta.ox,meta.oy],[24,23,0,0]);
   assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/png/${path}`)).status,200);
 });
+
+/** ADR-063 regression source only — not executed or HTTP-probed for this delivery. */
+test('inline dialogue catalogue: normal item/skill icons, original names, no learned-skill or save mutation',
+  {timeout:20000,skip:!ART_ARCHIVE},async t=>{
+    const world=await startWorld(t,{skills:true});
+    const before=JSON.stringify([...world.accounts]),saved=world.store.saved;
+    const get=async(path:string)=>fetch(`http://127.0.0.1:${world.webPort}${path}`);
+    const potion=await (await get('/api/item/2000000')).json() as {
+      id:number;name:string;icon:{width:number;height:number};iconRaw:{width:number;height:number};
+    };
+    assert.equal(potion.name,'빨간 포션');
+    assert.deepEqual([potion.icon.width,potion.icon.height],[27,30]);
+    assert.deepEqual([potion.iconRaw.width,potion.iconRaw.height],[27,27]);
+    const weapon=await (await get('/api/item/1302000')).json() as {icon:{width:number;height:number}};
+    assert.deepEqual([weapon.icon.width,weapon.icon.height],[31,30]);
+    const skill=await (await get('/api/skill/1000000')).json() as {
+      id:number;name:string;icon:{path:string;width:number;height:number};
+    };
+    assert.deepEqual(skill,{id:1000000,name:'HP 회복력 향상',
+      icon:{path:'Skill/100.img/skill/1000000/icon',width:32,height:32}});
+    for(const id of ['-1','NaN','1.5','2147483648','999999999999','0','1000000/icon.png'])
+      assert.equal((await get(`/api/skill/${id}`)).status,404);
+    assert.equal(JSON.stringify([...world.accounts]),before);assert.equal(world.store.saved,saved);
+  });

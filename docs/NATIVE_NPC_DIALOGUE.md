@@ -7,6 +7,8 @@
 
 > 後續 ADR-062已接NPC idle／speech／controller鏈，索引差異與原server政策仍未解；見 [NATIVE_NPC_BEHAVIOR](NATIVE_NPC_BEHAVIOR.md)。
 
+> 後續ADR-063已補 `#i/#s` 圖文內容、名稱tip／動態row／生命週期；見 [NATIVE_DIALOGUE_RICHTEXT](NATIVE_DIALOGUE_RICHTEXT.md)。原quest腳本仍缺。
+
 ## 本輪交付
 
 1. NPC 缺省 frame delay 從 1000ms 修成原 `40C730` 的 **180ms**。保留 canvas 明示 delay、Mob 的既有規則及 Map 的缺省值。
@@ -84,9 +86,9 @@
   已交叉出 `49A0C0` 為4–12秒抽選、`499C00` 氣泡5000ms，但不直接把它寫成任務翻頁或本地各自亂播的AI。
   `.lst 0049A2C2..0049A310` 明確對signed action與extra表count比較；sender `49A3C0` 是extraIndex+2，
   此邊界與action表語意仍待釐清。不能用猜測的wire索引宣稱已同步。
-- 只實作已確認的色彩／粗體／換行／非負整數#L選項；人物、任務、道具名稱替換、`#i` icon與其tooltip、其他macro仍缺。
-  未支援碼保留literal，不默默刪掉內容或杜撰資料。
-- Browser Gulim／KMSCJK fallback不是原GDI字型量測；換行以browser glyph量測，未完成原byte-token whitespace／word splitting。
+- 後續ADR-063已補 `#i/#s` icon、archive名稱tip與圖文選項；未確認的人物／任務／道具名稱替換不套後期macro。
+  未支援碼仍保留literal，不默默刪掉內容或杜撰資料。
+- Browser Gulim／KMSCJK fallback不是原GDI字型量測；ADR-063改用整段量測、續行空白／掛行，完整原byte-token word splitting仍未全移植。
   因此有原尺寸／素材／row規則，不宣稱文字pixel-perfect。
 - Wheel、PageUp/Down、Home/End、focus trap、IME／主按鍵防誤觸是browser相容／操作政策；不是完整CWndMan。
   普通scroll thumb互動可用，但原控件的按住重複、全部hover/pressed scrollbar狀態、drag caption未完整移植。

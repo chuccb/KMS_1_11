@@ -2464,3 +2464,29 @@ controller按NPC由最早在場者擔任／離場交接，靜止預設、movable
 新增native-npc-behavior與修舊npc/world/field/webclient/cursor回歸來源，**全部未執行**。
 亦未執行test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
 詳NATIVE_NPC_BEHAVIOR.md。同save停服冷備再開LIVE，[skip ci]提交、非force推送目前Arena分支。
+
+
+## ADR-063：用原record語意補CUtilDlgEx圖文，不杜撰缺失的server腳本
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作與回歸來源，未執行驗證。
+
+沿534A80／534FA0／5338A0／535520／5359B0／535A60、530D40／5333D0及4BB270追查，
+listing交叉 `##` escape、L/i/s token、item479B10(id,1)、skillentry+100、row bottom／height−1。
+直接WZ dump確認紅水normal27×30 vs raw27×27、短劍31×30 vs raw31×29、技能32×32。
+
+**決策**：保留原普通icon尺寸、row最大高度與行底對齊，原單行名稱tip；不以iconRaw或16px占位圖代替。
+canonical lexer由UI與reply authority共用，escaped ##L與空標記不是選項；未知macro保留literal。
+整段文字量測替代逐字寬度累加，補掛行句點／逗號與續行空白，不聲稱原GDI／所有DBCS splitting。
+
+新增唯讀 `/api/skill/<id>`，不依已學SP、不暴露新遊戲寫入能力。資源4併行、128成功快取、
+去重／首輪PNG等待、每modal AbortSignal／identity guard、字型到達保留editor與焦點／scroll。
+圖文／純圖選項沿實際record高度命中／底線／捲動，逐piece透明target但每selection僅一個Tab stop。
+名稱tip在modal clip外上層；close／滾動／重排／失焦取消舊hover／press，沒有合成角色操作。
+
+**界線**：canonical數值範圍／並行／快取／載入gate／錯誤防護與DOM可及性屬重建政策。
+不推測原atoi畸形輸入／崩潰，不新增後期人物／任務macro，不臆造計程車／倉庫／轉職腳本。
+圖文唯讀入口不是任務、不發0x15、不給物品／技能／進度；真0x47仍優先。
+
+新增native-dialogue-richtext與webclient回歸來源、更新舊inline literal斷言，**全部未執行**。
+依使用者要求不test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
+詳NATIVE_DIALOGUE_RICHTEXT.md。同save停服冷備再開LIVE，[skip ci]提交、非force推目前Arena分支。

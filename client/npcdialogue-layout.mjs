@@ -1,66 +1,95 @@
-/** CUtilDlgEx source: 530C20/530CA0/5338A0/5359B0/535E40/535EF0.
- * Supported markup is deliberately bounded: colors, weight, #L<number># / #l and newlines.
- * Item/quest/character substitution and inline icons are NOT implemented; unknown codes remain
- * literal instead of silently deleting content. Browser font measurements are not native GDI.
+/** CUtilDlgEx: 534A80/534FA0 lexer; 5338A0 records; 535520 wrap; 5359B0/535A60 rows.
+ * Canonical bounded grammar only; no invented later-version name/quest substitutions.
+ * Browser font metrics are not the original GDI fonts.
  */
 export const DIALOGUE_FONT = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
 export const DIALOGUE_COLORS = {k:'#000000', r:'#ff0000', g:'#00ff00', b:'#0000ff'};
-export function dialogueRuns(value) {
-  const text = String(value).replace(/\r\n?/g, '\n');
-  const runs = [];
-  let color = 'k', bold = false, selection;
-  function append(text) {
-    const last = runs.at(-1);
-    if (last && last.color === color && last.bold === bold && last.selection === selection)
-      last.text += text;
-    else runs.push({text, color, bold, selection});
-  }
-  for (let i = 0; i < text.length;) {
-    if (text[i] === '#') {
-      const code = text[i + 1];
-      if (Object.hasOwn(DIALOGUE_COLORS, code)) { color = code;i += 2;continue; }
-      if (code === 'e' || code === 'n') { bold = code === 'e';i += 2;continue; }
-      if (code === 'l') { selection = undefined;i += 2;continue; }
-      if (code === 'L') {
-        const match = /^#L(\d+)#/.exec(text.slice(i));
-        if (match && Number(match[1]) <= 0x7fffffff) {
-          selection = Number(match[1]);i += match[0].length;continue;
+export function dialogueRuns(message) {
+  const runs=[];
+  let color='k',bold=false,selection,buffer='';
+  const flush=()=>{if(buffer){runs.push({text:buffer,color,bold,selection});buffer='';}};
+  const text=String(message ?? '').replace(/\r\n?/g,'\n');
+  for(let i=0;i<text.length;) {
+    if(text[i]==='\n'){flush();runs.push({text:'\n',color,bold,selection});i++;continue;}
+    if(text[i]==='#') {
+      const code=text[i+1];
+      if(code==='#'){buffer+='#';i+=2;continue;}
+      if(Object.hasOwn(DIALOGUE_COLORS,code)){flush();color=code;i+=2;continue;}
+      if(code==='e'||code==='n'){flush();bold=code==='e';i+=2;continue;}
+      if(code==='l'){flush();selection=undefined;i+=2;continue;}
+      if(code==='L'||code==='i'||code==='s') {
+        const match=/^#([Lis])(\d+)#/.exec(text.slice(i));
+        if(match && Number(match[2])<=0x7fffffff) {
+          flush();const id=Number(match[2]);
+          if(code==='L')selection=id;
+          else runs.push({text:'',kind:code==='i'?'item':'skill',id,color,bold,selection});
+          i+=match[0].length;continue;
         }
       }
     }
-    const ch = String.fromCodePoint(text.codePointAt(i));append(ch);i += ch.length;
+    const ch=String.fromCodePoint(text.codePointAt(i));buffer+=ch;i+=ch.length;
   }
-  return runs;
+  flush();return runs;
 }
-export function dialogueLayout(body, measure) {
-  const editing = body.kind === 'askText' || body.kind === 'askNumber';
-  const textWidth = editing ? 230 : 300, padding = editing ? 2 : 8;
-  const runs = dialogueRuns(body.message), pieces = [], rows = [[]];
-  let x = padding;
-  for (const run of runs) {
-    for (const ch of run.text) {
-      if (ch === '\n') {rows.push([]);x = padding;continue;}
-      const width = Math.max(0, measure(ch, run.bold));
-      if (x > padding && x + width + padding > textWidth) {rows.push([]);x = padding;}
-      const row = rows.at(-1), last = row.at(-1);
-      if (last && last.color === run.color && last.bold === run.bold && last.selection === run.selection) {
-        last.text += ch;last.width += width;
-      } else {
-        const piece = {...run, text:ch, x, y:padding + (rows.length - 1) * 18, width, height:16};
-        row.push(piece);pieces.push(piece);
+export const dialogueAssetKey = run => `${run.kind}:${run.id}`;
+export function dialoguePlainText(runs, resolve=()=>undefined) {
+  return runs.map(run=>run.kind ? (resolve(run)?.name || `${run.kind} ${run.id}`) : run.text).join('');
+}
+/** Shared canonical lexer: escaped ##L isn't an offered choice at the answer boundary. */
+export function dialogueSelections(message) {
+  return new Set(dialogueRuns(message).filter(run=>run.selection!==undefined && (run.kind || (run.text && run.text!=='\n'))).map(run=>run.selection));
+}
+/** WZ-sized icons, bottom-aligned against each row's maximum; no placeholder or icon scaling. */
+export function dialogueLayout(body, measure, resolve=()=>undefined) {
+  const editing=body.kind==='askText'||body.kind==='askNumber';
+  const textWidth=editing?230:300, padding=editing?2:8;
+  const runs=dialogueRuns(body.message),pieces=[],rows=[[]];
+  let row=rows[0],x=padding;
+  const nextRow=()=>{row=[];rows.push(row);x=padding;};
+  const add=piece=>{row.push(piece);pieces.push(piece);x+=piece.width;};
+  for(const run of runs) {
+    if(run.text==='\n'){nextRow();continue;}
+    if(run.kind) {
+      const asset=resolve(run), icon=asset?.icon;
+      if(!icon || !Number.isFinite(icon.width)||!Number.isFinite(icon.height)||icon.width<=0||icon.height<=0)continue;
+      if(x>padding && x+icon.width+padding>textWidth)nextRow();
+      add({...run,text:asset.name || `${run.kind} ${run.id}`,image:icon.path,
+        width:icon.width,height:icon.height,x,y:0});
+      continue;
+    }
+    let remaining=run.text;
+    while(remaining) {
+      const available=textWidth-padding-x;
+      if(measure(remaining,run.bold)<=available) {
+        add({...run,text:remaining,width:measure(remaining,run.bold),height:16,x,y:0});break;
       }
-      x += width;
+      // Search measured whole substrings; summing glyph widths loses kerning/shaping.
+      const chars=Array.from(remaining);let low=0,high=chars.length;
+      while(low<high){const mid=Math.ceil((low+high)/2);
+        if(measure(chars.slice(0,mid).join(''),run.bold)<=available)low=mid;else high=mid-1;}
+      if(low===0 && x>padding){nextRow();continue;}
+      low=Math.max(1,low); // Progress even for a malformed over-wide glyph/canvas.
+      if(chars[low]==='.'||chars[low]===',')low++; // 5338A0: one hanging punctuation mark.
+      const part=chars.slice(0,low).join('');
+      add({...run,text:part,width:measure(part,run.bold),height:16,x,y:0});
+      remaining=chars.slice(low).join('').replace(/^[ \t]+/,'');
+      if(remaining)nextRow();
     }
   }
-  // Plain-text lines are at least 16px high, followed by 2px; native 530CA0 adds end padding.
-  const textHeight = runs.length ? 2 * padding + rows.length * 18 : 0;
-  const scrolling = !editing && textHeight > 240 && Math.floor((textHeight - 240) / 8) + 1 > 2;
-  const visibleHeight = scrolling ? 240 : textHeight;
-  return {pieces, textWidth, textHeight, visibleHeight, scrolling,
-    maxScroll:scrolling ? Math.floor((textHeight - visibleHeight) / 8) : 0,
-    width:textWidth + 22 + (scrolling ? 12 : 0),
-    height:visibleHeight + (editing ? 99 : body.kind === 'menu' ? 58 : 79),
-    textX:editing ? 14 : 11, textY:36};
+  let y=padding;
+  for(const row of rows) {
+    const height=row.reduce((max,p)=>Math.max(max,p.height),16);
+    for(const p of row)p.y=y+height-p.height;
+    y+=height+2;
+  }
+  const textHeight=runs.length?padding+y:0;
+  const scrolling=!editing&&textHeight>240&&Math.floor((textHeight-240)/8)+1>2;
+  const visibleHeight=scrolling?240:textHeight;
+  return {pieces,textWidth,textHeight,visibleHeight,scrolling,
+    maxScroll:scrolling?Math.floor((textHeight-visibleHeight)/8):0,
+    width:textWidth+22+(scrolling?12:0),
+    height:visibleHeight+(editing?99:body.kind==='menu'?58:79),
+    textX:editing?14:11,textY:36};
 }
 export function dialogueButtons(body, width, height) {
   const button = (key, name, x, y, answer) => ({key, name, x, y, width:50, height:23, answer});

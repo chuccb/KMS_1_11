@@ -59,3 +59,18 @@ export function drawTextTooltip(ctx, x, y, lines, {maxWidth = 270, keyline = fal
   rows.forEach((line, i) => ctx.fillText(line, at.x + 4, at.y + 3 + i * 14));
   ctx.restore();
 }
+
+/** 500F50 simple name tip, not an item-stat panel: font172, text(4,3), width+8/height+6.
+ * Font height is measured at runtime, like 505530; Canvas fallback metrics are not native GDI.
+ */
+export function drawSimpleTooltip(ctx,x,y,text,{font=HUD_FONT,fontHeight}={}) {
+  if(!text)return;
+  ctx.save();ctx.font=font;ctx.textAlign='left';ctx.textBaseline='top';
+  const metrics=ctx.measureText(text),lineHeight=metrics.fontBoundingBoxAscent+metrics.fontBoundingBoxDescent;
+  const measuredHeight=Number.isFinite(lineHeight)&&lineHeight>0?Math.ceil(lineHeight):13;
+  const width=Math.max(8,Math.min(799,Math.ceil(metrics.width)+8)),height=(fontHeight??measuredHeight)+6;
+  const at=tooltipPosition(x,y,width,height);
+  drawTooltipFrame(ctx,at.x,at.y,width,height);
+  ctx.beginPath();ctx.rect(at.x+3,at.y+3,width-6,height-6);ctx.clip();
+  ctx.fillStyle='#ffffff';ctx.fillText(text,at.x+4,at.y+3);ctx.restore();
+}

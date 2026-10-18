@@ -64,7 +64,7 @@ test('5338A0 bounded markup preserves unsupported codes and sparse menu values',
   const runs=dialogueRuns('#rred#e bold#n#k\r\n#L42##bchoice#l #i1000#');
   assert.equal(runs[0].color,'r');assert.equal(runs[1].bold,true);
   assert.ok(runs.some((r:{selection?:number;text:string})=>r.selection===42&&r.text==='choice'));
-  assert.ok(runs.map((r:{text:string})=>r.text).join('').includes('#i1000#'));
+  assert.ok(runs.some((r:{kind?:string;id?:number})=>r.kind==='item'&&r.id===1000));
   assert.ok(dialogueRuns('#L-1#x').map((r:{text:string})=>r.text).join('').includes('#L-1#'));
 });
 

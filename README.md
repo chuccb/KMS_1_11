@@ -1,15 +1,22 @@
 # KMS 1.11 重建工作區
 
-最新還原（2026-10-18，未測試）：NPC原待機池、單一controller／交接、signed 0x2F→0x3D、
-30ms逐格／單次動作、原五秒深紅氣泡及氣泡期間隱藏名牌，補唯讀NPC狀態。
-[交叉證據、索引差異與未完成界線](docs/NATIVE_NPC_BEHAVIOR.md)／ADR-062；原server索引重寫及自主NPC走路仍缺，啟服不是PASS。
+最新還原（2026-10-18，未測試）：原CUtilDlgEx的 `#i` 道具／`#s` 技能圖示、不同高度圖文底對齊、
+圖文／純圖選項、archive名稱提示、完整字串量測折行與續行處理；補資源取消／焦點／回覆邊界。
+[原碼、listing、WZ尺寸與未完成界線](docs/NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；原quest腳本仍未恢復，啟服不是PASS。
 
 以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
 瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：NPC metadata區分own info／一跳linked行為根與動作art merge；
+- **本輪（2026-10-18，未測試）**：補原NPC圖文內容整條接線：普通道具icon（不是iconRaw）、skill normal icon、
+  每行最大高度／行底對齊、圖文與純圖選項、實際高度命中／底線／捲動、原單行名稱tip。
+  `##` escape、整段文字量測／掛行／續行空白；現有body重新解析選項，避免escaped `##L`被raw regex接受。
+  metadata去重／有界並行與快取、PNG首輪等待、close／換圖取消與舊頁guard、字型到達保留輸入／焦點。
+  體驗工具加兩個唯讀入口，明示非任務、不給道具／學技能／改save；不套後期macro或虛構計程車規則。
+  [完整交付](docs/NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；未執行test/check/typecheck/語法檢查/browser/VM/probe，同save冷備再開LIVE。
+
+- **前輪（2026-10-18，未測試）**：NPC metadata區分own info／一跳linked行為根與動作art merge；
   補單一controller與交接、signed2F/3D及move條件路徑、等待echo後演出、forced單次／30ms逐格。
   原normal五秒深紅氣泡、canvas高度錨點／隱藏名牌／清理；40000 Robin捷徑加唯讀控制及回包狀態。
   **sender+2與receiver raw索引差異未解**，保留原client兩端並明示透明relay／owner選擇是重建政策，不冒稱原server。
@@ -17,7 +24,7 @@
 
 - **前輪（2026-10-18，未測試）**：以反編譯／listing／WZ交叉補原CUtilDlgEx2對話框，修Prev=0／ESC=FF、長文scroll、五種body與實際sub-op回覆。
   補CP949 bytes／number／menu驗證、modal焦點與IME／失焦保護，修NPC缺省frame180ms。
-  工具列「體驗工具」新增五種唯讀UI範例，明示非任務、不發0x15、不改角色；原quest腳本和NPC idle同步仍缺。
+  工具列「體驗工具」新增五種唯讀UI範例，明示非任務、不發0x15、不改角色；原quest腳本仍缺；該輪尚未補NPC idle，後續ADR-062已補同步。
   [完整來源、入口及界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；未執行test/check/typecheck/browser/VM/probe，同save冷備份後重開LIVE。
 
 - **前輪（2026-10-18，未測試）**：依原 EXE／listing／Gr2D／WZ 補單張 arrow 游標，覆蓋登入／選角／遊戲及原生 DOM 控件，隨既有顯示縮放。

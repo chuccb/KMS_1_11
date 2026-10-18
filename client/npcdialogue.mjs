@@ -1,7 +1,9 @@
+import {dialogueAssets} from './dialogue-assets.mjs';
+import {drawSimpleTooltip} from './tooltip.mjs';
 import {releaseOnInterrupt} from './pointer.mjs';
 import {drawUtilFrame, drawUtilTextFrame} from './utildialog.mjs';
 import {DIALOGUE_FONT, DIALOGUE_COLORS, dialogueRuns, dialogueLayout, dialogueButtons,
-  dialogueInputError} from './npcdialogue-layout.mjs';
+  dialogueInputError, dialoguePlainText, dialogueAssetKey} from './npcdialogue-layout.mjs';
 
 /** Server CUtilDlgEx: native Ex2 art on canvas; DOM only for editing, focus and hit targets.
  * No NPC portrait/title is invented: 4A5910 reads but does not use the packet's NPC id.
@@ -12,12 +14,15 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
   const input = document.getElementById('dialogue-input');
   const error = document.getElementById('dialogue-error');
   const targets = document.getElementById('dialogue-controls');
+  const assets=dialogueAssets({image});
+  root.tabIndex=-1;
   let current, hover, pressed, armed, released, dragging, previousFocus, center = {x:400,y:300};
   const box = (element, x, y, width, height) => Object.assign(element.style,
     {left:`${x}px`,top:`${y}px`,width:`${width}px`,height:`${height}px`});
   const stamp = (path,x,y) => {const art=image(path);if(art.ready)ctx.drawImage(art.img,x,y);};
   function reset(restore = false) {
     const c = current;
+    c?.abort.abort();root.removeAttribute('aria-busy');
     if (c) center = {x:c.x + Math.trunc(c.width/2),y:c.y + Math.trunc(c.height/2)};
     current = hover = pressed = armed = released = dragging = undefined;
     root.classList.add('hidden');targets.replaceChildren();
@@ -28,7 +33,7 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
     previousFocus = undefined;
   }
   function finish(answer, value) {
-    const c = current;if (!c) return;
+    const c = current;if (!c || (answer===1 && c.loading)) return;
     const reply = {kind:c.body.kind,answer};
     if (answer === 1 && (c.body.kind === 'askText' || c.body.kind === 'askNumber')) {
       const reason = dialogueInputError(c.body, input.value);
@@ -73,52 +78,60 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
     const c=current;if(!c)return;
     for(const target of c.buttons)box(target.element,c.x+target.x,c.y+target.y,target.width,target.height);
     for(const target of c.choices) {
-      const p=target.piece, top=Math.max(1,p.y-c.scroll*8),bottom=Math.min(c.visibleHeight-1,p.y+16-c.scroll*8);
-      target.element.classList.toggle('hidden',bottom<=top);
-      box(target.element,c.x+c.textX+p.x,c.y+c.textY+top,p.width,Math.max(0,bottom-top));
+      const p=target.piece, top=Math.max(1,p.y-c.scroll*8),bottom=Math.min(c.visibleHeight-1,p.y+p.height-c.scroll*8);
+      const left=Math.max(1,p.x),right=Math.min(c.textWidth-1,p.x+p.width);
+      target.element.classList.toggle('hidden',bottom<=top||right<=left);
+      box(target.element,c.x+c.textX+left,c.y+c.textY+top,Math.max(0,right-left),Math.max(0,bottom-top));
     }
   }
   function setScroll(value) {
-    if(!current)return;current.scroll=Math.max(0,Math.min(current.maxScroll,Math.round(value)));
+    if(!current)return;current.iconHover=undefined;current.scroll=Math.max(0,Math.min(current.maxScroll,Math.round(value)));
     placeTargets();
   }
-  function show(npcId, body, context) {
-    if(current)return false; // One packet-owned modal at a time, never silently accept/replace it.
-    previousFocus=document.activeElement;
+  const choiceStops=c=>c.choices.filter(choice=>choice.element.tabIndex===0);
+  function reveal(c,piece) {
+    if(piece.y<c.scroll*8+1)setScroll(Math.floor((piece.y-1)/8));
+    else if(piece.y+piece.height>c.scroll*8+c.visibleHeight)
+      setScroll(Math.ceil((piece.y+piece.height+1-c.visibleHeight)/8));
+  }
+  function applyLayout(c) {
+    if(current!==c)return;
+    const focusKey=document.activeElement?.dataset?.dialogueKey;
+    const anchor=c.width ? {x:c.x+Math.trunc(c.width/2),y:c.y+Math.trunc(c.height/2)} : center;
     ctx.save();
-    const layout=dialogueLayout(body,(text,bold)=>{ctx.font=(bold?'bold ':'')+DIALOGUE_FONT;return ctx.measureText(text).width;});
+    const layout=dialogueLayout(c.body,(text,bold)=>{
+      ctx.font=(bold?'bold ':'')+DIALOGUE_FONT;return ctx.measureText(text).width;
+    },run=>c.assetMap.get(dialogueAssetKey(run)));
     ctx.restore();
-    // Oversized editor prompts are clipped to the logical viewport, not positioned offscreen.
-    const height=Math.min(600,layout.height), width=layout.width;
-    const c=current={...layout,height,width,npcId,body,context,scroll:0,choices:[],buttons:[],
-      x:Math.max(0,Math.min(800-width,center.x-Math.trunc(width/2))),
-      y:Math.max(0,Math.min(600-height,center.y-Math.trunc(height/2)))};
-    label.textContent=dialogueRuns(body.message).map(r=>r.text).join('');
-    const editing=body.kind==='askText'||body.kind==='askNumber';
-    input.classList.toggle('hidden',!editing);
+    Object.assign(c,layout,{height:Math.min(600,layout.height),iconHover:undefined});
+    c.x=Math.max(0,Math.min(800-c.width,anchor.x-Math.trunc(c.width/2)));
+    c.y=Math.max(0,Math.min(600-c.height,anchor.y-Math.trunc(c.height/2)));
+    const editing=c.body.kind==='askText'||c.body.kind==='askNumber';
     if(editing) {
-      input.inputMode=body.kind==='askNumber'?'numeric':'text';
-      input.maxLength=body.kind==='askText'?(body.maxLength<0?65535:body.maxLength):9;
-      input.value=String(body.kind==='askText'?body.defaultText:body.defaultValue);
       c.editorHeight=Math.min(c.textHeight,c.height-99);
       if(c.editorHeight<c.textHeight)c.maxScroll=Math.ceil((c.textHeight-c.editorHeight)/8);
       box(input,c.x+16,c.y+c.editorHeight+38,c.width-30,14);
-      // Native number edits are capped at 9 bytes; unsigned protocol ranges are retained in data.
-      if(body.kind==='askNumber')input.maxLength=9;
     }
-    for(const spec of dialogueButtons(body,width,height)) {
+    c.scroll=Math.max(0,Math.min(c.maxScroll,c.scroll));
+    label.textContent=dialoguePlainText(c.runs,run=>c.assetMap.get(dialogueAssetKey(run)));
+    targets.replaceChildren();c.choices=[];c.buttons=[];
+    hover=pressed=armed=released=undefined;dragging=false;
+    for(const spec of dialogueButtons(c.body,c.width,c.height)) {
       const element=buttonTarget(spec,()=>finish(spec.answer));
       c.buttons.push({...spec,element});
     }
-    if(body.kind==='menu') {
+    if(c.body.kind==='menu') {
+      const names=new Map();
+      for(const run of c.runs)if(run.selection!==undefined)
+        names.set(run.selection,[...(names.get(run.selection)||[]),
+          dialoguePlainText([run],record=>c.assetMap.get(dialogueAssetKey(record)))]);
+      const seen=new Set();
       for(const piece of c.pieces) {
-        if(piece.selection===undefined)continue;
-        const spec={key:`choice-${piece.selection}`,name:piece.text,label:piece.text,silent:true};
+        if(piece.selection===undefined || piece.width<=0)continue;
+        const spec={key:`choice-${piece.selection}`,name:names.get(piece.selection).join(' '),silent:true};
         const element=buttonTarget(spec,()=>finish(1,piece.selection));
-        element.addEventListener('focus',()=>{
-          if(piece.y < c.scroll*8)setScroll(Math.floor(piece.y/8));
-          else if(piece.y+16 > c.scroll*8+c.visibleHeight)setScroll(Math.ceil((piece.y+17-c.visibleHeight)/8));
-        });
+        element.disabled=c.loading;element.tabIndex=seen.has(piece.selection)?-1:0;seen.add(piece.selection);
+        element.addEventListener('focus',()=>reveal(c,piece));
         c.choices.push({piece,element});
       }
     }
@@ -127,10 +140,43 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
     for(const spec of c.buttons)for(const state of ['normal','mouseOver','pressed'])
       image(spec.key==='close'?`UI/UIWindow.img/BtUIClose2/${state}/0`:`UI/UIWindow.img/UtilDlgEx2/Bt${spec.name}/${state}/0`);
     if(c.scrolling)for(const name of ['base','prev0','next0','thumb0','thumb1'])image(`UI/Basic.img/VScr/enabled/${name}`);
-    placeTargets();root.classList.remove('hidden');onOpen();
+    placeTargets();
+    if(focusKey) {
+      const target=[...choiceStops(c),...c.buttons].find(item=>item.element.dataset.dialogueKey===focusKey);
+      if(target && !target.element.disabled){if(target.piece)reveal(c,target.piece);target.element.focus();}
+    }
+  }
+  function show(npcId, body, context) {
+    if(current)return false; // One packet-owned modal, never silently replace or accept it.
+    previousFocus=document.activeElement;
+    const runs=dialogueRuns(body.message);
+    const c=current={npcId,body,context,runs,scroll:0,assetMap:new Map(),
+      abort:new AbortController(),loading:runs.some(run=>run.kind)};
+    root.setAttribute('aria-busy',String(c.loading));
+    const editing=body.kind==='askText'||body.kind==='askNumber';
+    input.classList.toggle('hidden',!editing);
+    if(editing) {
+      input.inputMode=body.kind==='askNumber'?'numeric':'text';
+      input.maxLength=body.kind==='askText'?(body.maxLength<0?65535:body.maxLength):9;
+      input.value=String(body.kind==='askText'?body.defaultText:body.defaultValue);
+    }
+    applyLayout(c);root.classList.remove('hidden');onOpen();
     if(editing){input.focus();input.select();}
-    else (c.choices[0]?.element ?? c.buttons.find(b=>b.answer===1)?.element ?? c.buttons[0]?.element)?.focus();
-    // 4A5A80..4A65C0 open the modal without an extra DlgNotice sound.
+    else if(c.loading)root.focus();
+    else (choiceStops(c)[0]?.element ?? c.buttons.find(b=>b.answer===1)?.element ?? c.buttons[0]?.element)?.focus();
+    if(c.loading) {
+      const complete=map=>{
+        if(current!==c || c.abort.signal.aborted)return;
+        const focusRoot=document.activeElement===root;
+        c.assetMap=map;c.loading=false;root.setAttribute('aria-busy','false');applyLayout(c);
+        if(focusRoot){const first=choiceStops(c)[0] ?? c.buttons.find(b=>b.answer===1) ?? c.buttons[0];
+          if(first){if(first.piece)reveal(c,first.piece);first.element.focus();}}
+      };
+      void assets.load(runs,c.abort.signal).then(complete,()=>complete(new Map()));
+    }
+    // Font arrival can change wrap; never reset the editor, scroll, or a newer packet's modal.
+    void document.fonts?.load(DIALOGUE_FONT).then(()=>{if(current===c)applyLayout(c);}).catch(()=>{});
+    // Original modal open has no extra DlgNotice sound.
     return true;
   }
   input.addEventListener('input',()=>{
@@ -144,20 +190,24 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
     if(event.key==='Escape'){event.preventDefault();if(!event.repeat)close();}
     else if(event.key==='Tab') {
       event.preventDefault();
-      const controls=[...(input.classList.contains('hidden')?[]:[input]),...c.choices.map(x=>x.element),...c.buttons.map(x=>x.element)];
+      const controls=[...(input.classList.contains('hidden')?[]:[input]),...choiceStops(c).filter(x=>!x.element.disabled).map(x=>x.element),...c.buttons.map(x=>x.element)];
       const index=controls.indexOf(document.activeElement), count=controls.length;
-      const next=controls[(index+(event.shiftKey?count-1:1)+count)%count];
+      const next=controls[index<0?(event.shiftKey?count-1:0):(index+(event.shiftKey?count-1:1))%count];
       const choice=c.choices.find(x=>x.element===next);
       if(choice && choice.element.classList.contains('hidden'))
-        setScroll(Math.floor(choice.piece.y/8));
+        reveal(c,choice.piece);
       next?.focus();
     } else if(event.key==='Enter') {
       event.preventDefault();if(event.repeat)return;
       if(c.body.kind==='menu') {
-        const choice=c.choices.find(x=>x.element===document.activeElement);if(choice)finish(1,choice.piece.selection);
+        const choice=c.choices.find(x=>x.element===document.activeElement);
+        if(choice)finish(1,choice.piece.selection);
+        else if(c.buttons.some(b=>b.element===document.activeElement))close();
       } else if(c.body.kind==='confirm') {
         const button=c.buttons.find(x=>x.element===document.activeElement);if(button)finish(button.answer);
       } else finish(1);
+    } else if(event.key===' ' && document.activeElement!==input) {
+      event.preventDefault();if(!event.repeat)document.activeElement?.click();
     } else if(c.body.kind==='confirm' && /^[yn]$/i.test(event.key)) {
       event.preventDefault();if(!event.repeat)finish(event.key.toLowerCase()==='y'?1:0);
     } else if(c.maxScroll>0 && ['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(event.key)) {
@@ -165,6 +215,16 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
         c.scroll+({ArrowUp:-1,ArrowDown:1,PageUp:-Math.floor((c.editorHeight??c.visibleHeight)/8),PageDown:Math.floor((c.editorHeight??c.visibleHeight)/8)})[event.key]);
     } else if(document.activeElement!==input && !(event.ctrlKey||event.metaKey))event.preventDefault();
   },{capture:true});
+  root.addEventListener('mousemove',event=>{
+    const c=current;if(!c || c.loading)return;
+    const p=point(event),x=p.x-c.x-c.textX,y=p.y-c.y-c.textY;
+    c.iconHover=undefined;
+    if(x<=0||x>=c.textWidth-1||y<=0||y>=c.visibleHeight-1)return;
+    const piece=c.pieces.find(piece=>piece.image && x>piece.x && x<piece.x+piece.width &&
+      y>piece.y-c.scroll*8 && y<piece.y+piece.height-c.scroll*8);
+    if(piece)c.iconHover={text:piece.text,x:p.x+20,y:p.y+20};
+  });
+  root.addEventListener('mouseleave',()=>{if(current)current.iconHover=undefined;});
   root.addEventListener('wheel',event=>{
     if(!current)return;event.preventDefault();event.stopPropagation();
     setScroll(current.scroll+Math.sign(event.deltaY)*3);
@@ -188,7 +248,7 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
   for(const name of ['mousedown','mouseup','click','dblclick','pointerdown','pointerup'])window.addEventListener(name,event=>{
     if(current && !root.contains(event.target)){event.preventDefault();event.stopImmediatePropagation();}
   },{capture:true});
-  releaseOnInterrupt(()=>{pressed=hover=armed=released=undefined;dragging=false;});
+  releaseOnInterrupt(()=>{if(current)current.iconHover=undefined;pressed=hover=armed=released=undefined;dragging=false;});
   return {show,close,get open(){return !!current;},get preview(){return current?.context?.preview===true;},draw(){
     const c=current;if(!c)return;
     const {x,y,width:w,height:h}=c;
@@ -203,11 +263,12 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
     ctx.textAlign='left';ctx.textBaseline='top';
     for(const piece of c.pieces) {
       const py=y+c.textY+piece.y-c.scroll*8;
-      if(py+16<y+c.textY||py>=y+c.textY+clipHeight)continue;
+      if(py+piece.height<y+c.textY||py>=y+c.textY+clipHeight)continue;
       ctx.font=(piece.bold?'bold ':'')+DIALOGUE_FONT;ctx.fillStyle=DIALOGUE_COLORS[piece.color];
-      ctx.fillText(piece.text,x+c.textX+piece.x,py);
+      if(piece.image)stamp(piece.image,x+c.textX+piece.x,py);
+      else ctx.fillText(piece.text,x+c.textX+piece.x,py);
       if(piece.selection!==undefined && hover===`choice-${piece.selection}`) {
-        ctx.fillStyle='#000000';ctx.fillRect(x+c.textX+piece.x,py+15,piece.width,1);
+        ctx.fillStyle='#000000';ctx.fillRect(x+c.textX+piece.x,py+piece.height-1,piece.width,1);
       }
     }
     ctx.restore();
@@ -230,5 +291,6 @@ export function npcDialogue({ctx, image, audio, point, onOpen, onReply}) {
       stamp(path,x+spec.x,y+spec.y);
     }
     ctx.restore();
+    if(c.iconHover)drawSimpleTooltip(ctx,c.iconHover.x,c.iconHover.y,c.iconHover.text,{font:DIALOGUE_FONT});
   }};
 }

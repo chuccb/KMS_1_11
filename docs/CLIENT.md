@@ -4,7 +4,15 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：NPC idle／speech／controller（2026-10-18，未測試）
+## 最新實作：NPC圖文內容與選項（2026-10-18，未測試）
+
+補 `#i` 普通道具圖、`#s` normal技能圖、原尺寸／行底對齊／不同row高度、圖文與純圖選項／名稱tip。
+`##` escape、整段量測折行、掛行／續行空白；實際高度連到命中、底線、捲動、鍵盤reveal與可及文字。
+資源去重／4併行／128成功快取、首輪PNG等待；close／換圖／死亡／斷線取消、modal identity guard，字型到達保留輸入／焦點。
+回覆端重新解析目前body，escaped `##L` 不再誤算有效選項。新增兩個唯讀入口；不是任務、沒有新增原server腳本。
+[NATIVE_DIALOGUE_RICHTEXT](NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；未執行test/check/typecheck/語法檢查/browser/VM/probe，啟服非PASS。
+
+## 前輪實作：NPC idle／speech／controller（2026-10-18，未測試）
 
 靜止NPC依原池與4–12秒抽選，由單一控制者送2F、全體含sender等3D才演出；controller離圖交接。
 forced單次播放、30ms逐格、原normal五秒深紅氣泡／height錨點／隱藏名牌；場地／斷線／冷art清理。

@@ -2,6 +2,7 @@
  * Original senders: 4A5A80/4A5D00 (1/0/FF), 4A5F40/4A6320/4A65C0 (1/0).
  * Keep the currently offered body as authority, never trust the browser's claimed dialog kind.
  */
+import {dialogueSelections} from '../../../client/npcdialogue-layout.mjs';
 import {encodeCp949} from '../protocol/cp949.ts';
 import type {QuestTalkBody, QuestReply} from '../protocol/quest.ts';
 
@@ -33,7 +34,7 @@ export function questReplyFor(body: QuestTalkBody, answer: number, detail: Quest
         throw new RangeError(`talk value must be ${body.min}..${body.max}`);
       if (body.kind === 'menu') {
         // Bounded supported menu grammar, independently checked here, not supplied by the browser.
-        const offered = [...body.message.matchAll(/#L(\d+)#/g)].some(match => Number(match[1]) === value && value <= 0x7fffffff);
+        const offered = dialogueSelections(body.message).has(value);
         if (!offered) throw new RangeError('talk selection was not offered by the open menu');
       }
       return {kind:body.kind,answer,value};

@@ -5743,7 +5743,7 @@ const npcDialog = npcDialogue({ctx,image:artImage,audio,point:viewPoint,
     talkingNpc=undefined;
     if(context?.preview) {
       logLine(`UI 範例（未送封包）：${JSON.stringify(reply)}`);
-      if(reply.kind === "say" && reply.answer !== 255 &&
+      if(context.exampleKind === "say" && reply.kind === "say" && reply.answer !== 255 &&
           ((context.page === 0 && reply.answer === 1) || (context.page === 1 && reply.answer === 0)))
         openDialogueExample("say",reply.answer === 1 ? 1 : 0);
       return;
@@ -5757,7 +5757,7 @@ function openDialogueExample(kind, page = 0) {
   if(!body || loginStage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
       talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible ||
       shop!==undefined || shopPending || slotPending || mesoPending || portalPending)return false;
-  return npcDialog.show(0,body,{preview:true,page});
+  return npcDialog.show(0,body,{preview:true,page,exampleKind:kind});
 }
 
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,

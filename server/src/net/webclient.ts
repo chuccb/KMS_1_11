@@ -1519,6 +1519,22 @@ export function startWebClient(
       });
       return;
     }
+    // Inline #s: skill name + normal icon (4BAC80/5338A0), independent of learned SP state.
+    if (url.pathname.startsWith("/api/skill/")) {
+      const raw = url.pathname.slice("/api/skill/".length);
+      const id = /^\d{1,10}$/.test(raw) ? Number(raw) : NaN;
+      const skill = Number.isInteger(id) && id >= 0 && id <= 0x7fffffff
+        ? options.skills?.info(id) : undefined;
+      if (!skill) {
+        sendJson(response, 404, { error: "skill absent from Data.wz or invalid id" });
+        return;
+      }
+      const path = `${skill.path}/icon`;
+      const canvas = options.art?.reader?.at(path);
+      sendJson(response, 200, { id, name: skill.name,
+        ...(canvas ? { icon: { path, width: canvas.width, height: canvas.height } } : {}) });
+      return;
+    }
     if (url.pathname.startsWith("/api/skills/")) {
       const job = Number(url.pathname.slice("/api/skills/".length));
       if (!Number.isInteger(job) || job < 0 || job > 0x7fff || !options.skills) {
