@@ -62,7 +62,8 @@ import {
 import { itemDialogs } from "./itemdialogs.ts";
 import { equipmentWindow, bodyPart, canWear } from "./equipment.ts";
 import { miniMapWindow } from "./minimap.ts";
-import { viewLayout, DISPLAY_MODES } from "./display.ts";
+import { displayControls } from "./display-controls.ts";
+import { archiveImages, avatarImages } from "./image-cache.ts";
 import { movementPortal, arrivalPortal } from "./portals.ts";
 import { statWindow } from "./statwindow.ts";
 import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.ts";
@@ -1780,12 +1781,12 @@ const VIEW_H = 600;
 /** The background image stack of the current map (`/api/map/<id>/art`), or undefined. */
 let mapArt;
 /** `archive path -> { img, ready }`; the page draws a sprite only once its PNG has arrived. */
-const artImages = new Map();
+const archiveCache = archiveImages();
 let mapScene = [];
 let layerOrder = sceneOrdering();
 let mapGeneration = 0, mapAnimationStart = 0;
 /** `look|stance|frame|flip -> { img, dx, dy, ready }` avatar frames. */
-const avatarFrames = new Map();
+const avatarCache = avatarImages({ faceProfile: face => faceCatalog.get(face)?.data });
 /** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
 const npcArts = new Map();
 const npcMetadata = new Map();
@@ -1943,88 +1944,18 @@ function selfDisplayPosition() {
     : self;
 }
 
-/** CSS fit was 1.25x at 1000x800/DPR1: source columns alternated between 1 and 2 pixels.
- * Default to device-pixel integer presentation; keep fit/native as explicit browser preferences. */
-const scaleSelect = document.getElementById("view-scale");
-let displayMode = "pixel";
-try {
-  const saved = localStorage.getItem("kms111.displayMode");
-  if (DISPLAY_MODES.includes(saved)) displayMode = saved;
-} catch {}
-scaleSelect.value = displayMode;
-function resize() {
-  // Assigning width/height clears the canvas/context. Do not do it on ordinary window/DPR changes.
-  if (canvas.width !== VIEW_W) canvas.width = VIEW_W;
-  if (canvas.height !== VIEW_H) canvas.height = VIEW_H;
-  const layout = viewLayout(
-    window.innerWidth,
-    window.innerHeight,
-    window.devicePixelRatio,
-    displayMode,
-  );
-  Object.assign(canvas.style, {
-    width: `${layout.width}px`,
-    height: `${layout.height}px`,
-    left: `${layout.left}px`,
-    top: `${layout.top}px`,
-  });
-  Object.assign(ui.gameUi.style, {
-    left: `${layout.left}px`,
-    top: `${layout.top}px`,
-    transform: `scale(${layout.scale})`,
-  });
-  gameCursor.resize(layout.scale);
-  ctx.imageSmoothingEnabled = false;
-  canvas.dataset.displayMode = displayMode;
-  scaleSelect.title = `800×600 → ${Math.round(layout.width)}×${Math.round(layout.height)} CSS px · DPR ${layout.dpr} · 每原像素 ${Number(layout.deviceScale.toFixed(3))} 實體像素${layout.downsampled ? "（視窗太小，正在縮小）" : ""}`;
-  watchDpr();
-}
-scaleSelect.addEventListener("change", () => {
-  displayMode = DISPLAY_MODES.includes(scaleSelect.value)
-    ? scaleSelect.value
-    : "pixel";
-  try {
-    localStorage.setItem("kms111.displayMode", displayMode);
-  } catch {}
-  resize();
+/** Typed presentation owns mode/storage/DPR/listener lifecycle; backing stays native 800×600. */
+const displayController = displayControls({
+  canvas,
+  context: ctx,
+  overlay: ui.gameUi,
+  select: requireElement("view-scale", "select"),
+  onScale: scale => gameCursor.resize(scale),
 });
-// Moving a window between monitors can change DPR without changing its CSS dimensions.
-let dprQuery;
-function watchDpr() {
-  if (!window.matchMedia) return;
-  dprQuery?.removeEventListener?.("change", resize);
-  dprQuery = window.matchMedia(
-    `(resolution: ${window.devicePixelRatio || 1}dppx)`,
-  );
-  dprQuery.addEventListener?.("change", resize, { once: true });
-}
-window.addEventListener("resize", resize);
-resize();
 
-/** One PNG of the archive, by its own path; `src` is encoded as a single segment. */
+/** One PNG of the archive; typed bounded cache retains shared UI preferentially. */
 function artImage(path) {
-  let entry = artImages.get(path);
-  if (entry) return entry;
-  if (artImages.size >= 1024) {
-    let drop = 256;
-    for (const key of artImages.keys()) {
-      if (key.startsWith("UI/") || /^Effect\/BasicEff\.img\/No(?:Red|Violet)/.test(key)) continue;
-      artImages.delete(key);
-      if (--drop === 0) break;
-    }
-  }
-  entry = { img: new Image(), ready: false };
-  entry.loading = new Promise((resolve) => {
-    entry.img.onload = () => { entry.ready = true; resolve(); };
-    entry.img.onerror = () => {
-      entry.ready = false;
-      if (artImages.get(path) === entry) artImages.delete(path);
-      resolve();
-    };
-  });
-  entry.img.src = `/api/png/${encodeURIComponent(path)}`;
-  artImages.set(path, entry);
-  return entry;
+  return archiveCache.get(path);
 }
 
 /** Title positions are CUITitle/sub_4D05A0 and CUILogin/sub_4CEEC0's control coordinates. */
@@ -2410,62 +2341,7 @@ function lookOf(entity) {
  * composes at the WZ origins, so the page never adds anchors of its own.
  */
 function avatarFrame(look, stance, frame, flip, emotion, planes = false, faceFrame = 0) {
-  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}|${faceFrame}|${planes ? "planes" : "merged"}`;
-  // Keep the active neutral pose's tiny blink sequence warm. Look up actual PNG-cache entries
-  // again after eviction, not a stale once-only marker; also covers selection/creation previews.
-  if (emotion === undefined) {
-    const profile = faceCatalog.get(look.face)?.data;
-    if (profile) {
-      for (const f of profile.actions.blink.frames) avatarFrame(look, stance, frame, flip, "blink", planes, f.index);
-    }
-  }
-  let entry = avatarFrames.get(key);
-  if (entry) {
-    avatarFrames.delete(key);
-    avatarFrames.set(key, entry); // Active attack frames must survive unrelated look preloads.
-    return entry;
-  }
-  if (avatarFrames.size >= 256) {
-    let drop = 64;
-    for (const key of avatarFrames.keys()) {
-      avatarFrames.delete(key);
-      if (--drop === 0) break;
-    }
-  }
-  entry = { img: new Image(), dx: 0, dy: 0, ready: false, requested: false };
-  avatarFrames.set(key, entry);
-  const query =
-    `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&faceFrame=${faceFrame}&v=20261018-native-body-motion`;
-  entry.requested = true;
-  entry.loading = fetch(`/api/avatar.png${query}`)
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`avatar ${response.status}`);
-      entry.dx = Number(response.headers.get("x-frame-dx") ?? 0);
-      entry.dy = Number(response.headers.get("x-frame-dy") ?? 0);
-      entry.planeHeight = Number(response.headers.get("x-frame-plane-height") ?? 0);
-      const damageAnchor = response.headers.get("x-frame-damage-origin-y");
-      if (damageAnchor !== null && Number.isFinite(Number(damageAnchor))) entry.damageOriginY = Number(damageAnchor);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      try {
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-          img.src = url;
-        });
-      } finally {
-        URL.revokeObjectURL(url);
-      } // The decoded Image owns its pixels; don't leak a blob per pose/map.
-      entry.img = img;
-      entry.ready = true;
-    })
-    .catch(() => {
-      entry.requested = false;
-      if (avatarFrames.get(key) === entry) avatarFrames.delete(key);
-    });
-  return entry;
+  return avatarCache.get(look, stance, frame, flip, emotion, planes, faceFrame);
 }
 
 /** Ordinary pose prewarm uses metadata indices, including reverse idle entries and weapon stance2. */
@@ -2983,6 +2859,7 @@ function movementBlocked() {
     talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
 function frame() {
+  displayController.refresh();
   const enabled = !!canSendEmotion();
   if (enabled !== emoteAvailable) {
     emoteAvailable = enabled;

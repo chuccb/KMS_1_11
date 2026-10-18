@@ -266,7 +266,11 @@ test("integration source: native F1..F7, no local echo reset, shared creation/se
     creation = source("../../client/creation.ts");
   assert.match(main, /\^F\[1-7\]/);
   assert.match(main, /!event\.repeat\) requestEmotion/);
-  assert.match(main, /faceFrame=\$\{faceFrame\}/);
+  // The independent face-frame remains in both the delegated cache key and avatar HTTP query.
+  assert.match(main, /avatarCache\.get\(look, stance, frame, flip, emotion, planes, faceFrame\)/);
+  const images = source("../../client/image-cache.ts");
+  assert.match(images, /emotion \?\? "default",\s*faceFrame,\s*planes/);
+  assert.match(images, /faceFrame: String\(faceFrame\)/);
   assert.match(main, /message\.characterId === selfView\?\.characterId\) return/);
   assert.match(main, /sampleAvatarFace\(character, look, now\)/);
   assert.match(creation, /face\(previewActor, look, now\)/);

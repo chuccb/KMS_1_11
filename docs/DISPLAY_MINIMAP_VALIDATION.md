@@ -1,5 +1,7 @@
 # 清晰縮放與原版小地圖驗證（2026-10-17）
 
+> 本頁以下保留當時量測；現行入口為 `browser_display_probe.ts`（Bun／唯讀／明示目標）。DPR監測已改由既有app frame的typed refresh補足未發事件情況，實際新驗證見 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
+
 ## 1. 畫面「糊」的實測，而非猜測
 
 舊版保持 800×600 backing，但 CSS 自動填滿。在 1000×800 視窗得到 1000×750，DPR 1／1.25／2 的實體倍率為 **1.25／1.5625／2.5**。

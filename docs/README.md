@@ -7,10 +7,12 @@
 
 | 文件 | 用途 |
 |---|---|
-| [ARCHITECTURE](ARCHITECTURE.md) | 實際瀏覽器／Node資料流、目錄、共用規則與技術債 |
+| [ARCHITECTURE](ARCHITECTURE.md) | 實際瀏覽器／Bun資料流、目錄、共用規則與技術債 |
 | [ORIGINAL_PARITY_AUDIT](ORIGINAL_PARITY_AUDIT.md) | 對原版的現行差異／部分完成／未接／未知總盤點、程式入口與優先序（基準4f9ad1b，A01/A04/A05有ADR-077續作更新；未執行驗證） |
 | [ROADMAP](ROADMAP.md) | 現況入口、未完成玩法、工程優先序與交付界線 |
 | [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md) | 原檔／listing／WZ證據優先序、保護規則與研究入口 |
+| [BUN_MIGRATION](BUN_MIGRATION.md) | 嚴格TS／ESNext／Bun已完成與未完成範圍、全套失敗multiset |
+| [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md) | 顯示／DPR、影像快取、唯讀診斷與歷史native工具限制 |
 | [TOOLCHAIN](TOOLCHAIN.md) | 最新正式版鎖定、安裝／啟用、CI與未驗證風險 |
 | [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066、臉部／新隔離體驗見067、普通動作見068、蹲刺／時序／射程見069，舊編號不重編 |
 | [server README](../server/README.md) | CLI、模組、協定／保存細節與歷史結果 |

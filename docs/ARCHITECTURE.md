@@ -11,7 +11,7 @@
        │ 同 origin：HTTP 靜態檔／資源 API、/ws JSON 事件
        ▼
 server/src/net/webclient.ts + websocket.ts
-       │ 每條 WebSocket 一個 Node ClientSession
+       │ 每條 WebSocket 一個 Bun ClientSession
        ▼
 server/src/client/session.ts
        │ 原版握手／cipher／CP949／二進位封包，透過 TCP
@@ -33,18 +33,18 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.mjs` | 動畫、物理、分層、UI、音訊，以及可被 Node 使用的純規則 |
-| `client/*.d.mts` | 部分 JS 模組的型別介面；不是全客戶端都已轉成 TypeScript |
+| `client/*.ts` | 76個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |
 | `server/src/game/` | 場地、保存、數值與物品權威；另含 WZ 資源呈現資料與重建政策 |
 | `server/src/wz/` | WZ 產品 reader、值層／像素／PNG；執行時直接讀 archive |
-| `tools/` | Python 靜態研究參考工具、bootstrap／shell 環境；遊戲 runtime 不 import Python |
+| `tools/` | Bun TS靜態分析、工具鏈安裝、browser build、保護既有save與明示新fixture啟動 |
 | `analysis/` | 既有研究輸出，不能把過時 manifest 描述當現在的解析結果 |
 | `generated/` | 可重建工具／素材與不可隨意重建的玩家 save／備份並存；均忽略但重要性不同 |
 
-**共用邏輯現況**：server 會 import `client/jobs.mjs`、`characterstats.mjs`、`mobmotion.mjs` 等純模組，
+**共用邏輯現況**：server 會 import `client/jobs.ts`、`characterstats.ts`、`mobmotion.ts` 等純模組，
 所以不能再寫「server 絕不 import client」。這些模組不得在載入時碰 DOM／Canvas／Audio；
 未來可獨立成共用目錄，但目前沒有建立 `shared/`，本輪也不搬路徑，以免破壞既有匯入與資源 URL。
 不能把此債務或未來方向描述成已完成的架構。
@@ -52,8 +52,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 ## 普通身體動作與幾何分界
 
 `game/avatarmotion.ts`讀body幀表與武器walk/stand → ArtProvider／HTTP metadata →
-`client/avatar-motion.mjs`普通倒數 → `main.js`場地／selection／creation →既有avatar PNG compositor。
-`motion.mjs`保留幾何並re-export普通clock；不讓新身體時序改movement byte、傷害或attack forced override。
+`client/avatar-motion.ts`普通倒數 → `main.js`場地／selection／creation →既有avatar PNG compositor。
+`motion.ts`保留幾何並re-export普通clock；不讓新身體時序改movement byte、傷害或attack forced override。
 actor持有clock與已完成的immutable weapon profile；64座metadata cache去重／退避，滿pending不逐RAF相互驅逐。
 只讀開發閱覽用獨立actor及look副本，不與selfView／inventory／save混用；見[NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md)。
 
@@ -64,6 +64,8 @@ actor持有clock與已完成的immutable weapon profile；64座metadata cache去
 - Web Audio 解碼／播放原資料所對應的音訊；不重寫 DirectSound／ACM 相容層。
 - `game/wzart.ts` 做 path／UOL／canvas reader 與快取；mapart／avatar／sprites 等供應渲染資料。
 - PNG、metadata、音訊由既有 `/api/...` 輸出，瀏覽器資源快取與取消／identity guard 管理生命週期。
+- `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；800×600 backing不變。
+- archive1024 FIFO/UI優先（仍hard bound）、avatar256 LRU/實際blink預熱是browser policy，不是原EXE常數。
 - `assets/` 離線輸出仍可供分析，但不是 runtime 必經的「先全量轉檔」階段。
 - 原字型未隨專案重建；Gulim／本地合法 fallback 的 metrics 與 GDI 不保證像素相同。
 
@@ -81,9 +83,11 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 
 ## 工具鏈與驗證狀態
 
-Node 版本以根 `.node-version`、Python 以 `.python-version`、npm 以 `server/package.json` 的 packageManager、
-TypeScript／Node 型別以 package.json＋lockfile 鎖定。CI 使用同一份版本檔與固定 SHA 的 Actions。
-執行時零 npm 依賴不等於開發時不需要 node_modules：安裝型別／編譯器與實際 typecheck 是兩件事。
+根 `.bun-version`／`package.json`／`bun.lock`／`tsconfig.json` 是唯一工具鏈；Bun1.4.3／TS7.0.2，
+ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
+`node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-CI 保留原有測試流程；本輪提交 `[skip ci]`，沒有執行它，也未執行 typecheck／browser／VM／遊戲 probe。
-文件中的舊 PASS 仍只代表當時範圍，不是最新版本證明。
+main.js與10支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
+完整958/44，既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+本輪有真Chromium唯讀載入／DPR／PNG測試，不登入LIVE、不操作角色／save、不restart。
+詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。

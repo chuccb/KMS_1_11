@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import chromium, { inflate } from "@sparticuz/chromium";
-import { chromium as playwright, type Browser } from "playwright-core";
+import { chromium as playwright, type Browser, type Page } from "playwright-core";
 
 /** Explicit CLI target only; no hidden default live port or credentials in a URL. */
 export function browserOrigin(argument: string | undefined): string {
@@ -46,8 +46,36 @@ export async function launchBrowser(): Promise<Browser> {
     env: { ...process.env, ...(libraryPath ? { LD_LIBRARY_PATH: libraryPath } : {}) },
     // Keep ordinary browser origin/security behavior. The package's serverless defaults disable
     // web security; these tests must not pass only because CORS/mixed-content rules were removed.
+    // Single-process mode also crashes when Playwright closes a context and opens another;
+    // retain normal multi-process browser/context lifetimes for multi-DPR tools.
     args: chromium.args.filter(
-      (arg) => !["--disable-web-security", "--allow-running-insecure-content"].includes(arg),
+      (arg) =>
+        ![
+          "--disable-web-security",
+          "--allow-running-insecure-content",
+          "--single-process",
+        ].includes(arg),
     ),
   });
+}
+
+/** Same-origin GET only, with all WebSockets intercepted before page navigation. */
+export async function readOnlyBrowserPage(page: Page, target: string) {
+  const origin = browserOrigin(target);
+  let socketAttempts = 0;
+  await page.routeWebSocket("**/*", (socket) => {
+    socketAttempts++;
+    socket.close({ code: 1008, reason: "Read-only probe does not authenticate" });
+  });
+  await page.route("**/*", (route) => {
+    const request = route.request();
+    return new URL(request.url()).origin === origin && request.method() === "GET"
+      ? route.continue()
+      : route.abort();
+  });
+  return {
+    get socketAttempts() {
+      return socketAttempts;
+    },
+  };
 }

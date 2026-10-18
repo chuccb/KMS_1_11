@@ -2825,3 +2825,22 @@ strict／format／build通過，新增15項回歸；真source/bundle camera偏�
 與原controller20scenarios／3540frames／425個encoded movement packets交叉全同（除新增presentation-only欄位）。
 LIVE同PID6097，72modules及Chromium唯讀載入首幀通過、0WS；未登入、未操作角色／存檔、未restart。
 完整來源、取捨與驗證見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。
+
+## ADR-080：顯示／影像快取實作型別與安全診斷入口（2026-10-18）
+
+延續全案嚴格TS／ESNext／Bun要求，不以rename、cast、allowJs或降低strict冒充完成。
+main抽出display-controls／image-cache：DPR／canvas-overlay-cursor／偏好／dispose與bounded archive/avatar生命週期。
+實際Chromium重現DPR-only不送resize/mediaquery事件，改在既有app frame比較量測再relayout，不增加timer或物理tick。
+修正全UI cache繞過1024 budget、stale failure誤刪replacement、src同步錯誤未settle與decoded constructor失敗漏revoke。
+1024/256、淘汰1/4、probe queue4096與timeouts皆為browser/tool政策，不冒充原EXE常數。
+
+移除display/render/whisper三舊MJS，typed runner/import/main分離；只讀頁導航前same-origin GET＋阻WS。
+手動state-changing分支需明示帳號／目標／一次ack並拒已知LIVE，但ack不是isolation proof。
+shared transport集中handshake/cipher、single-consumer、timeout/close與保序filtered drain，不暴露mutable queue。
+whisper創角按真male MakeCharInfo／430630/430690修正；跨系統歷史動作／ammo／HP情境仍未認證，不沿稱105 PASS。
+Chromium排除single-process，避免多context生命週期crash，仍不放寬web security。
+
+新增27case；strict／format／build通過，最終focused63/0（8 files）；真五DPR、title120frame、WZ PNG/revoke後像素通過。
+完整958pass/44fail（1002tests/109files，197.48s），相對c8b52d7 failure multiset新增0／移除0。
+LIVE同PID6097，74modules與唯讀Chromium首幀通過、0WS；未登入／角色操作／save／restart。
+client76TS但main.js、其餘10MJS與44fail仍WIP；完整界線見 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。

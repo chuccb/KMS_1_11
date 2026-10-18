@@ -4,6 +4,8 @@
 
 2026-10-17。本輪不改移動／跳躍／繩索物理參數，不改 `Data.wz`，也不把局部完成當作全遊戲 1:1。
 
+> 工具後續更新：現行 `browser_render_probe.ts` 預設只量title、不登入，field分支須顯式fixture帳號與ack且本輪未跑。下列地圖效能數字是歷史，不是新工具或當前版本的效能認證。見 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
+
 ## 1. 量測後減少無謂工作
 
 - `client/scene.mjs`：地圖靜態節點只在 art 載入時排序一次。每幀只排序小量動態角色／怪物，再穩定合併。

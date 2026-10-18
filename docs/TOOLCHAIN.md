@@ -41,8 +41,8 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 74 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
-  **`client/main.js` 及 server/scripts 剩餘 13 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 76 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  **`client/main.js` 及 server/scripts 剩餘 10 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
@@ -50,7 +50,7 @@ bun run build
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
 - 9 支純規則 probe 已移至 `server/test/presentation-*.test.ts`，連同新增 recovery／typed UI／WZ HTTP 測試納入根 suite。
-  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 13 支工具／fixture，不能以能 bundle 代替完成。
+  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 10 支工具／fixture，不能以能 bundle 代替完成。
 
 ## 工具遷移與原證
 
@@ -94,19 +94,33 @@ Playwright Core／Chromium 皆固定本日 registry latest，安裝生命週期�
 
 source／bundle 的真瀏覽器啟動與假傳輸 UI 測試納入 bun run test。只用 ephemeral HTTP port，沒有遊戲 server／玩家帳號／save；WebSocket 在 Playwright 內攔截，永不 connectToServer。故障注入會故意製造錯誤，確認啟動警示與 ready gate，不是在 LIVE 注入。
 
-三支現行 typed 工具：
+現行 typed 工具（有副作用的分支須依限制手動操作）：
 
 ```sh
 bun server/scripts/art_perf_probe.ts
 bun server/scripts/browser_audio_probe.ts <明示web-port或http(s)://origin>
 bun server/scripts/equipment_fixture.ts generated/validation/<全新名稱>.json
+bun server/scripts/browser_display_probe.ts <明示web-port或http(s)://origin>
+bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 ```
 
-音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘13支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
+音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘10支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
+
+`whisper_probe.ts` 也已嚴格型別化，採顯式帳號／目標／ack與共享TCP transport；歷史跨系統場景沒有重新驗收，
+不得以舊105項PASS宣稱當前服務認證。只讀 display/render 已跑真瀏覽器；field/login分支未跑，見
+[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
 
 ## 實際驗證狀態
 
-最新走跳／鏡頭增量：strict／format／build 通過；完整 **931 pass / 44 fail，975 tests / 106 files**，
+最新顯示／快取／工具增量：strict／format／build 通過，最終focused63/0（8 files）；完整
+**958 pass / 44 fail，1002 tests / 109 files**，相對c8b52d7失敗multiset新增0／移除0。
+真Chromium五DPR、同頁DPR-only切換、title120畫格、真WZ avatar decode/revoke後像素通過。
+LIVE仍同PID6097、74 modules與首幀通過、0WS，不登入／操作角色／save／restart。
+六個npm latest與exact pins逐個相符；沒有升到不存在的新版本。
+
+### 前輪走跳／鏡頭增量（c8b52d7）
+
+走跳／鏡頭增量：strict／format／build 通過；完整 **931 pass / 44 fail，975 tests / 106 files**，
 對38cdd2d的44項failure multiset新增0／移除0。新camera/presentation focused19/0，
 原／新權威3540frames與425個movement packet bytes全同；LIVE仍同一PID、72modules與唯讀Chromium首幀通過，0WS。
 新三模組全部嚴格TS；全案遷移仍未完成。細節及最多30ms呈現延遲限制見
@@ -119,4 +133,4 @@ frozen lockfile（47 packages 無漂移）、根 strict typecheck、格式與 br
 
 focused 20/0；真 Chromium 的來源版與建置版、PNG實際壓縮／快取、150筆原音訊解碼、fixture獨占寫入與防越界皆通過。原 WZ manifest checksum 及其他既有測試保留。現有 LIVE 首頁200、兩個entry與69個模組 HTTP／MIME／JS parser 通過；只載入頁面的 Chromium 實測 ready／首幀通過、page errors=0、WebSocket attempts=0。沒有登入 LIVE、操作現有角色或重啟 server。
 
-**44個失敗仍阻擋驗收；main.js 與13支工具仍未遷完，這不是全專案完成。** 詳細範圍、原證與失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。CI 不使用 continue-on-error、skip、縮小範圍或關閉 strict。
+**44個失敗仍阻擋驗收；main.js 與10支工具仍未遷完，這不是全專案完成。** 詳細範圍、原證與失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。CI 不使用 continue-on-error、skip、縮小範圍或關閉 strict。

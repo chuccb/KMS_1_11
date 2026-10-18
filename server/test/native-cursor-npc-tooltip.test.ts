@@ -160,7 +160,11 @@ test(
 test("integration source keeps the cursor in its own plane and cancels interruptions without packets", () => {
   const main = source("../../client/main.js"),
     css = source("../../client/style.css");
-  assert.match(main, /gameCursor\.resize\(layout\.scale\)/);
+  // Follow the extracted controller -> native cursor call chain, not the old inline layout.
+  assert.match(main, /const displayController = displayControls\(/);
+  assert.match(main, /onScale:\s*scale\s*=>\s*gameCursor\.resize\(scale\)/);
+  assert.match(source("../../client/display-controls.ts"), /onScale\(layout\.scale\)/);
+  assert.match(main, /displayController\.refresh\(\)/);
   assert.match(css, /\.native-cursor-ready \*/);
   assert.doesNotMatch(main, /canvas\.style\.cursor\s*=/);
   assert.doesNotMatch(main, /const NPC_BOX/);

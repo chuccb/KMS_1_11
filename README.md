@@ -18,6 +18,7 @@
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
 | 查啟動參數與協定工具 | [server 說明](server/README.md) |
 | 走跳顯示插值、四種鏡頭與驗證限制 | [呈現與鏡頭](docs/PLAYER_PRESENTATION_CAMERA.md) |
+| 顯示／影像快取與安全診斷工具、遷移進度 | [整理與限制](docs/BROWSER_TOOL_CLEANUP.md)／[嚴格TS遷移](docs/BUN_MIGRATION.md) |
 | 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
 
 ## 現行技術
@@ -36,7 +37,7 @@
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；其餘 .js/.mjs 尚待型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；76支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture

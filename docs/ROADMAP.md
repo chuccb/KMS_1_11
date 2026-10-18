@@ -3,7 +3,9 @@
 更新：2026-10-18。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
-**有程式與回歸來源不代表已驗證；近期改動與工具鏈升級未執行測試。**
+**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（958/44），
+既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。使用者當前優先要求全案TS／ESNext／Bun整理，
+main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
@@ -45,7 +47,7 @@
 
 ## 優先序 3：工程整理與營運基礎
 
-- 將大型 main 的責任逐步拆分；先明確邊界，不做未驗證的大規模搬檔。
+- 將大型 main 的責任逐步拆分；display lifecycle與image cache已抽成TS並回歸，主整合入口仍未typed，不能只rename或降低strict。
 - 未來抽出 server／browser 共用純規則；目前共用檔仍在 client，架構文件不隱瞞。
 - 維持正式版工具鏈的明確版本檔／lock／CI 一致，不把升級或成功啟服視為相容性證明。
 - 效能改善須定位實際熱點；不為「前沿」直接改成另一套引擎或 GPU 架構。

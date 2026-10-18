@@ -1,7 +1,7 @@
 /** Presentation only: never change the original 800x600 simulation/hit-test coordinate system.
  * Pixel mode maps each source pixel to an integer square of DEVICE pixels, not CSS pixels.
  * Browser zoom / OS scaling is included in devicePixelRatio. A tiny viewport must downsample. */
-export const DISPLAY_MODES = ["pixel", "native", "fit"];
+export const DISPLAY_MODES = ["pixel", "native", "fit"] as const;
 /** Chromium snaps a canvas paint origin in CSS space before device rasterization. Align BOTH
  * grids: at DPR 1.25 the shared grid is 4 CSS px; at DPR 2 it is 1 CSS px, not half a CSS px. */
 function originGrid(dpr: number) {

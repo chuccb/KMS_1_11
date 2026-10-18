@@ -560,7 +560,12 @@ client 自己先做兩件事：用名字在**同一張圖**的 `CUserPool` 裡�
 - **人氣是 u16**：往下給 0 分的人不會變成負數；配額用 UTC 的日／月序號算。
 - **配額不進存檔**：`FameLedgers` 只在記憶體裡，重開伺服器就重新開始（§4.38.2 寫了要加欄位時的形狀）。
 
-`scripts/whisper_probe.mjs` 是這幾節（攻擊轉播／密語／死亡與復活／外觀／表情／拖放／用掉道具／組隊／人氣／**交易**／**메신저**）的**實機煙霧測試**：一個迷你 2003 client（真的走
+**工具遷移更正（2026-10-18）**：現行入口為 `scripts/whisper_probe.ts`，舊MJS已刪。以下105項敘述是**歷史場景／結果**，不是當前native admission認證；空彈藥轉播、固定HP／動作等假設仍待對齊。
+新工具已typed、純import、第一錯誤即停並關閉全部連線，要求不同的顯式fixture帳號／目標／ack，拒絕已知LIVE端點。本輪只驗transport／options／import／真MakeCharInfo創角fixture，**沒有登入或執行整段場景**。
+現行創角為合法ProbeHero／ProbeAlt、六個male catalogue選項、STR/DEX/INT/LUK總25；不沿用下文舊衣褲鞋／Alt三字名。
+詳見 [BROWSER_TOOL_CLEANUP](../docs/BROWSER_TOOL_CLEANUP.md)。
+
+原 `scripts/whisper_probe.mjs` 是這幾節（攻擊轉播／密語／死亡與復活／外觀／表情／拖放／用掉道具／組隊／人氣／**交易**／**메신저**）的**實機煙霧測試**：一個迷你 2003 client（真的走
 `0x01`→`0x02`→`0x03`→`0x04` 登入鏈，字元不存在就自己建），用**真 `Data.wz`** 的兩條連線跑完
 「跨圖密語／找人／找不到／氣球不回應／**別人的揮擊與射擊與魔法**／被打掉血／復活／**別人的臉與頭髮與穿在身上的裝備**／**表情**／**脫下武器再穿回去（`0x0B` ＋`0x28`、被拒的拖放）**／**把武器丟到地上再走過去撿回來（`0x43` kind 2、站著不動與 80 px 外都不會撿、`0x44` ＋`0x0B` ＋`0x11`）**／**買卷軸並用掉**／**組隊（建立→邀請→接受→退出→隊長退出解散→沒有隊伍的退出）**／**人氣（1 級的人被擋在門外，目標什麼都沒收到）**／**交易（邀請→答應→兩邊進房→放 30 元→兩邊確認→鎖定→兩邊的錢包真的動了→成交）**／**메신저（開房→邀請→答應→兩邊的名冊→聊天→離開）**」**105 個檢查** —— 其中兩條連線**真的在不同地圖上**：
 `0x16` 進 `1000000` 之後，它用 `0x0D` 走過那張圖的 `east00` 傳送門到 `1010000`，再驗證找人的回覆
@@ -583,9 +588,11 @@ client 自己先做兩件事：用名字在**同一張圖**的 `CUserPool` 裡�
 （헤네시스），不是伺服器挑的圖。這一段需要 `--start-mesos`（新角色才有錢）：
 
 ```bash
-bun server/src/cli.ts serve --port 8495 --game-port 8496 \
-     --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-bun server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（105 個檢查）
+# 僅對已由操作者確認的新disposable fixture；不是玩家存檔，也不是本輪已跑過的命令。
+PROBE_ACCOUNT=fixture-one PROBE_PASSWORD=fixture-only \
+PROBE_ALT_ACCOUNT=fixture-two PROBE_ALT_PASSWORD=fixture-only \
+  bun server/scripts/whisper_probe.ts <fixture-login-port> <fixture-game-port> --allow-state-changes
+# 歷史場景目前未認證；不可預告105 PASS。第一個不符合當前規則的斷言會停止。
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`
