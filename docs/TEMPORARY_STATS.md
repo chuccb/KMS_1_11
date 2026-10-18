@@ -1,5 +1,7 @@
 # 暫時能力封包、原加速藥水與裝備移動能力
 
+> **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
+
 > **2026-10-18 後續（未測試）**：[ACTIVE_SKILLS](ACTIVE_SKILLS.md)／ADR-070已接七個主動技能、原七鍵、消耗、多段／範圍、增益與隊伍入口。下方保留當輪歷史範圍；不代表其他技能／魔法／完整幾何已完成。
 
 > **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新碰撞／EVA消費者與尚未完成的完整物理／技能界線見 [NATIVE_CONTACT_REVIVE.md](NATIVE_CONTACT_REVIVE.md)。
@@ -42,7 +44,7 @@ if durationMs != 0:
 
 對應 DWORD value pair 起點：2、8、14、20、26、32、38、44、50、54、58、62；
 各 expiry pair 在 value 起點再加2。前九欄為 PAD／PDD／MAD／MDD／ACC／EVA／hands／speed／jump。
-最後三欄 codec 暫名 `unknown200`／`unknown400`／`unknown800`，**沒有靠後期版本的 buff 表來補語意或施放**。
+當輪最後三欄暫名 `unknown200`／`unknown400`／`unknown800`。**本輪原碼續追已證0x400為booster**，codec與全攻速消費鏈已更名，見[新證據](NATIVE_RANGED_SKILLS.md)；0x200／0x800仍不猜名，也不猜Booster施放幅度。
 `protocol/temporarystat.ts` 處理 wire；`stat.ts` 不再拒絕所有非零 duration。
 未帶暫時能力的舊封包仍原樣只附四個零 byte。
 

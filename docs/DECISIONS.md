@@ -2648,3 +2648,28 @@ canvas碰撞／hit overlay與多段數字間隔、白色mask合成並非已驗�
 Dark Sight／mob debuff／手動解除仍缺，禁止白耗資源的半實作。完整交叉表／常數意義／回歸來源見[ACTIVE_SKILLS](ACTIVE_SKILLS.md)。
 
 **交付**：不執行測試，新增active-skills回歸來源；同save停服冷備再重開LIVE，不重seed或自動配職業／技能。
+
+
+## ADR-071：遠距技能不能當多段普通射擊；保留未知server規則（2026-10-18）
+
+**狀態**：實作／回歸來源已寫，未執行test／typecheck／語法／browser／VM／probe；啟服非PASS。
+
+**決策**：交叉518BF0→519380／511630／513C80／514BA0／4C7960，新增Arrow Blow3001004、
+Double Shot3001005、Lucky Seven4001344；與七技同入口，總計十招。錯武器拒絕；近身／prone／無足量彈藥
+走普通近戰且不付技能費用；不能繞普通guard發免費技能。0x10／0x24保留原level、hits與projectileId。
+同疊彈藥與數字段數分開；hitCount=min15(bulletCount*attackCount)，空射也扣MP與彈藥；全驗證與預encode後原子commit。
+Lucky Seven獨立Uniform(LUK1.3,LUK0.5)*5*PAD，仍共每目標七字cursor、原PD後damage%；不是普通claw公式。
+Arrow Blow讀Skill ball，其他讀實際ammo bullet；多彈終點14px間隔，只有星鏢launch差120ms，傷害共同時鐘不硬加延遲。
+
+**攻速交叉**：temp0x400→58/59→CWvsApp86/87→4BE8B0確證booster。保留raw baseSpeed，先減DoubleStab1／
+received booster再clamp0..6。普通／prone／射擊／主動動作／server／bridge／release全接；55AA80／4CC050依有效weapon ID
+變化只清booster與icon mask。WZ未給Booster提升幅度，因此不假定2、不以零效果白扣費。
+Magic Guard的WZ百分比存在，但client仍送完整HP傷害／MP0，server捨入／不足MP／mask未證，繼續拒絕半實作施放。
+另更正前輪ACK時鐘：55BEB0非零ack會重新stamp，恢復200ms ACK gate；不為減RTT而刪原行為。
+
+**政策／界線**：server原子交易／位置容差與全snapshot安全域屬重建政策；完整shape／牆ray／Gr2D未移植，
+本機傷害仍是預測、TCP仍信client damages，非authoritative反作弊。相關取消／原常數／已證與未知詳[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)。
+
+**方便入口**：固定遠距裝備／彈藥allowlist須已授權帳號勾確認，clone計畫／預encode後整組發放；不自動穿戴／改能力，數量200明示為工具政策。
+
+**交付**：新增ranged-skills回歸來源但未執行；沿用使用者最新save，停服冷備，不重seed／回復舊快照或自動改角。

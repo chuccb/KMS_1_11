@@ -2,13 +2,14 @@
 export function weaponIdOf(look) {
   return look?.items?.find((id) => id >= 1300000 && id < 1500000) ?? 0;
 }
-export function basicAmmo(inventory, weaponId) {
+export function basicAmmo(inventory, weaponId, required=1) {
+  if(!Number.isInteger(required)||required<1||required>15)return;
   const category = Math.trunc(weaponId / 10000);
   const items = inventory?.tabs?.find((tab) => tab.tab === 2)?.items ?? [];
   return [...items]
     .sort((a, b) => a.slot - b.slot)
     .find((item) => {
-      if (!(item.quantity >= 1)) return false;
+      if (!(item.quantity >= required)) return false;
       return category === 145
         ? Math.trunc(item.itemId / 1000) === 2060
         : category === 146

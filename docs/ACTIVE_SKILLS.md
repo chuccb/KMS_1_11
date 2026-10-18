@@ -1,5 +1,7 @@
 # 主動技能第一批：施放、七鍵、消耗、近戰、多段、增益與隊伍鏈
 
+> **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
+
 2026-10-18，ADR-070。**這輪未執行 test／check／typecheck／語法檢查／browser／VM／probe。**
 只有原 C／listing／WZ 的靜態追查與程式實作；新回歸來源不是 PASS，LIVE 啟動也不是驗收。
 
@@ -27,7 +29,7 @@ Disorder 的怪物暫時能力、武器 booster、箭／飛鏢主動技能、魔
 | `518BF0` | dead 拒絕；4BDD20 讀已學等級；4BDDC0 預先扣 HP／MP，再依 skillId dispatch；失敗恢復。本重建改成**全部驗證後原子扣款**，不把失敗扣款留到下一包。 |
 | `4BDDC0` | `hpCon >= HP` 拒絕；`mpCon > MP` 拒絕，最後一點 MP 可以消耗。itemCon 鏈未支援則拒絕，不能白用物品技能。 |
 | `519270` | self buff 呼叫55D320，成功才50C460。沒有強制揮刀或額外施法 body action；其本身沒有梯繩拒絕，因此自身 buff 可在梯繩施放。 |
-| `55D320` | c2s **30 decimal = 0x1E**；u32 skillId、u8 level、u8 recipientCount、u32 characterId[]；pending gate＋200ms。不是0x1D學習包、不是怪物ID。200ms從send起算，不在ACK再加一次RTT。 |
+| `55D320` | c2s **30 decimal = 0x1E**；u32 skillId、u8 level、u8 recipientCount、u32 characterId[]；pending gate＋200ms。不是0x1D學習包、不是怪物ID。**續追更正**：55BEB0非零ACK也重設clock，見ADR-071；不是永遠只從send起算。 |
 | `519950` | party存在才可施放；以施法者 `x/y ±50` 的 PtInRect 蒐集六格中的其他同圖隊友；右／下界不包含。伺服器再驗證隊伍／位置／生命，不相信任意 recipient。 |
 | `5192B0`／`512F90`／`427F60` | prone 不准主動近戰；Double Stab 只准 dagger33，選16／17；其他兩招沿普通武器 action pool。 |
 | `4BE8B0` | Double Stab 先將武器攻速值減一，然後扣 booster 值，再 clamp0..6；本批未啟用語意尚未完整的 booster。不是把 Double Stab 寫死為某個 speed。 |

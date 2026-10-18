@@ -1811,6 +1811,7 @@ export class ClientSession {
           this.applyStats(update.diff);
           if(update.ack && this.activeSkillPending!==undefined){
             const skillId=this.activeSkillPending;this.activeSkillPending=undefined;this.skillPending=false;
+            this.nextActiveAt=performance.now()+200; // 55BEB0 ACK re-stamps CWvsApp+28.
             this.emit({kind:'active-skill-result',skillId,accepted:!!update.temporary});
           }
           if (update.temporary) this.emit({ kind: "temporary-stat", update: update.temporary });

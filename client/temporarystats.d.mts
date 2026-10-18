@@ -4,6 +4,7 @@ export interface TemporaryApplication extends TemporaryStatUpdate {
 }
 export interface TemporaryStats {
   clear(): void;
+  removeFields(fields:readonly string[]):void;
   apply(update: TemporaryStatUpdate, now: number): void;
   values(now: number): Partial<Record<string, number>>;
   icons(now: number): TemporaryApplication[];

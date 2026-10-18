@@ -1,5 +1,15 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：Arrow Blow／Double Shot／Lucky Seven、彈藥與攻速消費鏈（未測試）
+
+支援主動技能總數增至十招；原K／七鍵共用入口，依原519380近身／蹲下／彈藥不足退普通近戰。
+完整接原0x10／0x24、同疊多彈藥原子扣款、Lucky Seven LUK專用公式、Skill ball／實際彈藥、14px與星鏢120ms。
+0x400已證為booster，raw speed先減後clamp、body／release／server一併消費，換有效武器僅清該欄；
+**沒有以猜測的2開放Booster施放**。另依55BEB0恢復ACK重設200ms gate，不以RTT優化刪除原行為。
+細節、原碼／WZ與重建政策、仍缺項見[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071。
+未執行測試／typecheck／語法／browser／VM／probe，啟服亦非PASS。
+
+
 ## 2026-10-18：七個主動技能與完整入口鏈（未測試）
 
 本批 Power Strike／Slash Blast／Double Stab、Iron Body／Magic Armor／Focus／Rage。
@@ -492,7 +502,7 @@ error        { message }
 - **怪物 AI 與怪物打你**：2003 client 自己跑怪的 AI（FINDINGS §4.20／ADR-008），頁面只畫伺服器
   送來的 `0x30`／`0x31`，怪不會主動攻擊、玩家不會掉血。衝擊（`0x1C`）與死亡／復活是伺服器側
   已有的路徑（ADR-021），頁面沒有接。
-- **主動技能／魔法傷害**：已接[七招物理與增益](ACTIVE_SKILLS.md)，魔法／箭鏢主動技能等仍缺；不是所有技能完成。
+- **主動技能／魔法傷害**：已接[十招物理／箭鏢與增益](NATIVE_RANGED_SKILLS.md)，其他魔法／箭鏢主動技能等仍缺；不是所有技能完成。
   動作選擇與全域RNG仍未完全同步、CShape2D選敵／怪物暫時能力仍缺。
 - **密語的「對方是不是在密你」**：線路上分不出來——送達的密語就是 `0x1A` 的 `0x12`，跟場地聊天同一包
   （FINDINGS 4.31）。頁面照實顯示，不假裝知道。

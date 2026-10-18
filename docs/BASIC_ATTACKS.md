@@ -1,5 +1,7 @@
 > 2026-10-18後續（未測試）：本機prone／32蹲刺、攻擊接受時起3000警戒、強制動作逐幀30ms與raw release拆分、
 
+> **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
+
 > **2026-10-18 後續（未測試）**：[ACTIVE_SKILLS](ACTIVE_SKILLS.md)／ADR-070已接七個主動技能、原七鍵、消耗、多段／範圍、增益與隊伍入口。下方保留當輪歷史範圍；不代表其他技能／魔法／完整幾何已完成。
 > 恢復body ID、原被動射程與資源／封包生命週期見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)／ADR-069。
 > 下方是前輪紀錄，其「尚未實作」與raw攻擊時間敘述須按後續更正閱讀。

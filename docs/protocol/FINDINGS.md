@@ -4432,3 +4432,15 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 55D5F0的0x1F由販售數量dialog呼叫，不是技能取消，未硬接。
 七招範圍、原VariantChangeType／Focus BSTR、傷害順序、常數與政策詳[ACTIVE_SKILLS](../ACTIVE_SKILLS.md)。
 未執行測試／typecheck／語法／browser／VM／probe，沒有PASS或全技能宣稱。
+
+
+### 4.44 續作：513C80多彈藥／Lucky Seven與0x400（2026-10-18，未測試）
+
+511630對level bulletCount找同一疊足量ammo；513C80的damage hits為min15(bulletCount*attackCount)，
+缺／<=1個別作1，0x10的high nibble仍至多一個mob。0x24保留原技能level／id及消耗前projectileId。
+513C80彈體終點7*(2*i-n+1)、星鏢207族launch才加120*i；共同damage release+travel不可套同一延後。
+4C7960 case47對4001344走LUK1.3..0.5*5*PAD，仍PD後damage%、七字cursor，不是普通claw公式。
+4C5DC0的0x400寫temp58/59，CWvsApp28+58=86，512F90／513C80皆把86^87交4BE8B0第三參數；
+55AA80換有效weapon時清86/87、4CC050圖示mask&=~0x400，故unknown400確證booster。0x200／0x800不猜。
+55BEB0 ack重stamp200ms門檻，更正前輪send-only說法。全鏈與未知server規則見[NATIVE_RANGED_SKILLS](../NATIVE_RANGED_SKILLS.md)。
+新增來源未執行，不宣稱測試PASS或全技能1:1。

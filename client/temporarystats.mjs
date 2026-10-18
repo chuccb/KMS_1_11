@@ -13,7 +13,7 @@ export const TEMPORARY_FIELDS = Object.freeze([
   "speed",
   "jump",
   "unknown200",
-  "unknown400",
+  "booster",
   "unknown800",
 ]);
 export function temporaryStats() {
@@ -25,6 +25,12 @@ export function temporaryStats() {
   return {
     clear() {
       applications = [];
+    },
+    /** 55AA80/4CC050: weapon identity changes clear ONLY the 0x400 field and its icon mask. */
+    removeFields(fields) {
+      for(const field of fields)if(!TEMPORARY_FIELDS.includes(field))throw new RangeError(`Unknown temporary field ${field}`);
+      for(const entry of applications)for(const field of fields)delete entry.values[field];
+      applications=applications.filter(entry=>Object.keys(entry.values).length);
     },
     apply(update, now) {
       if (

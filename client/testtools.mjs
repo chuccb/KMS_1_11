@@ -63,6 +63,7 @@ export function testTools({
       "qa-checkpoint",
       "qa-speed-potions",
       "qa-combat-potions",
+      "qa-ranged-kit",
       "qa-evasion-potions",
     ])
       el(id).disabled = !ready;
@@ -174,6 +175,7 @@ export function testTools({
   el("qa-motion").addEventListener("toggle", () => { if (!el("qa-motion").open) resetMotionPreview(); });
   el("qa-confirm").addEventListener("change", sync);
   el("qa-warrior").addEventListener("click", () => preset(100));
+  el("qa-archer").addEventListener("click", () => preset(300));
   el("qa-magician").addEventListener("click", () => preset(200));
   el("qa-thief").addEventListener("click", () => preset(400));
   el("qa-apply").addEventListener("click", () => {
@@ -197,6 +199,7 @@ export function testTools({
     "restore",
     "speed-potions",
     "combat-potions",
+    "ranged-kit",
     "evasion-potions",
   ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));

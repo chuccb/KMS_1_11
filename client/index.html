@@ -563,7 +563,7 @@
         </fieldset>
         <fieldset><legend>2 · 明確同意後才修改</legend>
           <label><input id="qa-confirm" type="checkbox" /> 我了解這不是原版規則，並同意修改目前角色及保存。</label>
-          <div class="qa-buttons"><button id="qa-warrior" type="button">填入戰士體驗配置</button><button id="qa-magician" type="button">填入法師體驗配置</button><button id="qa-thief" type="button">填入盜賊體驗配置</button></div>
+          <div class="qa-buttons"><button id="qa-warrior" type="button">填入戰士體驗配置</button><button id="qa-archer" type="button">填入弓手體驗配置</button><button id="qa-magician" type="button">填入法師體驗配置</button><button id="qa-thief" type="button">填入盜賊體驗配置</button></div>
           <label>職業（有原技能書） <select id="qa-job"></select></label>
           <div class="qa-numbers"><label>AP <input id="qa-ap" type="number" min="0" max="32767" step="1" value="20" /></label><label>SP <input id="qa-sp" type="number" min="0" max="32767" step="1" value="40" /></label></div>
           <label><input id="qa-reset-skills" type="checkbox" /> 套用時清除已學技能（原紀錄保留於還原點）</label>
@@ -572,6 +572,8 @@
           <div class="qa-buttons"><button id="qa-heal" type="button" disabled>補滿 HP／MP</button><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button><button id="qa-near-death" type="button" disabled>HP設為1（碰怪看死亡演出）</button></div>
           <button id="qa-repair-starters" type="button" disabled>修復舊全零起始裝備（原WZ值）</button>
           <p>修復只針對原建角清單中、全部能力與升級次數皆為0的裝備；保留非全零／已升級實例。這是明示的舊版資料修復，不是原遊戲功能，且不由能力還原點回溯。</p>
+          <button id="qa-ranged-kit" type="button" disabled>領取弓／弩／拳套＋各200枚彈藥（會存檔）</button>
+          <p>需勾選確認；原WZ War Bow（Lv10）、석궁（Lv12）、Garnier（Lv10）與相容彈藥。僅放入背包，不自動穿戴／轉職／學技能／加點；需求照原WZ，還原能力不回收道具。I穿戴後，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊），雙擊或拖七鍵使用。</p>
           <button id="qa-speed-potions" type="button" disabled>領取 3 瓶原 WZ 加速藥水（會存檔）</button>
           <button id="qa-evasion-potions" type="button" disabled>領取 3 瓶原 WZ 迴避藥水（會存檔）</button>
           <button id="qa-combat-potions" type="button" disabled>領取攻擊／命中藥水各 3 瓶（會存檔）</button>

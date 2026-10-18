@@ -77,7 +77,7 @@ export function rollNativePhysical(
   skills: SkillCatalog | undefined,
   next: () => number,
   report?: (trace: PhysicalAttackTrace) => void,
-  active?: {damagePercent:number;random?:{values:number[];cursor:number}},
+  active?: {damagePercent:number;skillId?:number;random?:{values:number[];cursor:number}},
 ): number {
   const stream=active?.random ?? {values:Array.from({length:7},()=>next()),cursor:0};
   const uniform = (a: number, b: number) =>
@@ -143,7 +143,10 @@ export function rollNativePhysical(
         raw = (uniform(b.dex, b.dex * factor) * 4 + b.str) * pad * 0.01;
         break;
       case 47:
-        raw = (uniform(b.luk, b.luk * factor) * 4 + b.str + b.dex) * pad * 0.01;
+        // 4C7960 case47: Lucky Seven bypasses mastery/STR/DEX, still uses PAD+star PAD.
+        raw = active?.skillId===4001344
+          ? uniform(b.luk*1.3,b.luk*0.5)*5*pad*0.01
+          : (uniform(b.luk, b.luk * factor) * 4 + b.str + b.dex) * pad * 0.01;
         break;
     }
   }

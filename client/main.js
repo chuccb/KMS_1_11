@@ -1,4 +1,4 @@
-import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds} from './active-skills.mjs';
+import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout} from './active-skills.mjs';
 import { combatAssets } from "./combat-assets.mjs";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
 import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackFrameStart } from "./attack-timing.mjs";
@@ -637,6 +637,7 @@ function handle(message) {
       return;
 
     case "stat-basis":
+      if(nativeBasis&&nativeBasis.weaponId!==message.basis.weaponId)buffs.removeFields(['booster']);
       nativeBasis=message.basis; nativeShotRange=Number.isInteger(message.shotRange) ? message.shotRange : 200; nativeAmmoPad=message.ammoPad; nativeWornFacts=message.wornFacts??[];
       return;
 
@@ -684,7 +685,7 @@ function handle(message) {
     case 'skill-effect':
       void playSkillEffect(message.characterId,message.skillId,message.skillLevel,performance.now());return;
     case 'active-hit': {
-      if(message.contactField!==contactField)return;
+      if(message.contactField!==contactField||!(selfView?.hp>0))return;
       const at=performance.now()+(message.delayMs??0);
       (message.damages??[]).forEach((damage,index)=>scheduleAttackHit(message.mobId,damage,at,index));
       void playSkillHit(message.mobId,message.skillId,message.skillLevel,at);return;
@@ -3355,7 +3356,7 @@ function oneShotFrame(frames,elapsed) {
 }
 async function preloadSkillArt(data,level) {
   const art=data?.arts?.[level];if(!art)return;
-  const pictures=[...art.effects,...(art.hitVariants?.flat()??art.hits)].map(f=>artImage(f.path));
+  const pictures=[...art.effects,...(art.balls??[]),...(art.hitVariants?.flat()??art.hits)].map(f=>artImage(f.path));
   await Promise.all(pictures.map(p=>p.loading));
   return pictures.every(p=>p.ready)?art:undefined;
 }
@@ -3372,7 +3373,7 @@ async function playSkillEffect(characterId,skillId,level,start) {
   if(flash)await flash.loading;
   const current=characterId===selfView?.characterId?selfView:users.get(String(characterId));
   if(self!==field||combatEpoch!==epoch||!art||deathFx.get(characterId)||!current||
-    JSON.stringify(lookOf(current))!==lookKey)return;
+    (characterId!==selfView?.characterId&&current!==entity)||JSON.stringify(lookOf(current))!==lookKey)return;
   const duration=art.armorFlash?400:art.effects.reduce((n,f)=>n+f.delay,0);
   if(performance.now()-start>=Math.max(duration,200))return; // Sound-only casts also expire; never replay on a late load.
   if(art.useSound)void audio.effect(art.useSound,spatialVolume(current.x??self.x,current.y??self.y,self));
@@ -3423,7 +3424,7 @@ function scheduleAttackHit(mobId, damage, at, ordinal=0) {
   if (delay > 0) setTimeout(show, delay);
   else show();
 }
-function launchProjectile(entity, itemId, motion, mob, now, near) {
+function launchProjectile(entity, itemId, motion, mob, now, near, options={}) {
   const local = entity === selfView;
   const at = local ? self : entity;
   if (!at) return;
@@ -3431,12 +3432,18 @@ function launchProjectile(entity, itemId, motion, mob, now, near) {
   // 513C80 passes 515C70(source avatar main layer) through 41B630 -> 41BF60.
   // A bullet keeps its launch root depth; moving the shooter later must not drag its z around.
   const z = actorDepth(local ? (playerBody ?? at) : at, terrain, local ? "self" : "user");
-  const record = { ...leg, releaseAt: now + shotRelease(motion), frames: [], z };
+  const record = {...leg,y1:leg.y1+(options.offsetY??0),
+    releaseAt:now+shotRelease(motion)+(options.delayMs??0),frames:options.frames??[],z};
   projectiles.push(record);
   const field = self;
-  void ensureProjectileFrames(itemId).then((frames) => {
-    if (self === field) record.frames = frames;
+  if(!options.frames)void ensureProjectileFrames(itemId).then(frames=>{
+    if(self===field)record.frames=frames;
   });
+}
+/** 513C80: same source/root z and common travel time; only endpoints/launch clocks fan out. */
+function launchActiveProjectiles(entity,itemId,motion,mob,now,near,values,frames){
+  for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(itemId/10000)===207))
+    launchProjectile(entity,itemId,motion,mob,now,near,{...layout,frames});
 }
 function drawProjectile(shot, cameraX, cameraY, now) {
   const elapsed = now - shot.releaseAt, t = elapsed / shot.duration;
@@ -3456,7 +3463,8 @@ async function receiveUserAttack(message, now) {
     epoch = combatEpoch;
   const ticket = user.attackTicket = (user.attackTicket ?? 0) + 1;
   const look = lookOf(user), lookKey = JSON.stringify(look);
-  const profile = await ensureAttackProfile(look);
+  const [profile,skillData]=await Promise.all([ensureAttackProfile(look),
+    message.skillId?combatCatalog.skill(message.skillId):undefined]);
   if (
     self !== field ||
     combatEpoch !== epoch ||
@@ -3465,7 +3473,7 @@ async function receiveUserAttack(message, now) {
   )
     return;
   const skillId=message.skillId??0;
-  const action = skillId?activeMeleeActions(profile,skillId).find(a=>a.action===message.action)
+  const action = skillId?(message.shoot?activeRangedActions(profile,skillId):activeMeleeActions(profile,skillId)).find(a=>a.action===message.action)
     :basicAttackAction(profile, message.action, message.shoot);
   if (!action) return; // Do not turn an unknown/skill action into a fabricated one-handed swing.
   const speed = Math.max(0, Math.min(6, message.speed));
@@ -3482,15 +3490,16 @@ async function receiveUserAttack(message, now) {
   playWeaponSound(user, profile);
   const target = mobs.get(String(message.targets?.[0]?.mobId));
   const near = shotNear(profile.melee[0]);
-  if (message.shoot && message.projectileItemId)
-    launchProjectile(
-      user,
-      message.projectileItemId,
-      motion,
-      target,
-      now,
-      near,
-    );
+  if(message.shoot&&message.projectileItemId){
+    const values=skillData?.levels.find(row=>row.level===message.skillLevel)?.values;
+    if(skillId&&values){
+      const balls=skillData.arts?.[message.skillLevel]?.balls;
+      // Keep the original start/root even if an ammo image arrives late.
+      if(balls?.length)launchActiveProjectiles(user,message.projectileItemId,motion,target,now,near,values,balls);
+      else for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(message.projectileItemId/10000)===207))
+        launchProjectile(user,message.projectileItemId,motion,target,now,near,layout);
+    }else if(!skillId)launchProjectile(user,message.projectileItemId,motion,target,now,near);
+  }
   for (const [targetIndex,target] of (message.targets ?? []).entries()) {
     const mob = mobs.get(String(target.mobId));
     const delay = message.shoot
@@ -3534,7 +3543,7 @@ function mobsInAttackRect(bounds, facingLeft, clampNear = false) {
 function mobInAttackRect(bounds,facingLeft,clampNear=false){return mobsInAttackRect(bounds,facingLeft,clampNear)[0];}
 /** Ctrl: prone32; otherwise melee near/no ammo or a basic shot. Empty attacks still go on wire. */
 async function swing(skillId=0) {
-  const rule=skillId?activeSkill(skillId):undefined;
+  let rule=skillId?activeSkill(skillId):undefined;
   if(skillId&&!rule){logLine("此技能尚未完整實作，未消耗資源。");return;}
   if (
     !self ||
@@ -3563,12 +3572,12 @@ async function swing(skillId=0) {
   let entity = selfView;
   const lookKey = JSON.stringify(lookOf(entity));
   try {
-    let skillData,skillLevel,skillValues;
+    let skillData,skillLevel,skillValues,skillArt;
     if(skillId){
       skillLevel=skillPanel.level(skillId);skillData=await combatCatalog.skill(skillId);
       skillValues=skillData?.levels.find(row=>row.level===skillLevel)?.values;
       if(!skillValues||!activeSkillCost(entity,skillValues)){logLine('技能尚未學習或 HP／MP 不足。');return;}
-      const readyArt=await preloadSkillArt(skillData,skillLevel);
+      const readyArt=skillArt=await preloadSkillArt(skillData,skillLevel);
       entity=selfView;
       if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
         selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible)||
@@ -3603,7 +3612,7 @@ async function swing(skillId=0) {
     )
       return;
     const prone = locomotion(playerBody) === "prone";
-    if(skillId&&prone)return;
+    if(skillId&&prone&&rule.kind!=='ranged')return;
     if (!profile || (prone ? !profile.prone : !profile.melee.length)) {
       logLine("無法取得此武器的原始攻擊資料；暫不以其他武器動作替代。");
       return;
@@ -3611,29 +3620,36 @@ async function swing(skillId=0) {
     if (performance.now() < nextSwingAt) return;
     const pick = (actions) =>
       actions?.[Math.floor(Math.random() * actions.length)];
-    let action = skillId?pick(activeMeleeActions(profile,skillId)):prone ? profile?.prone : pick(profile?.melee);
-    // 511E20 skips the ammunition/shoot branch while prone; do not consume a star/arrow.
-    let ammo = (prone||skillId) ? undefined : basicAmmo(inventory, weaponIdOf(lookOf(entity)));
-    let mob = action?.bounds
-      ? mobInAttackRect(action.bounds, entity.facing === 1, !!ammo)
-      : undefined;
-    const shoot = !!ammo && !!profile?.shoot.length && !mob;
-    const near = shotNear(action);
-    if (shoot) {
-      action = pick(profile.shoot);
-      // 513C80: far = character x +/- (200 + learned WZ range), along y-25; shape pool not yet ported.
-      mob = mobInAttackRect(
-        { left: -nativeShotRange, right: -near, top: -25, bottom: -24 },
-        entity.facing === 1,
-      );
+    if(rule?.kind==='ranged'&&!activeRangedActions(profile,skillId).length){
+      logLine('此技能需要相容的弓／弩或拳套；未消耗資源。');return;
+    }
+    let action = rule?.kind==='melee'?pick(activeMeleeActions(profile,skillId))
+      :prone?profile.prone:pick(profile.melee);
+    let ammo = prone||rule?.kind==='melee'?undefined
+      :basicAmmo(inventory,weaponIdOf(lookOf(entity)),rule?.kind==='ranged'?activeSkillAmmo(skillValues):1);
+    let mob=action?.bounds?mobInAttackRect(action.bounds,entity.facing===1,!!ammo):undefined;
+    let forceMelee=false;
+    // 519380: incompatible weapon refuses; prone, insufficient ammo or close target uses
+    // ordinary melee and rolls back skill HP/MP. Never turn a failed skill into a free shot.
+    if(rule?.kind==='ranged'&&(prone||!ammo||mob)){
+      forceMelee=true;skillId=0;rule=undefined;ammo=undefined;
+    }
+    const shoot=!forceMelee&&!!ammo&&!!profile.shoot.length&&!mob;
+    const near=shotNear(action);
+    if(shoot){
+      action=pick(skillId?activeRangedActions(profile,skillId):profile.shoot);
+      mob=mobInAttackRect({left:-nativeShotRange,right:-near,top:-25,bottom:-24},entity.facing===1);
     }
     if (!action) return;
-    const motion = skillId?{...action,delays:scaledAttackDelays(action.baseDelays,activeSkillSpeed(profile.speed,skillId))}:action;
+    const speed=activeSkillSpeed(profile.baseSpeed??profile.speed,skillId,buffs.values(performance.now()).booster??0);
+    const motion={...action,delays:scaledAttackDelays(action.baseDelays,speed)};
     const look = lookOf(entity), facingLeft = entity.facing === 1;
     const frames = motion.delays.map((_, frame) => avatarFrame(
       look, motion.stance, attackCanvasFrame(motion, frame), facingFlip(entity.facing), undefined, true));
     const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
-    await Promise.all([...frames, ...effects].map((frame) => frame.loading));
+    const bulletFrames=shoot?(skillId&&skillArt?.balls?.length?skillArt.balls:await ensureProjectileFrames(ammo.itemId)):[];
+    const bullets=bulletFrames.map(frame=>artImage(frame.path));
+    await Promise.all([...frames,...effects,...bullets].map(frame=>frame.loading));
     entity = selfView;
     if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch || localActionEpoch !== interaction
       || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
@@ -3644,12 +3660,13 @@ async function swing(skillId=0) {
       || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
       || testToolsPanel.open || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
       || document.activeElement instanceof HTMLInputElement) return;
-    if ([...frames, ...effects].some((frame) => !frame.ready)) {
+    if ((shoot&&!bulletFrames.length)||[...frames,...effects,...bullets].some(frame=>!frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
       return;
     }
+    if(activeSkillSpeed(profile.baseSpeed??profile.speed,skillId,buffs.values(performance.now()).booster??0)!==speed)return;
     if (shoot) {
-      const readyAmmo = basicAmmo(inventory, weaponIdOf(look));
+      const readyAmmo = basicAmmo(inventory, weaponIdOf(look),skillId?activeSkillAmmo(skillValues):1);
       if (!readyAmmo || readyAmmo.slot !== ammo.slot || readyAmmo.itemId !== ammo.itemId) return;
       ammo = readyAmmo;
     }
@@ -3659,10 +3676,16 @@ async function swing(skillId=0) {
     let selected;
     if(skillId){
       if(skillPanel.level(skillId)!==skillLevel||!activeSkillCost(entity,skillValues))return;
+      if(shoot){
+        // A target entered the near rectangle during cold loading: cancel, do not shoot through it.
+        if(mobInAttackRect(profile.melee[0]?.bounds,facingLeft,true))return;
+        selected=mob?[mob]:[];
+      }else{
       const near=mobsInAttackRect(action.bounds,facingLeft);
       const bounds=activeMeleeBounds(action.bounds,skillValues.range??0,facingLeft,near.length>0);
       selected=mobsInAttackRect(bounds,facingLeft).slice(0,skillValues.range&&near.length?6:1)
         .sort((a,b)=>(a.x-b.x)*(facingLeft?-1:1));
+      }
     }
     const now = performance.now();
     // Flush actual posture BEFORE the attack; the 10Hz publisher may not yet have sent Down.
@@ -3674,11 +3697,12 @@ async function swing(skillId=0) {
     if(skillId){
       playWeaponSound(entity,profile);
       void playSkillEffect(entity.characterId,skillId,skillLevel,now);
-      send({t:'active-melee',skillId,action:motion.action,facingLeft,
+      if(shoot)launchActiveProjectiles(entity,ammo.itemId,motion,mob,now,near,skillValues,bulletFrames);
+      send({t:shoot?'active-ranged':'active-melee',skillId,action:motion.action,facingLeft,
         targets:selected.map(mob=>({mobId:mob.mobId,x:mob.x,y:mob.y}))});return;
     }
     playWeaponSound(entity, profile);
-    if (shoot) launchProjectile(entity, ammo.itemId, selfSwing, mob, now, near);
+    if(shoot)launchProjectile(entity,ammo.itemId,selfSwing,mob,now,near,{frames:bulletFrames});
     send({
       t: "attack",
       mode: shoot ? "shoot" : "melee",

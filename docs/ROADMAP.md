@@ -9,7 +9,7 @@
 
 | 範圍 | 現況入口 |
 |---|---|
-| 七個主動技能／七鍵／消耗／近戰多段／buff與隊伍邀請 | [主動技能與明確界線](ACTIVE_SKILLS.md)，非全技能完成 |
+| 十個主動技能／七鍵／多彈藥／Lucky Seven／增益與隊伍 | [遠距與攻速界線](NATIVE_RANGED_SKILLS.md)、[第一批](ACTIVE_SKILLS.md)，非全技能完成 |
 | 原協定、登入／選角／建刪角、原版 WZ 畫面 | [server](../server/README.md)、[CLIENT](CLIENT.md)、[FINDINGS](protocol/FINDINGS.md) |
 | 地圖／背景／角色／怪物、左右朝向、繩梯與傳送、BGM／音效 | [地圖](MAP_MOVEMENT_VALIDATION.md)、[動作音訊](CLIMB_AUDIO_VALIDATION.md)、[門與登台](PORTAL_CLIMB_VALIDATION.md) |
 | 分層、普通跳躍怪、攻擊合成、移動雲 | [圖層](NATIVE_LAYER_PRIORITY.md)、[跳躍／攻擊／背景](NATIVE_JUMP_ATTACK_BACKGROUNDS.md) |
@@ -32,7 +32,7 @@
 
 ## 優先序 2：未接通的玩法
 
-- 主動技能已接七招及七鍵／消耗／多段／buff／party，見[範圍](ACTIVE_SKILLS.md)；續補魔法／箭鏢／Magic Guard／booster／mob debuff與手動解除，其餘被動逐條還原。
+- 主動技能已接十招及七鍵／消耗／多段／多彈藥／buff／party，見[範圍與新證據](NATIVE_RANGED_SKILLS.md)；續補其他魔法／箭鏢／Magic Guard／booster施放幅度／mob debuff與手動解除，其餘被動逐條還原。
 - 自然 AP／SP、原轉職流程與加成；資料未定位不套慣見5／3或後期規則。
 - 卷軸、cash／pet、完整怪物攻擊 AI、飛行／仇恨等分支。
 - 原 quest／taxi／trunk scripts：原 server 腳本缺證據，不自創價格／路線／任務。

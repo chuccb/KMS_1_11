@@ -1,5 +1,6 @@
+import {activeSkillSpeed} from "../../../client/active-skills.mjs";
 /** Basic attacks only. Native selectors: 427F60 / 427FE0; ammo scan: 511630.
- * Skill costs, Soul Arrow and multi-shot must not be inferred from this one-round path.
+ * Skill admission remains separate; the 511630 ammo planner is shared with validated multi-shot.
  */
 import type { ClientAttack } from "../protocol/field.ts";
 import type { CharacterData, CharacterItems } from "../protocol/chardata.ts";
@@ -78,6 +79,8 @@ export interface BasicAttackProfile {
   weaponId: number;
   group: number;
   speed: number;
+  /** Unclamped WZ value: 4BE8B0 subtracts booster/Double Stab BEFORE the 0..6 clamp. */
+  baseSpeed?:number;
   /** WZ info/sfx, loaded with the profile so a cold item tooltip cannot mute the first swing. */
   sfx?: string;
   melee: BasicAttackAction[];
@@ -97,14 +100,15 @@ export function basicAttackPostureAllows(action: number, shoot: boolean, movemen
  * skills/magic elsewhere, and do not let unknown actions skip timing/ammo checks here.
  */
 export function validatedBasicAttack(
-  profile: BasicAttackProfile | undefined, attack: ClientAttack, shoot: boolean, movement: number,
+  profile: BasicAttackProfile | undefined, attack: ClientAttack, shoot: boolean, movement: number, booster=0,
 ): BasicAttackAction | undefined {
   if (!profile || attack.skillId !== 0 || attack.hits !== 1 || attack.targets.length > 1 ||
-      attack.targetCount !== attack.targets.length || attack.speed !== profile.speed ||
+      attack.targetCount !== attack.targets.length || attack.speed !== activeSkillSpeed(profile.baseSpeed??profile.speed,0,booster) ||
       attack.targets.some(target => target.damages.length !== 1 || target.damages.some(
         damage => !Number.isInteger(damage) || damage < 0 || damage > 9999)) || // 4C7960 output domain.
       !basicAttackPostureAllows(attack.action, shoot, movement)) return undefined;
-  return basicAttackAction(profile, attack.action, shoot);
+  const action=basicAttackAction(profile,attack.action,shoot);
+  return action?(attack.speed===profile.speed?action:{...action,delays:scaledAttackDelays(action.baseDelays,attack.speed)}):undefined;
 }
 /** 513C80: far endpoint is character X +/- (200 + learned WZ range), NOT near+200.
  * 4BC590/listing4BD3C1 stores range at level+76 == 120*level-44. No current-job filter.
@@ -191,6 +195,7 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
             weaponId,
             group,
             speed,
+            baseSpeed:typeof info.attackSpeed==='number'?Math.trunc(info.attackSpeed):3,
             ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),
             melee: actionsOf(MELEE_ACTIONS[group]!),
             shoot: actionsOf(SHOOT_ACTIONS[group] ?? []),
@@ -217,8 +222,9 @@ export function isCompatibleAmmo(weaponId: number, itemId: number): boolean {
 }
 /** USE slots in numeric order, not Map insertion order; skip zero-charge stars. */
 export function firstBasicAmmo(
-  items: CharacterItems | undefined,
+  items: CharacterItems | undefined, required=1,
 ): { slot: number; itemId: number } | undefined {
+  if(!Number.isInteger(required)||required<1||required>15)return undefined;
   const weaponId = items?.worn.get(11)?.itemId ?? 0;
   const inventory = items?.inventories[INVENTORY_TAB.consume - 1];
   if (!inventory) return undefined;
@@ -226,38 +232,31 @@ export function firstBasicAmmo(
     const item = inventory.items.get(slot);
     if (
       item?.kind === "nonequip" &&
-      item.quantity >= 1 &&
+      item.quantity >= required &&
       isCompatibleAmmo(weaponId, item.itemId)
     )
       return { slot, itemId: item.itemId };
   }
   return undefined;
 }
-/** Validate before touching the record. The relay must keep itemId even when the last arrow clears. */
-export function spendBasicAmmo(
-  items: CharacterItems,
-  slot: number,
-): { itemId: number; change: InventoryChange } | undefined {
-  const selected = firstBasicAmmo(items);
-  if (!selected || selected.slot !== slot) return undefined;
-  const inventory = items.inventories[INVENTORY_TAB.consume - 1]!;
-  const item = inventory.items.get(slot);
-  if (item?.kind !== "nonequip") return undefined;
-  const quantity = item.quantity - 1;
-  const clear = quantity === 0 && Math.trunc(item.itemId / 10000) !== 207;
-  if (clear) inventory.items.delete(slot);
-  else inventory.items.set(slot, { ...item, quantity });
-  return {
-    itemId: selected.itemId,
-    change: clear
-      ? { op: INVENTORY_OP.clear, inventory: INVENTORY_TAB.consume, slot }
-      : {
-          op: INVENTORY_OP.put,
-          inventory: INVENTORY_TAB.consume,
-          slot,
-          item: { ...item, quantity },
-        },
-  };
+/** Prepare without mutation so resource, inventory and wire encoding can commit atomically.
+ * Keep pre-debit itemId for the relay even when the last arrow clears. */
+export function planBasicAmmo(items:CharacterItems,slot:number,count=1) {
+  const selected=firstBasicAmmo(items,count);
+  if(!selected||selected.slot!==slot)return;
+  const inventory=items.inventories[INVENTORY_TAB.consume-1]!,item=inventory.items.get(slot);
+  if(item?.kind!=='nonequip')return;
+  const quantity=item.quantity-count,clear=quantity===0&&Math.trunc(item.itemId/10000)!==207;
+  const change:InventoryChange=clear
+    ?{op:INVENTORY_OP.clear,inventory:INVENTORY_TAB.consume,slot}
+    :{op:INVENTORY_OP.put,inventory:INVENTORY_TAB.consume,slot,item:{...item,quantity}};
+  return {itemId:selected.itemId,change,apply(){
+    if(clear)inventory.items.delete(slot);else inventory.items.set(slot,{...item,quantity});
+  }};
+}
+export function spendBasicAmmo(items:CharacterItems,slot:number,count=1):{itemId:number;change:InventoryChange}|undefined {
+  const plan=planBasicAmmo(items,slot,count);if(!plan)return;
+  plan.apply();return {itemId:plan.itemId,change:plan.change};
 }
 
 /** 41BC80 loads the item's own bullet canvases; 207 icons are not projectiles. */

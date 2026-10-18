@@ -1,6 +1,7 @@
+import {activeSkillAmmo} from "../../../client/active-skills.mjs";
 import {learnedSkillLevel} from "../game/skills.ts";
 import {temporaryStats} from "../../../client/temporarystats.mjs";
-import {learnedActive,activeTemporary,validatedActiveMelee} from "../game/activeskills.ts";
+import {learnedActive,activeTemporary,validatedActiveMelee,validatedActiveRanged} from "../game/activeskills.ts";
 import {readClientSkillUse,CLIENT_SKILL_USE_OPCODE} from "../protocol/skilluse.ts";
 import { attackDuration, shotRelease } from "../../../client/attack-timing.mjs";
 import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
@@ -11,9 +12,10 @@ import { equipmentFromTemplate, planBlankStarterRepair } from "../game/equipment
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
+import {planRangedPreviewKit} from "../game/rangedpreview.ts";
 import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
-import { spendBasicAmmo, basicShotRange, validatedBasicAttack,
+import { planBasicAmmo, spendBasicAmmo, basicShotRange, validatedBasicAttack,
   BASIC_ATTACK_TRANSPORT_GRACE_MS, BASIC_SHOT_POSITION_SLOP_X, BASIC_SHOT_POSITION_SLOP_Y, type BasicAttackProvider } from "../game/basicattack.ts";
 import {
   MESO_DROP_OPCODE,
@@ -1047,6 +1049,7 @@ interface FieldSession extends FieldMember {
   attackReadyAt?: number;
   skillReadyAt?: number;
   temporary?: ReturnType<typeof temporaryStats>;
+  temporaryWeaponId?:number;
 }
 
 export class GameEntryServer {
@@ -1267,6 +1270,14 @@ export class GameEntryServer {
         message = plan.changes.length
           ? `已明確修復 ${plan.changes.length} 件舊全零起始裝備為原WZ值（含攻擊／防禦／可升級次數）。未改物品ID、職業、AP/SP、EXP、金錢或地圖；還原點不回溯裝備。`
           : "沒有符合條件的全零起始裝備；未更動角色。非全零／已升級／非MakeCharInfo道具不會重設。";
+      } else if(kind==="ranged-kit") {
+        if((request as {confirmed?:unknown}).confirmed!==true)throw new Error("請勾選確認後再領取遠距體驗裝備。");
+        const plan=planRangedPreviewKit(session.character.items??emptyCharacterItems(),this.options.itemCatalog);
+        const packet=encodeInventoryChange(plan.changes);
+        session.character.items=plan.items;
+        session.character.flags|=CHAR_FLAG_ITEMS|CHAR_FLAG_INVENTORY_2;
+        session.send(packet);this.persist();
+        message="已明確領取原WZ War Bow（Lv10）、석궁（Lv12）、Garnier（Lv10）各1件、兩種箭與수비 표창各200枚。這是非原版體驗發放，會存檔且能力還原點不回收道具。沒有自動穿戴／改職業／加點／學技能；裝備需求照原WZ。I背包穿戴相容武器，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊）後雙擊／拖七鍵；沒有彈藥或太近會退普通近戰。";
       } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
         const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:[2002004,2002005];
@@ -1434,6 +1445,7 @@ export class GameEntryServer {
     session.talk = undefined;
     session.send(encodeSetField(this.setFieldOf(session.character)));
     // Full field records have no temporary-stat tail. Re-apply only the remaining live duration.
+    this.temporaryValues(session,Date.now());
     for(const entry of session.temporary?.icons(Date.now())??[]) {
       const durationMs=Math.ceil(entry.expiresAt-Date.now());
       if(durationMs>0)session.send(encodeStatUpdate({ack:false,diff:{},temporary:{...entry,durationMs}}));
@@ -1789,6 +1801,7 @@ export class GameEntryServer {
         return;
       }
     }
+    this.temporaryValues(session,Date.now());
     const outcome = applyChangeSlot(session.character.items, request);
     if (outcome.kind === "failed") {
       session.send(encodeInventoryChange([]));
@@ -1797,6 +1810,7 @@ export class GameEntryServer {
       );
       return;
     }
+    this.temporaryValues(session,Date.now());
     session.send(encodeInventoryChange(outcome.changes));
     if(outcome.lookChanged) {
       // Server policy: removing max-vital equipment cannot leave current vitals above the ceiling.
@@ -1837,28 +1851,15 @@ export class GameEntryServer {
     );
   }
 
-  /**
-   * The player used an item out of the USE tab: `0x18` for the 200/201/202 families (potions and
-   * food) and `0x19` for 203 (the 귀환 주문서 line, `spec/moveTo`). FINDINGS 4.34, `game/items.ts`.
-   *
-   * Both are two fields - `slot`, `itemId` - and both are **the client asking the server to do it**:
-   * the client's own character record is not written on this path (only `0x0D` writes it), so the
-   * heal or the teleport only happens because of what this sends back:
-   *
-   *   `0x0B`  the item left the slot (a `put` with what remains, or a `clear` when the stack ran
-   *           out) - the only packet that changes an inventory.
-   *   `0x0D`  for a potion: the vitals that moved, with the same `[0, max]` clamp every other HP
-   *           change goes through (`game/vitals.ts`).
-   *   `0x16`  for a return scroll: the map its own `spec/moveTo` names, through the same `enterMap`
-   *           a portal uses - `-1` (마을 귀환 주문서, "the nearest town") is read with the map's
-   *           `info/returnMap`, the one `reviveMapId` already answers with.
-   *
-   * A use that cannot happen is **still answered**, with an empty `0x0B`: the senders arm the same
-   * one-request-at-a-time gate an object click does (`*(this + 6)`, cleared by a non-zero `0x0B`
-   * result or `0x0D` ack), so silence would leave the player unable to use anything at all - and
-   * since the client's inventory only changes on `0x0B`, an empty one *is* the refusal.
-   */
-  /** 55D320 / 519270 / 519950. All facts validated before cost, recipient or effect mutation. */
+  /** 55AA80 / 4CC050: native cancellation is effective weapon ID, not any look/stat change. */
+  private temporaryValues(session:FieldSession,now:number) {
+    const weapon=characterStatBasis(session.character,this.options.itemCatalog,this.options.skills).weaponId;
+    if(session.temporaryWeaponId!==undefined&&weapon!==session.temporaryWeaponId)
+      session.temporary?.removeFields(['booster']);
+    session.temporaryWeaponId=weapon;
+    return session.temporary?.values(now)??{};
+  }
+  /** 55D320 / 519270 / 519950. Validate before cost, recipient or effect mutation. */
   private handleActiveSkill(session:FieldSession,plain:Uint8Array):void {
     const refuse=()=>session.send(encodeStatUpdate({ack:true,diff:{}}));
     let request;
@@ -1893,6 +1894,7 @@ export class GameEntryServer {
     Object.assign(session.character.stats,learned.cost);
     session.skillReadyAt=now+200; // 55D320 native request interval, not an invented cast animation.
     for(const target of recipients) {
+      this.temporaryValues(target,now);
       (target.temporary??=temporaryStats()).apply(temporary,now);
       target.send(target===session?own:other);
     }
@@ -1901,6 +1903,27 @@ export class GameEntryServer {
     this.persist();
   }
 
+  /**
+   * The player used an item out of the USE tab: `0x18` for the 200/201/202 families (potions and
+   * food) and `0x19` for 203 (the 귀환 주문서 line, `spec/moveTo`). FINDINGS 4.34, `game/items.ts`.
+   *
+   * Both are two fields - `slot`, `itemId` - and both are **the client asking the server to do it**:
+   * the client's own character record is not written on this path (only `0x0D` writes it), so the
+   * heal or the teleport only happens because of what this sends back:
+   *
+   *   `0x0B`  the item left the slot (a `put` with what remains, or a `clear` when the stack ran
+   *           out) - the only packet that changes an inventory.
+   *   `0x0D`  for a potion: the vitals that moved, with the same `[0, max]` clamp every other HP
+   *           change goes through (`game/vitals.ts`).
+   *   `0x16`  for a return scroll: the map its own `spec/moveTo` names, through the same `enterMap`
+   *           a portal uses - `-1` (마을 귀환 주문서, "the nearest town") is read with the map's
+   *           `info/returnMap`, the one `reviveMapId` already answers with.
+   *
+   * A use that cannot happen is **still answered**, with an empty `0x0B`: the senders arm the same
+   * one-request-at-a-time gate an object click does (`*(this + 6)`, cleared by a non-zero `0x0B`
+   * result or `0x0D` ack), so silence would leave the player unable to use anything at all - and
+   * since the client's inventory only changes on `0x0B`, an empty one *is* the refusal.
+   */
   private handleUseItem(
     session: FieldSession,
     plain: Uint8Array,
@@ -1979,7 +2002,7 @@ export class GameEntryServer {
     stats.mp = probe.mp;
     session.send(encodeInventoryChange([taken.change]));
     session.send(statPacket);
-    if(temporary)(session.temporary??=temporaryStats()).apply(temporary,Date.now());
+    if(temporary){this.temporaryValues(session,Date.now());(session.temporary??=temporaryStats()).apply(temporary,Date.now());}
     this.persist();
     this.options.log?.(
       `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
@@ -2361,8 +2384,8 @@ export class GameEntryServer {
    * answers with what that did - the damage numbers themselves need no packet, the attacker's own
    * client already drew them (FINDINGS 4.13.1).
    *
-   * The damage is the client's number: this server does not re-roll it (it has no evidence for the
-   * formula, and the client would disagree). What the server does own is which mobs exist and how
+   * The damage is the client's number: the bridge now uses the native formula, but this server
+   * does not own/replay the attacker RNG stream. What it does own is which mobs exist and how
    * much HP they have, so a hit on a mob this field does not have is logged, not invented.
    *
    * What goes out, and in which order, is the world's answer to the swing: the swing itself as
@@ -2397,11 +2420,44 @@ export class GameEntryServer {
     const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
     const profile = this.options.basicAttack?.(weaponId);
     const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
+    const booster=this.temporaryValues(session,now).booster??0;
     // Active physical skills have their OWN admission path; basic guards stay strict.
     // Unknown/magic skills must never bypass cooldown, resources or motion validation.
+    if(attack.skillId!==0 && shoot) {
+      const validated=validatedActiveRanged(session.character,this.options.skills,profile,attack,session.at?.action??4,booster);
+      if(!validated||!session.at||now<(session.skillReadyAt??0)||!session.character.items)return;
+      const {motion,learned,ammo}=validated,range=basicShotRange(session.character,this.options.skills);
+      const direction=attack.facingLeft?-1:1;
+      const targets=attack.targets.filter(target=>{
+        const mob=session.instance.mobs.mob(target.mobId),dx=mob?(mob.x-session.at!.x)*direction:-1;
+        return mob?.alive&&dx>=0&&dx<=range+BASIC_SHOT_POSITION_SLOP_X&&
+          Math.abs(mob.y-session.at!.y)<=BASIC_SHOT_POSITION_SLOP_Y;
+      });
+      const spending=planBasicAmmo(session.character.items,ammo.slot,activeSkillAmmo(learned.values));
+      if(!spending)return;
+      let statPacket:Uint8Array,inventoryPacket:Uint8Array;
+      try {
+        statPacket=encodeStatUpdate({ack:false,diff:learned.cost});
+        inventoryPacket=encodeInventoryChange([spending.change],0);
+      }catch{return;}
+      // No mutation before ALL validations/encodings; empty shots still spend both MP and ammo.
+      spending.apply();Object.assign(session.character.stats,learned.cost);
+      session.attackReadyAt=now+attackDuration(motion);
+      session.send(inventoryPacket);session.send(statPacket);this.persist();
+      const accepted={...attack,targets,targetCount:targets.length};
+      this.relayAttack(session,opcode,accepted,targets,spending.itemId);
+      if(targets.length){
+        const mob=session.instance.mobs.mob(targets[0]!.mobId)!,bounds=profile?.melee[0]?.bounds;
+        const near=bounds?-Math.min(Math.max(bounds.left,-65),bounds.right-1):65;
+        const travel=Math.trunc(Math.hypot(mob.x-(session.at.x+direction*near),mob.y-20-(session.at.y-25))*1.5);
+        this.pendingShots.push({session,instance:session.instance,opcode,attack:accepted,
+          dueAt:now+shotRelease(motion)+travel,deaths:new Map([[mob.mobId,mob.deaths]])});
+      }
+      return;
+    }
     if(attack.skillId!==0) {
       const validated=opcode===CLIENT_FIELD_OPCODE.attack
-        ? validatedActiveMelee(session.character,this.options.skills,profile,attack,session.at?.action??4):undefined;
+        ? validatedActiveMelee(session.character,this.options.skills,profile,attack,session.at?.action??4,booster):undefined;
       if(!validated || !session.at || now<(session.skillReadyAt??0))return;
       const {motion,learned}=validated,base=motion.bounds;
       if(!base)return;
@@ -2427,7 +2483,7 @@ export class GameEntryServer {
         deaths:new Map([[target.mobId,session.instance.mobs.mob(target.mobId)!.deaths]])}));
       return;
     }
-    const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4);
+    const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4,booster);
     if (this.options.basicAttack && ((opcode !== CLIENT_FIELD_OPCODE.attack && !shoot) || !basicMotion)) return;
     if (shoot) {
       // This path is a basic one-round attack, not an accidental free skill/multi-shot service.
@@ -2556,8 +2612,8 @@ export class GameEntryServer {
    * Three of the receiver's fields have no source on this side, and they are sent as the value that
    * is not a guess:
    *
-   *   `skillLevel`/`skillId`  0 - "no skill node". The pair is read, never watched on a wire, and a
-   *                           plain melee swing has no skill behind it.
+   *   `skillLevel`/`skillId`  0 for ordinary attacks; admitted active attacks use the real
+   *                           learned/WZ-capped level and skill ID (0x23/0x24).
    *   `afterimage`            0 - the first child of `Character/Afterimage/<the weapon's
    *                           info/afterImage>`, which every one of those images has. Which child the
    *                           attacker used comes from `sub_4BE270` on its own client.

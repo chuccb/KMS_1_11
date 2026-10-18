@@ -16,7 +16,7 @@ export const TEMPORARY_STAT_FIELDS = [
   "speed",
   "jump",
   "unknown200",
-  "unknown400",
+  "booster",
   "unknown800",
 ] as const;
 export type TemporaryStatName = (typeof TEMPORARY_STAT_FIELDS)[number];
