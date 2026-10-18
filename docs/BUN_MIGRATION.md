@@ -2,11 +2,23 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：使用者可選物理與十種鏡頭
+## 最新增量：7支瀏覽器工具與實體素材責任
+
+本輪完成7支browser MJS的真正TS實作／入口／呼叫鏈遷移，移除舊檔；共用安全admission與嚴格觀測，不在匯入時啟動任何服務。
+主入口另抽出entity-assets／entity-resource-validation／avatar-look，包含未知JSON守衛、template identity、取消與same-generation stale ownership。
+client目前 **81支TS**，只餘main.js與 **3支MJS**；沒有降低strict或用declaration包住原實作。
+
+六個registry latest再次與exact pins一致。strict／format／build通過，focused **78/0，9 files**；最後工具路由／redirect與import另驗 **15/0**。
+完整 **995/44，1039 tests / 113 files**，相對29f3df6 failure multiset新增0／移除0（含重複），不skip／減少suite，CI仍不綠。
+新增19案例；真Chromium空白fixture／假echo與Data.wz真HTTP metadata通過，22 imports／0 I/O attempts。
+LIVE同PID6097，79modules與首幀通過、0WS；未登入／操作角色／save／restart。
+實作、可用命令、安全限制與仍未驗收的手動場景見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)／ADR-082。
+
+## 前輪增量：使用者可選物理與十種鏡頭
 
 依明確要求開放非原版5/8/10/15/20/30/45/60ms本機角色物理步長；預設30ms保留。
 獨立插值／即時呈現選項、還原與typed local preference；camera增加六種真實構圖／解析彈簧模式，共十種。
-移除重複header背包入口，不移除原ITEM／I。新增motion-controls／motion-tuning，client目前 **78支TS**；main與10MJS仍WIP。
+移除重複header背包入口，不移除原ITEM／I。新增motion-controls／motion-tuning，當輪client **78支TS**；main與10MJS仍WIP。
 
 strict／format／build通過，focused **81/0，9 files**；完整 **976/44，1020 tests / 110 files**。
 相對9e10525失敗multiset新增0／移除0；新增18案例，沒有skip或調低原admission。
@@ -61,7 +73,7 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 ## 已落實
 
 - Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI。
-- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前78）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
+- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前81）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
 - 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的兩個 entry／完整 import graph 均驗過狀態、MIME、JS parser；本輪另以真正 Chromium 執行初始化及 rendering，不登入 LIVE。
@@ -129,20 +141,13 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 ## 尚未完成的原目標
 
 1. client/main.js 的真正實作型別與合理分層，不能只 rename 或用 any 包住。
-2. 下列 **10 支 server/scripts .mjs 工具／fixture** 的 Bun runner、型別與呼叫鏈遷移；含手動 browser probes，不因本次 pure suite 轉綠而宣稱它們已完成。
+2. 下列 **3 支 server/scripts .mjs 工具／fixture** 的 Bun runner、型別與呼叫鏈遷移；含手動 browser probes，不因本次 pure suite 轉綠而宣稱它們已完成。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. 追查全部 **44 項失敗**，分清 fixture、Bun 相容差異與真實行為，按原證修正；不能只讓 CI 表面變綠。
 5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
 
-### 尚未遷移的工具
+### 尚未遷移的工具（只剩這三支）
 
-- server/scripts/browser_creation_probe.mjs
-- server/scripts/browser_equipment_probe.mjs
-- server/scripts/browser_minimap_probe.mjs
-- server/scripts/browser_motion_probe.mjs
-- server/scripts/browser_portal_probe.mjs
-- server/scripts/browser_selection_probe.mjs
-- server/scripts/browser_stat_probe.mjs
 - server/scripts/client_probe.mjs
 - server/scripts/frame_probe.mjs
 - server/scripts/play_probe.mjs

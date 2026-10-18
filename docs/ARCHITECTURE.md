@@ -33,7 +33,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 78個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 81個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/entity-assets.ts`／`entity-resource-validation.ts`／`avatar-look.ts` | NPC/mob metadata驗證、field ownership／取消、native action量化與local/remote look規則 |
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
@@ -41,6 +42,7 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |
 | `server/src/game/` | 場地、保存、數值與物品權威；另含 WZ 資源呈現資料與重建政策 |
 | `server/src/wz/` | WZ 產品 reader、值層／像素／PNG；執行時直接讀 archive |
+| `server/scripts/browser-fixture.ts`／`browser-observation.ts` | 明示手動fixture admission、有界純觀測；匯入無連線／登入；7支browser runner為strict TS |
 | `tools/` | Bun TS靜態分析、工具鏈安裝、browser build、保護既有save與明示新fixture啟動 |
 | `analysis/` | 既有研究輸出，不能把過時 manifest 描述當現在的解析結果 |
 | `generated/` | 可重建工具／素材與不可隨意重建的玩家 save／備份並存；均忽略但重要性不同 |
@@ -88,7 +90,7 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-main.js與10支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整976/44，既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+main.js與3支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
+完整995/44，既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
 本輪有真Chromium唯讀載入／DPR／PNG測試，不登入LIVE、不操作角色／save、不restart。
-詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。
+詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

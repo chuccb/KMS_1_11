@@ -1,5 +1,8 @@
 # 地圖素材與移動回歸（2026-10-17）
 
+> 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
+> 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 > 後續繩索合成／移動修正與 BGM／音效的最新驗證見 `CLIMB_AUDIO_VALIDATION.md`；以下記錄的是先前素材修正階段。
 
 

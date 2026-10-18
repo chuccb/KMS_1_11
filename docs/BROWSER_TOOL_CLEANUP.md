@@ -1,5 +1,8 @@
 # 顯示／影像快取與診斷工具整理（2026-10-18，ADR-080）
 
+> 本頁保留當輪功能與驗證數字。後續ADR-082的7支browser工具遷移、素材責任、現行安全命令與最新型別範圍，
+> 見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)；歷史PASS不沿用為手動場景的新驗收。
+
 > 此頁保留9e10525當輪範圍／數字；後續新增本機步長實驗與十種鏡頭，最新結果見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。
 
 本輪是嚴格 TypeScript／ESNext／Bun 遷移的增量，**不是全案完成**。client 現有 76 支 TS；`main.js` 與 10 支 MJS 工具仍須實際遷移。沒有降低 strict、加入 allowJs／no-check／production any 或為通過測試改物理／傷害／協定。

@@ -4,7 +4,7 @@
 重建 **瀏覽器客戶端＋TypeScript 伺服器＋原協定與資源工具**。
 瀏覽器客戶端是唯一實作主線，不再規劃另一套引擎移植。
 
-**尚非完整 MMO 成品，不宣稱全遊戲 1:1、正式營運安全或最新改動已驗證通過。**
+**尚非完整 MMO 成品，不宣稱全遊戲 1:1、正式營運安全或全部回歸已通過。**
 
 ## 從這裡開始
 
@@ -17,6 +17,7 @@
 | 查還原方法與證據規則 | [還原原則](docs/REBUILD_PRINCIPLES.md) |
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
 | 查啟動參數與協定工具 | [server 說明](server/README.md) |
+| 手動瀏覽器工具／NPC與怪物素材整理 | [嚴格TS工具與素材](docs/STRICT_BROWSER_TOOL_MIGRATION.md) |
 | 可選物理步長、插值與十種自訂鏡頭 | [手感實驗](docs/MOTION_EXPERIMENTS.md)／[原版呈現原證](docs/PLAYER_PRESENTATION_CAMERA.md) |
 | 顯示／影像快取與安全診斷工具、遷移進度 | [整理與限制](docs/BROWSER_TOOL_CLEANUP.md)／[嚴格TS遷移](docs/BUN_MIGRATION.md) |
 | 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
@@ -31,13 +32,13 @@
 
 2026-10-18 工具鏈鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**。
 根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
-**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘 `.mjs` 尚未完成型別化；
+**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘3支 `.mjs` 尚未完成型別化；
 不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；76支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；81支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture

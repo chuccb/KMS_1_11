@@ -1,5 +1,8 @@
 # 繩索合成、移動與原始音訊驗證（2026-10-17）
 
+> 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
+> 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 > 後續朝向／地面怪物／世界與角色選擇的修正及 536 項驗證，見 `FACING_SELECTION_VALIDATION.md`。本報告的 530 項是前一輪結果。
 
 本次針對使用者提供的「繩上正面臉／衣服消失／站立武器伸出」截圖追查；不是換一張替代圖片。`Data.wz` 未修改。

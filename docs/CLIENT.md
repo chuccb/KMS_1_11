@@ -1,5 +1,14 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：實體素材與瀏覽器工具的嚴格TS整理
+
+NPC／mob的metadata載入已抽出typed entity-assets／entity-resource-validation，驗證未知JSON及template identity，
+換場／關閉／取消與同generation重入不再讓舊回覆寫入新owner；保留native body時序，不更動可選步長或戰鬥權威。
+local／remote lookOf也獨立typed，不把remote hair當裝備、不修改來源角色。
+7支browser工具遷成strict TS、刪MJS；新增共用明示admission與有界觀測，import無登入／連線。
+本輪78項focused通過、完整995/44與前輪失敗multiset相同，LIVE只唯讀首幀，沒有操作玩家。
+client現81支TS，main與3個legacy MJS尚未完成；現行命令與詳細界線見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 ## 2026-10-18：可選物理步長、十種鏡頭與移除重複背包入口
 
 上方重複「背包」按鈕已移除，原遊戲ITEM與I仍在。
@@ -546,8 +555,7 @@ error        { message }
 ## 測試
 
 ```sh
-cd server
-node --test test/websocket.test.ts test/webclient.test.ts
+bun test --timeout 30000 server/test/websocket.test.ts server/test/webclient.test.ts
 ```
 
 `websocket.test.ts`（9 則）釘住 RFC 6455 的三件事：`Sec-WebSocket-Accept` 的官方向量、client 訊框
@@ -560,6 +568,9 @@ node --test test/websocket.test.ts test/webclient.test.ts
 背包（`inventory` 事件的形狀、`/api/item` 的三種答案、一次雙擊把 3 瓶喝成 2 瓶且 HP 20→50），
 以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
 兩句台詞用 `0x15` 走完）。
+
+以下frame/play三段保留早期設計記錄；**這兩支MJS仍未遷移、未按當前客戶端驗收，不可照歷史預設帳密／port執行**。
+現行唯讀startup／render驗證與七支typed手動工具見本頁開頭連結；舊shim不能證明真PNG解碼或現在遊戲功能通過。
 
 另外還有一支**對真的伺服器**跑的畫面探針：`node server/scripts/frame_probe.mjs 8495`。它把
 `client/main.js` 放進一個 DOM shim（元素、會算次數的 2D context、會 `onload` 的 `Image`、Node 的
@@ -581,8 +592,8 @@ compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM
 ## 預覽環境
 
 `serve` 的三個 port 都是參數，但只有 `--web-port` 那個會出現在預覽網址裡，所以本專案的預覽跑法固定是
-**頁面 8495、login 8496、game 8497**；`https://8495-<sandbox>.e2b.app/` 就是頁面。把 login 放在
-8495 的話，預覽只會拿到一段 2003 的位元組（瀏覽器把它當成壞掉的 HTTP），看起來就是「Sandbox not
+**頁面 8515、login 8516、game 8517**；`https://8515-<sandbox>.e2b.app/` 就是頁面。把 login 放在
+8515 的話，預覽只會拿到一段 2003 的位元組（瀏覽器把它當成壞掉的 HTTP），看起來就是「Sandbox not
 found」之外的另一種空白。
 
 **已實測**（2026-10-17，真的瀏覽器，不是 Node 的 `WebSocket`）：預覽 proxy 會轉發 `wss` 的 upgrade。
@@ -590,13 +601,15 @@ found」之外的另一種空白。
 （헤네시스 `100000000`）→ 送出一句聊天，伺服器日誌逐包對得上。所以「代理不轉發 upgrade」的備案
 （HTTP 輪詢）**不需要**。
 
-### 離線 UI 回歸
+### 歷史離線 UI 回歸（尚未完成遷移）
+
+> client_probe的舊DOM/VM shim已不符合完整main；其wrapper仍是44個失敗之一。本段只保留歷史意圖，不是目前PASS。
 
 `node server/scripts/client_probe.mjs` 不需要伺服器、瀏覽器或外部套件：用 DOM／canvas shim 執行真正的
 `client/main.js`，注入與 WebSocket 相同的事件，驗證登入面板與按鈕的素材路徑／座標／狀態、登入
 取消／重試／防重送與密碼清理，以及原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
 拖曳滑塊、背包減少後捲動與選取清理、視窗拖曳在畫布外放開、位置儲存，以及 WZ 說明的字面 `\n`
-換行。`server/test/client-ui.test.ts` 將它納入 `npm test`。這是互動回歸，不代替真 canvas 的像素檢查。
+換行。`server/test/client-ui.test.ts` 將它納入 根`bun run test`。這是互動回歸，不代替真 canvas 的像素檢查。
 
 
 ## 2026-10-18：怪物主動攻擊鏈與唯讀入口（ADR-076，未測試）

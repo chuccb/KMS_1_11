@@ -1,5 +1,8 @@
 # 原版背包拖放／裝備窗驗證（2026-10-17）
 
+> 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
+> 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 > 後續狀態更正：本文件的驗證／未完成清單為當輪歷史。HP／MP自然成長與配點已由原表接上（**新改動未測試**），舊「成長表不在client」判讀已更正；自然AP/SP發放、完整Detail／buff仍缺。見 [STAT_GROWTH.md](STAT_GROWTH.md)／ADR-047。
 
 > **歷史驗證範圍**：本文件的570／Chromium結果來自裝備窗這一輪。

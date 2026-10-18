@@ -1,5 +1,8 @@
 # 手感實驗：可選物理步長與十種鏡頭（2026-10-18，ADR-081）
 
+> 本頁保留當輪功能與驗證數字。後續ADR-082的7支browser工具遷移、素材責任、現行安全命令與最新型別範圍，
+> 見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)；歷史PASS不沿用為手動場景的新驗收。
+
 這次依使用者要求，**明示開放非原版手感實驗**，不再只限原版30ms。預設仍30ms＋平滑插值＋原有平滑跟隨；其他選項不冒充官方規則，也不保證比官方更順。原版重建缺口仍見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)／[NATIVE_TERRAIN](NATIVE_TERRAIN.md)。
 
 ## 在遊戲裡怎麼用

@@ -8,7 +8,6 @@ import { motionControls } from "./motion-controls.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
-import {nativeMobActions} from "./mob-reaction.ts";
 import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.ts";
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.ts";
 import {attackPredictions} from './attack-predictions.ts';
@@ -65,6 +64,8 @@ import { equipmentWindow, bodyPart, canWear } from "./equipment.ts";
 import { miniMapWindow } from "./minimap.ts";
 import { displayControls } from "./display-controls.ts";
 import { archiveImages, avatarImages } from "./image-cache.ts";
+import { entityAssets } from "./entity-assets.ts";
+import { lookOf } from "./avatar-look.ts";
 import { movementPortal, arrivalPortal } from "./portals.ts";
 import { statWindow } from "./statwindow.ts";
 import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.ts";
@@ -383,6 +384,7 @@ function connect() {
     visualFieldActive = false;
     lastAttackTrace = undefined;
     ++mapGeneration;
+    entityCatalog.clear();
     revivePanel.reset();
     selfSwing = undefined;
     projectiles.length = damageMarks.length = 0;
@@ -434,6 +436,7 @@ function handle(message) {
     pendingWhisper=undefined;userRequestUntil=0;
     chatHistoryPanel.cancelDrag();
     ++mapGeneration;
+    entityCatalog.clear();
     visualFieldActive = false;
     lastAttackTrace = undefined;
     miniMapPanel.setMap(undefined);
@@ -1164,10 +1167,7 @@ async function loadMap(mapId, generation) {
     // Shared UI/map sheets and avatar poses survive portals; bounded caches evict old entries.
     mapScene = [];
     layerOrder = sceneOrdering();
-    npcArts.clear();
-    npcMetadata.clear();
-    mobArts.clear();mobMetadata.clear();mobBodyAttack.clear();mobPushThreshold.clear();
-    artMissing.clear();
+    entityCatalog.clear();
     // Every field entry is a discontinuity, including same-map revive/re-entry.
     camera.ready = false;
     void loadMapArt(mapId, generation);
@@ -1789,9 +1789,19 @@ let mapGeneration = 0, mapAnimationStart = 0;
 /** `look|stance|frame|flip -> { img, dx, dy, ready }` avatar frames. */
 const avatarCache = avatarImages({ faceProfile: face => faceCatalog.get(face)?.data });
 /** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
-const npcArts = new Map();
-const npcMetadata = new Map();
-const mobArts = new Map();
+const entityCatalog = entityAssets({
+  generation: () => mapGeneration,
+  image: artImage,
+  onNpc(data) {
+    npcVisuals.load(data.templateId, data.actions, data.behavior, performance.now());
+  },
+  onError(kind, templateId, error) {
+    logLine(`${kind} ${templateId}: ${String(error)}`);
+  },
+});
+const npcArts = entityCatalog.npcActions;
+const npcMetadata = entityCatalog.npcMetadata;
+const mobArts = entityCatalog.mobActions;
 /** `mobId -> when its 0x30 (die) arrived`; the corpse plays the monster's own `die1` frames. */
 const dying = new Map();
 /**
@@ -1810,9 +1820,10 @@ let selfSwing;
 const damageMarks = [];
 function addDamageMark(mark){mark.order??=layerOrder(mark,ATTACK_EFFECT_Z);damageMarks.push(mark);}
 const mobForces = new Map();
-const mobBodyAttack = new Map();
-const mobPushThreshold=new Map();
-const mobMetadata=new Map(),mobWorldEffects=[];
+const mobBodyAttack = entityCatalog.bodyAttack;
+const mobPushThreshold = entityCatalog.pushed;
+const mobMetadata = entityCatalog.mobMetadata;
+const mobWorldEffects = [];
 const mobAttackFx=mobAttackEffects({metadata:id=>mobMetadata.get(id),emit(effect){
   const end=effect.start+effect.frames.reduce((n,f)=>n+f.delay,0);
   if(performance.now()>=end)return; // Cold metadata never restarts or replays an expired layer.
@@ -1923,8 +1934,6 @@ const combatCatalog = combatAssets({
 });
 const attackLooks = new Set();
 const projectiles = [];
-/** Template ids whose art endpoint said 404 - stop asking. */
-const artMissing = new Set();
 /** The camera: world coordinate shown at the top-left of the 800x600 view. */
 const camera = createCamera();
 const motionSettings = motionControls({
@@ -2330,26 +2339,6 @@ function drawSelectionScreen(now) {
   creationDialogs.draw(now);
 }
 
-/** `{ face, hair, items }` for the local character or another user of the field. */
-function lookOf(entity) {
-  if (!entity) return { face: 20000, hair: 30000, items: [] };
-  if (typeof entity.hair === "number" && entity.hair !== 0) {
-    return {
-      face: entity.face || 20000,
-      hair: entity.hair,
-      items: entity.avatarItems ?? [],
-    };
-  }
-  // Another user's `0x1C` list starts with the hair (`avatarItemsOf`) and carries no separate
-  // hair field, so the first id is the hair and the rest are the worn equips.
-  const list = entity.avatarItems ?? [];
-  return {
-    face: entity.face || 20000,
-    hair: list[0] || 30000,
-    items: list.slice(1),
-  };
-}
-
 /**
  * Asks the server for one composed frame.
  *
@@ -2407,35 +2396,7 @@ function preloadAvatar(look, retainedProfile) {
 
 /** Fetches one NPC's or mob's frame table, once per template. */
 function ensureEntityArt(kind, templateId) {
-  const table = kind === "npc" ? npcArts : mobArts;
-  if (table.has(templateId) || artMissing.has(`${kind}:${templateId}`)) return;
-  table.set(templateId, undefined);
-  const generation=mapGeneration;
-  fetch(`/api/${kind}/${templateId}`)
-    .then((response) =>
-      response.ok
-        ? response.json()
-        : Promise.reject(new Error(String(response.status))),
-    )
-    .then((data) => {
-      if(generation!==mapGeneration)return;
-      table.set(templateId, kind==="mob"?nativeMobActions(data.actions??{}):data.actions??{});
-      if (kind === "mob") {mobBodyAttack.set(templateId,data.bodyAttack===true);mobPushThreshold.set(templateId,data.pushed??1);mobMetadata.set(templateId,{attacks:data.attacks??[],maxMP:data.maxMP??0});
-        for(const a of data.attacks??[])for(const frames of [a.effect,a.hit,a.ball])for(const f of frames??[])artImage(f.path);
-      }
-      else {
-        npcMetadata.set(templateId, {name:data.name,clickBounds:data.clickBounds,behavior:data.behavior});
-        npcVisuals.load(templateId,data.actions??{},data.behavior,performance.now());
-      }
-      for (const frames of Object.values(data.actions ?? {})) {
-        for (const frame of frames) artImage(frame.path);
-      }
-    })
-    .catch(() => {
-      if(generation!==mapGeneration)return;
-      table.delete(templateId);
-      artMissing.add(`${kind}:${templateId}`);
-    });
+  void entityCatalog.load(kind, templateId);
 }
 
 /**

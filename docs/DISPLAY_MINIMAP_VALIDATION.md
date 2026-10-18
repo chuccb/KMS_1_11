@@ -1,5 +1,8 @@
 # 清晰縮放與原版小地圖驗證（2026-10-17）
 
+> 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
+> 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 > 本頁以下保留當時量測；現行入口為 `browser_display_probe.ts`（Bun／唯讀／明示目標）。DPR監測已改由既有app frame的typed refresh補足未發事件情況，實際新驗證見 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
 
 ## 1. 畫面「糊」的實測，而非猜測

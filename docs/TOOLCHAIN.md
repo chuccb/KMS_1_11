@@ -41,8 +41,8 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 78 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
-  **`client/main.js` 及 server/scripts 剩餘 10 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 81 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  **`client/main.js` 及 server/scripts 剩餘 3 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
@@ -50,7 +50,7 @@ bun run build
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
 - 9 支純規則 probe 已移至 `server/test/presentation-*.test.ts`，連同新增 recovery／typed UI／WZ HTTP 測試納入根 suite。
-  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 10 支工具／fixture，不能以能 bundle 代替完成。
+  7支手動 `browser_*_probe.ts` 已strict型別化但本輪未執行登入／角色場景；全案仍欠主入口與3支工具／fixture，不能以能 bundle 代替完成。
 
 ## 工具遷移與原證
 
@@ -104,15 +104,26 @@ bun server/scripts/browser_display_probe.ts <明示web-port或http(s)://origin>
 bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 ```
 
-音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘10支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
+音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘3支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
 
 `whisper_probe.ts` 也已嚴格型別化，採顯式帳號／目標／ack與共享TCP transport；歷史跨系統場景沒有重新驗收，
 不得以舊105項PASS宣稱當前服務認證。只讀 display/render 已跑真瀏覽器；field/login分支未跑，見
 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
 
+手動browser probe的明示帳號／目標／--allow-state-changes與七個入口見
+[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。不要照歷史node／MJS命令操作；import不會自動執行。
+
 ## 實際驗證狀態
 
-最新手感實驗增量：strict／format／build通過，focused81/0（9 files），完整976/44（1020 tests / 110 files）；
+最新工具／實體素材增量：strict／format／build通過；focused78/0（9 files）、最後工具15/0。
+完整995/44（1039 tests / 113 files），對29f3df6 failure multiset新增0／移除0；新增19案例，未skip。
+22個工具／元件import與七個runner的錯誤入口皆0 I/O attempts；真Chromium觀測／redirect防護與原WZ HTTP metadata通過。
+LIVE仍同PID6097，79modules與首幀通過、0WS，沒有登入／操作角色／save／restart。
+六個registry latest再次與pins一致；本輪日誌在ignored generated/strict-cleanup/。
+
+### 前輪手感實驗（29f3df6）
+
+手感實驗增量：strict／format／build通過，focused81/0（9 files），完整976/44（1020 tests / 110 files）；
 相對9e10525 failure multiset新增0／移除0，預設30ms的3540frames／425原movement packet bytes與修改前相同。
 LIVE同PID6097，76 modules與唯讀首幀通過、0WS；不登入／角色／save／restart。
 新增兩個typed controls/rules實作，只有原生TS／ESNext／Bun；main與10MJS仍待實際遷移。

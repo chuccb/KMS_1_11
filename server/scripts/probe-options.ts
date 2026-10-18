@@ -41,7 +41,7 @@ export function fixturePort(value: string): number {
   const number = Number(value);
   if (number < 1 || number > 65535) throw new Error("Expected TCP port 1..65535");
   // Reserved for the existing user-facing preview; the flag cannot bypass this guard.
-  if ([8515, 8516, 8517].includes(number))
+  if ([8495, 8496, 8497, 8515, 8516, 8517].includes(number))
     throw new Error("Refusing the user-facing preview ports");
   return number;
 }
@@ -68,7 +68,7 @@ export function fixtureBrowserOrigin(target: string | undefined): string {
   const origin = browserOrigin(target),
     url = new URL(origin);
   fixturePort(url.port || (url.protocol === "https:" ? "443" : "80"));
-  if (/^851[567]-[^.]+\.e2b\.app$/i.test(url.hostname))
+  if (/^(?:849|851)[567]-[^.]+\.e2b\.app$/i.test(url.hostname))
     throw new Error("Refusing the user-facing preview proxy");
   return origin;
 }

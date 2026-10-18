@@ -2862,3 +2862,27 @@ strict／format／build通過，focused81/0與完整976/44（1020tests/110files�
 真source/bundle controls與800px popup、storage／reset／Escape通過；LIVE同PID6097、76modules／首幀、0WS。
 沒有自動登入／操作玩家／save／restart；主觀遊戲手感未替使用者驗收。不宣稱低step保證更順或非原版軌跡與原版相同。
 完整數值意義、取捨與未完成界線見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。
+
+## ADR-082：手動瀏覽器工具與實體素材的真正strict TS遷移（2026-10-18）
+
+依使用者要求繼續全案最乾淨易讀、最新版TypeScript／ESNext／Bun。六個npm latest再核與exact pins相同，
+不重裝同版冒稱升級、不降strict、不加allowJs／no-check／假的declaration。
+
+七支browser creation／equipment／minimap／motion／portal／selection／stat MJS真正遷為TS，刪舊檔不留兼容殼。
+共用typed fixture admission／觀測與原browser launcher；目標、帳密、state-change ack全部明示，雙角色各自獨立，
+保護目前與歷史預覽port/proxy。import.meta.main／runner admission在任何launch或mkdir前；匯入不自動執行場景。
+原生WebSocket資料與Canvas overload、transform、Blob／音訊行為保留；未知JSON逐欄驗證，錯誤觀測不能悄悄通過，
+不把觀測投影當完整遊戲協定。motion手動斷言改正508FC0 movement2/6/16，不再誤用body35/37倍增。
+
+main抽出entity-assets／entity-resource-validation／avatar-look：NPC/mob身分與素材guard、pending dedup、取消、
+同generation request identity、negative cache與換場清理；舊JSON不得復活已失效owner或預熱舊PNG。
+native mob時序、WZ原frames、碰撞／能力／傷害／codec不改。缺metadata不啟用body contact；local與remote hair規則明確分開。
+
+新增19案例；strict／format／build通過，focused78/0與最後工具15/0；完整995/44（1039tests/113files），
+對29f3df6 failure multiset新增0／移除0，既有44仍阻擋全案驗收。不skip／縮suite或沿用舊native工具PASS。
+真Chromium空白fixture／假echo驗證實際畫布、音訊、Blob、redirect與觀測；原WZ真HTTP metadata驗四個NPC，
+22imports與七個拒絕入口0 I/O attempts；LIVE同PID6097，79modules與首幀通過、0WS。
+沒有自動登入LIVE／操作角色／save／restart，原檔／analysis不改。
+
+剩餘main.js、client_probe／frame_probe／play_probe三支MJS、44失敗與typed whisper歷史admission仍待實際完成。
+完整現行命令、數值意義與驗證界線見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

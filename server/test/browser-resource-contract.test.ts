@@ -6,6 +6,7 @@ import { artProviderOf } from "../src/game/art.ts";
 import { skillCatalogOf } from "../src/game/skills.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import { isCreationCatalog } from "../../client/ui-resource-validation.ts";
+import { isNpcMetadata } from "../../client/entity-resource-validation.ts";
 import { ACTIVE_SKILLS } from "../../client/active-skills.ts";
 import {
   isActiveSkillMetadata,
@@ -32,6 +33,9 @@ test("browser metadata guards accept original WZ HTTP responses, without a game 
       ["/api/projectile/2060000", isSpriteFrames],
       ["/api/creation", isCreationCatalog],
       ["/api/mob/100100", isMobMetadata],
+      ...[1001000, 1002000, 1002001, 2100].map(
+        (id) => [`/api/npc/${id}`, isNpcMetadata] as [string, (data: unknown) => boolean],
+      ),
       ["/api/skills/100", isSkillCatalogue],
       ["/api/skills/200", isSkillCatalogue],
       ...Object.keys(ACTIVE_SKILLS).map(

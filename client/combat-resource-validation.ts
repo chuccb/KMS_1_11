@@ -42,6 +42,7 @@ export function isSpriteFrame(value: unknown): value is SpriteFrame {
     optional(value.height, isFiniteNumber) &&
     optional(value.a0, isFiniteNumber) &&
     optional(value.a1, isFiniteNumber) &&
+    optional(value.rawDelay, isFiniteNumber) &&
     optional(value.bounds, rect)
   );
 }

@@ -3,9 +3,9 @@
 更新：2026-10-18。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
-**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（976/44），
+**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（995/44），
 既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。全案TS／ESNext／Bun整理也未完成，
-main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+main.js／3支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
@@ -30,7 +30,14 @@ main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](
 | 臉部獨立時鐘／眨眼／F鍵／101臉飾／remote attr2 hit | [臉部證據與界線](NATIVE_FACE_ANIMATION.md)，沒有改全部原生movement幾何 |
 | 方便體驗入口 | [非原版工具](RECOVERY_TEST_TOOLS.md)，唯讀範例與授權寫入操作分開 |
 
-## 優先序 1：持續原版差異修復
+## 優先序 1：繼續真正的嚴格 TypeScript 遷移
+
+- 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。main.js與client_probe／frame_probe／play_probe仍需實作型別及合理拆分，不只改名。
+- 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。
+- 逐項追查44失敗及typed whisper歷史native admission情境；不能改skip、刪斷言或降低strict掩蓋問題。
+- HTTP／WebSocket其餘資料邊界仍須逐一審核；strict compile不等於所有payload已驗證。
+
+## 優先序 2：持續原版差異修復
 
 - 依原碼／listing／WZ 追查角色與怪物移動、繩梯、攻擊、時序、相機、圖層與音訊的實際差異。
 - 補完整 CVecCtrl／CShape2D 的已證分支；不能把現有近似當成全域原30ms時鐘或完整幾何。
@@ -38,7 +45,7 @@ main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](
 - 字型與 tooltip 等 UI 保持原素材／座標／實例資料，不以 CSS 美化、後期資源或缺素材 fallback 代替。
 - 每項有證據入口、實作／unknown／重建政策與取消／過期邊界；不因有某個 codec 就聲稱整個玩法完成。
 
-## 優先序 2：未接通的玩法
+## 優先序 3：未接通的玩法
 
 - 主動技能白名單已接12招（7首批＋3遠距＋2魔法）及七鍵／消耗／多段／多彈藥／buff／party，見[遠距](NATIVE_RANGED_SKILLS.md)與[魔法](NATIVE_MAGIC_SKILLS.md)；續補其餘技能／Magic Guard／booster施放幅度／mob debuff與手動解除，其餘被動逐條還原。
 - 自然 AP／SP、原轉職流程與加成；資料未定位不套慣見5／3或後期規則。
@@ -46,9 +53,9 @@ main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](
 - 原 quest／taxi／trunk scripts：原 server 腳本缺證據，不自創價格／路線／任務。
 - 組隊已接指令／名冊／原式邀請與Rage收件者，尚非完整party視窗；交易／Messenger等完整瀏覽器UI仍待接通。
 
-## 優先序 3：工程整理與營運基礎
+## 優先序 4：工程整理與營運基礎
 
-- 將大型 main 的責任逐步拆分；display lifecycle與image cache已抽成TS並回歸，主整合入口仍未typed，不能只rename或降低strict。
+- 將大型 main 的責任逐步拆分；display lifecycle、image cache、entity assets／look已抽成TS並回歸，主整合入口仍未typed，不能只rename或降低strict。
 - 未來抽出 server／browser 共用純規則；目前共用檔仍在 client，架構文件不隱瞞。
 - 維持正式版工具鏈的明確版本檔／lock／CI 一致，不把升級或成功啟服視為相容性證明。
 - 效能改善須定位實際熱點；不為「前沿」直接改成另一套引擎或 GPU 架構。
@@ -60,6 +67,6 @@ main.js／10支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](
 1. 先查原證據，再寫實作；新規則標明重建政策，unknown 不變成事實。
 2. 實例、模板、資源 cache、連線／modal／場地生命週期分清，舊 response 不得復活舊操作。
 3. 不自動修改角色，不以新 save／QA fixture 冒充舊進度；停服冷備才能恢復同檔。
-4. 依使用者要求不自動執行 test／check／typecheck／語法檢查／browser／VM／遊戲 probe。
+4. 依後續授權可執行完整型別／格式／單元／建置及唯讀browser檢查；仍不自動登入LIVE、操作角色／save或跑手動state-changing probe。
 5. 維護回歸來源與文件，但未執行就是未執行；歷史 PASS 不可挪用。
-6. `[skip ci]` 提交，只非 force 推目前 Arena 分支；提供可用 LIVE，若存檔缺失須明示並先恢復資料。
+6. 只非force推目前Arena分支，不用skip CI掩蓋失敗；提供可用LIVE，保護既有程序與存檔，缺存檔須明示。

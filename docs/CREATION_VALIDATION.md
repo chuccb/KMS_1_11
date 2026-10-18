@@ -1,5 +1,8 @@
 # 原建立／刪除角色流程：來源、實作與驗證
 
+> 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
+> 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
 本次取代固定外觀的 HTML 建角列，接通 CUINewChar 與刪角的真登入封包、持久化。
 不把此項完成當成整個遊戲已 1:1。原 `Data.wz` 未改。
 
