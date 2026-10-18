@@ -2,7 +2,20 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 本輪修復：登入按鈕沒有反應
+## 最新增量：走跳顯示插值與鏡頭模式
+
+已按原 CVecCtrl 537520／53C2B0 補上獨立顯示取樣，不改走速／重力／權威30ms時鐘／發包；
+走路、跳躍、繩梯、KB與附身視覺共用。保留最多30ms呈現延遲，原 app ceil 全域相位仍未完整移植。
+新增嚴格 TS `player-presentation.ts`／`camera.ts`／`camera-controls.ts`；四種鏡頭、回中、獨立偏好與焦點守衛已接真 UI。
+
+本次 strict／format／build 通過；完整 **931 pass / 44 fail（975 tests / 106 files，168.25秒）**，
+對登入修復輪38cdd2d的44項 failure multiset 新增0／移除0，CI仍不綠。
+新增15項 regression；含真 source／bundle startup與camera偏好的 focused **19/0**。
+原／新物理20 scenarios／3540 frames／425個原movement packet bytes交叉全同。
+LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登入／操作現有角色／存檔／restart。
+詳見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。以下登入修復與150音訊等數字保留其**前輪**時點意義。
+
+## 前輪修復：登入按鈕沒有反應（38cdd2d）
 
 上一輪把 statwindow 的 #stat-body 誤判成 div，實際 index.html 是 button。真 Chromium 重現了 requireElement 拋錯，使整頁初始化中斷；前輪 HTTP／MIME／JS 語法檢查無法偵測這種執行期錯誤。**失敗 multiset 沒增加，不代表頁面功能一定正確。**
 
@@ -17,7 +30,7 @@
 ## 已落實
 
 - Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI。
-- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 現有 **71 支 .ts**（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
+- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 現有 **74 支 .ts**（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
 - 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的兩個 entry／完整 import graph 均驗過狀態、MIME、JS parser；本輪另以真正 Chromium 執行初始化及 rendering，不登入 LIVE。
@@ -26,7 +39,7 @@
 - 分析 CLI 保留原證 CP949 bytes、forward declaration、列函式、具名函式、calls/globals；存檔保護只接受現有非空 regular file，錯誤不建立替代進度。
 - 原版 EXE/DLL/ACM、C/listing、Data.wz、analysis 與歷史 ADR 均保留。沒有登入 LIVE、操作現有角色、修改玩家存檔或重啟既有 LIVE；unit 使用隔離 fixture 與假傳輸。
 
-## 凍結來源後驗證
+## 登入修復輪凍結來源後驗證（38cdd2d）
 
 | 檢查 | 本輪實際結果 |
 | --- | --- |

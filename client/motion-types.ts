@@ -4,6 +4,7 @@ import type {
   PhysicalBounds,
   TerrainSegment,
   TerrainVelocity,
+  TerrainPoint,
 } from "./native-terrain.ts";
 import type { NativeShoe, GroundAttributes, FieldAttributes } from "./native-locomotion.ts";
 import type { PostureBody } from "./posture.ts";
@@ -82,6 +83,8 @@ export interface PlayerBody extends PostureBody, TerrainVelocity {
   jumpQueued: boolean;
   groundJumps: number;
   accumulator: number;
+  /** Last completed controller interval, presentation only; optional for legacy external bodies. */
+  renderPrevious?: Readonly<TerrainPoint>;
   knockback?: { x: number; y: number };
   terrainTrace: { at: number; before: MovementSnapshot; after: MovementSnapshot }[];
   motionOrigin?: MovementSnapshot;

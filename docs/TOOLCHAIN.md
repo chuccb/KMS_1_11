@@ -41,7 +41,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 71 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 74 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
   **`client/main.js` 及 server/scripts 剩餘 13 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
@@ -105,6 +105,14 @@ bun server/scripts/equipment_fixture.ts generated/validation/<全新名稱>.json
 音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘13支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
 
 ## 實際驗證狀態
+
+最新走跳／鏡頭增量：strict／format／build 通過；完整 **931 pass / 44 fail，975 tests / 106 files**，
+對38cdd2d的44項failure multiset新增0／移除0。新camera/presentation focused19/0，
+原／新權威3540frames與425個movement packet bytes全同；LIVE仍同一PID、72modules與唯讀Chromium首幀通過，0WS。
+新三模組全部嚴格TS；全案遷移仍未完成。細節及最多30ms呈現延遲限制見
+[PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。
+
+### 前輪登入修復凍結點（38cdd2d）
 
 frozen lockfile（47 packages 無漂移）、根 strict typecheck、格式與 browser build 均通過。
 完整回歸 **916 pass / 44 fail，960 tests / 105 files**；上一凍結點 ff0e735 是902/44。44項檔名／標題／重複次數完全相同，新增／移除均0。**不能以無新增失敗推論沒有執行期問題**：本輪真 Chromium 找出並修正前輪漏掉的 stat-body tag 錯誤，已補正式啟動／假傳輸／故障注入案例。

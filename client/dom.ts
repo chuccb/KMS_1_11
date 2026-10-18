@@ -44,3 +44,8 @@ export function blurWithin(root: Node): void {
   const active = document.activeElement;
   if (root.contains(active)) focusTarget(active)?.blur();
 }
+
+/** Native browser editors/selects own their keys; camera/scale selection must not move a player. */
+export function isEditingControl(element: Element | null): boolean {
+  return element !== null && ["input", "textarea", "select"].includes(element.localName);
+}

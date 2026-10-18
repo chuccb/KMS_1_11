@@ -1,5 +1,11 @@
 # 普通移動力學、地形狀態、繩梯與有序移動路徑
 
+> 2026-10-18 後續：已補原537520／53C2B0的本機前後位置顯示取樣，涵蓋走路與跳躍而非改力學。
+> 原553F40的ceil全域時相尚未移植；browser保留floor權威時鐘與最多30ms呈現延遲。
+> 四種camera政策、來源交叉、實際執行結果及LIVE保存見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。
+> 本頁下方「來源未執行」等描述保留ADR-077撰寫時點，不取代後續實際驗證記錄。
+
+
 日期：2026-10-18；ADR-077，幾何續作ADR-078見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)。**已實裝來源；未執行 test／check／typecheck／語法檢查／browser／VM／HTTP或登入 probe。**
 這是普通控制器相關鏈的續作，不是完整 CVecCtrl、CShape2D 或原 server 已還原的宣告。
 

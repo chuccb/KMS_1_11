@@ -2805,3 +2805,23 @@ flyer KB共用539B10，移除該caller未呼的獨立shape wall sweep。既有fo
 stable WZ-array scan不是native R-tree遍歷；x87／global phase／原CMovePath recorder與完整water／fly／owner AI未完成。
 empty／narrow／malformed geometry及overflow sentinel空best有明示防護，非正常原版規則。
 原證、常數意義、相關鏈、來源fixtures與同save保存見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)。
+
+
+## ADR-079：本機顯示向量與可選鏡頭，權威時鐘不變（2026-10-18）
+
+使用者補充走路也有不順感，不能只改jump或歸因TS。交叉537520存previous、53C2B0 Gr2D顯示插值、
+CVecCtrl vtable+148與get_x/get_y、537260／53BEC0 reset，以及553F40先update再tick+30的ceil app loop。
+新增純typed presentation sampler，每完整控制步保存previous；角色與附身視覺／鏡頭使用同一顯示點，
+碰撞／技能搜尋／接觸／portal／journal與發包仍用權威位置，不加外推／改速度或gravity。
+保留現有floor accumulator，明載最多30ms呈現延遲；**不是完整原app共用全域時相還原**。
+
+camera分為純幾何與typed DOM preference；平滑／直接置中／區域跟隨／固定及回中按鈕，全部明標browser政策。
+470340僅證VR中心界限與窄圖signed整數中點，不證`.18≈原版0.2s`，移除舊錯誤註解。
+內部float tracking／外部單一整數raster origin，所有圖層與pointer同源；同圖重入／server correction reset，
+late art只clamp不再二次回中。UI鍵盤焦點不漏到角色；偏好僅寫localStorage，不寫玩家存檔。
+
+strict／format／build通過，新增15項回歸；真source/bundle camera偏好與startup focused19/0。
+完整931pass/44fail（975tests/106files）；對38cdd2d失敗multiset新增0／移除0，44項仍阻擋全案驗收。
+與原controller20scenarios／3540frames／425個encoded movement packets交叉全同（除新增presentation-only欄位）。
+LIVE同PID6097，72modules及Chromium唯讀載入首幀通過、0WS；未登入、未操作角色／存檔、未restart。
+完整來源、取捨與驗證見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。

@@ -7,6 +7,8 @@ import { startWebClient } from "../src/net/webclient.ts";
 import { WzArchive } from "../src/wz/archive.ts";
 import { artProviderOf } from "../src/game/art.ts";
 import { isRecord } from "../../client/resource-validation.ts";
+import { CAMERA_MODES } from "../../client/camera.ts";
+import { CAMERA_STORAGE_KEY } from "../../client/camera-controls.ts";
 
 interface FixtureOptions {
   root?: string;
@@ -98,6 +100,41 @@ test("actual HTML and the complete source and bundled module graphs finish start
       );
       assert.equal(await page.locator("#startup-error").isVisible(), false);
       assert.equal(await page.locator("#login").isDisabled(), false);
+      const modes = page.locator("#camera-mode");
+      assert.equal(await modes.getAttribute("aria-label"), "鏡頭模式（瀏覽器自訂）");
+      assert.deepEqual(
+        await modes
+          .locator("option")
+          .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
+        CAMERA_MODES.map((mode) => mode.id),
+      );
+      assert.equal(
+        await modes.evaluate((select) => getComputedStyle(select).pointerEvents),
+        "auto",
+        "header pointer-events:none must not make the camera select unclickable",
+      );
+      for (const { id } of CAMERA_MODES) {
+        await modes.selectOption(id, { force: true });
+        assert.equal(await modes.inputValue(), id);
+        assert.equal(
+          await page.evaluate((key) => localStorage.getItem(key), CAMERA_STORAGE_KEY),
+          id,
+        );
+        assert.ok((await modes.getAttribute("title"))?.length);
+      }
+      // A page-only preference reload, not login/field entry/character input.
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
+      assert.equal(await modes.inputValue(), "fixed");
+      await page.locator("#camera-recenter").evaluate((button) => {
+        if (!(button instanceof HTMLButtonElement)) throw new Error("Expected camera button");
+        button.click();
+      });
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
+      await page.evaluate((key) => localStorage.setItem(key, "corrupt-mode"), CAMERA_STORAGE_KEY);
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
+      assert.equal(await modes.inputValue(), "smooth");
       assert.deepEqual(messages, []);
       assert.deepEqual(errors, []);
     });

@@ -1,6 +1,9 @@
 import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
-import { requireContext2d } from "./dom.ts";
+import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
+import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
+import { createCamera, updateCamera } from "./camera.ts";
+import { cameraControls } from "./camera-controls.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
@@ -698,7 +701,7 @@ function handle(message) {
       if (selfView?.hp > 0 && message.self.hp <= 0) {
         selfDeathSettled = false;
         if (playerBody && map?.id === self?.mapId)
-          deathFx.observe(message.self.characterId, true, self, performance.now());
+          deathFx.observe(message.self.characterId, true, selfDisplayPosition(), performance.now());
         selfSwing = undefined;
         buffs.clear();skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();
         clearAttackAlert(playerBody);
@@ -806,6 +809,7 @@ function handle(message) {
               terrain,
               message.foothold,
             );
+          camera.ready = false;
         }
         return;
       }
@@ -1162,10 +1166,8 @@ async function loadMap(mapId, generation) {
     npcMetadata.clear();
     mobArts.clear();mobMetadata.clear();mobBodyAttack.clear();mobPushThreshold.clear();
     artMissing.clear();
-    if (cameraMapId !== mapId) {
-      cameraMapId = mapId;
-      camera.ready = false;
-    }
+    // Every field entry is a discontinuity, including same-map revive/re-entry.
+    camera.ready = false;
     void loadMapArt(mapId, generation);
     for (const npc of map.npcs ?? []) ensureEntityArt("npc", npc.templateId);
     for (const mob of map.mobs ?? []) ensureEntityArt("mob", mob.templateId);
@@ -1211,7 +1213,7 @@ async function loadMapArt(mapId, generation) {
     });
     mapScene.sort((a, b) => a.z - b.z || a.order - b.order);
     layerOrder = sceneOrdering(mapScene.length);
-    camera.ready = false;
+    // updateCamera applies the new bounds without a second recenter/pop when art arrives late.
     for (const back of art.backs) artImage(back.path);
     for (const frame of art.portalFrames ?? []) artImage(frame.path);
     // Only the canvases the map actually places: a 1000-sprite map is a few hundred distinct files.
@@ -1775,9 +1777,6 @@ canvas.addEventListener(
 const VIEW_W = 800;
 const VIEW_H = 600;
 
-/** How long the camera takes to catch up: the 2003 client eases over ~0.2 s, not instantly. */
-const CAMERA_EASE = 0.18;
-
 /** The background image stack of the current map (`/api/map/<id>/art`), or undefined. */
 let mapArt;
 /** `archive path -> { img, ready }`; the page draws a sprite only once its PNG has arrived. */
@@ -1925,28 +1924,23 @@ const projectiles = [];
 /** Template ids whose art endpoint said 404 - stop asking. */
 const artMissing = new Set();
 /** The camera: world coordinate shown at the top-left of the 800x600 view. */
-let camera = { x: 0, y: 0, ready: false };
-/** The map the view was last set up for, so a re-entry resets the camera. */
-let cameraMapId = 0;
+const camera = createCamera();
+const cameraSettings = cameraControls(
+  requireElement("camera-mode", "select"),
+  requireElement("camera-recenter", "button"),
+  () => {
+    camera.ready = false;
+    canvas.focus();
+  },
+);
 
-/** Where the camera wants to be: the player at the centre, clamped to the map's `VR` box. */
-function cameraTarget(width = VIEW_W, height = VIEW_H) {
-  const px = self?.x ?? 0;
-  const py = self?.y ?? 0;
-  let x = px - width / 2;
-  let y = py - height / 2;
-  const bounds = mapArt?.bounds;
-  if (bounds) {
-    // The client's own clamp (`sub_469980`): never show past the map's rectangle; if the map is
-    // smaller than the view, centre it instead of sliding it around.
-    if (bounds.right - bounds.left <= width)
-      x = (bounds.left + bounds.right) / 2 - width / 2;
-    else x = Math.max(bounds.left, Math.min(bounds.right - width, x));
-    if (bounds.bottom - bounds.top <= height)
-      y = (bounds.top + bounds.bottom) / 2 - height / 2;
-    else y = Math.max(bounds.top, Math.min(bounds.bottom - height, y));
-  }
-  return { x, y };
+/** The local avatar's presentation vector is never written back to self or playerBody.
+ * Attachments, camera and minimap share it; gameplay queries keep the authoritative body.
+ */
+function selfDisplayPosition() {
+  return self && playerBody && map?.id === self.mapId
+    ? { ...self, ...samplePlayerPosition(playerBody) }
+    : self;
 }
 
 /** CSS fit was 1.25x at 1000x800/DPR1: source columns alternated between 1 and 2 pixels.
@@ -2233,7 +2227,7 @@ window.addEventListener("keydown", (event) => {
   if (
     !["worlds", "characters"].includes(loginStage) ||
     creationDialogs.open ||
-    document.activeElement instanceof HTMLInputElement
+    isEditingControl(document.activeElement)
   )
     return;
   if (
@@ -2688,13 +2682,12 @@ function sampleAvatarFace(entity, look, now) {
 }
 
 /** An avatar at `(screenX, screenY)`; native WZ faces left, right-facing pictures are mirrored. */
-function drawAvatarAt(entity, screenX, screenY, now, flip) {
+function drawAvatarAt(entity, screenX, screenY, now, flip, position = entity) {
   const dead = deathFx.get(entity.characterId);
   // 509AF0 tomb z=-1 is an OVERLAY CHILD of the avatar, not an independent world z-1.
   // It belongs behind this avatar's body, but not behind another root with a smaller z.
   const tomb = dead && deathFx.tomb(entity.characterId, now);
   if (tomb?.frame) {
-    const position = entity === selfView ? self : entity;
     drawArchiveImage(tomb.frame, screenX + tomb.x - position.x, screenY + tomb.y - position.y, false);
   }
   const pendingSwing = dead ? undefined : entity === selfView ? selfSwing : entity.swing;
@@ -2702,7 +2695,7 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
   const direction = swing ? !swing.facingLeft : flip;
   ctx.save();
   if (dead) {
-    const pose = deathPose(dead, now), position = entity === selfView ? self : entity;
+    const pose = deathPose(dead, now);
     screenX += pose.x - position.x;
     screenY += pose.y - position.y;
     ctx.globalAlpha *= pose.alpha;
@@ -2987,7 +2980,7 @@ function statusButtonClick(button) {
 function movementBlocked() {
   return document.hidden || !document.hasFocus() || portalPending || itemDialog.open ||
     systemPanel.visible || testToolsPanel.open || selfView?.hp <= 0 || shop !== undefined ||
-    talkingNpc !== undefined || document.activeElement instanceof HTMLInputElement;
+    talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
 function frame() {
   const enabled = !!canSendEmotion();
@@ -3069,19 +3062,19 @@ function frame() {
     if (dead) delete user.swing;
     if (visualFieldActive) deathFx.observe(user.characterId, dead, user, now);
   }
+  const displaySelf = selfDisplayPosition();
   if (visualFieldActive && selfView && playerBody && self && map?.id === self.mapId)
-    deathFx.observe(selfView.characterId, selfView.hp <= 0, self, now, selfDeathSettled);
+    deathFx.observe(selfView.characterId, selfView.hp <= 0, displaySelf, now, selfDeathSettled);
   updateContact(now);
-  const target = cameraTarget();
-  if (!camera.ready) {
-    camera.x = target.x;
-    camera.y = target.y;
-    camera.ready = true;
-  } else {
-    const ease = 1 - Math.pow(1 - CAMERA_EASE, elapsed / (1000 / 60));
-    camera.x += (target.x - camera.x) * ease;
-    camera.y += (target.y - camera.y) * ease;
-  }
+  updateCamera(
+    camera,
+    displaySelf ?? { x: 0, y: 0 },
+    cameraSettings.mode(),
+    elapsed,
+    VIEW_W,
+    VIEW_H,
+    mapArt?.bounds,
+  );
   const cameraX = camera.x;
   const cameraY = camera.y;
 
@@ -3094,7 +3087,7 @@ function frame() {
   for (const mob of mobs.values()) actors.push({ kind: "mob", y: mob.y, mob });
   for (const user of users.values())
     actors.push({ kind: "user", y: user.y, user });
-  if (self && selfView) actors.push({ kind: "self", y: self.y, self });
+  if (displaySelf && selfView) actors.push({ kind: "self", y: displaySelf.y, self: displaySelf });
   // Actors belong to their foothold page/group, NOT one global "between layers 2 and 3" slot.
   const scene = [];
   for (const actor of actors) {
@@ -3116,7 +3109,7 @@ function frame() {
     if (now >= shot.releaseAt) scene.push({ kind: "projectile", shot, z: shot.z, y: 0, order: layerOrder(shot, shot.z) });
   for(const [id,speech] of speechBalloons.active(now)) {
     const entity=id===selfView?.characterId?selfView:users.get(String(id));
-    const position=id===selfView?.characterId?self:entity;
+    const position=id===selfView?.characterId?displaySelf:entity;
     if(entity&&position)scene.push({kind:'speech',entity,position,id,z:250210,y:0,order:layerOrder(speech,250210)});
   }
   for(const [id,speech] of npcBalloons.active(now)) {
@@ -3128,7 +3121,7 @@ function frame() {
   for(let i=skillEffects.length-1;i>=0;i--){const effect=skillEffects[i];
     const entity=effect.characterId===selfView?.characterId?selfView:users.get(String(effect.characterId));
     if(now>=effect.end||!entity||(effect.entity&&entity!==effect.entity)||deathFx.get(effect.characterId)||JSON.stringify(lookOf(entity))!==effect.lookKey){skillEffects.splice(i,1);continue;}
-    if(now>=effect.start)scene.push({kind:'skill-effect',effect,position:entity===selfView?self:entity,z:ATTACK_EFFECT_Z,y:0,order:effect.order??(effect.order=layerOrder(effect,ATTACK_EFFECT_Z))});
+    if(now>=effect.start)scene.push({kind:'skill-effect',effect,position:entity===selfView?displaySelf:entity,z:ATTACK_EFFECT_Z,y:0,order:effect.order??(effect.order=layerOrder(effect,ATTACK_EFFECT_Z))});
   }
   for(let i=skillHitEffects.length-1;i>=0;i--)if(now>=skillHitEffects[i].end)skillHitEffects.splice(i,1);
   for(const effect of skillHitEffects)if(now>=effect.start)scene.push({kind:'hit-effect',effect,z:ATTACK_EFFECT_Z,y:0,order:effect.order});
@@ -3144,7 +3137,8 @@ function frame() {
       const owner=mobs.get(e.owner);if(owner){e.x=owner.x;e.y=owner.y;}
     }else{
       const actor=mobActors.find(a=>a.id===e.actorId);if(!actor){mobWorldEffects.splice(i,1);continue;}
-      e.x=actor.x;e.y=actor.y-30;
+      const position=actor.id===selfView?.characterId?displaySelf:actor;
+      e.x=position.x;e.y=position.y-30;
     }
     scene.push({kind:'mob-world-effect',effect:e,z:ATTACK_EFFECT_Z,y:0,order:e.order});
   }
@@ -3183,7 +3177,7 @@ function frame() {
     }
     const x =
       actor.kind === "self"
-        ? self.x - cameraX
+        ? actor.self.x - cameraX
         : actor.kind === "mob"
           ? actor.mob.x - cameraX
           : actor.kind === "npc"
@@ -3221,7 +3215,7 @@ function frame() {
         actor.mob.actionSince,
       );
     } else if (actor.kind === "self") {
-      drawAvatarAt(selfView, x, y, now, facingFlip(selfView.facing));
+      drawAvatarAt(selfView, x, y, now, facingFlip(selfView.facing), actor.self);
       drawName(selfView.name, x, y);
     } else {
       drawAvatarAt(actor.user, x, y, now, facingFlip(actor.user.facing));
@@ -3330,7 +3324,7 @@ function dropPosition(record, now) {
     const t = Math.min(1, (now - record.takenAt) / DROP_PICKUP_MS);
     const taker =
       record.takenBy === selfView?.characterId
-        ? self
+        ? selfDisplayPosition()
         : (users.get(String(record.takenBy)) ?? undefined);
     if (taker === undefined)
       return t >= 1 ? undefined : { x: drop.x, y: drop.y - DROP_LIFT_PX, t };
@@ -3682,7 +3676,7 @@ async function swing(skillId=0) {
     !playerBody ||
     !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN ||
     testToolsPanel.open || npcDialog.open || tooltipViewer.open ||
-    document.activeElement instanceof HTMLInputElement ||
+    isEditingControl(document.activeElement) ||
     map?.id !== self.mapId ||
     (playerBody?.ladder && rule?.kind!=='buff') ||
     selfView.hp <= 0 ||
@@ -3799,7 +3793,7 @@ async function swing(skillId=0) {
       || (locomotion(playerBody) === "prone") !== prone
       || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
       || testToolsPanel.open || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
-      || document.activeElement instanceof HTMLInputElement) return;
+      || isEditingControl(document.activeElement)) return;
     if ((shoot&&!bulletFrames.length)||[...frames,...effects,...bullets].some(frame=>!frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
       return;
@@ -5571,7 +5565,7 @@ window.addEventListener("keydown", (event) => {
   if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
-    document.activeElement instanceof HTMLInputElement &&
+    isEditingControl(document.activeElement) &&
     document.activeElement !== ui.say
   )
     return;
@@ -5645,7 +5639,7 @@ window.addEventListener("keydown", (event) => {
   }
   // A key pressed while the login fields are focused belongs to them, not to the character.
   const focused = document.activeElement;
-  if (focused instanceof HTMLInputElement) return;
+  if (isEditingControl(focused)) return;
   const key = event.key.toLowerCase();
   if (
     [
@@ -5696,6 +5690,7 @@ window.addEventListener("blur", () => {
   recovery.reset();
   previousContactPlayer = undefined; previousContactMobs.clear();
   keys.clear();
+  if (playerBody) resetPlayerPresentation(playerBody);
   lastPhysicsAt = undefined;
 });
 
@@ -5875,7 +5870,7 @@ const skillPanel = skillWindow({
 const miniMapPanel = miniMapWindow({
   ctx,
   image: artImage,
-  getSelf: () => self,
+  getSelf: selfDisplayPosition,
   getUsers: () => [...users.values()],
   isInGame: () => loginStage === "game",
   point: viewPoint,
@@ -6076,7 +6071,7 @@ const testToolsPanel = testTools({
   openDialogue:openDialogueExample,
   openTooltip:openTooltipExample,
 });
-document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();if(document.hidden){keys.clear();lastPhysicsAt=undefined;}});
+document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();if(document.hidden){keys.clear();if(playerBody)resetPlayerPresentation(playerBody);lastPhysicsAt=undefined;}});
 
 const itemDialog = itemDialogs({
   ctx,

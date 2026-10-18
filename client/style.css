@@ -54,7 +54,8 @@ body {
   right: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 8px 14px;
   background: linear-gradient(rgba(0, 0, 0, 0.65), transparent);
   font-size: 13px;
@@ -663,7 +664,7 @@ body {
   clip-path: inset(50%);
 }
 
-#view-scale {
+#view-scale, #camera-mode {
   pointer-events: auto;
   max-width: 175px;
   padding: 3px 6px;

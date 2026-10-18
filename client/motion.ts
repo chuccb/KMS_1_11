@@ -22,6 +22,7 @@ import {
   terrainContact,
   contactTangent,
 } from "./native-terrain.ts";
+import { resetPlayerPresentation } from "./player-presentation.ts";
 import { playerPosture } from "./posture.ts";
 import { mergeImpulse } from "./contact.ts";
 import {
@@ -156,6 +157,7 @@ export function createPlayer(
       ? { foothold: f, y: at }
       : floorBelow(world, x, y, 24);
   if (settle && floor) alignGround(body, floor.foothold, floor.y, 0);
+  resetPlayerPresentation(body);
   body.motionOrigin = movementSnapshot(body);
   body.motionFrames = [];
   return body;
@@ -568,6 +570,7 @@ export function advancePlayer(
   latchJump(body, input);
   body.accumulator += clamp(Number.isFinite(elapsedMs) ? elapsedMs : 0, 0, 250);
   while (body.accumulator + EPS >= PHYSICS.stepMs) {
+    resetPlayerPresentation(body);
     step(body, input, world, PHYSICS.stepMs / 1000);
     recordMovementTick(body, PHYSICS.stepMs);
     body.accumulator -= PHYSICS.stepMs;

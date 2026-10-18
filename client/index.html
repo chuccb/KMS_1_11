@@ -12,7 +12,7 @@
       <p id="startup-error-message"></p>
       <a href="">重新載入頁面</a>
     </aside>
-    <canvas id="view"></canvas>
+    <canvas id="view" tabindex="-1" aria-label="遊戲畫面"></canvas>
 
     <header id="bar">
       <strong>KMS 1.11</strong>
@@ -22,6 +22,8 @@
         <option value="native">原尺寸 800×600</option>
         <option value="fit">填滿視窗（非整數）</option>
       </select>
+      <select id="camera-mode" aria-label="鏡頭模式（瀏覽器自訂）"></select>
+      <button id="camera-recenter" type="button" title="將鏡頭重新對準角色；固定鏡頭模式也可使用">鏡頭回中</button>
       <button id="sound-toggle" type="button" aria-pressed="false">
         聲音：開
       </button>

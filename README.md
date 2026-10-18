@@ -17,6 +17,7 @@
 | 查還原方法與證據規則 | [還原原則](docs/REBUILD_PRINCIPLES.md) |
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
 | 查啟動參數與協定工具 | [server 說明](server/README.md) |
+| 走跳顯示插值、四種鏡頭與驗證限制 | [呈現與鏡頭](docs/PLAYER_PRESENTATION_CAMERA.md) |
 | 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
 
 ## 現行技術
