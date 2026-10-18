@@ -11,19 +11,16 @@ import {
   contactImpulse,
   mergeImpulse,
   contactClock,
-} from "../../client/contact.mjs";
+} from "../../client/contact.ts";
 import { rollNativeTouch } from "../src/game/nativecombat.ts";
 import { ClientRandom } from "../src/protocol/random.ts";
-import {
-  encodeClientInteract,
-  INTERACT_KIND_REVIVE,
-} from "../src/protocol/field.ts";
+import { encodeClientInteract, INTERACT_KIND_REVIVE } from "../src/protocol/field.ts";
 import { WzArchive } from "../src/wz/archive.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
 import { mobArtOf } from "../src/game/sprites.ts";
 import { loadMobTemplate } from "../src/game/mobs.ts";
 import { composeAvatar } from "../src/game/avatar.ts";
-import type { StatBasis } from "../../client/characterstats.mjs";
+import type { StatBasis } from "../../client/characterstats.ts";
 const basic: StatBasis["basic"] = {
   level: 10,
   job: 0,
@@ -41,16 +38,10 @@ test("touch uses conditional stream-2 draws, including equality MISS and zero PA
     draws++;
     return 0;
   };
-  assert.equal(
-    rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 0, pa: 100 }, random),
-    0,
-  );
+  assert.equal(rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 0, pa: 100 }, random), 0);
   assert.equal(draws, 1, "MISS does not draw physical damage");
   draws = 0;
-  assert.equal(
-    rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 1, pa: 0 }, random),
-    1,
-  );
+  assert.equal(rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 1, pa: 0 }, random), 1);
   assert.equal(draws, 2, "PA=0 still draws, then clamps to one");
   draws = 0;
   assert.equal(
@@ -62,12 +53,7 @@ test("touch uses conditional stream-2 draws, including equality MISS and zero PA
   );
   assert.equal(draws, 2, "level gap is C integer division: 3 - trunc(5/2) = 1");
   assert.equal(
-    rollNativeTouch(
-      basic,
-      { eva: 3 },
-      { level: 10, acc: 2, pa: 100 },
-      () => 9999999,
-    ),
+    rollNativeTouch(basic, { eva: 3 }, { level: 10, acc: 2, pa: 100 }, () => 9999999),
     0,
   );
   assert.equal(
@@ -97,14 +83,8 @@ test("4C8ED0 job-specific defence coefficients; beginner does not get the warrio
   const attack = new ClientRandom(1, 2, 3),
     touch = new ClientRandom(1, 2, 3);
   const before = [...attack.state];
-  rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 1, pa: 100 }, () =>
-    touch.next(),
-  );
-  assert.deepEqual(
-    attack.state,
-    before,
-    "touch cannot advance the ordinary attack stream",
-  );
+  rollNativeTouch(basic, { eva: 0 }, { level: 1, acc: 1, pa: 100 }, () => touch.next());
+  assert.deepEqual(attack.state, before, "touch cannot advance the ordinary attack stream");
   assert.notDeepEqual(touch.state, before);
 });
 
@@ -130,24 +110,15 @@ test("native current-frame RECT, mirror, swept union, inner-body shrink and stri
   });
   assert.equal(mobRect(undefined, { x: 0, y: 0 }), undefined);
   assert.equal(
-    mobRect(
-      { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
-      { x: 0, y: 0 },
-    ),
+    mobRect({ bounds: { left: 0, top: 0, right: 0, bottom: 0 } }, { x: 0, y: 0 }),
     undefined,
   );
   assert.equal(
-    intersects(
-      { left: 0, top: 0, right: 1, bottom: 1 },
-      { left: 1, top: 0, right: 2, bottom: 1 },
-    ),
+    intersects({ left: 0, top: 0, right: 1, bottom: 1 }, { left: 1, top: 0, right: 2, bottom: 1 }),
     false,
   );
   assert.equal(
-    intersects(
-      playerContactRect({ x: 0, y: 0 }),
-      mobContactRect(f, { x: 0, y: 0 }),
-    ),
+    intersects(playerContactRect({ x: 0, y: 0 }), mobContactRect(f, { x: 0, y: 0 })),
     true,
   );
   const swept = mobRect(f, { x: 10, y: 10 }, false, { x: -10, y: -10 });
@@ -156,43 +127,20 @@ test("native current-frame RECT, mirror, swept union, inner-body shrink and stri
 
 test("knockback comes from relative displacement and bounded pending-force/velocity merges", () => {
   assert.deepEqual(
-    contactImpulse(
-      { x: 10, y: 0 },
-      { x: 0, y: 0 },
-      { x: 99, y: 0 },
-      { x: 99, y: 0 },
-    ),
+    contactImpulse({ x: 10, y: 0 }, { x: 0, y: 0 }, { x: 99, y: 0 }, { x: 99, y: 0 }),
     { x: -270, y: -270 },
   );
   assert.deepEqual(
-    contactImpulse(
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-      { x: 5, y: 10 },
-      { x: 0, y: 0 },
-    ),
+    contactImpulse({ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 10 }, { x: 0, y: 0 }),
     { x: 270, y: 0 },
   );
   assert.deepEqual(
-    contactImpulse(
-      { x: 0, y: 0 },
-      { x: 0, y: 0 },
-      { x: 100, y: 0 },
-      { x: 100, y: 0 },
-    ),
+    contactImpulse({ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 0 }),
     { x: 0, y: -270 },
   );
-  assert.equal(
-    mergeImpulse(125, -270),
-    -145,
-    "do not overwrite walking velocity",
-  );
+  assert.equal(mergeImpulse(125, -270), -145, "do not overwrite walking velocity");
   assert.equal(mergeImpulse(-125, -270), -270, "bounded in same direction");
-  assert.equal(
-    mergeImpulse(-400, -270),
-    -400,
-    "do not reduce an already stronger velocity",
-  );
+  assert.equal(mergeImpulse(-400, -270), -400, "do not reduce an already stronger velocity");
   assert.equal(
     mergeImpulse(500, -270),
     230,
@@ -270,17 +218,11 @@ test(
       frame: 0,
       emotion: "hit",
     })!;
-    assert.notDeepEqual(
-      hit.png,
-      neutral.png,
-      "emotion must reach the compositor",
-    );
+    assert.notDeepEqual(hit.png, neutral.png, "emotion must reach the compositor");
     assert.ok(
       hit.damageOriginY! >= -hit.dy,
       "damage anchor preserves untrimmed origin, not PNG height",
     );
-    assert.ok(
-      composeAvatar(archive, look, { reader, stance: "dead", frame: 0 }),
-    );
+    assert.ok(composeAvatar(archive, look, { reader, stance: "dead", frame: 0 }));
   },
 );

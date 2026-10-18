@@ -1,5 +1,5 @@
 import * as skilluse from "./skilluse.ts";
-import * as notice from './notice.ts';
+import * as notice from "./notice.ts";
 import * as skills from "./skills.ts";
 /**
  * The protocol catalogue: **one machine-readable list of every packet this repo can actually
@@ -95,7 +95,11 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8 (CTitle)",
     codecs: ["decodeClientPacket", "encodeClientPacket"],
     fields: [
-      { name: "account", type: STRING, note: "the CTitle input boxes' contents, no encoding applied" },
+      {
+        name: "account",
+        type: STRING,
+        note: "the CTitle input boxes' contents, no encoding applied",
+      },
       { name: "password", type: STRING },
     ],
   },
@@ -171,9 +175,12 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "any",
     name: "echo",
     status: "byte-exact",
-    evidence: "FINDINGS 4.2 / 4.30 (sub_43B170 case 8 -> sub_43B280: the client echoes the u32 back)",
+    evidence:
+      "FINDINGS 4.2 / 4.30 (sub_43B170 case 8 -> sub_43B280: the client echoes the u32 back)",
     codecs: ["decodeClientPacket", "encodeClientPacket"],
-    fields: [{ name: "value", type: "u32", note: "the value the server pinged with, echoed verbatim" }],
+    fields: [
+      { name: "value", type: "u32", note: "the value the server pinged with, echoed verbatim" },
+    ],
   },
 
   {
@@ -182,9 +189,16 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "any",
     name: "echo",
     status: "byte-exact",
-    evidence: "FINDINGS 4.2 / 4.30 (the heartbeat: net/heartbeat.ts sends it, the client's echo proves the session is alive)",
+    evidence:
+      "FINDINGS 4.2 / 4.30 (the heartbeat: net/heartbeat.ts sends it, the client's echo proves the session is alive)",
     codecs: ["encodeEcho"],
-    fields: [{ name: "value", type: "u32", note: "a counter in this build; the client echoes it and reads nothing into it" }],
+    fields: [
+      {
+        name: "value",
+        type: "u32",
+        note: "a counter in this build; the client echoes it and reads nothing into it",
+      },
+    ],
   },
 
   // ---------------------------------------------------------------- login stage, server -> client
@@ -197,8 +211,16 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8 (sub_4D0DB0 switches on the result byte)",
     codecs: ["encodeLoginResult"],
     fields: [
-      { name: "result", type: "u8", note: "LOGIN_RESULT: 0/1/>=10 continue, 2..9/0xff are refusals" },
-      { name: "worlds", type: "u8 count + {string name, u32 unknownId}[]", note: "only when result continues" },
+      {
+        name: "result",
+        type: "u8",
+        note: "LOGIN_RESULT: 0/1/>=10 continue, 2..9/0xff are refusals",
+      },
+      {
+        name: "worlds",
+        type: "u8 count + {string name, u32 unknownId}[]",
+        note: "only when result continues",
+      },
     ],
   },
   {
@@ -211,7 +233,11 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["encodeWorldSelectResult"],
     fields: [
       { name: "result", type: "u8" },
-      { name: "characters", type: "u8 count + CharacterData[]", note: "the client fills exactly three slots and zeroes the rest (sub_54E250)" },
+      {
+        name: "characters",
+        type: "u8 count + CharacterData[]",
+        note: "the client fills exactly three slots and zeroes the rest (sub_54E250)",
+      },
     ],
   },
   {
@@ -251,8 +277,16 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8 / 4.9: result byte plus a whole CharacterData",
     codecs: ["encodeCreateCharacterResult"],
     fields: [
-      { name: "result", type: "u8", note: "CREATE_CHARACTER_RESULT: **0 = failed**, non-zero = a record follows (sub_4329A0)" },
-      { name: "character", type: "CharacterData", note: "chardata.ts, flags tell which blocks follow" },
+      {
+        name: "result",
+        type: "u8",
+        note: "CREATE_CHARACTER_RESULT: **0 = failed**, non-zero = a record follows (sub_4329A0)",
+      },
+      {
+        name: "character",
+        type: "CharacterData",
+        note: "chardata.ts, flags tell which blocks follow",
+      },
     ],
   },
   {
@@ -264,8 +298,16 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.8",
     codecs: ["encodeDeleteCharacterResult"],
     fields: [
-      { name: "characterId", type: "u32", note: "the id the client sent; it must match a slot on screen" },
-      { name: "flag", type: "u8", note: "non-zero: 0 makes the client throw CTerminateException 570425350 (sub_432890)" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "the id the client sent; it must match a slot on screen",
+      },
+      {
+        name: "flag",
+        type: "u8",
+        note: "non-zero: 0 makes the client throw CTerminateException 570425350 (sub_432890)",
+      },
     ],
   },
 
@@ -276,8 +318,7 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "dropMesos",
     status: "byte-exact",
-    evidence:
-      "4DAF70 / 55D5F0: opcode31, u32 amount; golden source added, not executed",
+    evidence: "4DAF70 / 55D5F0: opcode31, u32 amount; golden source added, not executed",
     codecs: ["encodeMesoDrop", "readMesoDrop"],
     fields: [{ name: "amount", type: "u32" }],
   },
@@ -322,7 +363,11 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "hits", type: "u8 (nibble)", note: "damage numbers per mob, 1..15" },
       { name: "targetCount", type: "u8 (nibble)", note: "sub_491E90 returns at most 6" },
-      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
+      {
+        name: "skillId",
+        type: "u32",
+        note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records",
+      },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)", note: "index into dword_5B2144" },
       {
@@ -353,7 +398,11 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "hits", type: "u8 (nibble)" },
       { name: "hasSecondObject", type: "u8 (nibble)", note: "16 * (v129 != nullptr), so 0 or 1" },
-      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
+      {
+        name: "skillId",
+        type: "u32",
+        note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records",
+      },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)" },
       { name: "speed", type: "u8", note: "same byte as 0x0F" },
@@ -381,7 +430,11 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "hits", type: "u8 (nibble)" },
       { name: "hasSecondObject", type: "u8 (nibble)" },
-      { name: "skillId", type: "u32", note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records" },
+      {
+        name: "skillId",
+        type: "u32",
+        note: "`*right` of the `Skill/` node the swing came from - `sub_4BDD20(CSkillInfo, ...)`; 0 = a plain attack. The monsters being hit are the target records",
+      },
       { name: "facingLeft", type: "bool (bit 7)" },
       { name: "action", type: "u8 (bits 0..6)" },
       { name: "speed", type: "u8", note: "same byte as 0x0F" },
@@ -397,7 +450,11 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.13 / 4.26 (sub_470C70: one string, and nothing else)",
     codecs: ["readClientChat", "encodeClientChat", "describeClientChat"],
     fields: [
-      { name: "text", type: STRING, note: "kept as bytes: the server relays it, it never reads it" },
+      {
+        name: "text",
+        type: STRING,
+        note: "kept as bytes: the server relays it, it never reads it",
+      },
     ],
   },
   {
@@ -428,7 +485,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "0x05 find / 0x06 whisper / 0x22 refuse received whisper (sender name + own name; ADR-059)",
       },
-      { name: "name", type: STRING, note: "the target by name - the packet carries no character id" },
+      {
+        name: "name",
+        type: STRING,
+        note: "the target by name - the packet carries no character id",
+      },
       { name: "text", type: STRING, note: "only the kinds with a body carry it" },
     ],
   },
@@ -451,7 +512,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "0 invite / 3 accept / 5 invite by name / 7 leave / 11 offer item / 12 offer mesos / 13 confirm",
       },
-      { name: "roomKind", type: "u8", note: "type 0 only; the one writer stores a literal 1 (= trade)" },
+      {
+        name: "roomKind",
+        type: "u8",
+        note: "type 0 only; the one writer stores a literal 1 (= trade)",
+      },
       { name: "targetId", type: "u32", note: "type 0: the character to invite" },
       { name: "inviterId", type: "u32", note: "type 3: echoed from s2c type 1" },
       { name: "name", type: STRING, note: "type 5 only" },
@@ -560,7 +625,11 @@ export const PACKETS: readonly PacketSchema[] = [
         note: "1 invite / 2 refusal / 3 join / 4 enter / 5 message / 6 update / 7 no-op / 8 finish / 11 item / 12 mesos / 13 lock",
       },
       { name: "inviterName+inviterId", type: STRING + "u32", note: "type 1" },
-      { name: "code(+name)", type: "u8 (+STRING)", note: "type 2: 0 ok, 1 not found, 2 busy (carries the name)" },
+      {
+        name: "code(+name)",
+        type: "u8 (+STRING)",
+        note: "type 2: 0 ok, 1 not found, 2 busy (carries the name)",
+      },
       {
         name: "roomKind/count/myIndex",
         type: "u8 ×3",
@@ -571,7 +640,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8 + u32 + u32[] until 0 + STRING",
         note: "u8 = a number the client renders (sent as level), u32 = face, then hair-first look ids, then the name",
       },
-      { name: "item", type: "u8 index + u8 roomSlot + GW_ItemSlot (with category byte)", note: "type 11" },
+      {
+        name: "item",
+        type: "u8 index + u8 roomSlot + GW_ItemSlot (with category byte)",
+        note: "type 11",
+      },
     ],
   },
   {
@@ -603,7 +676,11 @@ export const PACKETS: readonly PacketSchema[] = [
         note: "type 0; announce != 0 prints \"- '%s'님이 입장하셨습니다\"",
       },
       { name: "slot/code", type: "u8", note: "type 1 (code) and type 2 (slot)" },
-      { name: "inviterName+roomId", type: STRING + "u32", note: "type 3; the modal's yes answers with that roomId" },
+      {
+        name: "inviterName+roomId",
+        type: STRING + "u32",
+        note: "type 3; the modal's yes answers with that roomId",
+      },
       { name: "ok+name", type: "u8 + STRING", note: "type 4: 0 not found, 1 sent" },
       { name: "line", type: STRING, note: "type 5, already formatted as 'name : text'" },
     ],
@@ -618,23 +695,55 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["readSetField", "encodeSetField"],
     fields: [
       { name: "mode", type: "u8", note: "spawn mode, kept at CField+156 (sub_468E00)" },
-      { name: "full", type: "u8", note: "non-zero means the three seed parts and a CharacterData follow" },
-      { name: "randomSeedA", type: "u32", note: "field RNG seed part 1 (sub_4C7930 -> sub_48A900)" },
-      { name: "randomSeedB", type: "u32", note: "seed part 2 - the client's Random() is the inverse" },
+      {
+        name: "full",
+        type: "u8",
+        note: "non-zero means the three seed parts and a CharacterData follow",
+      },
+      {
+        name: "randomSeedA",
+        type: "u32",
+        note: "field RNG seed part 1 (sub_4C7930 -> sub_48A900)",
+      },
+      {
+        name: "randomSeedB",
+        type: "u32",
+        note: "seed part 2 - the client's Random() is the inverse",
+      },
       { name: "randomSeedC", type: "u32", note: "seed part 3 - damage rolls become reproducible" },
-      { name: "character", type: "CharacterData", note: "its mapId field is what gets loaded (Map/Map/%09d.img)" },
+      {
+        name: "character",
+        type: "CharacterData",
+        note: "its mapId field is what gets loaded (Map/Map/%09d.img)",
+      },
     ],
   },
   {
-    opcode:field.FIELD_OPCODE.userBalloon,direction:"s2c",stage:"field",name:"userBalloon",status:"byte-exact",
-    evidence:"51D530 -> 50B320: u32 id + CP949 string, log and 5000ms native balloon (ADR-059)",
-    codecs:["readUserBalloon","encodeUserBalloon","describeUserBalloon"],
-    fields:[{name:"characterId",type:"u32"},{name:"text",type:STRING}],
+    opcode: field.FIELD_OPCODE.userBalloon,
+    direction: "s2c",
+    stage: "field",
+    name: "userBalloon",
+    status: "byte-exact",
+    evidence: "51D530 -> 50B320: u32 id + CP949 string, log and 5000ms native balloon (ADR-059)",
+    codecs: ["readUserBalloon", "encodeUserBalloon", "describeUserBalloon"],
+    fields: [
+      { name: "characterId", type: "u32" },
+      { name: "text", type: STRING },
+    ],
   },
   {
-    opcode:notice.SYSTEM_NOTICE_OPCODE,direction:"s2c",stage:"field",name:"systemNotice",status:"partial",
-    evidence:"55CDE0: type0 + string -> [공지사항] text in StatusBar font5; type1 center notice not implemented",
-    codecs:["readSystemNotice","encodeSystemNotice"],fields:[{name:"type",type:"u8",note:"only 0 implemented"},{name:"text",type:STRING}],
+    opcode: notice.SYSTEM_NOTICE_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "systemNotice",
+    status: "partial",
+    evidence:
+      "55CDE0: type0 + string -> [공지사항] text in StatusBar font5; type1 center notice not implemented",
+    codecs: ["readSystemNotice", "encodeSystemNotice"],
+    fields: [
+      { name: "type", type: "u8", note: "only 0 implemented" },
+      { name: "text", type: STRING },
+    ],
   },
   {
     opcode: field.FIELD_OPCODE.userEmotion,
@@ -646,7 +755,11 @@ export const PACKETS: readonly PacketSchema[] = [
       "FINDINGS 4.35 (CUserPool 0x27 -> sub_51D590's third case from the end; the id is read by the range dispatcher and resolved with sub_51CD30, then sub_509790(user, emotion, -1))",
     codecs: ["readUserEmotion", "encodeUserEmotion", "describeUserEmotion"],
     fields: [
-      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "resolved in the pool; an unknown id drops the packet",
+      },
       { name: "emotion", type: "u32", note: "0..8; the client's own face table is EMOTION_NAMES" },
     ],
   },
@@ -662,12 +775,24 @@ export const PACKETS: readonly PacketSchema[] = [
       "the same pair a joining player's 0x1C ends in). What is not located: the two words flags 0x4 / 0x8 carry.",
     codecs: ["readUserLook", "encodeUserLook", "describeUserLook"],
     fields: [
-      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
-      { name: "flags", type: "u32", note: "0x1 = a face word follows, 0x4 / 0x8 = a word the client reads and drops" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "resolved in the pool; an unknown id drops the packet",
+      },
+      {
+        name: "flags",
+        type: "u32",
+        note: "0x1 = a face word follows, 0x4 / 0x8 = a word the client reads and drops",
+      },
       { name: "face", type: "u32", note: "only with flag 0x1; stored at CUser+68 (sub_508260)" },
       { name: "unknownA", type: "u32", note: "only with flag 0x4; read and never stored" },
       { name: "unknownB", type: "u32", note: "only with flag 0x8; read and never stored" },
-      { name: "hasAvatar", type: "u8", note: "0 = the client keeps the look it has (sub_5221A0's memcpy branch)" },
+      {
+        name: "hasAvatar",
+        type: "u8",
+        note: "0 = the client keeps the look it has (sub_5221A0's memcpy branch)",
+      },
       {
         name: "avatarItems",
         type: "u32[] until 0",
@@ -688,18 +813,38 @@ export const PACKETS: readonly PacketSchema[] = [
       "record with sub_521400/sub_521AD0; the trailing u32 reaches the 0x24 handler only.",
     codecs: ["readUserAttack", "encodeUserAttack", "describeUserAttack"],
     fields: [
-      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "resolved in the pool; an unknown id drops the packet",
+      },
       { name: "hits", type: "u8 (nibble)", note: "damage numbers per mob - 0x0F's own packing" },
-      { name: "targetCount", type: "u8 (nibble)", note: "0x0F's packing; the reader drops records whose mob it cannot resolve" },
+      {
+        name: "targetCount",
+        type: "u8 (nibble)",
+        note: "0x0F's packing; the reader drops records whose mob it cannot resolve",
+      },
       {
         name: "skillLevel",
         type: "u8",
         note: "read as a skill level - it is clamped to the looked-up node's child count; 0 = no skill node",
       },
-      { name: "skillId", type: "u32", note: "only when skillLevel is non-zero; read, never watched on a wire" },
+      {
+        name: "skillId",
+        type: "u32",
+        note: "only when skillLevel is non-zero; read, never watched on a wire",
+      },
       { name: "facingLeft", type: "bool (bit 7)" },
-      { name: "action", type: "u8 (bits 0..6)", note: "sub_508690 resolves it in the user's own action table" },
-      { name: "speed", type: "u8", note: "byte 4 of the attacker's own 0x0F; sub_508700 turns it into frame delays" },
+      {
+        name: "action",
+        type: "u8 (bits 0..6)",
+        note: "sub_508690 resolves it in the user's own action table",
+      },
+      {
+        name: "speed",
+        type: "u8",
+        note: "byte 4 of the attacker's own 0x0F; sub_508700 turns it into frame delays",
+      },
       {
         name: "afterimage",
         type: "u8",
@@ -725,7 +870,11 @@ export const PACKETS: readonly PacketSchema[] = [
       "FINDINGS 4.35 (sub_511E20 case 10: `push $0x13` at .text:00511FDF, the u32 is CUser+172 right after sub_509790 set it; F1..F7 send 1..7)",
     codecs: ["readClientEmotion", "encodeClientEmotion", "describeClientEmotion"],
     fields: [
-      { name: "emotion", type: "u32", note: "0..8 (EMOTION_NAMES); the sender has applied it to itself already" },
+      {
+        name: "emotion",
+        type: "u32",
+        note: "0..8 (EMOTION_NAMES); the sender has applied it to itself already",
+      },
     ],
   },
   {
@@ -737,10 +886,18 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.27 (CUserPool 0x29 -> sub_522300; the id is read by sub_51D590)",
     codecs: ["readUserEffect", "encodeUserEffect", "describeUserEffect"],
     fields: [
-      { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
-      { name: "effect", type: "u8", note: "0 = level-up; 1 = skill effect (522300 -> 4BAC80 -> 50C460)" },
-      {name:"skillId",type:"u32",note:"only effect1"},
-      {name:"skillLevel",type:"u8",note:"only effect1; native looks up this learned level"},
+      {
+        name: "characterId",
+        type: "u32",
+        note: "resolved in the pool; an unknown id drops the packet",
+      },
+      {
+        name: "effect",
+        type: "u8",
+        note: "0 = level-up; 1 = skill effect (522300 -> 4BAC80 -> 50C460)",
+      },
+      { name: "skillId", type: "u32", note: "only effect1" },
+      { name: "skillLevel", type: "u8", note: "only effect1; native looks up this learned level" },
     ],
   },
   {
@@ -768,8 +925,7 @@ export const PACKETS: readonly PacketSchema[] = [
       {
         name: "subOp",
         type: "u8",
-        note:
-          "0x12 incoming whisper / 0x09 find answer / 0x0A whisper answer / 0x22 whisper refusal (ADR-059)",
+        note: "0x12 incoming whisper / 0x09 find answer / 0x0A whisper answer / 0x22 whisper refusal (ADR-059)",
       },
       { name: "name", type: STRING, note: "the speaker - there is no character id in this packet" },
       {
@@ -788,13 +944,25 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.11 (CUserPool 0x1C, sub_51CFE0 + CUserRemote::Init sub_520680)",
     codecs: ["readUserEnterField", "writeUserEnterField", "encodeUserEnterField"],
     fields: [
-      { name: "characterId", type: "u32", note: "equal to our own id means 'this is me', the client skips it" },
+      {
+        name: "characterId",
+        type: "u32",
+        note: "equal to our own id means 'this is me', the client skips it",
+      },
       { name: "name", type: STRING },
       { name: "unknown64", type: "u8" },
-      { name: "face", type: "u32", note: "the drawn face id, stored at CUser+68 (FINDINGS 4.11.3c)" },
+      {
+        name: "face",
+        type: "u32",
+        note: "the drawn face id, stored at CUser+68 (FINDINGS 4.11.3c)",
+      },
       { name: "unknownA", type: "u32", note: "read and dropped by sub_520680" },
       { name: "unknownB", type: "u32", note: "read and dropped by sub_520680" },
-      { name: "avatarItems", type: "u32[] until 0", note: "hair + worn equips; the 101xxxx entry becomes CUser+72" },
+      {
+        name: "avatarItems",
+        type: "u32[] until 0",
+        note: "hair + worn equips; the 101xxxx entry becomes CUser+72",
+      },
       { name: "x", type: "s16" },
       { name: "y", type: "s16" },
       { name: "action", type: "u8" },
@@ -830,17 +998,34 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "mobEnterField",
     status: "partial",
-    evidence: "FINDINGS 4.12.1/4.15 (CMobPool 0x2F, sub_4924A0 + CMob::Init sub_484ED0; sent for every map spawn)",
+    evidence:
+      "FINDINGS 4.12.1/4.15 (CMobPool 0x2F, sub_4924A0 + CMob::Init sub_484ED0; sent for every map spawn)",
     codecs: ["encodeMobEnterField", "readMobEnterField", "describeMobEnterField"],
     fields: [
-      { name: "mobId", type: "u32", note: "pool key; a second 0x2F for a known id has no fields at all" },
-      { name: "templateId", type: "u32", note: "read only when the id is new: 1210100 = Mob/0120100.img" },
+      {
+        name: "mobId",
+        type: "u32",
+        note: "pool key; a second 0x2F for a known id has no fields at all",
+      },
+      {
+        name: "templateId",
+        type: "u32",
+        note: "read only when the id is new: 1210100 = Mob/0120100.img",
+      },
       { name: "x", type: "s16" },
       { name: "y", type: "s16" },
       { name: "facing", type: "u8", note: "only bit 0 is read (0 = right, 1 = left)" },
       { name: "unknownA", type: "u16", note: "ZMap lookup only, meaning open; a miss is handled" },
-      { name: "unknownB", type: "u16", note: "second lookup, feeds sub_53D310 with a template field" },
-      { name: "animFlags", type: "u32", note: "bits 1..0x40 switch on one channel each (sub_4C6CE0)" },
+      {
+        name: "unknownB",
+        type: "u16",
+        note: "second lookup, feeds sub_53D310 with a template field",
+      },
+      {
+        name: "animFlags",
+        type: "u32",
+        note: "bits 1..0x40 switch on one channel each (sub_4C6CE0)",
+      },
       { name: "animChannels", type: "s16 x2 per bit", note: "(index, delay in 100 ms ticks)" },
     ],
   },
@@ -854,9 +1039,21 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["encodeMobMove", "readMobMove", "describeMobMove"],
     fields: [
       { name: "mobId", type: "u32", note: "pool lookup by id (sub_492400)" },
-      { name: "actionByte", type: "u8", note: "bit 7 = keep the current animation, bit 0 = facing, bits 1..6 = action index" },
-      { name: "value", type: "u32", note: "open meaning; reaches sub_488E30 for the attack actions only, so 0 for a walk" },
-      { name: "path", type: "CMovePath", note: "read after the u32, always (sub_4967C0 -> sub_4953A0)" },
+      {
+        name: "actionByte",
+        type: "u8",
+        note: "bit 7 = keep the current animation, bit 0 = facing, bits 1..6 = action index",
+      },
+      {
+        name: "value",
+        type: "u32",
+        note: "open meaning; reaches sub_488E30 for the attack actions only, so 0 for a walk",
+      },
+      {
+        name: "path",
+        type: "CMovePath",
+        note: "read after the u32, always (sub_4967C0 -> sub_4953A0)",
+      },
     ],
   },
   {
@@ -865,7 +1062,8 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "mobLeaveDelayed",
     status: "byte-exact",
-    evidence: "FINDINGS 4.16/4.17 (CMobPool 0x30, sub_4926B0; the timed queue sub_492100 plays the die action)",
+    evidence:
+      "FINDINGS 4.16/4.17 (CMobPool 0x30, sub_4926B0; the timed queue sub_492100 plays the die action)",
     codecs: ["encodeMobLeaveDelayed", "readMobLeaveDelayed", "describeMobLeaveDelayed"],
     fields: [
       { name: "mobId", type: "u32" },
@@ -882,7 +1080,8 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "mobPresence",
     status: "byte-exact",
-    evidence: "FINDINGS 4.16/4.17 (CMobPool 0x31, sub_4927B0 -> sub_491630 flag != 0 / sub_491830 flag == 0)",
+    evidence:
+      "FINDINGS 4.16/4.17 (CMobPool 0x31, sub_4927B0 -> sub_491630 flag != 0 / sub_491830 flag == 0)",
     codecs: ["encodeMobRemove", "encodeMobAppear", "readMobPresence", "describeMobPresence"],
     fields: [
       {
@@ -891,7 +1090,11 @@ export const PACKETS: readonly PacketSchema[] = [
         note: "0 = remove (sub_491830: flash off if the sprite is busy, then unlink); != 0 = keep, or create from templateId + the 0x2F body below, then flash it (sub_485330(mob, 1))",
       },
       { name: "mobId", type: "u32" },
-      { name: "templateId", type: "u32", note: "flag != 0 and the id is unknown only; a known id ends the packet here" },
+      {
+        name: "templateId",
+        type: "u32",
+        note: "flag != 0 and the id is unknown only; a known id ends the packet here",
+      },
       {
         name: "tail",
         type: "= the 0x2F body after templateId",
@@ -925,11 +1128,16 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "mobStat",
     status: "byte-exact",
-    evidence: "FINDINGS 4.17 (CMobPool 0x34, sub_488D90: the u16 is the mob's MP - mob+132, compared against each attack's conMP in sub_487D10 - and it puts the mob into its flash state)",
+    evidence:
+      "FINDINGS 4.17 (CMobPool 0x34, sub_488D90: the u16 is the mob's MP - mob+132, compared against each attack's conMP in sub_487D10 - and it puts the mob into its flash state)",
     codecs: ["encodeMobStat", "readMobStat", "describeMobStat"],
     fields: [
       { name: "mobId", type: "u32" },
-      { name: "mp", type: "u16", note: "the mob's MP; the only reader is the attack picker's conMP test, and the handler's other effect (state -> 4/5, flash on) is what makes a hit animate" },
+      {
+        name: "mp",
+        type: "u16",
+        note: "the mob's MP; the only reader is the attack picker's conMP test, and the handler's other effect (state -> 4/5, flash on) is what makes a hit animate",
+      },
     ],
   },
   {
@@ -948,12 +1156,21 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "mobAnim",
     status: "byte-exact",
-    evidence: "FINDINGS 4.20 (CMobPool 0x35, sub_492380 case '5' -> sub_488E10 = sub_4C6CE0(mob+136, packet, now), the same decoder CMob::Init uses for the 0x2F block)",
+    evidence:
+      "FINDINGS 4.20 (CMobPool 0x35, sub_492380 case '5' -> sub_488E10 = sub_4C6CE0(mob+136, packet, now), the same decoder CMob::Init uses for the 0x2F block)",
     codecs: ["encodeMobAnim", "readMobAnim", "describeMobAnim"],
     fields: [
-      { name: "mobId", type: "u32", note: "an id the client does not know returns before reading the block" },
+      {
+        name: "mobId",
+        type: "u32",
+        note: "an id the client does not know returns before reading the block",
+      },
       { name: "flags", type: "u32", note: "7 channels, bit 1 << i" },
-      { name: "channel[i]", type: "s16 index + s16 delay", note: "per set bit; delay is in 100 ms ticks" },
+      {
+        name: "channel[i]",
+        type: "s16 index + s16 delay",
+        note: "per set bit; delay is in 100 ms ticks",
+      },
     ],
   },
   {
@@ -962,14 +1179,31 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "clientMobAttack",
     status: "partial",
-    evidence: "FINDINGS 4.20 (sub_4885D0 -> sub_4A1EA0(..., 44, ...); reached from the mob AI update sub_4862C0 line 141468, from the action hit frame sub_487A30 line 142636 and from the reset path line 141581)",
+    evidence:
+      "FINDINGS 4.20 (sub_4885D0 -> sub_4A1EA0(..., 44, ...); reached from the mob AI update sub_4862C0 line 141468, from the action hit frame sub_487A30 line 142636 and from the reset path line 141581)",
     codecs: ["readClientMobAttack", "encodeClientMobAttack"],
     fields: [
       { name: "mobId", type: "u32" },
-      { name: "flags", type: "u8", note: "bit 0 = a 71-in-101 roll of the client's own generator; high nibble = the caller (1 = the AI's attack, 0 = the hit frame / reset)" },
-      { name: "actionByte", type: "u8", note: "(action << 1) | facing, the 0x33 encoding; 0xFF is the reset form" },
-      { name: "position", type: "u32", note: "x | y << 16, only for the attack types with an origin (sub_487D10 writes 0 otherwise)" },
-      { name: "tail", type: "bytes", note: "appended by sub_495880 -> sub_495620 (u16, u16, u8, then a list); NOT decoded, kept verbatim" },
+      {
+        name: "flags",
+        type: "u8",
+        note: "bit 0 = a 71-in-101 roll of the client's own generator; high nibble = the caller (1 = the AI's attack, 0 = the hit frame / reset)",
+      },
+      {
+        name: "actionByte",
+        type: "u8",
+        note: "(action << 1) | facing, the 0x33 encoding; 0xFF is the reset form",
+      },
+      {
+        name: "position",
+        type: "u32",
+        note: "x | y << 16, only for the attack types with an origin (sub_487D10 writes 0 otherwise)",
+      },
+      {
+        name: "tail",
+        type: "bytes",
+        note: "appended by sub_495880 -> sub_495620 (u16, u16, u8, then a list); NOT decoded, kept verbatim",
+      },
     ],
   },
   {
@@ -980,25 +1214,60 @@ export const PACKETS: readonly PacketSchema[] = [
     status: "byte-exact",
     evidence: "FINDINGS 4.42; CUIStat sub_4F2D70 -> sub_55CF60 (opcode 27 + u32 mask)",
     codecs: ["encodeAbilityRequest", "readAbilityRequest", "describeAbilityRequest"],
-    fields: [{ name: "mask", type: "u32", note: "STR=0x40, DEX=0x80, INT=0x100, LUK=0x200, maxHP=0x800, maxMP=0x2000; HP/MP growth: sub_4C7450 / game/growth.ts" }],
-  },
-  {
-    opcode: skills.SKILL_REQUEST_OPCODE, direction: "c2s", stage: "field", name: "skillUp",
-    status: "byte-exact", evidence: "sub_4EE1B0 -> sub_55ABE0 -> sub_55D140; docs/SKILLS.md",
-    codecs: ["encodeSkillRequest", "readSkillRequest", "describeSkillRequest"], fields: [{ name: "skillId", type: "u32" }],
-  },
-  {
-    opcode:skilluse.CLIENT_SKILL_USE_OPCODE,direction:'c2s',stage:'field',name:'activeSkillUse',
-    status:'byte-exact',evidence:'PE 55D320 / 519270 / 519950; docs/ACTIVE_SKILLS.md',
-    codecs:['readClientSkillUse','encodeClientSkillUse'],fields:[
-      {name:'skillId',type:'u32'},{name:'level',type:'u8'},{name:'count',type:'u8'},
-      {name:'targets',type:'u32[count]',note:'party character IDs, NOT mob IDs; zero for self buffs'},
+    fields: [
+      {
+        name: "mask",
+        type: "u32",
+        note: "STR=0x40, DEX=0x80, INT=0x100, LUK=0x200, maxHP=0x800, maxMP=0x2000; HP/MP growth: sub_4C7450 / game/growth.ts",
+      },
     ],
   },
   {
-    opcode: skills.SKILL_UPDATE_OPCODE, direction: "s2c", stage: "field", name: "skillUpdate",
-    status: "byte-exact", evidence: "sub_55A900 case14 -> sub_55B6A0; docs/SKILLS.md",
-    codecs: ["encodeSkillUpdate", "readSkillUpdate", "describeSkillUpdate"], fields: [{ name: "ack", type: "u8" }, { name: "count", type: "u16" }, { name: "changes", type: "{u32 skillId,s32 level}[count]", note: "level<=0 removes; no expiry field" }],
+    opcode: skills.SKILL_REQUEST_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "skillUp",
+    status: "byte-exact",
+    evidence: "sub_4EE1B0 -> sub_55ABE0 -> sub_55D140; docs/SKILLS.md",
+    codecs: ["encodeSkillRequest", "readSkillRequest", "describeSkillRequest"],
+    fields: [{ name: "skillId", type: "u32" }],
+  },
+  {
+    opcode: skilluse.CLIENT_SKILL_USE_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "activeSkillUse",
+    status: "byte-exact",
+    evidence: "PE 55D320 / 519270 / 519950; docs/ACTIVE_SKILLS.md",
+    codecs: ["readClientSkillUse", "encodeClientSkillUse"],
+    fields: [
+      { name: "skillId", type: "u32" },
+      { name: "level", type: "u8" },
+      { name: "count", type: "u8" },
+      {
+        name: "targets",
+        type: "u32[count]",
+        note: "party character IDs, NOT mob IDs; zero for self buffs",
+      },
+    ],
+  },
+  {
+    opcode: skills.SKILL_UPDATE_OPCODE,
+    direction: "s2c",
+    stage: "field",
+    name: "skillUpdate",
+    status: "byte-exact",
+    evidence: "sub_55A900 case14 -> sub_55B6A0; docs/SKILLS.md",
+    codecs: ["encodeSkillUpdate", "readSkillUpdate", "describeSkillUpdate"],
+    fields: [
+      { name: "ack", type: "u8" },
+      { name: "count", type: "u16" },
+      {
+        name: "changes",
+        type: "{u32 skillId,s32 level}[count]",
+        note: "level<=0 removes; no expiry field",
+      },
+    ],
   },
   {
     opcode: field.CLIENT_FIELD_OPCODE.statReport,
@@ -1015,9 +1284,21 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u32",
         note: "the same bit meanings as the 0x0d diff (0x400 = hp, 0x1000 = mp); the client's writer always sets both (0x1400)",
       },
-      { name: "hpDelta", type: "s16", note: "signed change of the record's hp; negative is damage (sub_5114A0 sends -damage)" },
-      { name: "mpDelta", type: "s16", note: "signed change of the record's mp; the map's regeneration sends +3 (sub_558950)" },
-      { name: "flag", type: "u8", note: "role not located: 0 from the damage path, 1 from an item-driven recovery" },
+      {
+        name: "hpDelta",
+        type: "s16",
+        note: "signed change of the record's hp; negative is damage (sub_5114A0 sends -damage)",
+      },
+      {
+        name: "mpDelta",
+        type: "s16",
+        note: "signed change of the record's mp; the map's regeneration sends +3 (sub_558950)",
+      },
+      {
+        name: "flag",
+        type: "u8",
+        note: "role not located: 0 from the damage path, 1 from an item-driven recovery",
+      },
     ],
   },
   {
@@ -1033,14 +1314,26 @@ export const PACKETS: readonly PacketSchema[] = [
       "sub_463BE0 the throw-away prompt)",
     codecs: ["readClientChangeSlot", "encodeClientChangeSlot", "describeClientChangeSlot"],
     fields: [
-      { name: "tab", type: "u8", note: "1 = equip, 2 = use, 3 = etc, 4 = cash (sub_463DF0 insists on 2 for a USE item)" },
+      {
+        name: "tab",
+        type: "u8",
+        note: "1 = equip, 2 = use, 3 = etc, 4 = cash (sub_463DF0 insists on 2 for a USE item)",
+      },
       {
         name: "fromSlot",
         type: "s16",
         note: "on tab 1 a negative number is the worn item: -1 cap .. -11 weapon (the client's cursor switch allows 111xxxx at -12/-13; this server refuses it)",
       },
-      { name: "toSlot", type: "s16", note: "0 = the ground (sub_463BE0); otherwise where the item goes" },
-      { name: "count", type: "s16", note: "-1 = the whole slot (all three move senders); a throw-away carries the number to drop" },
+      {
+        name: "toSlot",
+        type: "s16",
+        note: "0 = the ground (sub_463BE0); otherwise where the item goes",
+      },
+      {
+        name: "count",
+        type: "s16",
+        note: "-1 = the whole slot (all three move senders); a throw-away carries the number to drop",
+      },
     ],
   },
   {
@@ -1054,7 +1347,11 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["readClientUseItem", "encodeClientUseItem"],
     fields: [
       { name: "slot", type: "s16", note: "a slot of the USE tab; the tab byte is not on the wire" },
-      { name: "itemId", type: "u32", note: "what the client says the slot holds - not what the server says it holds" },
+      {
+        name: "itemId",
+        type: "u32",
+        note: "what the client says the slot holds - not what the server says it holds",
+      },
     ],
   },
   {
@@ -1068,7 +1365,11 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["readClientUseItem", "encodeClientUseItem"],
     fields: [
       { name: "slot", type: "s16" },
-      { name: "itemId", type: "u32", note: "2030000 = 마을 귀환 주문서 (moveTo -1), 02030001..02030005 name a town" },
+      {
+        name: "itemId",
+        type: "u32",
+        note: "2030000 = 마을 귀환 주문서 (moveTo -1), 02030001..02030005 name a town",
+      },
     ],
   },
   {
@@ -1080,12 +1381,24 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.19 (CNpcPool 0x39, sub_49F6C0 -> sub_498CF0; a known id ends the packet)",
     codecs: ["encodeNpcEnterField", "readNpcEnterField", "describeNpcEnterField"],
     fields: [
-      { name: "npcId", type: "u32", note: "the pool key; a known id only sets bit 0 of npc+24 (a refresh) and reads nothing else" },
-      { name: "templateId", type: "u32", note: "unknown ids only: Npc/%07d.img, cached by sub_49CB30" },
+      {
+        name: "npcId",
+        type: "u32",
+        note: "the pool key; a known id only sets bit 0 of npc+24 (a refresh) and reads nothing else",
+      },
+      {
+        name: "templateId",
+        type: "u32",
+        note: "unknown ids only: Npc/%07d.img, cached by sub_49CB30",
+      },
       { name: "x", type: "s16" },
       { name: "y", type: "s16" },
       { name: "facing", type: "u8", note: "npc+20; the map's life.f" },
-      { name: "lookupKey", type: "u16", note: "sub_489800 lookup whose result goes to the vecctrl; a miss is handled, so 0" },
+      {
+        name: "lookupKey",
+        type: "u16",
+        note: "sub_489800 lookup whose result goes to the vecctrl; a miss is handled, so 0",
+      },
       { name: "pointX", type: "s16", note: "npc+16; nothing located names the pair, so 0" },
       { name: "pointY", type: "s16", note: "npc+17" },
     ],
@@ -1096,7 +1409,8 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "npcLeaveField",
     status: "byte-exact",
-    evidence: "FINDINGS 4.19 (CNpcPool 0x3A, sub_49F810: clear bit 0, unlink only when npc+24 becomes 0)",
+    evidence:
+      "FINDINGS 4.19 (CNpcPool 0x3A, sub_49F810: clear bit 0, unlink only when npc+24 becomes 0)",
     codecs: ["encodeNpcLeaveField", "readNpcId"],
     fields: [{ name: "npcId", type: "u32" }],
   },
@@ -1106,10 +1420,15 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "npcStateToggle",
     status: "byte-exact",
-    evidence: "FINDINGS 4.19 (CNpcPool 0x3B, sub_49F970 -> sub_49F260/sub_49F380: bit 1 + sub_499760(npc+16, flag))",
+    evidence:
+      "FINDINGS 4.19 (CNpcPool 0x3B, sub_49F970 -> sub_49F260/sub_49F380: bit 1 + sub_499760(npc+16, flag))",
     codecs: ["encodeNpcState", "readNpcState"],
     fields: [
-      { name: "flag", type: "u8", note: "read BEFORE the id, and the id is read for both values; an unknown id with flag != 0 creates the NPC (this server does not send that form)" },
+      {
+        name: "flag",
+        type: "u8",
+        note: "read BEFORE the id, and the id is read for both values; an unknown id with flag != 0 creates the NPC (this server does not send that form)",
+      },
       { name: "npcId", type: "u32" },
     ],
   },
@@ -1119,16 +1438,32 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "npcLookupU32",
     status: "partial",
-    evidence: "FINDINGS 4.19 (sub_49F5B0: u32 id + a pool lookup; 0x3C/0x3E/0x3F/0x40 then stop, 0x38/0x41 have no case at all)",
+    evidence:
+      "FINDINGS 4.19 (sub_49F5B0: u32 id + a pool lookup; 0x3C/0x3E/0x3F/0x40 then stop, 0x38/0x41 have no case at all)",
     codecs: ["readNpcId"],
-    fields: [{ name: "npcId", type: "u32", note: "0x3E..0x40 are the same packet; what the client does with the hit is not located" }],
+    fields: [
+      {
+        name: "npcId",
+        type: "u32",
+        note: "0x3E..0x40 are the same packet; what the client does with the hit is not located",
+      },
+    ],
   },
   {
-    opcode:npc.CLIENT_NPC_IDLE_OPCODE,direction:"c2s",stage:"field",name:"npcIdleRequest",status:"partial",
-    evidence:"49A3C0; 49A0C0 chooses extraIndex+2 or -1/info speech. Index rewriting by original server remains unknown.",
-    codecs:["encodeClientNpcIdle","readNpcIdle"],
-    fields:[{name:"npcId",type:"u32"},{name:"action",type:"s8"},{name:"speech",type:"s8"},
-      {name:"path",type:"CMovePath",note:"iff template has move"}],
+    opcode: npc.CLIENT_NPC_IDLE_OPCODE,
+    direction: "c2s",
+    stage: "field",
+    name: "npcIdleRequest",
+    status: "partial",
+    evidence:
+      "49A3C0; 49A0C0 chooses extraIndex+2 or -1/info speech. Index rewriting by original server remains unknown.",
+    codecs: ["encodeClientNpcIdle", "readNpcIdle"],
+    fields: [
+      { name: "npcId", type: "u32" },
+      { name: "action", type: "s8" },
+      { name: "speech", type: "s8" },
+      { name: "path", type: "CMovePath", note: "iff template has move" },
+    ],
   },
   {
     opcode: npc.NPC_OPCODE.update,
@@ -1136,13 +1471,26 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "npcAction",
     status: "partial",
-    evidence: "49F5B0 -> 49A280: u32 id, two signed bytes; 4967C0 CMovePath ONLY when template+8 (move exists) is nonzero; NATIVE_NPC_BEHAVIOR",
-    codecs: ["encodeNpcIdle","readNpcIdle"],
+    evidence:
+      "49F5B0 -> 49A280: u32 id, two signed bytes; 4967C0 CMovePath ONLY when template+8 (move exists) is nonzero; NATIVE_NPC_BEHAVIOR",
+    codecs: ["encodeNpcIdle", "readNpcIdle"],
     fields: [
-      {name:"npcId",type:"u32"},
-      {name:"action",type:"s8",note:"-1 = info.speak; raw >=0 < extraCount sets forced action, art uses raw-2 for raw>=2"},
-      {name:"speech",type:"s8",note:"-1 = none; action branch reads extra[raw].speak, NOT extra[raw-2]"},
-      {name:"path",type:"CMovePath",note:"present iff template has move; independent of whether action/speech indices were accepted"},
+      { name: "npcId", type: "u32" },
+      {
+        name: "action",
+        type: "s8",
+        note: "-1 = info.speak; raw >=0 < extraCount sets forced action, art uses raw-2 for raw>=2",
+      },
+      {
+        name: "speech",
+        type: "s8",
+        note: "-1 = none; action branch reads extra[raw].speak, NOT extra[raw-2]",
+      },
+      {
+        name: "path",
+        type: "CMovePath",
+        note: "present iff template has move; independent of whether action/speech indices were accepted",
+      },
     ],
   },
   {
@@ -1159,7 +1507,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "DROP_KIND; 0 and 1 also carry the monster below, 2 is a placed drop (a v1.11 client has no request for one)",
       },
-      { name: "dropId", type: "u32", note: "the pool key; a repeat of a live id only refreshes the entry" },
+      {
+        name: "dropId",
+        type: "u32",
+        note: "the pool key; a repeat of a live id only refreshes the entry",
+      },
       {
         name: "money",
         type: "u8",
@@ -1167,7 +1519,11 @@ export const PACKETS: readonly PacketSchema[] = [
       },
       { name: "value", type: "u32", note: "meso amount or item id, see money" },
       { name: "x", type: "s16" },
-      { name: "y", type: "s16", note: "the ground line - the client draws the icon 16 px above it" },
+      {
+        name: "y",
+        type: "s16",
+        note: "the ground line - the client draws the icon 16 px above it",
+      },
       {
         name: "mobId",
         type: "u32",
@@ -1191,8 +1547,16 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.18 (CRewardPool 0x44, sub_4A95B0)",
     codecs: ["encodeDropRemove", "readDropRemove", "describeDropRemove"],
     fields: [
-      { name: "kind", type: "u8", note: "DROP_REMOVE_KIND: 0 gone, 1 vanished with an effect, 2 taken" },
-      { name: "dropId", type: "u32", note: "an unknown id ends the handler with no reply and no error" },
+      {
+        name: "kind",
+        type: "u8",
+        note: "DROP_REMOVE_KIND: 0 gone, 1 vanished with an effect, 2 taken",
+      },
+      {
+        name: "dropId",
+        type: "u32",
+        note: "an unknown id ends the handler with no reply and no error",
+      },
       {
         name: "characterId",
         type: "u32",
@@ -1221,7 +1585,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "1 equip, 2 consume, 3 etc, 4 cash; a worn equip is addressed by its negative slot instead",
       },
-      { name: "slot", type: "s16", note: "op 0/1/3; op 2 carries a second one, op 1 a u16 key instead" },
+      {
+        name: "slot",
+        type: "s16",
+        note: "op 0/1/3; op 2 carries a second one, op 1 a u16 key instead",
+      },
       {
         name: "item",
         type: "ItemSlot",
@@ -1238,7 +1606,11 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.18 (CWvsApp sub_55A900 case 0x11 -> sub_55C130; three message shapes)",
     codecs: ["encodeLootNotice", "readLootNotice", "describeLootNotice"],
     fields: [
-      { name: "kind", type: "u8", note: "1 mesos, 0 item; any other byte is the 'no more items' line" },
+      {
+        name: "kind",
+        type: "u8",
+        note: "1 mesos, 0 item; any other byte is the 'no more items' line",
+      },
       { name: "amount", type: "u32", note: "kind 1 only" },
       { name: "itemId", type: "u32", note: "kind 0 only" },
       { name: "count", type: "u32", note: "kind 0 only; a count of 1 prints without the number" },
@@ -1259,7 +1631,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "0 changed / 1 ignored / 2 beginner / 3 already today / 4 already this month / 5 received",
       },
-      { name: "name", type: STRING, note: "type 0: the target; type 5: the giver (the client adds its own name)" },
+      {
+        name: "name",
+        type: STRING,
+        note: "type 0: the target; type 5: the giver (the client adds its own name)",
+      },
       { name: "up", type: "u8", note: "types 0 and 5 only" },
     ],
   },
@@ -1291,7 +1667,8 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "statUpdate",
     status: "byte-exact",
-    evidence: "FINDINGS 4.21 (CWvsApp sub_55A900 case 0x0D -> sub_55BEB0; the diff reader is sub_45E0D0)",
+    evidence:
+      "FINDINGS 4.21 (CWvsApp sub_55A900 case 0x0D -> sub_55BEB0; the diff reader is sub_45E0D0)",
     codecs: ["encodeStatUpdate", "readStatUpdate", "describeStatUpdate"],
     // The 19 optional fields are described from the codec's own table - the flag of entry `i` is
     // `1 << i`, and three widths differ from `CharacterData` (FINDINGS 4.21.1).
@@ -1301,7 +1678,11 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u8",
         note: "!= 0 clears the client's pending-request gate (CWvsApp+24/+28); the value itself is never compared",
       },
-      { name: "flags", type: "u32", note: "one bit per field below, read from 0x01 upwards (0x7ffff is all of them)" },
+      {
+        name: "flags",
+        type: "u32",
+        note: "one bit per field below, read from 0x01 upwards (0x7ffff is all of them)",
+      },
       ...stat.STAT_DIFF_FIELDS.map((field, index) => ({
         name: field.name,
         type: `u${field.bytes * 8}`,
@@ -1312,10 +1693,26 @@ export const PACKETS: readonly PacketSchema[] = [
         type: "u32",
         note: "0 ends the packet; otherwise temporary-stat mask, signed values and one source pair follow (PE 4C5DC0 / FINDINGS 4.21.2)",
       },
-      { name: "temporaryMask", type: "u32", note: "only if durationMs != 0; bits 0x001..0x800, not the duration word" },
-      { name: "temporaryValues", type: "s16[]", note: "one signed value per set bit in increasing order; only if durationMs != 0" },
-      { name: "sourceIsSkill", type: "u8", note: "only if durationMs != 0; 0 = item iconRaw, nonzero = skill icon; ONE source per application" },
-      { name: "sourceId", type: "u32", note: "only if durationMs != 0; the item or skill id (4CBBD0)" },
+      {
+        name: "temporaryMask",
+        type: "u32",
+        note: "only if durationMs != 0; bits 0x001..0x800, not the duration word",
+      },
+      {
+        name: "temporaryValues",
+        type: "s16[]",
+        note: "one signed value per set bit in increasing order; only if durationMs != 0",
+      },
+      {
+        name: "sourceIsSkill",
+        type: "u8",
+        note: "only if durationMs != 0; 0 = item iconRaw, nonzero = skill icon; ONE source per application",
+      },
+      {
+        name: "sourceId",
+        type: "u32",
+        note: "only if durationMs != 0; the item or skill id (4CBBD0)",
+      },
     ],
   },
   {
@@ -1341,7 +1738,11 @@ export const PACKETS: readonly PacketSchema[] = [
       { name: "shopId", type: "u32", note: "dlg+144; the client never sends it back" },
       { name: "count", type: "u16", note: "rows that follow; 0 is a legal empty shop" },
       { name: "itemId", type: "u32", note: "per row" },
-      { name: "price", type: "u32", note: "per row; the client prints it and charges it to itself" },
+      {
+        name: "price",
+        type: "u32",
+        note: "per row; the client prints it and charges it to itself",
+      },
       { name: "cash", type: "u8[8]", note: "per row, itemId / 10000 == 207 only, copied verbatim" },
       {
         name: "maxCount",
@@ -1372,11 +1773,16 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "shopRequest",
     status: "byte-exact",
-    evidence: "FINDINGS 4.22 (sub_4B6B40 / sub_4B6E90 / sub_4B7130 / sub_4B3C80 on the CShopDlg buttons)",
+    evidence:
+      "FINDINGS 4.22 (sub_4B6B40 / sub_4B6E90 / sub_4B7130 / sub_4B3C80 on the CShopDlg buttons)",
     codecs: ["encodeClientShopRequest", "readClientShopRequest", "describeClientShopRequest"],
     fields: [
       { name: "action", type: "u8", note: "0 buy, 1 sell, 2 recharge, 3 close" },
-      { name: "slot", type: "u16", note: "buy: the row index the client picked; sell/recharge: the inventory slot" },
+      {
+        name: "slot",
+        type: "u16",
+        note: "buy: the row index the client picked; sell/recharge: the inventory slot",
+      },
       { name: "itemId", type: "u32", note: "buy and sell only" },
       { name: "count", type: "u16", note: "buy and sell only" },
     ],
@@ -1390,7 +1796,11 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.22 (sub_55AF20, called by sub_4A7770's object-under-the-mouse pick)",
     codecs: ["encodeClientObjectClick", "readClientObjectClick", "describeClientObjectClick"],
     fields: [
-      { name: "objectId", type: "u32", note: "the field object's runtime id - for an NPC the id 0x39 gave it" },
+      {
+        name: "objectId",
+        type: "u32",
+        note: "the field object's runtime id - for an NPC the id 0x39 gave it",
+      },
     ],
   },
   {
@@ -1402,17 +1812,49 @@ export const PACKETS: readonly PacketSchema[] = [
     evidence: "FINDINGS 4.23 (sub_4A5910, the CQuestMan branch of sub_472770; 0x46/0x48 have none)",
     codecs: ["encodeQuestTalk", "readQuestTalk", "describeQuestTalk"],
     fields: [
-      { name: "unknownA", type: "u8", note: "the packet opens with it; read by the client and never used again" },
-      { name: "npcId", type: "u32", note: "ignored by the client just like unknownA; this server puts the NPC's pool id here" },
-      { name: "subOp", type: "u8", note: "0 say, 1 confirm, 2 askText, 3 askNumber, 4 selection menu; >4 is dropped" },
+      {
+        name: "unknownA",
+        type: "u8",
+        note: "the packet opens with it; read by the client and never used again",
+      },
+      {
+        name: "npcId",
+        type: "u32",
+        note: "ignored by the client just like unknownA; this server puts the NPC's pool id here",
+      },
+      {
+        name: "subOp",
+        type: "u8",
+        note: "0 say, 1 confirm, 2 askText, 3 askNumber, 4 selection menu; >4 is dropped",
+      },
       { name: "message", type: "string", note: "every sub-op; CP949 bytes behind a u16 length" },
-      { name: "unknownA", type: "u8", note: "sub-op 0 only: nonzero shows BtPrev, secondary answer 0 (535C60 / 532500)" },
-      { name: "unknownB", type: "u8", note: "sub-op 0 only: nonzero BtNext, zero BtOK; either primary answer 1" },
+      {
+        name: "unknownA",
+        type: "u8",
+        note: "sub-op 0 only: nonzero shows BtPrev, secondary answer 0 (535C60 / 532500)",
+      },
+      {
+        name: "unknownB",
+        type: "u8",
+        note: "sub-op 0 only: nonzero BtNext, zero BtOK; either primary answer 1",
+      },
       { name: "defaultText", type: "string", note: "sub-op 2 only: the edit box's initial text" },
-      { name: "minLength", type: "s16", note: "sub-op 2 only, with maxLength; the client's own caller passes (4, 12)" },
+      {
+        name: "minLength",
+        type: "s16",
+        note: "sub-op 2 only, with maxLength; the client's own caller passes (4, 12)",
+      },
       { name: "maxLength", type: "s16", note: "sub-op 2 only" },
-      { name: "defaultValue", type: "u32", note: "sub-op 3 only: the edit box's initial value, shown as %d" },
-      { name: "min", type: "u32", note: "sub-op 3 only, with max; the client's own mesos dialog passes (1, 1, mesos)" },
+      {
+        name: "defaultValue",
+        type: "u32",
+        note: "sub-op 3 only: the edit box's initial value, shown as %d",
+      },
+      {
+        name: "min",
+        type: "u32",
+        note: "sub-op 3 only, with max; the client's own mesos dialog passes (1, 1, mesos)",
+      },
       { name: "max", type: "u32", note: "sub-op 3 only" },
     ],
   },
@@ -1422,13 +1864,22 @@ export const PACKETS: readonly PacketSchema[] = [
     stage: "field",
     name: "questReply",
     status: "byte-exact",
-    evidence: "FINDINGS 4.23 (the five sub_4A5A80..sub_4A65C0 senders, all with sub_4A1EA0(&buf, 21, 0))",
+    evidence:
+      "FINDINGS 4.23 (the five sub_4A5A80..sub_4A65C0 senders, all with sub_4A1EA0(&buf, 21, 0))",
     codecs: ["encodeQuestReply", "readQuestReply", "describeQuestReply"],
     fields: [
       { name: "subOp", type: "u8", note: "the sub-op the dialog was opened with, echoed back" },
-      { name: "answer", type: "u8", note: "1 primary button/Enter, 0 the other button, 0xff closed without an answer" },
+      {
+        name: "answer",
+        type: "u8",
+        note: "1 primary button/Enter, 0 the other button, 0xff closed without an answer",
+      },
       { name: "text", type: "string", note: "sub-op 2 with answer 1: what the player typed" },
-      { name: "value", type: "u32", note: "sub-op 3/4 with answer 1: the entered number / the chosen entry" },
+      {
+        name: "value",
+        type: "u32",
+        note: "sub-op 3/4 with answer 1: the entered number / the chosen entry",
+      },
     ],
   },
 ];
@@ -1472,8 +1923,14 @@ export function resolveCodec(name: string): unknown {
 }
 
 /** The catalogue entry for one opcode, or `undefined` when this repo has no such row. */
-export function findPacket(opcode: number, direction: PacketDirection, stage: PacketStage): PacketSchema | undefined {
-  return PACKETS.find((entry) => entry.opcode === opcode && entry.direction === direction && entry.stage === stage);
+export function findPacket(
+  opcode: number,
+  direction: PacketDirection,
+  stage: PacketStage,
+): PacketSchema | undefined {
+  return PACKETS.find(
+    (entry) => entry.opcode === opcode && entry.direction === direction && entry.stage === stage,
+  );
 }
 
 /** Rows for one direction/stage pair, sorted by opcode - the order a table wants them in. */

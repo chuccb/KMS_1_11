@@ -47,9 +47,7 @@ export function isWebSocketUpgrade(request: IncomingMessage): boolean {
   const upgrade = request.headers.upgrade;
   const connection = request.headers.connection ?? "";
   if (typeof upgrade !== "string" || upgrade.toLowerCase() !== "websocket") return false;
-  return connection
-    .split(",")
-    .some((part) => part.trim().toLowerCase() === "upgrade");
+  return connection.split(",").some((part) => part.trim().toLowerCase() === "upgrade");
 }
 
 /** `Sec-WebSocket-Accept` for the client's key (RFC 6455 1.3, the one value a browser checks). */
@@ -63,12 +61,16 @@ export function acceptKey(key: string): string {
 export function upgradeResponse(
   request: IncomingMessage,
 ): { ok: true; headers: string[] } | { ok: false; status: number; reason: string } {
-  if (!isWebSocketUpgrade(request)) return { ok: false, status: 400, reason: "not a websocket upgrade" };
-  if (request.method !== "GET") return { ok: false, status: 405, reason: "the handshake must be a GET" };
+  if (!isWebSocketUpgrade(request))
+    return { ok: false, status: 400, reason: "not a websocket upgrade" };
+  if (request.method !== "GET")
+    return { ok: false, status: 405, reason: "the handshake must be a GET" };
   const version = request.headers["sec-websocket-version"];
-  if (version !== "13") return { ok: false, status: 426, reason: `unsupported websocket version ${String(version)}` };
+  if (version !== "13")
+    return { ok: false, status: 426, reason: `unsupported websocket version ${String(version)}` };
   const key = request.headers["sec-websocket-key"];
-  if (typeof key !== "string" || key.length === 0) return { ok: false, status: 400, reason: "no Sec-WebSocket-Key" };
+  if (typeof key !== "string" || key.length === 0)
+    return { ok: false, status: 400, reason: "no Sec-WebSocket-Key" };
   return {
     ok: true,
     headers: [
@@ -124,14 +126,25 @@ export class WsParser {
         offset = 4;
       } else if (length === 127) {
         if (this.buffer.length < 10) break;
-        const high = (this.buffer[2]! << 24) | (this.buffer[3]! << 16) | (this.buffer[4]! << 8) | this.buffer[5]!;
-        const low = ((this.buffer[6]! << 24) | (this.buffer[7]! << 16) | (this.buffer[8]! << 8) | this.buffer[9]!) >>> 0;
+        const high =
+          (this.buffer[2]! << 24) |
+          (this.buffer[3]! << 16) |
+          (this.buffer[4]! << 8) |
+          this.buffer[5]!;
+        const low =
+          ((this.buffer[6]! << 24) |
+            (this.buffer[7]! << 16) |
+            (this.buffer[8]! << 8) |
+            this.buffer[9]!) >>>
+          0;
         if (high !== 0) throw new WebSocketError("frame payload above 4 GiB");
         length = low;
         offset = 10;
       }
-      if ((first & 0x70) !== 0) throw new WebSocketError("reserved bits are set but no extension was negotiated");
-      if (this.requireMask && !masked) throw new WebSocketError("a client frame must be masked (RFC 6455 5.1)");
+      if ((first & 0x70) !== 0)
+        throw new WebSocketError("reserved bits are set but no extension was negotiated");
+      if (this.requireMask && !masked)
+        throw new WebSocketError("a client frame must be masked (RFC 6455 5.1)");
       if (length > this.maxPayloadBytes) {
         throw new WebSocketError(`frame of ${length} bytes exceeds ${this.maxPayloadBytes}`);
       }
@@ -209,7 +222,9 @@ export class WebSocket {
     this.onMessage = handlers.onMessage;
     this.onClose = handlers.onClose;
     socket.setNoDelay(true);
-    socket.on("data", (chunk) => this.receive(new Uint8Array(chunk)));
+    socket.on("data", (chunk) =>
+      this.receive(new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk)),
+    );
     socket.on("error", (error) => this.finish((error as Error).message));
     socket.on("close", () => this.finish(this.closeReason ?? "the socket closed"));
     // A socket handed over by `http.Server`'s upgrade event has `allowHalfOpen = true`, so a browser
@@ -247,7 +262,11 @@ export class WebSocket {
         }
         return;
       }
-      if (frame.opcode === WS_OPCODE.continuation || frame.opcode === WS_OPCODE.text || frame.opcode === WS_OPCODE.binary) {
+      if (
+        frame.opcode === WS_OPCODE.continuation ||
+        frame.opcode === WS_OPCODE.text ||
+        frame.opcode === WS_OPCODE.binary
+      ) {
         if (frame.opcode !== WS_OPCODE.continuation) {
           if (this.fragments.length > 0) {
             this.fail("a new data frame started before the previous one finished", 1002);

@@ -1,91 +1,94 @@
-# 工具鏈版本、安裝與升級界線
+# Bun / TypeScript / ESNext 工具鏈
 
-2026-10-18／ADR-066。依使用者「仔細評估後升級到最新版本」要求，選**最新正式版**，不是 nightly／beta／RC。
-版本由官方 GitHub release／tag 及 npm registry 查得；這是本輪固定基線，不宣稱永遠最新。
+更新：2026-10-18。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-## 鎖定與變更
+## 唯一版本與安裝入口
 
-| 工具 | 舊環境／lock | 新基線 | 唯一設定入口 |
-|---|---|---|---|
-| Node.js | 22.22.3 | **26.12.0** | 根 `.node-version`，server engines 限定26.x |
-| npm | 10.9.8 | **12.2.0** | `server/package.json` packageManager，engines限定12.x |
-| TypeScript | 5.9.3 | **7.0.2** | devDependencies精確版＋package-lock.json |
-| Node 型別 | 22.20.5 | **26.6.5** | devDependencies精確版＋package-lock.json |
-| Python | 3.11.2 | **3.15.0** | 根 `.python-version` |
-| checkout Action | v4 | **v7.0.1** | workflow 固定官方tag對應commit SHA |
-| setup-node Action | v4 | **v7.1.0** | 同上，Node版本讀根版本檔 |
-| setup-python Action | v5 | **v7.0.0** | 同上，Python版本讀根版本檔 |
+| 工具 | 固定穩定版 | 鎖定來源 |
+| --- | --- | --- |
+| Bun | 1.4.3 | `.bun-version`、根 `package.json` 的 `packageManager` |
+| TypeScript | 7.0.2 | 根 `package.json` 與 `bun.lock` |
+| Bun 型別 | 1.4.3 | 同上；與 runtime 同版 |
+| Prettier | 3.9.10 | 同上與 `.prettierrc.json` |
+| checkout Action | v7.0.1 | CI 固定完整 commit SHA |
+| setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
-來源：[Node release](https://github.com/nodejs/node/releases/tag/v26.12.0)、
-[Node schedule](https://github.com/nodejs/Release/blob/main/schedule.json)、
-[npm](https://registry.npmjs.org/npm/latest)、[TypeScript release](https://github.com/microsoft/TypeScript/releases/tag/v7.0.2)、
-[Node型別](https://registry.npmjs.org/@types%2fnode/latest)、[CPython tag](https://github.com/python/cpython/tree/v3.15.0)、
-[checkout](https://github.com/actions/checkout/releases/tag/v7.0.1)、
-[setup-node](https://github.com/actions/setup-node/releases/tag/v7.1.0)、
-[setup-python](https://github.com/actions/setup-python/releases/tag/v7.0.0)。
+本日查證：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
+[TypeScript registry](https://registry.npmjs.org/typescript/latest)、
+[Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、
+[Prettier registry](https://registry.npmjs.org/prettier/latest)、
+[setup-bun release](https://github.com/oven-sh/setup-bun/releases/tag/v2.2.0)。
+此為本日最新穩定版基線，不宣稱永遠最新；升版要重新檢查 lockfile、型別、回歸及瀏覽器建置。
 
-## 相容評估與刻意不改的部分
-
-- npm12.2.0 的 engines 接受 Node26；Node型別改同一主版本。Node26在本日期仍是LTS前正式版，
-  不是比LTS更保守的選擇；本次依使用者要求最新正式版，正式營運基線需另評估。
-- Node 原生 type stripping 仍使用 erasable TypeScript；**不等於自動做型別檢查**。
-- TypeScript7的compiler改以平台原生optional套件分發，lockfile因此增加平台項；不代表新增遊戲runtime依賴。
-  編輯器語言服務不假設仍有舊tsserver入口；未設定未驗證的IDE override。
-- TypeScript跨主要版本可能有新的診斷／模組解析差異；本輪未typecheck，不能聲稱0錯誤。
-- 保留 strict、noEmit、erasableSyntaxOnly、nodenext 與 ES2023 target／lib；不為升級關掉檢查或亂改瀏覽器語法基線。
-- Python只用標準庫，但舊腳本是否遇到3.15行為變更仍須後續驗證；不因能顯示版本就宣稱全部工具相容。
-- 不更改遊戲規則、封包、玩家save格式、WZ資料、renderer或字型；不引入另一套引擎／前端框架。
-- 不全域覆寫沙箱／作業系統的 Node／Python。新版本在 ignored `generated/toolchain/`，須明確啟用。
-
-## 安裝與啟用
-
-一般環境可用自己的版本管理器啟用 `.node-version`／`.python-version`，再安裝固定 npm 與 `server` 開發依賴。
-沙箱受網路主機白名單限制，提供不需sudo的 Linux／Bash bootstrap：
+先用官方發行版安裝固定 Bun，再從 repository 根目錄執行：
 
 ```sh
-# repository root；需要現有npm、curl、tar、make、gcc、perl；其他可選標準庫仍依系統開發函式庫而定
-bash tools/bootstrap-toolchain.sh
-source tools/env.sh
+bun tools/setup.ts
+bun run typecheck
+bun run format:check
+bun run test
+bun run build
 ```
 
-Node／npm由 npm registry 的固定版套件安裝；Python從官方 CPython `v3.15.0` tag source建置。
-WZ工具需要zlib：沙箱沒有其開發檔，故一併本機建置 **zlib1.3.2** 與 **OpenSSL4.0.3**，
-來源為各自官方tag：[zlib](https://github.com/madler/zlib/releases/tag/v1.3.2)、[OpenSSL](https://github.com/openssl/openssl/releases/tag/openssl-4.0.3)。
-`tools/build-python.sh`負責此部分，函式庫與headers留在ignored工具目錄，不改系統版本。
-不使用無法下載的release資產、不把下載失敗的檔案當成功安裝。
-Python保留在source build tree供純標準庫工具使用，**不是全功能Python套件環境**；未安裝pip。
-Python不啟用PGO、不跑make test、不做Python install／compileall；函式庫有本機install步驟。編譯器configure會做必要的建置能力偵測，不是遊戲probe。
-zlib／SSL之外的sqlite、lzma、readline等可選模組仍可能因系統開發檔缺失而未建置；不宣稱完整Python發行環境。
-缺少編譯器或必要函式庫建置失敗時bootstrap會失敗並保留 `generated/toolchain/python-build.log`，不靜默退回舊版本。
+`setup.ts` 檢查實際 Bun 版本後，只執行 frozen lockfile 安裝，禁止安裝生命週期腳本；不測試、不登入、不寫進度。
+本沙箱的 Bun 位於 ignored `generated/toolchain/bin/bun`；新 shell 可明示
+`export PATH="$PWD/generated/toolchain/bin:$PATH"`。不覆寫作業系統的 Node/Python。
 
-每個新shell都要重新 `source tools/env.sh`。Bash工具呼叫間不保留PATH；從外部呼叫時亦需啟用。
-若ignored目錄未隨沙箱重建保留，可重跑bootstrap，**工具可以重建，玩家save不能用此法重建**。
-腳本不啟動server、不建立帳號／存檔、不寫入 `.bashrc` 或系統目錄。
-另提供 `tools/serve-existing-save.sh`：只接受已存在且非空的save，預設8515/8516/8517；
-不自行停止舊程序／冷備、不授權體驗寫入工具，也不聲稱存檔內容已通過驗證。
+## 編譯、瀏覽器與遷移界線
 
-`node --version`、`npm --version`、`tsc --version`、`python3 --version` 僅顯示工具版本；
-它們不是測試、型別檢查或相容性驗收。執行時不需要server/node_modules，但開發編譯器／型別需要。
+- 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
+  `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
+- 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
+  **剩餘 `client/main.js`、`.mjs` 及 probe 並未因此獲得嚴格型別驗證**，仍必須實際遷移。
+- 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
+- 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
+  `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
+- `bun run build` 用 Bun 的 browser/ESM bundler 輸出 ignored `dist/client`，複製 HTML、CSS 與字型。
+  建置結果是產物，不是 authored JavaScript 原始碼。
+- `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
+- 目前全專案遷移尚欠主瀏覽器入口、其餘 `.mjs` 與手動 probe 的實作型別，不能以能 bundle 代替完成。
 
-## CI 與保留的驗證界線
+## 工具遷移與原證
 
-CI從根版本檔設定Node／Python，安裝固定npm後使用lockfile `npm ci --ignore-scripts`。
-Actions用固定commit SHA，旁註對應tag，不用浮動latest；workflow只有contents:read，checkout不保留憑證。保留既有測試與CLI流程，沒有新增偷偷執行的typecheck步驟。
-本輪提交有 `[skip ci]`，**未執行CI、專案test/check/typecheck/語法檢查/browser/VM/遊戲HTTP或登入probe**。
-新工具安裝成功與server啟動成功都不能代替這些驗證。
+已移除 Node/npm 與 Python 的獨立版本檔、server 重複 package/lock/tsconfig，以及 Bash/Python 的啟動／分析實作。
+分析改用以下 TypeScript 入口：
 
-## 存檔與目前沙箱恢復問題
+```sh
+bun tools/hexfunc.ts MapleStory.exe.c sub_5376C0 --calls
+bun tools/kstr.ts MapleStory.exe.c sub_5376C0 --names
+bun tools/wz.ts help
+bun tools/wz.ts manifest
+bun tools/wz.ts dump Map/Map/101000000.img --json
+```
 
-續接時原碼可由已推送commit恢復，但先前 `generated/preview-death-20261018.json` 與冷備未出現在目前工作區。
-這不是格式升級或工具腳本刪除save；本輪沒有建立替代角色、沒有拿新fixture冒充原進度。
-原遊戲LIVE恢復須先取得真正save，再停服冷備並使用同路徑啟動；資料未到前不得自動seed。
-重要資料應另行匯出保存，不以Git忽略目錄或舊程序識別當永久保存保證。
+WZ 工具直接重用產品 parser，不再維護第二套 Python parser；舊 Python CLI 的子命令／參數並非全部同名。
+因此**不能再聲稱有兩個獨立現行 reader**。改以舊 Python 已保存且不重新生成的
+`analysis/data_wz_manifest.json`，對照所有 1,056 個 image 的 offset、size、source 及每段原始 bytes checksum，
+另保留產品 parser 的手建 fixture 與既有 goldens。
+反編譯工具保留原始 bytes，再以 CP949 優先解碼；不先 UTF-8 replace 毀掉韓文字串。
 
+原 `.c`／`.lst`、EXE/DLL/ACM、WZ、analysis 資料與過往 ADR 均是原證或歷史記錄，**不翻譯、不格式化、不刪除**。
+歷史文件中的 `.py`、`node`、`npm` 舊命令只代表當時操作；現行命令以本頁與 README 為準。
 
-## 本輪實際安裝結果
+## 存檔與操作安全
 
-沙箱中已安裝Node26.12.0／npm12.2.0與server開發依賴，TypeScript CLI顯示7.0.2。
-第一次Python建置因缺開發檔而未包含zlib／SSL，沒有將它當完整交付；補上官方tag函式庫後重建成功。
-Python3.15.0 source build現在包含WZ工具所需的zlib；函式庫版本顯示 **zlib1.3.2**、**OpenSSL4.0.3（2026-09-29）**。
-沙箱仍缺sqlite3、lzma、bz2、readline等可選開發函式庫，不以這個最小工具環境代替完整Python套件發行版。
-純安裝紀錄與版本顯示不是專案相容性證明。`serve-existing-save.sh`未執行；原遊戲LIVE未恢復。
+```sh
+# 必須先停止舊程序、確認真正 save、冷備；這個入口不替你做以上三件事。
+bun tools/serve-existing-save.ts generated/<真正存在的存檔>.json
+```
+
+只接受已存在、非空的 regular file，否則直接失敗，不建立 replacement、不加種子帳號、不聲稱恢復成功。
+預設 web/login/game 為 8515/8516/8517，綁 0.0.0.0；可用 `KMS_WEB_PORT`、`KMS_LOGIN_PORT`、
+`KMS_GAME_PORT` 指定 1–65535。瀏覽器素材與 WebSocket 維持同 origin，不指向使用者機器的 localhost。
+保護測試只用臨時 fixture，不接觸玩家存檔。
+
+本次允許型別、格式、單元回歸及建置；**不自動登入、不操作角色、不寫玩家進度、不自動跑手動 probe**。
+
+## 實際驗證狀態
+
+來源凍結後，所有 TS 的嚴格型別、格式與 browser build 均通過。完整回歸為 **828 pass / 45 fail**；
+同版 Bun 執行 d311622 隔離原始碼為 **823 pass / 45 fail**，按檔名／標題／重複次數比較，失敗完全相同。
+工具／HTTP 新增的五項全部通過（包含原 manifest 全 image checksum 與整個 browser import graph）。
+**45 個失敗仍阻擋驗收，這不是全專案完成；也不能從 Bun 參照推論原 Node 一樣失敗。**
+詳本次遷移記錄 [BUN_MIGRATION](BUN_MIGRATION.md)。
+CI 使用同一組 Bun 命令，不靠 `continue-on-error`、篩掉失敗案例或縮小型別設定讓結果變綠。

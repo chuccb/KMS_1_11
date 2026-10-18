@@ -14,7 +14,16 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { WzArchive, mapSummary, type MapObject, type WzObject } from "../src/wz/archive.ts";
-import { RETURN_MAP_NONE, mapCatalogOf, spawnPortalIndex, mapDataFrom, mapDataProvider, loadMapData, reviveMapId, type MapData } from "../src/game/map.ts";
+import {
+  RETURN_MAP_NONE,
+  mapCatalogOf,
+  spawnPortalIndex,
+  mapDataFrom,
+  mapDataProvider,
+  loadMapData,
+  reviveMapId,
+  type MapData,
+} from "../src/game/map.ts";
 import { encodeMobEnterField } from "../src/protocol/mob.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
@@ -37,7 +46,10 @@ test("life entries become spawns, and an entry the WZ does not describe is dropp
     { type: "x", id: "1210100", x: 0, y: 0, fh: 0 }, // neither "m" nor "n"
   ];
   const summary = mapSummary({
-    props: [{ name: "life", value: life }, { name: "info", value: { mapName: "Test" } }],
+    props: [
+      { name: "life", value: life },
+      { name: "info", value: { mapName: "Test" } },
+    ],
   } as unknown as WzObject);
   const map = mapDataFrom(summary, 1234);
   assert.deepEqual(map.mobs, [
@@ -49,7 +61,11 @@ test("life entries become spawns, and an entry the WZ does not describe is dropp
     { templateId: 1012000, x: 0, y: 0, foothold: 1, facing: 0, rx0: 0, rx1: 0, cy: 0 },
   ]);
   assert.equal(map.name, "Test");
-  assert.equal(map.imagePath, "Map/Map/000001234.img", "the client's own path (%09d), not a server file");
+  assert.equal(
+    map.imagePath,
+    "Map/Map/000001234.img",
+    "the client's own path (%09d), not a server file",
+  );
   assert.deepEqual(map.portals, []);
 });
 
@@ -84,11 +100,23 @@ test("the default map has monsters, and each one encodes into a legal 0x2F", nee
   assert.ok(data.footholds > 0, "the spawns stand on real footholds");
 
   for (const [index, mob] of data.mobs.entries()) {
-    const bytes = encodeMobEnterField({ mobId: index + 1, templateId: mob.templateId, x: mob.x, y: mob.y, facing: mob.facing });
+    const bytes = encodeMobEnterField({
+      mobId: index + 1,
+      templateId: mob.templateId,
+      x: mob.x,
+      y: mob.y,
+      facing: mob.facing,
+    });
     assert.equal(bytes[0], 0x2f);
     assert.ok(mob.templateId > 0, `mob ${index} has a template id`);
-    assert.ok(mob.facing === 0 || mob.facing === 1, `mob ${index} faces left or right, not ${mob.facing}`);
-    assert.ok(mob.x > -32768 && mob.x < 32768 && mob.y > -32768 && mob.y < 32768, "coordinates fit s16");
+    assert.ok(
+      mob.facing === 0 || mob.facing === 1,
+      `mob ${index} faces left or right, not ${mob.facing}`,
+    );
+    assert.ok(
+      mob.x > -32768 && mob.x < 32768 && mob.y > -32768 && mob.y < 32768,
+      "coordinates fit s16",
+    );
   }
 });
 
@@ -99,7 +127,11 @@ test("a town is all NPCs and no monsters", needsArchive, () => {
   assert.equal(data.imagePath, "Map/Map/100000000.img");
   assert.equal(data.mobs.length, 0, "헤네시스 has nothing to spawn");
   assert.equal(data.npcs.length, 2);
-  assert.deepEqual(data.npcs.map((npc) => npc.templateId), [1012000, 1010100], "Heena and Roger");
+  assert.deepEqual(
+    data.npcs.map((npc) => npc.templateId),
+    [1012000, 1010100],
+    "Heena and Roger",
+  );
   assert.equal(data.name, "헤네시스");
   assert.equal(data.returnMapId, HENESYS, "a town sends you back to itself");
 });
@@ -113,7 +145,10 @@ test("a monster field spawns the ids the WZ lists, in order", needsArchive, () =
   assert.equal(data.npcs.length, 1);
   assert.equal(data.mobs[0]?.templateId, 100100, "the first life entry is the snail (0100100)");
   assert.ok(data.mobs.every((mob) => mob.templateId > 0));
-  assert.ok(data.mobs.some((mob) => mob.foothold > 0), "spawns are anchored to footholds");
+  assert.ok(
+    data.mobs.some((mob) => mob.foothold > 0),
+    "spawns are anchored to footholds",
+  );
 });
 
 test("a revive goes to the map's own info/returnMap, and to the map itself when the data has none", () => {
@@ -130,7 +165,11 @@ test("a revive goes to the map's own info/returnMap, and to the map itself when 
     40000,
     "999999999 is not a map id: a town sends you back into itself",
   );
-  assert.equal(reviveMapId(withReturnMap(undefined)), 40000, "no returnMap at all is the same answer");
+  assert.equal(
+    reviveMapId(withReturnMap(undefined)),
+    40000,
+    "no returnMap at all is the same answer",
+  );
 });
 
 test("an unknown map id is undefined, not an empty map", needsArchive, () => {
@@ -158,29 +197,50 @@ test("the provider reads each map once and can be handed anywhere", needsArchive
   assert.equal(mapDataProvider(undefined)(DEFAULT_MAP), undefined, "no archive means no maps");
 });
 
-test("native spawn portal index excludes type 3 but includes sp and hidden type 1", needsArchive, () => {
-  const base = loadMapData(archive!, DEFAULT_MAP)!;
-  const portal = base.portals[0]!;
-  const map = {...base,portals:[{...portal,name:"sp",type:0},{...portal,name:"auto",type:3},{...portal,name:"hidden",type:1},{...portal,name:"door",type:2}]};
-  assert.equal(spawnPortalIndex(map,"HIDDEN"),1);
-  assert.equal(spawnPortalIndex(map,"door"),2);
-  assert.equal(spawnPortalIndex(map,"auto"),0);
-  assert.equal(spawnPortalIndex(map,"missing"),0);
-});
-test("real archive map catalog is cached and includes actual map zero; tn names resolve in native spawn pool", needsArchive, () => {
-  const provider=mapDataProvider(archive!),catalog=mapCatalogOf(archive!,provider);
-  const maps=catalog();assert.equal(maps.length,100);assert.equal(catalog(),maps);
-  assert.equal(maps[0]!.id,0);assert.ok(maps[0]!.name.length>0);
-  const map=provider(1000000)!,destination=provider(map.portals.find(p=>p.name==="east00")!.toMapId)!;
-  const index=spawnPortalIndex(destination,"west00");
-  assert.equal(destination.portals.filter(p=>p.type!==3)[index]!.name,"west00");
-  assert.notEqual(index,spawnPortalIndex(destination,"sp"));
-});
+test(
+  "native spawn portal index excludes type 3 but includes sp and hidden type 1",
+  needsArchive,
+  () => {
+    const base = loadMapData(archive!, DEFAULT_MAP)!;
+    const portal = base.portals[0]!;
+    const map = {
+      ...base,
+      portals: [
+        { ...portal, name: "sp", type: 0 },
+        { ...portal, name: "auto", type: 3 },
+        { ...portal, name: "hidden", type: 1 },
+        { ...portal, name: "door", type: 2 },
+      ],
+    };
+    assert.equal(spawnPortalIndex(map, "HIDDEN"), 1);
+    assert.equal(spawnPortalIndex(map, "door"), 2);
+    assert.equal(spawnPortalIndex(map, "auto"), 0);
+    assert.equal(spawnPortalIndex(map, "missing"), 0);
+  },
+);
+test(
+  "real archive map catalog is cached and includes actual map zero; tn names resolve in native spawn pool",
+  needsArchive,
+  () => {
+    const provider = mapDataProvider(archive!),
+      catalog = mapCatalogOf(archive!, provider);
+    const maps = catalog();
+    assert.equal(maps.length, 100);
+    assert.equal(catalog(), maps);
+    assert.equal(maps[0]!.id, 0);
+    assert.ok(maps[0]!.name.length > 0);
+    const map = provider(1000000)!,
+      destination = provider(map.portals.find((p) => p.name === "east00")!.toMapId)!;
+    const index = spawnPortalIndex(destination, "west00");
+    assert.equal(destination.portals.filter((p) => p.type !== 3)[index]!.name, "west00");
+    assert.notEqual(index, spawnPortalIndex(destination, "sp"));
+  },
+);
 
 // Regression source only; new recovery work was not executed for this delivery.
-test("4707E0 recovery multiplier defaults to one, and zero is not replaced with a fabricated heal",()=>{
-  const base={info:{},life:[],portal:[],foothold:0,ladderRope:0};
-  assert.equal(mapDataFrom(base,1000000).recovery,1);
-  assert.equal(mapDataFrom({...base,info:{recovery:0}},1000000).recovery,0);
-  assert.equal(mapDataFrom({...base,info:{recovery:1.5}},1000000).recovery,1.5);
+test("4707E0 recovery multiplier defaults to one, and zero is not replaced with a fabricated heal", () => {
+  const base = { info: {}, life: [], portal: [], foothold: 0, ladderRope: 0 };
+  assert.equal(mapDataFrom(base, 1000000).recovery, 1);
+  assert.equal(mapDataFrom({ ...base, info: { recovery: 0 } }, 1000000).recovery, 0);
+  assert.equal(mapDataFrom({ ...base, info: { recovery: 1.5 } }, 1000000).recovery, 1.5);
 });

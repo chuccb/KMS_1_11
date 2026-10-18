@@ -30,7 +30,10 @@ test("the first five values for the golden seed are the formulas' own output", (
 
 test("randomRange is `lo + next() % span`, and span 0 passes the raw value through", () => {
   const state = seedState(A, B, C);
-  assert.deepEqual([0, 1, 2, 3].map(() => randomRange(state, 0, 100)), [61, 80, 45, 97]);
+  assert.deepEqual(
+    [0, 1, 2, 3].map(() => randomRange(state, 0, 100)),
+    [61, 80, 45, 97],
+  );
   const raw = seedState(A, B, C);
   const passthrough = randomRange(raw, 7, 0);
   assert.equal(passthrough, 0x79c46c15);

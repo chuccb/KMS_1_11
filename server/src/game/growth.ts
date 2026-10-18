@@ -4,11 +4,7 @@ import type { ItemCatalog } from "./iteminfo.ts";
  * This is not the damage formula. Natural growth uses row 2*floor(job/100), AP uses the next row.
  * RNG is server-owned: reproduce rand()%width, not the original process's hidden random seed.
  */
-import type {
-  CharacterData,
-  CharacterStats,
-  InventoryRecord,
-} from "../protocol/chardata.ts";
+import type { CharacterData, CharacterStats, InventoryRecord } from "../protocol/chardata.ts";
 import { ABILITY_MASK } from "../protocol/ability.ts";
 import type { StatDiff } from "../protocol/stat.ts";
 import type { ItemSource } from "./iteminfo.ts";
@@ -50,11 +46,7 @@ export function growthSkillProvider(
 ): GrowthSkillProvider {
   const cache = new Map<number, Map<number, { x: number; y: number }>>();
   return (skillId, level) => {
-    if (
-      ![1000001, 2000001].includes(skillId) ||
-      !Number.isInteger(level) ||
-      level <= 0
-    )
+    if (![1000001, 2000001].includes(skillId) || !Number.isInteger(level) || level <= 0)
       return undefined;
     let levels = cache.get(skillId);
     if (levels === undefined) {
@@ -76,9 +68,7 @@ export function growthSkillProvider(
       cache.set(skillId, levels);
     }
     // sub_4C7450 clamps positive learned levels to the loaded skill-level array length.
-    return levels.size > 0
-      ? levels.get(Math.min(level, Math.max(...levels.keys())))
-      : undefined;
+    return levels.size > 0 ? levels.get(Math.min(level, Math.max(...levels.keys()))) : undefined;
   };
 }
 
@@ -89,9 +79,14 @@ export function growthSkillProvider(
 export function characterGrowthContext(
   character: CharacterData,
   skill?: GrowthSkillProvider,
-  catalog?:ItemCatalog,
+  catalog?: ItemCatalog,
 ): GrowthContext {
-  if(catalog) return {intelligence:characterStatBasis(character,catalog).basic.int,skills:character.items?.map32,skill};
+  if (catalog)
+    return {
+      intelligence: characterStatBasis(character, catalog).basic.int,
+      skills: character.items?.map32,
+      skill,
+    };
   let intelligence = character.stats.int;
   for (const [slot, item] of character.items?.worn ?? []) {
     if (slot < 1 || slot > 14 || item.kind !== "equip") continue;
@@ -109,12 +104,8 @@ export function growVitals(
   mode: GrowthMode,
   context: GrowthContext = {},
 ): StatDiff {
-  if (!Number.isInteger(stats.job) || stats.job < 0 || stats.job >= 500)
-    return {};
-  const row =
-    VITAL_GROWTH_ROWS[
-      2 * Math.floor(stats.job / 100) + (mode === "ap" ? 1 : 0)
-    ]!;
+  if (!Number.isInteger(stats.job) || stats.job < 0 || stats.job >= 500) return {};
+  const row = VITAL_GROWTH_ROWS[2 * Math.floor(stats.job / 100) + (mode === "ap" ? 1 : 0)]!;
   const rand = context.rand15 ?? (() => Math.floor(Math.random() * 0x8000));
   const roll = (min: number, max: number): number => {
     const value = rand();
@@ -124,8 +115,7 @@ export function growVitals(
   };
   const bonus = (id: number): number => {
     // The native ZMap is last-write-wins, including when a saved map contains duplicate keys.
-    const learned =
-      context.skills?.filter((entry) => entry.key === id).at(-1)?.value ?? 0;
+    const learned = context.skills?.filter((entry) => entry.key === id).at(-1)?.value ?? 0;
     if (!Number.isInteger(learned) || learned <= 0) return 0;
     const passive = context.skill?.(id, learned);
     const value = passive?.[mode === "level" ? "x" : "y"] ?? 0;
@@ -140,10 +130,7 @@ export function growVitals(
   )
     diff.maxHp = Math.max(
       50,
-      Math.min(
-        MAX_BASE_HP,
-        stats.maxHp + roll(row[0]!, row[1]!) + bonus(1000001),
-      ),
+      Math.min(MAX_BASE_HP, stats.maxHp + roll(row[0]!, row[1]!) + bonus(1000001)),
     );
   const intelligence = context.intelligence ?? stats.int;
   if (

@@ -33,7 +33,14 @@ import {
   type CharacterItems,
 } from "../src/protocol/chardata.ts";
 import { EQUIP_STATS, equipSlot, nonEquipSlot } from "../src/protocol/itemslot.ts";
-import { FileSaveStore, MemorySaveStore, SAVE_VERSION, loadAccounts, readSave, saveJson } from "../src/game/save.ts";
+import {
+  FileSaveStore,
+  MemorySaveStore,
+  SAVE_VERSION,
+  loadAccounts,
+  readSave,
+  saveJson,
+} from "../src/game/save.ts";
 import type { AccountRecord } from "../src/net/loginserver.ts";
 
 /** An item block with something in every place a save has to carry one. */
@@ -57,14 +64,21 @@ function sampleItems(): CharacterItems {
   use.items.set(3, nonEquipSlot(2000000, 50));
   use.items.set(24, nonEquipSlot(4000019, 1));
   use.records.push({ key: 9, value: 11 });
-  items.inventories[3]!.items.set(1, nonEquipSlot(4000019, 3, { cash: { sn: 5n, unknown18: 1, unknown1A: 6n } }));
+  items.inventories[3]!.items.set(
+    1,
+    nonEquipSlot(4000019, 3, { cash: { sn: 5n, unknown18: 1, unknown1A: 6n } }),
+  );
   items.map32.push({ key: 1, value: 2 });
   items.mapString.push({ key: "quest", value: "done" });
   return items;
 }
 
 /** A character with a distinct value in every stat field, so any reorder shows up as a diff. */
-function sampleCharacter(id: number, name: string, items: CharacterItems = sampleItems()): CharacterData {
+function sampleCharacter(
+  id: number,
+  name: string,
+  items: CharacterItems = sampleItems(),
+): CharacterData {
   const stats = zeroStats();
   stats.id = id;
   stats.name = name;
@@ -100,7 +114,10 @@ function sampleTable(): Map<string, AccountRecord> {
       "admin",
       {
         password: "hunter2",
-        characters: [sampleCharacter(3, "Hero"), characterDataOf({ ...zeroStats(), id: 4, name: "Bare" })],
+        characters: [
+          sampleCharacter(3, "Hero"),
+          characterDataOf({ ...zeroStats(), id: 4, name: "Bare" }),
+        ],
       },
     ],
     ["guest", { password: "", characters: [sampleCharacter(9, "Guest", emptyCharacterItems())] }],
@@ -133,8 +150,9 @@ test("every stat field survives, a name included", () => {
     (stats[key] as number) = 1000 + key.length;
   }
   const character = characterDataOf(stats);
-  const back = readSave(saveJson(new Map([["a", { password: "p", characters: [character] }]]))).get("a")!
-    .characters[0]!;
+  const back = readSave(saveJson(new Map([["a", { password: "p", characters: [character] }]]))).get(
+    "a",
+  )!.characters[0]!;
   assert.deepEqual(back.stats, character.stats);
   assert.equal(back.stats.name, "AllFields");
 });
@@ -144,7 +162,12 @@ test("every equip stat survives", () => {
   for (const [index, stat] of EQUIP_STATS.entries()) item[stat] = 100 + index;
   const items = startingCharacterItems(24);
   items.worn.set(1, item);
-  const table = new Map([["a", { password: "p", characters: [characterDataOf({ ...zeroStats(), id: 1, name: "E" }, items)] }]]);
+  const table = new Map([
+    [
+      "a",
+      { password: "p", characters: [characterDataOf({ ...zeroStats(), id: 1, name: "E" }, items)] },
+    ],
+  ]);
   const back = readSave(saveJson(table)).get("a")!.characters[0]!.items!.worn.get(1)!;
   assert.deepEqual(back, item);
 });
@@ -152,14 +175,23 @@ test("every equip stat survives", () => {
 test("flags are derived on load, not stored: an item block is announced to the client", () => {
   const table = sampleTable();
   const text = saveJson(table);
-  assert.equal(text.includes("\"flags\""), false, "the flags byte is a function of the record, not a field");
+  assert.equal(
+    text.includes('"flags"'),
+    false,
+    "the flags byte is a function of the record, not a field",
+  );
   const hero = readSave(text).get("admin")!.characters[0]!;
   // Every block that holds something (or that has slots) is announced: `sampleItems` uses both worn
   // groups, tabs 2 and 4, and both record maps, so the derived byte is all seven bits.
   assert.equal(
     hero.flags,
-    CHAR_FLAG_STATS | CHAR_FLAG_ITEMS | CHAR_FLAG_INVENTORY_2 | CHAR_FLAG_INVENTORY_3 | CHAR_FLAG_INVENTORY_4 |
-      CHAR_FLAG_MAP32 | CHAR_FLAG_MAPSTR,
+    CHAR_FLAG_STATS |
+      CHAR_FLAG_ITEMS |
+      CHAR_FLAG_INVENTORY_2 |
+      CHAR_FLAG_INVENTORY_3 |
+      CHAR_FLAG_INVENTORY_4 |
+      CHAR_FLAG_MAP32 |
+      CHAR_FLAG_MAPSTR,
   );
   // …and a stat-only record is the bare flags byte plus the 69-byte stat block (FINDINGS 4.9).
   const bare = readSave(text).get("admin")!.characters[1]!;
@@ -180,12 +212,20 @@ test("a hand-written file with items but no flags still announces them", () => {
             // The minimum a worn equip can be: `stats` is a partial map, so a field it does not
             // mention stays 0 ("a shape that does not fit is not a value").
             items: {
-              worn: [[5, { kind: "equip", itemId: 1000000, cash: null, ruc: 7, cuc: 0, stats: { str: 3 } }]],
+              worn: [
+                [
+                  5,
+                  { kind: "equip", itemId: 1000000, cash: null, ruc: 7, cuc: 0, stats: { str: 3 } },
+                ],
+              ],
               // Tab 0 is the equip tab (the codec passes the equip hint for it), so the consumable
               // goes into tab 1 - the array index *is* the tab, like `CharacterData.inventories`.
               inventories: [
                 { capacity: 0, items: [] },
-                { capacity: 24, items: [[2, { kind: "nonequip", itemId: 2000000, cash: null, quantity: 2 }]] },
+                {
+                  capacity: 24,
+                  items: [[2, { kind: "nonequip", itemId: 2000000, cash: null, quantity: 2 }]],
+                },
               ],
             },
           },
@@ -203,7 +243,10 @@ test("a hand-written file with items but no flags still announces them", () => {
 });
 
 test("a save whose records hold nothing the file mentions keeps the fresh values", () => {
-  const save = { version: SAVE_VERSION, accounts: { admin: { password: "p", characters: [{ stats: { id: 3, name: "Solo" } }] } } };
+  const save = {
+    version: SAVE_VERSION,
+    accounts: { admin: { password: "p", characters: [{ stats: { id: 3, name: "Solo" } }] } },
+  };
   const character = readSave(JSON.stringify(save)).get("admin")!.characters[0]!;
   assert.deepEqual({ ...character.stats, id: 0, name: "" }, zeroStats());
   assert.equal(character.stats.id, 3);
@@ -212,14 +255,23 @@ test("a save whose records hold nothing the file mentions keeps the fresh values
 });
 
 test("a version this build does not write is refused, not loaded halfway", () => {
-  assert.throws(() => readSave(JSON.stringify({ version: SAVE_VERSION + 1, accounts: {} })), /version 2/);
-  assert.throws(() => readSave(JSON.stringify({ version: undefined, accounts: {} })), /version undefined/);
+  assert.throws(
+    () => readSave(JSON.stringify({ version: SAVE_VERSION + 1, accounts: {} })),
+    /version 2/,
+  );
+  assert.throws(
+    () => readSave(JSON.stringify({ version: undefined, accounts: {} })),
+    /version undefined/,
+  );
   assert.throws(() => readSave("{ not json"), /not JSON/);
 });
 
 test("a character without identity is refused", () => {
   const wrap = (stats: unknown): string =>
-    JSON.stringify({ version: SAVE_VERSION, accounts: { admin: { password: "p", characters: [{ stats }] } } });
+    JSON.stringify({
+      version: SAVE_VERSION,
+      accounts: { admin: { password: "p", characters: [{ stats }] } },
+    });
   assert.throws(() => readSave(wrap({ name: "NoId" })), /no numeric id/);
   assert.throws(() => readSave(wrap({ id: 4 })), /name of character 4 is not a string/);
 });
@@ -237,17 +289,38 @@ test("a record the client could not be told about is refused at load, not at log
   // the file has to be refused rather than sent as a truncated `0x16`.
   const items = startingCharacterItems(24);
   items.inventories[1]!.items.set(30, nonEquipSlot(2000000, 1));
-  const overfull = new Map([["a", { password: "p", characters: [characterDataOf({ ...zeroStats(), id: 1, name: "X" }, items)] }]]);
+  const overfull = new Map([
+    [
+      "a",
+      { password: "p", characters: [characterDataOf({ ...zeroStats(), id: 1, name: "X" }, items)] },
+    ],
+  ]);
   assert.throws(() => readSave(saveJson(overfull)), /cannot be sent to a client.*capacity/s);
 
   // A name the 13-byte field cannot hold (the same check the create path uses, `nameFieldBytes`).
-  const longName = new Map([["a", { password: "p", characters: [sampleCharacter(2, "A".repeat(13), emptyCharacterItems())] }]]);
+  const longName = new Map([
+    [
+      "a",
+      { password: "p", characters: [sampleCharacter(2, "A".repeat(13), emptyCharacterItems())] },
+    ],
+  ]);
   assert.throws(() => readSave(saveJson(longName)), /cannot be sent to a client.*allows 12/s);
 
   // A slot that is neither of the two kinds the client knows cannot be guessed at either.
-  const badKind = { version: SAVE_VERSION, accounts: { a: { password: "p", characters: [
-    { stats: { id: 2, name: "K" }, items: { worn: [[1, { kind: "maybe", itemId: 1000000 }]] } },
-  ] } } };
+  const badKind = {
+    version: SAVE_VERSION,
+    accounts: {
+      a: {
+        password: "p",
+        characters: [
+          {
+            stats: { id: 2, name: "K" },
+            items: { worn: [[1, { kind: "maybe", itemId: 1000000 }]] },
+          },
+        ],
+      },
+    },
+  };
   assert.throws(() => readSave(JSON.stringify(badKind)), /item 1000000 with kind "maybe"/);
 });
 
@@ -255,10 +328,14 @@ test("the same world saves to the same bytes, whatever order the accounts arrive
   const first = saveJson(sampleTable());
   assert.equal(saveJson(sampleTable()), first, "an unchanged world is byte-identical");
   const reversed = new Map([...sampleTable().entries()].reverse());
-  assert.equal(saveJson(reversed), first, "accounts are written by name, so a diff is about the world");
+  assert.equal(
+    saveJson(reversed),
+    first,
+    "accounts are written by name, so a diff is about the world",
+  );
   // And an account whose name JSON would treat specially is a key like any other.
   const odd = new Map<string, AccountRecord>([["__proto__", { password: "p", characters: [] }]]);
-  assert.equal(saveJson(odd).includes("\"__proto__\""), true);
+  assert.equal(saveJson(odd).includes('"__proto__"'), true);
   assert.deepEqual([...readSave(saveJson(odd)).keys()], ["__proto__"]);
 });
 
@@ -269,7 +346,11 @@ test("the file store writes the file, leaves no .tmp, and reads it back", (t) =>
   assert.equal(store.load(), undefined, "no file yet is the normal first run");
   store.save(sampleTable());
   assert.equal(existsSync(path), true);
-  assert.equal(existsSync(`${path}.tmp`), false, "the temporary file is renamed away, not left behind");
+  assert.equal(
+    existsSync(`${path}.tmp`),
+    false,
+    "the temporary file is renamed away, not left behind",
+  );
   assert.deepEqual(store.load(), sampleTable());
 });
 
@@ -294,7 +375,10 @@ test("a save that cannot be written is a log line, not an exception into the con
   const blocker = join(dir, "file");
   writeFileSync(blocker, "not a directory\n");
   const lines: string[] = [];
-  const store = new FileSaveStore({ path: join(blocker, "world.json"), log: (line) => lines.push(line) });
+  const store = new FileSaveStore({
+    path: join(blocker, "world.json"),
+    log: (line) => lines.push(line),
+  });
   store.save(sampleTable()); // must not throw: this runs inside a socket's event handler
   assert.equal(lines.length, 1);
   assert.match(lines[0]!, /could not be written/);
@@ -303,7 +387,10 @@ test("a save that cannot be written is a log line, not an exception into the con
 test("the load is logged with what came back", (t) => {
   const dir = tempDir(t);
   const lines: string[] = [];
-  const store = new FileSaveStore({ path: join(dir, "world.json"), log: (line) => lines.push(line) });
+  const store = new FileSaveStore({
+    path: join(dir, "world.json"),
+    log: (line) => lines.push(line),
+  });
   store.save(sampleTable());
   lines.length = 0;
   store.load();
@@ -315,7 +402,11 @@ test("--account seeds a first run, and the file wins over it on every run after 
   const lines: string[] = [];
 
   const empty = new MemorySaveStore();
-  assert.equal(loadAccounts(empty, seed, (line) => lines.push(line)), seed, "no save yet: the seed is the world");
+  assert.equal(
+    loadAccounts(empty, seed, (line) => lines.push(line)),
+    seed,
+    "no save yet: the seed is the world",
+  );
 
   const store = new MemorySaveStore();
   store.save(sampleTable());
@@ -336,5 +427,5 @@ test("the save file is JSON a person can read: named stats, and serial numbers t
   assert.equal(hero["id"], 3);
   // The one shape JSON has no number for: a `u64` serial number is text, so it cannot be rounded.
   assert.match(text, /"sn": "1234605616436508552"/);
-  assert.equal((0x1122334455667788n).toString(), "1234605616436508552");
+  assert.equal(0x1122334455667788n.toString(), "1234605616436508552");
 });

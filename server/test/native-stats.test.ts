@@ -8,7 +8,7 @@ import {
   statTotals,
   detailRows,
   type StatItem,
-} from "../../client/characterstats.mjs";
+} from "../../client/characterstats.ts";
 import { characterDataOf, zeroStats } from "../src/protocol/chardata.ts";
 import { equipSlot } from "../src/protocol/itemslot.ts";
 import { characterStatBasis } from "../src/game/characterstats.ts";
@@ -40,10 +40,7 @@ const item = (slot: number, str = 0, reqStr = 0): StatItem => ({
 });
 test("4C5020 excludes self qualification and restarts after each failure", () => {
   assert.deepEqual(effectiveWorn(stats(), [item(1, 20, 10)]), []);
-  assert.deepEqual(
-    effectiveWorn(stats(), [item(1, 5, 10), item(8, 20, 10)]),
-    [],
-  );
+  assert.deepEqual(effectiveWorn(stats(), [item(1, 5, 10), item(8, 20, 10)]), []);
   assert.deepEqual(
     effectiveWorn(stats(), [item(8, 8, 10), item(1, 8, 10)]).map((i) => i.slot),
     [1, 8],
@@ -55,11 +52,7 @@ test("4C5020 excludes self qualification and restarts after each failure", () =>
     "exclude replacement before evaluating dependencies",
   );
   const bow = { ...item(11), itemId: 1452000 };
-  assert.deepEqual(
-    effectiveWorn(stats(200), [bow]),
-    [],
-    "native mage weapon whitelist",
-  );
+  assert.deepEqual(effectiveWorn(stats(200), [bow]), [], "native mage weapon whitelist");
 });
 test("4C5420/5740 use signed instance stats, job-dependent ACC and independent truncations", () => {
   const worn = {
@@ -71,11 +64,7 @@ test("4C5420/5740 use signed instance stats, job-dependent ACC and independent t
   assert.equal(basis.basic.maxHp, 70);
   assert.equal(basis.secondary.acc, 13);
   assert.equal(basis.secondary.eva, 6);
-  assert.equal(
-    basis.secondary.hands,
-    33,
-    "equipment craft is not added by this native function",
-  );
+  assert.equal(basis.secondary.hands, 33, "equipment craft is not added by this native function");
   assert.equal(basis.secondary.mad, 15);
   assert.equal(basis.secondary.mdd, 15);
   assert.equal(statBasis(stats(300), []).secondary.acc, 7);
@@ -107,9 +96,7 @@ test("4C7960 consumes seven RNG words even on MISS; PD and weapon rather than jo
     dex: 20,
     int: 200,
   });
-  const basis = statBasis(character.stats, [
-    { ...item(11), itemId: 1302000, stats: { pad: 100 } },
-  ]);
+  const basis = statBasis(character.stats, [{ ...item(11), itemId: 1302000, stats: { pad: 100 } }]);
   let draws = 0;
   const next = () => {
     draws++;
@@ -172,5 +159,9 @@ test("shipped WZ: instance PAD overrides template; Nimble/ Amazon and actual pot
     assert.equal(spec.time, time);
     assert.deepEqual(spec.unapplied, []);
   }
-  assert.deepEqual(consumeSpecOf(archive, 2002000)!.unapplied, [], "stream 2 contact now consumes EVA");
+  assert.deepEqual(
+    consumeSpecOf(archive, 2002000)!.unapplied,
+    [],
+    "stream 2 contact now consumes EVA",
+  );
 });

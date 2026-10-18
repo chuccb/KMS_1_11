@@ -7,7 +7,9 @@ import {
   firstBasicAmmo,
   spendBasicAmmo,
   isCompatibleAmmo,
-  basicAttackProvider, basicShotRange, basicAttackAction,
+  basicAttackProvider,
+  basicShotRange,
+  basicAttackAction,
   basicProjectileFrames,
 } from "../src/game/basicattack.ts";
 import { emptyCharacterItems, characterDataOf } from "../src/protocol/chardata.ts";
@@ -52,11 +54,7 @@ test("511630: compatible family, numerical slots, empty stars skipped and no mut
   );
   assert.deepEqual(use.get(5), nonEquipSlot(2070000, 1));
   spendBasicAmmo(items, 5);
-  assert.deepEqual(
-    use.get(5),
-    nonEquipSlot(2070000, 0),
-    "keep an empty rechargeable set",
-  );
+  assert.deepEqual(use.get(5), nonEquipSlot(2070000, 0), "keep an empty rechargeable set");
   assert.deepEqual(firstBasicAmmo(items), { slot: 12, itemId: 2070001 });
 });
 
@@ -111,10 +109,7 @@ test("0x10 empty basic shot keeps hits=1 and the USE slot; 0x24 empty relay keep
     targets: [],
   };
   const packet = encodeUserAttack(relay, 0x24);
-  assert.deepEqual(
-    [...packet],
-    [0x24, 7, 0, 0, 0, 1, 0, 24, 2, 0, 0xf0, 0x95, 0x1f, 0],
-  );
+  assert.deepEqual([...packet], [0x24, 7, 0, 0, 0, 1, 0, 24, 2, 0, 0xf0, 0x95, 0x1f, 0]);
   assert.deepEqual(readUserAttack(new PacketReader(packet, 1)), relay);
 });
 
@@ -159,39 +154,88 @@ test(
 );
 
 // Added 2026-10-18 as source only; NOT executed or used as evidence of a passing implementation.
-test("all native weapon groups retain a separate WZ prone32, real indices/sfx/bounds and composable art",{skip:!existsSync(data)},()=>{
-  const wz=WzArchive.open(data),provider=basicAttackProvider(artReaderOf(wz)!);
-  for(const id of [1302000,1312000,1322000,1332000,1372000,1382000,1402000,1412000,1422000,1432000,1442000,1452000,1462000,1472000]) {
-    const profile=provider(id)!,action=profile.prone!;
-    assert.equal(action.action,32);assert.equal(action.stance,"proneStab");
-    assert.deepEqual(action.baseDelays,[300,400]);assert.deepEqual(action.frameIndices,[0,1]);
-    assert.equal(typeof profile.sfx,"string");assert.ok(action.bounds);
-    assert.ok(profile.melee.every(a=>a.action!==32));assert.ok(profile.shoot.every(a=>a.action!==32));
-    assert.equal(basicAttackAction(profile,32),action);assert.equal(basicAttackAction(profile,32,true),undefined);
-    const look={faceId:20000,hairId:30000,items:[1040002,1060002,1072001,id]};
-    for(const flip of [false,true])for(const frame of [0,1])
-      assert.ok(composeAvatarBitmap(wz,look,{stance:"proneStab",frame,flip,planes:true}));
-  }
-  assert.equal(provider(0),undefined,"no made-up bare-hand stab");
-});
+test(
+  "all native weapon groups retain a separate WZ prone32, real indices/sfx/bounds and composable art",
+  { skip: !existsSync(data) },
+  () => {
+    const wz = WzArchive.open(data),
+      provider = basicAttackProvider(artReaderOf(wz)!);
+    for (const id of [
+      1302000, 1312000, 1322000, 1332000, 1372000, 1382000, 1402000, 1412000, 1422000, 1432000,
+      1442000, 1452000, 1462000, 1472000,
+    ]) {
+      const profile = provider(id)!,
+        action = profile.prone!;
+      assert.equal(action.action, 32);
+      assert.equal(action.stance, "proneStab");
+      assert.deepEqual(action.baseDelays, [300, 400]);
+      assert.deepEqual(action.frameIndices, [0, 1]);
+      assert.equal(typeof profile.sfx, "string");
+      assert.ok(action.bounds);
+      assert.ok(profile.melee.every((a) => a.action !== 32));
+      assert.ok(profile.shoot.every((a) => a.action !== 32));
+      assert.equal(basicAttackAction(profile, 32), action);
+      assert.equal(basicAttackAction(profile, 32, true), undefined);
+      const look = { faceId: 20000, hairId: 30000, items: [1040002, 1060002, 1072001, id] };
+      for (const flip of [false, true])
+        for (const frame of [0, 1])
+          assert.ok(
+            composeAvatarBitmap(wz, look, { stance: "proneStab", frame, flip, planes: true }),
+          );
+    }
+    assert.equal(provider(0), undefined, "no made-up bare-hand stab");
+  },
+);
 
-test("513C80 range uses numerical WZ learned levels; 4BD3C1 field+76, no current-job filter",{skip:!existsSync(data)},()=>{
-  const catalog=skillCatalogOf(WzArchive.open(data));
-  for(const [weapon,skill] of [[1452000,3000002],[1462000,3000002],[1472000,4000001]]) {
-    const items=bag(weapon!),c=characterDataOf({id:1,name:"Range",job:0},items);
-    assert.equal(basicShotRange(c,catalog),200);
-    items.map32=[{key:skill!,value:1}];assert.equal(basicShotRange(c,catalog),225);
-    items.map32=[{key:skill!,value:8}];assert.equal(basicShotRange(c,catalog),400);
-    items.map32=[{key:skill!,value:99}];assert.equal(basicShotRange(c,catalog),400);
-    items.map32.push({key:skill!,value:0});assert.equal(basicShotRange(c,catalog),200,"last learned record wins");
-  }
-});
+test(
+  "513C80 range uses numerical WZ learned levels; 4BD3C1 field+76, no current-job filter",
+  { skip: !existsSync(data) },
+  () => {
+    const catalog = skillCatalogOf(WzArchive.open(data));
+    for (const [weapon, skill] of [
+      [1452000, 3000002],
+      [1462000, 3000002],
+      [1472000, 4000001],
+    ]) {
+      const items = bag(weapon!),
+        c = characterDataOf({ id: 1, name: "Range", job: 0 }, items);
+      assert.equal(basicShotRange(c, catalog), 200);
+      items.map32 = [{ key: skill!, value: 1 }];
+      assert.equal(basicShotRange(c, catalog), 225);
+      items.map32 = [{ key: skill!, value: 8 }];
+      assert.equal(basicShotRange(c, catalog), 400);
+      items.map32 = [{ key: skill!, value: 99 }];
+      assert.equal(basicShotRange(c, catalog), 400);
+      items.map32.push({ key: skill!, value: 0 });
+      assert.equal(basicShotRange(c, catalog), 200, "last learned record wins");
+    }
+  },
+);
 
-test("prone attack preserves action32/facing in both 0x0F and 0x23 without a projectile slot",()=>{
-  const attack={hits:1,targetCount:0,skillId:0,facingLeft:true,action:32,speed:2,targets:[]};
-  const bytes=encodeClientAttack(attack);
-  assert.deepEqual([...bytes],[0x0f,1,0,0,0,0,0xa0,2]);
-  assert.deepEqual(readClientAttack(new PacketReader(bytes,1)),attack);
-  const relay={characterId:7,hits:1,skillLevel:0,skillId:0,facingLeft:true,action:32,speed:2,afterimage:0,projectileItemId:0,targets:[]};
-  assert.deepEqual(readUserAttack(new PacketReader(encodeUserAttack(relay),1)),relay);
+test("prone attack preserves action32/facing in both 0x0F and 0x23 without a projectile slot", () => {
+  const attack = {
+    hits: 1,
+    targetCount: 0,
+    skillId: 0,
+    facingLeft: true,
+    action: 32,
+    speed: 2,
+    targets: [],
+  };
+  const bytes = encodeClientAttack(attack);
+  assert.deepEqual([...bytes], [0x0f, 1, 0, 0, 0, 0, 0xa0, 2]);
+  assert.deepEqual(readClientAttack(new PacketReader(bytes, 1)), attack);
+  const relay = {
+    characterId: 7,
+    hits: 1,
+    skillLevel: 0,
+    skillId: 0,
+    facingLeft: true,
+    action: 32,
+    speed: 2,
+    afterimage: 0,
+    projectileItemId: 0,
+    targets: [],
+  };
+  assert.deepEqual(readUserAttack(new PacketReader(encodeUserAttack(relay), 1)), relay);
 });

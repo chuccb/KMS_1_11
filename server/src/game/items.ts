@@ -1,4 +1,4 @@
-import type {TemporaryStatUpdate} from "../protocol/temporarystat.ts";
+import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 /**
  * Using a consumable: what an item in the USE tab does, and what the server does about it.
  *
@@ -51,7 +51,7 @@ import type { CharacterStats } from "../protocol/chardata.ts";
 import type { VitalReport } from "./vitals.ts";
 
 /** The `spec` fields this server knows how to apply, in the order the archive lists them. */
-export const TIMED_CONSUME_FIELDS=["speed","pad","mad","acc","eva","pdd"] as const;
+export const TIMED_CONSUME_FIELDS = ["speed", "pad", "mad", "acc", "eva", "pdd"] as const;
 const APPLIED_SPEC_FIELDS = ["hp", "mp", "hpR", "mpR"] as const;
 
 /**
@@ -73,7 +73,7 @@ export interface ConsumeSpec {
   /** Destination of a 203-family item; `-1` is "the nearest town" (`spec/moveTo`). */
   moveTo?: number;
   /** Implemented timed mechanics: movement, physical attack, magic MAD, accuracy and contact evasion/defence. */
-  mad?:number;
+  mad?: number;
   pad?: number;
   acc?: number;
   eva?: number;
@@ -116,29 +116,16 @@ export function consumeSpecOf(
   const fields = new Set(Object.keys(spec));
   const read = (name: string): number | undefined => {
     const value = spec[name];
-    return typeof value === "number" && Number.isFinite(value)
-      ? value
-      : undefined;
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   };
   const applied = new Set<string>([...APPLIED_SPEC_FIELDS, MOVE_TO_FIELD]);
   // Only mechanics with a live consumer are accepted. MDD/unknown mechanics still refuse whole items.
   const time = read("time");
-  const timed: Pick<ConsumeSpec, typeof TIMED_CONSUME_FIELDS[number] | "time"> = {};
-  if (
-    time !== undefined &&
-    Number.isInteger(time) &&
-    time > 0 &&
-    time <= 0x7fffffff
-  ) {
+  const timed: Pick<ConsumeSpec, (typeof TIMED_CONSUME_FIELDS)[number] | "time"> = {};
+  if (time !== undefined && Number.isInteger(time) && time > 0 && time <= 0x7fffffff) {
     for (const key of TIMED_CONSUME_FIELDS) {
       const n = read(key);
-      if (
-        n !== undefined &&
-        Number.isInteger(n) &&
-        n !== 0 &&
-        n >= -32768 &&
-        n <= 32767
-      ) {
+      if (n !== undefined && Number.isInteger(n) && n !== 0 && n >= -32768 && n <= 32767) {
         timed[key] = n;
         applied.add(key);
       }
@@ -155,9 +142,7 @@ export function consumeSpecOf(
     mpR: read("mpR"),
     moveTo: read(MOVE_TO_FIELD),
     ...timed,
-    unapplied: [...fields].filter(
-      (name) => !applied.has(name) && typeof spec[name] === "number",
-    ),
+    unapplied: [...fields].filter((name) => !applied.has(name) && typeof spec[name] === "number"),
   };
 }
 
@@ -190,16 +175,11 @@ export function healsVitals(spec: ConsumeSpec): boolean {
  * does not divide is a partial point the client's bar cannot show anyway (a choice: the 2003
  * server's rounding is not in the binary).
  */
-export function consumeDeltas(
-  spec: ConsumeSpec,
-  stats: CharacterStats,
-): VitalReport {
+export function consumeDeltas(spec: ConsumeSpec, stats: CharacterStats): VitalReport {
   const percent = (rate: number | undefined, max: number): number =>
     rate === undefined
       ? 0
-      : Math.floor(
-          (Math.max(0, Math.trunc(max)) * Math.max(0, Math.trunc(rate))) / 100,
-        );
+      : Math.floor((Math.max(0, Math.trunc(max)) * Math.max(0, Math.trunc(rate))) / 100);
   const hpDelta = (spec.hp ?? 0) + percent(spec.hpR, stats.maxHp);
   const mpDelta = (spec.mp ?? 0) + percent(spec.mpR, stats.maxMp);
   const report: VitalReport = {};
@@ -210,12 +190,26 @@ export function consumeDeltas(
 
 /** Same allowlist as the spec reader: a decoded EVA/PDD/MAD must reach the wire and ledger.
  * Missing duration/unsupported fields refuses the WHOLE item; no partial effect/consumption. */
-export function consumeTemporary(spec:ConsumeSpec,itemId:number):TemporaryStatUpdate|undefined {
-  if(spec.unapplied.length||!Number.isInteger(spec.time)||!spec.time||spec.time<=0||spec.time>0x7fffffff)return;
-  const values:TemporaryStatUpdate['values']={};
-  for(const key of TIMED_CONSUME_FIELDS)if(spec[key]!==undefined){
-    const value=spec[key]!;if(!Number.isInteger(value)||value===0||value< -32768||value>32767)return;
-    values[key]=value;
-  }
-  return Object.keys(values).length?{durationMs:spec.time,values,sourceIsSkill:false,sourceId:itemId}:undefined;
+export function consumeTemporary(
+  spec: ConsumeSpec,
+  itemId: number,
+): TemporaryStatUpdate | undefined {
+  if (
+    spec.unapplied.length ||
+    !Number.isInteger(spec.time) ||
+    !spec.time ||
+    spec.time <= 0 ||
+    spec.time > 0x7fffffff
+  )
+    return;
+  const values: TemporaryStatUpdate["values"] = {};
+  for (const key of TIMED_CONSUME_FIELDS)
+    if (spec[key] !== undefined) {
+      const value = spec[key]!;
+      if (!Number.isInteger(value) || value === 0 || value < -32768 || value > 32767) return;
+      values[key] = value;
+    }
+  return Object.keys(values).length
+    ? { durationMs: spec.time, values, sourceIsSkill: false, sourceId: itemId }
+    : undefined;
 }

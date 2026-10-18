@@ -11,7 +11,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC } from "../src/protocol/cipher.ts";
-import { encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/protocol/session.ts";
+import {
+  encodeSessionPacket,
+  SessionDeframer,
+  type SessionEvent,
+} from "../src/protocol/session.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeClientPacket, type ClientPacket } from "../src/protocol/login.ts";
 import {
@@ -66,7 +70,12 @@ import {
   readDropRemove,
   readLootNotice,
 } from "../src/protocol/drop.ts";
-import { INVENTORY_OP, INVENTORY_OPCODE, INVENTORY_TAB, readInventoryChange } from "../src/protocol/inventory.ts";
+import {
+  INVENTORY_OP,
+  INVENTORY_OPCODE,
+  INVENTORY_TAB,
+  readInventoryChange,
+} from "../src/protocol/inventory.ts";
 import {
   MOB_OPCODE,
   readMobEnterField,
@@ -92,16 +101,8 @@ import {
   readMessengerResult,
 } from "../src/protocol/messenger.ts";
 import { grantItem } from "../src/game/rewards.ts";
-import {
-  PARTY_OPCODE,
-  encodeClientPartyRequest,
-  readPartyResult,
-} from "../src/protocol/party.ts";
-import {
-  FAME_OPCODE,
-  encodeClientFameRequest,
-  readFameResult,
-} from "../src/protocol/fame.ts";
+import { PARTY_OPCODE, encodeClientPartyRequest, readPartyResult } from "../src/protocol/party.ts";
+import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../src/protocol/fame.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
   CLIENT_SHOP_OPCODE,
@@ -126,7 +127,12 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { MapData } from "../src/game/map.ts";
 import { CREATE_CHARACTER_RESULT, LOGIN_OPCODE, LOGIN_RESULT } from "../src/protocol/replies.ts";
-import { GameEntryServer, HandoffRegistry, LoginServer, type AccountRecord } from "../src/net/loginserver.ts";
+import {
+  GameEntryServer,
+  HandoffRegistry,
+  LoginServer,
+  type AccountRecord,
+} from "../src/net/loginserver.ts";
 import { MemorySaveStore, loadAccounts } from "../src/game/save.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
@@ -149,7 +155,9 @@ class FakeClient {
     this.serverSendSeed = 0;
     socket.on("data", (chunk) => {
       const before = this.deframer.awaitingHandshake;
-      for (const event of this.deframer.push(new Uint8Array(chunk))) {
+      for (const event of this.deframer.push(
+        new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
+      )) {
         if (event.kind === "handshake") {
           // The client adopts the seeds the server chose; its send state is seeded from them.
           this.sendState = new CipherState(event.handshake.sendSeed);
@@ -208,7 +216,10 @@ class FakeClient {
     }
     const taken = this.queue.splice(0, count).map((event) => event.plain);
     if (process.env.SERVE_TEST_DEBUG) {
-      for (const body of taken) process.stderr.write(`[test] s2c ${[...body].map((b) => b.toString(16).padStart(2, "0")).join("")}\n`);
+      for (const body of taken)
+        process.stderr.write(
+          `[test] s2c ${[...body].map((b) => b.toString(16).padStart(2, "0")).join("")}\n`,
+        );
     }
     return taken;
   }
@@ -327,7 +338,8 @@ function parseLoginReply(bytes: Uint8Array): {
   const app9 = reader.readByte();
   const count = reader.readByte();
   const worlds: { name: string; unknownId: number }[] = [];
-  for (let i = 0; i < count; i++) worlds.push({ name: reader.readAsciiString(), unknownId: reader.readU32() });
+  for (let i = 0; i < count; i++)
+    worlds.push({ name: reader.readAsciiString(), unknownId: reader.readU32() });
   assert.equal(reader.exhausted, true);
   return { result, account: { app4, app8, app9 }, worlds };
 }
@@ -421,13 +433,21 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
     ],
     "and wears words 3..6 as worn equips, in the slot each item's part code names (sub_45F340)",
   );
-  assert.deepEqual([created.stats.str, created.stats.dex, created.stats.int, created.stats.luk], [4,5,6,10]);
+  assert.deepEqual(
+    [created.stats.str, created.stats.dex, created.stats.int, created.stats.luk],
+    [4, 5, 6, 10],
+  );
   assert.equal(created.stats.level, 1);
   assert.ok(created.stats.id > 0);
   assert.equal(createReader.exhausted, true);
 
   // 6. The same name is now taken.
-  client.send({ kind: "check-name", opcode: 0x06, name: "Hero", appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10] });
+  client.send({
+    kind: "check-name",
+    opcode: 0x06,
+    name: "Hero",
+    appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
+  });
   const takenReply = (await client.take(1))[0]!;
   const takenReader = new PacketReader(takenReply);
   takenReader.readByte();
@@ -477,112 +497,130 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
  * whole thing: a second login is refused while the first player is in the field, another account is
  * unaffected, and the seat comes back when the session really ends.
  */
-test("a second login for an account that is already online is refused with 7", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const online = new OnlineAccounts();
-  const accounts = new Map<string, AccountRecord>([
-    ["admin", { password: "admin", characters: [] }],
-    ["guest", { password: "guest", characters: [] }],
-  ]);
-  const stats = zeroStats();
-  stats.id = 21;
-  stats.name = "Hero";
-  stats.level = 1;
-  stats.hp = 50;
-  stats.maxHp = 50;
-  stats.mapId = 1000000;
-  accounts.get("admin")!.characters.push(characterDataOf(stats, startingCharacterItems()));
+test(
+  "a second login for an account that is already online is refused with 7",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const online = new OnlineAccounts();
+    const accounts = new Map<string, AccountRecord>([
+      ["admin", { password: "admin", characters: [] }],
+      ["guest", { password: "guest", characters: [] }],
+    ]);
+    const stats = zeroStats();
+    stats.id = 21;
+    stats.name = "Hero";
+    stats.level = 1;
+    stats.hp = 50;
+    stats.maxHp = 50;
+    stats.mapId = 1000000;
+    accounts.get("admin")!.characters.push(characterDataOf(stats, startingCharacterItems()));
 
-  const game = new GameEntryServer({
-    handoffs,
-    online,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  const login = new LoginServer({
-    accounts,
-    worlds: [{ name: "Scania", unknownId: 0 }],
-    gameServer: { ip: "127.0.0.1", port: gameInfo.port },
-    handoffs,
-    online,
-    handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
-    log: (line) => log.push(line),
-  });
-  const loginInfo = await login.listen(0);
-  t.after(async () => {
-    await login.close();
-    await game.close();
-  });
+    const game = new GameEntryServer({
+      handoffs,
+      online,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    const login = new LoginServer({
+      accounts,
+      worlds: [{ name: "Scania", unknownId: 0 }],
+      gameServer: { ip: "127.0.0.1", port: gameInfo.port },
+      handoffs,
+      online,
+      handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
+      log: (line) => log.push(line),
+    });
+    const loginInfo = await login.listen(0);
+    t.after(async () => {
+      await login.close();
+      await game.close();
+    });
 
-  /** Logs in and returns the result byte, leaving the connection open. */
-  const openLogin = async (username: string, password: string): Promise<{ client: FakeClient; result: number }> => {
-    const client = await FakeClient.connect(loginInfo.port);
-    client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-    client.send({ kind: "login-request", opcode: 0x01, username, password });
-    return { client, result: parseLoginReply((await client.take(1))[0]!).result };
-  };
+    /** Logs in and returns the result byte, leaving the connection open. */
+    const openLogin = async (
+      username: string,
+      password: string,
+    ): Promise<{ client: FakeClient; result: number }> => {
+      const client = await FakeClient.connect(loginInfo.port);
+      client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+      client.send({ kind: "login-request", opcode: 0x01, username, password });
+      return { client, result: parseLoginReply((await client.take(1))[0]!).result };
+    };
 
-  // 1. The player logs in and enters the map.
-  const hero = await openLogin("admin", "admin");
-  assert.equal(hero.result, LOGIN_RESULT.ok);
-  hero.client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
-  await hero.client.take(1);
-  hero.client.send({ kind: "select-character", opcode: 0x03, characterId: 21 });
-  const selectReader = new PacketReader((await hero.client.take(1))[0]!);
-  selectReader.readByte();
-  selectReader.readByte();
-  selectReader.readU32();
-  selectReader.readU16();
-  const issuedId = selectReader.readU32();
-  const inGame = await FakeClient.connect(gameInfo.port);
-  inGame.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
-  assert.equal((await inGame.take(1))[0]![0], FIELD_OPCODE.setField, "0x16: the character is in the map");
+    // 1. The player logs in and enters the map.
+    const hero = await openLogin("admin", "admin");
+    assert.equal(hero.result, LOGIN_RESULT.ok);
+    hero.client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+    await hero.client.take(1);
+    hero.client.send({ kind: "select-character", opcode: 0x03, characterId: 21 });
+    const selectReader = new PacketReader((await hero.client.take(1))[0]!);
+    selectReader.readByte();
+    selectReader.readByte();
+    selectReader.readU32();
+    selectReader.readU16();
+    const issuedId = selectReader.readU32();
+    const inGame = await FakeClient.connect(gameInfo.port);
+    inGame.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
+    assert.equal(
+      (await inGame.take(1))[0]![0],
+      FIELD_OPCODE.setField,
+      "0x16: the character is in the map",
+    );
 
-  // 2. The login connection goes away - which is what the real client does once the 0x03 reply has
-  // sent it to the game server. The seat must stay taken: the character is still standing in a map.
-  hero.client.close();
-  const loginSocketGone = Date.now() + 2000;
-  while (online.sessionsOf("admin").some((session) => session.where === "login") && Date.now() < loginSocketGone) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.deepEqual(
-    online.sessionsOf("admin").map((session) => session.where),
-    ["game"],
-    "the field session is now the one holding the account",
-  );
+    // 2. The login connection goes away - which is what the real client does once the 0x03 reply has
+    // sent it to the game server. The seat must stay taken: the character is still standing in a map.
+    hero.client.close();
+    const loginSocketGone = Date.now() + 2000;
+    while (
+      online.sessionsOf("admin").some((session) => session.where === "login") &&
+      Date.now() < loginSocketGone
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.deepEqual(
+      online.sessionsOf("admin").map((session) => session.where),
+      ["game"],
+      "the field session is now the one holding the account",
+    );
 
-  // 3. A second login for the same account is refused - and the client has a message for exactly
-  // this result byte (FINDINGS 4.8).
-  const second = await openLogin("admin", "admin");
-  assert.equal(second.result, LOGIN_RESULT.alreadyConnected);
-  assert.equal(second.result, 7);
-  second.client.close();
-  assert.ok(
-    log.some((line) => line.includes('"admin" is already online (game 127.0.0.1:')),
-    log.join("\n"),
-  );
+    // 3. A second login for the same account is refused - and the client has a message for exactly
+    // this result byte (FINDINGS 4.8).
+    const second = await openLogin("admin", "admin");
+    assert.equal(second.result, LOGIN_RESULT.alreadyConnected);
+    assert.equal(second.result, 7);
+    second.client.close();
+    assert.ok(
+      log.some((line) => line.includes('"admin" is already online (game 127.0.0.1:')),
+      log.join("\n"),
+    );
 
-  // 4. Another account is not affected: the seat is per account.
-  const other = await openLogin("guest", "guest");
-  assert.equal(other.result, LOGIN_RESULT.ok);
-  other.client.close();
+    // 4. Another account is not affected: the seat is per account.
+    const other = await openLogin("guest", "guest");
+    assert.equal(other.result, LOGIN_RESULT.ok);
+    other.client.close();
 
-  // 5. The player leaves the game. The next login gets in again.
-  inGame.close();
-  const deadline = Date.now() + 2000;
-  let retry = await openLogin("admin", "admin");
-  while (retry.result !== LOGIN_RESULT.ok && Date.now() < deadline) {
+    // 5. The player leaves the game. The next login gets in again.
+    inGame.close();
+    const deadline = Date.now() + 2000;
+    let retry = await openLogin("admin", "admin");
+    while (retry.result !== LOGIN_RESULT.ok && Date.now() < deadline) {
+      retry.client.close();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      retry = await openLogin("admin", "admin");
+    }
+    assert.equal(
+      retry.result,
+      LOGIN_RESULT.ok,
+      `the seat came back after the session ended; log:\n${log.join("\n")}`,
+    );
     retry.client.close();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    retry = await openLogin("admin", "admin");
-  }
-  assert.equal(retry.result, LOGIN_RESULT.ok, `the seat came back after the session ended; log:\n${log.join("\n")}`);
-  retry.client.close();
-});
+  },
+);
 
 /**
  * The same character, twice.
@@ -594,55 +632,84 @@ test("a second login for an account that is already online is refused with 7", {
  * with both connections writing the same `CharacterData` (ADR-017). So the game server refuses the
  * second connection instead, and the first one keeps playing.
  */
-test("a character that is already in a field is not entered twice", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const online = new OnlineAccounts();
-  const game = new GameEntryServer({
-    handoffs,
-    online,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a character that is already in a field is not entered twice",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const online = new OnlineAccounts();
+    const game = new GameEntryServer({
+      handoffs,
+      online,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const stats = zeroStats();
-  stats.id = 21;
-  stats.name = "Hero";
-  stats.level = 1;
-  stats.hp = 50;
-  stats.maxHp = 50;
-  stats.mapId = 1000000;
-  const entry = { username: "admin", characterId: 21, characterName: "Hero", character: characterDataOf(stats) };
+    const stats = zeroStats();
+    stats.id = 21;
+    stats.name = "Hero";
+    stats.level = 1;
+    stats.hp = 50;
+    stats.maxHp = 50;
+    stats.mapId = 1000000;
+    const entry = {
+      username: "admin",
+      characterId: 21,
+      characterName: "Hero",
+      character: characterDataOf(stats),
+    };
 
-  const first = await FakeClient.connect(gameInfo.port);
-  t.after(() => first.close());
-  first.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
-  assert.equal((await first.take(1))[0]![0], FIELD_OPCODE.setField, "the first connection gets its 0x16");
+    const first = await FakeClient.connect(gameInfo.port);
+    t.after(() => first.close());
+    first.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
+    assert.equal(
+      (await first.take(1))[0]![0],
+      FIELD_OPCODE.setField,
+      "the first connection gets its 0x16",
+    );
 
-  const second = await FakeClient.connect(gameInfo.port);
-  t.after(() => second.close());
-  second.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
-  const gone = new Promise<void>((resolve) => second.socketClose(() => resolve()));
-  await gone;
-  assert.equal(second.queueLength, 0, "no 0x16, no snapshot: nothing is sent to a refused connection");
-  assert.ok(
-    log.some((line) => line.includes('character 0x00000015 ("Hero") is already in map 1000000 - refusing the second connection')),
-    log.join("\n"),
-  );
+    const second = await FakeClient.connect(gameInfo.port);
+    t.after(() => second.close());
+    second.send({ kind: "handshake-reply", opcode: 0x04, value: handoffs.issue(entry) });
+    const gone = new Promise<void>((resolve) => second.socketClose(() => resolve()));
+    await gone;
+    assert.equal(
+      second.queueLength,
+      0,
+      "no 0x16, no snapshot: nothing is sent to a refused connection",
+    );
+    assert.ok(
+      log.some((line) =>
+        line.includes(
+          'character 0x00000015 ("Hero") is already in map 1000000 - refusing the second connection',
+        ),
+      ),
+      log.join("\n"),
+    );
 
-  // The player who was already there is untouched: chat still works, which means the field and the
-  // session are both intact (drain the entry snapshot first, or `take` would hand back a mob).
-  await first.drain();
-  first.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.chat, body: encodeClientChat({ text: encodeCp949("still here") }).slice(1) });
-  const chat = (await first.take(1))[0]!;
-  assert.equal(chat[0], FIELD_OPCODE.userBalloon, `the first session still gets its chat back; log:\n${log.join("\n")}`);
-});
+    // The player who was already there is untouched: chat still works, which means the field and the
+    // session are both intact (drain the entry snapshot first, or `take` would hand back a mob).
+    await first.drain();
+    first.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.chat,
+      body: encodeClientChat({ text: encodeCp949("still here") }).slice(1),
+    });
+    const chat = (await first.take(1))[0]!;
+    assert.equal(
+      chat[0],
+      FIELD_OPCODE.userBalloon,
+      `the first session still gets its chat back; log:\n${log.join("\n")}`,
+    );
+  },
+);
 
 /**
  * The heartbeat is what makes "already online" self-healing.
@@ -653,47 +720,53 @@ test("a character that is already in a field is not entered twice", { timeout: 2
  * the 2003 client always echoes (FINDINGS 4.2), so a session that does not answer three times is
  * dropped, and its seat goes with it.
  */
-test("a session that stops answering the 0x08 heartbeat loses its seat", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
-  const login = new LoginServer({
-    accounts,
-    worlds: [{ name: "Scania", unknownId: 0 }],
-    gameServer: { ip: "127.0.0.1", port: 1 },
-    pingMs: 40,
-    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
-    log: (line) => log.push(line),
-  });
-  const info = await login.listen(0);
-  t.after(async () => {
-    await login.close();
-  });
+test(
+  "a session that stops answering the 0x08 heartbeat loses its seat",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const accounts = new Map<string, AccountRecord>([
+      ["admin", { password: "admin", characters: [] }],
+    ]);
+    const login = new LoginServer({
+      accounts,
+      worlds: [{ name: "Scania", unknownId: 0 }],
+      gameServer: { ip: "127.0.0.1", port: 1 },
+      pingMs: 40,
+      handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+      log: (line) => log.push(line),
+    });
+    const info = await login.listen(0);
+    t.after(async () => {
+      await login.close();
+    });
 
-  // This fake client never answers a ping - it is the "cable pulled out" case.
-  const silent = await FakeClient.connect(info.port);
-  silent.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-  silent.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
-  assert.equal(parseLoginReply((await silent.take(1))[0]!).result, LOGIN_RESULT.ok);
-  assert.equal(login.online.isOnline("admin"), true);
+    // This fake client never answers a ping - it is the "cable pulled out" case.
+    const silent = await FakeClient.connect(info.port);
+    silent.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    silent.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+    assert.equal(parseLoginReply((await silent.take(1))[0]!).result, LOGIN_RESULT.ok);
+    assert.equal(login.online.isOnline("admin"), true);
 
-  const dropped = new Promise<void>((resolve) => silent.socketClose(() => resolve()));
-  const pings: number[] = [];
-  silent.collectOpcodes(pings);
-  await dropped;
-  assert.ok(pings.includes(0x08), `the server asked before giving up (saw ${pings.join(",")})`);
-  assert.ok(
-    await eventually(() => !login.online.isOnline("admin")),
-    "the seat went with the connection (its close handler runs on our side of the FIN)",
-  );
-  assert.match(log.join("\n"), /heartbeat: login 127\.0\.0\.1:\d+ sent nothing for \d+ ms/);
+    const dropped = new Promise<void>((resolve) => silent.socketClose(() => resolve()));
+    const pings: number[] = [];
+    silent.collectOpcodes(pings);
+    await dropped;
+    assert.ok(pings.includes(0x08), `the server asked before giving up (saw ${pings.join(",")})`);
+    assert.ok(
+      await eventually(() => !login.online.isOnline("admin")),
+      "the seat went with the connection (its close handler runs on our side of the FIN)",
+    );
+    assert.match(log.join("\n"), /heartbeat: login 127\.0\.0\.1:\d+ sent nothing for \d+ ms/);
 
-  // And the account can log in again, without waiting for anything.
-  const again = await FakeClient.connect(info.port);
-  again.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-  again.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
-  assert.equal(parseLoginReply((await again.take(1))[0]!).result, LOGIN_RESULT.ok);
-  again.close();
-});
+    // And the account can log in again, without waiting for anything.
+    const again = await FakeClient.connect(info.port);
+    again.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    again.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+    assert.equal(parseLoginReply((await again.take(1))[0]!).result, LOGIN_RESULT.ok);
+    again.close();
+  },
+);
 
 /**
  * A third timeout-free proof of the seat: the login server that is closed releases its seats itself.
@@ -704,7 +777,9 @@ test("a session that stops answering the 0x08 heartbeat loses its seat", { timeo
  */
 test("closing a server gives its seats back before it returns", { timeout: 20000 }, async (t) => {
   const online = new OnlineAccounts();
-  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+  const accounts = new Map<string, AccountRecord>([
+    ["admin", { password: "admin", characters: [] }],
+  ]);
   const first = new LoginServer({
     accounts,
     worlds: [{ name: "Scania", unknownId: 0 }],
@@ -741,87 +816,114 @@ test("closing a server gives its seats back before it returns", { timeout: 20000
   back.close();
 });
 
-test("the game server claims the character id the login server issued", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
-  const game = new GameEntryServer({
-    handoffs,
-    handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
-    log: (l) => log.push(l),
-  });
-  const gameInfo = await game.listen(0);
-  const login = new LoginServer({
-    accounts,
-    worlds: [{ name: "Scania", unknownId: 0 }],
-    gameServer: { ip: "127.0.0.1", port: gameInfo.port },
-    handoffs,
-    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
-    log: (line) => log.push(line),
-  });
-  const loginInfo = await login.listen(0);
-  t.after(async () => {
-    await login.close();
-    await game.close();
-  });
+test(
+  "the game server claims the character id the login server issued",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const accounts = new Map<string, AccountRecord>([
+      ["admin", { password: "admin", characters: [] }],
+    ]);
+    const game = new GameEntryServer({
+      handoffs,
+      handshake: { clientSendSeed: 0x33333333, clientRecvSeed: 0x44444444 },
+      log: (l) => log.push(l),
+    });
+    const gameInfo = await game.listen(0);
+    const login = new LoginServer({
+      accounts,
+      worlds: [{ name: "Scania", unknownId: 0 }],
+      gameServer: { ip: "127.0.0.1", port: gameInfo.port },
+      handoffs,
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      log: (line) => log.push(line),
+    });
+    const loginInfo = await login.listen(0);
+    t.after(async () => {
+      await login.close();
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(loginInfo.port);
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-  client.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
-  await client.take(1);
-  client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
-  await client.take(1);
-  client.send({ kind: "check-name", opcode: 0x06, name: "Hero", appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10] });
-  await client.take(1);
-  client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
-  const createReply = (await client.take(1))[0]!;
-  const createReader = new PacketReader(createReply);
-  createReader.readByte();
-  createReader.readByte();
-  const character = readCharacterData(createReader);
-  client.send({ kind: "select-character", opcode: 0x03, characterId: character.stats.id });
-  const selectReply = (await client.take(1))[0]!;
-  const selectReader2 = new PacketReader(selectReply);
-  selectReader2.readByte();
-  selectReader2.readByte();
-  selectReader2.readU32();
-  selectReader2.readU16();
-  const issuedId = selectReader2.readU32();
-  assert.equal(issuedId, character.stats.id, "the handoff value is the character's own id");
-  client.close();
+    const client = await FakeClient.connect(loginInfo.port);
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    client.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+    await client.take(1);
+    client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+    await client.take(1);
+    client.send({
+      kind: "check-name",
+      opcode: 0x06,
+      name: "Hero",
+      appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
+    });
+    await client.take(1);
+    client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+    const createReply = (await client.take(1))[0]!;
+    const createReader = new PacketReader(createReply);
+    createReader.readByte();
+    createReader.readByte();
+    const character = readCharacterData(createReader);
+    client.send({ kind: "select-character", opcode: 0x03, characterId: character.stats.id });
+    const selectReply = (await client.take(1))[0]!;
+    const selectReader2 = new PacketReader(selectReply);
+    selectReader2.readByte();
+    selectReader2.readByte();
+    selectReader2.readU32();
+    selectReader2.readU16();
+    const issuedId = selectReader2.readU32();
+    assert.equal(issuedId, character.stats.id, "the handoff value is the character's own id");
+    client.close();
 
-  // The second connection: the client is the one that speaks now, with its character id.
-  const gameClient = await FakeClient.connect(gameInfo.port);
-  gameClient.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
-  const deadline = Date.now() + 2000;
-  while (!log.some((line) => line.includes("claimed")) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.ok(
-    log.some((line) => line.includes(`character 0x${(issuedId >>> 0).toString(16).padStart(8, "0")} claimed -> "Hero"`)),
-    log.join("\n"),
-  );
+    // The second connection: the client is the one that speaks now, with its character id.
+    const gameClient = await FakeClient.connect(gameInfo.port);
+    gameClient.send({ kind: "handshake-reply", opcode: 0x04, value: issuedId });
+    const deadline = Date.now() + 2000;
+    while (!log.some((line) => line.includes("claimed")) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      log.some((line) =>
+        line.includes(
+          `character 0x${(issuedId >>> 0).toString(16).padStart(8, "0")} claimed -> "Hero"`,
+        ),
+      ),
+      log.join("\n"),
+    );
 
-  // ... and the claim is followed by 0x16, the packet that actually puts the client into a map.
-  const fieldEntry = (await gameClient.take(1))[0]!;
-  assert.equal(fieldEntry[0], FIELD_OPCODE.setField, "the game server's first in-game packet is 0x16");
-  const field = readSetField(new PacketReader(fieldEntry, 1));
-  assert.equal(field.full, true, "the full form carries the map id inside the CharacterData");
-  assert.equal(field.character.stats.mapId, 1000000, "DEFAULT_MAP_ID is a map that exists in Data.wz");
-  assert.equal(field.character.stats.id, issuedId, "the same character the handoff named");
-  assert.equal(field.character.stats.name, "Hero");
-  assert.notEqual(field.randomSeedA | field.randomSeedB | field.randomSeedC, 0, "the field seeds are chosen, not zero");
-  gameClient.close();
+    // ... and the claim is followed by 0x16, the packet that actually puts the client into a map.
+    const fieldEntry = (await gameClient.take(1))[0]!;
+    assert.equal(
+      fieldEntry[0],
+      FIELD_OPCODE.setField,
+      "the game server's first in-game packet is 0x16",
+    );
+    const field = readSetField(new PacketReader(fieldEntry, 1));
+    assert.equal(field.full, true, "the full form carries the map id inside the CharacterData");
+    assert.equal(
+      field.character.stats.mapId,
+      1000000,
+      "DEFAULT_MAP_ID is a map that exists in Data.wz",
+    );
+    assert.equal(field.character.stats.id, issuedId, "the same character the handoff named");
+    assert.equal(field.character.stats.name, "Hero");
+    assert.notEqual(
+      field.randomSeedA | field.randomSeedB | field.randomSeedC,
+      0,
+      "the field seeds are chosen, not zero",
+    );
+    gameClient.close();
 
-  // A second client can ask for a different map, and no state leaks between connections.
-  const other = await FakeClient.connect(gameInfo.port);
-  const otherId = handoffs.issue({ username: "admin", characterId: 4242, characterName: "Alt" });
-  other.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
-  const otherField = readSetField(new PacketReader((await other.take(1))[0]!, 1));
-  assert.equal(otherField.character.stats.mapId, 1000000);
-  assert.equal(otherField.character.stats.id, 4242);
-  other.close();
-});
+    // A second client can ask for a different map, and no state leaks between connections.
+    const other = await FakeClient.connect(gameInfo.port);
+    const otherId = handoffs.issue({ username: "admin", characterId: 4242, characterName: "Alt" });
+    other.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
+    const otherField = readSetField(new PacketReader((await other.take(1))[0]!, 1));
+    assert.equal(otherField.character.stats.mapId, 1000000);
+    assert.equal(otherField.character.stats.id, 4242);
+    other.close();
+  },
+);
 
 /**
  * The map the stub provider answers for. Two mobs is enough to prove ordering and that the id
@@ -849,10 +951,7 @@ const STUB_MAP: MapData = {
   ladderRopes: 0,
   // One straight foothold under both spawns, so the test can watch the mobs walk on it.
   footholdSegments: new Map([
-    [
-      32,
-      { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 },
-    ],
+    [32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }],
   ]),
 };
 
@@ -869,12 +968,16 @@ const STUB_MAP_ALT: MapData = {
   streetName: "stub",
   bgm: "",
   returnMapId: 0,
-  mobs: [{ templateId: 120100, x: 700, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 }],
+  mobs: [
+    { templateId: 120100, x: 700, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 },
+  ],
   npcs: [{ templateId: 2003, x: 650, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 0, cy: 300 }],
   portals: [{ name: "east00", type: 2, x: 600, y: 300, toMapId: 1000000, toName: "west00" }],
   footholds: 1,
   ladderRopes: 0,
-  footholdSegments: new Map([[32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }]]),
+  footholdSegments: new Map([
+    [32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }],
+  ]),
 };
 
 /**
@@ -899,147 +1002,207 @@ const STUB_MAP_TOWN: MapData = {
   ladderRopes: 0,
 };
 
-test("the game server spawns the map's monsters and NPCs right after 0x16", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
-    mobTickMs: 20,
-    handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "the game server spawns the map's monsters and NPCs right after 0x16",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 20,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 100,
+        dieMs: 0,
+      }),
+      mobTickMs: 20,
+      handshake: { clientSendSeed: 0x55555555, clientRecvSeed: 0x66666666 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  // 0x16, then the map's two mobs, then its one NPC - all four in the same TCP stream.
-  const packets = await client.take(4);
-  client.close();
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 7,
+      characterName: "Hero",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    // 0x16, then the map's two mobs, then its one NPC - all four in the same TCP stream.
+    const packets = await client.take(4);
+    client.close();
 
-  assert.equal(packets[0]![0], FIELD_OPCODE.setField, "0x16 comes first: the field has to exist");
-  assert.equal(packets[1]![0], MOB_OPCODE.enterField, "then one 0x2F per mob, in WZ order");
-  assert.equal(packets[2]![0], MOB_OPCODE.enterField);
-  assert.equal(packets[3]![0], NPC_OPCODE.enterField, "then one 0x39 per NPC (FINDINGS 4.19)");
-  assert.equal(client.headersOk, true, "every spawned packet survives the cipher/header check");
+    assert.equal(packets[0]![0], FIELD_OPCODE.setField, "0x16 comes first: the field has to exist");
+    assert.equal(packets[1]![0], MOB_OPCODE.enterField, "then one 0x2F per mob, in WZ order");
+    assert.equal(packets[2]![0], MOB_OPCODE.enterField);
+    assert.equal(packets[3]![0], NPC_OPCODE.enterField, "then one 0x39 per NPC (FINDINGS 4.19)");
+    assert.equal(client.headersOk, true, "every spawned packet survives the cipher/header check");
 
-  const npc = readNpcEnterField(new PacketReader(packets[3]!, 1), false);
-  assert.deepEqual(
-    { npcId: npc.npcId, templateId: npc.templateId, x: npc.x, y: npc.y, facing: npc.facing },
-    { npcId: 1, templateId: 2003, x: 69, y: 275, facing: 0 },
-    "the map's life entry, with an id from the NPC pool's own sequence",
-  );
+    const npc = readNpcEnterField(new PacketReader(packets[3]!, 1), false);
+    assert.deepEqual(
+      { npcId: npc.npcId, templateId: npc.templateId, x: npc.x, y: npc.y, facing: npc.facing },
+      { npcId: 1, templateId: 2003, x: 69, y: 275, facing: 0 },
+      "the map's life entry, with an id from the NPC pool's own sequence",
+    );
 
-  const first = readMobEnterField(new PacketReader(packets[1]!, 1));
-  assert.deepEqual(
-    { mobId: first.mobId, templateId: first.templateId, x: first.x, y: first.y, facing: first.facing },
-    { mobId: 1, templateId: 120100, x: 509, y: 300, facing: 0 },
-    "the first life entry of the map, with a server-chosen pool id",
-  );
-  const second = readMobEnterField(new PacketReader(packets[2]!, 1));
-  assert.deepEqual(
-    { mobId: second.mobId, templateId: second.templateId, x: second.x, y: second.y, facing: second.facing },
-    { mobId: 2, templateId: 1210100, x: -5, y: 7, facing: 1 },
-    "negative coordinates and the left-facing bit survive the wire",
-  );
-  assert.equal(second.channels, undefined, "no animation channel is claimed by the server yet");
-  assert.equal(new PacketReader(packets[2]!, 1).remaining, 21, "a channel-less 0x2F is 22 bytes");
-  assert.ok(log.some((line) => line.includes("spawned 2 mobs")), log.join("\n"));
+    const first = readMobEnterField(new PacketReader(packets[1]!, 1));
+    assert.deepEqual(
+      {
+        mobId: first.mobId,
+        templateId: first.templateId,
+        x: first.x,
+        y: first.y,
+        facing: first.facing,
+      },
+      { mobId: 1, templateId: 120100, x: 509, y: 300, facing: 0 },
+      "the first life entry of the map, with a server-chosen pool id",
+    );
+    const second = readMobEnterField(new PacketReader(packets[2]!, 1));
+    assert.deepEqual(
+      {
+        mobId: second.mobId,
+        templateId: second.templateId,
+        x: second.x,
+        y: second.y,
+        facing: second.facing,
+      },
+      { mobId: 2, templateId: 1210100, x: -5, y: 7, facing: 1 },
+      "negative coordinates and the left-facing bit survive the wire",
+    );
+    assert.equal(second.channels, undefined, "no animation channel is claimed by the server yet");
+    assert.equal(new PacketReader(packets[2]!, 1).remaining, 21, "a channel-less 0x2F is 22 bytes");
+    assert.ok(
+      log.some((line) => line.includes("spawned 2 mobs")),
+      log.join("\n"),
+    );
 
-  // ... and then they walk: the mob on foothold 32 gets one 0x33 per leg (mobTickMs = 20 here).
-  // `take` returns whole packets, one at a time: the second mob is on foothold 0 (the stub map has
-  // no segment for it), so the only thing that can arrive here is a 0x33 for the first mob.
-  const moves: Uint8Array[] = [];
-  for (let i = 0; i < 5 && moves.length === 0; i++) {
-    const packet = (await client.take(1))[0]!;
-    if (packet[0] === MOB_OPCODE.move) moves.push(packet);
-  }
-  assert.equal(moves.length >= 1, true, "the field sends 0x33 for a mob that can walk");
-  const move = readMobMove(new PacketReader(moves[0]!, 1));
-  assert.equal(move.mobId, 1, "the first mob is the one on the foothold");
-  const element = move.body.path.elements[0]!;
-  assert.equal(element.y, 300, "walking along the foothold's y");
-  assert.ok(element.x >= 0 && element.x <= 1000, `the leg ends inside the range, at ${element.x}`);
-  assert.equal(move.body.path.originX, 509, "and starts where the mob spawned");
-  assert.equal(element.vx, 0);
-  assert.equal(element.vy, 0);
-  assert.equal(client.headersOk, true, "the movement packets survive the cipher too");
-});
+    // ... and then they walk: the mob on foothold 32 gets one 0x33 per leg (mobTickMs = 20 here).
+    // `take` returns whole packets, one at a time: the second mob is on foothold 0 (the stub map has
+    // no segment for it), so the only thing that can arrive here is a 0x33 for the first mob.
+    const moves: Uint8Array[] = [];
+    for (let i = 0; i < 5 && moves.length === 0; i++) {
+      const packet = (await client.take(1))[0]!;
+      if (packet[0] === MOB_OPCODE.move) moves.push(packet);
+    }
+    assert.equal(moves.length >= 1, true, "the field sends 0x33 for a mob that can walk");
+    const move = readMobMove(new PacketReader(moves[0]!, 1));
+    assert.equal(move.mobId, 1, "the first mob is the one on the foothold");
+    const element = move.body.path.elements[0]!;
+    assert.equal(element.y, 300, "walking along the foothold's y");
+    assert.ok(
+      element.x >= 0 && element.x <= 1000,
+      `the leg ends inside the range, at ${element.x}`,
+    );
+    assert.equal(move.body.path.originX, 509, "and starts where the mob spawned");
+    assert.equal(element.vx, 0);
+    assert.equal(element.vy, 0);
+    assert.equal(client.headersOk, true, "the movement packets survive the cipher too");
+  },
+);
 
-test("legacy --npc-walk requests one controller after visibility; idle timers live on the client", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    npcWalk: npcWalkPolicy("2003"),
-    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "legacy --npc-walk requests one controller after visibility; idle timers live on the client",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      npcWalk: npcWalkPolicy("2003"),
+      handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  const packets = await client.take(5);
-  client.close();
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 7,
+      characterName: "Hero",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    const packets = await client.take(5);
+    client.close();
 
-  // 0x16, the two mobs, NPC visibility and its controller designation - the flag belongs to a pool entry,
-  // so it cannot come before the packet that makes one.
-  assert.deepEqual(packets.map((packet) => packet[0]), [
-    FIELD_OPCODE.setField,
-    MOB_OPCODE.enterField,
-    MOB_OPCODE.enterField,
-    NPC_OPCODE.enterField,
-    NPC_OPCODE.stateToggle,
-  ]);
-  assert.deepEqual(
-    readNpcState(new PacketReader(packets[4]!, 1)),
-    { npcId: 1, on: true },
-    "the pool id the 0x39 handed out, not the template id the policy named",
-  );
-  assert.ok(log.some((line) => line.includes("1 NPCs (1 legacy controller requests)")), log.join("\n"));
-  assert.equal(client.headersOk, true);
-});
+    // 0x16, the two mobs, NPC visibility and its controller designation - the flag belongs to a pool entry,
+    // so it cannot come before the packet that makes one.
+    assert.deepEqual(
+      packets.map((packet) => packet[0]),
+      [
+        FIELD_OPCODE.setField,
+        MOB_OPCODE.enterField,
+        MOB_OPCODE.enterField,
+        NPC_OPCODE.enterField,
+        NPC_OPCODE.stateToggle,
+      ],
+    );
+    assert.deepEqual(
+      readNpcState(new PacketReader(packets[4]!, 1)),
+      { npcId: 1, on: true },
+      "the pool id the 0x39 handed out, not the template id the policy named",
+    );
+    assert.ok(
+      log.some((line) => line.includes("1 NPCs (1 legacy controller requests)")),
+      log.join("\n"),
+    );
+    assert.equal(client.headersOk, true);
+  },
+);
 
-test("a map the provider does not know still enters, it just has nothing to spawn", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: () => undefined,
-    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a map the provider does not know still enters, it just has nothing to spawn",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: () => undefined,
+      handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 8, characterName: "Solo" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  const first = (await client.take(1))[0]!;
-  assert.equal(first[0], FIELD_OPCODE.setField, "0x16 is sent even without map data");
-  assert.deepEqual(
-    await client.drainOpcodes(80),
-    [],
-    "and no 0x2F follows, rather than a mob at (0,0)",
-  );
-  assert.ok(log.some((line) => line.includes("has no Map/Map/*.img")), log.join("\n"));
-  client.close();
-});
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 8,
+      characterName: "Solo",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    const first = (await client.take(1))[0]!;
+    assert.equal(first[0], FIELD_OPCODE.setField, "0x16 is sent even without map data");
+    assert.deepEqual(
+      await client.drainOpcodes(80),
+      [],
+      "and no 0x2F follows, rather than a mob at (0,0)",
+    );
+    assert.ok(
+      log.some((line) => line.includes("has no Map/Map/*.img")),
+      log.join("\n"),
+    );
+    client.close();
+  },
+);
 
 /**
  * The whole mob loop over a real socket: a swing kills a monster, and the death comes back as the
@@ -1047,88 +1210,117 @@ test("a map the provider does not know still enters, it just has nothing to spaw
  * now) and, once that animation is over, `0x31 flag=0` (the corpse goes). A stub template is used so
  * the die animation is 40 ms instead of the real 720: the timing logic is the same code.
  */
-test("a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse is over", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    mobTickMs: 20,
-    mobRespawnMs: 5000,
-    // One guaranteed drop per kill, so the packet after the death is always the same one.
-    dropPolicy: () => [{ money: 25 }],
-    handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse is over",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      mobTickMs: 20,
+      mobRespawnMs: 5000,
+      // One guaranteed drop per kill, so the packet after the death is always the same one.
+      dropPolicy: () => [{ money: 25 }],
+      handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  const spawn = await client.take(4);
-  client.close(); // the spawn burst (0x16, two mobs, the NPC) is all this test needs
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 11,
+      characterName: "Fighter",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    const spawn = await client.take(4);
+    client.close(); // the spawn burst (0x16, two mobs, the NPC) is all this test needs
 
-  const killer = await FakeClient.connect(gameInfo.port);
-  t.after(() => killer.close());
-  const otherId = handoffs.issue({ username: "admin", characterId: 12, characterName: "Fighter2" });
-  killer.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
-  await killer.take(4);
-  assert.equal(spawn[1]![0], MOB_OPCODE.enterField);
-  assert.equal(spawn[3]![0], NPC_OPCODE.enterField, "the NPC spawn rides along with the mob burst");
+    const killer = await FakeClient.connect(gameInfo.port);
+    t.after(() => killer.close());
+    const otherId = handoffs.issue({
+      username: "admin",
+      characterId: 12,
+      characterName: "Fighter2",
+    });
+    killer.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
+    await killer.take(4);
+    assert.equal(spawn[1]![0], MOB_OPCODE.enterField);
+    assert.equal(
+      spawn[3]![0],
+      NPC_OPCODE.enterField,
+      "the NPC spawn rides along with the mob burst",
+    );
 
-  // One swing, one target, 10 damage - exactly the mob's HP, so it dies.
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  killer.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+    // One swing, one target, 10 damage - exactly the mob's HP, so it dies.
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    killer.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-  const hit = await killer.take(2);
-  assert.equal(hit[0]![0], MOB_OPCODE.stat, "0x34 first: the mob's stat, which is its flash state");
-  assert.deepEqual(readMobStat(new PacketReader(hit[0]!, 1)), { mobId: 1, mp: 0 });
-  assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed, "then 0x30: the die animation starts now");
-  assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
-  assert.equal(killer.headersOk, true, "both survive the cipher/header check");
+    const hit = await killer.take(2);
+    assert.equal(
+      hit[0]![0],
+      MOB_OPCODE.stat,
+      "0x34 first: the mob's stat, which is its flash state",
+    );
+    assert.deepEqual(readMobStat(new PacketReader(hit[0]!, 1)), { mobId: 1, mp: 0 });
+    assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed, "then 0x30: the die animation starts now");
+    assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
+    assert.equal(killer.headersOk, true, "both survive the cipher/header check");
 
-  // The kill pays the monster's own `info.exp` (stub: 1) as a 0x0D stat diff - exp only, because the
-  // bar did not fill up (FINDINGS 4.21). The level-up form is its own test below.
-  const stat = (await killer.take(1))[0]!;
-  assert.equal(stat[0], STAT_OPCODE);
-  assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), { ack: false, diff: { exp: 1 } });
+    // The kill pays the monster's own `info.exp` (stub: 1) as a 0x0D stat diff - exp only, because the
+    // bar did not fill up (FINDINGS 4.21). The level-up form is its own test below.
+    const stat = (await killer.take(1))[0]!;
+    assert.equal(stat[0], STAT_OPCODE);
+    assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), { ack: false, diff: { exp: 1 } });
 
-  // The kill also leaves loot: one 0x43 per drop, and the monster's id is in it, which is what makes
-  // the client fly the item out of the corpse (FINDINGS 4.18).
-  const drop = await killer.take(1);
-  assert.equal(drop[0]![0], DROP_OPCODE.appear);
-  const loot = readDropAppear(new PacketReader(drop[0]!, 1));
-  assert.equal(loot.money, true);
-  assert.equal(loot.value, 25);
-  assert.equal(loot.mobId, 1, "the drop knows the monster it came out of");
-  assert.equal(loot.kind, 0);
+    // The kill also leaves loot: one 0x43 per drop, and the monster's id is in it, which is what makes
+    // the client fly the item out of the corpse (FINDINGS 4.18).
+    const drop = await killer.take(1);
+    assert.equal(drop[0]![0], DROP_OPCODE.appear);
+    const loot = readDropAppear(new PacketReader(drop[0]!, 1));
+    assert.equal(loot.money, true);
+    assert.equal(loot.value, 25);
+    assert.equal(loot.mobId, 1, "the drop knows the monster it came out of");
+    assert.equal(loot.kind, 0);
 
-  // ... and 40 ms of die animation later the corpse goes. The walking timer is what sends it.
-  const corpse = await killer.take(1);
-  assert.equal(corpse[0]![0], MOB_OPCODE.presence);
-  assert.deepEqual(readMobPresence(new PacketReader(corpse[0]!, 1)), { flag: 0, mobId: 1 });
+    // ... and 40 ms of die animation later the corpse goes. The walking timer is what sends it.
+    const corpse = await killer.take(1);
+    assert.equal(corpse[0]![0], MOB_OPCODE.presence);
+    assert.deepEqual(readMobPresence(new PacketReader(corpse[0]!, 1)), { flag: 0, mobId: 1 });
 
-  assert.ok(
-    log.some((line) => line.includes("mob 1 (template 120100) killed by 10")),
-    log.join("\n"),
-  );
-});
+    assert.ok(
+      log.some((line) => line.includes("mob 1 (template 120100) killed by 10")),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * A kill pays experience, and the player's own numbers move for the first time: the packet is `0x0D`
@@ -1147,7 +1339,16 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
     handoffs,
     mapId: 1000000,
     mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
+    mobTemplate: () => ({
+      templateId: 120100,
+      name: "stub",
+      level: 1,
+      maxHP: 10,
+      maxMP: 0,
+      exp: 20,
+      speedPercent: 0,
+      dieMs: 0,
+    }),
     mobTickMs: 20,
     mobRespawnMs: 60_000,
     // No loot, so the only packets after the death are the corpse going and the stat diff.
@@ -1202,10 +1403,19 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
   assert.equal(stat[0], STAT_OPCODE, "the kill pays out as 0x0D");
   assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), {
     ack: false,
-    diff: { exp: 15, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp },
+    diff: {
+      exp: 15,
+      level: 2,
+      hp: stats.maxHp,
+      maxHp: stats.maxHp,
+      mp: stats.maxMp,
+      maxMp: stats.maxMp,
+    },
   });
   assert.ok(
-    log.some((line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2")),
+    log.some(
+      (line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2"),
+    ),
     log.join("\n"),
   );
 });
@@ -1220,387 +1430,521 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
  * The drop's landing spot is read out of the `0x43` the server sent - exactly what a client would
  * have to do - instead of being predicted, because the spread is drawn from the field's generator.
  */
-test("a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    mobTickMs: 20,
-    mobRespawnMs: 60_000,
-    dropPolicy: () => [{ money: 25 }, { itemId: 2000000, count: 3 }],
-    dropSpreadPx: 0,
-    handshake: { clientSendSeed: 0x12345678, clientRecvSeed: 0x87654321 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 11, characterName: "Fighter" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
-  t.after(() => client.close());
-
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-
-  // 0x34, 0x30, the kill's exp (0x0D), then the two drops.
-  const burst = await client.take(5);
-  assert.equal(burst[0]![0], MOB_OPCODE.stat);
-  assert.equal(burst[1]![0], MOB_OPCODE.leaveDelayed);
-  assert.equal(burst[2]![0], STAT_OPCODE);
-  const mesos = readDropAppear(new PacketReader(burst[3]!, 1));
-  const item = readDropAppear(new PacketReader(burst[4]!, 1));
-  assert.equal(mesos.money, true);
-  assert.equal(mesos.value, 25);
-
-  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
-  const walkTo = (x: number, y: number): void => {
-    const move = encodeClientUserMove({
-      stageByte: 0,
-      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+test(
+  "a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      mobTickMs: 20,
+      mobRespawnMs: 60_000,
+      dropPolicy: () => [{ money: 25 }, { itemId: 2000000, count: 3 }],
+      dropSpreadPx: 0,
+      handshake: { clientSendSeed: 0x12345678, clientRecvSeed: 0x87654321 },
+      log: (line) => log.push(line),
     });
-    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
-  };
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  // The field keeps talking while the player walks (the mob's corpse still has to go), so the pickup
-  // is found by opcode instead of by counting packets.
-  const takeUntil = async (opcode: number): Promise<Uint8Array[]> => {
-    const seen: Uint8Array[] = [];
-    for (let index = 0; index < 20; index++) {
-      try {
-        const [packet] = await client.take(1);
-        seen.push(packet!);
-        if (packet![0] === opcode) return seen;
-      } catch {
-        throw new Error(
-          `no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]\n` +
-            log.join("\n"),
-        );
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 11,
+      characterName: "Fighter",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
+    t.after(() => client.close());
+
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+    // 0x34, 0x30, the kill's exp (0x0D), then the two drops.
+    const burst = await client.take(5);
+    assert.equal(burst[0]![0], MOB_OPCODE.stat);
+    assert.equal(burst[1]![0], MOB_OPCODE.leaveDelayed);
+    assert.equal(burst[2]![0], STAT_OPCODE);
+    const mesos = readDropAppear(new PacketReader(burst[3]!, 1));
+    const item = readDropAppear(new PacketReader(burst[4]!, 1));
+    assert.equal(mesos.money, true);
+    assert.equal(mesos.value, 25);
+
+    /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+    const walkTo = (x: number, y: number): void => {
+      const move = encodeClientUserMove({
+        stageByte: 0,
+        path: {
+          originX: 0,
+          originY: 0,
+          elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }],
+        },
+      });
+      client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+    };
+
+    // The field keeps talking while the player walks (the mob's corpse still has to go), so the pickup
+    // is found by opcode instead of by counting packets.
+    const takeUntil = async (opcode: number): Promise<Uint8Array[]> => {
+      const seen: Uint8Array[] = [];
+      for (let index = 0; index < 20; index++) {
+        try {
+          const [packet] = await client.take(1);
+          seen.push(packet!);
+          if (packet![0] === opcode) return seen;
+        } catch {
+          throw new Error(
+            `no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]\n` +
+              log.join("\n"),
+          );
+        }
       }
-    }
-    throw new Error(`no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]`);
-  };
+      throw new Error(
+        `no 0x${opcode.toString(16)} in [${seen.map((packet) => packet[0]!.toString(16)).join(",")}]`,
+      );
+    };
 
-  // Standing on the mesos: the server takes them on the next field tick, without being asked.
-  walkTo(mesos.x, mesos.y);
+    // Standing on the mesos: the server takes them on the next field tick, without being asked.
+    walkTo(mesos.x, mesos.y);
 
-  const mesoPickup = await takeUntil(DROP_OPCODE.remove);
-  const takenPacket = mesoPickup[mesoPickup.length - 1]!;
-  assert.deepEqual(readDropRemove(new PacketReader(takenPacket, 1)), {
-    dropId: mesos.dropId,
-    kind: DROP_REMOVE_KIND.taken,
-    characterId,
-  });
-  const mesoNotice = await takeUntil(LOOT_OPCODE);
-  assert.deepEqual(readLootNotice(new PacketReader(mesoNotice[mesoNotice.length - 1]!, 1)), {
-    kind: "mesos",
-    amount: 25,
-  });
-  // The mesos are part of the character record, so what moves them is a 0x0D diff; the `0x11` line is
-  // only the chat notice (FINDINGS 4.22.5).
-  const wallet = mesoNotice.find((packet) => packet[0] === STAT_OPCODE);
-  assert.ok(wallet !== undefined, "a meso pickup sends the wallet as 0x0D");
-  assert.deepEqual(readStatUpdate(new PacketReader(wallet, 1)).diff, { mesos: 25 });
-  assert.ok(
-    log.some((line) => line.includes("took 25 mesos")),
-    log.join("\n"),
-  );
+    const mesoPickup = await takeUntil(DROP_OPCODE.remove);
+    const takenPacket = mesoPickup[mesoPickup.length - 1]!;
+    assert.deepEqual(readDropRemove(new PacketReader(takenPacket, 1)), {
+      dropId: mesos.dropId,
+      kind: DROP_REMOVE_KIND.taken,
+      characterId,
+    });
+    const mesoNotice = await takeUntil(LOOT_OPCODE);
+    assert.deepEqual(readLootNotice(new PacketReader(mesoNotice[mesoNotice.length - 1]!, 1)), {
+      kind: "mesos",
+      amount: 25,
+    });
+    // The mesos are part of the character record, so what moves them is a 0x0D diff; the `0x11` line is
+    // only the chat notice (FINDINGS 4.22.5).
+    const wallet = mesoNotice.find((packet) => packet[0] === STAT_OPCODE);
+    assert.ok(wallet !== undefined, "a meso pickup sends the wallet as 0x0D");
+    assert.deepEqual(readStatUpdate(new PacketReader(wallet, 1)).diff, { mesos: 25 });
+    assert.ok(
+      log.some((line) => line.includes("took 25 mesos")),
+      log.join("\n"),
+    );
 
-  // Standing on the item: 0x44, then 0x0B (the item is in a slot now), then the item's notice.
-  walkTo(item.x, item.y);
-  const itemPickup = await takeUntil(INVENTORY_OPCODE);
-  const changePacket = itemPickup[itemPickup.length - 1]!;
-  const change = readInventoryChange(new PacketReader(changePacket, 1));
-  assert.equal(change.result, 1);
-  assert.deepEqual(change.changes, [
-    {
-      op: INVENTORY_OP.put,
-      inventory: 2,
-      slot: 1,
-      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 3 },
-    },
-  ]);
-  const itemNotice = await takeUntil(LOOT_OPCODE);
-  assert.deepEqual(readLootNotice(new PacketReader(itemNotice[itemNotice.length - 1]!, 1)), {
-    kind: "item",
-    itemId: 2000000,
-    count: 3,
-  });
-  const removal = itemPickup.find((packet) => packet[0] === DROP_OPCODE.remove);
-  assert.ok(removal, "the item's 0x44 came before its 0x0B");
-  assert.equal(readDropRemove(new PacketReader(removal!, 1)).dropId, item.dropId);
+    // Standing on the item: 0x44, then 0x0B (the item is in a slot now), then the item's notice.
+    walkTo(item.x, item.y);
+    const itemPickup = await takeUntil(INVENTORY_OPCODE);
+    const changePacket = itemPickup[itemPickup.length - 1]!;
+    const change = readInventoryChange(new PacketReader(changePacket, 1));
+    assert.equal(change.result, 1);
+    assert.deepEqual(change.changes, [
+      {
+        op: INVENTORY_OP.put,
+        inventory: 2,
+        slot: 1,
+        item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 3 },
+      },
+    ]);
+    const itemNotice = await takeUntil(LOOT_OPCODE);
+    assert.deepEqual(readLootNotice(new PacketReader(itemNotice[itemNotice.length - 1]!, 1)), {
+      kind: "item",
+      itemId: 2000000,
+      count: 3,
+    });
+    const removal = itemPickup.find((packet) => packet[0] === DROP_OPCODE.remove);
+    assert.ok(removal, "the item's 0x44 came before its 0x0B");
+    assert.equal(readDropRemove(new PacketReader(removal!, 1)).dropId, item.dropId);
 
-  // The field is empty afterwards: standing there again must not send a second pickup.
-  walkTo(item.x, item.y);
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(client.queueLength, 0, "nothing is taken twice");
-});
+    // The field is empty afterwards: standing there again must not send a second pickup.
+    walkTo(item.x, item.y);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(client.queueLength, 0, "nothing is taken twice");
+  },
+);
 
 /**
  * A swing at a mob this field does not have is logged, not invented: the server answers nothing and
  * the mob it does have stays up. (A 2003 client only sends ids it got from the server, so this is the
  * malformed case - and it must not desync the HP of a different mob.)
  */
-test("a swing at an unknown mob id answers nothing and leaves the field alone", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    mobTickMs: 20,
-    handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a swing at an unknown mob id answers nothing and leaves the field alone",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      mobTickMs: 20,
+      handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 13, characterName: "Sloppy" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 13,
+      characterName: "Sloppy",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
 
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 99,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 99, hitAnimation: 7, x: 0, y: 0, sequence: 1, damages: [9999] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-  const answered = await client.drainOpcodes();
-  assert.equal(
-    answered.includes(MOB_OPCODE.stat),
-    false,
-    `no mob stat answers for a mob that is not there (saw [${answered.map((op) => op.toString(16)).join(",")}])`,
-  );
-  assert.ok(log.some((line) => line.includes("no such mob")), log.join("\n"));
-});
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 99,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 99, hitAnimation: 7, x: 0, y: 0, sequence: 1, damages: [9999] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+    const answered = await client.drainOpcodes();
+    assert.equal(
+      answered.includes(MOB_OPCODE.stat),
+      false,
+      `no mob stat answers for a mob that is not there (saw [${answered.map((op) => op.toString(16)).join(",")}])`,
+    );
+    assert.ok(
+      log.some((line) => line.includes("no such mob")),
+      log.join("\n"),
+    );
+  },
+);
 
+test(
+  "clicking an NPC opens its shop, and buying moves the item and the mesos",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 20,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 100,
+        dieMs: 0,
+      }),
+      npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
+      shops: shopKeeper(archive!),
+      // No patrol packets in this test: the mobs are still, so every burst below is exactly the
+      // shop's own packets and the order stays readable.
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-test("clicking an NPC opens its shop, and buying moves the item and the mesos", { skip: archive === null, timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
-    npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
-    shops: shopKeeper(archive!),
-    // No patrol packets in this test: the mobs are still, so every burst below is exactly the
-    // shop's own packets and the order stays readable.
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+    const client = await FakeClient.connect(gameInfo.port);
+    // The wallet starts at 100 mesos, which is enough for two red potions (25 each) and nothing else.
+    const stats = { ...zeroStats(), level: 1, mesos: 100 };
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 21,
+      characterName: "Shopper",
+      character: characterDataOf(stats, startingCharacterItems()),
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
 
-  const client = await FakeClient.connect(gameInfo.port);
-  // The wallet starts at 100 mesos, which is enough for two red potions (25 each) and nothing else.
-  const stats = { ...zeroStats(), level: 1, mesos: 100 };
-  const characterId = handoffs.issue({
-    username: "admin",
-    characterId: 21,
-    characterName: "Shopper",
-    character: characterDataOf(stats, startingCharacterItems()),
-  });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
+    // Click the NPC: the release byte first, then the window. The NPC pool gave it id 1.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const opened = await client.take(2);
+    assert.equal(
+      opened[0]![0],
+      FIELD_OPCODE.requestRelease,
+      "0x19 comes first: a click arms the client's gate",
+    );
+    assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+    const shop = readShopOpen(new PacketReader(opened[1]!, 1));
+    assert.equal(shop.shopId, 2003, "로빈's shop, keyed by the NPC template id");
+    assert.deepEqual(
+      shop.items.map((line) => [line.itemId, line.price]),
+      [
+        [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
+        [2000003, 100], // 파란 포션
+        [2030000, 75], // 마을 귀환 주문서, out of Item/Consume/0203.img
+      ],
+    );
+    assert.equal(client.headersOk, true);
 
-  // Click the NPC: the release byte first, then the window. The NPC pool gave it id 1.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_OBJECT_CLICK_OPCODE,
-    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
-  });
-  const opened = await client.take(2);
-  assert.equal(opened[0]![0], FIELD_OPCODE.requestRelease, "0x19 comes first: a click arms the client's gate");
-  assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
-  const shop = readShopOpen(new PacketReader(opened[1]!, 1));
-  assert.equal(shop.shopId, 2003, "로빈's shop, keyed by the NPC template id");
-  assert.deepEqual(
-    shop.items.map((line) => [line.itemId, line.price]),
-    [
-      [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
-      [2000003, 100], // 파란 포션
-      [2030000, 75], // 마을 귀환 주문서, out of Item/Consume/0203.img
-    ],
-  );
-  assert.equal(client.headersOk, true);
+    // Buy one red potion: the result, the inventory change, and the mesos.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "buy", row: 0, itemId: 2000000, count: 1 }).slice(1),
+    });
+    const trade = await client.take(3);
+    assert.equal(trade[0]![0], SHOP_RESULT_OPCODE);
+    assert.equal(trade[0]![1], SHOP_RESULT.silent, "a trade that happened says nothing in words");
+    assert.equal(trade[1]![0], INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(trade[1]!, 1));
+    assert.equal(change.changes.length, 1);
+    assert.equal(change.changes[0]!.op, INVENTORY_OP.put, "the potion lands in a consume slot");
+    assert.equal(trade[2]![0], STAT_OPCODE);
+    const diff = readStatUpdate(new PacketReader(trade[2]!, 1));
+    assert.deepEqual(
+      diff,
+      { ack: false, diff: { mesos: 75 } },
+      "the 0x0D flag 0x40000 is the money field",
+    );
+    assert.ok(
+      log.some((line) => line.includes("bought") && line.includes("mesos 75")),
+      log.join("\n"),
+    );
 
-  // Buy one red potion: the result, the inventory change, and the mesos.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_SHOP_OPCODE,
-    body: encodeClientShopRequest({ kind: "buy", row: 0, itemId: 2000000, count: 1 }).slice(1),
-  });
-  const trade = await client.take(3);
-  assert.equal(trade[0]![0], SHOP_RESULT_OPCODE);
-  assert.equal(trade[0]![1], SHOP_RESULT.silent, "a trade that happened says nothing in words");
-  assert.equal(trade[1]![0], INVENTORY_OPCODE);
-  const change = readInventoryChange(new PacketReader(trade[1]!, 1));
-  assert.equal(change.changes.length, 1);
-  assert.equal(change.changes[0]!.op, INVENTORY_OP.put, "the potion lands in a consume slot");
-  assert.equal(trade[2]![0], STAT_OPCODE);
-  const diff = readStatUpdate(new PacketReader(trade[2]!, 1));
-  assert.deepEqual(diff, { ack: false, diff: { mesos: 75 } }, "the 0x0D flag 0x40000 is the money field");
-  assert.ok(log.some((line) => line.includes("bought") && line.includes("mesos 75")), log.join("\n"));
+    // A purchase the wallet cannot pay for: the client gets code 2 and nothing moves.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "buy", row: 1, itemId: 2000003, count: 1 }).slice(1),
+    });
+    const refused = await client.take(1);
+    assert.deepEqual(
+      [refused[0]![0], refused[0]![1]],
+      [SHOP_RESULT_OPCODE, SHOP_RESULT.notEnoughMesos],
+    );
 
-  // A purchase the wallet cannot pay for: the client gets code 2 and nothing moves.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_SHOP_OPCODE,
-    body: encodeClientShopRequest({ kind: "buy", row: 1, itemId: 2000003, count: 1 }).slice(1),
-  });
-  const refused = await client.take(1);
-  assert.deepEqual([refused[0]![0], refused[0]![1]], [SHOP_RESULT_OPCODE, SHOP_RESULT.notEnoughMesos]);
+    // Closing is deliberate silence: the client's close does not arm its in-flight flag, and a 0x4B
+    // would make it throw (`sub_4B73A0` case 75).
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "close" }).slice(1),
+    });
+    const answered = await client.drainOpcodes();
+    assert.equal(
+      answered.includes(SHOP_RESULT_OPCODE) || answered.includes(SHOP_OPEN_OPCODE),
+      false,
+      "a close is not answered",
+    );
+    client.close();
+  },
+);
 
-  // Closing is deliberate silence: the client's close does not arm its in-flight flag, and a 0x4B
-  // would make it throw (`sub_4B73A0` case 75).
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_SHOP_OPCODE,
-    body: encodeClientShopRequest({ kind: "close" }).slice(1),
-  });
-  const answered = await client.drainOpcodes();
-  assert.equal(
-    answered.includes(SHOP_RESULT_OPCODE) || answered.includes(SHOP_OPEN_OPCODE),
-    false,
-    "a close is not answered",
-  );
-  client.close();
-});
+test(
+  "clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by line",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const lines = ["one", "two", "three"];
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 20,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 100,
+        dieMs: 0,
+      }),
+      npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
+      // The words are the archive's in production; a stub keeps this test archive-free.
+      npcDialogue: () => ({ templateId: 2003, name: "stub npc", lines }),
+      // No shops at all: the NPC has nothing to sell, so a click is a conversation.
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaa },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by line", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const lines = ["one", "two", "three"];
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 20, maxMP: 0, exp: 1, speedPercent: 100, dieMs: 0 }),
-    npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
-    // The words are the archive's in production; a stub keeps this test archive-free.
-    npcDialogue: () => ({ templateId: 2003, name: "stub npc", lines }),
-    // No shops at all: the NPC has nothing to sell, so a click is a conversation.
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaa },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 31,
+      characterName: "Talker",
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({ username: "admin", characterId: 31, characterName: "Talker" });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
+    // The click: release byte first, then the first line. The NPC pool gave it id 1.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const opened = await client.take(2);
+    assert.equal(
+      opened[0]![0],
+      FIELD_OPCODE.requestRelease,
+      "0x19 comes first: a click arms the client's gate",
+    );
+    assert.equal(opened[1]![0], QUEST_TALK_OPCODE);
+    const first = readQuestTalk(new PacketReader(opened[1]!, 1));
+    assert.deepEqual(
+      first,
+      {
+        unknownA: 0,
+        npcId: 1,
+        body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 },
+      },
+      "the pool id the client clicked, not the template id",
+    );
+    assert.equal(client.headersOk, true);
 
-  // The click: release byte first, then the first line. The NPC pool gave it id 1.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_OBJECT_CLICK_OPCODE,
-    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
-  });
-  const opened = await client.take(2);
-  assert.equal(opened[0]![0], FIELD_OPCODE.requestRelease, "0x19 comes first: a click arms the client's gate");
-  assert.equal(opened[1]![0], QUEST_TALK_OPCODE);
-  const first = readQuestTalk(new PacketReader(opened[1]!, 1));
-  assert.deepEqual(first, {
-    unknownA: 0,
-    npcId: 1,
-    body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 },
-    }, "the pool id the client clicked, not the template id");
-  assert.equal(client.headersOk, true);
+    // A click while the dialog is up is refused: the client would throw on a second 0x47.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const refused = await client.take(1);
+    assert.deepEqual(
+      [refused[0]![0]],
+      [FIELD_OPCODE.requestRelease],
+      "the release byte, and no second dialog",
+    );
+    assert.ok(
+      log.some((line) => line.includes("still talking")),
+      log.join("\n"),
+    );
 
-  // A click while the dialog is up is refused: the client would throw on a second 0x47.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_OBJECT_CLICK_OPCODE,
-    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
-  });
-  const refused = await client.take(1);
-  assert.deepEqual([refused[0]![0]], [FIELD_OPCODE.requestRelease], "the release byte, and no second dialog");
-  assert.ok(log.some((line) => line.includes("still talking")), log.join("\n"));
+    // The primary answer advances; Prev goes back, header Close/ESC ends the conversation.
+    client.send({
+      kind: "unknown",
+      opcode: QUEST_REPLY_OPCODE,
+      body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1),
+    });
+    const second = await client.take(1);
+    assert.equal(second[0]![0], QUEST_TALK_OPCODE);
+    assert.equal(readQuestTalk(new PacketReader(second[0]!, 1)).body.message, "two");
 
-  // The primary answer advances; Prev goes back, header Close/ESC ends the conversation.
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  const second = await client.take(1);
-  assert.equal(second[0]![0], QUEST_TALK_OPCODE);
-  assert.equal(readQuestTalk(new PacketReader(second[0]!, 1)).body.message, "two");
+    client.send({
+      kind: "unknown",
+      opcode: QUEST_REPLY_OPCODE,
+      body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1),
+    });
+    const third = await client.take(1);
+    assert.equal(readQuestTalk(new PacketReader(third[0]!, 1)).body.message, "three");
 
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  const third = await client.take(1);
-  assert.equal(readQuestTalk(new PacketReader(third[0]!, 1)).body.message, "three");
+    client.send({
+      kind: "unknown",
+      opcode: QUEST_REPLY_OPCODE,
+      body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1),
+    });
+    const answered = await client.drainOpcodes();
+    assert.equal(
+      answered.includes(QUEST_TALK_OPCODE),
+      false,
+      "the last line's answer ends the talk: nothing follows",
+    );
+    assert.ok(
+      log.some((line) => line.includes("the last line was read")),
+      log.join("\n"),
+    );
 
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  const answered = await client.drainOpcodes();
-  assert.equal(
-    answered.includes(QUEST_TALK_OPCODE),
-    false,
-    "the last line's answer ends the talk: nothing follows",
-  );
-  assert.ok(log.some((line) => line.includes("the last line was read")), log.join("\n"));
+    // A reply with no dialog open is dropped, and a new click starts a fresh conversation.
+    client.send({
+      kind: "unknown",
+      opcode: QUEST_REPLY_OPCODE,
+      body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1),
+    });
+    assert.equal(
+      (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
+      false,
+      "an answer with no dialog is not answered",
+    );
+    assert.ok(
+      log.some((line) => line.includes("without a dialog open")),
+      log.join("\n"),
+    );
 
-  // A reply with no dialog open is dropped, and a new click starts a fresh conversation.
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 1 }).slice(1) });
-  assert.equal(
-    (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
-    false,
-    "an answer with no dialog is not answered",
-  );
-  assert.ok(log.some((line) => line.includes("without a dialog open")), log.join("\n"));
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const again = await client.take(2);
+    assert.equal(again[1]![0], QUEST_TALK_OPCODE);
+    assert.equal(
+      readQuestTalk(new PacketReader(again[1]!, 1)).body.message,
+      "one",
+      "a new talk starts at the first line",
+    );
 
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_OBJECT_CLICK_OPCODE,
-    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
-  });
-  const again = await client.take(2);
-  assert.equal(again[1]![0], QUEST_TALK_OPCODE);
-  assert.equal(readQuestTalk(new PacketReader(again[1]!, 1)).body.message, "one", "a new talk starts at the first line");
-
-  // Header Close/ESC (answer FF) closes it without another packet.
-  client.send({ kind: "unknown", opcode: QUEST_REPLY_OPCODE, body: encodeQuestReply({ kind: "say", answer: 255 }).slice(1) });
-  assert.equal(
-    (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
-    false,
-    "header Close ends the talk",
-  );
-  assert.ok(log.some((line) => line.includes("conversation ended")), log.join("\n"));
-  client.close();
-});
+    // Header Close/ESC (answer FF) closes it without another packet.
+    client.send({
+      kind: "unknown",
+      opcode: QUEST_REPLY_OPCODE,
+      body: encodeQuestReply({ kind: "say", answer: 255 }).slice(1),
+    });
+    assert.equal(
+      (await client.drainOpcodes()).includes(QUEST_TALK_OPCODE),
+      false,
+      "header Close ends the talk",
+    );
+    assert.ok(
+      log.some((line) => line.includes("conversation ended")),
+      log.join("\n"),
+    );
+    client.close();
+  },
+);
 
 /**
  * The MMO half of ADR-012, over real sockets: two players in one map.
@@ -1611,167 +1955,211 @@ test("clicking an NPC with no shop opens its dialogue, and 0x15 walks it line by
  * go to that player alone. Nothing moves on its own here (`speedPercent: 0`), so every packet in the
  * test is one the test itself caused.
  */
-test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [{ money: 25 }],
-    handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [{ money: 25 }],
+      handshake: { clientSendSeed: 0xbbbbbbbb, clientRecvSeed: 0xcccccccc },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
-  });
-  const heroBurst = await hero.take(4);
-  assert.deepEqual(
-    heroBurst.map((bytes) => bytes[0]),
-    [FIELD_OPCODE.setField, MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
-    "the first player gets the map and its world, and no 0x1C: there is nobody else",
-  );
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+    });
+    const heroBurst = await hero.take(4);
+    assert.deepEqual(
+      heroBurst.map((bytes) => bytes[0]),
+      [FIELD_OPCODE.setField, MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
+      "the first player gets the map and its world, and no 0x1C: there is nobody else",
+    );
 
-  // The second player into the same map: the snapshot, and then who is already standing there.
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  // Alt's record is the one a real `0x06` produces: the face and hair the dialog picked, and the four
-  // clothes as worn equips - exactly how `createCharacter` dresses a character. The others are
-  // hand-built handoffs with no record at all, which is why they arrive in the starter look.
-  const altStats = { ...zeroStats(), id: 8, name: "Alt" };
-  const altRecord = characterDataOf(
-    altStats,
-    withWorn(startingCharacterItems(), wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10])),
-  );
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt", character: altRecord }),
-  });
-  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  assert.deepEqual(
-    altBurst.map((bytes) => bytes[0]),
-    [
-      FIELD_OPCODE.setField,
-      MOB_OPCODE.enterField,
-      MOB_OPCODE.enterField,
-      NPC_OPCODE.enterField,
-      FIELD_OPCODE.userEnterField,
-    ],
-    "the joiner gets the world first, then the players",
-  );
-  const aboutHero = readUserEnterField(new PacketReader(altBurst[4]!, 1));
-  assert.deepEqual(
-    {
-      characterId: aboutHero.characterId,
-      name: aboutHero.name,
-      x: aboutHero.x,
-      y: aboutHero.y,
-      foothold: aboutHero.foothold,
-    },
-    { characterId: 7, name: "Hero", x: 100, y: 190, foothold: 32 },
-    "sub_511820 initializes ten pixels above the spawn portal",
-  );
-  assert.deepEqual(
-    [aboutHero.face, aboutHero.avatarItems],
-    [DEFAULT_FACE_ID, [DEFAULT_HAIR_ID]],
-    "and with a face and hair - a hand-built handoff record has no look of its own, so the " +
-      "server fills the starter one in rather than sending a user with no face at all",
-  );
+    // The second player into the same map: the snapshot, and then who is already standing there.
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    // Alt's record is the one a real `0x06` produces: the face and hair the dialog picked, and the four
+    // clothes as worn equips - exactly how `createCharacter` dresses a character. The others are
+    // hand-built handoffs with no record at all, which is why they arrive in the starter look.
+    const altStats = { ...zeroStats(), id: 8, name: "Alt" };
+    const altRecord = characterDataOf(
+      altStats,
+      withWorn(
+        startingCharacterItems(),
+        wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10]),
+      ),
+    );
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 8,
+        characterName: "Alt",
+        character: altRecord,
+      }),
+    });
+    const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.deepEqual(
+      altBurst.map((bytes) => bytes[0]),
+      [
+        FIELD_OPCODE.setField,
+        MOB_OPCODE.enterField,
+        MOB_OPCODE.enterField,
+        NPC_OPCODE.enterField,
+        FIELD_OPCODE.userEnterField,
+      ],
+      "the joiner gets the world first, then the players",
+    );
+    const aboutHero = readUserEnterField(new PacketReader(altBurst[4]!, 1));
+    assert.deepEqual(
+      {
+        characterId: aboutHero.characterId,
+        name: aboutHero.name,
+        x: aboutHero.x,
+        y: aboutHero.y,
+        foothold: aboutHero.foothold,
+      },
+      { characterId: 7, name: "Hero", x: 100, y: 190, foothold: 32 },
+      "sub_511820 initializes ten pixels above the spawn portal",
+    );
+    assert.deepEqual(
+      [aboutHero.face, aboutHero.avatarItems],
+      [DEFAULT_FACE_ID, [DEFAULT_HAIR_ID]],
+      "and with a face and hair - a hand-built handoff record has no look of its own, so the " +
+        "server fills the starter one in rather than sending a user with no face at all",
+    );
 
-  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-  assert.deepEqual(heroSaw.map((bytes) => bytes[0]), [FIELD_OPCODE.userEnterField], "and the one who was there gets the newcomer");
-  const aboutAlt = readUserEnterField(new PacketReader(heroSaw[0]!, 1));
-  assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [8, "Alt"]);
-  assert.deepEqual(
-    [aboutAlt.face, aboutAlt.avatarItems],
-    [20000, [30000, 1040001, 1060001, 1071000, 1302000]],
-    "the face and the worn equips of the record go out as the 0x1C's first u32 and its id list - " +
-      "which is the whole reason the clothes are stored as worn equips (`sub_42E2C0`, 4.11.3c)",
-  );
-  assert.equal(hero.headersOk, true, "every packet of a shared field survives the cipher/header check");
+    const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.deepEqual(
+      heroSaw.map((bytes) => bytes[0]),
+      [FIELD_OPCODE.userEnterField],
+      "and the one who was there gets the newcomer",
+    );
+    const aboutAlt = readUserEnterField(new PacketReader(heroSaw[0]!, 1));
+    assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [8, "Alt"]);
+    assert.deepEqual(
+      [aboutAlt.face, aboutAlt.avatarItems],
+      [20000, [30000, 1040001, 1060001, 1071000, 1302000]],
+      "the face and the worn equips of the record go out as the 0x1C's first u32 and its id list - " +
+        "which is the whole reason the clothes are stored as worn equips (`sub_42E2C0`, 4.11.3c)",
+    );
+    assert.equal(
+      hero.headersOk,
+      true,
+      "every packet of a shared field survives the cipher/header check",
+    );
 
-  // A walk: relayed as the other client's own path, with the id in front (0x0E carries none).
-  const move = encodeClientUserMove({
-    stageByte: 0,
-    path: {
-      originX: 0,
-      originY: 0,
-      elements: [{ attr: 0, x: 300, y: 290, vx: 0, vy: 0, action: 0, foothold: 32, duration: 60 }],
-    },
-  });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
-  const altSawMove = await alt.takeOpcode(FIELD_OPCODE.userMove);
-  const relayed = readUserMove(new PacketReader(altSawMove[altSawMove.length - 1]!, 1));
-  assert.equal(relayed.characterId, 7);
-  assert.deepEqual(relayed.path.elements.map((element) => [element.x, element.y]), [[300, 290]]);
-  const echoedMoves = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userMove);
-  assert.deepEqual(echoedMoves, [], "the mover is not told about their own walk");
+    // A walk: relayed as the other client's own path, with the id in front (0x0E carries none).
+    const move = encodeClientUserMove({
+      stageByte: 0,
+      path: {
+        originX: 0,
+        originY: 0,
+        elements: [
+          { attr: 0, x: 300, y: 290, vx: 0, vy: 0, action: 0, foothold: 32, duration: 60 },
+        ],
+      },
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+    const altSawMove = await alt.takeOpcode(FIELD_OPCODE.userMove);
+    const relayed = readUserMove(new PacketReader(altSawMove[altSawMove.length - 1]!, 1));
+    assert.equal(relayed.characterId, 7);
+    assert.deepEqual(
+      relayed.path.elements.map((element) => [element.x, element.y]),
+      [[300, 290]],
+    );
+    const echoedMoves = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userMove);
+    assert.deepEqual(echoedMoves, [], "the mover is not told about their own walk");
 
-  // One swing kills a monster: the death is the field's, the exp is the attacker's.
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+    // One swing kills a monster: the death is the field's, the exp is the attacker's.
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-  const altSawKill = await alt.takeOpcode(DROP_OPCODE.appear);
-  assert.deepEqual(
-    altSawKill.map((bytes) => bytes[0]),
-    [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
-    "the other player sees the swing first, then the hit, the death and the loot - and nothing of the reward",
-  );
-  // The swing itself: the attacker's own numbers and action, and only the mobs this field accepted.
-  const swing = readUserAttack(new PacketReader(altSawKill[0]!, 1));
-  assert.deepEqual(
-    [swing.characterId, swing.facingLeft, swing.action, swing.hits, swing.speed, swing.targets],
-    [7, false, 0, 1, 1, [{ mobId: 1, hitAnimation: 7, damages: [10] }]],
-    "0x23 carries the swing the attacker reported, under the attacker's own character id",
-  );
-  assert.deepEqual(
-    [swing.afterimage, swing.skillLevel, swing.skillId, swing.projectileItemId],
-    [0, 0, 0, 0],
-    "the three fields with no source here go out as their neutral values, not as a guess (FINDINGS 4.11.7b)",
-  );
-  assert.equal(readDropAppear(new PacketReader(altSawKill[3]!, 1)).mobId, 1, "the loot flies out of the monster that died");
+    const altSawKill = await alt.takeOpcode(DROP_OPCODE.appear);
+    assert.deepEqual(
+      altSawKill.map((bytes) => bytes[0]),
+      [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
+      "the other player sees the swing first, then the hit, the death and the loot - and nothing of the reward",
+    );
+    // The swing itself: the attacker's own numbers and action, and only the mobs this field accepted.
+    const swing = readUserAttack(new PacketReader(altSawKill[0]!, 1));
+    assert.deepEqual(
+      [swing.characterId, swing.facingLeft, swing.action, swing.hits, swing.speed, swing.targets],
+      [7, false, 0, 1, 1, [{ mobId: 1, hitAnimation: 7, damages: [10] }]],
+      "0x23 carries the swing the attacker reported, under the attacker's own character id",
+    );
+    assert.deepEqual(
+      [swing.afterimage, swing.skillLevel, swing.skillId, swing.projectileItemId],
+      [0, 0, 0, 0],
+      "the three fields with no source here go out as their neutral values, not as a guess (FINDINGS 4.11.7b)",
+    );
+    assert.equal(
+      readDropAppear(new PacketReader(altSawKill[3]!, 1)).mobId,
+      1,
+      "the loot flies out of the monster that died",
+    );
 
-  const heroSawKill = await hero.takeOpcode(DROP_OPCODE.appear);
-  assert.deepEqual(
-    heroSawKill.map((bytes) => bytes[0]),
-    [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, STAT_OPCODE, DROP_OPCODE.appear],
-    "the attacker gets the same world packets plus their own exp - no 0x23 for the swing it just played",
-  );
-  assert.deepEqual(readStatUpdate(new PacketReader(heroSawKill[2]!, 1)).diff, { exp: 1 });
+    const heroSawKill = await hero.takeOpcode(DROP_OPCODE.appear);
+    assert.deepEqual(
+      heroSawKill.map((bytes) => bytes[0]),
+      [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, STAT_OPCODE, DROP_OPCODE.appear],
+      "the attacker gets the same world packets plus their own exp - no 0x23 for the swing it just played",
+    );
+    assert.deepEqual(readStatUpdate(new PacketReader(heroSawKill[2]!, 1)).diff, { exp: 1 });
 
-  // The way out: the field tells the one still standing there.
-  alt.close();
-  const heroSawLeave = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
-  assert.equal(
-    new PacketReader(heroSawLeave[heroSawLeave.length - 1]!, 1).readU32(),
-    8,
-    "the id of the character that left",
-  );
-  assert.ok(log.some((line) => line.includes('"Alt" (8) entered map 1000000')), log.join("\n"));
-  assert.ok(log.some((line) => line.includes("(8) left map 1000000")), log.join("\n"));
-});
+    // The way out: the field tells the one still standing there.
+    alt.close();
+    const heroSawLeave = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
+    assert.equal(
+      new PacketReader(heroSawLeave[heroSawLeave.length - 1]!, 1).readU32(),
+      8,
+      "the id of the character that left",
+    );
+    assert.ok(
+      log.some((line) => line.includes('"Alt" (8) entered map 1000000')),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes("(8) left map 1000000")),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * The other two halves of the attack family (ADR-027). A shot and a cast are the *same* body as a
@@ -1788,371 +2176,530 @@ test("two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D
  * the two things worth pinning are its two answers - the `0x0B` that moves the item in this player's
  * own window, and the `0x28` that puts it on everybody else's screen.
  */
-test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 500, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [],
-    // Standing monsters: this test counts packets by opcode, and a walking one would only add noise.
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x99887766, clientRecvSeed: 0x55443322 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  // The cap is in the bag, not on the head: both the window and the avatar have something to change.
-  const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, startingCharacterItems());
-  heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: heroRecord }),
-  });
-  await hero.take(4);
-
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
-  assert.deepEqual(aboutHero.avatarItems, [DEFAULT_HAIR_ID], "nothing on the head yet - the cap is in the bag");
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  // A double-click on the cap: the four fields of `sub_4636B0` - tab 1, slot 2, the part its caller
-  // derived from the item id (1002000 -> cap -> 1, written the way a worn slot is written: negative).
-  const doubleClick = encodeClientChangeSlot({ tab: INVENTORY_TAB.equip, fromSlot: 2, toSlot: -1, count: -1 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: doubleClick.slice(1) });
-
-  // The wearer's own window: out of the tab slot, into the worn slot of part 1 - and nothing else,
-  // because the client's inventory only ever changes on `0x0B` (FINDINGS 4.6).
-  const heroSaw = await hero.takeOpcode(INVENTORY_OPCODE);
-  const change = readInventoryChange(new PacketReader(heroSaw[heroSaw.length - 1]!, 1));
-  assert.deepEqual(
-    change.changes.map((entry) => [entry.op, entry.inventory, entry.slot]),
-    [
-      [INVENTORY_OP.put, INVENTORY_TAB.equip, -1],
-      [INVENTORY_OP.clear, INVENTORY_TAB.equip, 2],
-    ],
-    "the cap is put at the negative slot - the worn item itself - and the old slot is cleared",
-  );
-  assert.equal(
-    change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
-    1002000,
-    "the put carries the item that was moved",
-  );
-  assert.equal(change.result, 1, "the result byte is the client's own timer flag, not a per-entry status");
-
-  // Everybody else: a `0x28` with the list a `0x1C` would have carried, and the face left alone
-  // (flags bit 0 clear, so no face word is on the wire at all - FINDINGS 4.11.8).
-  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userLook);
-  const look = readUserLook(new PacketReader(altSaw[altSaw.length - 1]!, 1));
-  assert.deepEqual(
-    [look.characterId, look.face, look.avatarItems],
-    [7, undefined, [DEFAULT_HAIR_ID, 1002000]],
-    "0x28 names the user, leaves the face and replaces the id list",
-  );
-  assert.ok(
-    log.some((line) => line.includes("tab 1 slot 2 -> worn 1 count=-1") && line.includes("look changed")),
-    log.join("\n"),
-  );
-  // The wearer is not sent their own look: their client draws them from the record it holds, the rule
-  // `0x27` and the attack relays follow too.
-  assert.deepEqual(
-    (await hero.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
-    [],
-    "no 0x28 for the player who equipped it",
-  );
-
-  // The record itself moved, not a copy of it: this is the object the account table holds, so the
-  // worn cap is what a relog reads back (ADR-017).
-  assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000, "part 1 of the worn group is the cap");
-  assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
-
-  // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
-  // an empty one. `sub_55ACB0` arms the client's one-request gate (FINDINGS 4.6) and only a `0x0B`
-  // clears it, so a refusal that stayed silent would freeze the whole window.
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: doubleClick.slice(1) });
-  const refused = await hero.takeOpcode(INVENTORY_OPCODE);
-  const empty = readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1));
-  assert.deepEqual([empty.result, empty.changes], [1, []], "an empty 0x0B is this server's refusal");
-  assert.ok(log.some((line) => line.includes("refused (emptySlot)")), log.join("\n"));
-  assert.deepEqual(
-    (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
-    [],
-    "and a refused drag tells the map nothing",
-  );
-});
-
-test("a throw-away answers 0x0B and puts the item on the ground for the whole map", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    // A monster with nothing to drop: the only thing that lands here is what the player throws.
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 500, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [],
-    // The field's own tick, which is what takes a drop a player is standing on.
-    mobTickMs: 20,
-    handshake: { clientSendSeed: 0x0a0b0c0d, clientRecvSeed: 0x01020304 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  // A pile of ten potions in consume slot 4: enough to throw some away and keep the rest.
-  const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, startingCharacterItems());
-  heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Hero", character: heroRecord }),
-  });
-  await hero.take(4);
-
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  /** The `0x43` of a drop: the monster block is what a throw-away must not have. */
-  const dropBody = (packet: Uint8Array): void => {
-    assert.equal(packet.length, 15, "kind 2 is 15 bytes on the wire - no monster block (FINDINGS 4.18.2)");
-  };
-
-  // Four of the ten go on the ground. The client's own sender is `sub_463BE0`: the tab and the slot
-  // it was dragged from, `toSlot = 0`, and the number the player answered to "몇 개나 버리시겠습니까?".
-  const throwAway = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 4 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: throwAway.slice(1) });
-
-  // The thrower's window: the slot now holds six, and that is the whole `0x0B` - one `put`.
-  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
-  const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
-  assert.deepEqual(change.changes, [
-    {
-      op: INVENTORY_OP.put,
-      inventory: INVENTORY_TAB.consume,
-      slot: 4,
-      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
-    },
-  ]);
-  // The ground, for everyone: the thrower's own client never drew the item anywhere but the slot, so
-  // this 0x43 is the only thing that puts it on the map.
-  const fromHero = await hero.takeOpcode(DROP_OPCODE.appear);
-  const heroSaw = fromHero[fromHero.length - 1]!;
-  dropBody(heroSaw);
-  const drop = readDropAppear(new PacketReader(heroSaw, 1));
-  assert.deepEqual(
-    [drop.kind, drop.money, drop.value, drop.mobId],
-    [DROP_KIND.placed, false, 2000000, undefined],
-    "a placed drop names the item, no mesos, and no monster",
-  );
-  const fromAlt = await alt.takeOpcode(DROP_OPCODE.appear);
-  assert.equal(readDropAppear(new PacketReader(fromAlt[fromAlt.length - 1]!, 1)).dropId, drop.dropId);
-  assert.ok(log.some((line) => line.includes("dropped item 2000000 x4")), log.join("\n"));
-
-  // It is under the thrower's feet, and the field leaves it there: the packet's own coordinates are
-  // the player's, and `DropField.reachable` only takes a drop that was already there when the player
-  // last moved. Without that rule a throw-away would come straight back on the next tick.
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  assert.deepEqual(
-    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
-    [],
-    "the thrower does not re-take it while standing still",
-  );
-
-  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
-  const walkTo = (x: number, y: number): void => {
-    const move = encodeClientUserMove({
-      stageByte: 0,
-      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+test(
+  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 500,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [],
+      // Standing monsters: this test counts packets by opcode, and a walking one would only add noise.
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x99887766, clientRecvSeed: 0x55443322 },
+      log: (line) => log.push(line),
     });
-    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
-  };
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  // Stepping off it is not a pickup either, and stepping back on is one: the item goes back into the
-  // slot with the count it was thrown with, which is how the throw's number is shown to survive.
-  walkTo(drop.x + 80, drop.y);
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.deepEqual(
-    (await hero.drainOpcodes(50)).filter((opcode) => opcode === DROP_OPCODE.remove),
-    [],
-    "80 px away is outside the reach",
-  );
-  walkTo(drop.x, drop.y);
-  const back = await hero.takeOpcode(DROP_OPCODE.remove);
-  assert.deepEqual(readDropRemove(new PacketReader(back[back.length - 1]!, 1)), {
-    dropId: drop.dropId,
-    kind: DROP_REMOVE_KIND.taken,
-    characterId: 9,
-  });
-  const pickup = await hero.takeOpcode(INVENTORY_OPCODE);
-  const taken = readInventoryChange(new PacketReader(pickup[pickup.length - 1]!, 1));
-  assert.deepEqual(taken.changes, [
-    {
-      op: INVENTORY_OP.put,
-      inventory: INVENTORY_TAB.consume,
-      slot: 4,
-      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
-    },
-  ]);
-  const notice = await alt.takeOpcode(DROP_OPCODE.remove);
-  assert.equal(readDropRemove(new PacketReader(notice[notice.length - 1]!, 1)).characterId, 9);
+    // The cap is in the bag, not on the head: both the window and the avatar have something to change.
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 7, name: "Hero" },
+      startingCharacterItems(),
+    );
+    heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.take(4);
 
-  // A count of zero is not a throw-away the client can send, and it is refused the same way every
-  // other impossible drag is: an empty `0x0B`, and nothing on the ground.
-  const zero = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 0 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
-  const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
-  assert.deepEqual(readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes, []);
-  assert.ok(log.some((line) => line.includes("refused (badCount)")), log.join("\n"));
-  assert.deepEqual(
-    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
-    [],
-    "a refused throw-away leaves the ground as it was",
-  );
-});
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
+    assert.deepEqual(
+      aboutHero.avatarItems,
+      [DEFAULT_HAIR_ID],
+      "nothing on the head yet - the cap is in the bag",
+    );
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-test("a shot goes out as 0x24 with the projectile id, and a cast as 0x25", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    // A monster with room for two hits, so both relays have a live target.
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 60, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [],
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x55667788 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+    // A double-click on the cap: the four fields of `sub_4636B0` - tab 1, slot 2, the part its caller
+    // derived from the item id (1002000 -> cap -> 1, written the way a worn slot is written: negative).
+    const doubleClick = encodeClientChangeSlot({
+      tab: INVENTORY_TAB.equip,
+      fromSlot: 2,
+      toSlot: -1,
+      count: -1,
+    });
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.changeSlot,
+      body: doubleClick.slice(1),
+    });
 
-  // The attacker owns a pile of arrows in consume slot 3, which is what a shot's extra `u16` names.
-  const heroItems = startingCharacterItems();
-  heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(3, nonEquipSlot(2060000, 100));
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
-      characterId: 7,
-      characterName: "Archer",
-      character: characterDataOf({ ...zeroStats(), id: 7, name: "Archer" }, heroItems),
-    }),
-  });
-  await hero.take(4); // 0x16 + the two mobs + the NPC
+    // The wearer's own window: out of the tab slot, into the worn slot of part 1 - and nothing else,
+    // because the client's inventory only ever changes on `0x0B` (FINDINGS 4.6).
+    const heroSaw = await hero.takeOpcode(INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(heroSaw[heroSaw.length - 1]!, 1));
+    assert.deepEqual(
+      change.changes.map((entry) => [entry.op, entry.inventory, entry.slot]),
+      [
+        [INVENTORY_OP.put, INVENTORY_TAB.equip, -1],
+        [INVENTORY_OP.clear, INVENTORY_TAB.equip, 2],
+      ],
+      "the cap is put at the negative slot - the worn item itself - and the old slot is cleared",
+    );
+    assert.equal(
+      change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
+      1002000,
+      "the put carries the item that was moved",
+    );
+    assert.equal(
+      change.result,
+      1,
+      "the result byte is the client's own timer flag, not a per-entry status",
+    );
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    // Everybody else: a `0x28` with the list a `0x1C` would have carried, and the face left alone
+    // (flags bit 0 clear, so no face word is on the wire at all - FINDINGS 4.11.8).
+    const altSaw = await alt.takeOpcode(FIELD_OPCODE.userLook);
+    const look = readUserLook(new PacketReader(altSaw[altSaw.length - 1]!, 1));
+    assert.deepEqual(
+      [look.characterId, look.face, look.avatarItems],
+      [7, undefined, [DEFAULT_HAIR_ID, 1002000]],
+      "0x28 names the user, leaves the face and replaces the id list",
+    );
+    assert.ok(
+      log.some(
+        (line) => line.includes("tab 1 slot 2 -> worn 1 count=-1") && line.includes("look changed"),
+      ),
+      log.join("\n"),
+    );
+    // The wearer is not sent their own look: their client draws them from the record it holds, the rule
+    // `0x27` and the attack relays follow too.
+    assert.deepEqual(
+      (await hero.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+      [],
+      "no 0x28 for the player who equipped it",
+    );
 
-  // A shot: `0x10` carries the pile it used, `1` arrow's worth of damage, facing left.
-  const shot = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: true,
-      action: 0x2e,
-      speed: 2,
-      projectileSlot: 3,
-      targets: [{ mobId: 1, hitAnimation: -1, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.shootAttack,
-  );
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.shootAttack, body: shot.slice(1) });
+    // The record itself moved, not a copy of it: this is the object the account table holds, so the
+    // worn cap is what a relog reads back (ADR-017).
+    assert.equal(
+      heroRecord.items!.worn.get(1)?.itemId,
+      1002000,
+      "part 1 of the worn group is the cap",
+    );
+    assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
 
-  const altShot = await alt.takeOpcode(FIELD_OPCODE.userShootAttack);
-  assert.equal(
-    altShot[0]![0],
-    FIELD_OPCODE.userShootAttack,
-    "the observer sees the shot before the monster's reaction - and nothing of someone else's reward",
-  );
-  const altSawHit = await alt.takeOpcode(MOB_OPCODE.stat);
-  assert.equal(altSawHit[altSawHit.length - 1]![0], MOB_OPCODE.stat, "the monster's reaction follows the shot");
-  const relayedShot = readUserAttack(new PacketReader(altShot[0]!, 1));
-  assert.deepEqual(
-    [relayedShot.characterId, relayedShot.facingLeft, relayedShot.action, relayedShot.hits, relayedShot.speed],
-    [7, true, 0x2e, 1, 2],
-    "0x24 is the shot the attacker reported: their id, their action, their speed (FINDINGS 4.11.7c)",
-  );
-  assert.equal(relayedShot.projectileItemId, 2060000, "the slot the client named is relayed as the item id");
-  assert.deepEqual(relayedShot.targets, [{ mobId: 1, hitAnimation: -1, damages: [10] }]);
-  // The attacker gets the world's reaction (and the `0x1C` about Alt joining, which was waiting), but
-  // never its own shot back: its client drew that one as it built the packet.
-  const heroSawShot = await hero.takeOpcode(MOB_OPCODE.stat);
-  assert.equal(heroSawShot[heroSawShot.length - 1]![0], MOB_OPCODE.stat, "the attacker gets the monster's reaction");
-  assert.deepEqual(
-    heroSawShot.filter((bytes) => bytes[0] === FIELD_OPCODE.userShootAttack || bytes[0] === FIELD_OPCODE.userAttack),
-    [],
-    "and nothing of its own attack back - it played that locally",
-  );
+    // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
+    // an empty one. `sub_55ACB0` arms the client's one-request gate (FINDINGS 4.6) and only a `0x0B`
+    // clears it, so a refusal that stayed silent would freeze the whole window.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.changeSlot,
+      body: doubleClick.slice(1),
+    });
+    const refused = await hero.takeOpcode(INVENTORY_OPCODE);
+    const empty = readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1));
+    assert.deepEqual(
+      [empty.result, empty.changes],
+      [1, []],
+      "an empty 0x0B is this server's refusal",
+    );
+    assert.ok(
+      log.some((line) => line.includes("refused (emptySlot)")),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+      [],
+      "and a refused drag tells the map nothing",
+    );
+  },
+);
 
-  // A cast: same record, `0x11`'s header has no slot, so the projectile field goes out as 0.
-  const cast = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0x20,
-      speed: 3,
-      targets: [{ mobId: 1, hitAnimation: 3, x: 509, y: 300, sequence: 2, damages: [9] }],
-    },
-    CLIENT_FIELD_OPCODE.magicAttack,
-  );
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.magicAttack, body: cast.slice(1) });
+test(
+  "a throw-away answers 0x0B and puts the item on the ground for the whole map",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // A monster with nothing to drop: the only thing that lands here is what the player throws.
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 500,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [],
+      // The field's own tick, which is what takes a drop a player is standing on.
+      mobTickMs: 20,
+      handshake: { clientSendSeed: 0x0a0b0c0d, clientRecvSeed: 0x01020304 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const altCast = await alt.takeOpcode(FIELD_OPCODE.userMagicAttack);
-  assert.equal(altCast[0]![0], FIELD_OPCODE.userMagicAttack, "a cast never goes out as the shot's opcode");
-  const relayedCast = readUserAttack(new PacketReader(altCast[0]!, 1));
-  assert.deepEqual(
-    [relayedCast.characterId, relayedCast.action, relayedCast.speed, relayedCast.projectileItemId],
-    [7, 0x20, 3, 0],
-    "and its projectile field is the neutral 0: there is no slot in the packet to look up",
-  );
-  assert.deepEqual(relayedCast.targets, [{ mobId: 1, hitAnimation: 3, damages: [9] }]);
-  assert.ok(
-    log.some((line) => line.includes("0x24 attack of \"Archer\"") && line.includes("1 target(s)")),
-    log.join("\n"),
-  );
-  assert.ok(log.some((line) => line.includes("0x25 attack of \"Archer\"")), log.join("\n"));
-});
+    // A pile of ten potions in consume slot 4: enough to throw some away and keep the rest.
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 9, name: "Hero" },
+      startingCharacterItems(),
+    );
+    heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
+      4,
+      nonEquipSlot(2000000, 10),
+    );
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.take(4);
+
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    /** The `0x43` of a drop: the monster block is what a throw-away must not have. */
+    const dropBody = (packet: Uint8Array): void => {
+      assert.equal(
+        packet.length,
+        15,
+        "kind 2 is 15 bytes on the wire - no monster block (FINDINGS 4.18.2)",
+      );
+    };
+
+    // Four of the ten go on the ground. The client's own sender is `sub_463BE0`: the tab and the slot
+    // it was dragged from, `toSlot = 0`, and the number the player answered to "몇 개나 버리시겠습니까?".
+    const throwAway = encodeClientChangeSlot({
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 4,
+      toSlot: 0,
+      count: 4,
+    });
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.changeSlot,
+      body: throwAway.slice(1),
+    });
+
+    // The thrower's window: the slot now holds six, and that is the whole `0x0B` - one `put`.
+    const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
+    assert.deepEqual(change.changes, [
+      {
+        op: INVENTORY_OP.put,
+        inventory: INVENTORY_TAB.consume,
+        slot: 4,
+        item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
+      },
+    ]);
+    // The ground, for everyone: the thrower's own client never drew the item anywhere but the slot, so
+    // this 0x43 is the only thing that puts it on the map.
+    const fromHero = await hero.takeOpcode(DROP_OPCODE.appear);
+    const heroSaw = fromHero[fromHero.length - 1]!;
+    dropBody(heroSaw);
+    const drop = readDropAppear(new PacketReader(heroSaw, 1));
+    assert.deepEqual(
+      [drop.kind, drop.money, drop.value, drop.mobId],
+      [DROP_KIND.placed, false, 2000000, undefined],
+      "a placed drop names the item, no mesos, and no monster",
+    );
+    const fromAlt = await alt.takeOpcode(DROP_OPCODE.appear);
+    assert.equal(
+      readDropAppear(new PacketReader(fromAlt[fromAlt.length - 1]!, 1)).dropId,
+      drop.dropId,
+    );
+    assert.ok(
+      log.some((line) => line.includes("dropped item 2000000 x4")),
+      log.join("\n"),
+    );
+
+    // It is under the thrower's feet, and the field leaves it there: the packet's own coordinates are
+    // the player's, and `DropField.reachable` only takes a drop that was already there when the player
+    // last moved. Without that rule a throw-away would come straight back on the next tick.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.deepEqual(
+      (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
+      [],
+      "the thrower does not re-take it while standing still",
+    );
+
+    /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+    const walkTo = (x: number, y: number): void => {
+      const move = encodeClientUserMove({
+        stageByte: 0,
+        path: {
+          originX: 0,
+          originY: 0,
+          elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }],
+        },
+      });
+      hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+    };
+
+    // Stepping off it is not a pickup either, and stepping back on is one: the item goes back into the
+    // slot with the count it was thrown with, which is how the throw's number is shown to survive.
+    walkTo(drop.x + 80, drop.y);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(
+      (await hero.drainOpcodes(50)).filter((opcode) => opcode === DROP_OPCODE.remove),
+      [],
+      "80 px away is outside the reach",
+    );
+    walkTo(drop.x, drop.y);
+    const back = await hero.takeOpcode(DROP_OPCODE.remove);
+    assert.deepEqual(readDropRemove(new PacketReader(back[back.length - 1]!, 1)), {
+      dropId: drop.dropId,
+      kind: DROP_REMOVE_KIND.taken,
+      characterId: 9,
+    });
+    const pickup = await hero.takeOpcode(INVENTORY_OPCODE);
+    const taken = readInventoryChange(new PacketReader(pickup[pickup.length - 1]!, 1));
+    assert.deepEqual(taken.changes, [
+      {
+        op: INVENTORY_OP.put,
+        inventory: INVENTORY_TAB.consume,
+        slot: 4,
+        item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
+      },
+    ]);
+    const notice = await alt.takeOpcode(DROP_OPCODE.remove);
+    assert.equal(readDropRemove(new PacketReader(notice[notice.length - 1]!, 1)).characterId, 9);
+
+    // A count of zero is not a throw-away the client can send, and it is refused the same way every
+    // other impossible drag is: an empty `0x0B`, and nothing on the ground.
+    const zero = encodeClientChangeSlot({
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 4,
+      toSlot: 0,
+      count: 0,
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
+    const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
+    assert.deepEqual(
+      readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes,
+      [],
+    );
+    assert.ok(
+      log.some((line) => line.includes("refused (badCount)")),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+      [],
+      "a refused throw-away leaves the ground as it was",
+    );
+  },
+);
+
+test(
+  "a shot goes out as 0x24 with the projectile id, and a cast as 0x25",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // A monster with room for two hits, so both relays have a live target.
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 60,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [],
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x55667788 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    // The attacker owns a pile of arrows in consume slot 3, which is what a shot's extra `u16` names.
+    const heroItems = startingCharacterItems();
+    heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(3, nonEquipSlot(2060000, 100));
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Archer",
+        character: characterDataOf({ ...zeroStats(), id: 7, name: "Archer" }, heroItems),
+      }),
+    });
+    await hero.take(4); // 0x16 + the two mobs + the NPC
+
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    // A shot: `0x10` carries the pile it used, `1` arrow's worth of damage, facing left.
+    const shot = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: true,
+        action: 0x2e,
+        speed: 2,
+        projectileSlot: 3,
+        targets: [{ mobId: 1, hitAnimation: -1, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.shootAttack,
+    );
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.shootAttack, body: shot.slice(1) });
+
+    const altShot = await alt.takeOpcode(FIELD_OPCODE.userShootAttack);
+    assert.equal(
+      altShot[0]![0],
+      FIELD_OPCODE.userShootAttack,
+      "the observer sees the shot before the monster's reaction - and nothing of someone else's reward",
+    );
+    const altSawHit = await alt.takeOpcode(MOB_OPCODE.stat);
+    assert.equal(
+      altSawHit[altSawHit.length - 1]![0],
+      MOB_OPCODE.stat,
+      "the monster's reaction follows the shot",
+    );
+    const relayedShot = readUserAttack(new PacketReader(altShot[0]!, 1));
+    assert.deepEqual(
+      [
+        relayedShot.characterId,
+        relayedShot.facingLeft,
+        relayedShot.action,
+        relayedShot.hits,
+        relayedShot.speed,
+      ],
+      [7, true, 0x2e, 1, 2],
+      "0x24 is the shot the attacker reported: their id, their action, their speed (FINDINGS 4.11.7c)",
+    );
+    assert.equal(
+      relayedShot.projectileItemId,
+      2060000,
+      "the slot the client named is relayed as the item id",
+    );
+    assert.deepEqual(relayedShot.targets, [{ mobId: 1, hitAnimation: -1, damages: [10] }]);
+    // The attacker gets the world's reaction (and the `0x1C` about Alt joining, which was waiting), but
+    // never its own shot back: its client drew that one as it built the packet.
+    const heroSawShot = await hero.takeOpcode(MOB_OPCODE.stat);
+    assert.equal(
+      heroSawShot[heroSawShot.length - 1]![0],
+      MOB_OPCODE.stat,
+      "the attacker gets the monster's reaction",
+    );
+    assert.deepEqual(
+      heroSawShot.filter(
+        (bytes) =>
+          bytes[0] === FIELD_OPCODE.userShootAttack || bytes[0] === FIELD_OPCODE.userAttack,
+      ),
+      [],
+      "and nothing of its own attack back - it played that locally",
+    );
+
+    // A cast: same record, `0x11`'s header has no slot, so the projectile field goes out as 0.
+    const cast = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0x20,
+        speed: 3,
+        targets: [{ mobId: 1, hitAnimation: 3, x: 509, y: 300, sequence: 2, damages: [9] }],
+      },
+      CLIENT_FIELD_OPCODE.magicAttack,
+    );
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.magicAttack, body: cast.slice(1) });
+
+    const altCast = await alt.takeOpcode(FIELD_OPCODE.userMagicAttack);
+    assert.equal(
+      altCast[0]![0],
+      FIELD_OPCODE.userMagicAttack,
+      "a cast never goes out as the shot's opcode",
+    );
+    const relayedCast = readUserAttack(new PacketReader(altCast[0]!, 1));
+    assert.deepEqual(
+      [
+        relayedCast.characterId,
+        relayedCast.action,
+        relayedCast.speed,
+        relayedCast.projectileItemId,
+      ],
+      [7, 0x20, 3, 0],
+      "and its projectile field is the neutral 0: there is no slot in the packet to look up",
+    );
+    assert.deepEqual(relayedCast.targets, [{ mobId: 1, hitAnimation: 3, damages: [9] }]);
+    assert.ok(
+      log.some((line) => line.includes('0x24 attack of "Archer"') && line.includes("1 target(s)")),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes('0x25 attack of "Archer"')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * Character ids are the field's key for a player (`CUserPool`, `sub_51CFE0`) and the handoff's, so two
@@ -2184,7 +2731,12 @@ test("two accounts never hand out the same character id", { timeout: 20000 }, as
     await client.take(1);
     client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
     await client.take(1);
-    client.send({ kind: "check-name", opcode: 0x06, name, appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10] });
+    client.send({
+      kind: "check-name",
+      opcode: 0x06,
+      name,
+      appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
+    });
     await client.take(1);
     client.send({ kind: "create-character", opcode: 0x05, name });
     const reply = (await client.take(1))[0]!;
@@ -2198,7 +2750,6 @@ test("two accounts never hand out the same character id", { timeout: 20000 }, as
   assert.equal(second, 2, "the next one follows the *server's* maximum, not the account's");
 });
 
-
 /**
  * A portal is a map change (FINDINGS 4.25): the client sends the name of the portal under the cursor
  * (`0x0D`, `kind = -1`) and the server answers with the release byte and then the field that portal
@@ -2210,117 +2761,171 @@ test("two accounts never hand out the same character id", { timeout: 20000 }, as
  * arrives in map 2000000 by *record* - and finds the player who took the portal standing there, at
  * that map's own spawn portal.
  */
-test("a portal moves a player to another map, and the map they left hears about it", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    handshake: { clientSendSeed: 0xdddddddd, clientRecvSeed: 0xeeeeeeee },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a portal moves a player to another map, and the map they left hears about it",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined,
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      handshake: { clientSendSeed: 0xdddddddd, clientRecvSeed: 0xeeeeeeee },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
-  });
-  await hero.take(4);
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+    });
+    await hero.take(4);
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // A name that is no portal of this map: the release byte is owed either way - the client's interact
-  // gate stays armed until it arrives (`sub_472590`) - and nothing else happens.
-  alt.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.interact,
-    body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "nowhere" }).slice(1),
-  });
-  const release = await alt.take(1);
-  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease, "the release byte answers every 0x0D");
-  const jumps = (await alt.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.setField);
-  assert.deepEqual(jumps, [], "an unknown portal is not a teleport");
-  assert.ok(log.some((line) => line.includes('"nowhere" is no portal of map 1000000')), log.join("\n"));
+    // A name that is no portal of this map: the release byte is owed either way - the client's interact
+    // gate stays armed until it arrives (`sub_472590`) - and nothing else happens.
+    alt.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.interact,
+      body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "nowhere" }).slice(1),
+    });
+    const release = await alt.take(1);
+    assert.equal(
+      release[0]![0],
+      FIELD_OPCODE.requestRelease,
+      "the release byte answers every 0x0D",
+    );
+    const jumps = (await alt.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.setField);
+    assert.deepEqual(jumps, [], "an unknown portal is not a teleport");
+    assert.ok(
+      log.some((line) => line.includes('"nowhere" is no portal of map 1000000')),
+      log.join("\n"),
+    );
 
-  // The real one. `tm` of the map's own portal is where it leads, so the answer is a new field.
-  alt.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.interact,
-    body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "west00" }).slice(1),
-  });
-  const moved = await alt.take(4);
-  assert.deepEqual(
-    moved.map((bytes) => bytes[0]),
-    [FIELD_OPCODE.requestRelease, FIELD_OPCODE.setField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
-    "release byte, then the destination map and its world",
-  );
-  const arrived = readSetField(new PacketReader(moved[1]!, 1));
-  assert.equal(arrived.character.stats.mapId, 2000000, "the record the client holds now names the new map");
-  assert.deepEqual([arrived.character.stats.id, arrived.character.stats.name], [8, "Alt"]);
+    // The real one. `tm` of the map's own portal is where it leads, so the answer is a new field.
+    alt.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.interact,
+      body: encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name: "west00" }).slice(1),
+    });
+    const moved = await alt.take(4);
+    assert.deepEqual(
+      moved.map((bytes) => bytes[0]),
+      [
+        FIELD_OPCODE.requestRelease,
+        FIELD_OPCODE.setField,
+        MOB_OPCODE.enterField,
+        NPC_OPCODE.enterField,
+      ],
+      "release byte, then the destination map and its world",
+    );
+    const arrived = readSetField(new PacketReader(moved[1]!, 1));
+    assert.equal(
+      arrived.character.stats.mapId,
+      2000000,
+      "the record the client holds now names the new map",
+    );
+    assert.deepEqual([arrived.character.stats.id, arrived.character.stats.name], [8, "Alt"]);
 
-  // The map the player left: one 0x1D, and nothing else - the two players are in two maps now.
-  const left = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
-  assert.equal(
-    new PacketReader(left[left.length - 1]!, 1).readU32(),
-    8,
-    "exactly the character that walked through the portal",
-  );
-  const otherFieldNews = (await hero.drain()).filter(
-    (bytes) => bytes[0] === FIELD_OPCODE.userEnterField || bytes[0] === FIELD_OPCODE.userLeaveField,
-  );
-  assert.deepEqual(otherFieldNews, [], "a field does not report what another field is doing");
+    // The map the player left: one 0x1D, and nothing else - the two players are in two maps now.
+    const left = await hero.takeOpcode(FIELD_OPCODE.userLeaveField);
+    assert.equal(
+      new PacketReader(left[left.length - 1]!, 1).readU32(),
+      8,
+      "exactly the character that walked through the portal",
+    );
+    const otherFieldNews = (await hero.drain()).filter(
+      (bytes) =>
+        bytes[0] === FIELD_OPCODE.userEnterField || bytes[0] === FIELD_OPCODE.userLeaveField,
+    );
+    assert.deepEqual(otherFieldNews, [], "a field does not report what another field is doing");
 
-  // Where a player enters is their own record: this one names map 2000000, so that is the field the
-  // new connection is put into - and the player who took the portal is in it.
-  const guest = await FakeClient.connect(gameInfo.port);
-  t.after(() => guest.close());
-  const record = characterDataOf(
-    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
-    startingCharacterItems(),
-  );
-  guest.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
-  });
-  const guestBurst = await guest.takeOpcode(FIELD_OPCODE.userEnterField);
-  assert.deepEqual(
-    guestBurst.map((bytes) => bytes[0]),
-    [FIELD_OPCODE.setField, MOB_OPCODE.enterField, NPC_OPCODE.enterField, FIELD_OPCODE.userEnterField],
-    "the record\'s map, its world, then who is in it",
-  );
-  assert.equal(readSetField(new PacketReader(guestBurst[0]!, 1)).character.stats.mapId, 2000000);
-  const aboutAlt = readUserEnterField(new PacketReader(guestBurst[3]!, 1));
-  assert.deepEqual(
-    [aboutAlt.characterId, aboutAlt.name, aboutAlt.x, aboutAlt.y, aboutAlt.foothold],
-    [8, "Alt", 600, 290, 32],
-    "the player who took the portal is at the destination\'s own portal, on its foothold",
-  );
+    // Where a player enters is their own record: this one names map 2000000, so that is the field the
+    // new connection is put into - and the player who took the portal is in it.
+    const guest = await FakeClient.connect(gameInfo.port);
+    t.after(() => guest.close());
+    const record = characterDataOf(
+      {
+        ...zeroStats(),
+        id: 9,
+        name: "Guest",
+        mapId: 2000000,
+        level: 1,
+        hp: 50,
+        maxHp: 50,
+        mp: 50,
+        maxMp: 50,
+      },
+      startingCharacterItems(),
+    );
+    guest.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Guest",
+        character: record,
+      }),
+    });
+    const guestBurst = await guest.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.deepEqual(
+      guestBurst.map((bytes) => bytes[0]),
+      [
+        FIELD_OPCODE.setField,
+        MOB_OPCODE.enterField,
+        NPC_OPCODE.enterField,
+        FIELD_OPCODE.userEnterField,
+      ],
+      "the record\'s map, its world, then who is in it",
+    );
+    assert.equal(readSetField(new PacketReader(guestBurst[0]!, 1)).character.stats.mapId, 2000000);
+    const aboutAlt = readUserEnterField(new PacketReader(guestBurst[3]!, 1));
+    assert.deepEqual(
+      [aboutAlt.characterId, aboutAlt.name, aboutAlt.x, aboutAlt.y, aboutAlt.foothold],
+      [8, "Alt", 600, 290, 32],
+      "the player who took the portal is at the destination\'s own portal, on its foothold",
+    );
 
-  // ... and the one who was there hears the newcomer, the same way as in any other map.
-  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  assert.equal(readUserEnterField(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId, 9);
-  assert.ok(
-    log.some((line) => line.includes('"Alt" uses portal "west00" of map 1000000 -> 2000000')),
-    log.join("\n"),
-  );
-});
+    // ... and the one who was there hears the newcomer, the same way as in any other map.
+    const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.equal(
+      readUserEnterField(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId,
+      9,
+    );
+    assert.ok(
+      log.some((line) => line.includes('"Alt" uses portal "west00" of map 1000000 -> 2000000')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * The revive dialog (`0x0D` with `kind = 0`, FINDINGS 4.32): the `CUIRevive` window - the one that
@@ -2339,125 +2944,169 @@ test("a portal moves a player to another map, and the map they left hears about 
  * it cannot (the same branch every town takes through `RETURN_MAP_NONE`: leave and re-enter, which
  * the players standing there see as `0x1D` + `0x1C`).
  */
-test("a revive restores HP and re-enters a field: the return map if it can be read, the same map otherwise", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) =>
-      mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a revive restores HP and re-enters a field: the return map if it can be read, the same map otherwise",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000
+          ? STUB_MAP
+          : mapId === 2000000
+            ? STUB_MAP_ALT
+            : mapId === 1010000
+              ? STUB_MAP_TOWN
+              : undefined,
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  /** A record one hit from death, so the packet that comes back says whether HP was restored. */
-  const hurt = (id: number, name: string, mapId: number): CharacterData => {
-    const stats = zeroStats();
-    stats.id = id;
-    stats.name = name;
-    stats.level = 1;
-    stats.hp = 1;
-    stats.maxHp = 50;
-    stats.mp = 5;
-    stats.maxMp = 5;
-    stats.mapId = mapId;
-    return characterDataOf(stats, startingCharacterItems());
-  };
+    /** A record one hit from death, so the packet that comes back says whether HP was restored. */
+    const hurt = (id: number, name: string, mapId: number): CharacterData => {
+      const stats = zeroStats();
+      stats.id = id;
+      stats.name = name;
+      stats.level = 1;
+      stats.hp = 1;
+      stats.maxHp = 50;
+      stats.mp = 5;
+      stats.maxMp = 5;
+      stats.mapId = mapId;
+      return characterDataOf(stats, startingCharacterItems());
+    };
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: hurt(7, "Hero", 1000000) }),
-  });
-  const wounded = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
-  assert.equal(wounded.character.stats.hp, 1, "the record enters the field as it is - a hurt 1/50");
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: hurt(7, "Hero", 1000000),
+      }),
+    });
+    const wounded = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+    assert.equal(
+      wounded.character.stats.hp,
+      1,
+      "the record enters the field as it is - a hurt 1/50",
+    );
 
-  const witness = await FakeClient.connect(gameInfo.port);
-  t.after(() => witness.close());
-  witness.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await witness.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    const witness = await FakeClient.connect(gameInfo.port);
+    t.after(() => witness.close());
+    witness.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await witness.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // The revive dialog's OK: the same `0x0D` a portal click uses, with `kind = 0` and no name.
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.interact,
-    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
-  });
-  const release = await hero.take(1);
-  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease, "the release byte answers a revive too");
-  const revived = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
-  assert.equal(revived.character.stats.hp, 50, "a revive restores HP to full");
-  assert.equal(revived.character.stats.maxHp, 50, "and does not touch the maximum");
-  assert.equal(revived.character.stats.mapId, 1010000, "the map is the one info/returnMap names");
-  assert.ok(
-    log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1000000 -> 1010000')),
-    log.join("\n"),
-  );
-  assert.deepEqual(
-    (await witness.drainOpcodes()).filter(
-      (opcode) => opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
-    ),
-    [FIELD_OPCODE.userLeaveField],
-    "the map they died in hears them leave",
-  );
+    // The revive dialog's OK: the same `0x0D` a portal click uses, with `kind = 0` and no name.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.interact,
+      body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
+    });
+    const release = await hero.take(1);
+    assert.equal(
+      release[0]![0],
+      FIELD_OPCODE.requestRelease,
+      "the release byte answers a revive too",
+    );
+    const revived = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+    assert.equal(revived.character.stats.hp, 50, "a revive restores HP to full");
+    assert.equal(revived.character.stats.maxHp, 50, "and does not touch the maximum");
+    assert.equal(revived.character.stats.mapId, 1010000, "the map is the one info/returnMap names");
+    assert.ok(
+      log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1000000 -> 1010000')),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await witness.drainOpcodes()).filter(
+        (opcode) =>
+          opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
+      ),
+      [FIELD_OPCODE.userLeaveField],
+      "the map they died in hears them leave",
+    );
 
-  // A character whose own record says 1010000 finds them there: the revive joined the new field, it
-  // did not just send a packet.
-  const latecomer = await FakeClient.connect(gameInfo.port);
-  t.after(() => latecomer.close());
-  latecomer.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
-      characterId: 9,
-      characterName: "Other",
-      character: hurt(9, "Other", 1010000),
-    }),
-  });
-  await latecomer.takeOpcode(FIELD_OPCODE.setField);
-  const sawHero = await latecomer.takeOpcode(FIELD_OPCODE.userEnterField);
-  assert.equal(readUserEnterField(new PacketReader(sawHero[sawHero.length - 1]!, 1)).characterId, 7);
+    // A character whose own record says 1010000 finds them there: the revive joined the new field, it
+    // did not just send a packet.
+    const latecomer = await FakeClient.connect(gameInfo.port);
+    t.after(() => latecomer.close());
+    latecomer.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Other",
+        character: hurt(9, "Other", 1010000),
+      }),
+    });
+    await latecomer.takeOpcode(FIELD_OPCODE.setField);
+    const sawHero = await latecomer.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.equal(
+      readUserEnterField(new PacketReader(sawHero[sawHero.length - 1]!, 1)).characterId,
+      7,
+    );
 
-  // The second revive happens in the town, whose `returnMap` is a map this server cannot read: the
-  // field is left and joined again, which everyone standing there sees.
-  await hero.drain(); // the latecomer's own 0x1C is already in this queue
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.interact,
-    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
-  });
-  const releaseAgain = await hero.take(1);
-  assert.equal(releaseAgain[0]![0], FIELD_OPCODE.requestRelease, "…and so does the second one");
-  const again = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
-  assert.equal(again.character.stats.mapId, 1010000, "an unreadable return map re-enters the map they are in");
-  assert.equal(again.character.stats.hp, 50);
-  assert.ok(
-    log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1010000 -> 1010001')),
-    log.join("\n"),
-  );
-  assert.ok(log.some((line) => line.includes("map 1010001 has no Map/Map/*.img")), log.join("\n"));
-  assert.deepEqual(
-    (await latecomer.drainOpcodes()).filter(
-      (opcode) => opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
-    ),
-    [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField],
-    "the town sees them leave and arrive again",
-  );
-});
+    // The second revive happens in the town, whose `returnMap` is a map this server cannot read: the
+    // field is left and joined again, which everyone standing there sees.
+    await hero.drain(); // the latecomer's own 0x1C is already in this queue
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.interact,
+      body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
+    });
+    const releaseAgain = await hero.take(1);
+    assert.equal(releaseAgain[0]![0], FIELD_OPCODE.requestRelease, "…and so does the second one");
+    const again = readSetField(new PacketReader((await hero.take(1))[0]!, 1));
+    assert.equal(
+      again.character.stats.mapId,
+      1010000,
+      "an unreadable return map re-enters the map they are in",
+    );
+    assert.equal(again.character.stats.hp, 50);
+    assert.ok(
+      log.some((line) => line.includes('"Hero" revives - hp 50/50, map 1010000 -> 1010001')),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes("map 1010001 has no Map/Map/*.img")),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await latecomer.drainOpcodes()).filter(
+        (opcode) =>
+          opcode === FIELD_OPCODE.userLeaveField || opcode === FIELD_OPCODE.userEnterField,
+      ),
+      [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField],
+      "the town sees them leave and arrive again",
+    );
+  },
+);
 
 /**
  * The other half of the death slice: what a monster's hit *is* on the wire (FINDINGS 4.33, ADR-021).
@@ -2470,100 +3119,112 @@ test("a revive restores HP and re-enters a field: the return map if it can be re
  * regenerate", and "a report that changes nothing costs no packet" - after which the revive path
  * (ADR-020) closes the loop by refilling HP.
  */
-test("a monster's damage lands because the client reports it: c2s 0x1C in, 0x0D out", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) =>
-      mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
-    handshake: { clientSendSeed: 0x0da0a0a0, clientRecvSeed: 0x0be1be1b },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a monster's damage lands because the client reports it: c2s 0x1C in, 0x0D out",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
+      handshake: { clientSendSeed: 0x0da0a0a0, clientRecvSeed: 0x0be1be1b },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const stats = zeroStats();
-  stats.id = 41;
-  stats.name = "PunchingBag";
-  stats.level = 1;
-  stats.hp = 50;
-  stats.maxHp = 50;
-  stats.mp = 5;
-  stats.maxMp = 30;
+    const stats = zeroStats();
+    stats.id = 41;
+    stats.name = "PunchingBag";
+    stats.level = 1;
+    stats.hp = 50;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 30;
 
-  const client = await FakeClient.connect(gameInfo.port);
-  t.after(() => client.close());
-  client.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
-      characterId: 41,
-      characterName: "PunchingBag",
-      character: characterDataOf(stats, startingCharacterItems()),
-    }),
-  });
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 41,
+        characterName: "PunchingBag",
+        character: characterDataOf(stats, startingCharacterItems()),
+      }),
+    });
 
-  // The entry burst (`0x16`, the mobs, the NPCs) first, so every drain below is about a report.
-  const entering = await client.drain();
-  assert.equal(entering[0]![0], FIELD_OPCODE.setField);
+    // The entry burst (`0x16`, the mobs, the NPCs) first, so every drain below is about a report.
+    const entering = await client.drain();
+    assert.equal(entering[0]![0], FIELD_OPCODE.setField);
 
-  /** What `sub_55B870` puts on the wire, minus the opcode byte the client adds: both fields, always. */
-  const report = (hpDelta: number, mpDelta: number): void => {
+    /** What `sub_55B870` puts on the wire, minus the opcode byte the client adds: both fields, always. */
+    const report = (hpDelta: number, mpDelta: number): void => {
+      client.send({
+        kind: "unknown",
+        opcode: CLIENT_FIELD_OPCODE.statReport,
+        body: encodeClientStatReport({ hpDelta, mpDelta, flag: 0 }).slice(1),
+      });
+    };
+    /**
+     * The `0x0D`s among `packets`. A live field is never quiet - the mobs keep sending `0x33` - so the
+     * claim this test can make is "exactly these stat diffs arrived", not "only one packet arrived".
+     */
+    const statDiffs = (packets: Uint8Array[]): Record<string, number>[] =>
+      packets
+        .filter((bytes) => bytes[0] === STAT_OPCODE)
+        .map((bytes) => readStatUpdate(new PacketReader(bytes, 1)).diff);
+
+    // A monster's hit: the client rolled it, the server only hears "-30".
+    report(-30, 0);
+    assert.deepEqual(statDiffs(await client.drain()), [{ hp: 20 }]);
+    assert.ok(
+      log.some((line) =>
+        line.includes('"PunchingBag" 0x1c stat report: hpDelta=-30 mpDelta=0 flag=0 - hp 20/50'),
+      ),
+      log.join("\n"),
+    );
+
+    // One hit more than the HP that is left: it lands on 0 and never below it.
+    report(-30, 0);
+    assert.deepEqual(statDiffs(await client.drain()), [{ hp: 0 }]);
+
+    // The map's own regeneration tick while dead (`sub_558950`): MP lands, HP does not - the revive
+    // is what refills HP, so a corpse is not walked back up 10 HP at a time.
+    report(10, 3);
+    assert.deepEqual(statDiffs(await client.drain()), [{ mp: 8 }]);
+    report(10, 0);
+    assert.deepEqual(
+      statDiffs(await client.drain()),
+      [],
+      "a report that changes nothing is not answered",
+    );
+
+    // The revive (ADR-020) closes the loop: HP is full again, and MP is left where it was - the
+    // original's death mechanic is HP, and nothing here invents an MP refill.
     client.send({
       kind: "unknown",
-      opcode: CLIENT_FIELD_OPCODE.statReport,
-      body: encodeClientStatReport({ hpDelta, mpDelta, flag: 0 }).slice(1),
+      opcode: CLIENT_FIELD_OPCODE.interact,
+      body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
     });
-  };
-  /**
-   * The `0x0D`s among `packets`. A live field is never quiet - the mobs keep sending `0x33` - so the
-   * claim this test can make is "exactly these stat diffs arrived", not "only one packet arrived".
-   */
-  const statDiffs = (packets: Uint8Array[]): Record<string, number>[] =>
-    packets
-      .filter((bytes) => bytes[0] === STAT_OPCODE)
-      .map((bytes) => readStatUpdate(new PacketReader(bytes, 1)).diff);
-
-  // A monster's hit: the client rolled it, the server only hears "-30".
-  report(-30, 0);
-  assert.deepEqual(statDiffs(await client.drain()), [{ hp: 20 }]);
-  assert.ok(
-    log.some((line) =>
-      line.includes('"PunchingBag" 0x1c stat report: hpDelta=-30 mpDelta=0 flag=0 - hp 20/50'),
-    ),
-    log.join("\n"),
-  );
-
-  // One hit more than the HP that is left: it lands on 0 and never below it.
-  report(-30, 0);
-  assert.deepEqual(statDiffs(await client.drain()), [{ hp: 0 }]);
-
-  // The map's own regeneration tick while dead (`sub_558950`): MP lands, HP does not - the revive
-  // is what refills HP, so a corpse is not walked back up 10 HP at a time.
-  report(10, 3);
-  assert.deepEqual(statDiffs(await client.drain()), [{ mp: 8 }]);
-  report(10, 0);
-  assert.deepEqual(statDiffs(await client.drain()), [], "a report that changes nothing is not answered");
-
-  // The revive (ADR-020) closes the loop: HP is full again, and MP is left where it was - the
-  // original's death mechanic is HP, and nothing here invents an MP refill.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.interact,
-    body: encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }).slice(1),
-  });
-  const release = await client.take(1);
-  assert.equal(release[0]![0], FIELD_OPCODE.requestRelease);
-  const revived = readSetField(new PacketReader((await client.take(1))[0]!, 1));
-  assert.equal(revived.character.stats.hp, 50, "the revive refills the HP that was reported away");
-  assert.equal(revived.character.stats.mp, 8, "and leaves the MP alone");
-  assert.equal(revived.character.stats.mapId, 1010000, "still the map info/returnMap names");
-});
+    const release = await client.take(1);
+    assert.equal(release[0]![0], FIELD_OPCODE.requestRelease);
+    const revived = readSetField(new PacketReader((await client.take(1))[0]!, 1));
+    assert.equal(
+      revived.character.stats.hp,
+      50,
+      "the revive refills the HP that was reported away",
+    );
+    assert.equal(revived.character.stats.mp, 8, "and leaves the MP alone");
+    assert.equal(revived.character.stats.mapId, 1010000, "still the map info/returnMap names");
+  },
+);
 
 /**
  * Chat (FINDINGS 4.26): the client's `0x12` is relayed to the map as `0x1A` + sub-op `0x12` + the
@@ -2577,101 +3238,140 @@ test("a monster's damage lands because the client reports it: c2s 0x1C in, 0x0D 
  *    another map is not a listener, and the text is passed through as bytes - the server never has to
  *    decode what it is relaying.
  */
-test("chat reaches everyone in the map, the speaker included, and stays in it", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "chat reaches everyone in the map, the speaker included, and stays in it",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined,
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
-  });
-  await hero.take(4);
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+    });
+    await hero.take(4);
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // A third player, in the *other* map: the same server, a different field.
-  const guest = await FakeClient.connect(gameInfo.port);
-  t.after(() => guest.close());
-  const record = characterDataOf(
-    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
-    startingCharacterItems(),
-  );
-  guest.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
-  });
-  await guest.takeOpcode(FIELD_OPCODE.setField);
+    // A third player, in the *other* map: the same server, a different field.
+    const guest = await FakeClient.connect(gameInfo.port);
+    t.after(() => guest.close());
+    const record = characterDataOf(
+      {
+        ...zeroStats(),
+        id: 9,
+        name: "Guest",
+        mapId: 2000000,
+        level: 1,
+        hp: 50,
+        maxHp: 50,
+        mp: 50,
+        maxMp: 50,
+      },
+      startingCharacterItems(),
+    );
+    guest.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Guest",
+        character: record,
+      }),
+    });
+    await guest.takeOpcode(FIELD_OPCODE.setField);
 
-  // Hero says hello, in the CP949 bytes the chat box produced.
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.chat,
-    body: encodeClientChat({ text: encodeCp949("안녕") }).slice(1),
-  });
-  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userBalloon);
-  const heard = readUserBalloon(new PacketReader(altSaw[altSaw.length - 1]!, 1));
-  assert.deepEqual(
-    [heard.characterId, toHex(heard.text)],
-    [7, "bec8b3e7"],
-    "the other player hears the speaker's name and the bytes they typed",
-  );
-  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
-  assert.deepEqual(
-    readUserBalloon(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
-    heard,
-    "and so does the speaker - the client only ever renders what it receives",
-  );
+    // Hero says hello, in the CP949 bytes the chat box produced.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.chat,
+      body: encodeClientChat({ text: encodeCp949("안녕") }).slice(1),
+    });
+    const altSaw = await alt.takeOpcode(FIELD_OPCODE.userBalloon);
+    const heard = readUserBalloon(new PacketReader(altSaw[altSaw.length - 1]!, 1));
+    assert.deepEqual(
+      [heard.characterId, toHex(heard.text)],
+      [7, "bec8b3e7"],
+      "the other player hears the speaker's name and the bytes they typed",
+    );
+    const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
+    assert.deepEqual(
+      readUserBalloon(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
+      heard,
+      "and so does the speaker - the client only ever renders what it receives",
+    );
 
-  // A second line from the other player: the name is the session's, so it changes with the speaker.
-  alt.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.chat,
-    body: encodeClientChat({ text: Uint8Array.from([0x68, 0x69]) }).slice(1),
-  });
-  const heroSawAlt = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
-  assert.deepEqual(
-    [
-      readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).characterId,
-      toHex(readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).text),
-    ],
-    [8, "6869"],
-    "the same opcode, the other speaker",
-  );
+    // A second line from the other player: the name is the session's, so it changes with the speaker.
+    alt.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.chat,
+      body: encodeClientChat({ text: Uint8Array.from([0x68, 0x69]) }).slice(1),
+    });
+    const heroSawAlt = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
+    assert.deepEqual(
+      [
+        readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).characterId,
+        toHex(readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).text),
+      ],
+      [8, "6869"],
+      "the same opcode, the other speaker",
+    );
 
-  // The map 2000000 player: a field of their own, so the line is not theirs to hear.
-  assert.equal(
-    (await guest.drainOpcodes()).includes(FIELD_OPCODE.userBalloon),
-    false,
-    "chat does not leave the map it was said in",
-  );
-  assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
-  assert.ok(log.some((line) => line.includes('chat "Hero": 안녕 in map 1000000')), log.join("\n"));
-  assert.ok(log.some((line) => line.includes('chat "Alt": hi in map 1000000')), log.join("\n"));
-});
+    // The map 2000000 player: a field of their own, so the line is not theirs to hear.
+    assert.equal(
+      (await guest.drainOpcodes()).includes(FIELD_OPCODE.userBalloon),
+      false,
+      "chat does not leave the map it was said in",
+    );
+    assert.equal(
+      hero.headersOk && alt.headersOk && guest.headersOk,
+      true,
+      "every packet survives the cipher/header check",
+    );
+    assert.ok(
+      log.some((line) => line.includes('chat "Hero": 안녕 in map 1000000')),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes('chat "Alt": hi in map 1000000')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * A level-up is the field's news too (FINDINGS 4.27): `0x29` is `u32 characterId` + `u8 effect`, and
@@ -2685,173 +3385,210 @@ test("chat reaches everyone in the map, the speaker included, and stays in it", 
  *  - everybody else sees the hit, the death and then the effect, all inside one synchronous handler
  *    (nothing from the mob tick can slip in between).
  */
-test("a level-up plays the effect for the other players (0x29), not for the one who levelled", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
-    mobTickMs: 20,
-    mobRespawnMs: 60_000,
-    // No loot, so the only packets after the death are the effect and the attacker's own diff.
-    dropPolicy: () => [],
-    handshake: { clientSendSeed: 0x2b2b2b2b, clientRecvSeed: 0x3c3c3c3c },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a level-up plays the effect for the other players (0x29), not for the one who levelled",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 20,
+        speedPercent: 0,
+        dieMs: 0,
+      }),
+      mobTickMs: 20,
+      mobRespawnMs: 60_000,
+      // No loot, so the only packets after the death are the effect and the attacker's own diff.
+      dropPolicy: () => [],
+      handshake: { clientSendSeed: 0x2b2b2b2b, clientRecvSeed: 0x3c3c3c3c },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const stats = zeroStats();
-  stats.id = 7;
-  stats.name = "Hero";
-  stats.level = 1;
-  stats.exp = 0;
-  stats.hp = 20;
-  stats.maxHp = 50;
-  stats.mp = 5;
-  stats.maxMp = 50;
+    const stats = zeroStats();
+    stats.id = 7;
+    stats.name = "Hero";
+    stats.level = 1;
+    stats.exp = 0;
+    stats.hp = 20;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 50;
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: characterDataOf(stats, startingCharacterItems()),
+      }),
+    });
+    await hero.take(4); // 0x16 + the two mobs + the NPC
+
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+
+    const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEffect);
+    assert.deepEqual(
+      altSaw.map((bytes) => bytes[0]),
+      [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
+      "the field sees the swing, the hit, the death, and then the level-up effect",
+    );
+    assert.equal(readUserAttack(new PacketReader(altSaw[0]!, 1)).targets[0]!.mobId, 1);
+    assert.deepEqual(readUserEffect(new PacketReader(altSaw[3]!, 1)), {
       characterId: 7,
-      characterName: "Hero",
-      character: characterDataOf(stats, startingCharacterItems()),
-    }),
-  });
-  await hero.take(4); // 0x16 + the two mobs + the NPC
+      effect: USER_EFFECT_LEVEL_UP,
+    });
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    // The attacker: their own 0x0D (level 2, and the refill that comes with it), and no 0x29.
+    const heroSaw = await hero.takeOpcode(STAT_OPCODE);
+    assert.deepEqual(readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)), {
+      ack: false,
+      diff: {
+        exp: 5,
+        level: 2,
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        mp: stats.maxMp,
+        maxMp: stats.maxMp,
+      },
+    });
+    const effectsForHero = (await hero.drain()).filter(
+      (bytes) => bytes[0] === FIELD_OPCODE.userEffect,
+    );
+    assert.deepEqual(effectsForHero, [], "the effect is not echoed to the player who levelled");
+    assert.ok(
+      log.some((line) =>
+        line.includes('0x29 level-up effect for "Hero" sent to 1 other player(s)'),
+      ),
+      log.join("\n"),
+    );
+  },
+);
 
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+test(
+  "an emotion (0x13) reaches the rest of the field as 0x27 and is not echoed",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // Nothing else may arrive: the claim is about the emotion and the quiet that follows it.
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x1a1a1a1a, clientRecvSeed: 0x2b2b2b2b },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEffect);
-  assert.deepEqual(
-    altSaw.map((bytes) => bytes[0]),
-    [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
-    "the field sees the swing, the hit, the death, and then the level-up effect",
-  );
-  assert.equal(readUserAttack(new PacketReader(altSaw[0]!, 1)).targets[0]!.mobId, 1);
-  assert.deepEqual(readUserEffect(new PacketReader(altSaw[3]!, 1)), {
-    characterId: 7,
-    effect: USER_EFFECT_LEVEL_UP,
-  });
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    const heroStats = { ...zeroStats(), id: 61, name: "Hero", level: 1, hp: 50, maxHp: 50 };
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 61,
+        characterName: "Hero",
+        character: characterDataOf(heroStats, startingCharacterItems()),
+      }),
+    });
+    await hero.drain();
 
-  // The attacker: their own 0x0D (level 2, and the refill that comes with it), and no 0x29.
-  const heroSaw = await hero.takeOpcode(STAT_OPCODE);
-  assert.deepEqual(readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)), {
-    ack: false,
-    diff: { exp: 5, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp },
-  });
-  const effectsForHero = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userEffect);
-  assert.deepEqual(effectsForHero, [], "the effect is not echoed to the player who levelled");
-  assert.ok(
-    log.some((line) => line.includes('0x29 level-up effect for "Hero" sent to 1 other player(s)')),
-    log.join("\n"),
-  );
-});
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 62, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-test("an emotion (0x13) reaches the rest of the field as 0x27 and is not echoed", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    // Nothing else may arrive: the claim is about the emotion and the quiet that follows it.
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x1a1a1a1a, clientRecvSeed: 0x2b2b2b2b },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+    // What `F3` sends: `[0x13][u32 3]` - and nothing else, because the client has already put the
+    // face on itself (`CUser::SetFace` runs before the packet is built).
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.emotion,
+      body: encodeClientEmotion({ emotion: 3 }).slice(1),
+    });
 
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  const heroStats = { ...zeroStats(), id: 61, name: "Hero", level: 1, hp: 50, maxHp: 50 };
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
+    const seen = await alt.takeOpcode(FIELD_OPCODE.userEmotion);
+    assert.equal(seen[seen.length - 1]![0], FIELD_OPCODE.userEmotion);
+    assert.deepEqual(readUserEmotion(new PacketReader(seen[seen.length - 1]!, 1)), {
       characterId: 61,
-      characterName: "Hero",
-      character: characterDataOf(heroStats, startingCharacterItems()),
-    }),
-  });
-  await hero.drain();
+      emotion: 3,
+    });
+    assert.deepEqual(
+      await hero.drain(),
+      [],
+      "the sender gets nothing back: the face is already on",
+    );
+    assert.ok(
+      log.some(
+        (line) => line.includes("0x27 emotion 3 (troubled)") && line.includes("1 other player(s)"),
+      ),
+      log.join("\n"),
+    );
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 62, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  // What `F3` sends: `[0x13][u32 3]` - and nothing else, because the client has already put the
-  // face on itself (`CUser::SetFace` runs before the packet is built).
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.emotion,
-    body: encodeClientEmotion({ emotion: 3 }).slice(1),
-  });
-
-  const seen = await alt.takeOpcode(FIELD_OPCODE.userEmotion);
-  assert.equal(seen[seen.length - 1]![0], FIELD_OPCODE.userEmotion);
-  assert.deepEqual(readUserEmotion(new PacketReader(seen[seen.length - 1]!, 1)), {
-    characterId: 61,
-    emotion: 3,
-  });
-  assert.deepEqual(await hero.drain(), [], "the sender gets nothing back: the face is already on");
-  assert.ok(
-    log.some((line) => line.includes("0x27 emotion 3 (troubled)") && line.includes("1 other player(s)")),
-    log.join("\n"),
-  );
-
-  // Something that is not a face: the client's own setter refuses `n8 > 8` and the drawer clamps to
-  // 0, so this cannot come from the client - it is dropped, and nobody hears about it.
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.emotion,
-    body: Uint8Array.from([0x09, 0x00, 0x00, 0x00]),
-  });
-  assert.deepEqual(await alt.drainOpcodes(200), []);
-  assert.deepEqual(await hero.drainOpcodes(200), []);
-  assert.ok(log.some((line) => line.includes("0x13 emotion unreadable") && line.includes("not a face")), log.join("\n"));
-});
+    // Something that is not a face: the client's own setter refuses `n8 > 8` and the drawer clamps to
+    // 0, so this cannot come from the client - it is dropped, and nobody hears about it.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.emotion,
+      body: Uint8Array.from([0x09, 0x00, 0x00, 0x00]),
+    });
+    assert.deepEqual(await alt.drainOpcodes(200), []);
+    assert.deepEqual(await hero.drainOpcodes(200), []);
+    assert.ok(
+      log.some((line) => line.includes("0x13 emotion unreadable") && line.includes("not a face")),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * A session that ends writes the character back to the save.
@@ -2862,101 +3599,132 @@ test("an emotion (0x13) reaches the rest of the field as 0x27 and is not echoed"
  * save. This test walks the loop an operator would: a character enters, kills the mob, disconnects,
  * and what comes out of the store is the record the client was last told about in `0x0D`.
  */
-test("a session that ends leaves the character's progress in the save", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const store = new MemorySaveStore();
-  let saves = 0;
-  // The table *is* the world: the record the game server is handed is the one in here, which is what
-  // `LoginServerOptions.accounts` means and what the CLI's `persist` closure saves.
-  const accounts = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 20, speedPercent: 0, dieMs: 0 }),
-    mobTickMs: 20,
-    mobRespawnMs: 60_000,
-    dropPolicy: () => [],
-    handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
-    persist: () => {
-      saves += 1;
-      store.save(accounts);
-    },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a session that ends leaves the character's progress in the save",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const store = new MemorySaveStore();
+    let saves = 0;
+    // The table *is* the world: the record the game server is handed is the one in here, which is what
+    // `LoginServerOptions.accounts` means and what the CLI's `persist` closure saves.
+    const accounts = new Map<string, AccountRecord>([
+      ["admin", { password: "admin", characters: [] }],
+    ]);
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 20,
+        speedPercent: 0,
+        dieMs: 0,
+      }),
+      mobTickMs: 20,
+      mobRespawnMs: 60_000,
+      dropPolicy: () => [],
+      handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
+      persist: () => {
+        saves += 1;
+        store.save(accounts);
+      },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const stats = zeroStats();
-  stats.id = 21;
-  stats.name = "Fighter";
-  stats.level = 1;
-  stats.exp = 10;
-  stats.hp = 20;
-  stats.maxHp = 50;
-  stats.mp = 5;
-  stats.maxMp = 30;
-  stats.mesos = 500;
-  const record = characterDataOf(stats, startingCharacterItems());
-  accounts.get("admin")!.characters.push(record);
+    const stats = zeroStats();
+    stats.id = 21;
+    stats.name = "Fighter";
+    stats.level = 1;
+    stats.exp = 10;
+    stats.hp = 20;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 30;
+    stats.mesos = 500;
+    const record = characterDataOf(stats, startingCharacterItems());
+    accounts.get("admin")!.characters.push(record);
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({
-    username: "admin",
-    characterId: 21,
-    characterName: "Fighter",
-    character: record,
-  });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
-  t.after(() => client.close());
+    const client = await FakeClient.connect(gameInfo.port);
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 21,
+      characterName: "Fighter",
+      character: record,
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
+    t.after(() => client.close());
 
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-  await client.take(2); // the mob's stat + the corpse
-  const stat = (await client.take(1))[0]!;
-  const told = readStatUpdate(new PacketReader(stat, 1));
-  assert.ok(stats.maxHp >= 70 && stats.maxHp <= 75);
-  assert.ok(stats.maxMp >= 40 && stats.maxMp <= 42);
-  assert.deepEqual(told.diff, { exp: 15, level: 2, hp: stats.maxHp, maxHp: stats.maxHp, mp: stats.maxMp, maxMp: stats.maxMp }, "the growth diff is persisted immediately");
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 1,
+        facingLeft: false,
+        action: 0,
+        speed: 1,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+    await client.take(2); // the mob's stat + the corpse
+    const stat = (await client.take(1))[0]!;
+    const told = readStatUpdate(new PacketReader(stat, 1));
+    assert.ok(stats.maxHp >= 70 && stats.maxHp <= 75);
+    assert.ok(stats.maxMp >= 40 && stats.maxMp <= 42);
+    assert.deepEqual(
+      told.diff,
+      {
+        exp: 15,
+        level: 2,
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        mp: stats.maxMp,
+        maxMp: stats.maxMp,
+      },
+      "the growth diff is persisted immediately",
+    );
 
-  // Kill rewards persist immediately; leaving still saves the same authoritative record.
-  assert.ok(saves >= 1, "growth is durable while the session is open");
-  const savesBeforeClose = saves;
-  client.close();
-  const deadline = Date.now() + 2000;
-  while (saves === savesBeforeClose && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(saves, savesBeforeClose + 1, `the session ending saved once; log:\n${log.join("\n")}`);
+    // Kill rewards persist immediately; leaving still saves the same authoritative record.
+    assert.ok(saves >= 1, "growth is durable while the session is open");
+    const savesBeforeClose = saves;
+    client.close();
+    const deadline = Date.now() + 2000;
+    while (saves === savesBeforeClose && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      saves,
+      savesBeforeClose + 1,
+      `the session ending saved once; log:\n${log.join("\n")}`,
+    );
 
-  // What the store holds is the character as they left: the level-up, the refill that came with it,
-  // and the rest of the record untouched.
-  const saved = loadAccounts(store, new Map()).get("admin")!.characters[0]!;
-  assert.equal(saved.stats.name, "Fighter");
-  assert.equal(saved.stats.id, 21);
-  assert.equal(saved.stats.level, 2);
-  assert.equal(saved.stats.exp, 15);
-  assert.equal(saved.stats.hp, told.diff.maxHp);
-  assert.equal(saved.stats.maxHp, told.diff.maxHp);
-  assert.equal(saved.stats.mp, told.diff.maxMp);
-  assert.equal(saved.stats.maxMp, told.diff.maxMp);
-  assert.equal(saved.stats.ap, 0);
-  assert.equal(saved.stats.mesos, 500);
-  assert.equal(saved.items?.inventories.length, 4, "the bags came back too");
-});
+    // What the store holds is the character as they left: the level-up, the refill that came with it,
+    // and the rest of the record untouched.
+    const saved = loadAccounts(store, new Map()).get("admin")!.characters[0]!;
+    assert.equal(saved.stats.name, "Fighter");
+    assert.equal(saved.stats.id, 21);
+    assert.equal(saved.stats.level, 2);
+    assert.equal(saved.stats.exp, 15);
+    assert.equal(saved.stats.hp, told.diff.maxHp);
+    assert.equal(saved.stats.maxHp, told.diff.maxHp);
+    assert.equal(saved.stats.mp, told.diff.maxMp);
+    assert.equal(saved.stats.maxMp, told.diff.maxMp);
+    assert.equal(saved.stats.ap, 0);
+    assert.equal(saved.stats.mesos, 500);
+    assert.equal(saved.items?.inventories.length, 4, "the bags came back too");
+  },
+);
 
 /**
  * The whole reason a save exists: the next run of the server is the same world.
@@ -2967,83 +3735,94 @@ test("a session that ends leaves the character's progress in the save", { timeou
  * character list. The seed losing is the point: the save file is the world, and `--account` is only
  * what a first run starts from.
  */
-test("the world comes back after a restart: the save file is the accounts", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const store = new MemorySaveStore();
-  const startLogin = async (accounts: Map<string, AccountRecord>) => {
-    const server = new LoginServer({
-      accounts,
-      worlds: [{ name: "Scania", unknownId: 0 }],
-      gameServer: { ip: "127.0.0.1", port: 8585 },
-      handoffs: new HandoffRegistry(),
-      persist: () => store.save(accounts),
-      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
-      log: (line) => log.push(line),
+test(
+  "the world comes back after a restart: the save file is the accounts",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const store = new MemorySaveStore();
+    const startLogin = async (accounts: Map<string, AccountRecord>) => {
+      const server = new LoginServer({
+        accounts,
+        worlds: [{ name: "Scania", unknownId: 0 }],
+        gameServer: { ip: "127.0.0.1", port: 8585 },
+        handoffs: new HandoffRegistry(),
+        persist: () => store.save(accounts),
+        handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+        log: (line) => log.push(line),
+      });
+      const info = await server.listen(0);
+      return { server, port: info.port };
+    };
+
+    // Run one: no save yet, so the --account seed is the world.
+    const seed = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
+    const first = await startLogin(loadAccounts(store, seed, (line) => log.push(line)));
+    t.after(async () => {
+      await first.server.close();
     });
-    const info = await server.listen(0);
-    return { server, port: info.port };
-  };
 
-  // Run one: no save yet, so the --account seed is the world.
-  const seed = new Map<string, AccountRecord>([["admin", { password: "admin", characters: [] }]]);
-  const first = await startLogin(loadAccounts(store, seed, (line) => log.push(line)));
-  t.after(async () => {
+    const create = await FakeClient.connect(first.port);
+    t.after(() => create.close());
+    create.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    create.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+    await create.take(1);
+    create.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+    await create.take(1);
+    create.send({
+      kind: "check-name",
+      opcode: 0x06,
+      name: "Hero",
+      appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
+    });
+    await create.take(1);
+    create.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+    const createdReply = (await create.take(1))[0]!;
+    const createdReader = new PacketReader(createdReply);
+    createdReader.readByte();
+    assert.equal(createdReader.readByte(), CREATE_CHARACTER_RESULT.created);
+    const hero = readCharacterData(createdReader);
+    assert.equal(hero.stats.name, "Hero");
+    create.close();
     await first.server.close();
-  });
 
-  const create = await FakeClient.connect(first.port);
-  t.after(() => create.close());
-  create.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-  create.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
-  await create.take(1);
-  create.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
-  await create.take(1);
-  create.send({ kind: "check-name", opcode: 0x06, name: "Hero", appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10] });
-  await create.take(1);
-  create.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
-  const createdReply = (await create.take(1))[0]!;
-  const createdReader = new PacketReader(createdReply);
-  createdReader.readByte();
-  assert.equal(createdReader.readByte(), CREATE_CHARACTER_RESULT.created);
-  const hero = readCharacterData(createdReader);
-  assert.equal(hero.stats.name, "Hero");
-  create.close();
-  await first.server.close();
+    // Run two: the same store, and a seed whose password is *wrong* on purpose. If the seed won, the
+    // login below would be refused.
+    const reloaded = loadAccounts(
+      store,
+      new Map([["admin", { password: "not-the-password", characters: [] }]]),
+      (line) => log.push(line),
+    );
+    assert.deepEqual([...reloaded.keys()], ["admin"]);
+    assert.equal(reloaded.get("admin")!.characters.length, 1);
+    const second = await startLogin(reloaded);
+    t.after(async () => {
+      await second.server.close();
+    });
 
-  // Run two: the same store, and a seed whose password is *wrong* on purpose. If the seed won, the
-  // login below would be refused.
-  const reloaded = loadAccounts(store, new Map([["admin", { password: "not-the-password", characters: [] }]]), (line) =>
-    log.push(line),
-  );
-  assert.deepEqual([...reloaded.keys()], ["admin"]);
-  assert.equal(reloaded.get("admin")!.characters.length, 1);
-  const second = await startLogin(reloaded);
-  t.after(async () => {
-    await second.server.close();
-  });
-
-  const back = await FakeClient.connect(second.port);
-  t.after(() => back.close());
-  back.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
-  back.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
-  const loginReply = parseLoginReply((await back.take(1))[0]!);
-  assert.equal(loginReply.result, LOGIN_RESULT.ok, "the saved password is the one that works");
-  back.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
-  const worldReply = (await back.take(1))[0]!;
-  const reader = new PacketReader(worldReply);
-  assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
-  assert.equal(reader.readByte(), LOGIN_RESULT.ok);
-  assert.equal(reader.readByte(), 1, "the character survived the restart");
-  const sameHero = readCharacterData(reader);
-  assert.equal(sameHero.stats.name, "Hero");
-  assert.equal(sameHero.stats.id, hero.stats.id, "and it is the same character, not a new one");
-  assert.equal(sameHero.items?.inventories.length, 4);
-  assert.equal(reader.exhausted, true);
-  assert.ok(
-    log.some((line) => line.includes("ignoring 1 --account entr(ies)")),
-    `the seed losing is worth a line:\n${log.join("\n")}`,
-  );
-});
+    const back = await FakeClient.connect(second.port);
+    t.after(() => back.close());
+    back.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+    back.send({ kind: "login-request", opcode: 0x01, username: "admin", password: "admin" });
+    const loginReply = parseLoginReply((await back.take(1))[0]!);
+    assert.equal(loginReply.result, LOGIN_RESULT.ok, "the saved password is the one that works");
+    back.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+    const worldReply = (await back.take(1))[0]!;
+    const reader = new PacketReader(worldReply);
+    assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
+    assert.equal(reader.readByte(), LOGIN_RESULT.ok);
+    assert.equal(reader.readByte(), 1, "the character survived the restart");
+    const sameHero = readCharacterData(reader);
+    assert.equal(sameHero.stats.name, "Hero");
+    assert.equal(sameHero.stats.id, hero.stats.id, "and it is the same character, not a new one");
+    assert.equal(sameHero.items?.inventories.length, 4);
+    assert.equal(reader.exhausted, true);
+    assert.ok(
+      log.some((line) => line.includes("ignoring 1 --account entr(ies)")),
+      `the seed losing is worth a line:\n${log.join("\n")}`,
+    );
+  },
+);
 
 /**
  * Whisper and find (FINDINGS 4.31): the client's `0x23` names **one** user, and the answers are two
@@ -3056,307 +3835,410 @@ test("the world comes back after a restart: the save file is the accounts", { ti
  * the target's name and one flag and nothing else: their client prints "name<< text" from the text it
  * kept locally (`sub_4717D0` stores it at `CField+28`).
  */
-test("whisper and find reach a player by name, across maps, and answer the asker", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
-  });
-  await hero.take(4);
-
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  // A third player in the *other* map: still reachable, because a whisper is about a character, not
-  // about a field.
-  const guest = await FakeClient.connect(gameInfo.port);
-  t.after(() => guest.close());
-  const record = characterDataOf(
-    { ...zeroStats(), id: 9, name: "Guest", mapId: 2000000, level: 1, hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
-    startingCharacterItems(),
-  );
-  guest.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Guest", character: record }),
-  });
-  await guest.takeOpcode(FIELD_OPCODE.setField);
-
-  // Hero whispers Guest, who is in the other map. The text is CP949 bytes, exactly as typed.
-  const sendWhisper = (name: string, text: string) =>
-    encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name, text: encodeCp949(text) }).slice(1);
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.userRequest,
-    body: sendWhisper("guest", "안녕"),
-  });
-  const guestSaw = await guest.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(
-    [
-      readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).name,
-      toHex(readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).text),
-    ],
-    ["Hero", toHex(encodeCp949("안녕"))],
-    "the receiver's line is the chat packet, with the sender's own name in front of it",
-  );
-  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(
-    readUserWhisperAnswer(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
-    { name: "Guest", delivered: true },
-    "and the asker gets the target's **stored** name - typed as \"guest\", answered as \"Guest\"",
-  );
-  assert.equal(
-    (await alt.drainOpcodes()).filter((opcode) => opcode === FIELD_OPCODE.userMessage).length,
-    0,
-    "the player in the sender's own map hears nothing: this one is addressed",
-  );
-
-  // A name nobody is playing: the same field packet, flag 0 - the client prints "'name'님을 찾지
-  // 못했습니다" for it, which is the only failure this answer has.
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.userRequest,
-    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name: "Nobody", text: Uint8Array.from([0x68]) }).slice(1),
-  });
-  const notFound = await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(
-    readUserWhisperAnswer(new PacketReader(notFound[notFound.length - 1]!, 1)),
-    { name: "Nobody", delivered: false },
-  );
-
-  // A find is the other kind: no text, and the answer names the *map*, which the client turns into
-  // "street:map" out of its own data. Alt is online, so the id is real...
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.userRequest,
-    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Alt" }).slice(1),
-  });
-  const whereIsAlt = await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(readUserFindAnswer(new PacketReader(whereIsAlt[whereIsAlt.length - 1]!, 1)), {
-    name: "Alt",
-    mapId: 1000000,
-  });
-  // ... and an offline name is `0xFFFFFFFF`, the id the client never loads.
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.userRequest,
-    body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Nobody" }).slice(1),
-  });
-  const nowhere = await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(readUserFindAnswer(new PacketReader(nowhere[nowhere.length - 1]!, 1)), {
-    name: "Nobody",
-    mapId: -1,
-  });
-
-  // SOURCE UPDATED for ADR-059: refresh the real delivery immediately before the 3s refusal window.
-  hero.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
-    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.whisper,name:"Guest",text:encodeCp949("again")}).slice(1)});
-  await guest.takeOpcode(FIELD_OPCODE.userMessage);await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  guest.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
-    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name:"Hero",text:encodeCp949("Guest")}).slice(1)});
-  const refused=await hero.takeOpcode(FIELD_OPCODE.userMessage);
-  assert.deepEqual(readUserWhisperRefused(new PacketReader(refused.at(-1)!,1)),{name:"Guest"});
-  // A forged own-name or unsolicited refusal must not notify anybody.
-  hero.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
-    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name:"Alt",text:encodeCp949("Guest")}).slice(1)});
-  await new Promise(resolve=>setTimeout(resolve,40));
-  assert.equal((await alt.drainOpcodes()).includes(FIELD_OPCODE.userMessage),false);
-
-  assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
-  assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Guest": 안녕')), log.join("\n"));
-  assert.ok(log.some((line) => line.includes('find "Alt" -> "Alt" in map 1000000')), log.join("\n"));
-  assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Nobody": no such player')), log.join("\n"));
-});
-
-test("using a USE-tab item: 0x18 restores and consumes it, 0x19 changes the map", { skip: archive === null, timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) =>
-      mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
-    shops: shopKeeper(archive!),
-    // What an item does is the client's own data: 빨간 포션 `spec/hp = 50`, 마을 귀환 주문서
-    // `spec/moveTo = -1`. Nothing about the effects lives in the handler.
-    consumeSpec: consumeSpecProvider(archive!),
-    // No patrol packets in this test: the mobs are still, so every burst below is exactly the use's
-    // own answer and the order stays readable.
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x55aa55aa, clientRecvSeed: 0xaa55aa55 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const stats = zeroStats();
-  stats.id = 51;
-  stats.name = "Drinker";
-  stats.level = 1;
-  stats.hp = 20;
-  stats.maxHp = 50;
-  stats.mp = 5;
-  stats.maxMp = 30;
-  stats.mesos = 200;
-
-  const client = await FakeClient.connect(gameInfo.port);
-  t.after(() => client.close());
-  client.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({
-      username: "admin",
-      characterId: 51,
-      characterName: "Drinker",
-      character: characterDataOf(stats, startingCharacterItems()),
-    }),
-  });
-  await client.drain();
-
-  // The shop on STUB_MAP's NPC (로빈, 2003), priced out of the real archive.
-  client.send({
-    kind: "unknown",
-    opcode: CLIENT_OBJECT_CLICK_OPCODE,
-    body: encodeClientObjectClick({ objectId: 1 }).slice(1),
-  });
-  const opened = await client.take(2);
-  assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
-  assert.deepEqual(
-    readShopOpen(new PacketReader(opened[1]!, 1)).items.map((line) => [line.itemId, line.price]),
-    [
-      [2000000, 25], // 빨간 포션, Item/Consume/0200.img/02000000/info/price
-      [2000003, 100], // 파란 포션
-      [2030000, 75], // 마을 귀환 주문서, Item/Consume/0203.img/02030000/info/price
-    ],
-  );
-
-  const buy = async (row: number, itemId: number): Promise<number> => {
-    client.send({
-      kind: "unknown",
-      opcode: CLIENT_SHOP_OPCODE,
-      body: encodeClientShopRequest({ kind: "buy", row, itemId, count: 1 }).slice(1),
+test(
+  "whisper and find reach a player by name, across maps, and answer the asker",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000 ? STUB_MAP : mapId === 2000000 ? STUB_MAP_ALT : undefined,
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      log: (line) => log.push(line),
     });
-    const trade = await client.take(3);
-    assert.deepEqual(
-      trade.map((bytes) => bytes[0]),
-      [SHOP_RESULT_OPCODE, INVENTORY_OPCODE, STAT_OPCODE],
-      "the result, the inventory change and the mesos",
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+    });
+    await hero.take(4);
+
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    // A third player in the *other* map: still reachable, because a whisper is about a character, not
+    // about a field.
+    const guest = await FakeClient.connect(gameInfo.port);
+    t.after(() => guest.close());
+    const record = characterDataOf(
+      {
+        ...zeroStats(),
+        id: 9,
+        name: "Guest",
+        mapId: 2000000,
+        level: 1,
+        hp: 50,
+        maxHp: 50,
+        mp: 50,
+        maxMp: 50,
+      },
+      startingCharacterItems(),
     );
-    const change = readInventoryChange(new PacketReader(trade[1]!, 1)).changes[0]!;
-    assert.equal(change.op, INVENTORY_OP.put);
-    return change.slot;
-  };
-  const potionSlot = await buy(0, 2000000);
-  assert.equal(await buy(0, 2000000), potionSlot, "the second potion stacks into the same slot");
-  const scrollSlot = await buy(2, 2030000);
-  assert.notEqual(scrollSlot, potionSlot);
+    guest.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Guest",
+        character: record,
+      }),
+    });
+    await guest.takeOpcode(FIELD_OPCODE.setField);
 
-  /** What `sub_55B2C0` / `sub_55B4B0` send: two fields, and the item id is what picked the opcode. */
-  const use = (slot: number, itemId: number, opcode: number): void => {
+    // Hero whispers Guest, who is in the other map. The text is CP949 bytes, exactly as typed.
+    const sendWhisper = (name: string, text: string) =>
+      encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.whisper,
+        name,
+        text: encodeCp949(text),
+      }).slice(1);
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: sendWhisper("guest", "안녕"),
+    });
+    const guestSaw = await guest.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(
+      [
+        readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).name,
+        toHex(readUserChat(new PacketReader(guestSaw[guestSaw.length - 1]!, 1)).text),
+      ],
+      ["Hero", toHex(encodeCp949("안녕"))],
+      "the receiver's line is the chat packet, with the sender's own name in front of it",
+    );
+    const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(
+      readUserWhisperAnswer(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
+      { name: "Guest", delivered: true },
+      'and the asker gets the target\'s **stored** name - typed as "guest", answered as "Guest"',
+    );
+    assert.equal(
+      (await alt.drainOpcodes()).filter((opcode) => opcode === FIELD_OPCODE.userMessage).length,
+      0,
+      "the player in the sender's own map hears nothing: this one is addressed",
+    );
+
+    // A name nobody is playing: the same field packet, flag 0 - the client prints "'name'님을 찾지
+    // 못했습니다" for it, which is the only failure this answer has.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.whisper,
+        name: "Nobody",
+        text: Uint8Array.from([0x68]),
+      }).slice(1),
+    });
+    const notFound = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(readUserWhisperAnswer(new PacketReader(notFound[notFound.length - 1]!, 1)), {
+      name: "Nobody",
+      delivered: false,
+    });
+
+    // A find is the other kind: no text, and the answer names the *map*, which the client turns into
+    // "street:map" out of its own data. Alt is online, so the id is real...
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Alt" }).slice(1),
+    });
+    const whereIsAlt = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(readUserFindAnswer(new PacketReader(whereIsAlt[whereIsAlt.length - 1]!, 1)), {
+      name: "Alt",
+      mapId: 1000000,
+    });
+    // ... and an offline name is `0xFFFFFFFF`, the id the client never loads.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Nobody" }).slice(1),
+    });
+    const nowhere = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(readUserFindAnswer(new PacketReader(nowhere[nowhere.length - 1]!, 1)), {
+      name: "Nobody",
+      mapId: -1,
+    });
+
+    // SOURCE UPDATED for ADR-059: refresh the real delivery immediately before the 3s refusal window.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.whisper,
+        name: "Guest",
+        text: encodeCp949("again"),
+      }).slice(1),
+    });
+    await guest.takeOpcode(FIELD_OPCODE.userMessage);
+    await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    guest.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.refuseWhisper,
+        name: "Hero",
+        text: encodeCp949("Guest"),
+      }).slice(1),
+    });
+    const refused = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+    assert.deepEqual(readUserWhisperRefused(new PacketReader(refused.at(-1)!, 1)), {
+      name: "Guest",
+    });
+    // A forged own-name or unsolicited refusal must not notify anybody.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.userRequest,
+      body: encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.refuseWhisper,
+        name: "Alt",
+        text: encodeCp949("Guest"),
+      }).slice(1),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal((await alt.drainOpcodes()).includes(FIELD_OPCODE.userMessage), false);
+
+    assert.equal(
+      hero.headersOk && alt.headersOk && guest.headersOk,
+      true,
+      "every packet survives the cipher/header check",
+    );
+    assert.ok(
+      log.some((line) => line.includes('whisper "Hero" -> "Guest": 안녕')),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes('find "Alt" -> "Alt" in map 1000000')),
+      log.join("\n"),
+    );
+    assert.ok(
+      log.some((line) => line.includes('whisper "Hero" -> "Nobody": no such player')),
+      log.join("\n"),
+    );
+  },
+);
+
+test(
+  "using a USE-tab item: 0x18 restores and consumes it, 0x19 changes the map",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) =>
+        mapId === 1000000 ? STUB_MAP : mapId === 1010000 ? STUB_MAP_TOWN : undefined,
+      shops: shopKeeper(archive!),
+      // What an item does is the client's own data: 빨간 포션 `spec/hp = 50`, 마을 귀환 주문서
+      // `spec/moveTo = -1`. Nothing about the effects lives in the handler.
+      consumeSpec: consumeSpecProvider(archive!),
+      // No patrol packets in this test: the mobs are still, so every burst below is exactly the use's
+      // own answer and the order stays readable.
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x55aa55aa, clientRecvSeed: 0xaa55aa55 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    const stats = zeroStats();
+    stats.id = 51;
+    stats.name = "Drinker";
+    stats.level = 1;
+    stats.hp = 20;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 30;
+    stats.mesos = 200;
+
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 51,
+        characterName: "Drinker",
+        character: characterDataOf(stats, startingCharacterItems()),
+      }),
+    });
+    await client.drain();
+
+    // The shop on STUB_MAP's NPC (로빈, 2003), priced out of the real archive.
     client.send({
       kind: "unknown",
-      opcode,
-      body: encodeClientUseItem({ slot, itemId }, opcode).slice(1),
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
     });
-  };
-  /** The client's own `0x1C` report: a monster hit, rolled locally (`sub_5114A0`). */
-  const hit = (damage: number): void => {
-    client.send({
-      kind: "unknown",
-      opcode: CLIENT_FIELD_OPCODE.statReport,
-      body: encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }).slice(1),
+    const opened = await client.take(2);
+    assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+    assert.deepEqual(
+      readShopOpen(new PacketReader(opened[1]!, 1)).items.map((line) => [line.itemId, line.price]),
+      [
+        [2000000, 25], // 빨간 포션, Item/Consume/0200.img/02000000/info/price
+        [2000003, 100], // 파란 포션
+        [2030000, 75], // 마을 귀환 주문서, Item/Consume/0203.img/02030000/info/price
+      ],
+    );
+
+    const buy = async (row: number, itemId: number): Promise<number> => {
+      client.send({
+        kind: "unknown",
+        opcode: CLIENT_SHOP_OPCODE,
+        body: encodeClientShopRequest({ kind: "buy", row, itemId, count: 1 }).slice(1),
+      });
+      const trade = await client.take(3);
+      assert.deepEqual(
+        trade.map((bytes) => bytes[0]),
+        [SHOP_RESULT_OPCODE, INVENTORY_OPCODE, STAT_OPCODE],
+        "the result, the inventory change and the mesos",
+      );
+      const change = readInventoryChange(new PacketReader(trade[1]!, 1)).changes[0]!;
+      assert.equal(change.op, INVENTORY_OP.put);
+      return change.slot;
+    };
+    const potionSlot = await buy(0, 2000000);
+    assert.equal(await buy(0, 2000000), potionSlot, "the second potion stacks into the same slot");
+    const scrollSlot = await buy(2, 2030000);
+    assert.notEqual(scrollSlot, potionSlot);
+
+    /** What `sub_55B2C0` / `sub_55B4B0` send: two fields, and the item id is what picked the opcode. */
+    const use = (slot: number, itemId: number, opcode: number): void => {
+      client.send({
+        kind: "unknown",
+        opcode,
+        body: encodeClientUseItem({ slot, itemId }, opcode).slice(1),
+      });
+    };
+    /** The client's own `0x1C` report: a monster hit, rolled locally (`sub_5114A0`). */
+    const hit = (damage: number): void => {
+      client.send({
+        kind: "unknown",
+        opcode: CLIENT_FIELD_OPCODE.statReport,
+        body: encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }).slice(1),
+      });
+    };
+
+    // One potion: the slot keeps the second one, and the HP comes from the archive's own `spec/hp` -
+    // 20 + 50 is clamped to the maximum, which is `game/vitals.ts`'s rule and not the file's.
+    use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+    const drank = await client.take(2);
+    assert.deepEqual(
+      drank.map((bytes) => bytes[0]),
+      [INVENTORY_OPCODE, STAT_OPCODE],
+    );
+    const left = readInventoryChange(new PacketReader(drank[0]!, 1)).changes[0]!;
+    assert.equal(left.op, INVENTORY_OP.put, "one potion is left in the slot");
+    assert.ok(
+      left.op === INVENTORY_OP.put && left.item.kind === "nonequip" && left.item.quantity === 1,
+      "the slot now holds one",
+    );
+    assert.deepEqual(readStatUpdate(new PacketReader(drank[1]!, 1)).diff, { hp: 50 });
+
+    // The same use at a full bar: nothing would move, so the potion has to stay in the bag - and the
+    // answer is still a packet (an *empty* 0x0B), because the client's use gate waits for one.
+    use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+    const refused = await client.take(1);
+    const refusal = readInventoryChange(new PacketReader(refused[0]!, 1));
+    assert.equal(refusal.changes.length, 0, "an empty change list is the refusal");
+    assert.equal(refusal.result, 1, "and its result byte still re-arms the client's gate");
+    assert.equal((await client.drainOpcodes(120)).length, 0, "nothing else follows it");
+
+    // A monster hit lands first (`0x1C` -> `0x0D`), because that is the state a potion is drunk in.
+    hit(30);
+    assert.deepEqual(readStatUpdate(new PacketReader((await client.take(1))[0]!, 1)).diff, {
+      hp: 20,
     });
-  };
 
-  // One potion: the slot keeps the second one, and the HP comes from the archive's own `spec/hp` -
-  // 20 + 50 is clamped to the maximum, which is `game/vitals.ts`'s rule and not the file's.
-  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
-  const drank = await client.take(2);
-  assert.deepEqual(drank.map((bytes) => bytes[0]), [INVENTORY_OPCODE, STAT_OPCODE]);
-  const left = readInventoryChange(new PacketReader(drank[0]!, 1)).changes[0]!;
-  assert.equal(left.op, INVENTORY_OP.put, "one potion is left in the slot");
-  assert.ok(
-    left.op === INVENTORY_OP.put && left.item.kind === "nonequip" && left.item.quantity === 1,
-    "the slot now holds one",
-  );
-  assert.deepEqual(readStatUpdate(new PacketReader(drank[1]!, 1)).diff, { hp: 50 });
+    // The last potion: the stack empties, so the change is a `clear`.
+    use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+    const emptied = await client.take(2);
+    assert.equal(
+      readInventoryChange(new PacketReader(emptied[0]!, 1)).changes[0]!.op,
+      INVENTORY_OP.clear,
+    );
+    assert.deepEqual(readStatUpdate(new PacketReader(emptied[1]!, 1)).diff, { hp: 50 });
 
-  // The same use at a full bar: nothing would move, so the potion has to stay in the bag - and the
-  // answer is still a packet (an *empty* 0x0B), because the client's use gate waits for one.
-  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
-  const refused = await client.take(1);
-  const refusal = readInventoryChange(new PacketReader(refused[0]!, 1));
-  assert.equal(refusal.changes.length, 0, "an empty change list is the refusal");
-  assert.equal(refusal.result, 1, "and its result byte still re-arms the client's gate");
-  assert.equal((await client.drainOpcodes(120)).length, 0, "nothing else follows it");
+    // Now the slot is empty and the bar is not full: the packet claims an item the server's own
+    // inventory does not have, and the server - not the packet - is what decides.
+    hit(30);
+    await client.take(1);
+    use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
+    assert.equal(
+      readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length,
+      0,
+    );
+    assert.ok(
+      log.some((line) =>
+        line.includes(`slot ${potionSlot} of the USE tab does not hold item 2000000`),
+      ),
+      log.join("\n"),
+    );
 
-  // A monster hit lands first (`0x1C` -> `0x0D`), because that is the state a potion is drunk in.
-  hit(30);
-  assert.deepEqual(readStatUpdate(new PacketReader((await client.take(1))[0]!, 1)).diff, { hp: 20 });
+    // The scroll: 마을 귀환 주문서's own `spec/moveTo = -1` is read with the map's `info/returnMap`
+    // (STUB_MAP says 1010000), and the map change is the same `0x16` a portal sends.
+    use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
+    const jumped = await client.take(2);
+    assert.deepEqual(
+      jumped.map((bytes) => bytes[0]),
+      [INVENTORY_OPCODE, FIELD_OPCODE.setField],
+    );
+    assert.equal(
+      readInventoryChange(new PacketReader(jumped[0]!, 1)).changes[0]!.op,
+      INVENTORY_OP.clear,
+      "a scroll is used up",
+    );
+    const entered = readSetField(new PacketReader(jumped[1]!, 1));
+    assert.equal(entered.character.stats.mapId, 1010000, "the ground under the player changed");
+    assert.ok(
+      log.some(
+        (line) =>
+          line.includes("0x19 map item") && line.includes("map 1000000 -> 1010000 (moveTo -1)"),
+      ),
+      log.join("\n"),
+    );
 
-  // The last potion: the stack empties, so the change is a `clear`.
-  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
-  const emptied = await client.take(2);
-  assert.equal(readInventoryChange(new PacketReader(emptied[0]!, 1)).changes[0]!.op, INVENTORY_OP.clear);
-  assert.deepEqual(readStatUpdate(new PacketReader(emptied[1]!, 1)).diff, { hp: 50 });
-
-  // Now the slot is empty and the bar is not full: the packet claims an item the server's own
-  // inventory does not have, and the server - not the packet - is what decides.
-  hit(30);
-  await client.take(1);
-  use(potionSlot, 2000000, CLIENT_FIELD_OPCODE.useItem);
-  assert.equal(readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length, 0);
-  assert.ok(
-    log.some((line) => line.includes(`slot ${potionSlot} of the USE tab does not hold item 2000000`)),
-    log.join("\n"),
-  );
-
-  // The scroll: 마을 귀환 주문서's own `spec/moveTo = -1` is read with the map's `info/returnMap`
-  // (STUB_MAP says 1010000), and the map change is the same `0x16` a portal sends.
-  use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
-  const jumped = await client.take(2);
-  assert.deepEqual(jumped.map((bytes) => bytes[0]), [INVENTORY_OPCODE, FIELD_OPCODE.setField]);
-  assert.equal(
-    readInventoryChange(new PacketReader(jumped[0]!, 1)).changes[0]!.op,
-    INVENTORY_OP.clear,
-    "a scroll is used up",
-  );
-  const entered = readSetField(new PacketReader(jumped[1]!, 1));
-  assert.equal(entered.character.stats.mapId, 1010000, "the ground under the player changed");
-  assert.ok(log.some((line) => line.includes("0x19 map item") && line.includes("map 1000000 -> 1010000 (moveTo -1)")), log.join("\n"));
-
-  // The slot is empty again, and this time the item cannot even name a map: the refusal comes before
-  // anything is taken (the town's own `returnMap` here is a map no provider knows).
-  use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
-  assert.equal(readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length, 0);
-  assert.deepEqual(await client.drainOpcodes(120), [], "no second 0x16");
-});
+    // The slot is empty again, and this time the item cannot even name a map: the refusal comes before
+    // anything is taken (the town's own `returnMap` here is a map no provider knows).
+    use(scrollSlot, 2030000, CLIENT_FIELD_OPCODE.useMapItem);
+    assert.equal(
+      readInventoryChange(new PacketReader((await client.take(1))[0]!, 1)).changes.length,
+      0,
+    );
+    assert.deepEqual(await client.drainOpcodes(120), [], "no second 0x16");
+  },
+);
 
 /**
  * The inventory window's drag, over real sockets (FINDINGS 4.36, ADR-029).
@@ -3367,105 +4249,136 @@ test("using a USE-tab item: 0x18 restores and consumes it, 0x19 changes the map"
  * map gets so that everybody's copy of this player's look changes. The wearer is not sent their own
  * `0x28`: their client draws them from the record it holds.
  */
-test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [],
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x44332211 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [],
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x44332211 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  // A record the create dialog could have produced - face, hair and the four clothes it wears - plus one
-  // more cap that is *not* worn: it sits in the equip tab's second slot, which is what gets dragged.
-  const heroItems = withWorn(startingCharacterItems(), wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10]));
-  heroItems.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
-  const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, heroItems);
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero", character: heroRecord }),
-  });
-  await hero.take(4);
+    // A record the create dialog could have produced - face, hair and the four clothes it wears - plus one
+    // more cap that is *not* worn: it sits in the equip tab's second slot, which is what gets dragged.
+    const heroItems = withWorn(
+      startingCharacterItems(),
+      wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10]),
+    );
+    heroItems.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
+    const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, heroItems);
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.take(4);
 
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
-  });
-  const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
-  assert.equal(aboutHero.avatarItems?.includes(1002000), false, "the cap is in the bag, not on the head");
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 8, characterName: "Alt" }),
+    });
+    const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
+    assert.equal(
+      aboutHero.avatarItems?.includes(1002000),
+      false,
+      "the cap is in the bag, not on the head",
+    );
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // Double-clicking the cap: `sub_4636B0` sends tab 1, the bag slot, the part its caller read off the
-  // item id (1002000 -> a hat -> part 1, written the way a worn slot is: negative) and -1 for "all of it".
-  const equip = encodeClientChangeSlot({ tab: 1, fromSlot: 2, toSlot: -1, count: -1 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
+    // Double-clicking the cap: `sub_4636B0` sends tab 1, the bag slot, the part its caller read off the
+    // item id (1002000 -> a hat -> part 1, written the way a worn slot is: negative) and -1 for "all of it".
+    const equip = encodeClientChangeSlot({ tab: 1, fromSlot: 2, toSlot: -1, count: -1 });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
 
-  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
-  const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
-  assert.deepEqual(
-    change.changes.map((entry) => [entry.op, entry.slot]),
-    [
-      [INVENTORY_OP.put, -1],
-      [INVENTORY_OP.clear, 2],
-    ],
-    "the cap is put at the worn part and the bag slot is cleared",
-  );
-  assert.equal(
-    change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
-    1002000,
-    "the put carries the item that moved",
-  );
-  assert.equal(change.result, 1, "the result byte is the client's own timing flag, not a status");
+    const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1));
+    assert.deepEqual(
+      change.changes.map((entry) => [entry.op, entry.slot]),
+      [
+        [INVENTORY_OP.put, -1],
+        [INVENTORY_OP.clear, 2],
+      ],
+      "the cap is put at the worn part and the bag slot is cleared",
+    );
+    assert.equal(
+      change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
+      1002000,
+      "the put carries the item that moved",
+    );
+    assert.equal(change.result, 1, "the result byte is the client's own timing flag, not a status");
 
-  // Everybody else: one `0x28` with the new list and no face (flags 0 means \"the head did not change\"),
-  // and the wearer gets none - their client already drew it.
-  const lookPacket = await alt.takeOpcode(FIELD_OPCODE.userLook);
-  const look = readUserLook(new PacketReader(lookPacket[lookPacket.length - 1]!, 1));
-  assert.deepEqual(
-    [look.characterId, look.face, look.avatarItems],
-    [7, undefined, [30000, 1040001, 1060001, 1071000, 1302000, 1002000]],
-    "the list is the avatarItems a 0x1C would have carried",
-  );
-  assert.deepEqual(
-    (await hero.drainOpcodes(200)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
-    [],
-    "the wearer is not echoed their own look",
-  );
+    // Everybody else: one `0x28` with the new list and no face (flags 0 means \"the head did not change\"),
+    // and the wearer gets none - their client already drew it.
+    const lookPacket = await alt.takeOpcode(FIELD_OPCODE.userLook);
+    const look = readUserLook(new PacketReader(lookPacket[lookPacket.length - 1]!, 1));
+    assert.deepEqual(
+      [look.characterId, look.face, look.avatarItems],
+      [7, undefined, [30000, 1040001, 1060001, 1071000, 1302000, 1002000]],
+      "the list is the avatarItems a 0x1C would have carried",
+    );
+    assert.deepEqual(
+      (await hero.drainOpcodes(200)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+      [],
+      "the wearer is not echoed their own look",
+    );
 
-  // The record itself moved (this is the object the account table holds, ADR-017): the worn part is the
-  // cap now, and the bag slot it came from is empty.
-  assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000);
-  assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
+    // The record itself moved (this is the object the account table holds, ADR-017): the worn part is the
+    // cap now, and the bag slot it came from is empty.
+    assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000);
+    assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
 
-  // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
-  // an empty one. `sub_55ACB0` armed the client's one-request gate as it sent, and only a `0x0B` clears
-  // it, so a refusal that stayed silent would freeze the whole window (FINDINGS 4.6).
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
-  const refused = await hero.takeOpcode(INVENTORY_OPCODE);
-  assert.deepEqual(readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1)).changes, []);
-  assert.ok(log.some((line) => line.includes("refused (emptySlot)")), log.join("\n"));
-  assert.deepEqual(
-    (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
-    [],
-    "and a refused drag tells the map nothing",
-  );
-});
+    // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -
+    // an empty one. `sub_55ACB0` armed the client's one-request gate as it sent, and only a `0x0B` clears
+    // it, so a refusal that stayed silent would freeze the whole window (FINDINGS 4.6).
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
+    const refused = await hero.takeOpcode(INVENTORY_OPCODE);
+    assert.deepEqual(
+      readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1)).changes,
+      [],
+    );
+    assert.ok(
+      log.some((line) => line.includes("refused (emptySlot)")),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
+      [],
+      "and a refused drag tells the map nothing",
+    );
+  },
+);
 
 /**
  * Throwing something away: the same `0x17` with `toSlot = 0` (`sub_463BE0`), and the field's own `0x43`.
@@ -3476,139 +4389,191 @@ test("equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the m
  * What picks it back up is walking onto it, and only after a move: the drop landed *after* this player
  * last moved, so standing on it is not enough (`DropField.reachable`, FINDINGS 4.18.6).
  */
-test("a throw-away answers 0x0B and puts the item on the ground for the whole map", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({ templateId: 120100, name: "stub", level: 1, maxHP: 10, maxMP: 0, exp: 1, speedPercent: 0, dieMs: 40 }),
-    dropPolicy: () => [],
-    // The field's own tick, which is what takes a drop a player is standing on.
-    mobTickMs: 20,
-    handshake: { clientSendSeed: 0x01020304, clientRecvSeed: 0x04030201 },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  // Ten potions in the USE tab: enough to throw some away and keep the rest.
-  const heroItems = startingCharacterItems();
-  heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
-  const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, heroItems);
-  const hero = await FakeClient.connect(gameInfo.port);
-  t.after(() => hero.close());
-  hero.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 9, characterName: "Hero", character: heroRecord }),
-  });
-  await hero.take(4);
-
-  const alt = await FakeClient.connect(gameInfo.port);
-  t.after(() => alt.close());
-  alt.send({
-    kind: "handshake-reply",
-    opcode: 0x04,
-    value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
-  });
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  // Four of the ten, dragged onto the ground: the tab, the slot, `toSlot = 0` and the number the player
-  // answered to the "how many" prompt.
-  const throwAway = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 4 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: throwAway.slice(1) });
-
-  // The thrower's window first: the slot holds six now, and that is the whole `0x0B`.
-  const answer = await hero.takeOpcode(INVENTORY_OPCODE);
-  assert.deepEqual(readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1)).changes, [
-    {
-      op: INVENTORY_OP.put,
-      inventory: INVENTORY_TAB.consume,
-      slot: 4,
-      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
-    },
-  ]);
-
-  // Then the ground, to the thrower and to the map: `kind 2` is the only shape without a monster block.
-  const heroDrop = await hero.takeOpcode(DROP_OPCODE.appear);
-  const onGround = readDropAppear(new PacketReader(heroDrop[heroDrop.length - 1]!, 1));
-  assert.equal(heroDrop[heroDrop.length - 1]!.length, 15, "kind 2 is opcode + 14 bytes (FINDINGS 4.18.2)");
-  assert.deepEqual(
-    [onGround.kind, onGround.money, onGround.value, onGround.mobId],
-    [DROP_KIND.placed, false, 2000000, undefined],
-    "the item, no mesos, and no monster",
-  );
-  const altDrop = await alt.takeOpcode(DROP_OPCODE.appear);
-  assert.equal(readDropAppear(new PacketReader(altDrop[altDrop.length - 1]!, 1)).dropId, onGround.dropId);
-  assert.ok(log.some((line) => line.includes("dropped item 2000000 x4")), log.join("\n"));
-
-  /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
-  const walkTo = (x: number, y: number): void => {
-    const move = encodeClientUserMove({
-      stageByte: 0,
-      path: { originX: 0, originY: 0, elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }] },
+test(
+  "a throw-away answers 0x0B and puts the item on the ground for the whole map",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      dropPolicy: () => [],
+      // The field's own tick, which is what takes a drop a player is standing on.
+      mobTickMs: 20,
+      handshake: { clientSendSeed: 0x01020304, clientRecvSeed: 0x04030201 },
+      log: (line) => log.push(line),
     });
-    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
-  };
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  // It is under the thrower's feet, and it stays there: the drop is younger than the last move, so not
-  // even the tick that follows takes it (a throw-away must not come straight back).
-  assert.deepEqual(
-    (await hero.drainOpcodes(200)).filter((opcode) => opcode === DROP_OPCODE.remove),
-    [],
-    "standing on it is not a pickup",
-  );
-  // 80 px away is outside the 40 px reach; stepping back onto it is what takes it - with the count the
-  // throw carried, which is only visible on the way back in.
-  walkTo(onGround.x + 80, onGround.y);
-  assert.deepEqual(
-    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
-    [],
-    "and neither is 80 px away",
-  );
-  walkTo(onGround.x, onGround.y);
-  const taken = await hero.takeOpcode(DROP_OPCODE.remove);
-  assert.deepEqual(readDropRemove(new PacketReader(taken[taken.length - 1]!, 1)), {
-    dropId: onGround.dropId,
-    kind: DROP_REMOVE_KIND.taken,
-    characterId: 9,
-  });
-  const back = await hero.takeOpcode(INVENTORY_OPCODE);
-  assert.deepEqual(readInventoryChange(new PacketReader(back[back.length - 1]!, 1)).changes, [
-    {
-      op: INVENTORY_OP.put,
-      inventory: INVENTORY_TAB.consume,
-      slot: 4,
-      item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
-    },
-  ]);
-  const notice = await hero.takeOpcode(LOOT_OPCODE);
-  assert.deepEqual(readLootNotice(new PacketReader(notice[notice.length - 1]!, 1)), {
-    kind: "item",
-    itemId: 2000000,
-    count: 4,
-  });
-  const altSaw = await alt.takeOpcode(DROP_OPCODE.remove);
-  assert.equal(readDropRemove(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId, 9);
+    // Ten potions in the USE tab: enough to throw some away and keep the rest.
+    const heroItems = startingCharacterItems();
+    heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
+    const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, heroItems);
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.take(4);
 
-  // A throw-away of zero is not something the client can send (`sub_463BE0` asks the stack size), and it
-  // is refused the way every other impossible drag is: an empty `0x0B`, and nothing on the ground.
-  const zero = encodeClientChangeSlot({ tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 0 });
-  hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
-  const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
-  assert.deepEqual(readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes, []);
-  assert.ok(log.some((line) => line.includes("refused (badCount)")), log.join("\n"));
-  assert.deepEqual(
-    (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
-    [],
-    "and the refused throw-away leaves the ground as it was",
-  );
-});
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    // Four of the ten, dragged onto the ground: the tab, the slot, `toSlot = 0` and the number the player
+    // answered to the "how many" prompt.
+    const throwAway = encodeClientChangeSlot({
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 4,
+      toSlot: 0,
+      count: 4,
+    });
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.changeSlot,
+      body: throwAway.slice(1),
+    });
+
+    // The thrower's window first: the slot holds six now, and that is the whole `0x0B`.
+    const answer = await hero.takeOpcode(INVENTORY_OPCODE);
+    assert.deepEqual(readInventoryChange(new PacketReader(answer[answer.length - 1]!, 1)).changes, [
+      {
+        op: INVENTORY_OP.put,
+        inventory: INVENTORY_TAB.consume,
+        slot: 4,
+        item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 6 },
+      },
+    ]);
+
+    // Then the ground, to the thrower and to the map: `kind 2` is the only shape without a monster block.
+    const heroDrop = await hero.takeOpcode(DROP_OPCODE.appear);
+    const onGround = readDropAppear(new PacketReader(heroDrop[heroDrop.length - 1]!, 1));
+    assert.equal(
+      heroDrop[heroDrop.length - 1]!.length,
+      15,
+      "kind 2 is opcode + 14 bytes (FINDINGS 4.18.2)",
+    );
+    assert.deepEqual(
+      [onGround.kind, onGround.money, onGround.value, onGround.mobId],
+      [DROP_KIND.placed, false, 2000000, undefined],
+      "the item, no mesos, and no monster",
+    );
+    const altDrop = await alt.takeOpcode(DROP_OPCODE.appear);
+    assert.equal(
+      readDropAppear(new PacketReader(altDrop[altDrop.length - 1]!, 1)).dropId,
+      onGround.dropId,
+    );
+    assert.ok(
+      log.some((line) => line.includes("dropped item 2000000 x4")),
+      log.join("\n"),
+    );
+
+    /** Walks the character onto a spot: the first element of a CMovePath is where the server puts us. */
+    const walkTo = (x: number, y: number): void => {
+      const move = encodeClientUserMove({
+        stageByte: 0,
+        path: {
+          originX: 0,
+          originY: 0,
+          elements: [{ attr: 0, x, y, vx: 0, vy: 0, action: 0, foothold: 0, duration: 60 }],
+        },
+      });
+      hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: move.slice(1) });
+    };
+
+    // It is under the thrower's feet, and it stays there: the drop is younger than the last move, so not
+    // even the tick that follows takes it (a throw-away must not come straight back).
+    assert.deepEqual(
+      (await hero.drainOpcodes(200)).filter((opcode) => opcode === DROP_OPCODE.remove),
+      [],
+      "standing on it is not a pickup",
+    );
+    // 80 px away is outside the 40 px reach; stepping back onto it is what takes it - with the count the
+    // throw carried, which is only visible on the way back in.
+    walkTo(onGround.x + 80, onGround.y);
+    assert.deepEqual(
+      (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.remove),
+      [],
+      "and neither is 80 px away",
+    );
+    walkTo(onGround.x, onGround.y);
+    const taken = await hero.takeOpcode(DROP_OPCODE.remove);
+    assert.deepEqual(readDropRemove(new PacketReader(taken[taken.length - 1]!, 1)), {
+      dropId: onGround.dropId,
+      kind: DROP_REMOVE_KIND.taken,
+      characterId: 9,
+    });
+    const back = await hero.takeOpcode(INVENTORY_OPCODE);
+    assert.deepEqual(readInventoryChange(new PacketReader(back[back.length - 1]!, 1)).changes, [
+      {
+        op: INVENTORY_OP.put,
+        inventory: INVENTORY_TAB.consume,
+        slot: 4,
+        item: { kind: "nonequip", itemId: 2000000, cash: null, quantity: 10 },
+      },
+    ]);
+    const notice = await hero.takeOpcode(LOOT_OPCODE);
+    assert.deepEqual(readLootNotice(new PacketReader(notice[notice.length - 1]!, 1)), {
+      kind: "item",
+      itemId: 2000000,
+      count: 4,
+    });
+    const altSaw = await alt.takeOpcode(DROP_OPCODE.remove);
+    assert.equal(readDropRemove(new PacketReader(altSaw[altSaw.length - 1]!, 1)).characterId, 9);
+
+    // A throw-away of zero is not something the client can send (`sub_463BE0` asks the stack size), and it
+    // is refused the way every other impossible drag is: an empty `0x0B`, and nothing on the ground.
+    const zero = encodeClientChangeSlot({
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 4,
+      toSlot: 0,
+      count: 0,
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: zero.slice(1) });
+    const nothing = await hero.takeOpcode(INVENTORY_OPCODE);
+    assert.deepEqual(
+      readInventoryChange(new PacketReader(nothing[nothing.length - 1]!, 1)).changes,
+      [],
+    );
+    assert.ok(
+      log.some((line) => line.includes("refused (badCount)")),
+      log.join("\n"),
+    );
+    assert.deepEqual(
+      (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+      [],
+      "and the refused throw-away leaves the ground as it was",
+    );
+  },
+);
 
 /**
  * The party, over two real sockets: create, invite, accept, leave, and the leader's leave that ends it.
@@ -3618,89 +4583,120 @@ test("a throw-away answers 0x0B and puts the item on the ground for the whole ma
  * server has to remember who invited whom. This test is the same walk the probe does with the real
  * `Data.wz`; here the map is a stub, so nothing else is on the wire.
  */
-test("a party is created, joined, left, and ended by its leader (0x26/0x10)", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const enter = async (id: number, name: string): Promise<FakeClient> => {
-    const client = await FakeClient.connect(gameInfo.port);
-    t.after(() => client.close());
-    client.send({
-      kind: "handshake-reply",
-      opcode: 0x04,
-      value: handoffs.issue({
-        username: `user${id}`,
-        characterId: id,
-        characterName: name,
-        character: characterDataOf({ ...zeroStats(), id, name, level: 1, hp: 50, maxHp: 50 }, startingCharacterItems()),
-      }),
+test(
+  "a party is created, joined, left, and ended by its leader (0x26/0x10)",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+      log: (line) => log.push(line),
     });
-    await client.takeOpcode(FIELD_OPCODE.setField);
-    return client;
-  };
-  const hero = await enter(61, "Hero");
-  const alt = await enter(62, "Alt");
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  const party = (client: FakeClient, request: Parameters<typeof encodeClientPartyRequest>[0]): void => {
-    client.send({
-      kind: "unknown",
-      opcode: PARTY_OPCODE.request,
-      body: encodeClientPartyRequest(request).slice(1),
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
     });
-  };
-  const result = async (client: FakeClient): Promise<ReturnType<typeof readPartyResult>> => {
-    const packets = await client.takeOpcode(PARTY_OPCODE.result);
-    return readPartyResult(new PacketReader(packets[packets.length - 1]!, 1));
-  };
 
-  party(hero, { kind: "create" });
-  assert.deepEqual(await result(hero), { kind: "created", partyId: 1 });
-  assert.deepEqual(await alt.drainOpcodes(100), [], "nobody else hears about the creation");
+    const enter = async (id: number, name: string): Promise<FakeClient> => {
+      const client = await FakeClient.connect(gameInfo.port);
+      t.after(() => client.close());
+      client.send({
+        kind: "handshake-reply",
+        opcode: 0x04,
+        value: handoffs.issue({
+          username: `user${id}`,
+          characterId: id,
+          characterName: name,
+          character: characterDataOf(
+            { ...zeroStats(), id, name, level: 1, hp: 50, maxHp: 50 },
+            startingCharacterItems(),
+          ),
+        }),
+      });
+      await client.takeOpcode(FIELD_OPCODE.setField);
+      return client;
+    };
+    const hero = await enter(61, "Hero");
+    const alt = await enter(62, "Alt");
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  party(hero, { kind: "invite", targetId: 62 });
-  assert.deepEqual(await result(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
-  assert.deepEqual(await hero.drainOpcodes(100), [], "the inviter is not told about its own invite");
+    const party = (
+      client: FakeClient,
+      request: Parameters<typeof encodeClientPartyRequest>[0],
+    ): void => {
+      client.send({
+        kind: "unknown",
+        opcode: PARTY_OPCODE.request,
+        body: encodeClientPartyRequest(request).slice(1),
+      });
+    };
+    const result = async (client: FakeClient): Promise<ReturnType<typeof readPartyResult>> => {
+      const packets = await client.takeOpcode(PARTY_OPCODE.result);
+      return readPartyResult(new PacketReader(packets[packets.length - 1]!, 1));
+    };
 
-  party(alt, { kind: "accept", inviterId: 61 });
-  const joined = { kind: "joined", partyId: 1, name: "Alt", members: [
-    { characterId: 61, name: "Hero" },
-    { characterId: 62, name: "Alt" },
-  ] } as const;
-  assert.deepEqual(await result(hero), joined);
-  assert.deepEqual(await result(alt), joined, "the joiner hears it too, and prints its own name");
+    party(hero, { kind: "create" });
+    assert.deepEqual(await result(hero), { kind: "created", partyId: 1 });
+    assert.deepEqual(await alt.drainOpcodes(100), [], "nobody else hears about the creation");
 
-  // Alt leaves: `flag 1`, `kicked 0`, the roster already without Alt - and the leaver hears it,
-  // because that packet (with its own id in it) is the only thing that clears its party id.
-  party(alt, { kind: "leave", unknown: 0 });
-  const left = { kind: "left", partyId: 1, characterId: 62, kicked: false, name: "Alt", members: [
-    { characterId: 61, name: "Hero" },
-  ] } as const;
-  assert.deepEqual(await result(alt), left);
-  assert.deepEqual(await result(hero), left);
+    party(hero, { kind: "invite", targetId: 62 });
+    assert.deepEqual(await result(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
+    assert.deepEqual(
+      await hero.drainOpcodes(100),
+      [],
+      "the inviter is not told about its own invite",
+    );
 
-  // The last one out is the leader: `flag 0`, no roster - the party is gone.
-  party(hero, { kind: "leave", unknown: 0 });
-  assert.deepEqual(await result(hero), { kind: "ended", partyId: 1, leaderId: 61 });
-  assert.deepEqual(await alt.drainOpcodes(100), [], "Alt left already: it is not told about the disband");
+    party(alt, { kind: "accept", inviterId: 61 });
+    const joined = {
+      kind: "joined",
+      partyId: 1,
+      name: "Alt",
+      members: [
+        { characterId: 61, name: "Hero" },
+        { characterId: 62, name: "Alt" },
+      ],
+    } as const;
+    assert.deepEqual(await result(hero), joined);
+    assert.deepEqual(await result(alt), joined, "the joiner hears it too, and prints its own name");
 
-  party(alt, { kind: "leave", unknown: 0 });
-  assert.deepEqual(await result(alt), { kind: "notInParty" });
-  assert.ok(log.some((line) => line.includes('party: "Hero" created party 1')), log.join("\n"));
-});
+    // Alt leaves: `flag 1`, `kicked 0`, the roster already without Alt - and the leaver hears it,
+    // because that packet (with its own id in it) is the only thing that clears its party id.
+    party(alt, { kind: "leave", unknown: 0 });
+    const left = {
+      kind: "left",
+      partyId: 1,
+      characterId: 62,
+      kicked: false,
+      name: "Alt",
+      members: [{ characterId: 61, name: "Hero" }],
+    } as const;
+    assert.deepEqual(await result(alt), left);
+    assert.deepEqual(await result(hero), left);
+
+    // The last one out is the leader: `flag 0`, no roster - the party is gone.
+    party(hero, { kind: "leave", unknown: 0 });
+    assert.deepEqual(await result(hero), { kind: "ended", partyId: 1, leaderId: 61 });
+    assert.deepEqual(
+      await alt.drainOpcodes(100),
+      [],
+      "Alt left already: it is not told about the disband",
+    );
+
+    party(alt, { kind: "leave", unknown: 0 });
+    assert.deepEqual(await result(alt), { kind: "notInParty" });
+    assert.ok(
+      log.some((line) => line.includes('party: "Hero" created party 1')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * Fame (`0x20` -> `0x12`), which is the first social packet that changes *the other* player's record.
@@ -3710,78 +4706,91 @@ test("a party is created, joined, left, and ended by its leader (0x26/0x10)", { 
  * refusals are the same packet with no payload. The daily and monthly quotas are this server's own
  * rules (ADR-031), so the second attempt against the same target is the monthly one.
  */
-test("fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas refuse (3/4)", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x0c0c0c0c, clientRecvSeed: 0x0d0d0d0d },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const enter = async (id: number, name: string, level: number): Promise<FakeClient> => {
-    const client = await FakeClient.connect(gameInfo.port);
-    t.after(() => client.close());
-    client.send({
-      kind: "handshake-reply",
-      opcode: 0x04,
-      value: handoffs.issue({
-        username: `user${id}`,
-        characterId: id,
-        characterName: name,
-        character: characterDataOf({ ...zeroStats(), id, name, level, hp: 50, maxHp: 50 }, startingCharacterItems()),
-      }),
+test(
+  "fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas refuse (3/4)",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x0c0c0c0c, clientRecvSeed: 0x0d0d0d0d },
+      log: (line) => log.push(line),
     });
-    await client.takeOpcode(FIELD_OPCODE.setField);
-    return client;
-  };
-  const hero = await enter(71, "Hero", 30);
-  // Alt is a beginner (level 14): old enough to be famed, too young to fame anybody.
-  const alt = await enter(72, "Alt", 14);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  const fame = (client: FakeClient, targetId: number, up: boolean): void => {
-    client.send({
-      kind: "unknown",
-      opcode: FAME_OPCODE.request,
-      body: encodeClientFameRequest({ targetId, up }).slice(1),
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
     });
-  };
-  const answer = async (client: FakeClient): Promise<ReturnType<typeof readFameResult>> => {
-    const packets = await client.takeOpcode(FAME_OPCODE.result);
-    return readFameResult(new PacketReader(packets[packets.length - 1]!, 1));
-  };
 
-  fame(hero, 72, true);
-  assert.deepEqual(await answer(hero), { kind: "changed", name: "Alt", up: true });
-  assert.deepEqual(await answer(alt), { kind: "received", name: "Hero", up: true });
-  const stat = await alt.takeOpcode(STAT_OPCODE);
-  assert.deepEqual(readStatUpdate(new PacketReader(stat[stat.length - 1]!, 1)), { ack: false, diff: { fame: 1 } });
-  assert.deepEqual(await hero.drainOpcodes(150), [], "the giver's own record did not change");
+    const enter = async (id: number, name: string, level: number): Promise<FakeClient> => {
+      const client = await FakeClient.connect(gameInfo.port);
+      t.after(() => client.close());
+      client.send({
+        kind: "handshake-reply",
+        opcode: 0x04,
+        value: handoffs.issue({
+          username: `user${id}`,
+          characterId: id,
+          characterName: name,
+          character: characterDataOf(
+            { ...zeroStats(), id, name, level, hp: 50, maxHp: 50 },
+            startingCharacterItems(),
+          ),
+        }),
+      });
+      await client.takeOpcode(FIELD_OPCODE.setField);
+      return client;
+    };
+    const hero = await enter(71, "Hero", 30);
+    // Alt is a beginner (level 14): old enough to be famed, too young to fame anybody.
+    const alt = await enter(72, "Alt", 14);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // Same target, same month: `type 4` (the more specific message, and the client's own words).
-  fame(hero, 72, true);
-  assert.deepEqual(await answer(hero), { kind: "alreadyThisMonth" });
-  assert.deepEqual(await alt.drainOpcodes(100), [], "a refusal is not news for the target");
+    const fame = (client: FakeClient, targetId: number, up: boolean): void => {
+      client.send({
+        kind: "unknown",
+        opcode: FAME_OPCODE.request,
+        body: encodeClientFameRequest({ targetId, up }).slice(1),
+      });
+    };
+    const answer = async (client: FakeClient): Promise<ReturnType<typeof readFameResult>> => {
+      const packets = await client.takeOpcode(FAME_OPCODE.result);
+      return readFameResult(new PacketReader(packets[packets.length - 1]!, 1));
+    };
 
-  // Alt is level 14, so it cannot give fame: `type 2`, and Hero hears nothing.
-  fame(alt, 71, true);
-  assert.deepEqual(await answer(alt), { kind: "beginner" });
-  assert.deepEqual(await hero.drainOpcodes(100), []);
+    fame(hero, 72, true);
+    assert.deepEqual(await answer(hero), { kind: "changed", name: "Alt", up: true });
+    assert.deepEqual(await answer(alt), { kind: "received", name: "Hero", up: true });
+    const stat = await alt.takeOpcode(STAT_OPCODE);
+    assert.deepEqual(readStatUpdate(new PacketReader(stat[stat.length - 1]!, 1)), {
+      ack: false,
+      diff: { fame: 1 },
+    });
+    assert.deepEqual(await hero.drainOpcodes(150), [], "the giver's own record did not change");
 
-  // An id that is not in this field is `type 1`: nothing at all is printed.
-  fame(hero, 999, true);
-  assert.deepEqual(await answer(hero), { kind: "ignored" });
-  assert.ok(log.some((line) => line.includes("fame: \"Hero\" -> \"Alt\" up (now 1)")), log.join("\n"));
-});
+    // Same target, same month: `type 4` (the more specific message, and the client's own words).
+    fame(hero, 72, true);
+    assert.deepEqual(await answer(hero), { kind: "alreadyThisMonth" });
+    assert.deepEqual(await alt.drainOpcodes(100), [], "a refusal is not news for the target");
+
+    // Alt is level 14, so it cannot give fame: `type 2`, and Hero hears nothing.
+    fame(alt, 71, true);
+    assert.deepEqual(await answer(alt), { kind: "beginner" });
+    assert.deepEqual(await hero.drainOpcodes(100), []);
+
+    // An id that is not in this field is `type 1`: nothing at all is printed.
+    fame(hero, 999, true);
+    assert.deepEqual(await answer(hero), { kind: "ignored" });
+    assert.ok(
+      log.some((line) => line.includes('fame: "Hero" -> "Alt" up (now 1)')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * 交易（1:1 교환），兩個真 socket：邀請、接受、放道具、放錢、確認，然後東西真的換邊。
@@ -3790,151 +4799,214 @@ test("fame: 0x20 answers the giver (0), the target (5), and a 0x0D; the quotas r
  * 而 `settleTrade` 的原子性（東西不在了、對面放不下就整個不換）是伺服器自己的規則，client 只看到
  * `type 8` 的 `3` 或 `4`。
  */
-test("a trade: invite, accept, offer, confirm, and the swap lands in both inventories (0x25/0x50)", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-
-  const heroItems = startingCharacterItems();
-  const heroStack = grantItem(heroItems, 2_000_000, 10)!;
-  const altItems = startingCharacterItems();
-  const altStack = grantItem(altItems, 2_000_001, 3)!;
-  const enter = async (id: number, name: string, items: ReturnType<typeof startingCharacterItems>, mesos: number): Promise<FakeClient> => {
-    const client = await FakeClient.connect(gameInfo.port);
-    t.after(() => client.close());
-    client.send({
-      kind: "handshake-reply",
-      opcode: 0x04,
-      value: handoffs.issue({
-        username: `user${id}`,
-        characterId: id,
-        characterName: name,
-        character: characterDataOf({ ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50, mesos }, items),
-      }),
+test(
+  "a trade: invite, accept, offer, confirm, and the swap lands in both inventories (0x25/0x50)",
+  { timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
+      log: (line) => log.push(line),
     });
-    await client.takeOpcode(FIELD_OPCODE.setField);
-    return client;
-  };
-  const hero = await enter(61, "Hero", heroItems, 1_000);
-  const alt = await enter(62, "Alt", altItems, 100);
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-
-  const request = (client: FakeClient, body: Parameters<typeof encodeClientMiniRoomRequest>[0]): void => {
-    client.send({ kind: "unknown", opcode: MINIROOM_OPCODE.request, body: encodeClientMiniRoomRequest(body).slice(1) });
-  };
-  const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
-    const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
-    return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
-  };
-
-  // 1. `/교환 Alt`: Alt sees the invite, Hero gets the silent `code 0` acknowledgement.
-  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 62 });
-  assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
-  assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.ok });
-
-  // 2. Alt says yes: both windows open, each with its own side marked.
-  request(alt, { kind: "accept", inviterId: 61 });
-  const heroEnter = await answer(hero);
-  const altEnter = await answer(alt);
-  assert.equal(heroEnter.kind, "enter");
-  assert.equal(altEnter.kind, "enter");
-  if (heroEnter.kind !== "enter" || altEnter.kind !== "enter") return;
-  assert.equal(heroEnter.roomKind, 1);
-  assert.equal(heroEnter.myIndex, 0);
-  assert.equal(altEnter.myIndex, 1);
-  assert.deepEqual(heroEnter.participants.map((p) => p.name), ["Hero", "Alt"]);
-  assert.deepEqual(altEnter.participants.map((p) => p.name), ["Hero", "Alt"]);
-  assert.equal(heroEnter.participants[0]!.level, 10);
-  assert.equal(heroEnter.participants[0]!.face, DEFAULT_FACE_ID);
-
-  // 3. Hero puts 5 potions in slot 2 and 300 mesos: both sides see both packets.
-  request(hero, { kind: "offerItem", tab: heroStack.inventory, slot: heroStack.slot, count: 5, roomSlot: 2 });
-  for (const client of [hero, alt]) {
-    const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
-    const item = readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1));
-    assert.equal(item.kind, "item");
-    if (item.kind !== "item") return;
-    assert.equal(item.index, 0);
-    assert.equal(item.roomSlot, 2);
-    assert.equal(item.item.kind === "nonequip" ? item.item.quantity : 0, 5);
-  }
-  request(hero, { kind: "offerMesos", amount: 300 });
-  for (const client of [hero, alt]) {
-    const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
-    assert.deepEqual(readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1)), {
-      kind: "mesos",
-      index: 0,
-      amount: 300,
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
     });
-  }
 
-  // 4. Alt puts its 3 blue potions in slot 1 and 100 mesos.
-  request(alt, { kind: "offerItem", tab: altStack.inventory, slot: altStack.slot, count: 3, roomSlot: 1 });
-  await hero.takeOpcode(MINIROOM_OPCODE.result);
-  await alt.takeOpcode(MINIROOM_OPCODE.result);
-  request(alt, { kind: "offerMesos", amount: 100 });
-  await hero.takeOpcode(MINIROOM_OPCODE.result);
-  await alt.takeOpcode(MINIROOM_OPCODE.result);
+    const heroItems = startingCharacterItems();
+    const heroStack = grantItem(heroItems, 2_000_000, 10)!;
+    const altItems = startingCharacterItems();
+    const altStack = grantItem(altItems, 2_000_001, 3)!;
+    const enter = async (
+      id: number,
+      name: string,
+      items: ReturnType<typeof startingCharacterItems>,
+      mesos: number,
+    ): Promise<FakeClient> => {
+      const client = await FakeClient.connect(gameInfo.port);
+      t.after(() => client.close());
+      client.send({
+        kind: "handshake-reply",
+        opcode: 0x04,
+        value: handoffs.issue({
+          username: `user${id}`,
+          characterId: id,
+          characterName: name,
+          character: characterDataOf(
+            { ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50, mesos },
+            items,
+          ),
+        }),
+      });
+      await client.takeOpcode(FIELD_OPCODE.setField);
+      return client;
+    };
+    const hero = await enter(61, "Hero", heroItems, 1_000);
+    const alt = await enter(62, "Alt", altItems, 100);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  // 5. Both confirm: the lock (`13`), then `0x0B`/`0x0D`, then the finish (`8` code 3).
-  request(hero, { kind: "confirm" });
-  assert.deepEqual(await hero.drainOpcodes(80), [], "one confirmation changes nothing on the wire");
-  request(alt, { kind: "confirm" });
-  const heroLock = await hero.takeOpcode(MINIROOM_OPCODE.result);
-  assert.deepEqual(readMiniRoomResult(new PacketReader(heroLock[heroLock.length - 1]!, 1)), { kind: "lock" });
-  const altLock = await alt.takeOpcode(MINIROOM_OPCODE.result);
-  assert.deepEqual(readMiniRoomResult(new PacketReader(altLock[altLock.length - 1]!, 1)), { kind: "lock" });
+    const request = (
+      client: FakeClient,
+      body: Parameters<typeof encodeClientMiniRoomRequest>[0],
+    ): void => {
+      client.send({
+        kind: "unknown",
+        opcode: MINIROOM_OPCODE.request,
+        body: encodeClientMiniRoomRequest(body).slice(1),
+      });
+    };
+    const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
+      const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
+      return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
+    };
 
-  const heroChanges = await hero.takeOpcode(INVENTORY_OPCODE);
-  const heroInventory = readInventoryChange(new PacketReader(heroChanges[heroChanges.length - 1]!, 1));
-  const heroPut = heroInventory.changes.find((change) => change.op === INVENTORY_OP.put);
-  assert.ok(heroPut !== undefined, JSON.stringify(heroInventory));
-  assert.equal(heroPut!.inventory, heroStack.inventory);
-  assert.equal(heroPut!.slot, heroStack.slot);
-  assert.equal(heroPut!.op === INVENTORY_OP.put && heroPut!.item.kind === "nonequip" ? heroPut!.item.quantity : 0, 5);
-  assert.ok(
-    heroInventory.changes.some(
-      (change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_001,
-    ),
-    "Alt's stack arrives in Hero's bag",
-  );
+    // 1. `/교환 Alt`: Alt sees the invite, Hero gets the silent `code 0` acknowledgement.
+    request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 62 });
+    assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 61, inviterName: "Hero" });
+    assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.ok });
 
-  const heroStat = await hero.takeOpcode(STAT_OPCODE);
-  assert.deepEqual(readStatUpdate(new PacketReader(heroStat[heroStat.length - 1]!, 1)).diff, { mesos: 800 });
-  const heroFinish = await hero.takeOpcode(MINIROOM_OPCODE.result);
-  assert.deepEqual(readMiniRoomResult(new PacketReader(heroFinish[heroFinish.length - 1]!, 1)), {
-    kind: "finish",
-    code: TRADE_FINISH.done,
-  });
+    // 2. Alt says yes: both windows open, each with its own side marked.
+    request(alt, { kind: "accept", inviterId: 61 });
+    const heroEnter = await answer(hero);
+    const altEnter = await answer(alt);
+    assert.equal(heroEnter.kind, "enter");
+    assert.equal(altEnter.kind, "enter");
+    if (heroEnter.kind !== "enter" || altEnter.kind !== "enter") return;
+    assert.equal(heroEnter.roomKind, 1);
+    assert.equal(heroEnter.myIndex, 0);
+    assert.equal(altEnter.myIndex, 1);
+    assert.deepEqual(
+      heroEnter.participants.map((p) => p.name),
+      ["Hero", "Alt"],
+    );
+    assert.deepEqual(
+      altEnter.participants.map((p) => p.name),
+      ["Hero", "Alt"],
+    );
+    assert.equal(heroEnter.participants[0]!.level, 10);
+    assert.equal(heroEnter.participants[0]!.face, DEFAULT_FACE_ID);
 
-  const altChanges = await alt.takeOpcode(INVENTORY_OPCODE);
-  const altInventory = readInventoryChange(new PacketReader(altChanges[altChanges.length - 1]!, 1));
-  assert.ok(
-    altInventory.changes.some((change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_000),
-    "Hero's 5 potions arrive in Alt's bag",
-  );
-  const altStat = await alt.takeOpcode(STAT_OPCODE);
-  assert.deepEqual(readStatUpdate(new PacketReader(altStat[altStat.length - 1]!, 1)).diff, { mesos: 300 });
-  const altFinish = await alt.takeOpcode(MINIROOM_OPCODE.result);
-  assert.deepEqual(readMiniRoomResult(new PacketReader(altFinish[altFinish.length - 1]!, 1)), {
-    kind: "finish",
-    code: TRADE_FINISH.done,
-  });
+    // 3. Hero puts 5 potions in slot 2 and 300 mesos: both sides see both packets.
+    request(hero, {
+      kind: "offerItem",
+      tab: heroStack.inventory,
+      slot: heroStack.slot,
+      count: 5,
+      roomSlot: 2,
+    });
+    for (const client of [hero, alt]) {
+      const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
+      const item = readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1));
+      assert.equal(item.kind, "item");
+      if (item.kind !== "item") return;
+      assert.equal(item.index, 0);
+      assert.equal(item.roomSlot, 2);
+      assert.equal(item.item.kind === "nonequip" ? item.item.quantity : 0, 5);
+    }
+    request(hero, { kind: "offerMesos", amount: 300 });
+    for (const client of [hero, alt]) {
+      const seen = await client.takeOpcode(MINIROOM_OPCODE.result);
+      assert.deepEqual(readMiniRoomResult(new PacketReader(seen[seen.length - 1]!, 1)), {
+        kind: "mesos",
+        index: 0,
+        amount: 300,
+      });
+    }
 
-  assert.ok(log.some((line) => line.includes('trade: 1 done - "Hero"')), log.join("\n"));
-});
+    // 4. Alt puts its 3 blue potions in slot 1 and 100 mesos.
+    request(alt, {
+      kind: "offerItem",
+      tab: altStack.inventory,
+      slot: altStack.slot,
+      count: 3,
+      roomSlot: 1,
+    });
+    await hero.takeOpcode(MINIROOM_OPCODE.result);
+    await alt.takeOpcode(MINIROOM_OPCODE.result);
+    request(alt, { kind: "offerMesos", amount: 100 });
+    await hero.takeOpcode(MINIROOM_OPCODE.result);
+    await alt.takeOpcode(MINIROOM_OPCODE.result);
+
+    // 5. Both confirm: the lock (`13`), then `0x0B`/`0x0D`, then the finish (`8` code 3).
+    request(hero, { kind: "confirm" });
+    assert.deepEqual(
+      await hero.drainOpcodes(80),
+      [],
+      "one confirmation changes nothing on the wire",
+    );
+    request(alt, { kind: "confirm" });
+    const heroLock = await hero.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(heroLock[heroLock.length - 1]!, 1)), {
+      kind: "lock",
+    });
+    const altLock = await alt.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(altLock[altLock.length - 1]!, 1)), {
+      kind: "lock",
+    });
+
+    const heroChanges = await hero.takeOpcode(INVENTORY_OPCODE);
+    const heroInventory = readInventoryChange(
+      new PacketReader(heroChanges[heroChanges.length - 1]!, 1),
+    );
+    const heroPut = heroInventory.changes.find((change) => change.op === INVENTORY_OP.put);
+    assert.ok(heroPut !== undefined, JSON.stringify(heroInventory));
+    assert.equal(heroPut!.inventory, heroStack.inventory);
+    assert.equal(heroPut!.slot, heroStack.slot);
+    assert.equal(
+      heroPut!.op === INVENTORY_OP.put && heroPut!.item.kind === "nonequip"
+        ? heroPut!.item.quantity
+        : 0,
+      5,
+    );
+    assert.ok(
+      heroInventory.changes.some(
+        (change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_001,
+      ),
+      "Alt's stack arrives in Hero's bag",
+    );
+
+    const heroStat = await hero.takeOpcode(STAT_OPCODE);
+    assert.deepEqual(readStatUpdate(new PacketReader(heroStat[heroStat.length - 1]!, 1)).diff, {
+      mesos: 800,
+    });
+    const heroFinish = await hero.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(heroFinish[heroFinish.length - 1]!, 1)), {
+      kind: "finish",
+      code: TRADE_FINISH.done,
+    });
+
+    const altChanges = await alt.takeOpcode(INVENTORY_OPCODE);
+    const altInventory = readInventoryChange(
+      new PacketReader(altChanges[altChanges.length - 1]!, 1),
+    );
+    assert.ok(
+      altInventory.changes.some(
+        (change) => change.op === INVENTORY_OP.put && change.item.itemId === 2_000_000,
+      ),
+      "Hero's 5 potions arrive in Alt's bag",
+    );
+    const altStat = await alt.takeOpcode(STAT_OPCODE);
+    assert.deepEqual(readStatUpdate(new PacketReader(altStat[altStat.length - 1]!, 1)).diff, {
+      mesos: 300,
+    });
+    const altFinish = await alt.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(altFinish[altFinish.length - 1]!, 1)), {
+      kind: "finish",
+      code: TRADE_FINISH.done,
+    });
+
+    assert.ok(
+      log.some((line) => line.includes('trade: 1 done - "Hero"')),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * 交易的另一半：關窗就是取消，而且**對面**才是要收到封包的人。
@@ -3942,66 +5014,84 @@ test("a trade: invite, accept, offer, confirm, and the swap lands in both invent
  * 2003 的 client 沒有「拒絕邀請」的封包，所以邀請只會逾時；但房間已經開了以後，關窗會送 `0x25 type 7`
  * （`sub_4D31F0` 的參數 2），對面收到 `0x50 type 8` 的 `1`（상대방이 교환을 취소했습니다）。
  */
-test("a trade that is cancelled: the other side gets 0x50 type 8 code 1", { timeout: 20000 }, async (t) => {
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTickMs: 10_000,
-    handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
-  const enter = async (id: number, name: string): Promise<FakeClient> => {
-    const client = await FakeClient.connect(gameInfo.port);
-    t.after(() => client.close());
-    client.send({
-      kind: "handshake-reply",
-      opcode: 0x04,
-      value: handoffs.issue({
-        username: `user${id}`,
-        characterId: id,
-        characterName: name,
-        character: characterDataOf({ ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50 }, startingCharacterItems()),
-      }),
+test(
+  "a trade that is cancelled: the other side gets 0x50 type 8 code 1",
+  { timeout: 20000 },
+  async (t) => {
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x0a0a0a0a, clientRecvSeed: 0x0b0b0b0b },
     });
-    await client.takeOpcode(FIELD_OPCODE.setField);
-    return client;
-  };
-  const hero = await enter(71, "Hero");
-  const alt = await enter(72, "Alt");
-  await hero.takeOpcode(FIELD_OPCODE.userEnterField);
-  await alt.takeOpcode(FIELD_OPCODE.userEnterField);
-  const request = (client: FakeClient, body: Parameters<typeof encodeClientMiniRoomRequest>[0]): void => {
-    client.send({ kind: "unknown", opcode: MINIROOM_OPCODE.request, body: encodeClientMiniRoomRequest(body).slice(1) });
-  };
-  const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
-    const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
-    return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
-  };
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+    const enter = async (id: number, name: string): Promise<FakeClient> => {
+      const client = await FakeClient.connect(gameInfo.port);
+      t.after(() => client.close());
+      client.send({
+        kind: "handshake-reply",
+        opcode: 0x04,
+        value: handoffs.issue({
+          username: `user${id}`,
+          characterId: id,
+          characterName: name,
+          character: characterDataOf(
+            { ...zeroStats(), id, name, level: 10, hp: 50, maxHp: 50 },
+            startingCharacterItems(),
+          ),
+        }),
+      });
+      await client.takeOpcode(FIELD_OPCODE.setField);
+      return client;
+    };
+    const hero = await enter(71, "Hero");
+    const alt = await enter(72, "Alt");
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    const request = (
+      client: FakeClient,
+      body: Parameters<typeof encodeClientMiniRoomRequest>[0],
+    ): void => {
+      client.send({
+        kind: "unknown",
+        opcode: MINIROOM_OPCODE.request,
+        body: encodeClientMiniRoomRequest(body).slice(1),
+      });
+    };
+    const answer = async (client: FakeClient): Promise<ReturnType<typeof readMiniRoomResult>> => {
+      const packets = await client.takeOpcode(MINIROOM_OPCODE.result);
+      return readMiniRoomResult(new PacketReader(packets[packets.length - 1]!, 1));
+    };
 
-  // An id that is not in the map: `type 2 code 1` (캐릭터를 찾을 수 없습니다).
-  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 999 });
-  assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.notFound });
+    // An id that is not in the map: `type 2 code 1` (캐릭터를 찾을 수 없습니다).
+    request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 999 });
+    assert.deepEqual(await answer(hero), { kind: "refused", code: MINIROOM_REFUSAL.notFound });
 
-  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
-  await answer(alt);
-  await answer(hero);
-  request(alt, { kind: "accept", inviterId: 71 });
-  await answer(hero);
-  await answer(alt);
+    request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
+    await answer(alt);
+    await answer(hero);
+    request(alt, { kind: "accept", inviterId: 71 });
+    await answer(hero);
+    await answer(alt);
 
-  request(alt, { kind: "leave" });
-  assert.deepEqual(await answer(hero), { kind: "finish", code: TRADE_FINISH.cancelled });
-  assert.deepEqual(await alt.drainOpcodes(80), [], "the one who closed the window hears nothing back");
+    request(alt, { kind: "leave" });
+    assert.deepEqual(await answer(hero), { kind: "finish", code: TRADE_FINISH.cancelled });
+    assert.deepEqual(
+      await alt.drainOpcodes(80),
+      [],
+      "the one who closed the window hears nothing back",
+    );
 
-  // And the room is gone: a second invite works, so a character is not stuck in a dead room.
-  request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
-  assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 71, inviterName: "Hero" });
-});
+    // And the room is gone: a second invite works, so a character is not stuck in a dead room.
+    request(hero, { kind: "invite", roomKind: MINIROOM_KIND.trade, targetId: 72 });
+    assert.deepEqual(await answer(alt), { kind: "invite", inviterId: 71, inviterName: "Hero" });
+  },
+);
 
 test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
@@ -4048,11 +5138,21 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   await hero.takeOpcode(FIELD_OPCODE.userEnterField);
   await alt.takeOpcode(FIELD_OPCODE.userEnterField);
 
-  const request = (client: FakeClient, body: Parameters<typeof encodeClientMessengerRequest>[0]): void => {
-    client.send({ kind: "unknown", opcode: MESSENGER_OPCODE.request, body: encodeClientMessengerRequest(body).slice(1) });
+  const request = (
+    client: FakeClient,
+    body: Parameters<typeof encodeClientMessengerRequest>[0],
+  ): void => {
+    client.send({
+      kind: "unknown",
+      opcode: MESSENGER_OPCODE.request,
+      body: encodeClientMessengerRequest(body).slice(1),
+    });
   };
   /** The next `count` `0x4d` packets, in arrival order. */
-  const answers = async (client: FakeClient, count: number): Promise<ReturnType<typeof readMessengerResult>[]> => {
+  const answers = async (
+    client: FakeClient,
+    count: number,
+  ): Promise<ReturnType<typeof readMessengerResult>[]> => {
     const events: ReturnType<typeof readMessengerResult>[] = [];
     for (let i = 0; i < count; i++) {
       const packets = await client.takeOpcode(MESSENGER_OPCODE.result);
@@ -4069,7 +5169,11 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   assert.equal(opened.participant.slot, 0);
   assert.equal(opened.participant.name, "Hero");
   assert.equal(opened.participant.face, DEFAULT_FACE_ID);
-  assert.equal(opened.announce, true, "the window was just opened - the entry line belongs in the log");
+  assert.equal(
+    opened.announce,
+    true,
+    "the window was just opened - the entry line belongs in the log",
+  );
 
   // 2. `/초대 Alt`: Hero is told it was sent, Alt gets the modal carrying Hero's name and the room id.
   request(hero, { kind: "command", text: "/invite Alt" });
@@ -4087,7 +5191,11 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   request(alt, { kind: "enter", roomId });
   const heroSaw = await answers(hero, 2);
   assert.deepEqual(
-    heroSaw.map((event) => (event.kind === "participant" ? [event.participant.slot, event.participant.name, event.announce] : event)),
+    heroSaw.map((event) =>
+      event.kind === "participant"
+        ? [event.participant.slot, event.participant.name, event.announce]
+        : event,
+    ),
     [
       [0, "Hero", false],
       [1, "Alt", true],
@@ -4095,7 +5203,11 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   );
   const altSaw = await answers(alt, 2);
   assert.deepEqual(
-    altSaw.map((event) => (event.kind === "participant" ? [event.participant.slot, event.participant.name, event.announce] : event)),
+    altSaw.map((event) =>
+      event.kind === "participant"
+        ? [event.participant.slot, event.participant.name, event.announce]
+        : event,
+    ),
     [
       [0, "Hero", false],
       [1, "Alt", true],
@@ -4116,7 +5228,11 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   // 6. Alt leaves: Hero is told which slot emptied.
   request(alt, { kind: "leave" });
   assert.deepEqual((await answers(hero, 1))[0], { kind: "left", slot: 1 });
-  assert.deepEqual(await alt.drainOpcodes(120), [], "the leaving window is already closed - nothing to send it");
+  assert.deepEqual(
+    await alt.drainOpcodes(120),
+    [],
+    "the leaving window is already closed - nothing to send it",
+  );
 
   // 7. Talking with no room is dropped, and coming back needs a fresh invitation.
   request(alt, { kind: "chat", line: "Alt : still there?" });
@@ -4136,80 +5252,241 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   );
 });
 
-test("native create requires the exact successfully checked name and valid dice",async(t)=>{
-  const accounts=new Map<string,AccountRecord>([["maker",{password:"maker",characters:[]}]]);
-  const server=new LoginServer({accounts,worlds:[{name:"Scania",unknownId:0}],gameServer:{ip:"127.0.0.1",port:8585}});
-  const info=await server.listen(0),client=await FakeClient.connect(info.port);
-  t.after(async()=>{client.close();await server.close();});
-  client.send({kind:"handshake-reply",opcode:0x04,value:0});
-  client.send({kind:"login-request",opcode:0x01,username:"maker",password:"maker"});await client.take(1);
-  client.send({kind:"world-select",opcode:0x02,worldId:0});await client.take(1);
-  const create=async(name:string)=>{client.send({kind:"create-character",opcode:0x05,name});return(await client.take(1))[0]!;};
-  const appearance=[20000,30030,1040002,1060002,1072001,1302000,4,5,6,10];
-  assert.equal((await create("NoCheck"))[1],0);
-  client.send({kind:"check-name",opcode:0x06,name:"BadDice",appearance:[...appearance.slice(0,6),4,5,6,7]});
-  assert.equal((await client.take(1))[0]!.at(-1),255,"signed -1 refuses invalid native dice");
-  assert.equal((await create("BadDice"))[1],0);
-  client.send({kind:"check-name",opcode:0x06,name:"Checked",appearance}); await client.take(1);
-  assert.equal((await create("Different"))[1],0,"cannot substitute a different name");
-  assert.equal((await create("Checked"))[1],1);
-  assert.equal(accounts.get("maker")!.characters.length,1);
-  assert.equal((await create("Checked"))[1],0,"a checked result is consumed exactly once");
+test("native create requires the exact successfully checked name and valid dice", async (t) => {
+  const accounts = new Map<string, AccountRecord>([
+    ["maker", { password: "maker", characters: [] }],
+  ]);
+  const server = new LoginServer({
+    accounts,
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 8585 },
+  });
+  const info = await server.listen(0),
+    client = await FakeClient.connect(info.port);
+  t.after(async () => {
+    client.close();
+    await server.close();
+  });
+  client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+  client.send({ kind: "login-request", opcode: 0x01, username: "maker", password: "maker" });
+  await client.take(1);
+  client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
+  await client.take(1);
+  const create = async (name: string) => {
+    client.send({ kind: "create-character", opcode: 0x05, name });
+    return (await client.take(1))[0]!;
+  };
+  const appearance = [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10];
+  assert.equal((await create("NoCheck"))[1], 0);
+  client.send({
+    kind: "check-name",
+    opcode: 0x06,
+    name: "BadDice",
+    appearance: [...appearance.slice(0, 6), 4, 5, 6, 7],
+  });
+  assert.equal((await client.take(1))[0]!.at(-1), 255, "signed -1 refuses invalid native dice");
+  assert.equal((await create("BadDice"))[1], 0);
+  client.send({ kind: "check-name", opcode: 0x06, name: "Checked", appearance });
+  await client.take(1);
+  assert.equal((await create("Different"))[1], 0, "cannot substitute a different name");
+  assert.equal((await create("Checked"))[1], 1);
+  assert.equal(accounts.get("maker")!.characters.length, 1);
+  assert.equal((await create("Checked"))[1], 0, "a checked result is consumed exactly once");
 });
 
-test("raw native AP packets acknowledge malformed/refused requests and immediately persist successful allocations", {timeout:20000}, async t => {
- const stats=Object.assign(zeroStats(),{id:91,name:"Ability",level:1,str:4,dex:5,int:6,luk:7,hp:50,maxHp:50,ap:2,mapId:1000000});
- const character=characterDataOf(stats,startingCharacterItems());
- const accounts=new Map<string,AccountRecord>([["ap",{password:"ap",characters:[character]}]]);
- const store=new MemorySaveStore();store.save(accounts);let saves=0;
- const handoffs=new HandoffRegistry(),game=new GameEntryServer({handoffs,pingMs:0,mapId:1000000,
-  mapProvider:id=>id===1000000?STUB_MAP:undefined,persist:()=>{saves++;store.save(accounts);}});
- const info=await game.listen(0);t.after(()=>game.close());
- const client=await FakeClient.connect(info.port);t.after(()=>client.close());
- client.send({kind:"handshake-reply",opcode:0x04,value:handoffs.issue({username:"ap",characterId:91,characterName:"Ability",character})});
- await client.take(4); // setField, two mobs, one NPC
- const request=async(body:Uint8Array)=>{
-  client.send({kind:"unknown",opcode:ABILITY_REQUEST_OPCODE,body});
-  const packet=(await client.takeOpcode(STAT_OPCODE)).at(-1)!;assert.equal(packet[0],STAT_OPCODE);
-  const update=readStatUpdate(new PacketReader(packet,1));assert.equal(update.ack,true);return update.diff;
- };
- for(const body of [new Uint8Array(0),new Uint8Array(3),new Uint8Array([0x40,0,0,0,1])]){
-  assert.deepEqual(await request(body),{});assert.equal(character.stats.ap,2);
- }
- assert.deepEqual(await request(encodeAbilityRequest("str").slice(1)),{str:5,ap:1});
- assert.equal(saves,1);assert.equal(store.load()!.get("ap")!.characters[0]!.stats.str,5);
- assert.equal(store.load()!.get("ap")!.characters[0]!.stats.ap,1);
- assert.deepEqual(await request(encodeAbilityRequest("dex").slice(1)),{},"cooldown refusal still releases native pending");
- await new Promise(resolve=>setTimeout(resolve,510));
- assert.deepEqual(await request(new Uint8Array([0xc0,0,0,0])),{},"combined masks aren't two AP operations");
- assert.equal(saves,1);assert.equal(character.stats.ap,1);
- await new Promise(resolve=>setTimeout(resolve,510));
- assert.deepEqual(await request(encodeAbilityRequest("dex").slice(1)),{dex:6,ap:0});assert.equal(saves,2);
- await new Promise(resolve=>setTimeout(resolve,510));
- assert.deepEqual(await request(encodeAbilityRequest("int").slice(1)),{});assert.equal(character.stats.int,6);assert.equal(character.stats.ap,0);
- assert.equal(saves,2);assert.equal(client.headersOk,true);
-});
+test(
+  "raw native AP packets acknowledge malformed/refused requests and immediately persist successful allocations",
+  { timeout: 20000 },
+  async (t) => {
+    const stats = Object.assign(zeroStats(), {
+      id: 91,
+      name: "Ability",
+      level: 1,
+      str: 4,
+      dex: 5,
+      int: 6,
+      luk: 7,
+      hp: 50,
+      maxHp: 50,
+      ap: 2,
+      mapId: 1000000,
+    });
+    const character = characterDataOf(stats, startingCharacterItems());
+    const accounts = new Map<string, AccountRecord>([
+      ["ap", { password: "ap", characters: [character] }],
+    ]);
+    const store = new MemorySaveStore();
+    store.save(accounts);
+    let saves = 0;
+    const handoffs = new HandoffRegistry(),
+      game = new GameEntryServer({
+        handoffs,
+        pingMs: 0,
+        mapId: 1000000,
+        mapProvider: (id) => (id === 1000000 ? STUB_MAP : undefined),
+        persist: () => {
+          saves++;
+          store.save(accounts);
+        },
+      });
+    const info = await game.listen(0);
+    t.after(() => game.close());
+    const client = await FakeClient.connect(info.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "ap",
+        characterId: 91,
+        characterName: "Ability",
+        character,
+      }),
+    });
+    await client.take(4); // setField, two mobs, one NPC
+    const request = async (body: Uint8Array) => {
+      client.send({ kind: "unknown", opcode: ABILITY_REQUEST_OPCODE, body });
+      const packet = (await client.takeOpcode(STAT_OPCODE)).at(-1)!;
+      assert.equal(packet[0], STAT_OPCODE);
+      const update = readStatUpdate(new PacketReader(packet, 1));
+      assert.equal(update.ack, true);
+      return update.diff;
+    };
+    for (const body of [new Uint8Array(0), new Uint8Array(3), new Uint8Array([0x40, 0, 0, 0, 1])]) {
+      assert.deepEqual(await request(body), {});
+      assert.equal(character.stats.ap, 2);
+    }
+    assert.deepEqual(await request(encodeAbilityRequest("str").slice(1)), { str: 5, ap: 1 });
+    assert.equal(saves, 1);
+    assert.equal(store.load()!.get("ap")!.characters[0]!.stats.str, 5);
+    assert.equal(store.load()!.get("ap")!.characters[0]!.stats.ap, 1);
+    assert.deepEqual(
+      await request(encodeAbilityRequest("dex").slice(1)),
+      {},
+      "cooldown refusal still releases native pending",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 510));
+    assert.deepEqual(
+      await request(new Uint8Array([0xc0, 0, 0, 0])),
+      {},
+      "combined masks aren't two AP operations",
+    );
+    assert.equal(saves, 1);
+    assert.equal(character.stats.ap, 1);
+    await new Promise((resolve) => setTimeout(resolve, 510));
+    assert.deepEqual(await request(encodeAbilityRequest("dex").slice(1)), { dex: 6, ap: 0 });
+    assert.equal(saves, 2);
+    await new Promise((resolve) => setTimeout(resolve, 510));
+    assert.deepEqual(await request(encodeAbilityRequest("int").slice(1)), {});
+    assert.equal(character.stats.int, 6);
+    assert.equal(character.stats.ap, 0);
+    assert.equal(saves, 2);
+    assert.equal(client.headersOk, true);
+  },
+);
 
-test("raw native 0x0D map-zero jump, tn index, remote coordinates and map-zero reconnect preserve the real map", {timeout:20000}, async t => {
- const source={...STUB_MAP,mobs:[],npcs:[],portals:STUB_MAP.portals.map(p=>p.name==="west00"?{...p,toMapId:0}:p)};
- const destination={...STUB_MAP_ALT,id:0,mobs:[],npcs:[],portals:[{name:"sp",type:0,x:100,y:300,toMapId:999999999,toName:""},{name:"auto",type:3,x:200,y:300,toMapId:999999999,toName:""},...STUB_MAP_ALT.portals]};
- const handoffs=new HandoffRegistry();let saves=0;
- const game=new GameEntryServer({handoffs,mapId:1000000,mapProvider:id=>id===0?destination:id===1000000?source:undefined,allowMapCommand:user=>user==="admin",persist:()=>saves++});
- const {port}=await game.listen(0);t.after(()=>game.close());
- const hero=await FakeClient.connect(port);t.after(()=>hero.close());
- hero.send({kind:"handshake-reply",opcode:4,value:handoffs.issue({username:"admin",characterId:7,characterName:"Hero"})});await hero.takeOpcode(FIELD_OPCODE.setField);
- const interact=(client:FakeClient,kind:number,name="")=>client.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.interact,body:encodeClientInteract({kind,name}).slice(1)});
- interact(hero,INTERACT_KIND_CURSOR,"west00");
- const arrival=await hero.takeOpcode(FIELD_OPCODE.setField);assert.equal(arrival[0]![0],FIELD_OPCODE.requestRelease);
- const data=readSetField(new PacketReader(arrival.at(-1)!,1)).character;
- assert.deepEqual([data.stats.mapId,data.stats.unknown101],[0,1],"portal to map zero resolves east00, excluding auto pool");assert.equal(saves,1);
- const guest=await FakeClient.connect(port);t.after(()=>guest.close());
- const record=characterDataOf({...zeroStats(),id:9,name:"Guest",hp:50,maxHp:50,mapId:0});
- guest.send({kind:"handshake-reply",opcode:4,value:handoffs.issue({username:"alt",characterId:9,characterName:"Guest",character:record})});
- const burst=await guest.takeOpcode(FIELD_OPCODE.userEnterField);
- assert.equal(readSetField(new PacketReader(burst[0]!,1)).character.stats.mapId,0,"real map-zero save is NOT default-map migration");
- const about=readUserEnterField(new PacketReader(burst.at(-1)!,1));assert.deepEqual([about.x,about.y,about.foothold],[600,290,32]);
- interact(hero,1000000);await hero.takeOpcode(FIELD_OPCODE.setField);
- interact(hero,0);const zero=await hero.takeOpcode(FIELD_OPCODE.setField);assert.deepEqual([readSetField(new PacketReader(zero.at(-1)!,1)).character.stats.mapId,readSetField(new PacketReader(zero.at(-1)!,1)).character.stats.unknown101],[0,0],"authorized alive kind=0 is the original GM map-zero command, not revive");
- interact(guest,1000000);const denied=await guest.takeOpcode(0x13);assert.ok(denied.some(p=>p[0]===FIELD_OPCODE.requestRelease));assert.ok(!denied.some(p=>p[0]===FIELD_OPCODE.setField),"forged native packets cannot bypass the account policy");
-});
+test(
+  "raw native 0x0D map-zero jump, tn index, remote coordinates and map-zero reconnect preserve the real map",
+  { timeout: 20000 },
+  async (t) => {
+    const source = {
+      ...STUB_MAP,
+      mobs: [],
+      npcs: [],
+      portals: STUB_MAP.portals.map((p) => (p.name === "west00" ? { ...p, toMapId: 0 } : p)),
+    };
+    const destination = {
+      ...STUB_MAP_ALT,
+      id: 0,
+      mobs: [],
+      npcs: [],
+      portals: [
+        { name: "sp", type: 0, x: 100, y: 300, toMapId: 999999999, toName: "" },
+        { name: "auto", type: 3, x: 200, y: 300, toMapId: 999999999, toName: "" },
+        ...STUB_MAP_ALT.portals,
+      ],
+    };
+    const handoffs = new HandoffRegistry();
+    let saves = 0;
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (id) => (id === 0 ? destination : id === 1000000 ? source : undefined),
+      allowMapCommand: (user) => user === "admin",
+      persist: () => saves++,
+    });
+    const { port } = await game.listen(0);
+    t.after(() => game.close());
+    const hero = await FakeClient.connect(port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 4,
+      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+    });
+    await hero.takeOpcode(FIELD_OPCODE.setField);
+    const interact = (client: FakeClient, kind: number, name = "") =>
+      client.send({
+        kind: "unknown",
+        opcode: CLIENT_FIELD_OPCODE.interact,
+        body: encodeClientInteract({ kind, name }).slice(1),
+      });
+    interact(hero, INTERACT_KIND_CURSOR, "west00");
+    const arrival = await hero.takeOpcode(FIELD_OPCODE.setField);
+    assert.equal(arrival[0]![0], FIELD_OPCODE.requestRelease);
+    const data = readSetField(new PacketReader(arrival.at(-1)!, 1)).character;
+    assert.deepEqual(
+      [data.stats.mapId, data.stats.unknown101],
+      [0, 1],
+      "portal to map zero resolves east00, excluding auto pool",
+    );
+    assert.equal(saves, 1);
+    const guest = await FakeClient.connect(port);
+    t.after(() => guest.close());
+    const record = characterDataOf({
+      ...zeroStats(),
+      id: 9,
+      name: "Guest",
+      hp: 50,
+      maxHp: 50,
+      mapId: 0,
+    });
+    guest.send({
+      kind: "handshake-reply",
+      opcode: 4,
+      value: handoffs.issue({
+        username: "alt",
+        characterId: 9,
+        characterName: "Guest",
+        character: record,
+      }),
+    });
+    const burst = await guest.takeOpcode(FIELD_OPCODE.userEnterField);
+    assert.equal(
+      readSetField(new PacketReader(burst[0]!, 1)).character.stats.mapId,
+      0,
+      "real map-zero save is NOT default-map migration",
+    );
+    const about = readUserEnterField(new PacketReader(burst.at(-1)!, 1));
+    assert.deepEqual([about.x, about.y, about.foothold], [600, 290, 32]);
+    interact(hero, 1000000);
+    await hero.takeOpcode(FIELD_OPCODE.setField);
+    interact(hero, 0);
+    const zero = await hero.takeOpcode(FIELD_OPCODE.setField);
+    assert.deepEqual(
+      [
+        readSetField(new PacketReader(zero.at(-1)!, 1)).character.stats.mapId,
+        readSetField(new PacketReader(zero.at(-1)!, 1)).character.stats.unknown101,
+      ],
+      [0, 0],
+      "authorized alive kind=0 is the original GM map-zero command, not revive",
+    );
+    interact(guest, 1000000);
+    const denied = await guest.takeOpcode(0x13);
+    assert.ok(denied.some((p) => p[0] === FIELD_OPCODE.requestRelease));
+    assert.ok(
+      !denied.some((p) => p[0] === FIELD_OPCODE.setField),
+      "forged native packets cannot bypass the account policy",
+    );
+  },
+);

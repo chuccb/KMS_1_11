@@ -16,20 +16,28 @@ function integer(value: unknown, low: number, high: number): number {
 }
 export function readBrowserMovePath(value: unknown): MovePath {
   const path = object(value);
-  const originX = integer(path.originX, -32768, 32767), originY = integer(path.originY, -32768, 32767);
+  const originX = integer(path.originX, -32768, 32767),
+    originY = integer(path.originY, -32768, 32767);
   if (!Array.isArray(path.elements) || path.elements.length < 1 || path.elements.length > 64)
     throw new Error("invalid browser movement count");
   let total = 0;
-  const elements: MoveElement[] = path.elements.map(value => {
+  const elements: MoveElement[] = path.elements.map((value) => {
     const row = object(value);
     const duration = integer(row.duration, 0, 1000);
     total += duration;
     if (total > 1000) throw new Error("browser movement backlog exceeds 1000ms");
     const attr = integer(row.attr, 0, 2);
     if (attr !== 0 && attr !== 2) throw new Error("invalid browser movement attribute");
-    return {attr, duration, x: integer(row.x, -32768, 32767), y: integer(row.y, -32768, 32767),
-      vx: integer(row.vx, -32768, 32767), vy: integer(row.vy, -32768, 32767),
-      action: integer(row.action, 0, 255), foothold: integer(row.foothold, -32768, 65535)};
+    return {
+      attr,
+      duration,
+      x: integer(row.x, -32768, 32767),
+      y: integer(row.y, -32768, 32767),
+      vx: integer(row.vx, -32768, 32767),
+      vy: integer(row.vy, -32768, 32767),
+      action: integer(row.action, 0, 255),
+      foothold: integer(row.foothold, -32768, 65535),
+    };
   });
-  return {originX, originY, elements};
+  return { originX, originY, elements };
 }

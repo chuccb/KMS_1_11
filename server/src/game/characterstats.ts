@@ -3,8 +3,8 @@ import type { CharacterData } from "../protocol/chardata.ts";
 import { EQUIP_STATS } from "../protocol/itemslot.ts";
 import type { ItemCatalog } from "./iteminfo.ts";
 import { learnedSkillLevel, type SkillCatalog } from "./skills.ts";
-import { statBasis, type StatItem } from "../../../client/characterstats.mjs";
-export { statTotals } from "../../../client/characterstats.mjs";
+import { statBasis, type StatItem } from "../../../client/characterstats.ts";
+export { statTotals } from "../../../client/characterstats.ts";
 export function skillValues(
   character: CharacterData,
   catalog: SkillCatalog | undefined,
@@ -13,8 +13,7 @@ export function skillValues(
   const skill = catalog?.info(id),
     learned = learnedSkillLevel(character.items?.map32, id);
   return learned && skill
-    ? (skill.levels.find((r) => r.level === Math.min(learned, skill.maxLevel))
-        ?.values ?? {})
+    ? (skill.levels.find((r) => r.level === Math.min(learned, skill.maxLevel))?.values ?? {})
     : {};
 }
 export function characterStatBasis(

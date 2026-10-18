@@ -15,17 +15,11 @@ test("55D5F0 writes opcode31 and exactly one LE u32", () => {
   assert.deepEqual([...encodeMesoDrop(10)], [0x1f, 10, 0, 0, 0]);
   assert.deepEqual([...encodeMesoDrop(50000)], [0x1f, 0x50, 0xc3, 0, 0]);
   assert.equal(readMesoDrop(new PacketReader(encodeMesoDrop(50000), 1)), 50000);
-  assert.equal(
-    describeClientFieldPacket(encodeMesoDrop(10)),
-    "0x1f drop 10 mesos",
-  );
+  assert.equal(describeClientFieldPacket(encodeMesoDrop(10)), "0x1f drop 10 mesos");
   for (const amount of [0, 9, 50001, -1, 10.5, NaN, Infinity])
     assert.throws(() => encodeMesoDrop(amount));
   assert.throws(() => readMesoDrop(new PacketReader(new Uint8Array(3))));
-  assert.throws(
-    () => readMesoDrop(new PacketReader(new Uint8Array(5))),
-    /exactly/,
-  );
+  assert.throws(() => readMesoDrop(new PacketReader(new Uint8Array(5))), /exactly/);
 });
 
 test("2070001 also carries the recharge double: category division is integer division", () => {

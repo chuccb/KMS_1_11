@@ -19,7 +19,9 @@
 export class PacketUnderflowError extends Error {
   readonly code = 38;
   constructor(need: number, have: number) {
-    super(`packet underflow: needed ${need} more byte(s), ${have} left (client throws ZException 38)`);
+    super(
+      `packet underflow: needed ${need} more byte(s), ${have} left (client throws ZException 38)`,
+    );
     this.name = "PacketUnderflowError";
   }
 }
@@ -107,7 +109,8 @@ export class PacketWriter {
     const bytes = new Uint8Array(text.length);
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
-      if (code > 0xff) throw new RangeError(`character U+${code.toString(16)} is not a byte string char`);
+      if (code > 0xff)
+        throw new RangeError(`character U+${code.toString(16)} is not a byte string char`);
       bytes[i] = code;
     }
     return this.writeStringBytes(bytes);

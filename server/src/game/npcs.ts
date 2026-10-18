@@ -1,5 +1,5 @@
-import {npcBehaviorOf, type NpcBehavior} from "./sprites.ts";
-import {artReaderOf, type ArtReader} from "./wzart.ts";
+import { npcBehaviorOf, type NpcBehavior } from "./sprites.ts";
+import { artReaderOf, type ArtReader } from "./wzart.ts";
 /** NPC visibility and template metadata. FieldInstance owns controller designation and relay.
  * 0x3B is NOT a walk command: stationary NPCs need it for idle speech/actions too.
  * --npc-walk / walking / setWalking are retained LEGACY API names for explicit controller requests;
@@ -49,22 +49,28 @@ export interface NpcEntry {
  * A map's `life` list is *the map's* promise that the file is there, so a miss is a data problem
  * worth reporting - the caller decides what to do about it, this function only reads.
  */
-export function npcTemplateFrom(archive: WzArchive, templateId: number, reader?: ArtReader): NpcTemplate | undefined {
+export function npcTemplateFrom(
+  archive: WzArchive,
+  templateId: number,
+  reader?: ArtReader,
+): NpcTemplate | undefined {
   const path = npcImagePath(templateId);
   if (!archive.has(path)) return undefined;
   const root = archive.objects(path)[0];
   const info = infoOf(root);
-  const art=reader??artReaderOf(archive);
-  const behavior=art?npcBehaviorOf(templateId,art):undefined;
-  return { templateId, name: asText(info.name),...(behavior?{behavior}:{}) };
+  const art = reader ?? artReaderOf(archive);
+  const behavior = art ? npcBehaviorOf(templateId, art) : undefined;
+  return { templateId, name: asText(info.name), ...(behavior ? { behavior } : {}) };
 }
 
 /** Caches `npcTemplateFrom` per id, the way `mobTemplateProvider` does for mobs. */
-export function npcTemplateProvider(archive: WzArchive): (templateId: number) => NpcTemplate | undefined {
+export function npcTemplateProvider(
+  archive: WzArchive,
+): (templateId: number) => NpcTemplate | undefined {
   const cache = new Map<number, NpcTemplate | undefined>();
-  const reader=artReaderOf(archive);
+  const reader = artReaderOf(archive);
   return (templateId: number) => {
-    if (!cache.has(templateId)) cache.set(templateId, npcTemplateFrom(archive, templateId,reader));
+    if (!cache.has(templateId)) cache.set(templateId, npcTemplateFrom(archive, templateId, reader));
     return cache.get(templateId);
   };
 }
@@ -108,7 +114,7 @@ export class NpcField {
   /** Every spawned NPC, in the order the map's `life` list gives them. */
   readonly npcs: NpcEntry[] = [];
   private nextNpcId = 1;
-  private spawned=false;
+  private spawned = false;
   private readonly options: NpcFieldOptions;
 
   // A plain field, not a parameter property: `erasableSyntaxOnly` (i.e. Node's type stripping) does
@@ -137,7 +143,8 @@ export class NpcField {
    * repeated calls are ignored, rather than handing the same spawn a second pool id.
    */
   spawnAll(): void {
-    if(this.spawned)return;this.spawned=true;
+    if (this.spawned) return;
+    this.spawned = true;
     for (const spawn of this.options.spawns) this.spawn(spawn);
   }
 
@@ -178,7 +185,7 @@ export class NpcField {
       npcId: this.nextNpcId++,
       templateId: spawn.templateId,
       name: template?.name ?? "",
-      ...(template?.behavior?{behavior:template.behavior}:{}),
+      ...(template?.behavior ? { behavior: template.behavior } : {}),
       x: spawn.x,
       y: spawn.y,
       facing: spawn.facing & 1,
@@ -212,7 +219,13 @@ export class NpcField {
   refreshPacket(npcId: number): Uint8Array | undefined {
     const entry = this.byId(npcId);
     if (entry === undefined) return undefined;
-    return encodeNpcEnterField({ npcId: entry.npcId, templateId: undefined, x: 0, y: 0, facing: 0 });
+    return encodeNpcEnterField({
+      npcId: entry.npcId,
+      templateId: undefined,
+      x: 0,
+      y: 0,
+      facing: 0,
+    });
   }
 
   /** One NPC by its id, or `undefined`. */

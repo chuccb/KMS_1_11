@@ -50,8 +50,10 @@ test("0x39 for an unknown id is the template plus the six-field body", () => {
   // opcode, npcId(4), templateId(4), x(2), y(2), facing(1), lookupKey(2), pointX/pointY(4)
   assert.equal(bytes.length, 20, "the body is 19 bytes for a new id, plus the opcode");
   assert.equal(bytes[0], NPC_OPCODE.enterField);
-  assert.equal(describeNpcEnterField(readNpcEnterField(new PacketReader(bytes, 1), false)),
-    "npcId=1 template=1012000 at (69,275) facing=0 lookupKey=0");
+  assert.equal(
+    describeNpcEnterField(readNpcEnterField(new PacketReader(bytes, 1), false)),
+    "npcId=1 template=1012000 at (69,275) facing=0 lookupKey=0",
+  );
   // 1012000 = 0x000F7120 -> little endian; 69 = 0x0045, 275 = 0x0113
   assert.equal(toHex(bytes.slice(0, 13)), "39" + "01000000" + "20710f00" + "4500" + "1301");
 });
@@ -78,16 +80,23 @@ test("0x3A is the id alone, 0x3B is the flag then the id", () => {
   assert.deepEqual([...encodeNpcLeaveField(0x1234)], [NPC_OPCODE.leaveField, 0x34, 0x12, 0, 0]);
   assert.deepEqual([...encodeNpcState(9, true)], [NPC_OPCODE.stateToggle, 1, 9, 0, 0, 0]);
   assert.deepEqual([...encodeNpcState(9, false)], [NPC_OPCODE.stateToggle, 0, 9, 0, 0, 0]);
-  assert.deepEqual(readNpcState(new PacketReader(encodeNpcState(9, true), 1)), { npcId: 9, on: true });
+  assert.deepEqual(readNpcState(new PacketReader(encodeNpcState(9, true), 1)), {
+    npcId: 9,
+    on: true,
+  });
   assert.equal(readNpcId(new PacketReader(encodeNpcLeaveField(9), 1)), 9);
 });
 
 test("the field dispatcher describes the NPC packet instead of calling it undecoded", () => {
-  const text = describeFieldPacket(encodeNpcEnterField({ npcId: 1, templateId: 1012000, x: 69, y: 275, facing: 0 }));
+  const text = describeFieldPacket(
+    encodeNpcEnterField({ npcId: 1, templateId: 1012000, x: 69, y: 275, facing: 0 }),
+  );
   assert.match(text ?? "", /0x39 CNpcPool\(npc appear\): npcId=1 template=1012000/);
   assert.equal((text ?? "").includes("not decoded"), false);
   // A 5-byte packet is the refresh form - and the describer says both readings out loud.
-  const refresh = describeFieldPacket(encodeNpcEnterField({ npcId: 4, templateId: undefined, x: 0, y: 0, facing: 0 }));
+  const refresh = describeFieldPacket(
+    encodeNpcEnterField({ npcId: 4, templateId: undefined, x: 0, y: 0, facing: 0 }),
+  );
   assert.match(refresh ?? "", /npcId=4 \(known id: refresh only, or a truncated body\)/);
   assert.match(describeFieldPacket(new Uint8Array([NPC_OPCODE.enterField, 1])) ?? "", /truncated/);
   assert.match(describeFieldPacket(encodeNpcLeaveField(2)) ?? "", /npcId=2 leave/);
@@ -164,12 +173,25 @@ test("--npc-walk is a policy: nobody, everybody, or a list of template ids", () 
 });
 
 test("legacy NPC policy is a request, not a controller flag broadcast to every joiner", () => {
-  const field=new NpcField({spawns:[heena,{...heena,templateId:1010100,x:100,y:200}],walk:npcWalkPolicy("1012000")});
-  assert.deepEqual(field.spawnPackets().map(packet=>packet[0]),[NPC_OPCODE.enterField,NPC_OPCODE.enterField]);
-  assert.equal(field.walking,1);assert.equal(field.npcs[0]!.walking,true);assert.equal(field.npcs[1]!.walking,false);
-  assert.deepEqual(field.enterPackets().map(packet=>packet[0]),[NPC_OPCODE.enterField,NPC_OPCODE.enterField]);
-  field.spawnAll();assert.equal(field.npcs.length,2,"spawns are idempotent");
-  field.remove(1);assert.equal(field.walking,0);
+  const field = new NpcField({
+    spawns: [heena, { ...heena, templateId: 1010100, x: 100, y: 200 }],
+    walk: npcWalkPolicy("1012000"),
+  });
+  assert.deepEqual(
+    field.spawnPackets().map((packet) => packet[0]),
+    [NPC_OPCODE.enterField, NPC_OPCODE.enterField],
+  );
+  assert.equal(field.walking, 1);
+  assert.equal(field.npcs[0]!.walking, true);
+  assert.equal(field.npcs[1]!.walking, false);
+  assert.deepEqual(
+    field.enterPackets().map((packet) => packet[0]),
+    [NPC_OPCODE.enterField, NPC_OPCODE.enterField],
+  );
+  field.spawnAll();
+  assert.equal(field.npcs.length, 2, "spawns are idempotent");
+  field.remove(1);
+  assert.equal(field.walking, 0);
 });
 
 test("the NPC image path is the client's own format, padded to seven digits", () => {

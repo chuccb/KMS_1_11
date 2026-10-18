@@ -98,7 +98,6 @@ export function hairImagePath(hairId: number): string {
   return `Character/Hair/${String(hairId).padStart(8, "0")}.img`;
 }
 
-
 const BODY_IMAGE = "Character/00002000.img";
 const HEAD_IMAGE = "Character/00012000.img";
 
@@ -108,8 +107,10 @@ export function zRanksOf(archive: WzArchive): Map<string, number> {
   if (!archive.has("zmap.img")) return ranks;
   let rank = 0;
   for (const entry of archive.objects("zmap.img")[0]?.props ?? []) {
-    const number = entry.value === null || entry.value === undefined || entry.value === ""
-      ? NaN : Number(entry.value);
+    const number =
+      entry.value === null || entry.value === undefined || entry.value === ""
+        ? NaN
+        : Number(entry.value);
     rank = Number.isFinite(number) ? Math.trunc(number) : rank - 1;
     ranks.set(entry.name, rank);
   }
@@ -121,9 +122,10 @@ function slotMapOf(archive: WzArchive): Map<string, string> {
   let map = slotMaps.get(archive);
   if (map) return map;
   map = new Map();
-  if (archive.has("smap.img")) for (const entry of archive.objects("smap.img")[0]?.props ?? []) {
-    if (typeof entry.value === "string") map.set(entry.name, entry.value);
-  }
+  if (archive.has("smap.img"))
+    for (const entry of archive.objects("smap.img")[0]?.props ?? []) {
+      if (typeof entry.value === "string") map.set(entry.name, entry.value);
+    }
   slotMaps.set(archive, map);
   return map;
 }
@@ -147,15 +149,22 @@ export function avatarPartRank(z: CanvasArt["z"], ranks: Map<string, number>): n
 /** 402130, walked back-to-front. Equal islot priorities coexist; a conflict hides a WHOLE part.
  * Owners of earlier slots are deliberately not rolled back after a later conflict, like native.
  */
-export function occludeAvatarParts<T extends { slots: string[]; slotRank: number }>(parts: readonly T[]): T[] {
+export function occludeAvatarParts<T extends { slots: string[]; slotRank: number }>(
+  parts: readonly T[],
+): T[] {
   const owners = new Map<string, T>();
   const hidden = new Set<T>();
   for (const part of parts) {
     for (const slot of part.slots) {
       const owner = owners.get(slot);
       if (owner === undefined) owners.set(slot, part);
-      else if (owner.slotRank > part.slotRank) { hidden.add(part); break; }
-      else if (owner.slotRank < part.slotRank) { hidden.add(owner); owners.set(slot, part); }
+      else if (owner.slotRank > part.slotRank) {
+        hidden.add(part);
+        break;
+      } else if (owner.slotRank < part.slotRank) {
+        hidden.add(owner);
+        owners.set(slot, part);
+      }
     }
   }
   return parts.filter((part) => !hidden.has(part));
@@ -174,9 +183,24 @@ interface Layer {
   slotRank: number;
 }
 
-function layerOf(art: CanvasArt, x: number, y: number, image: string,
-  ranks: Map<string, number>, order: { value: number }): Layer {
-  return { art, x, y, image, rank: avatarPartRank(art.z, ranks), order: order.value++, slots: [], slotRank: -2147483647 };
+function layerOf(
+  art: CanvasArt,
+  x: number,
+  y: number,
+  image: string,
+  ranks: Map<string, number>,
+  order: { value: number },
+): Layer {
+  return {
+    art,
+    x,
+    y,
+    image,
+    rank: avatarPartRank(art.z, ranks),
+    order: order.value++,
+    slots: [],
+    slotRank: -2147483647,
+  };
 }
 
 /** What a placed part can anchor other parts to: name -> point in character coordinates. */
@@ -202,7 +226,8 @@ function anchorsOf(x: number, y: number, reader: ArtReader, path: string): Ancho
   if (!(map instanceof WzNode) || map.kind !== "props") return out;
   for (const entry of map.props) {
     const vector = entry.value;
-    if (!(vector instanceof WzNode) || vector.kind !== "vector" || !Array.isArray(vector.value)) continue;
+    if (!(vector instanceof WzNode) || vector.kind !== "vector" || !Array.isArray(vector.value))
+      continue;
     const [ax, ay] = vector.value as [number, number];
     if (typeof ax !== "number" || typeof ay !== "number") continue;
     out[entry.name] = { x: x + ax, y: y + ay };
@@ -255,12 +280,19 @@ function addFrameParts(
     const art = reader.at(path);
     if (art === undefined) continue;
     const at = placePart(reader, path, [parent]);
-    layers.push(layerOf(art, at.x, at.y, framePath.slice(0, framePath.indexOf(".img") + 4), ranks, order));
+    layers.push(
+      layerOf(art, at.x, at.y, framePath.slice(0, framePath.indexOf(".img") + 4), ranks, order),
+    );
   }
 }
 
 /** Exact action frame, or undefined; missing equipment poses must not fall back to standing. */
-function stanceNode(reader: ArtReader, image: string, stance: string, frame: number): string | undefined {
+function stanceNode(
+  reader: ArtReader,
+  image: string,
+  stance: string,
+  frame: number,
+): string | undefined {
   for (const [tryStance, tryFrame] of [
     [stance, frame],
     // Missing equipment actions are intentionally invisible (e.g. swords on ropes).
@@ -289,11 +321,29 @@ export function frameDelayOf(reader: ArtReader, stance: string, frame: number): 
  * The stance the field shows: the body image's own name for what a character is doing.
  * `stand1` is idle, `walk1`/`walk2` the two walk cycles, `alert` the "!" pause, `jump` a jump.
  */
-export function stanceOf(action: number, moving: boolean, profile?: Pick<AvatarMotionProfile, "walk" | "stand">): string {
+export function stanceOf(
+  action: number,
+  moving: boolean,
+  profile?: Pick<AvatarMotionProfile, "walk" | "stand">,
+): string {
   // Keep the old moving argument for consumers; a real movement action, NOT a body action id, wins.
-  if (!Number.isInteger(action)) return moving ? profile?.walk ?? "walk1" : profile?.stand ?? "stand1";
-  return ({1: profile?.walk ?? "walk1", 2: profile?.stand ?? "stand1", 3:"jump", 4:"alert", 5:"prone",
-    6:"fly", 7:"ladder", 8:"rope", 9:"dead"} as Record<number,string>)[action >> 1] ?? "walk1";
+  if (!Number.isInteger(action))
+    return moving ? (profile?.walk ?? "walk1") : (profile?.stand ?? "stand1");
+  return (
+    (
+      {
+        1: profile?.walk ?? "walk1",
+        2: profile?.stand ?? "stand1",
+        3: "jump",
+        4: "alert",
+        5: "prone",
+        6: "fly",
+        7: "ladder",
+        8: "rope",
+        9: "dead",
+      } as Record<number, string>
+    )[action >> 1] ?? "walk1"
+  );
 }
 
 /**
@@ -335,7 +385,9 @@ export function composeAvatarBitmap(
   if (requestedStance === "stand1" || requestedStance === "walk1") {
     const weaponId = look.items.find((id) => id >= 1300000 && id < 1500000);
     const weaponImage = weaponId === undefined ? undefined : itemImagePath(weaponId);
-    const info = nodeRecord(weaponImage === undefined ? undefined : reader.node(`${weaponImage}/info`));
+    const info = nodeRecord(
+      weaponImage === undefined ? undefined : reader.node(`${weaponImage}/info`),
+    );
     const mode = requestedStance === "stand1" ? "stand" : "walk";
     if (info[mode] === 2) normalStance = `${mode}2`;
   }
@@ -349,9 +401,10 @@ export function composeAvatarBitmap(
   // -- body (skin): the frame at the character's own origin -----------------
   const bodyFrame = stanceNode(reader, BODY_IMAGE, stance, frame);
   const bodyArt = bodyFrame === undefined ? undefined : reader.at(`${bodyFrame}/body`);
-  const body: Parent = bodyArt === undefined
-    ? { x: 0, y: 0, anchors: {} }
-    : { x: 0, y: 0, anchors: anchorsOf(0, 0, reader, `${bodyFrame}/body`) };
+  const body: Parent =
+    bodyArt === undefined
+      ? { x: 0, y: 0, anchors: {} }
+      : { x: 0, y: 0, anchors: anchorsOf(0, 0, reader, `${bodyFrame}/body`) };
   if (bodyArt !== undefined) {
     layers.push(layerOf(bodyArt, 0, 0, BODY_IMAGE, ranks, order));
   }
@@ -359,9 +412,10 @@ export function composeAvatarBitmap(
   // -- head: hung from the body's neck -------------------------------------
   const headFrame = stanceNode(reader, HEAD_IMAGE, stance, frame);
   const headArt = headFrame === undefined ? undefined : reader.at(`${headFrame}/head`);
-  const head: Parent = headArt === undefined
-    ? { x: body.x, y: body.y, anchors: body.anchors }
-    : placePart(reader, `${headFrame}/head`, [body]);
+  const head: Parent =
+    headArt === undefined
+      ? { x: body.x, y: body.y, anchors: body.anchors }
+      : placePart(reader, `${headFrame}/head`, [body]);
   if (headArt !== undefined) {
     layers.push(layerOf(headArt, head.x, head.y, HEAD_IMAGE, ranks, order));
   }
@@ -371,13 +425,16 @@ export function composeAvatarBitmap(
   // selects backHair/backHairBelowCap for rope/ladder and individual back-facing attack frames.
 
   // -- the rest of the body frame: the bare arm, and the hand it publishes --
-  if (bodyFrame !== undefined) addFrameParts(reader, layers, bodyFrame, ranks, order, body, { skip: "body" });
+  if (bodyFrame !== undefined)
+    addFrameParts(reader, layers, bodyFrame, ranks, order, body, { skip: "body" });
   // The arm's z changes during swing/stab. Finding rank=="arm" loses the hand precisely in
   // those attack frames; it also confuses identity with draw order. Keep the original z and
   // locate the actual arm against the same body anchor used by addFrameParts.
   const armPath = bodyFrame === undefined ? undefined : `${bodyFrame}/arm`;
-  const hand: Parent | undefined = armPath === undefined || reader.at(armPath) === undefined
-    ? undefined : placePart(reader, armPath, [body]);
+  const hand: Parent | undefined =
+    armPath === undefined || reader.at(armPath) === undefined
+      ? undefined
+      : placePart(reader, armPath, [body]);
 
   // -- worn items ---------------------------------------------------------
   for (const itemId of look.items) {
@@ -398,9 +455,10 @@ export function composeAvatarBitmap(
   }
 
   // -- hair and face, hung from the head's brow ---------------------------
-  const hairFrame = reader.node(`${hairImage}/${stance}/${frame}`) !== undefined
-    ? `${hairImage}/${stance}/${frame}`
-    : undefined;
+  const hairFrame =
+    reader.node(`${hairImage}/${stance}/${frame}`) !== undefined
+      ? `${hairImage}/${stance}/${frame}`
+      : undefined;
   if (hairFrame !== undefined) addFrameParts(reader, layers, hairFrame, ranks, order, head);
 
   // 408400 merges the 101 face accessory's same expression/frame with the face, on the brow.
@@ -409,9 +467,13 @@ export function composeAvatarBitmap(
   if (faceVisible) {
     const expression = options.emotion;
     const faceFrame = options.faceFrame ?? 0;
-    const images = [faceImagePath(look.faceId), ...look.items
-      .filter((id) => Math.floor(id / 10000) === 101)
-      .map(itemImagePath).filter((path): path is string => path !== undefined)];
+    const images = [
+      faceImagePath(look.faceId),
+      ...look.items
+        .filter((id) => Math.floor(id / 10000) === 101)
+        .map(itemImagePath)
+        .filter((path): path is string => path !== undefined),
+    ];
     for (const image of images) {
       const path = faceFramePath(reader, image, expression, faceFrame);
       if (path) addFrameParts(reader, layers, path, ranks, order, head);
@@ -427,13 +489,17 @@ export function composeAvatarBitmap(
     let info = infos.get(layer.image);
     if (!info) {
       const raw = nodeRecord(reader.node(`${layer.image}/info`));
-      const priorities = visualSlots(raw.islot).map((slot) => ranks.get(slot)).filter((rank): rank is number => rank !== undefined);
+      const priorities = visualSlots(raw.islot)
+        .map((slot) => ranks.get(slot))
+        .filter((rank): rank is number => rank !== undefined);
       info = { slots: new Set(visualSlots(raw.vslot)), rank: Math.max(-2147483647, ...priorities) };
       infos.set(layer.image, info);
     }
     layer.slotRank = info.rank;
-    layer.slots = typeof layer.art.z === "string"
-      ? visualSlots(smap.get(layer.art.z)).filter((slot) => info.slots.has(slot)) : [];
+    layer.slots =
+      typeof layer.art.z === "string"
+        ? visualSlots(smap.get(layer.art.z)).filter((slot) => info.slots.has(slot))
+        : [];
   }
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
@@ -460,8 +526,16 @@ export function composeAvatarBitmap(
   for (const layer of occludeAvatarParts(layers)) {
     const { art } = layer;
     const plane = layer.rank >= faceRank ? front : back;
-    drawCanvas(plane, { width: art.width, height: art.height, data: art.rgba },
-      (flip ? -layer.x : layer.x) - minX, layer.y - minY, art.ox, art.oy, 255, flip);
+    drawCanvas(
+      plane,
+      { width: art.width, height: art.height, data: art.rgba },
+      (flip ? -layer.x : layer.x) - minX,
+      layer.y - minY,
+      art.ox,
+      art.oy,
+      255,
+      flip,
+    );
   }
   // Even the flat preview folds the two native canvases (RGBA8 source-over is not exactly
   // associative after rounding). This also makes the packed and flat origins/crops identical.
@@ -470,15 +544,26 @@ export function composeAvatarBitmap(
   // Same crop/origin for both native planes: don't move face/hair independently of the body.
   if (options.planes) {
     const bounds = boundsOf(canvas) ?? { left: 0, top: 0, right: width - 1, bottom: height - 1 };
-    const lower = cropBitmap(back, bounds), upper = cropBitmap(front, bounds);
+    const lower = cropBitmap(back, bounds),
+      upper = cropBitmap(front, bounds);
     const packed = bitmapOf(lower.width, lower.height * 2);
     packed.data.set(lower.data);
     packed.data.set(upper.data, lower.data.length);
-    return { bitmap: packed, dx: bounds.left + minX, dy: bounds.top + minY,
-      damageOriginY: Math.max(0, -minY), planeHeight: lower.height };
+    return {
+      bitmap: packed,
+      dx: bounds.left + minX,
+      dy: bounds.top + minY,
+      damageOriginY: Math.max(0, -minY),
+      planeHeight: lower.height,
+    };
   }
   const trimmed = trimTransparent(canvas);
-  return { bitmap: trimmed.image, dx: trimmed.left + minX, dy: trimmed.top + minY, damageOriginY: Math.max(0, -minY) };
+  return {
+    bitmap: trimmed.image,
+    dx: trimmed.left + minX,
+    dy: trimmed.top + minY,
+    damageOriginY: Math.max(0, -minY),
+  };
 }
 
 /** The same frame as a PNG, plus the offsets the browser needs to place it. */

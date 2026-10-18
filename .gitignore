@@ -1,28 +1,18 @@
-# --- build / tooling artifacts ---
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-bin/
-obj/
+# Bun development dependencies and browser build products
+node_modules/
+dist/
+.prettier-cache
 
-# Rebuilt game assets (regenerate from Data.wz with tools/ ; never commit)
+# Rebuilt game assets, local toolchain, analysis scratch and isolated test fixtures
 assets/
 generated/
 *.wz.json
-
-# local scratch
 *.tmp
 
-# the server's save file (server/src/game/save.ts) - a running world, not source
+# Player data and packet traces are not source; export important progress separately
 kms111-save.json
+traces/
 .DS_Store
 
-# capture traces (regenerate with server/src/cli.ts capture)
-traces/
-
-# --- TypeScript dev tooling (typecheck only; runtime stays dependency-free) ---
-node_modules/
-
-# image search scratch (not part of the game)
+# Image search scratch is not part of the game
 image-search/

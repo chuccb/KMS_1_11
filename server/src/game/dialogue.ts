@@ -59,7 +59,9 @@ export function npcDialogueFrom(archive: WzArchive, templateId: number): NpcDial
 }
 
 /** Caches `npcDialogueFrom` per id, the way `npcTemplateProvider` caches names. */
-export function npcDialogueProvider(archive: WzArchive): (templateId: number) => NpcDialogue | undefined {
+export function npcDialogueProvider(
+  archive: WzArchive,
+): (templateId: number) => NpcDialogue | undefined {
   const cache = new Map<number, NpcDialogue | undefined>();
   return (templateId: number) => {
     if (!cache.has(templateId)) cache.set(templateId, npcDialogueFrom(archive, templateId));
@@ -108,8 +110,12 @@ export class NpcTalk {
     return encodeQuestTalk({
       unknownA: 0,
       npcId: this.npcId,
-      body: { kind: "say", message: this.lines[this.index]!,
-        unknownA:this.index > 0 ? 1 : 0, unknownB:this.index + 1 < this.lines.length ? 1 : 0 },
+      body: {
+        kind: "say",
+        message: this.lines[this.index]!,
+        unknownA: this.index > 0 ? 1 : 0,
+        unknownB: this.index + 1 < this.lines.length ? 1 : 0,
+      },
     });
   }
 

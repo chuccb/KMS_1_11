@@ -55,7 +55,12 @@ import { PacketWriter } from "../protocol/packet.ts";
 // The account row is the login server's type; this is a **type-only** import, so nothing here depends
 // on the socket code at runtime (and `net/loginserver.ts` never imports this module).
 import type { AccountRecord } from "../net/loginserver.ts";
-import { EQUIP_STATS, type EquipStat, type ItemSlot, type ItemSlotEquip } from "../protocol/itemslot.ts";
+import {
+  EQUIP_STATS,
+  type EquipStat,
+  type ItemSlot,
+  type ItemSlotEquip,
+} from "../protocol/itemslot.ts";
 
 /**
  * The save format this build writes. Bump it when a record changes shape in a way older code cannot
@@ -150,7 +155,9 @@ export class FileSaveStore implements SaveStore {
       writeFileSync(temporary, text);
       renameSync(temporary, this.path);
     } catch (error) {
-      this.log?.(`save: ${this.path} could not be written (${describeError(error)}) - not persisted`);
+      this.log?.(
+        `save: ${this.path} could not be written (${describeError(error)}) - not persisted`,
+      );
       return;
     }
     this.log?.(`save: ${this.path} written (${text.length} bytes)`);
@@ -240,8 +247,13 @@ export function readSave(text: string): Map<string, AccountRecord> {
       assertSendable(character);
       characters.push(character);
     }
-    accounts.set(username, { password: stringOf(record["password"], ""), characters,
-      ...(record["gender"] === 0 || record["gender"] === 1 ? { gender: record["gender"] as 0 | 1 } : {}) });
+    accounts.set(username, {
+      password: stringOf(record["password"], ""),
+      characters,
+      ...(record["gender"] === 0 || record["gender"] === 1
+        ? { gender: record["gender"] as 0 | 1 }
+        : {}),
+    });
   }
   return accounts;
 }
@@ -382,7 +394,8 @@ function slotsFromSave(value: unknown, where: string): Map<number, ItemSlot> {
   const slots = new Map<number, ItemSlot>();
   for (const entry of arrayOf(value)) {
     const pair = arrayOf(entry);
-    if (pair.length !== 2) throw new Error(`save file: ${where} has an entry that is not [slot, item]`);
+    if (pair.length !== 2)
+      throw new Error(`save file: ${where} has an entry that is not [slot, item]`);
     slots.set(requireNumber(pair[0], `${where} slot number`), slotFromSave(pair[1], where));
   }
   return slots;

@@ -89,7 +89,11 @@ export function encodeFameResult(result: FameResult): Uint8Array {
   const writer = new PacketWriter().writeByte(FAME_OPCODE.result);
   switch (result.kind) {
     case "changed":
-      return writer.writeByte(FAME_RESULT_TYPE.changed).writeAsciiString(result.name).writeByte(result.up ? 1 : 0).toBytes();
+      return writer
+        .writeByte(FAME_RESULT_TYPE.changed)
+        .writeAsciiString(result.name)
+        .writeByte(result.up ? 1 : 0)
+        .toBytes();
     case "ignored":
       return writer.writeByte(FAME_RESULT_TYPE.ignored).toBytes();
     case "beginner":
@@ -99,7 +103,11 @@ export function encodeFameResult(result: FameResult): Uint8Array {
     case "alreadyThisMonth":
       return writer.writeByte(FAME_RESULT_TYPE.alreadyThisMonth).toBytes();
     case "received":
-      return writer.writeByte(FAME_RESULT_TYPE.received).writeAsciiString(result.name).writeByte(result.up ? 1 : 0).toBytes();
+      return writer
+        .writeByte(FAME_RESULT_TYPE.received)
+        .writeAsciiString(result.name)
+        .writeByte(result.up ? 1 : 0)
+        .toBytes();
   }
 }
 

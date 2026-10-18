@@ -1,4 +1,4 @@
-import { physicalBounds, type PhysicalBounds } from "../../../client/native-terrain.mjs";
+import { physicalBounds, type PhysicalBounds } from "../../../client/native-terrain.ts";
 /**
  * What the server knows about a map.
  *
@@ -176,7 +176,7 @@ export function mapDataFrom(summary: MapSummary, id: number): MapData {
     name: asText(summary.info.mapName),
     streetName: asText(summary.info.streetName),
     bgm: asText(summary.info.bgm),
-    recovery: Number.isFinite(summary.info.recovery) ? asNumber(summary.info.recovery,1) : 1,
+    recovery: Number.isFinite(summary.info.recovery) ? asNumber(summary.info.recovery, 1) : 1,
     returnMapId: asNumber(summary.info.returnMap),
     mobs,
     npcs,
@@ -211,7 +211,9 @@ export function loadMapData(archive: WzArchive, mapId: number): MapData | undefi
  * A `mapId -> MapData` cache around `loadMapData`, so a running server reads each map once.
  * `undefined` means "no such map" or "no archive attached": callers decide what to do with that.
  */
-export function mapDataProvider(archive: WzArchive | undefined): (mapId: number) => MapData | undefined {
+export function mapDataProvider(
+  archive: WzArchive | undefined,
+): (mapId: number) => MapData | undefined {
   const cache = new Map<number, MapData | undefined>();
   return (mapId: number): MapData | undefined => {
     if (archive === undefined) return undefined;
@@ -222,21 +224,31 @@ export function mapDataProvider(archive: WzArchive | undefined): (mapId: number)
 
 /** sub_4A3920 appends all non-type-3 portals to the native spawn array in WZ enumeration order. */
 export function spawnPortalIndex(map: MapData, name = "sp"): number {
-  const portals = map.portals.filter(p => p.type !== 3);
-  const index = portals.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
-  const fallback = portals.findIndex(p => p.name.toLowerCase() === "sp");
+  const portals = map.portals.filter((p) => p.type !== 3);
+  const index = portals.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+  const fallback = portals.findIndex((p) => p.name.toLowerCase() === "sp");
   const result = index >= 0 ? index : Math.max(0, fallback);
   if (result > 255) throw new Error("native spawn portal index exceeds u8");
   return result;
 }
-export interface MapDestination { id: number; name: string; streetName: string }
+export interface MapDestination {
+  id: number;
+  name: string;
+  streetName: string;
+}
 /** Read-only, lazy list of real archive maps, reusing the game's provider/cache. */
-export function mapCatalogOf(archive: WzArchive, provider = mapDataProvider(archive)): () => MapDestination[] {
+export function mapCatalogOf(
+  archive: WzArchive,
+  provider = mapDataProvider(archive),
+): () => MapDestination[] {
   let cached: MapDestination[] | undefined;
-  return () => cached ??= archive.images.flatMap(image => {
-    const match = /^Map\/Map\/(\d{9})\.img$/.exec(image.path);
-    if (!match) return [];
-    const map = provider(Number(match[1]));
-    return map ? [{id:map.id,name:map.name,streetName:map.streetName}] : [];
-  }).sort((a,b)=>a.id-b.id);
+  return () =>
+    (cached ??= archive.images
+      .flatMap((image) => {
+        const match = /^Map\/Map\/(\d{9})\.img$/.exec(image.path);
+        if (!match) return [];
+        const map = provider(Number(match[1]));
+        return map ? [{ id: map.id, name: map.name, streetName: map.streetName }] : [];
+      })
+      .sort((a, b) => a.id - b.id));
 }

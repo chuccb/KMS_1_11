@@ -159,9 +159,15 @@ export function encodeClientMiniRoomRequest(request: ClientMiniRoomRequest): Uin
         .writeU32(request.targetId >>> 0)
         .toBytes();
     case "accept":
-      return writer.writeByte(MINIROOM_REQUEST_TYPE.accept).writeU32(request.inviterId >>> 0).toBytes();
+      return writer
+        .writeByte(MINIROOM_REQUEST_TYPE.accept)
+        .writeU32(request.inviterId >>> 0)
+        .toBytes();
     case "inviteByName":
-      return writer.writeByte(MINIROOM_REQUEST_TYPE.inviteByName).writeAsciiString(request.name).toBytes();
+      return writer
+        .writeByte(MINIROOM_REQUEST_TYPE.inviteByName)
+        .writeAsciiString(request.name)
+        .toBytes();
     case "leave":
       return writer.writeByte(MINIROOM_REQUEST_TYPE.leave).toBytes();
     case "offerItem":
@@ -172,7 +178,10 @@ export function encodeClientMiniRoomRequest(request: ClientMiniRoomRequest): Uin
       if (request.tab !== 1) writer.writeU16((request.count ?? 1) & 0xffff);
       return writer.writeByte(request.roomSlot).toBytes();
     case "offerMesos":
-      return writer.writeByte(MINIROOM_REQUEST_TYPE.offerMesos).writeU32(request.amount >>> 0).toBytes();
+      return writer
+        .writeByte(MINIROOM_REQUEST_TYPE.offerMesos)
+        .writeU32(request.amount >>> 0)
+        .toBytes();
     case "confirm":
       return writer.writeByte(MINIROOM_REQUEST_TYPE.confirm).toBytes();
   }
@@ -224,7 +233,10 @@ function resultWriter(type: number): PacketWriter {
 }
 
 /** `type 1`：邀請。 */
-export function encodeMiniRoomInvite(invite: { inviterId: number; inviterName: string }): Uint8Array {
+export function encodeMiniRoomInvite(invite: {
+  inviterId: number;
+  inviterName: string;
+}): Uint8Array {
   return resultWriter(MINIROOM_RESULT_TYPE.invite)
     .writeAsciiString(invite.inviterName)
     .writeU32(invite.inviterId >>> 0)
@@ -287,7 +299,9 @@ export function encodeMiniRoomItem(update: {
   item: ItemSlot;
 }): Uint8Array {
   if (update.roomSlot < 1 || update.roomSlot > TRADE_SLOTS) {
-    throw new RangeError(`trade slot ${update.roomSlot} is outside the client's 1..${TRADE_SLOTS} (sub_4D63C0)`);
+    throw new RangeError(
+      `trade slot ${update.roomSlot} is outside the client's 1..${TRADE_SLOTS} (sub_4D63C0)`,
+    );
   }
   const writer = resultWriter(MINIROOM_RESULT_TYPE.item)
     .writeByte(update.index)
@@ -343,7 +357,9 @@ export function readMiniRoomResult(reader: PacketReader): MiniRoomEvent {
     }
     case MINIROOM_RESULT_TYPE.refused: {
       const code = reader.readByte();
-      return code === MINIROOM_REFUSAL.busy ? { kind: "refused", code, name: reader.readAsciiString() } : { kind: "refused", code };
+      return code === MINIROOM_REFUSAL.busy
+        ? { kind: "refused", code, name: reader.readAsciiString() }
+        : { kind: "refused", code };
     }
     case MINIROOM_RESULT_TYPE.participant:
     case MINIROOM_RESULT_TYPE.update: {
@@ -361,7 +377,9 @@ export function readMiniRoomResult(reader: PacketReader): MiniRoomEvent {
         participants.push(readParticipant(reader, index));
       }
       if (participants.length !== count) {
-        throw new RangeError(`type 4 announced ${count} participant(s) but carried ${participants.length}`);
+        throw new RangeError(
+          `type 4 announced ${count} participant(s) but carried ${participants.length}`,
+        );
       }
       return { kind: "enter", roomKind, myIndex, participants };
     }

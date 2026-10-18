@@ -48,32 +48,50 @@ function room(bytes: Uint8Array) {
 
 test("0x25: every request the 2003 client can send", () => {
   // `/교환`: `sub_471A40` writes `0`, then `1`, then the target id.
-  assert.equal(hex(encodeClientMiniRoomRequest({ kind: "invite", roomKind: 1, targetId: 62 })), "2500013e000000");
-  assert.deepEqual(parse(encodeClientMiniRoomRequest({ kind: "invite", roomKind: 1, targetId: 62 })), {
-    kind: "invite",
-    roomKind: 1,
-    targetId: 62,
-  });
+  assert.equal(
+    hex(encodeClientMiniRoomRequest({ kind: "invite", roomKind: 1, targetId: 62 })),
+    "2500013e000000",
+  );
+  assert.deepEqual(
+    parse(encodeClientMiniRoomRequest({ kind: "invite", roomKind: 1, targetId: 62 })),
+    {
+      kind: "invite",
+      roomKind: 1,
+      targetId: 62,
+    },
+  );
   // The modal's "yes" (`sub_481910` at `.text:00481a2a`).
   assert.equal(hex(encodeClientMiniRoomRequest({ kind: "accept", inviterId: 61 })), "25033d000000");
   // Equip: the tab is 1, so no count goes on the wire (`sub_4D5C80`).
   assert.equal(
-    hex(encodeClientMiniRoomRequest({ kind: "offerItem", tab: 1, slot: 5, count: null, roomSlot: 2 })),
+    hex(
+      encodeClientMiniRoomRequest({ kind: "offerItem", tab: 1, slot: 5, count: null, roomSlot: 2 }),
+    ),
     "250b01050002",
   );
   assert.deepEqual(
-    parse(encodeClientMiniRoomRequest({ kind: "offerItem", tab: 1, slot: 5, count: null, roomSlot: 2 })),
+    parse(
+      encodeClientMiniRoomRequest({ kind: "offerItem", tab: 1, slot: 5, count: null, roomSlot: 2 }),
+    ),
     { kind: "offerItem", tab: 1, slot: 5, count: null, roomSlot: 2 },
   );
   // A stack: the count is there.
   assert.equal(
-    hex(encodeClientMiniRoomRequest({ kind: "offerItem", tab: 2, slot: 3, count: 10, roomSlot: 1 })),
+    hex(
+      encodeClientMiniRoomRequest({ kind: "offerItem", tab: 2, slot: 3, count: 10, roomSlot: 1 }),
+    ),
     "250b0203000a0001",
   );
-  assert.equal(hex(encodeClientMiniRoomRequest({ kind: "offerMesos", amount: 10_000 })), "250c10270000");
+  assert.equal(
+    hex(encodeClientMiniRoomRequest({ kind: "offerMesos", amount: 10_000 })),
+    "250c10270000",
+  );
   assert.equal(hex(encodeClientMiniRoomRequest({ kind: "confirm" })), "250d");
   assert.equal(hex(encodeClientMiniRoomRequest({ kind: "leave" })), "2507");
-  assert.equal(hex(encodeClientMiniRoomRequest({ kind: "inviteByName", name: "Alt" })), "25050300416c74");
+  assert.equal(
+    hex(encodeClientMiniRoomRequest({ kind: "inviteByName", name: "Alt" })),
+    "25050300416c74",
+  );
   assert.equal(MINIROOM_OPCODE.request, 0x25);
   assert.equal(MINIROOM_OPCODE.result, 0x50);
 });
@@ -89,7 +107,10 @@ test("0x25: an unknown type is refused, and 13 is not a request", () => {
 });
 
 test("0x50 type 1 and 2: the invitation and its refusal", () => {
-  assert.equal(hex(encodeMiniRoomInvite({ inviterId: 61, inviterName: "Hero" })), "500104004865726f3d000000");
+  assert.equal(
+    hex(encodeMiniRoomInvite({ inviterId: 61, inviterName: "Hero" })),
+    "500104004865726f3d000000",
+  );
   assert.deepEqual(room(encodeMiniRoomInvite({ inviterId: 61, inviterName: "Hero" })), {
     kind: "invite",
     inviterId: 61,
@@ -99,7 +120,10 @@ test("0x50 type 1 and 2: the invitation and its refusal", () => {
   assert.equal(hex(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.ok })), "500200");
   assert.equal(hex(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound })), "500201");
   // "that player is busy" carries the name.
-  assert.equal(hex(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.busy, name: "Alt" })), "5002020300416c74");
+  assert.equal(
+    hex(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.busy, name: "Alt" })),
+    "5002020300416c74",
+  );
   assert.deepEqual(room(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.busy, name: "Alt" })), {
     kind: "refused",
     code: 2,
@@ -111,7 +135,11 @@ const HERO = { index: 0, name: "Hero", face: 20_000, look: [30_000, 1_000_002], 
 const ALT = { index: 1, name: "Alt", face: 20_001, look: [30_001], level: 8 };
 
 test("0x50 type 4: the enter packet, and its 0xff terminator", () => {
-  const bytes = encodeMiniRoomEnter({ roomKind: MINIROOM_KIND.trade, myIndex: 1, participants: [HERO, ALT] });
+  const bytes = encodeMiniRoomEnter({
+    roomKind: MINIROOM_KIND.trade,
+    myIndex: 1,
+    participants: [HERO, ALT],
+  });
   assert.equal(bytes[0], 0x50);
   assert.equal(bytes[1], MINIROOM_RESULT_TYPE.enter);
   assert.equal(bytes[2], 1, "room kind 1 = trade (sub_481570 only allocates for 1)");
@@ -138,7 +166,11 @@ test("0x50 type 5 / 8 / 12 / 13: the small ones", () => {
   assert.deepEqual(room(encodeMiniRoomMessage("hi")), { kind: "message", text: "hi" });
   assert.equal(hex(encodeMiniRoomMessage("hi")), "50050002006869");
   assert.deepEqual(room(encodeMiniRoomFinish(TRADE_FINISH.done)), { kind: "finish", code: 3 });
-  assert.deepEqual(room(encodeMiniRoomMesos({ index: 1, amount: 1234 })), { kind: "mesos", index: 1, amount: 1234 });
+  assert.deepEqual(room(encodeMiniRoomMesos({ index: 1, amount: 1234 })), {
+    kind: "mesos",
+    index: 1,
+    amount: 1234,
+  });
   assert.equal(hex(encodeMiniRoomLock()), "500d");
   assert.deepEqual(room(encodeMiniRoomLock()), { kind: "lock" });
 });
@@ -148,15 +180,23 @@ test("0x50 type 11: the item carries its category byte", () => {
   assert.equal(bytes[1], MINIROOM_RESULT_TYPE.item);
   assert.equal(bytes[2], 0);
   assert.equal(bytes[3], 3);
-  assert.equal(bytes[4], 2, "itemId / 1000000 = 2 for a consume item (sub_45E6A0's third arg is 0)");
+  assert.equal(
+    bytes[4],
+    2,
+    "itemId / 1000000 = 2 for a consume item (sub_45E6A0's third arg is 0)",
+  );
   const parsed = room(bytes);
   assert.equal(parsed.kind, "item");
   if (parsed.kind !== "item") return;
   assert.equal(parsed.roomSlot, 3);
   assert.equal(parsed.item.itemId, 2_000_000);
-  assert.throws(() => encodeMiniRoomItem({ index: 0, roomSlot: 0, item: nonEquipSlot(2_000_000, 1) }), RangeError);
   assert.throws(
-    () => encodeMiniRoomItem({ index: 0, roomSlot: TRADE_SLOTS + 1, item: nonEquipSlot(2_000_000, 1) }),
+    () => encodeMiniRoomItem({ index: 0, roomSlot: 0, item: nonEquipSlot(2_000_000, 1) }),
+    RangeError,
+  );
+  assert.throws(
+    () =>
+      encodeMiniRoomItem({ index: 0, roomSlot: TRADE_SLOTS + 1, item: nonEquipSlot(2_000_000, 1) }),
     RangeError,
   );
 });
@@ -165,7 +205,11 @@ test("TradeRegistry: an invite expires, a room is one per character", () => {
   const trades = new TradeRegistry();
   trades.invite(1, 2, 1_000);
   assert.equal(trades.inviteOf(2, 1_000)?.inviterId, 1);
-  assert.equal(trades.inviteOf(2, 1_000 + TRADE_INVITE_TTL_MS + 1), undefined, "the 2003 client has no decline");
+  assert.equal(
+    trades.inviteOf(2, 1_000 + TRADE_INVITE_TTL_MS + 1),
+    undefined,
+    "the 2003 client has no decline",
+  );
   const room = trades.open({ characterId: 1, name: "Hero" }, { characterId: 2, name: "Alt" });
   assert.equal(trades.roomOf(1), room);
   assert.equal(trades.roomOf(2), room);
@@ -185,7 +229,13 @@ function character(mesos: number) {
   return { items, wallet: new MesoWallet(stats), stats };
 }
 
-function offerOf(roomSlot: number, tab: number, slot: number, item: ItemSlot, count = 1): TradeOffer {
+function offerOf(
+  roomSlot: number,
+  tab: number,
+  slot: number,
+  item: ItemSlot,
+  count = 1,
+): TradeOffer {
   return { roomSlot, tab, slot, count, item };
 }
 
@@ -208,8 +258,14 @@ test("settleTrade: items and mesos swap, and the 0x0B changes match", () => {
   assert.equal(heroTab.items.get(1)?.itemId, 2_000_001, "Alt's stack took the slot Hero emptied");
   const altTab = result.items[1].inventories[1]!;
   assert.equal(altTab.items.get(1)?.itemId, 2_000_000);
-  assert.equal(result.changes[0].some((change) => change.op === INVENTORY_OP.put), true);
-  assert.equal(result.changes[1].some((change) => change.op === INVENTORY_OP.put), true);
+  assert.equal(
+    result.changes[0].some((change) => change.op === INVENTORY_OP.put),
+    true,
+  );
+  assert.equal(
+    result.changes[1].some((change) => change.op === INVENTORY_OP.put),
+    true,
+  );
 });
 
 test("settleTrade: a partial stack stays behind, and the change is a put", () => {
@@ -217,7 +273,12 @@ test("settleTrade: a partial stack stays behind, and the change is a put", () =>
   const alt = character(0);
   grantItem(hero.items, 2_000_000, 10);
   const result = settleTrade(
-    { offers: [offerOf(2, 2, 1, nonEquipSlot(2_000_000, 10), 4)], mesos: 0, items: hero.items, wallet: hero.wallet },
+    {
+      offers: [offerOf(2, 2, 1, nonEquipSlot(2_000_000, 10), 4)],
+      mesos: 0,
+      items: hero.items,
+      wallet: hero.wallet,
+    },
     { offers: [], mesos: 0, items: alt.items, wallet: alt.wallet },
   );
   assert.equal(result.ok, true);
@@ -251,13 +312,22 @@ test("settleTrade: an item that is gone, or a full bag, fails without moving any
   const greedy = character(0);
   grantItem(greedy.items, 2_000_000, 1);
   const noRoom = settleTrade(
-    { offers: [offerOf(1, 2, 1, nonEquipSlot(2_000_000, 1), 1)], mesos: 0, items: greedy.items, wallet: greedy.wallet },
+    {
+      offers: [offerOf(1, 2, 1, nonEquipSlot(2_000_000, 1), 1)],
+      mesos: 0,
+      items: greedy.items,
+      wallet: greedy.wallet,
+    },
     { offers: [], mesos: 0, items: full.items, wallet: full.wallet },
   );
   assert.equal(noRoom.ok, false);
   if (noRoom.ok) return;
   assert.match(noRoom.reason, /no room/);
-  assert.equal(greedy.items.inventories[1]!.items.get(1)?.itemId, 2_000_000, "the clone failed, not the record");
+  assert.equal(
+    greedy.items.inventories[1]!.items.get(1)?.itemId,
+    2_000_000,
+    "the clone failed, not the record",
+  );
 });
 
 test("settleTrade: mesos that are not there are refused", () => {
@@ -281,7 +351,12 @@ test("isTradeSlot is 1..8, and the equip tab is 1", () => {
   const alt = character(0);
   grantItem(hero.items, 1_000_002);
   const result = settleTrade(
-    { offers: [offerOf(1, 1, 1, equipSlot(1_000_002), 2)], mesos: 0, items: hero.items, wallet: hero.wallet },
+    {
+      offers: [offerOf(1, 1, 1, equipSlot(1_000_002), 2)],
+      mesos: 0,
+      items: hero.items,
+      wallet: hero.wallet,
+    },
     { offers: [], mesos: 0, items: alt.items, wallet: alt.wallet },
   );
   assert.equal(result.ok, false);

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PacketReader, PacketUnderflowError, PacketWriter, readOpcode } from "../src/protocol/packet.ts";
+import {
+  PacketReader,
+  PacketUnderflowError,
+  PacketWriter,
+  readOpcode,
+} from "../src/protocol/packet.ts";
 import { decodeClientPacket, encodeClientPacket } from "../src/protocol/login.ts";
 import { fromHex, toHex } from "../src/protocol/frame.ts";
 

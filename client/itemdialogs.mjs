@@ -1,5 +1,5 @@
-import {drawUtilFrame} from "./utildialog.mjs";
-import {releaseOnInterrupt} from "./pointer.mjs";
+import {drawUtilFrame} from "./utildialog.ts";
+import {releaseOnInterrupt} from "./pointer.ts";
 /** CUtilDlgEx numeric input: 4643F0 / 4B7960 / 535EF0 / 532A80 / 531110.
  * Native art on canvas, DOM only for text/numeric editing, focus and hit targets.
  * No inventory writes: callers revalidate their source snapshot before sending.

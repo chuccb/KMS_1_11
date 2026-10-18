@@ -129,7 +129,10 @@ test("a truncated path is refused instead of half decoded", () => {
   const writer = new PacketWriter(64);
   writeMovePath(writer, samplePath);
   const bytes = writer.toBytes();
-  assert.throws(() => readMovePath(new PacketReader(bytes.slice(0, bytes.length - 1))), /38|underflow/i);
+  assert.throws(
+    () => readMovePath(new PacketReader(bytes.slice(0, bytes.length - 1))),
+    /38|underflow/i,
+  );
 });
 
 test("more elements than a u8 can count is refused", () => {
@@ -197,9 +200,16 @@ test("user move is the id plus the path, byte exact and round-trippable", () => 
   const bytes = encodeUserMove({ characterId: 1000, path: samplePath });
   assert.equal(
     toHex(bytes),
-    "22" + "e8030000" + "d4fec80002" + "006400ceff0100feff0407007800" + "01ffff0200000000000000002c01",
+    "22" +
+      "e8030000" +
+      "d4fec80002" +
+      "006400ceff0100feff0407007800" +
+      "01ffff0200000000000000002c01",
   );
-  assert.deepEqual(readUserMove(new PacketReader(bytes, 1)), { characterId: 1000, path: samplePath });
+  assert.deepEqual(readUserMove(new PacketReader(bytes, 1)), {
+    characterId: 1000,
+    path: samplePath,
+  });
 });
 
 test("leave field carries exactly the character id", () => {
@@ -212,7 +222,14 @@ test("set field carries mode, the three unknown words and a CharacterData", () =
   stats.id = 1000;
   stats.name = "Bob";
   const character: CharacterData = { flags: 1, stats };
-  const bytes = encodeSetField({ mode: 0, full: true, randomSeedA: 1, randomSeedB: 2, randomSeedC: 3, character });
+  const bytes = encodeSetField({
+    mode: 0,
+    full: true,
+    randomSeedA: 1,
+    randomSeedB: 2,
+    randomSeedC: 3,
+    character,
+  });
   assert.equal(bytes[0], FIELD_OPCODE.setField);
   assert.equal(toHex(bytes.slice(0, 15)), "160001010000000200000003000000");
   const decoded = readSetField(new PacketReader(bytes, 1));
@@ -224,7 +241,10 @@ test("set field carries mode, the three unknown words and a CharacterData", () =
 });
 
 test("the 0x16 form without CharacterData is refused, not mis-parsed", () => {
-  assert.throws(() => readSetField(new PacketReader(Uint8Array.from([0, 0, 1, 2, 3]))), /not decoded yet/);
+  assert.throws(
+    () => readSetField(new PacketReader(Uint8Array.from([0, 0, 1, 2, 3]))),
+    /not decoded yet/,
+  );
 });
 
 test("describeFieldPacket names the opcodes it can read and stays quiet about the rest", () => {
@@ -232,9 +252,15 @@ test("describeFieldPacket names the opcodes it can read and stays quiet about th
     describeFieldPacket(encodeUserMove({ characterId: 1000, path: samplePath })),
     "0x22 CUserPool: characterId=1000 elements=2 first=(100,-50) action=4 fh=7",
   );
-  assert.match(describeFieldPacket(encodeUserEnterField(sampleUser)) ?? "", /name="Bob" avatar=2 items at \(10,-20\)/);
+  assert.match(
+    describeFieldPacket(encodeUserEnterField(sampleUser)) ?? "",
+    /name="Bob" avatar=2 items at \(10,-20\)/,
+  );
   assert.equal(describeFieldPacket(encodeUserLeaveField(1000)), "0x1d CUserPool: characterId=1000");
-  assert.equal(describeFieldPacket(Uint8Array.from([0x2e, 1, 2])), "0x2e CMobPool (fields not decoded yet)");
+  assert.equal(
+    describeFieldPacket(Uint8Array.from([0x2e, 1, 2])),
+    "0x2e CMobPool (fields not decoded yet)",
+  );
   // `0x01` is not a field opcode at all; the two app-level ones below the range are.
   assert.equal(describeFieldPacket(Uint8Array.from([0x01])), undefined);
   assert.equal(describeFieldPacket(Uint8Array.from([0x0c])), undefined);
@@ -275,7 +301,10 @@ test("the client's own move packet is the stage byte plus the same path (0x0E)",
     toHex(bytes),
     "0e07" + "d4fec80002" + "006400ceff0100feff0407007800" + "01ffff0200000000000000002c01",
   );
-  assert.deepEqual(readClientUserMove(new PacketReader(bytes, 1)), { stageByte: 7, path: samplePath });
+  assert.deepEqual(readClientUserMove(new PacketReader(bytes, 1)), {
+    stageByte: 7,
+    path: samplePath,
+  });
 });
 
 test("the portal/object click request is kind plus name (0x0D)", () => {
@@ -299,7 +328,9 @@ test("attack (0x0F) is byte exact, header and per-target records", () => {
     facingLeft: true,
     action: 0x11,
     speed: 6,
-    targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12, 13] }],
+    targets: [
+      { mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12, 13] },
+    ],
   };
   const bytes = encodeClientAttack(attack);
   assert.equal(
@@ -384,9 +415,15 @@ test("describeClientFieldPacket names the three client field packets and stays q
     targets: [{ mobId: 0x10, hitAnimation: -1, x: 100, y: 200, sequence: 5, damages: [11, 12] }],
   });
   const text = describeClientFieldPacket(attack)!;
-  assert.match(text, /^0x0f attack: left action=17 hits=2 speed=6 skill=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/);
+  assert.match(
+    text,
+    /^0x0f attack: left action=17 hits=2 speed=6 skill=48 targets=1 16@\(100,200\)\[11\+12\] anim=-1$/,
+  );
   assert.equal(describeClientFieldPacket(new Uint8Array([0x7f, 1, 2, 3])), undefined);
-  assert.match(describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!, /^0x0f \(truncated: packet underflow/);
+  assert.match(
+    describeClientFieldPacket(new Uint8Array([0x0f, 0x41]))!,
+    /^0x0f \(truncated: packet underflow/,
+  );
 });
 
 /**
@@ -470,16 +507,30 @@ test("mob attack (0x2c) without a position, and the 0xff reset form", () => {
   assert.equal("action" in back, true);
 
   // `sub_4885D0(mob, -1, 0, 0, 0)` writes the signed byte straight through, so 0xFF is "reset".
-  const reset = readClientMobAttack(new PacketReader(encodeClientMobAttack({
-    mobId: 7, flags: 0, actionByte: 0xff, positionX: 0, positionY: 0, tail: new Uint8Array(0),
-  }), 1));
+  const reset = readClientMobAttack(
+    new PacketReader(
+      encodeClientMobAttack({
+        mobId: 7,
+        flags: 0,
+        actionByte: 0xff,
+        positionX: 0,
+        positionY: 0,
+        tail: new Uint8Array(0),
+      }),
+      1,
+    ),
+  );
   assert.equal(reset.action, undefined);
   assert.equal("action" in reset, false, "no undefined key, so JSON and deepEqual stay honest");
 });
 
 test("the mob-attack describer names the action and says how much it did not read", () => {
   const bytes = encodeClientMobAttack({
-    mobId: 42, flags: 0x11, actionByte: (0 << 1) | 1, positionX: -1, positionY: 2,
+    mobId: 42,
+    flags: 0x11,
+    actionByte: (0 << 1) | 1,
+    positionX: -1,
+    positionY: 2,
     tail: new Uint8Array([9, 9]),
   });
   assert.equal(
@@ -487,9 +538,17 @@ test("the mob-attack describer names the action and says how much it did not rea
     "0x2c mob attack: mobId=42 move,left flags=0x11 at (-1,2) tail=2B",
   );
   const noPosition = encodeClientMobAttack({
-    mobId: 42, flags: 1, actionByte: 10 << 1, positionX: 0, positionY: 0, tail: new Uint8Array(0),
+    mobId: 42,
+    flags: 1,
+    actionByte: 10 << 1,
+    positionX: 0,
+    positionY: 0,
+    tail: new Uint8Array(0),
   });
-  assert.equal(describeClientFieldPacket(noPosition), "0x2c mob attack: mobId=42 attack1,right flags=0x1 tail=0B");
+  assert.equal(
+    describeClientFieldPacket(noPosition),
+    "0x2c mob attack: mobId=42 attack1,right flags=0x1 tail=0B",
+  );
   assert.match(describeClientFieldPacket(new Uint8Array([0x2c, 1]))!, /truncated/);
 });
 
@@ -498,7 +557,9 @@ test("chat: 0x12 out is one string, 0x1a back is the speaker's name and the same
   const said = encodeClientChat({ text: encodeCp949("안녕") });
   assert.equal(CLIENT_FIELD_OPCODE.chat, 0x12);
   assert.equal(toHex(said), "12" + "0400" + "bec8b3e7");
-  assert.deepEqual(readClientChat(new PacketReader(said, 1)), { text: Uint8Array.from([0xbe, 0xc8, 0xb3, 0xe7]) });
+  assert.deepEqual(readClientChat(new PacketReader(said, 1)), {
+    text: Uint8Array.from([0xbe, 0xc8, 0xb3, 0xe7]),
+  });
   assert.equal(describeClientChat(readClientChat(new PacketReader(said, 1))), "0x12 chat: 안녕");
   assert.equal(describeClientFieldPacket(said), "0x12 chat: 안녕");
 
@@ -521,10 +582,18 @@ test("0x1a's other sub-ops are refused instead of read as chat", () => {
   // `sub_472910` has four cases, all of them two-strings-or-fewer display messages, and only 0x12 is
   // chat. 0x22 is the whisper refusal: one name, and the client's line is "'name' refuses whispers".
   const refusal = Uint8Array.from([0x1a, 0x22, 0x03, 0x00, 0x41, 0x42, 0x43]);
-  assert.throws(() => readUserChat(new PacketReader(refusal, 1)), /sub-op 0x22 is not chat \(0x12\)/);
-  assert.match(describeFieldPacket(refusal)!, /^0x1a CField\(user message\): \(unreadable: .*not chat/);
+  assert.throws(
+    () => readUserChat(new PacketReader(refusal, 1)),
+    /sub-op 0x22 is not chat \(0x12\)/,
+  );
+  assert.match(
+    describeFieldPacket(refusal)!,
+    /^0x1a CField\(user message\): \(unreadable: .*not chat/,
+  );
   // A chat packet that runs out mid-string is still an error, not a short line.
-  assert.throws(() => readUserChat(new PacketReader(Uint8Array.from([0x1a, 0x12, 0x04, 0x00, 0x41]), 1)));
+  assert.throws(() =>
+    readUserChat(new PacketReader(Uint8Array.from([0x1a, 0x12, 0x04, 0x00, 0x41]), 1)),
+  );
 });
 
 test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-before-text", () => {
@@ -542,7 +611,10 @@ test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-befor
     kind: USER_REQUEST_KIND.find,
     name: "Alt",
   });
-  assert.equal(describeClientUserRequest(readClientUserRequest(new PacketReader(find, 1))), '0x23 find "Alt"');
+  assert.equal(
+    describeClientUserRequest(readClientUserRequest(new PacketReader(find, 1))),
+    '0x23 find "Alt"',
+  );
   assert.equal(describeClientFieldPacket(find), '0x23 find "Alt"');
 
   const whisper = encodeClientUserRequest({
@@ -576,7 +648,8 @@ test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-befor
   // A kind nobody has a body for is refused, not half-read: 0x04 alone is the whisper family with
   // neither bit set, i.e. a text-less whisper, which the client cannot build.
   assert.throws(
-    () => readClientUserRequest(new PacketReader(Uint8Array.from([0x23, 0x04, 0x01, 0x00, 0x41]), 1)),
+    () =>
+      readClientUserRequest(new PacketReader(Uint8Array.from([0x23, 0x04, 0x01, 0x00, 0x41]), 1)),
     /0x23 kind 0x4 is not a user request/,
   );
 });
@@ -588,8 +661,14 @@ test("the two 0x1a answers: a map id for a find, one flag byte for a whisper", (
   const found = encodeUserFindAnswer({ name: "Alt", mapId: 2000000 });
   assert.equal(toHex(found), "1a" + "09" + "0300" + "416c74" + "80841e00");
   assert.deepEqual(readUserFindAnswer(new PacketReader(found, 1)), { name: "Alt", mapId: 2000000 });
-  assert.equal(describeUserFindAnswer(readUserFindAnswer(new PacketReader(found, 1))), 'find answer "Alt": map 2000000');
-  assert.equal(describeFieldPacket(found), '0x1a CField(user message): find answer "Alt": map 2000000');
+  assert.equal(
+    describeUserFindAnswer(readUserFindAnswer(new PacketReader(found, 1))),
+    'find answer "Alt": map 2000000',
+  );
+  assert.equal(
+    describeFieldPacket(found),
+    '0x1a CField(user message): find answer "Alt": map 2000000',
+  );
 
   const missing = encodeUserFindAnswer({ name: "Nobody", mapId: -1 });
   assert.equal(toHex(missing), "1a" + "09" + "0600" + "4e6f626f6479" + "ffffffff");
@@ -604,7 +683,10 @@ test("the two 0x1a answers: a map id for a find, one flag byte for a whisper", (
   assert.equal(USER_MESSAGE_WHISPER_ANSWER, 0x0a);
   const delivered = encodeUserWhisperAnswer({ name: "Alt", delivered: true });
   assert.equal(toHex(delivered), "1a" + "0a" + "0300" + "416c74" + "01");
-  assert.deepEqual(readUserWhisperAnswer(new PacketReader(delivered, 1)), { name: "Alt", delivered: true });
+  assert.deepEqual(readUserWhisperAnswer(new PacketReader(delivered, 1)), {
+    name: "Alt",
+    delivered: true,
+  });
   assert.equal(
     describeFieldPacket(delivered),
     '0x1a CField(user message): whisper answer "Alt": delivered',
@@ -638,7 +720,10 @@ test("the level-up effect (0x29) names a user, and one byte says which effect", 
   // The second branch of `sub_522300` reads another u32; what it plays is not located, so a packet
   // that says 1 is refused rather than half-read (`0x1A`'s non-chat sub-ops get the same treatment).
   const unlocated = Uint8Array.from([0x29, 0x07, 0x00, 0x00, 0x00, 0x01, 0x2a, 0x00, 0x00, 0x00]);
-  assert.throws(() => readUserEffect(new PacketReader(unlocated, 1)), /effect 1 is not the located one/);
+  assert.throws(
+    () => readUserEffect(new PacketReader(unlocated, 1)),
+    /effect 1 is not the located one/,
+  );
   assert.match(describeFieldPacket(unlocated)!, /not the located one/);
 });
 
@@ -668,13 +753,19 @@ test("the player's own HP/MP change (0x1c) travels as a signed delta of the reco
   // The format allows either field alone: the flags word decides what is on the wire.
   const mpOnly = { mpDelta: -5, flag: 0 };
   assert.equal(toHex(encodeClientStatReport(mpOnly)), "1c" + "00100000" + "fbff" + "00");
-  assert.deepEqual(readClientStatReport(new PacketReader(encodeClientStatReport(mpOnly), 1)), mpOnly);
+  assert.deepEqual(
+    readClientStatReport(new PacketReader(encodeClientStatReport(mpOnly), 1)),
+    mpOnly,
+  );
 
   // A delta is an s16: one that does not fit is refused instead of wrapped, and a flag bit nobody
   // has located is refused instead of half-read (the same rule the 0x0d panel block gets).
   assert.throws(() => encodeClientStatReport({ hpDelta: 0x8000, flag: 0 }), /cannot hold 32768/);
   const unknownBit = Uint8Array.from([0x1c, 0x01, 0x14, 0x00, 0x00, 0x00]);
-  assert.throws(() => readClientStatReport(new PacketReader(unknownBit, 1)), /only the hp \(0x400\)/);
+  assert.throws(
+    () => readClientStatReport(new PacketReader(unknownBit, 1)),
+    /only the hp \(0x400\)/,
+  );
   assert.match(describeClientFieldPacket(unknownBit)!, /only the hp \(0x400\)/);
 });
 
@@ -706,8 +797,14 @@ test("using an item out of the USE tab (0x18/0x19) is a slot and an item id, not
   // The opcode cannot be a third value, and an item id cannot leave the u32: the two traps that
   // would otherwise write a packet the client's own reader would misread.
   assert.throws(() => encodeClientUseItem(potion, 0x1a), /not one of the use-item opcodes/);
-  assert.throws(() => readClientUseItem(new PacketReader(Uint8Array.from([0x1a, 0x00, 0x00]), 1), 0x1a), /0x18, 0x19/);
-  assert.throws(() => encodeClientUseItem({ slot: 1, itemId: 0x1_0000_0000 }), /does not fit the u32/);
+  assert.throws(
+    () => readClientUseItem(new PacketReader(Uint8Array.from([0x1a, 0x00, 0x00]), 1), 0x1a),
+    /0x18, 0x19/,
+  );
+  assert.throws(
+    () => encodeClientUseItem({ slot: 1, itemId: 0x1_0000_0000 }),
+    /does not fit the u32/,
+  );
 });
 
 test("an emotion is one u32 in both directions, and the nine faces are the client's own table", () => {
@@ -725,7 +822,7 @@ test("an emotion is one u32 in both directions, and the nine faces are the clien
   assert.equal(EMOTION_HIT, 1);
   assert.equal(emotionName(EMOTION_HIT), "hit");
   assert.equal(emotionName(0), "blink");
-  assert.equal(emotionName(-1), undefined, "the constructor's -1 is \"no face\", not a name");
+  assert.equal(emotionName(-1), undefined, 'the constructor\'s -1 is "no face", not a name');
   assert.equal(emotionName(9), undefined, "and the drawer clamps anything above 8 to 0");
 
   // c2s `0x13`: what the F-keys send, `[0x13][u32 emotion]`.
@@ -744,7 +841,10 @@ test("an emotion is one u32 in both directions, and the nine faces are the clien
   assert.equal(toHex(out), "27" + "2c000000" + "05000000");
   assert.deepEqual(readUserEmotion(new PacketReader(out, 1)), over);
   assert.equal(describeUserEmotion(over), "characterId=44 emotion=5 (angry)");
-  assert.equal(describeFieldPacket(out), "0x27 CUserPool(user emotion): characterId=44 emotion=5 (angry)");
+  assert.equal(
+    describeFieldPacket(out),
+    "0x27 CUserPool(user emotion): characterId=44 emotion=5 (angry)",
+  );
 
   // The range is the client's own (`sub_509790` tests `n8 <= 8`): nothing outside 0..8 is a face, so
   // neither direction will carry one.
@@ -795,7 +895,10 @@ test("user attack (0x23) is byte exact: the swing, for everyone but the attacker
   );
   // A whiff is a swing too: no target records, but the header is still there.
   const whiffBytes = encodeUserAttack({ ...swing, hits: 1, targets: [] });
-  assert.equal(toHex(whiffBytes), "23" + "30000000" + "01" + "00" + "91" + "02" + "00" + "00000000");
+  assert.equal(
+    toHex(whiffBytes),
+    "23" + "30000000" + "01" + "00" + "91" + "02" + "00" + "00000000",
+  );
   assert.deepEqual(readUserAttack(new PacketReader(whiffBytes, 1)).targets, []);
 });
 
@@ -831,14 +934,26 @@ test("the relay mirrors each client attack as the opcode whose receiver renders 
     targets: [{ mobId: 0x10, hitAnimation: -1, damages: [7] }],
   };
   const shotBytes = encodeUserAttack(shot, FIELD_OPCODE.userShootAttack);
-  assert.equal(toHex(shotBytes), "24" + "30000000" + "11" + "00" + "2e" + "01" + "00" + "f0951f00" + "10000000ff" + "0700");
+  assert.equal(
+    toHex(shotBytes),
+    "24" + "30000000" + "11" + "00" + "2e" + "01" + "00" + "f0951f00" + "10000000ff" + "0700",
+  );
   assert.deepEqual(readUserAttack(new PacketReader(shotBytes, 1)), shot);
-  assert.match(describeFieldPacket(shotBytes)!, /^0x24 CUserPool\(user attack, shot\): characterId=48/);
+  assert.match(
+    describeFieldPacket(shotBytes)!,
+    /^0x24 CUserPool\(user attack, shot\): characterId=48/,
+  );
 
-  const castBytes = encodeUserAttack({ ...shot, projectileItemId: 0 }, FIELD_OPCODE.userMagicAttack);
+  const castBytes = encodeUserAttack(
+    { ...shot, projectileItemId: 0 },
+    FIELD_OPCODE.userMagicAttack,
+  );
   assert.equal(castBytes[0], FIELD_OPCODE.userMagicAttack);
   assert.equal(castBytes.length, shotBytes.length, "the body is the same record");
-  assert.match(describeFieldPacket(castBytes)!, /^0x25 CUserPool\(user attack, magic\): characterId=48/);
+  assert.match(
+    describeFieldPacket(castBytes)!,
+    /^0x25 CUserPool\(user attack, magic\): characterId=48/,
+  );
 });
 
 test("a 0x23 skill level adds the skill id, and level 0 leaves it out", () => {
@@ -888,7 +1003,11 @@ test("a 0x23 target record with mobId 0 is refused, and hits must match the head
     () => encodeUserAttack({ ...base, targets: [{ mobId: 9, hitAnimation: 0, damages: [1] }] }),
     /exactly 2 damage/,
   );
-  const many = Array.from({ length: 16 }, (_, i) => ({ mobId: i + 1, hitAnimation: 0, damages: [1, 2] }));
+  const many = Array.from({ length: 16 }, (_, i) => ({
+    mobId: i + 1,
+    hitAnimation: 0,
+    damages: [1, 2],
+  }));
   assert.throws(() => encodeUserAttack({ ...base, targets: many }), /at most 15 targets/);
 });
 
@@ -907,7 +1026,10 @@ test("change slot (0x17) is the window's four fields, signed and byte exact", ()
   assert.equal(toHex(bytes), "17010200ffffffff");
   assert.deepEqual(readClientChangeSlot(new PacketReader(bytes, 1)), equip);
   assert.equal(describeClientChangeSlot(equip), "tab 1 slot 2 -> worn 1 count=-1");
-  assert.equal(describeClientFieldPacket(bytes), "0x17 change slot: tab 1 slot 2 -> worn 1 count=-1");
+  assert.equal(
+    describeClientFieldPacket(bytes),
+    "0x17 change slot: tab 1 slot 2 -> worn 1 count=-1",
+  );
 
   // What `sub_463BE0` sends after "몇 개나 버리시겠습니까?": the ground is slot 0 and the count is how
   // many of the stack to throw away.
@@ -916,7 +1038,10 @@ test("change slot (0x17) is the window's four fields, signed and byte exact", ()
   assert.equal(toHex(dropBytes), "1703040000000500");
   assert.deepEqual(readClientChangeSlot(new PacketReader(dropBytes, 1)), drop);
   assert.equal(describeClientChangeSlot(drop), "tab 3 slot 4 -> ground count=5");
-  assert.equal(describeClientFieldPacket(dropBytes), "0x17 change slot: tab 3 slot 4 -> ground count=5");
+  assert.equal(
+    describeClientFieldPacket(dropBytes),
+    "0x17 change slot: tab 3 slot 4 -> ground count=5",
+  );
 });
 
 /**
@@ -958,9 +1083,15 @@ test("user look (0x28) is a flags word, a face, and a keep-or-replace id list", 
   const unknownBytes = encodeUserLook(withUnknowns);
   assert.equal(toHex(unknownBytes), "28070000000c0000000100000002000000013075000000000000");
   assert.deepEqual(readUserLook(new PacketReader(unknownBytes, 1)), withUnknowns);
-  assert.equal(describeUserLook(withUnknowns), "characterId=7 unknownA=1 unknownB=2 avatar=1 items [30000]");
+  assert.equal(
+    describeUserLook(withUnknowns),
+    "characterId=7 unknownA=1 unknownB=2 avatar=1 items [30000]",
+  );
 
   // A 0 in the list would end it early, so the writer refuses instead of silently truncating.
-  assert.throws(() => encodeUserLook({ characterId: 1, avatarItems: [30000, 0] }), /ends at the first 0/);
+  assert.throws(
+    () => encodeUserLook({ characterId: 1, avatarItems: [30000, 0] }),
+    /ends at the first 0/,
+  );
   assert.throws(() => encodeUserLook({ characterId: 1, avatarItems: [0] }), /ends at the first 0/);
 });

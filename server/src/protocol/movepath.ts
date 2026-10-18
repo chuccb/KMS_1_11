@@ -149,7 +149,9 @@ export function readMovePath(reader: PacketReader): MovePath {
 /** Writes a `CMovePath`. Refuses a path the client could not have sent. */
 export function writeMovePath(writer: PacketWriter, path: MovePath): void {
   if (path.elements.length > MOVE_ELEMENT_LIMIT) {
-    throw new RangeError(`a move path carries at most ${MOVE_ELEMENT_LIMIT} elements, got ${path.elements.length}`);
+    throw new RangeError(
+      `a move path carries at most ${MOVE_ELEMENT_LIMIT} elements, got ${path.elements.length}`,
+    );
   }
   writer.writeU16(path.originX & 0xffff);
   writer.writeU16(path.originY & 0xffff);

@@ -31,11 +31,7 @@ import type { CharacterItems } from "../protocol/chardata.ts";
 import { grantItem, takeItem, type MesoWallet } from "./rewards.ts";
 import type { InventoryChange } from "../protocol/inventory.ts";
 import { INVENTORY_OP } from "../protocol/inventory.ts";
-import {
-  SHOP_RESULT,
-  encodeRechargeUnitPrice,
-  type ShopLine,
-} from "../protocol/shop.ts";
+import { SHOP_RESULT, encodeRechargeUnitPrice, type ShopLine } from "../protocol/shop.ts";
 
 /**
  * The most of one item a single purchase may take - the upper bound of the client's buy dialog
@@ -170,12 +166,7 @@ export interface ShopKeeper {
     count: number,
   ): TradeOutcome;
   /** Optional for embedders with a custom keeper; real WZ shops implement this service. */
-  recharge?(
-    items: CharacterItems,
-    wallet: MesoWallet,
-    shop: ShopDef,
-    slot: number,
-  ): TradeOutcome;
+  recharge?(items: CharacterItems, wallet: MesoWallet, shop: ShopDef, slot: number): TradeOutcome;
   sell(
     items: CharacterItems,
     wallet: MesoWallet,
@@ -190,9 +181,7 @@ export function unpricedShopItems(
   shop: ShopDef,
   priceOf: (itemId: number) => number | undefined,
 ): number[] {
-  return shop.items
-    .map((entry) => entry.itemId)
-    .filter((itemId) => priceOf(itemId) === undefined);
+  return shop.items.map((entry) => entry.itemId).filter((itemId) => priceOf(itemId) === undefined);
 }
 
 /**
@@ -213,20 +202,11 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
   // No fixed/fallback 200-stack limit for stars. The archive owns capacity and unit price.
   const rechargeInfo = (
     itemId: number,
-  ):
-    | { itemId: number; maxCount: number; unitPrice: number; price: number }
-    | undefined => {
-    if (
-      !archive ||
-      Math.floor(itemId / 10000) !== 207 ||
-      !archive.has(itemImagePath(itemId))
-    )
+  ): { itemId: number; maxCount: number; unitPrice: number; price: number } | undefined => {
+    if (!archive || Math.floor(itemId / 10000) !== 207 || !archive.has(itemImagePath(itemId)))
       return undefined;
     const info = infoOf(
-      propertyOf(
-        archive.objects(itemImagePath(itemId))[0],
-        String(itemId).padStart(8, "0"),
-      ),
+      propertyOf(archive.objects(itemImagePath(itemId))[0], String(itemId).padStart(8, "0")),
     );
     const { slotMax, unitPrice, price } = info;
     if (
@@ -244,10 +224,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       return undefined;
     return { itemId, maxCount: slotMax, unitPrice, price };
   };
-  const rechargeables = new Map<
-    number,
-    NonNullable<ReturnType<typeof rechargeInfo>>
-  >();
+  const rechargeables = new Map<number, NonNullable<ReturnType<typeof rechargeInfo>>>();
   const starPath = itemImagePath(2070000);
   if (archive?.has(starPath))
     for (const entry of entriesOf(archive.objects(starPath)[0])) {
@@ -262,13 +239,12 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       const recharge = rechargeables.get(entry.itemId);
       if (Math.floor(entry.itemId / 10000) === 207 && !recharge) continue;
       lines.push({
-        ...(recharge
-          ? { cash: encodeRechargeUnitPrice(recharge.unitPrice) }
-          : {}),
+        ...(recharge ? { cash: encodeRechargeUnitPrice(recharge.unitPrice) } : {}),
         itemId: entry.itemId,
         price,
-        maxCount:
-          isEquipItemId(entry.itemId) ? 1 : recharge?.maxCount ?? entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT,
+        maxCount: isEquipItemId(entry.itemId)
+          ? 1
+          : (recharge?.maxCount ?? entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT),
       });
     }
     // 4B3780: every 207 row enters the recharge list; only nonzero-price rows enter the buy list.
@@ -283,8 +259,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
     return lines;
   };
   return {
-    shopOfNpc: (npcTemplateId) =>
-      SHOPS.find((shop) => shop.npcTemplateId === npcTemplateId),
+    shopOfNpc: (npcTemplateId) => SHOPS.find((shop) => shop.npcTemplateId === npcTemplateId),
     linesOf,
     priceOf,
     sellPriceOf,
@@ -296,20 +271,15 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       const recharge = rechargeables.get(itemId);
       if (Math.floor(itemId / 10000) === 207 && !recharge)
         return { kind: "failed", reason: "notInShop" };
-      const maxCount = recharge
-        ? 1
-        : (entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT);
-      if (!Number.isInteger(count) || count <= 0)
-        return { kind: "failed", reason: "badRequest" };
+      const maxCount = recharge ? 1 : (entry.maxCount ?? DEFAULT_SHOP_MAX_COUNT);
+      if (!Number.isInteger(count) || count <= 0) return { kind: "failed", reason: "badRequest" };
       if (isEquipItemId(itemId) && count !== 1) return { kind: "failed", reason: "badRequest" };
       if (count > maxCount) return { kind: "failed", reason: "badRequest" };
       const total = price * count;
-      if (wallet.balance < total)
-        return { kind: "failed", reason: "notEnoughMesos" };
+      if (wallet.balance < total) return { kind: "failed", reason: "notEnoughMesos" };
       const grantedCount = recharge?.maxCount ?? count;
       const granted = grantItem(items, itemId, grantedCount, undefined, catalog);
-      if (granted === undefined)
-        return { kind: "failed", reason: "notEnoughSlots" };
+      if (granted === undefined) return { kind: "failed", reason: "notEnoughSlots" };
       // The balance was checked above, so this cannot fail; if it ever did, the grant would have to
       // be taken back - which is exactly why the check comes first.
       wallet.spend(total);
@@ -346,8 +316,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       const total = Math.ceil(missing * info.unitPrice);
       if (!Number.isSafeInteger(total) || total <= 0)
         return { kind: "failed", reason: "badRequest" };
-      if (!wallet.spend(total))
-        return { kind: "failed", reason: "notEnoughMesos" };
+      if (!wallet.spend(total)) return { kind: "failed", reason: "notEnoughMesos" };
       const next = { ...item, quantity: info.maxCount };
       tab!.items.set(slot, next);
       return {
@@ -367,8 +336,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       if (!Number.isInteger(count) || count < 0 || (count === 0 && !recharge))
         return { kind: "failed", reason: "badRequest" };
       const unitPrice = sellPriceOf(itemId);
-      if (unitPrice === undefined)
-        return { kind: "failed", reason: "unsellable" };
+      if (unitPrice === undefined) return { kind: "failed", reason: "unsellable" };
       // A star set is a single object, including at zero charges. Never multiply the base set price
       // by its charge count or allow partial sales (either would create money/charges).
       const held = items.inventories[1]?.items.get(slot);
@@ -384,16 +352,12 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
       )
         return { kind: "failed", reason: "badRequest" };
       const total = recharge
-        ? Math.floor(
-            (recharge.price + Math.ceil(count * recharge.unitPrice)) *
-              SELL_PRICE_RATIO,
-          )
+        ? Math.floor((recharge.price + Math.ceil(count * recharge.unitPrice)) * SELL_PRICE_RATIO)
         : unitPrice * count;
       if (!Number.isSafeInteger(total) || wallet.balance + total > 0xffffffff)
         return { kind: "failed", reason: "badRequest" };
       const taken = takeItem(items, itemId, slot, count);
-      if (taken === undefined)
-        return { kind: "failed", reason: "notEnoughItems" };
+      if (taken === undefined) return { kind: "failed", reason: "notEnoughItems" };
       wallet.earn(total);
       return {
         kind: "sold",
@@ -416,10 +380,7 @@ export function shopKeeper(archive: WzArchive | undefined): ShopKeeper {
  * `undefined` for an item the archive does not have, or one whose `info` has no price - a shop deal
  * is never priced by this server.
  */
-export function itemPrice(
-  archive: WzArchive | undefined,
-  itemId: number,
-): number | undefined {
+export function itemPrice(archive: WzArchive | undefined, itemId: number): number | undefined {
   return itemCatalogOf(archive)?.info(itemId)?.price;
 }
 

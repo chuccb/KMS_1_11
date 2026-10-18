@@ -29,12 +29,21 @@ test("the starter look is the first face and hair image in the archive", () => {
 });
 
 test("a character that picked a face and hair keeps them", () => {
-  assert.deepEqual(lookOf({ appearanceA: 21004, appearanceB: 30035 }), { face: 21004, hair: 30035 });
+  assert.deepEqual(lookOf({ appearanceA: 21004, appearanceB: 30035 }), {
+    face: 21004,
+    hair: 30035,
+  });
 });
 
 test("each half falls back on its own: a save can have one of the two", () => {
-  assert.deepEqual(lookOf({ appearanceA: 20005, appearanceB: 0 }), { face: 20005, hair: DEFAULT_HAIR_ID });
-  assert.deepEqual(lookOf({ appearanceA: 0, appearanceB: 30030 }), { face: DEFAULT_FACE_ID, hair: 30030 });
+  assert.deepEqual(lookOf({ appearanceA: 20005, appearanceB: 0 }), {
+    face: 20005,
+    hair: DEFAULT_HAIR_ID,
+  });
+  assert.deepEqual(lookOf({ appearanceA: 0, appearanceB: 30030 }), {
+    face: DEFAULT_FACE_ID,
+    hair: 30030,
+  });
 });
 
 test("withDefaultLook only fills what is missing and leaves everything else alone", () => {
@@ -49,8 +58,16 @@ test("withDefaultLook only fills what is missing and leaves everything else alon
   assert.equal(dressed.stats.appearanceB, DEFAULT_HAIR_ID);
   assert.equal(dressed.stats.mapId, 1000000, "nothing else moves");
   assert.equal(dressed.flags, record.flags);
-  assert.equal(record.stats.appearanceA, 0, "the stored record is not touched: 'never set' stays legible");
+  assert.equal(
+    record.stats.appearanceA,
+    0,
+    "the stored record is not touched: 'never set' stays legible",
+  );
 
   const already = { ...record, stats: { ...record.stats, appearanceA: 20001, appearanceB: 30012 } };
-  assert.equal(withDefaultLook(already), already, "a record that has a look is handed back as it is");
+  assert.equal(
+    withDefaultLook(already),
+    already,
+    "a record that has a look is handed back as it is",
+  );
 });

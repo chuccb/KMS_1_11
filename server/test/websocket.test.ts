@@ -24,7 +24,11 @@ import {
 } from "../src/net/websocket.ts";
 
 /** A client frame, masked the way a browser masks it (RFC 6455 5.3). */
-function clientFrame(opcode: number, payload: Uint8Array, options: { fin?: boolean; mask?: boolean } = {}): Uint8Array {
+function clientFrame(
+  opcode: number,
+  payload: Uint8Array,
+  options: { fin?: boolean; mask?: boolean } = {},
+): Uint8Array {
   const fin = options.fin ?? true;
   const masked = options.mask ?? true;
   const length = payload.length;
@@ -76,7 +80,9 @@ test("only a real upgrade is accepted, and every missing header is a refusal", (
   const accepted = upgradeResponse(request(good));
   assert.equal(accepted.ok, true);
   assert.ok(accepted.ok && accepted.headers[0] === "HTTP/1.1 101 Switching Protocols");
-  assert.ok(accepted.ok && accepted.headers.includes("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+  assert.ok(
+    accepted.ok && accepted.headers.includes("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
+  );
 
   assert.equal(isWebSocketUpgrade(request({ ...good, upgrade: "h2c" })), false);
   assert.equal(isWebSocketUpgrade(request({ ...good, connection: "keep-alive" })), false);
@@ -110,24 +116,37 @@ test("a frame split across chunks waits for the rest of itself", () => {
 
 test("messages are reassembled from continuation frames before anyone sees them", () => {
   const parser = new WsParser();
-  const first = parser.push(clientFrame(WS_OPCODE.text, new TextEncoder().encode("hello "), { fin: false }));
+  const first = parser.push(
+    clientFrame(WS_OPCODE.text, new TextEncoder().encode("hello "), { fin: false }),
+  );
   assert.equal(first.length, 1); // the parser reports the fragment; reassembly is the connection's job
-  const second = parser.push(clientFrame(WS_OPCODE.continuation, new TextEncoder().encode("world"), { fin: true }));
+  const second = parser.push(
+    clientFrame(WS_OPCODE.continuation, new TextEncoder().encode("world"), { fin: true }),
+  );
   assert.equal(second.length, 1);
   assert.equal(new TextDecoder().decode(second[0]!.payload), "world");
 });
 
 test("an unmasked client frame, a reserved opcode and a huge frame are all refused", () => {
   const parser = new WsParser();
-  assert.throws(() => parser.push(clientFrame(WS_OPCODE.text, new Uint8Array(2), { mask: false })), WebSocketError);
+  assert.throws(
+    () => parser.push(clientFrame(WS_OPCODE.text, new Uint8Array(2), { mask: false })),
+    WebSocketError,
+  );
   assert.throws(() => parser.push(clientFrame(0x3, new Uint8Array(0))), WebSocketError);
   const oversized = new WsParser({ maxPayloadBytes: 8 });
-  assert.throws(() => oversized.push(clientFrame(WS_OPCODE.text, new Uint8Array(9))), WebSocketError);
+  assert.throws(
+    () => oversized.push(clientFrame(WS_OPCODE.text, new Uint8Array(9))),
+    WebSocketError,
+  );
 });
 
 test("a server frame is never masked and uses the smallest length form", () => {
   assert.deepEqual([...encodeServerFrame(WS_OPCODE.text, new Uint8Array(0))], [0x81, 0x00]);
-  assert.deepEqual([...encodeServerFrame(WS_OPCODE.binary, new Uint8Array(3))], [0x82, 0x03, 0, 0, 0]);
+  assert.deepEqual(
+    [...encodeServerFrame(WS_OPCODE.binary, new Uint8Array(3))],
+    [0x82, 0x03, 0, 0, 0],
+  );
   const big = encodeServerFrame(WS_OPCODE.binary, new Uint8Array(300));
   assert.equal(big[0], 0x82);
   assert.equal(big[1], 126);
@@ -139,31 +158,38 @@ test("the frame size cap is the message cap, not an arbitrary number", () => {
   assert.equal(WS_MAX_MESSAGE_BYTES, 1 << 20);
 });
 
-test("a peer that vanishes without a closing handshake still closes the socket", { timeout: 10000 }, async () => {
-  // The upgrade event hands out a socket with `allowHalfOpen = true`, so a browser that is killed
-  // (or a tab that is closed hard) only produces `end`. If that is not treated as a close, the
-  // session behind it - and the account's seat - is never released: the next login is answered with
-  // "already online" until the server restarts.
-  const server = createServer();
-  const closed: string[] = [];
-  server.on("upgrade", (_request, socket) => {
-    socket.write("HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n");
-    const ws = new WebSocket(socket, {});
-    ws.onClose = (reason) => closed.push(reason);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
-  const client = connect(port, "127.0.0.1");
-  await new Promise<void>((resolve) => client.on("connect", resolve));
-  client.write(
-    "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
-  );
-  client.end(); // half-close: FIN without a close frame
-  for (let i = 0; i < 100 && closed.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(closed.length, 1, "the server saw the connection go away");
-  assert.match(closed[0]!, /peer closed|socket closed/);
-  client.destroy();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-});
+test(
+  "a peer that vanishes without a closing handshake still closes the socket",
+  { timeout: 10000 },
+  async () => {
+    // The upgrade event hands out a socket with `allowHalfOpen = true`, so a browser that is killed
+    // (or a tab that is closed hard) only produces `end`. If that is not treated as a close, the
+    // session behind it - and the account's seat - is never released: the next login is answered with
+    // "already online" until the server restarts.
+    const server = createServer();
+    const closed: string[] = [];
+    server.on("upgrade", (_request, socket) => {
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n",
+      );
+      const ws = new WebSocket(socket, {});
+      ws.onClose = (reason) => closed.push(reason);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const client = connect(port, "127.0.0.1");
+    await new Promise<void>((resolve) => client.on("connect", resolve));
+    client.write(
+      "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+    );
+    client.end(); // half-close: FIN without a close frame
+    for (let i = 0; i < 100 && closed.length === 0; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(closed.length, 1, "the server saw the connection go away");
+    assert.match(closed[0]!, /peer closed|socket closed/);
+    client.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  },
+);

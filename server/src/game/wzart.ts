@@ -113,17 +113,23 @@ export function artReaderOf(source: ArtSource | undefined): ArtReader | undefine
   const nodes = new Map<string, WzNode | undefined>();
   const roots = new Map<string, WzObject | undefined>();
   const rootOf = (image: string): WzObject | undefined => {
-    if (!roots.has(image)) roots.set(image, source.has(image) ? source.objects(image)[0] : undefined);
+    if (!roots.has(image))
+      roots.set(image, source.has(image) ? source.objects(image)[0] : undefined);
     return roots.get(image);
   };
 
   /** Walks `parts` from the image root, following UOLs, and hands back the path that landed. */
   const resolvedPaths = new Map<string, string | undefined>();
-  const resolve = (image: string, parts: readonly string[]): { node: WzNode; path: string[] } | undefined => {
+  const resolve = (
+    image: string,
+    parts: readonly string[],
+  ): { node: WzNode; path: string[] } | undefined => {
     if (parts.length === 0) {
       // The image root itself: a property list, wrapped so the caller sees one node type.
       const root = rootOf(image);
-      return root === undefined ? undefined : { node: new WzNodeClass("props", root.props), path: [] };
+      return root === undefined
+        ? undefined
+        : { node: new WzNodeClass("props", root.props), path: [] };
     }
     let current = parts.slice();
     for (let hop = 0; hop < 12; hop++) {
@@ -165,7 +171,10 @@ export function artReaderOf(source: ArtSource | undefined): ArtReader | undefine
       nodes.set(path, landed?.node);
       // A UOL alias and its target are one canvas; remember where the lookup landed so `at()` can
       // key its cache by the target rather than by the alias.
-      resolvedPaths.set(path, landed === undefined ? undefined : `${image}/${landed.path.join("/")}`);
+      resolvedPaths.set(
+        path,
+        landed === undefined ? undefined : `${image}/${landed.path.join("/")}`,
+      );
       return landed?.node;
     },
     at(path: string): CanvasArt | undefined {
@@ -177,7 +186,10 @@ export function artReaderOf(source: ArtSource | undefined): ArtReader | undefine
       // Compare against native dimensions: level-4 backgrounds have one pixel per 16x16 block.
       // A real partial stream remains invalid, but neither shipped scaled background is partial.
       const needed = canvas?.expectedBytes ?? 0;
-      const complete = canvas !== undefined && canvas.pixels !== null && (needed === 0 || canvas.pixels.length >= needed);
+      const complete =
+        canvas !== undefined &&
+        canvas.pixels !== null &&
+        (needed === 0 || canvas.pixels.length >= needed);
       if (canvas !== undefined && complete) {
         const rgba = canvasToRgba(canvas);
         if (rgba !== null) {
@@ -189,12 +201,15 @@ export function artReaderOf(source: ArtSource | undefined): ArtReader | undefine
               const origin = vectorOf(entry.value);
               if (origin !== undefined) [ox, oy] = origin;
             } else if (entry.name === "z") {
-              if (typeof entry.value === "number" || typeof entry.value === "string") z = entry.value;
+              if (typeof entry.value === "number" || typeof entry.value === "string")
+                z = entry.value;
             }
           }
           let png: Uint8Array | undefined;
           art = {
-            get png() { return png ??= new Uint8Array(encodePng(rgba)); },
+            get png() {
+              return (png ??= new Uint8Array(encodePng(rgba)));
+            },
             rgba: rgba.data,
             width: rgba.width,
             height: rgba.height,
@@ -232,7 +247,7 @@ export function frameNames(node: WzNode | undefined): string[] {
 /** Canvas metadata lives in canvas.props, NOT WzNode.props. Preserve property frames too. */
 export function frameProperty(node: WzNode | undefined, name: string): unknown {
   const props = node?.kind === "canvas" ? node.canvas?.props : node?.props;
-  return props?.find(entry => entry.name === name)?.value;
+  return props?.find((entry) => entry.name === name)?.value;
 }
 
 /** Read alpha endpoints only when present; -1 means retain, as in the native layer API. */

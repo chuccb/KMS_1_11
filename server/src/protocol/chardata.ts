@@ -289,7 +289,13 @@ export interface CharacterData {
 /** Empty item block: legal, and what a server sends before it has an item model. */
 export function emptyCharacterItems(): CharacterItems {
   const empty = (): Inventory => ({ capacity: 0, items: new Map(), records: [] });
-  return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
+  return {
+    worn: new Map(),
+    wornCash: new Map(),
+    inventories: [empty(), empty(), empty(), empty()],
+    map32: [],
+    mapString: [],
+  };
 }
 
 /**
@@ -306,7 +312,13 @@ export const START_INVENTORY_SLOTS = 24;
 /** The item block of a new character: four announced tabs of `START_INVENTORY_SLOTS`, all empty. */
 export function startingCharacterItems(slots = START_INVENTORY_SLOTS): CharacterItems {
   const empty = (): Inventory => ({ capacity: slots, items: new Map(), records: [] });
-  return { worn: new Map(), wornCash: new Map(), inventories: [empty(), empty(), empty(), empty()], map32: [], mapString: [] };
+  return {
+    worn: new Map(),
+    wornCash: new Map(),
+    inventories: [empty(), empty(), empty(), empty()],
+    map32: [],
+    mapString: [],
+  };
 }
 
 /**
@@ -322,7 +334,10 @@ export const DEFAULT_FACE_ID = 20000;
 export const DEFAULT_HAIR_ID = 30000;
 
 /** What sits on the character's head: the record's face and hair, or the starters when it has none. */
-export function lookOf(stats: { appearanceA: number; appearanceB: number }): { face: number; hair: number } {
+export function lookOf(stats: { appearanceA: number; appearanceB: number }): {
+  face: number;
+  hair: number;
+} {
   return {
     face: stats.appearanceA !== 0 ? stats.appearanceA : DEFAULT_FACE_ID,
     hair: stats.appearanceB !== 0 ? stats.appearanceB : DEFAULT_HAIR_ID,
@@ -397,11 +412,16 @@ export function withWorn(items: CharacterItems, worn: Map<number, ItemSlot>): Ch
 export function nameFieldBytes(name: string): Uint8Array {
   const out = new Uint8Array(CHARACTER_NAME_BYTES);
   if (name.length > CHARACTER_NAME_MAX) {
-    throw new RangeError(`character name "${name}" is ${name.length} bytes; the client allows ${CHARACTER_NAME_MAX}`);
+    throw new RangeError(
+      `character name "${name}" is ${name.length} bytes; the client allows ${CHARACTER_NAME_MAX}`,
+    );
   }
   for (let i = 0; i < name.length; i++) {
     const code = name.charCodeAt(i);
-    if (code > 0xff) throw new RangeError(`character name "${name}" is not a byte string; encode CP949 before writing char[13]`);
+    if (code > 0xff)
+      throw new RangeError(
+        `character name "${name}" is not a byte string; encode CP949 before writing char[13]`,
+      );
     out[i] = code;
   }
   return out;
@@ -455,7 +475,8 @@ function writeInventory(writer: PacketWriter, inventory: Inventory, typeHint: nu
   const capacity = inventory.capacity > 0 ? inventory.capacity : highest;
   writer.writeByte(capacity);
   for (const slot of slots) {
-    if (slot < 1 || slot > 0xff) throw new RangeError(`slot ${slot} does not fit the wire's u8 slot number`);
+    if (slot < 1 || slot > 0xff)
+      throw new RangeError(`slot ${slot} does not fit the wire's u8 slot number`);
     if (slot > capacity) {
       throw new RangeError(`slot ${slot} is above the declared inventory capacity ${capacity}`);
     }
@@ -463,7 +484,8 @@ function writeInventory(writer: PacketWriter, inventory: Inventory, typeHint: nu
     writeItemSlot(writer, inventory.items.get(slot)!, typeHint);
   }
   writer.writeByte(0);
-  if (inventory.records.length > 0xff) throw new RangeError(`${inventory.records.length} records cannot fit a u8 count`);
+  if (inventory.records.length > 0xff)
+    throw new RangeError(`${inventory.records.length} records cannot fit a u8 count`);
   writer.writeByte(inventory.records.length);
   for (const record of inventory.records) writer.writeU32(record.key).writeU32(record.value);
 }
@@ -473,7 +495,9 @@ function writeWorn(writer: PacketWriter, worn: Map<number, ItemSlot>): void {
   const slots = [...worn.keys()].sort((a, b) => a - b);
   for (const slot of slots) {
     if (slot < 1 || slot > WORN_SLOT_LIMIT) {
-      throw new RangeError(`worn slot ${slot} is outside the client's 1..${WORN_SLOT_LIMIT} loop (sub_45F610)`);
+      throw new RangeError(
+        `worn slot ${slot} is outside the client's 1..${WORN_SLOT_LIMIT} loop (sub_45F610)`,
+      );
     }
     writer.writeByte(slot);
     // The worn groups are always equips, so the client passes "1" as the kind hint (sub_45E6A0).
@@ -485,9 +509,15 @@ function writeWorn(writer: PacketWriter, worn: Map<number, ItemSlot>): void {
 /** Appends `u8 flags` followed by whichever blocks the flags announce. */
 export function writeCharacterData(writer: PacketWriter, data: CharacterData): void {
   const allowed =
-    CHAR_FLAG_STATS | CHAR_FLAG_ITEMS | CHAR_FLAG_INVENTORY_2 | CHAR_FLAG_INVENTORY_3 | CHAR_FLAG_INVENTORY_4;
+    CHAR_FLAG_STATS |
+    CHAR_FLAG_ITEMS |
+    CHAR_FLAG_INVENTORY_2 |
+    CHAR_FLAG_INVENTORY_3 |
+    CHAR_FLAG_INVENTORY_4;
   if ((data.flags & ~(allowed | CHAR_FLAG_MAP32 | CHAR_FLAG_MAPSTR)) !== 0) {
-    throw new RangeError(`CharacterData flags 0x${data.flags.toString(16)}: the client reads at most 0x7f`);
+    throw new RangeError(
+      `CharacterData flags 0x${data.flags.toString(16)}: the client reads at most 0x7f`,
+    );
   }
   const flags = data.flags;
   const items = data.items ?? emptyCharacterItems();
@@ -508,7 +538,8 @@ export function writeCharacterData(writer: PacketWriter, data: CharacterData): v
   }
   if (flags & CHAR_FLAG_MAPSTR) {
     writer.writeU16(items.mapString.length);
-    for (const entry of items.mapString) writer.writeAsciiString(entry.key).writeAsciiString(entry.value);
+    for (const entry of items.mapString)
+      writer.writeAsciiString(entry.key).writeAsciiString(entry.value);
   }
 }
 
@@ -576,7 +607,8 @@ function readInventory(reader: PacketReader, typeHint: number): Inventory {
   }
   const recordCount = reader.readByte();
   const records: InventoryRecord[] = [];
-  for (let i = 0; i < recordCount; i++) records.push({ key: reader.readU32(), value: reader.readU32() });
+  for (let i = 0; i < recordCount; i++)
+    records.push({ key: reader.readU32(), value: reader.readU32() });
   return { capacity, items, records };
 }
 
@@ -593,7 +625,8 @@ function readWorn(reader: PacketReader): Map<number, ItemSlot> {
 /** Reads one `CharacterData`. A flags byte without `0x01` reads as a zeroed stat block. */
 export function readCharacterData(reader: PacketReader): CharacterData {
   const flags = reader.readByte();
-  if (flags & ~0x7f) throw new RangeError(`CharacterData flags 0x${flags.toString(16)} is not a known flag mask`);
+  if (flags & ~0x7f)
+    throw new RangeError(`CharacterData flags 0x${flags.toString(16)} is not a known flag mask`);
   const stats = flags & CHAR_FLAG_STATS ? readCharacterStats(reader) : zeroStats();
   const items = emptyCharacterItems();
   if (flags & CHAR_FLAG_ITEMS) {
@@ -607,11 +640,13 @@ export function readCharacterData(reader: PacketReader): CharacterData {
   }
   if (flags & CHAR_FLAG_MAP32) {
     const count = reader.readU16();
-    for (let i = 0; i < count; i++) items.map32.push({ key: reader.readU32(), value: reader.readU32() });
+    for (let i = 0; i < count; i++)
+      items.map32.push({ key: reader.readU32(), value: reader.readU32() });
   }
   if (flags & CHAR_FLAG_MAPSTR) {
     const count = reader.readU16();
-    for (let i = 0; i < count; i++) items.mapString.push({ key: reader.readAsciiString(), value: reader.readAsciiString() });
+    for (let i = 0; i < count; i++)
+      items.mapString.push({ key: reader.readAsciiString(), value: reader.readAsciiString() });
   }
   return { stats, items, flags };
 }
@@ -660,7 +695,8 @@ export function characterDataOf(
   // A tab is worth announcing when it holds something *or* when it has slots: the capacity byte is
   // what makes the client allocate the array at all (`sub_4605A0` resizes to capacity + 1), so a
   // character with 24 empty slots still needs its flag, or nothing could ever be put in it.
-  const tells = (inventory: Inventory): boolean => inventory.items.size > 0 || inventory.records.length > 0 || inventory.capacity > 0;
+  const tells = (inventory: Inventory): boolean =>
+    inventory.items.size > 0 || inventory.records.length > 0 || inventory.capacity > 0;
   const hasItems =
     block.worn.size + block.wornCash.size > 0 ||
     block.inventories.some(tells) ||
@@ -671,7 +707,8 @@ export function characterDataOf(
     // `CHAR_FLAG_ITEMS` announces the two worn groups *and* the equip tab, so anything in any of
     // them has to raise it - otherwise the client would never be told about the item at all.
     const equip = block.inventories[0];
-    if (block.worn.size + block.wornCash.size > 0 || (equip !== undefined && tells(equip))) flags |= CHAR_FLAG_ITEMS;
+    if (block.worn.size + block.wornCash.size > 0 || (equip !== undefined && tells(equip)))
+      flags |= CHAR_FLAG_ITEMS;
     for (let i = 1; i < block.inventories.length; i++) {
       const inventory = block.inventories[i]!;
       if (tells(inventory)) {

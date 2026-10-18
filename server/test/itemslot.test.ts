@@ -133,7 +133,10 @@ test("the cash block appears only when it is present, and round-trips as a u64",
   assert.deepEqual(readItemSlot(new PacketReader(writer.toBytes()), 1), item);
 
   // The client's flag is derived (`*(u64*)(obj + 0x10) != 0`), so a zero sn cannot be written.
-  assert.throws(() => writeItemSlot(new PacketWriter(), equipSlot(1, { cash: { ...cash, sn: 0n } }), 1), RangeError);
+  assert.throws(
+    () => writeItemSlot(new PacketWriter(), equipSlot(1, { cash: { ...cash, sn: 0n } }), 1),
+    RangeError,
+  );
 });
 
 test("the item block is worn + worn cash + equip tab + records, in sub_45FCC0's order", () => {
@@ -155,28 +158,56 @@ test("the item block is worn + worn cash + equip tab + records, in sub_45FCC0's 
   assert.equal(writer.length, 1 + CHARACTER_STATS_BYTES + 39 + 39 + 49);
   assert.equal(
     hex.slice(2 * (1 + CHARACTER_STATS_BYTES)),
-    "03" + EQUIP_HEX + "00" /* worn slot 3 */
-      + "01" + "31de1300" + "00" + "00" + "00" + "00".repeat(30) + "00" /* worn cash slot 1 */
-      + "18" /* equip tab capacity 24 */
-      + "01" + EQUIP_HEX + "00" /* equip tab slot 1 */
-      + "01" /* one record */
-      + "0d0c0b0a" + "04030201",
+    "03" +
+      EQUIP_HEX +
+      "00" /* worn slot 3 */ +
+      "01" +
+      "31de1300" +
+      "00" +
+      "00" +
+      "00" +
+      "00".repeat(30) +
+      "00" /* worn cash slot 1 */ +
+      "18" /* equip tab capacity 24 */ +
+      "01" +
+      EQUIP_HEX +
+      "00" /* equip tab slot 1 */ +
+      "01" /* one record */ +
+      "0d0c0b0a" +
+      "04030201",
   );
 });
 
 test("an item block round-trips, including the per-inventory 8-byte records", () => {
   const items = emptyCharacterItems();
   items.worn.set(1, sampleEquip());
-  items.inventories[0] = { capacity: 24, items: new Map([[1, sampleEquip()]]), records: [{ key: 1, value: 2 }] };
-  items.inventories[1] = { capacity: 30, items: new Map([[7, nonEquipSlot(2000001, 3)]]), records: [] };
-  items.inventories[3] = { capacity: 48, items: new Map(), records: [{ key: 0xdeadbeef, value: 0xffffffff }] };
+  items.inventories[0] = {
+    capacity: 24,
+    items: new Map([[1, sampleEquip()]]),
+    records: [{ key: 1, value: 2 }],
+  };
+  items.inventories[1] = {
+    capacity: 30,
+    items: new Map([[7, nonEquipSlot(2000001, 3)]]),
+    records: [],
+  };
+  items.inventories[3] = {
+    capacity: 48,
+    items: new Map(),
+    records: [{ key: 0xdeadbeef, value: 0xffffffff }],
+  };
   items.map32 = [{ key: 0x11111111, value: 0x22222222 }];
   items.mapString = [{ key: "quest", value: "clear" }];
 
   const data = characterDataOf({ id: 42, name: "RoundTrip" }, items);
   assert.equal(
     data.flags,
-    CHAR_FLAG_STATS | CHAR_FLAG_ITEMS | CHAR_FLAG_INVENTORY_2 | CHAR_FLAG_INVENTORY_4 | CHAR_FLAG_MAP32 | CHAR_FLAG_MAPSTR,
+    CHAR_FLAG_STATS |
+      CHAR_FLAG_ITEMS |
+      CHAR_FLAG_INVENTORY_2 |
+      CHAR_FLAG_INVENTORY_4 |
+      CHAR_FLAG_MAP32 |
+      CHAR_FLAG_MAPSTR,
   );
 
   const writer = new PacketWriter();
@@ -190,7 +221,10 @@ test("an item block round-trips, including the per-inventory 8-byte records", ()
 test("slot numbers the client cannot address are refused instead of truncated", () => {
   const items = emptyCharacterItems();
   items.worn.set(15, sampleEquip()); // the client loops 1..14 (sub_45F610)
-  assert.throws(() => writeCharacterData(new PacketWriter(), characterDataOf({ id: 1, name: "X" }, items)), /1\.\.14/);
+  assert.throws(
+    () => writeCharacterData(new PacketWriter(), characterDataOf({ id: 1, name: "X" }, items)),
+    /1\.\.14/,
+  );
 
   items.worn.clear();
   items.inventories[0] = { capacity: 4, items: new Map([[9, sampleEquip()]]), records: [] };

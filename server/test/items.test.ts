@@ -10,7 +10,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { consumeDeltas, consumeSpecProvider, consumeSpecOf, healsVitals } from "../src/game/items.ts";
+import {
+  consumeDeltas,
+  consumeSpecProvider,
+  consumeSpecOf,
+  healsVitals,
+} from "../src/game/items.ts";
 import { applyVitalReport } from "../src/game/vitals.ts";
 import { zeroStats, type CharacterStats } from "../src/protocol/chardata.ts";
 import type { WzArchive } from "../src/wz/archive.ts";
@@ -31,7 +36,10 @@ function image(items: Record<string, Record<string, unknown>>): unknown {
 }
 
 function fieldsToProps(fields: unknown): { name: string; value: unknown }[] {
-  return Object.entries(fields as Record<string, unknown>).map(([name, value]) => ({ name, value }));
+  return Object.entries(fields as Record<string, unknown>).map(([name, value]) => ({
+    name,
+    value,
+  }));
 }
 
 /** The two calls `consumeSpecOf` makes: `has(path)` and `objects(path)`. */
@@ -56,7 +64,14 @@ test("a potion's flat spec is `hp`/`mp`, and nothing else is applied", () => {
   // Item/Consume/0200.img/02000000: spec {hp: 50} (빨간 포션, info/price 25).
   const archive = fakeArchive("Item/Consume/0200.img", image({ "02000000": { spec: { hp: 50 } } }));
   const spec = consumeSpecOf(archive, 2000000);
-  assert.deepEqual(spec, { hp: 50, mp: undefined, hpR: undefined, mpR: undefined, moveTo: undefined, unapplied: [] });
+  assert.deepEqual(spec, {
+    hp: 50,
+    mp: undefined,
+    hpR: undefined,
+    mpR: undefined,
+    moveTo: undefined,
+    unapplied: [],
+  });
   assert.equal(healsVitals(spec!), true, "it restores a vital, so 0x18 is its opcode");
 
   // The deltas a use is worth, and then the *real* rule: 20 + 50 clamps to the maximum.
@@ -64,7 +79,11 @@ test("a potion's flat spec is `hp`/`mp`, and nothing else is applied", () => {
   assert.deepEqual(deltas, { hpDelta: 50 });
   const stats = record();
   assert.deepEqual(applyVitalReport(stats, deltas), { hp: 50 });
-  assert.deepEqual([stats.hp, stats.maxHp, stats.mp], [50, 50, 10], "MP is untouched by an HP potion");
+  assert.deepEqual(
+    [stats.hp, stats.maxHp, stats.mp],
+    [50, 50, 10],
+    "MP is untouched by an HP potion",
+  );
 
   // A full bar means the use would do nothing, which is what the handler refuses an item for.
   const full = record({ hp: 50 });
@@ -117,15 +136,30 @@ test("a 203 item is a map change, and its destination is `spec/moveTo`", () => {
 
 test("an id with no spec, no image, or no data at all has no use", () => {
   // An item whose node exists but has no `spec` (a 표창, a 207 item).
-  const noSpec = fakeArchive("Item/Consume/0207.img", image({ "02070000": { info: { price: 250 } } }));
+  const noSpec = fakeArchive(
+    "Item/Consume/0207.img",
+    image({ "02070000": { info: { price: 250 } } }),
+  );
   assert.equal(consumeSpecOf(noSpec, 2070000), undefined);
   // An item the archive does not carry at all, and an equip - whose image is not even under Item/.
   const archive = fakeArchive("Item/Consume/0200.img", image({ "02000000": { spec: { hp: 50 } } }));
   assert.equal(consumeSpecOf(archive, 2000001), undefined);
-  assert.equal(consumeSpecOf(archive, 1002000), undefined, "an equip id never throws, it just has no spec");
-  assert.equal(consumeSpecOf(undefined, 2000000), undefined, "--data off means no item does anything");
+  assert.equal(
+    consumeSpecOf(archive, 1002000),
+    undefined,
+    "an equip id never throws, it just has no spec",
+  );
+  assert.equal(
+    consumeSpecOf(undefined, 2000000),
+    undefined,
+    "--data off means no item does anything",
+  );
   assert.equal(consumeSpecProvider(undefined)(2000000), undefined);
-  assert.equal(consumeSpecProvider(archive)(2000000)?.hp, 50, "the provider is the same reader over one archive");
+  assert.equal(
+    consumeSpecProvider(archive)(2000000)?.hp,
+    50,
+    "the provider is the same reader over one archive",
+  );
 });
 
 test("a hostile spec is not a use: a percent that is not a number, or an id that is not an item", () => {
@@ -142,45 +176,90 @@ test("a hostile spec is not a use: a percent that is not a number, or an id that
 
 // New regression sources; not executed for this delivery.
 test("native speed potion reads milliseconds, while mixed unknown mechanics refuse as a whole", () => {
-  const spec = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002001": { spec: { speed: 8, time: 180000 } },
-  })), 2002001)!;
+  const spec = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0200.img",
+      image({
+        "02002001": { spec: { speed: 8, time: 180000 } },
+      }),
+    ),
+    2002001,
+  )!;
   assert.equal(spec.speed, 8);
   assert.equal(spec.time, 180000);
   assert.deepEqual(spec.unapplied, []);
   assert.equal(healsVitals(spec), false, "speed is not a fake HP/MP restoration");
-  const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002001": { spec: { speed: 8, time: 180000, mdd: 5 } },
-  })), 2002001)!;
+  const mixed = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0200.img",
+      image({
+        "02002001": { spec: { speed: 8, time: 180000, mdd: 5 } },
+      }),
+    ),
+    2002001,
+  )!;
   assert.deepEqual(mixed.unapplied, ["mdd"]);
   for (const time of [0, -1, 1.5, 0x80000000]) {
-    const bad = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-      "02002001": { spec: { speed: 8, time } },
-    })), 2002001)!;
+    const bad = consumeSpecOf(
+      fakeArchive(
+        "Item/Consume/0200.img",
+        image({
+          "02002001": { spec: { speed: 8, time } },
+        }),
+      ),
+      2002001,
+    )!;
     assert.ok(bad.unapplied.includes("speed"));
     assert.ok(bad.unapplied.includes("time"));
   }
 });
 
 // Added as unexecuted regression sources: PAD/ACC have real physical-attack consumers now.
-test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still refuses whole use",()=>{
-  for(const key of ["pad","acc"] as const) {
-    const spec=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000}}})),2002004)!;
-    assert.equal(spec[key],5);assert.equal(spec.time,180000);assert.deepEqual(spec.unapplied,[]);
-    const mixed=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000,mdd:10}}})),2002004)!;
-    assert.deepEqual(mixed.unapplied,["mdd"]);
+test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still refuses whole use", () => {
+  for (const key of ["pad", "acc"] as const) {
+    const spec = consumeSpecOf(
+      fakeArchive(
+        "Item/Consume/0200.img",
+        image({ "02002004": { spec: { [key]: 5, time: 180000 } } }),
+      ),
+      2002004,
+    )!;
+    assert.equal(spec[key], 5);
+    assert.equal(spec.time, 180000);
+    assert.deepEqual(spec.unapplied, []);
+    const mixed = consumeSpecOf(
+      fakeArchive(
+        "Item/Consume/0200.img",
+        image({ "02002004": { spec: { [key]: 5, time: 180000, mdd: 10 } } }),
+      ),
+      2002004,
+    )!;
+    assert.deepEqual(mixed.unapplied, ["mdd"]);
   }
 });
 
-
 // Unexecuted source: defensive specs are accepted only now that 4C8ED0 consumes PDD/EVA.
 test("timed PDD and EVA feed contact; an unimplemented MDD still refuses a mixed item", () => {
-  const spec = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002000": { spec: { pdd: 10, eva: 5, time: 180000 } },
-  })), 2002000)!;
-  assert.equal(spec.pdd, 10); assert.equal(spec.eva, 5); assert.deepEqual(spec.unapplied, []);
-  const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002000": { spec: { pdd: 10, eva: 5, mdd: 3, time: 180000 } },
-  })), 2002000)!;
+  const spec = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0200.img",
+      image({
+        "02002000": { spec: { pdd: 10, eva: 5, time: 180000 } },
+      }),
+    ),
+    2002000,
+  )!;
+  assert.equal(spec.pdd, 10);
+  assert.equal(spec.eva, 5);
+  assert.deepEqual(spec.unapplied, []);
+  const mixed = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0200.img",
+      image({
+        "02002000": { spec: { pdd: 10, eva: 5, mdd: 3, time: 180000 } },
+      }),
+    ),
+    2002000,
+  )!;
   assert.deepEqual(mixed.unapplied, ["mdd"]);
 });

@@ -81,12 +81,29 @@ test("the stat block layout is byte-exact against sub_45D840's read order", () =
   // id(4) name(13) gender(1) appearanceA(4) appearanceB(4) unknown26(1) hair(4) level(1)
   assert.equal(
     hex.slice(0, 2 * (4 + CHARACTER_NAME_BYTES + 1 + 4 + 4 + 1 + 4 + 1)),
-    "44332211" + toHex(nameFieldBytes("Hero")) + "01" + "02000100" + "04000300" + "05" + "07000600" + "08",
+    "44332211" +
+      toHex(nameFieldBytes("Hero")) +
+      "01" +
+      "02000100" +
+      "04000300" +
+      "05" +
+      "07000600" +
+      "08",
   );
   // job..sp are eleven u16 in this order: job str dex int luk hp maxHp mp maxMp ap sp
   assert.equal(
     hex.slice(2 * 32, 2 * 54),
-    "0901" + "0a02" + "0b03" + "0c04" + "0d05" + "0e06" + "0f07" + "1008" + "1109" + "120a" + "130b",
+    "0901" +
+      "0a02" +
+      "0b03" +
+      "0c04" +
+      "0d05" +
+      "0e06" +
+      "0f07" +
+      "1008" +
+      "1109" +
+      "120a" +
+      "130b",
   );
   // exp(u32) fame(u16) mesos(u32) mapId(u32) unknown101(u8)
   assert.equal(hex.slice(2 * 54), "1615140c" + "170d" + "1e1d1c10" + "21201f11" + "12");
@@ -114,7 +131,9 @@ test("a stat-only CharacterData is one flags byte plus one 69-byte stat block (C
 
 test("an item block with nothing in it is a legal, empty block", () => {
   const data = characterDataOf(sampleStats());
-  const bytes = encodeWorldSelectResult(LOGIN_RESULT.ok, [{ ...data, flags: CHAR_FLAG_STATS | CHAR_FLAG_ITEMS }]);
+  const bytes = encodeWorldSelectResult(LOGIN_RESULT.ok, [
+    { ...data, flags: CHAR_FLAG_STATS | CHAR_FLAG_ITEMS },
+  ]);
   // flags + stats + (two empty worn groups) + (empty equip tab: capacity, terminator, 0 records)
   assert.equal(bytes.length, 3 + 1 + CHARACTER_STATS_BYTES + 1 + 1 + 1 + 1 + 1);
   const reader = new PacketReader(bytes);
@@ -136,7 +155,11 @@ test("an item block with nothing in it is a legal, empty block", () => {
 });
 
 test("a failed login reply is a single result byte", () => {
-  for (const result of [LOGIN_RESULT.wrongPassword, LOGIN_RESULT.alreadyConnected, LOGIN_RESULT.systemError]) {
+  for (const result of [
+    LOGIN_RESULT.wrongPassword,
+    LOGIN_RESULT.alreadyConnected,
+    LOGIN_RESULT.systemError,
+  ]) {
     assert.equal(toHex(encodeLoginResult(result)), `01${result.toString(16).padStart(2, "0")}`);
   }
 });
@@ -150,7 +173,11 @@ test("the result codes are the client's own, and each one means what its message
   assert.equal(LOGIN_RESULT.erasedOrStopped2, 3);
   assert.equal(LOGIN_RESULT.wrongPassword, 4, "잘못된 패스워드입니다.");
   assert.equal(LOGIN_RESULT.notRegistered, 5, "등록되지 않은 아이디입니다.");
-  assert.equal(LOGIN_RESULT.alreadyConnected, 7, "현재 접속중인 아이디이거나, 현재 서버점검중입니다.");
+  assert.equal(
+    LOGIN_RESULT.alreadyConnected,
+    7,
+    "현재 접속중인 아이디이거나, 현재 서버점검중입니다.",
+  );
   assert.equal(LOGIN_RESULT.systemError, 0xff, "시스템 오류로 접속 할 수 없습니다.");
   assert.deepEqual(
     [LOGIN_RESULT.systemError6, LOGIN_RESULT.systemError8, LOGIN_RESULT.systemError9],
@@ -186,7 +213,11 @@ test("the world-select reply never pads past the three slots the client has", ()
   const bytes = encodeWorldSelectResult(LOGIN_RESULT.ok, three);
   assert.equal(bytes[2], 3);
   assert.throws(
-    () => encodeWorldSelectResult(LOGIN_RESULT.ok, [1, 2, 3, 4].map((n) => characterDataOf({ id: n, name: `C${n}` }))),
+    () =>
+      encodeWorldSelectResult(
+        LOGIN_RESULT.ok,
+        [1, 2, 3, 4].map((n) => characterDataOf({ id: n, name: `C${n}` })),
+      ),
     RangeError,
   );
   // An empty world is legal: the client zeroes all three slots.
@@ -199,7 +230,11 @@ test("the IPv4 field goes out in network order, the port as a little-endian u16"
   assert.throws(() => ipv4WireValue("1.2.3"), RangeError);
   assert.throws(() => ipv4WireValue("1.2.3.400"), RangeError);
 
-  const bytes = encodeSelectCharacterResult(LOGIN_RESULT.ok, { ip: "127.0.0.1", port: 0x8484, characterId: 0xdeadbeef });
+  const bytes = encodeSelectCharacterResult(LOGIN_RESULT.ok, {
+    ip: "127.0.0.1",
+    port: 0x8484,
+    characterId: 0xdeadbeef,
+  });
   assert.equal(toHex(bytes), "0300" + "7f000001" + "8484" + "efbeadde");
 });
 
@@ -209,8 +244,14 @@ test("a redirect is mandatory when the client is told to enter the game", () => 
 });
 
 test("the name-check reply is a string plus a signed byte", () => {
-  assert.equal(toHex(encodeNameCheckResult("Hero", NAME_CHECK_RESULT.taken)), "04" + "04004865726f" + "01");
-  assert.equal(toHex(encodeNameCheckResult("Hero", NAME_CHECK_RESULT.failed)), "04" + "04004865726f" + "ff");
+  assert.equal(
+    toHex(encodeNameCheckResult("Hero", NAME_CHECK_RESULT.taken)),
+    "04" + "04004865726f" + "01",
+  );
+  assert.equal(
+    toHex(encodeNameCheckResult("Hero", NAME_CHECK_RESULT.failed)),
+    "04" + "04004865726f" + "ff",
+  );
   assert.throws(() => encodeNameCheckResult("Hero", 200), RangeError);
 });
 

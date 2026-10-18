@@ -4,17 +4,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { WzArchive } from "../src/wz/archive.ts";
-import {
-  characterDataOf,
-  emptyCharacterItems,
-  zeroStats,
-} from "../src/protocol/chardata.ts";
+import { characterDataOf, emptyCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import { equipSlot } from "../src/protocol/itemslot.ts";
-import {
-  ABILITY_MASK,
-  encodeAbilityRequest,
-  readAbilityRequest,
-} from "../src/protocol/ability.ts";
+import { ABILITY_MASK, encodeAbilityRequest, readAbilityRequest } from "../src/protocol/ability.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeStatUpdate, readStatUpdate } from "../src/protocol/stat.ts";
 import { spendAbility } from "../src/game/ability.ts";
@@ -43,9 +35,7 @@ const fixture = (job = 0) =>
 const both = ABILITY_MASK.maxHp | ABILITY_MASK.maxMp;
 
 test("all 60 growth DWORDs match the original executable's VA 005BB344", () => {
-  const exe = readFileSync(
-    resolve(import.meta.dirname, "../../MapleStory.exe"),
-  );
+  const exe = readFileSync(resolve(import.meta.dirname, "../../MapleStory.exe"));
   const pe = exe.readUInt32LE(0x3c),
     optional = pe + 24;
   const base = exe.readUInt32LE(optional + 28),
@@ -59,9 +49,7 @@ test("all 60 growth DWORDs match the original executable's VA 005BB344", () => {
       offset = exe.readUInt32LE(section + 20) + rva - address;
   }
   assert.notEqual(offset, undefined);
-  const actual = Array.from({ length: 60 }, (_, i) =>
-    exe.readInt32LE(offset! + 4 * i),
-  );
+  const actual = Array.from({ length: 60 }, (_, i) => exe.readInt32LE(offset! + 4 * i));
   assert.deepEqual(actual, VITAL_GROWTH_ROWS.flat());
 });
 
@@ -89,56 +77,44 @@ test("five job groups select different natural/AP rows and truncate INT after mu
     }
   const stats = fixture(211);
   stats.int = 19;
-  assert.equal(
-    growVitals(stats, ABILITY_MASK.maxMp, "ap", { rand15: () => 0 }).maxMp,
-    69,
-  );
+  assert.equal(growVitals(stats, ABILITY_MASK.maxMp, "ap", { rand15: () => 0 }).maxMp, 69);
 });
 
 test("modulo RNG reaches inclusive endpoints without replacing it with a fractional range", () => {
   const stats = fixture();
   const draws = [5, 2];
-  assert.deepEqual(
-    growVitals(stats, both, "level", { rand15: () => draws.shift()! }),
-    { maxHp: 75, maxMp: 64 },
-  );
+  assert.deepEqual(growVitals(stats, both, "level", { rand15: () => draws.shift()! }), {
+    maxHp: 75,
+    maxMp: 64,
+  });
   const unchanged = fixture(),
     before = { ...unchanged };
-  assert.throws(
-    () => growVitals(unchanged, both, "level", { rand15: () => 32768 }),
-    /RNG/,
-  );
+  assert.throws(() => growVitals(unchanged, both, "level", { rand15: () => 32768 }), /RNG/);
   assert.deepEqual(unchanged, before);
 });
 
 test("real WZ passive numbers override misleading hs prose and apply to learned levels only", () => {
-  const skill = growthSkillProvider(
-    WzArchive.open(resolve(import.meta.dirname, "../../Data.wz")),
-  );
+  const skill = growthSkillProvider(WzArchive.open(resolve(import.meta.dirname, "../../Data.wz")));
   assert.deepEqual(skill(1000001, 10), { x: 30, y: 20 });
   assert.deepEqual(skill(2000001, 10), { x: 20, y: 10 });
-  assert.deepEqual(
-    skill(1000001, 99),
-    { x: 30, y: 20 },
-    "native clamps a positive learned level",
-  );
+  assert.deepEqual(skill(1000001, 99), { x: 30, y: 20 }, "native clamps a positive learned level");
   assert.equal(skill(1000001, 0), undefined);
   const skills = [
     { key: 1000001, value: 10 },
     { key: 2000001, value: 10 },
   ];
-  assert.deepEqual(
-    growVitals(fixture(100), both, "level", { skills, skill, rand15: () => 0 }),
-    { maxHp: 120, maxMp: 76 },
-  );
-  assert.deepEqual(
-    growVitals(fixture(100), both, "ap", { skills, skill, rand15: () => 0 }),
-    { maxHp: 105, maxMp: 63 },
-  );
-  assert.deepEqual(
-    growVitals(fixture(100), both, "level", { skill, rand15: () => 0 }),
-    { maxHp: 90, maxMp: 56 },
-  );
+  assert.deepEqual(growVitals(fixture(100), both, "level", { skills, skill, rand15: () => 0 }), {
+    maxHp: 120,
+    maxMp: 76,
+  });
+  assert.deepEqual(growVitals(fixture(100), both, "ap", { skills, skill, rand15: () => 0 }), {
+    maxHp: 105,
+    maxMp: 63,
+  });
+  assert.deepEqual(growVitals(fixture(100), both, "level", { skill, rand15: () => 0 }), {
+    maxHp: 90,
+    maxMp: 56,
+  });
 });
 
 test("MP uses normal worn INT, not cash appearance, loose equipment or WZ template stats", () => {
@@ -173,30 +149,21 @@ test("maxima saturate at 30000/10000 and AP refuses capped fields without consum
   assert.deepEqual(stats, before);
   const nearCap = fixture();
   nearCap.maxHp = 29999;
-  assert.deepEqual(
-    spendAbility(nearCap, ABILITY_MASK.maxHp, { rand15: () => 0 }),
-    { maxHp: 30000, ap: 2 },
-  );
+  assert.deepEqual(spendAbility(nearCap, ABILITY_MASK.maxHp, { rand15: () => 0 }), {
+    maxHp: 30000,
+    ap: 2,
+  });
   assert.equal(nearCap.hp, 20);
 });
 
 test("native lower clamps and unsupported job/mask/death refusal", () => {
   const stats = fixture();
   stats.maxHp = 0;
-  assert.equal(
-    growVitals(stats, ABILITY_MASK.maxHp, "ap", { rand15: () => 0 }).maxHp,
-    50,
-  );
+  assert.equal(growVitals(stats, ABILITY_MASK.maxHp, "ap", { rand15: () => 0 }).maxHp, 50);
   for (const field of ["maxHp", "maxMp"] as const) {
-    for (const patch of [
-      { hp: 0 },
-      { ap: 0 },
-      { job: 500 },
-      { job: -1 },
-      { job: 1.5 },
-    ]) {
-      const bad = Object.assign(fixture(), patch),
-        before = { ...bad };
+    for (const patch of [{ hp: 0 }, { ap: 0 }, { job: 500 }, { job: -1 }, { job: 1.5 }]) {
+      const bad: ReturnType<typeof fixture> = Object.assign(fixture(), patch);
+      const before = { ...bad };
       assert.deepEqual(spendAbility(bad, ABILITY_MASK[field]), {});
       assert.deepEqual(bad, before);
     }
@@ -213,25 +180,15 @@ test("two HP/MP allocations use real c2s/s2c codecs and survive an unchanged sav
   const stats = fixture(),
     character = characterDataOf(stats, emptyCharacterItems());
   for (const field of ["maxHp", "maxMp"] as const) {
-    const mask = readAbilityRequest(
-      new PacketReader(encodeAbilityRequest(field), 1),
-    );
+    const mask = readAbilityRequest(new PacketReader(encodeAbilityRequest(field), 1));
     const diff = spendAbility(stats, mask, { rand15: () => 0 });
-    const decoded = readStatUpdate(
-      new PacketReader(encodeStatUpdate({ ack: true, diff }), 1),
-    );
+    const decoded = readStatUpdate(new PacketReader(encodeStatUpdate({ ack: true, diff }), 1));
     assert.equal(decoded.ack, true);
     assert.deepEqual(decoded.diff, diff);
   }
-  assert.deepEqual(
-    [stats.maxHp, stats.maxMp, stats.hp, stats.mp, stats.ap],
-    [65, 57, 20, 5, 1],
-  );
-  const accounts = new Map([
-    ["growth", { password: "growth", characters: [character] }],
-  ]);
-  const saved = readSave(saveJson(accounts)).get("growth")!.characters[0]!
-    .stats;
+  assert.deepEqual([stats.maxHp, stats.maxMp, stats.hp, stats.mp, stats.ap], [65, 57, 20, 5, 1]);
+  const accounts = new Map([["growth", { password: "growth", characters: [character] }]]);
+  const saved = readSave(saveJson(accounts)).get("growth")!.characters[0]!.stats;
   assert.deepEqual(saved, stats);
 });
 
@@ -241,25 +198,13 @@ test("each crossed level grows maxima, refills only the living, and does not inv
   const gained = awardExp(stats, 100, undefined, { rand15: () => 0 });
   assert.equal(gained.levels, 2);
   assert.deepEqual(
-    [
-      stats.level,
-      stats.exp,
-      stats.maxHp,
-      stats.maxMp,
-      stats.hp,
-      stats.mp,
-      stats.ap,
-      stats.sp,
-    ],
+    [stats.level, stats.exp, stats.maxHp, stats.maxMp, stats.hp, stats.mp, stats.ap, stats.sp],
     [3, 51, 90, 70, 90, 70, 3, 0],
   );
   const dead = fixture(200);
   dead.hp = 0;
   awardExp(dead, 15, undefined, { rand15: () => 0 });
-  assert.deepEqual(
-    [dead.maxHp, dead.maxMp, dead.hp, dead.mp, dead.ap],
-    [60, 74, 0, 5, 3],
-  );
+  assert.deepEqual([dead.maxHp, dead.maxMp, dead.hp, dead.mp, dead.ap], [60, 74, 0, 5, 3]);
   const capped = fixture();
   capped.level = 199;
   awardExp(capped, expToNextLevel(199), undefined, { rand15: () => 0 });

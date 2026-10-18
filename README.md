@@ -22,27 +22,28 @@
 ## 現行技術
 
 - **客戶端**：原生 ES Modules、Canvas 2D、DOM 透明命中／輸入層、Web Audio；800×600 邏輯畫面，無前端建置步驟。
-- **伺服器**：Node.js／TypeScript，原生 type stripping，執行時零 npm 套件依賴。
-- **通訊**：瀏覽器同 origin HTTP／WebSocket → Node ClientSession → 原版 TCP 協定與遊戲服務。
+- **伺服器**：Bun／TypeScript／ESNext，執行時無第三方套件依賴。
+- **通訊**：瀏覽器同 origin HTTP／WebSocket → Bun ClientSession → 原版 TCP 協定與遊戲服務。
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
 - **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-2026-10-18 工具鏈鎖定：**Node 26.12.0、npm 12.2.0、TypeScript 7.0.2、@types/node 26.6.5、Python 3.15.0**。
-這是此次查得的正式版，不使用 nightly／RC；不代表每個選擇都必須追逐最前沿。
-Node 26 此時仍在 LTS 前，選用原因、相容範圍與未執行驗證見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
+2026-10-18 工具鏈鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**。
+根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
+**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘 `.mjs` 尚未完成型別化；
+不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與目前共用的純規則 .mjs
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；其餘 .js/.mjs 尚待型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
-server/src/client/      Node 端 ClientSession 與事件模型
+server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
 server/src/game/        世界、物品、規則、資源呈現資料與保存
 server/src/wz/          產品 WZ 解碼與 PNG 輸出
 server/test/            回歸來源；有來源不等於已執行通過
 server/scripts/         歷史 probe 與輔助腳本，不自動執行
-tools/                 靜態分析、工具鏈 bootstrap／環境、明示新隔離體驗建立腳本
+tools/                 靜態分析、Bun 工具鏈安裝／靜態分析、明示新隔離體驗建立腳本
 analysis/               已保存的 manifest、RTTI 與靜態分析結果
 docs/                   現行規劃、原版證據、ADR 與歷史驗證
 generated/             本機工具安裝、存檔、冷備份；忽略，不進 Git
@@ -53,16 +54,16 @@ generated/             本機工具安裝、存檔、冷備份；忽略，不進
 
 ## 本機啟動
 
-先按 [工具鏈文件](docs/TOOLCHAIN.md) 啟用版本。沙箱安裝完成後，每個新 shell 使用：
+先按 [工具鏈文件](docs/TOOLCHAIN.md) 安裝固定 Bun，從根目錄安裝鎖定開發依賴：
 
 ```sh
-source tools/env.sh
+bun tools/setup.ts
 ```
 
 下例從 repository 根目錄啟動，**只供建立新的本機體驗檔，不是恢復舊進度的命令**：
 
 ```sh
-node server/src/cli.ts serve \
+bun server/src/cli.ts serve \
   --host 0.0.0.0 --port 8496 --game-port 8497 --web-port 8495 \
   --data Data.wz --save generated/local-save.json \
   --account demo:demo --ping off
@@ -75,40 +76,39 @@ node server/src/cli.ts serve \
 已有進度時，先確認真正存檔存在、停服冷備，再把 `--save` 指向同一檔案。
 **找不到存檔就停止恢復流程，不用新 fixture 假裝舊角色。** `/tmp`、ignored 目錄或沙箱程序不能當成永久備份；
 重要 save 請另行匯出保存，不能期待 Git push 會帶走它。
-恢復原檔可使用 `bash tools/serve-existing-save.sh <真實save路徑>`；檔案不存在／空白會拒絕啟動。
+恢復原檔可使用 `bun tools/serve-existing-save.ts <真實save路徑>`；檔案不存在／空白會拒絕啟動。
 這個保護入口不自行停服或冷備，必須先由操作者確認。
 
-## 此輪補齊：普通角色動作（未測試）
+## 普通角色動作（單元回歸已執行；完整瀏覽器驗收未完成）
 
 原武器`info.walk`／`info.stand`分開選姿勢；普通動作改讀真WZ序列與原30ms倒數，
 補選角／創角同時鐘、繩梯整數Y停格與恢復、反向／換裝／場地生命週期及metadata／預熱。
 體驗工具新增**唯讀原角色動作閱覽**，可直接看單手劍／雙手劍／雙手斧與繩梯，不給物品、不改角色。
 詳[NATIVE_AVATAR_MOTION](docs/NATIVE_AVATAR_MOTION.md)／ADR-068；不是完整移動物理或全部原版動畫已完成。
 
-## 現行隔離 LIVE（2026-10-18）
+## 隔離體驗與進度安全
 
-使用者已同意無舊save也繼續；此輪建立 **全新** `generated/preview-faces-20261018.json`，不是恢復舊角色。
-先用exclusive-create的 `node tools/create-isolated-preview.ts generated/<新的檔名>.json` 走WZ／原建角模板，
-再停服冷備／啟服；重跑seed遇既有檔案會拒絕，不重設已玩進度。
+2026-10-18 本輪環境沒有找到先前的玩家 save；過往文件的檔名／冷備路徑不代表檔案仍存在。
+**不聲稱恢復舊角色，不自行重建相同名字的角色，不覆寫玩家資料。**
+有真實 save 時用 `bun tools/serve-existing-save.ts <真實路徑>`；必須先停服並冷備。
 
-- LIVE web **8515**，native login8516／game8517，全部綁0.0.0.0。
-- `preview / preview` → Preview；`observer / observer` → Observer。建立時為新初心者，後續自行遊玩的進度沿同檔保存，不重新seed。
-- 初始101000000無怪城鎮是明示體驗安排，不是原版建角起點；沒有自動轉職／給技能／金錢。
-- 可兩個分頁觀察同圖；F1–F7或表情按鈕看一般表情／自行眨眼，選角與創角預覽也接獨立時鐘。
-- 「體驗工具（非原版）」可找地圖／前往獵場、唯讀UI；修改配置／領物仍需自行確認。
-- 僅確認啟服日誌與監聽狀態，沒有登入、測試、typecheck、browser、VM或probe，不代表驗收PASS。
-
-前輪原碼／listing／WZ證據、臉飾、旁觀者attr2、HTTP／cache與界線見 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
-新save與冷備均ignored；**Git push不含進度，仍須另行保存重要save**。
-
-重啟既有新體驗檔（先停服、冷備；不要再seed）：
+可明示開啟不寫存檔的全新記憶體世界：
 
 ```sh
-source tools/env.sh
-node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-port 8515 \
-  --map 101000000 --data Data.wz --save generated/preview-faces-20261018.json \
+bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-port 8515 \
+  --map 101000000 --data Data.wz --save off \
   --account preview:preview,observer:observer --map-command preview,observer --test-tools preview,observer --ping off
 ```
+
+- 瀏覽器使用 **web port 8515** 的 LIVE 入口，8516/8517 是原生 TCP，不能當網頁開啟。
+- `preview / preview`、`observer / observer` 是**全新空帳號**；角色由使用者自行建立，不是已恢復的 Preview/Observer。
+- `--save off` **重啟會失去全部新進度**，不寫任何現有玩家存檔；重要進度請改在自行指定的新 save 上玩並另行匯出備份。
+- 101000000 城鎮是明示開發體驗安排，不是原版建角起點；不自動轉職／加技能／給錢。
+- 程序是否在線以本次實際 LIVE 程序為準，這裡不保證沙箱跨重啟存活。
+- 型別／格式／建置與回歸狀態見 [Bun 遷移記錄](docs/BUN_MIGRATION.md)；提供入口不是宣稱全案驗收通過。
+
+原碼／listing／WZ、臉飾與 attr2 原證保留在 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
+`create-isolated-preview.ts` 仍是**明示寫入新檔**的人工工具，不能拿來假恢復舊進度；本次自動驗證不執行它。
 
 ## 操作與體驗工具
 

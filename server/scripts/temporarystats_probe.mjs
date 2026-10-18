@@ -6,12 +6,12 @@ import {
   movementStats,
   drawTemporaryStats,
   TEMPORARY_FIELDS,
-} from "../../client/temporarystats.mjs";
+} from "../../client/temporarystats.ts";
 import {
   collisionWorld,
   createPlayer,
   advancePlayer,
-} from "../../client/motion.mjs";
+} from "../../client/motion.ts";
 const update = (values, durationMs = 100, sourceId = 2002001) => ({
   values,
   durationMs,

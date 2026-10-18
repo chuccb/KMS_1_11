@@ -18,11 +18,17 @@ import { zeroStats } from "../src/protocol/chardata.ts";
 
 test("the table is the published 2003 EXP table", () => {
   const beginner = [15, 34, 57, 92, 135, 372, 560, 840, 1242, 1716];
-  beginner.forEach((value, index) => assert.equal(expToNextLevel(index + 1), value, `level ${index + 1}`));
+  beginner.forEach((value, index) =>
+    assert.equal(expToNextLevel(index + 1), value, `level ${index + 1}`),
+  );
   const firstJob = [2360, 3216, 4200, 5460, 7050, 8840, 11040, 13716, 16680, 20216];
-  firstJob.forEach((value, index) => assert.equal(expToNextLevel(index + 11), value, `level ${index + 11}`));
+  firstJob.forEach((value, index) =>
+    assert.equal(expToNextLevel(index + 11), value, `level ${index + 11}`),
+  );
   const secondJob = [24402, 28980, 34320, 40512, 47216, 54900, 63666, 73080, 83720, 95700];
-  secondJob.forEach((value, index) => assert.equal(expToNextLevel(index + 21), value, `level ${index + 21}`));
+  secondJob.forEach((value, index) =>
+    assert.equal(expToNextLevel(index + 21), value, `level ${index + 21}`),
+  );
   // Where the closed formula stops and the chain takes over.
   assert.equal(expToNextLevel(50), 709_716);
   assert.equal(expToNextLevel(51), 748_608);
@@ -38,17 +44,21 @@ test("the high levels follow the 1.0548 chain exactly", () => {
     1_713_628_833, 1_807_535_693,
     // The fan-site table has 1_906_558_648 here, but the level after it only follows from *this*
     // value: trunc(1906588648 * 1.0548) = 2011069705, which is that table's own level 199.
-    1_906_588_648,
-    2_011_069_705, 2_121_276_324,
+    1_906_588_648, 2_011_069_705, 2_121_276_324,
   ];
-  tail.forEach((value, index) => assert.equal(expToNextLevel(index + 190), value, `level ${index + 190}`));
+  tail.forEach((value, index) =>
+    assert.equal(expToNextLevel(index + 190), value, `level ${index + 190}`),
+  );
 });
 
 test("the table covers 1..200 and grows", () => {
   let previous = 0;
   for (let level = 1; level <= EXP_TABLE_MAX_LEVEL; level++) {
     const value = expToNextLevel(level);
-    assert.ok(value > previous, `level ${level} (${value}) must be above level ${level - 1} (${previous})`);
+    assert.ok(
+      value > previous,
+      `level ${level} (${value}) must be above level ${level - 1} (${previous})`,
+    );
     previous = value;
   }
   // `sub_4C7190`: above 200 the client returns 0x7FFFFFFF, below 1 it clamps to level 1.

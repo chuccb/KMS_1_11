@@ -1,5 +1,5 @@
-import {releaseOnInterrupt} from "./pointer.mjs";
-import { detailRows } from "./characterstats.mjs";
+import {releaseOnInterrupt} from "./pointer.ts";
+import { detailRows } from "./characterstats.ts";
 /** CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D. */
 export const STAT_WINDOW = {
   width: 176,

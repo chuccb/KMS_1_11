@@ -1,4 +1,4 @@
-import {activeArt} from "./game/activeskills.ts";
+import { activeArt } from "./game/activeskills.ts";
 import { skillCatalogOf, type SkillCatalog } from "./game/skills.ts";
 import { creationCatalogOf } from "./game/creation.ts";
 /**
@@ -17,12 +17,7 @@ import { creationCatalogOf } from "./game/creation.ts";
 import { schemaJson, schemaText } from "./protocol/schema.ts";
 import { runWzCommand } from "./wz/cli.ts";
 import { WzArchive } from "./wz/archive.ts";
-import {
-  mapDataProvider,
-  mapCatalogOf,
-  type MapDestination,
-  type MapData,
-} from "./game/map.ts";
+import { mapDataProvider, mapCatalogOf, type MapDestination, type MapData } from "./game/map.ts";
 import { mobTemplateProvider } from "./game/mobs.ts";
 import { npcTemplateProvider, npcWalkPolicy } from "./game/npcs.ts";
 import { DEFAULT_PING_MS } from "./net/heartbeat.ts";
@@ -31,24 +26,14 @@ import { npcDialogueProvider } from "./game/dialogue.ts";
 import { starterEquipmentIds } from "./game/equipment.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { startWebClient } from "./net/webclient.ts";
-import {
-  SHOPS,
-  shopKeeper,
-  unpricedShopItems,
-  type ShopKeeper,
-} from "./game/shops.ts";
+import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { consumeSpecProvider } from "./game/items.ts";
 import { growthSkillProvider, type GrowthSkillProvider } from "./game/growth.ts";
 import { itemCatalogOf, type ItemCatalog } from "./game/iteminfo.ts";
 import { audioProviderOf, type AudioProvider } from "./game/audio.ts";
 import { artProviderOf } from "./game/art.ts";
 import type { ArtProvider } from "./net/webclient.ts";
-import {
-  appendFileSync,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CaptureServer,
   toJsonl,
@@ -195,17 +180,13 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
 /** Parses a seed as decimal or 0x-prefixed hex; returns undefined when absent or invalid. */
 function parseSeed(value: string | boolean | undefined): number | undefined {
   if (typeof value !== "string") return undefined;
-  const parsed = /^0x/i.test(value)
-    ? Number.parseInt(value.slice(2), 16)
-    : Number(value);
+  const parsed = /^0x/i.test(value) ? Number.parseInt(value.slice(2), 16) : Number(value);
   if (!Number.isFinite(parsed)) return undefined;
   return parsed >>> 0;
 }
 
 /** `auto` | `off` | `<sendSeed>:<recvSeed>` (each decimal or 0x hex). */
-function parseHandshake(
-  value: string | boolean | undefined,
-): CaptureServerOptions["handshake"] {
+function parseHandshake(value: string | boolean | undefined): CaptureServerOptions["handshake"] {
   if (value === undefined || value === "auto") return "auto";
   if (value === "off") return "off";
   if (typeof value !== "string") return "auto";
@@ -213,9 +194,7 @@ function parseHandshake(
   const sendSeed = parseSeed(send);
   const recvSeed = parseSeed(recv);
   if (sendSeed === undefined || recvSeed === undefined) {
-    process.stderr.write(
-      `invalid --handshake: expected auto, off, or <sendSeed>:<recvSeed>\n`,
-    );
+    process.stderr.write(`invalid --handshake: expected auto, off, or <sendSeed>:<recvSeed>\n`);
     process.exit(1);
   }
   return { clientSendSeed: sendSeed, clientRecvSeed: recvSeed };
@@ -224,10 +203,7 @@ function parseHandshake(
 function runDecode(rest: string[]): number {
   const args = parseArgs(rest);
   const file = rest.find(
-    (arg) =>
-      !arg.startsWith("--") &&
-      arg !== args["c2s-seed"] &&
-      arg !== args["s2c-seed"],
+    (arg) => !arg.startsWith("--") && arg !== args["c2s-seed"] && arg !== args["s2c-seed"],
   );
   if (!file) {
     process.stderr.write(`decode needs a trace file\n\n${USAGE}`);
@@ -273,8 +249,7 @@ function fromHexArg(text: string): Uint8Array {
     process.exit(1);
   }
   const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++)
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
@@ -287,9 +262,7 @@ function clamp(text: string, max = 160): string {
 }
 
 /** Parses `--account user:pass,user2:pass2` into the in-memory account table. */
-function parseAccounts(
-  value: string | boolean | undefined,
-): Map<string, AccountRecord> {
+function parseAccounts(value: string | boolean | undefined): Map<string, AccountRecord> {
   const accounts = new Map<string, AccountRecord>();
   if (typeof value !== "string") {
     accounts.set("admin", { password: "admin", characters: [] });
@@ -298,9 +271,7 @@ function parseAccounts(
   for (const entry of value.split(",")) {
     const [user, pass] = entry.split(":");
     if (!user || !pass) {
-      process.stderr.write(
-        `invalid --account entry "${entry}" (expected user:pass)\n`,
-      );
+      process.stderr.write(`invalid --account entry "${entry}" (expected user:pass)\n`);
       process.exit(1);
     }
     accounts.set(user, { password: pass, characters: [] });
@@ -311,28 +282,19 @@ function parseAccounts(
 async function runServe(rest: string[]): Promise<number> {
   const args = parseArgs(rest);
   const port = Number(args.port ?? 8484);
-  const gamePort =
-    args["game-port"] === undefined ? undefined : Number(args["game-port"]);
+  const gamePort = args["game-port"] === undefined ? undefined : Number(args["game-port"]);
   const mapId = args.map === undefined ? DEFAULT_MAP_ID : Number(args.map);
-  const webPort =
-    args["web-port"] === undefined ? undefined : Number(args["web-port"]);
-  const startMesos =
-    args["start-mesos"] === undefined ? 0 : Number(args["start-mesos"]);
+  const webPort = args["web-port"] === undefined ? undefined : Number(args["web-port"]);
+  const startMesos = args["start-mesos"] === undefined ? 0 : Number(args["start-mesos"]);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
     return 1;
   }
-  if (
-    gamePort !== undefined &&
-    (!Number.isInteger(gamePort) || gamePort < 0 || gamePort > 65535)
-  ) {
+  if (gamePort !== undefined && (!Number.isInteger(gamePort) || gamePort < 0 || gamePort > 65535)) {
     process.stderr.write(`invalid --game-port: ${String(args["game-port"])}\n`);
     return 1;
   }
-  if (
-    webPort !== undefined &&
-    (!Number.isInteger(webPort) || webPort < 0 || webPort > 65535)
-  ) {
+  if (webPort !== undefined && (!Number.isInteger(webPort) || webPort < 0 || webPort > 65535)) {
     process.stderr.write(`invalid --web-port: ${String(args["web-port"])}\n`);
     return 1;
   }
@@ -348,49 +310,43 @@ async function runServe(rest: string[]): Promise<number> {
     );
     return 1;
   }
-  if (
-    !Number.isInteger(startMesos) ||
-    startMesos < 0 ||
-    startMesos > 0xffffffff
-  ) {
+  if (!Number.isInteger(startMesos) || startMesos < 0 || startMesos > 0xffffffff) {
     process.stderr.write(
       `invalid --start-mesos: ${String(args["start-mesos"])} (0 = what the 2003 game gave)\n`,
     );
     return 1;
   }
   const mapCommandArg = args["map-command"];
-  if (
-    mapCommandArg !== undefined &&
-    (typeof mapCommandArg !== "string" || !mapCommandArg.trim())
-  ) {
-    process.stderr.write(
-      "--map-command needs off, all, or a comma-separated account list\n",
-    );
+  if (mapCommandArg !== undefined && (typeof mapCommandArg !== "string" || !mapCommandArg.trim())) {
+    process.stderr.write("--map-command needs off, all, or a comma-separated account list\n");
     return 1;
   }
-  const mapCommandPolicy =
-    typeof mapCommandArg === "string" ? mapCommandArg.trim() : "off";
+  const mapCommandPolicy = typeof mapCommandArg === "string" ? mapCommandArg.trim() : "off";
   const mapCommandUsers = new Set(
     mapCommandPolicy
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
   );
-  const testArg=args["test-tools"];
-  if(testArg!==undefined && (typeof testArg!=="string" || !testArg.trim())) {
-    process.stderr.write("--test-tools needs off, all, or a comma-separated account list\n");return 1;
+  const testArg = args["test-tools"];
+  if (testArg !== undefined && (typeof testArg !== "string" || !testArg.trim())) {
+    process.stderr.write("--test-tools needs off, all, or a comma-separated account list\n");
+    return 1;
   }
-  const testPolicy=typeof testArg==="string"?testArg.trim():"off";
-  const testUsers=new Set(testPolicy.split(",").map(s=>s.trim()).filter(Boolean));
+  const testPolicy = typeof testArg === "string" ? testArg.trim() : "off";
+  const testUsers = new Set(
+    testPolicy
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
   const quiet = args.quiet === true;
   const seed = parseSeed(args.seed);
   const seedAccounts = parseAccounts(args.account);
-  const worldNames =
-    typeof args.world === "string" ? args.world.split(",") : ["Scania"];
+  const worldNames = typeof args.world === "string" ? args.world.split(",") : ["Scania"];
   const worlds = worldNames.map((name, index) => ({ name, unknownId: index }));
-  const gameIp =
-    typeof args["game-ip"] === "string" ? args["game-ip"] : "127.0.0.1";
+  const gameIp = typeof args["game-ip"] === "string" ? args["game-ip"] : "127.0.0.1";
   const handshakeBody =
     typeof args["handshake-body"] === "string"
       ? fromHexArg(String(args["handshake-body"]))
@@ -399,15 +355,9 @@ async function runServe(rest: string[]): Promise<number> {
   // Mobs come from the same Data.wz the client reads. `--data off` keeps the server archive-free
   // (useful for protocol work), and without the flag an existing ./Data.wz is picked up.
   const dataArg =
-    args.data === true
-      ? "Data.wz"
-      : typeof args.data === "string"
-        ? args.data
-        : undefined;
+    args.data === true ? "Data.wz" : typeof args.data === "string" ? args.data : undefined;
   const dataPath =
-    dataArg === "off"
-      ? undefined
-      : (dataArg ?? (existsSync("Data.wz") ? "Data.wz" : undefined));
+    dataArg === "off" ? undefined : (dataArg ?? (existsSync("Data.wz") ? "Data.wz" : undefined));
   let mapProvider: ((mapId: number) => MapData | undefined) | undefined;
   let mapCatalog: (() => MapDestination[]) | undefined;
   let mobTemplate: ReturnType<typeof mobTemplateProvider> | undefined;
@@ -453,43 +403,29 @@ async function runServe(rest: string[]): Promise<number> {
       return 1;
     }
   }
-  const mobSpeed =
-    args["mob-speed"] === undefined ? undefined : Number(args["mob-speed"]);
+  const mobSpeed = args["mob-speed"] === undefined ? undefined : Number(args["mob-speed"]);
   if (mobSpeed !== undefined && (!Number.isFinite(mobSpeed) || mobSpeed < 0)) {
-    process.stderr.write(
-      `invalid --mob-speed: ${String(args["mob-speed"])} (px/s at 100%)\n`,
-    );
+    process.stderr.write(`invalid --mob-speed: ${String(args["mob-speed"])} (px/s at 100%)\n`);
     return 1;
   }
-  const mobRespawn =
-    args["mob-respawn"] === undefined ? undefined : Number(args["mob-respawn"]);
-  if (
-    mobRespawn !== undefined &&
-    (!Number.isFinite(mobRespawn) || mobRespawn < 0)
-  ) {
-    process.stderr.write(
-      `invalid --mob-respawn: ${String(args["mob-respawn"])} (ms)\n`,
-    );
+  const mobRespawn = args["mob-respawn"] === undefined ? undefined : Number(args["mob-respawn"]);
+  if (mobRespawn !== undefined && (!Number.isFinite(mobRespawn) || mobRespawn < 0)) {
+    process.stderr.write(`invalid --mob-respawn: ${String(args["mob-respawn"])} (ms)\n`);
     return 1;
   }
 
   let npcWalk: ((templateId: number) => boolean) | undefined;
   if (args["npc-walk"] !== undefined) {
-    const spec =
-      typeof args["npc-walk"] === "string" ? args["npc-walk"] : "all";
+    const spec = typeof args["npc-walk"] === "string" ? args["npc-walk"] : "all";
     try {
       npcWalk = npcWalkPolicy(spec);
     } catch (error) {
-      process.stderr.write(
-        `${error instanceof Error ? error.message : String(error)}\n`,
-      );
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
     }
   }
 
-  const log = quiet
-    ? undefined
-    : (line: string) => process.stdout.write(`[serve] ${line}\n`);
+  const log = quiet ? undefined : (line: string) => process.stdout.write(`[serve] ${line}\n`);
   // The heartbeat (net/heartbeat.ts): `off` means "no timers, trust TCP". A number is the interval;
   // a dropped session frees its account and character, so this is what makes "already online"
   // self-healing rather than a lockout (ADR-018).
@@ -513,11 +449,7 @@ async function runServe(rest: string[]): Promise<number> {
   // build cannot read stops the start instead of being overwritten - the operator decides.
   const saveArg = args.save;
   const savePath =
-    saveArg === "off"
-      ? undefined
-      : typeof saveArg === "string"
-        ? saveArg
-        : DEFAULT_SAVE_PATH;
+    saveArg === "off" ? undefined : typeof saveArg === "string" ? saveArg : DEFAULT_SAVE_PATH;
   const saveStore =
     savePath === undefined
       ? undefined
@@ -531,8 +463,7 @@ async function runServe(rest: string[]): Promise<number> {
     );
     return 1;
   }
-  const persist =
-    saveStore === undefined ? undefined : () => saveStore.save(accounts);
+  const persist = saveStore === undefined ? undefined : () => saveStore.save(accounts);
   for (const warning of shopWarnings) log?.(warning);
   const handshake =
     seed === undefined
@@ -572,10 +503,10 @@ async function runServe(rest: string[]): Promise<number> {
       pingMs,
       mapId,
       starterEquipmentIds: starterEquipmentIds(creationCatalog),
-      allowTestTools: username=>testPolicy!=="off"&&(testPolicy==="all"||testUsers.has(username)),
+      allowTestTools: (username) =>
+        testPolicy !== "off" && (testPolicy === "all" || testUsers.has(username)),
       allowMapCommand: (username) =>
-        mapCommandPolicy !== "off" &&
-        (mapCommandPolicy === "all" || mapCommandUsers.has(username)),
+        mapCommandPolicy !== "off" && (mapCommandPolicy === "all" || mapCommandUsers.has(username)),
       ...(mapProvider !== undefined ? { mapProvider } : {}),
       ...(mobTemplate !== undefined ? { mobTemplate } : {}),
       ...(npcTemplate !== undefined ? { npcTemplate } : {}),
@@ -587,11 +518,12 @@ async function runServe(rest: string[]): Promise<number> {
       ...(skills !== undefined ? { skills } : {}),
       ...(itemCatalog !== undefined ? { itemCatalog } : {}),
       ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
-      ...(art?.reader ? {activeSkillArt:(id:number,level:number)=>activeArt(art!.reader!,id,level)}:{}),
+      ...(art?.reader
+        ? { activeSkillArt: (id: number, level: number) => activeArt(art!.reader!, id, level) }
+        : {}),
       ...(itemCatalog !== undefined
         ? {
-            dropItemAllowed: (id: number) =>
-              itemCatalog?.info(id)?.cash === false,
+            dropItemAllowed: (id: number) => itemCatalog?.info(id)?.cash === false,
           }
         : {}),
       ...(mobSpeed !== undefined ? { mobSpeedPxPerSecond: mobSpeed } : {}),
@@ -630,7 +562,14 @@ async function runServe(rest: string[]): Promise<number> {
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
         ...(skills !== undefined ? { skills } : {}),
         ...(mobTemplate !== undefined ? { mobTemplate } : {}),
-        ...(game ? {mobPresentation:(username:string,id:number,mobId:number)=>game!.mobPresentation(username,id,mobId),testTools:(username:string,id:number,request:unknown)=>game!.testTools(username,id,request)} : {}),
+        ...(game
+          ? {
+              mobPresentation: (username: string, id: number, mobId: number) =>
+                game!.mobPresentation(username, id, mobId),
+              testTools: (username: string, id: number, request: unknown) =>
+                game!.testTools(username, id, request),
+            }
+          : {}),
         ...(art !== undefined ? { art } : {}),
         ...(audio !== undefined ? { audio } : {}),
         ...(log ? { log } : {}),
@@ -675,12 +614,7 @@ async function runServe(rest: string[]): Promise<number> {
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  if (
-    !command ||
-    command === "help" ||
-    command === "--help" ||
-    command === "-h"
-  ) {
+  if (!command || command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(USAGE);
     return command ? 0 : 1;
   }
@@ -702,8 +636,7 @@ async function main(argv: string[]): Promise<number> {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
     return 1;
   }
-  const mode: CaptureMode =
-    args.mode === "framed" || args.mode === "raw" ? args.mode : "session";
+  const mode: CaptureMode = args.mode === "framed" || args.mode === "raw" ? args.mode : "session";
   const out = typeof args.out === "string" ? args.out : undefined;
   const quiet = args.quiet === true;
   const handshake = parseHandshake(args.handshake);
@@ -711,8 +644,7 @@ async function main(argv: string[]): Promise<number> {
     typeof args["handshake-body"] === "string"
       ? fromHexArg(String(args["handshake-body"]))
       : undefined;
-  if (typeof handshake === "object" && handshakeBody)
-    handshake.body = handshakeBody;
+  if (typeof handshake === "object" && handshakeBody) handshake.body = handshakeBody;
 
   if (out) writeFileSync(out, "", { flag: "w" }); // start a fresh trace
 
@@ -721,9 +653,7 @@ async function main(argv: string[]): Promise<number> {
     if (out) appendFileSync(out, toJsonl([record]));
     if (!quiet) {
       const opcode =
-        record.opcode !== undefined
-          ? ` op=0x${record.opcode.toString(16).padStart(2, "0")}`
-          : "";
+        record.opcode !== undefined ? ` op=0x${record.opcode.toString(16).padStart(2, "0")}` : "";
       const body =
         record.plainHex !== undefined && record.plainHex !== record.hex
           ? `\n    plain ${clamp(record.plainHex)}`
@@ -750,9 +680,7 @@ async function main(argv: string[]): Promise<number> {
   });
   const info = await server.start();
   if (!quiet) {
-    process.stdout.write(
-      `capture listening on ${info.host}:${info.port} (mode=${info.mode})\n`,
-    );
+    process.stdout.write(`capture listening on ${info.host}:${info.port} (mode=${info.mode})\n`);
     if (info.mode === "session") {
       process.stdout.write(
         handshake === "off"

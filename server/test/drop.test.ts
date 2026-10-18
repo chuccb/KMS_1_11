@@ -92,7 +92,15 @@ test("0x43 kind 0 is kind, dropId, money, value, x, y, mobId, mobX, mobY, unknow
 test("0x43 kind 1 carries the mob block too, kind 2 does not", () => {
   const withMob = readDropAppear(
     new PacketReader(
-      encodeDropAppear({ dropId: 1, kind: DROP_KIND.fromMobAlt, money: true, value: 45, x: -3, y: 9, mobId: 2 }),
+      encodeDropAppear({
+        dropId: 1,
+        kind: DROP_KIND.fromMobAlt,
+        money: true,
+        value: 45,
+        x: -3,
+        y: 9,
+        mobId: 2,
+      }),
       1,
     ),
   );
@@ -116,7 +124,17 @@ test("0x43 kind 1 carries the mob block too, kind 2 does not", () => {
 
 test("0x43 x and y are signed: a drop left of the map origin stays negative", () => {
   const read = readDropAppear(
-    new PacketReader(encodeDropAppear({ dropId: 1, kind: DROP_KIND.placed, money: false, value: 1, x: -40, y: -1 }), 1),
+    new PacketReader(
+      encodeDropAppear({
+        dropId: 1,
+        kind: DROP_KIND.placed,
+        money: false,
+        value: 1,
+        x: -40,
+        y: -1,
+      }),
+      1,
+    ),
   );
   assert.equal(read.x, -40);
   assert.equal(read.y, -1);
@@ -124,7 +142,11 @@ test("0x43 x and y are signed: a drop left of the map origin stays negative", ()
 });
 
 test("0x44 kind 2 is the only form with a character id", () => {
-  const taken = encodeDropRemove({ dropId: 0xdead, kind: DROP_REMOVE_KIND.taken, characterId: 0x01020304 });
+  const taken = encodeDropRemove({
+    dropId: 0xdead,
+    kind: DROP_REMOVE_KIND.taken,
+    characterId: 0x01020304,
+  });
   assert.equal(taken.length, 1 + 1 + 4 + 4);
   assert.deepEqual(readDropRemove(new PacketReader(taken, 1)), {
     dropId: 0xdead,
@@ -150,7 +172,11 @@ test("0x11 has three shapes: mesos, an item, or a refusal with no fields", () =>
 
   const item = encodeLootNotice({ kind: "item", itemId: 2000000, count: 3 });
   assert.equal(item.length, 10);
-  assert.deepEqual(readLootNotice(new PacketReader(item, 1)), { kind: "item", itemId: 2000000, count: 3 });
+  assert.deepEqual(readLootNotice(new PacketReader(item, 1)), {
+    kind: "item",
+    itemId: 2000000,
+    count: 3,
+  });
 
   const refused = encodeLootNotice({ kind: "rejected" });
   assert.equal(refused.length, 2);
@@ -169,30 +195,47 @@ test("0x0B puts an item without a category byte, because the tab already names t
   const back = readInventoryChange(new PacketReader(bytes, 1));
   assert.equal(back.result, 1);
   assert.deepEqual(back.changes, [
-    { op: 0, inventory: 3, slot: 1, item: { kind: "nonequip", itemId: 4000019, cash: null, quantity: 1 } },
+    {
+      op: 0,
+      inventory: 3,
+      slot: 1,
+      item: { kind: "nonequip", itemId: 4000019, cash: null, quantity: 1 },
+    },
   ]);
 });
 
 test("0x0B refuses what makes the client throw: a re-key on the equip tab", () => {
   assert.throws(
-    () => encodeInventoryChange([{ op: INVENTORY_OP.key, inventory: INVENTORY_TAB.equip, slot: 1, key: 2 }]),
+    () =>
+      encodeInventoryChange([
+        { op: INVENTORY_OP.key, inventory: INVENTORY_TAB.equip, slot: 1, key: 2 },
+      ]),
     /throws CTerminateException/,
   );
   // The same op on any other tab is legal.
-  const bytes = encodeInventoryChange([{ op: INVENTORY_OP.key, inventory: INVENTORY_TAB.etc, slot: 4, key: 0xbeef }]);
+  const bytes = encodeInventoryChange([
+    { op: INVENTORY_OP.key, inventory: INVENTORY_TAB.etc, slot: 4, key: 0xbeef },
+  ]);
   assert.deepEqual(readInventoryChange(new PacketReader(bytes, 1)).changes, [
     { op: 1, inventory: 3, slot: 4, key: 0xbeef },
   ]);
 });
 
 test("0x0B validates the tab, the slot and the worn equip slots", () => {
-  assert.throws(() => encodeInventoryChange([{ op: INVENTORY_OP.clear, inventory: 0, slot: 1 }]), /outside the client's 1..4/);
   assert.throws(
-    () => encodeInventoryChange([{ op: INVENTORY_OP.clear, inventory: INVENTORY_TAB.etc, slot: -1 }]),
+    () => encodeInventoryChange([{ op: INVENTORY_OP.clear, inventory: 0, slot: 1 }]),
+    /outside the client's 1..4/,
+  );
+  assert.throws(
+    () =>
+      encodeInventoryChange([{ op: INVENTORY_OP.clear, inventory: INVENTORY_TAB.etc, slot: -1 }]),
     /worn equip slot/,
   );
   assert.throws(
-    () => encodeInventoryChange([{ op: INVENTORY_OP.clear, inventory: INVENTORY_TAB.equip, slot: -15 }]),
+    () =>
+      encodeInventoryChange([
+        { op: INVENTORY_OP.clear, inventory: INVENTORY_TAB.equip, slot: -15 },
+      ]),
     /does not fit the u16/,
   );
   // A negative slot on the equip tab is the client's worn-slot form and is legal.
@@ -200,9 +243,7 @@ test("0x0B validates the tab, the slot and the worn equip slots", () => {
     { op: INVENTORY_OP.put, inventory: INVENTORY_TAB.equip, slot: -1, item: equipSlot(1000000) },
   ]);
   const back = readInventoryChange(new PacketReader(worn, 1));
-  assert.deepEqual(back.changes, [
-    { op: 0, inventory: 1, slot: -1, item: equipSlot(1000000) },
-  ]);
+  assert.deepEqual(back.changes, [{ op: 0, inventory: 1, slot: -1, item: equipSlot(1000000) }]);
 });
 
 test("0x0B swap and clear round trip; describe names them", () => {
@@ -224,11 +265,18 @@ test("0x0B swap and clear round trip; describe names them", () => {
 test("the drop policy rolls mesos, the monster's own junk item and a potion", () => {
   // 0: meso chance passes, amount 1 + 0..; 1: junk chance passes; 2: potion chance passes.
   const rolls = defaultDropPolicy({ ...snail, level: 4 }, scripted([0, 0, 0, 0, 0]));
-  assert.deepEqual(rolls, [{ money: 1 }, { itemId: MOB_JUNK_DROP[100100]!, count: 1 }, { itemId: 2000000, count: 1 }]);
+  assert.deepEqual(rolls, [
+    { money: 1 },
+    { itemId: MOB_JUNK_DROP[100100]!, count: 1 },
+    { itemId: 2000000, count: 1 },
+  ]);
   // All three chances fail: nothing drops.
   assert.deepEqual(defaultDropPolicy(snail, scripted([999, 999, 999])), []);
   // A monster with no junk item of its own drops only mesos (and its potion roll).
-  const stumpRolls = defaultDropPolicy({ ...snail, templateId: 130100 }, scripted([0, 0, 999, 999]));
+  const stumpRolls = defaultDropPolicy(
+    { ...snail, templateId: 130100 },
+    scripted([0, 0, 999, 999]),
+  );
   assert.equal(stumpRolls.length, 1);
   assert.equal(stumpRolls[0]!.money, 1);
 });
@@ -252,9 +300,7 @@ test("a killed monster's drop lands on its own ground and starts where it died",
     random: scripted([0, 0, 0]),
     policy: () => [{ money: 12 }, { itemId: 4000019 }],
     spreadPx: 0,
-    footholds: new Map([
-      [3, { id: 3, x1: 100, y1: 200, x2: 200, y2: 200, next: 0, prev: 0 }],
-    ]),
+    footholds: new Map([[3, { id: 3, x1: 100, y1: 200, x2: 200, y2: 200, next: 0, prev: 0 }]]),
   });
   const spawned = field.spawnFromDeath({ ...snail, x: 150, y: 999 }, 1000);
   assert.equal(spawned.length, 2);
@@ -328,7 +374,11 @@ test("a player's throw-away lands where they stand, with no monster and no sprea
 
   // It can be walked onto by whoever moved after it landed - the thrower included, but only once
   // they moved, which is what keeps a throw-away from coming straight back (`reachable`).
-  assert.equal(field.reachable(12, -3, 999), undefined, "nobody who has not moved since can take it");
+  assert.equal(
+    field.reachable(12, -3, 999),
+    undefined,
+    "nobody who has not moved since can take it",
+  );
   assert.equal(field.reachable(12, -3, 1000), entry);
 
   // The ground keeps the item, not just its id: a weapon that was dropped with scrolls on it comes

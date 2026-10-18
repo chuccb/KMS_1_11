@@ -73,16 +73,20 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
         options.planes === true ? "planes" : "merged",
       ].join("|");
       if (avatars.has(key)) return avatars.get(key);
-      const frame = composeAvatar(archive, { faceId: look.face, hairId: look.hair, items: look.items }, {
-        ...(options.stance !== undefined ? { stance: options.stance } : {}),
-        ...(options.frame !== undefined ? { frame: options.frame } : {}),
-        ...(options.emotion !== undefined ? { emotion: options.emotion } : {}),
-        ...(options.faceFrame !== undefined ? { faceFrame: options.faceFrame } : {}),
-        ...(options.flip !== undefined ? { flip: options.flip } : {}),
-        ...(options.planes === true ? { planes: true } : {}),
-        ranks,
-        ...(reader !== undefined ? { reader } : {}),
-      });
+      const frame = composeAvatar(
+        archive,
+        { faceId: look.face, hairId: look.hair, items: look.items },
+        {
+          ...(options.stance !== undefined ? { stance: options.stance } : {}),
+          ...(options.frame !== undefined ? { frame: options.frame } : {}),
+          ...(options.emotion !== undefined ? { emotion: options.emotion } : {}),
+          ...(options.faceFrame !== undefined ? { faceFrame: options.faceFrame } : {}),
+          ...(options.flip !== undefined ? { flip: options.flip } : {}),
+          ...(options.planes === true ? { planes: true } : {}),
+          ranks,
+          ...(reader !== undefined ? { reader } : {}),
+        },
+      );
       // A cheap eviction: drop the oldest half once the map is full, so a busy hour with many looks
       // does not grow without bound while a single character's frames stay cached.
       if (avatars.size >= AVATAR_CACHE_LIMIT) {

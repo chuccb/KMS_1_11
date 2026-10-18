@@ -116,7 +116,12 @@ export function decodeClientPacket(body: Uint8Array): ClientPacket {
   const opcode = reader.readByte();
   switch (opcode) {
     case CLIENT_OPCODE.loginRequest:
-      return { kind: "login-request", opcode, username: reader.readAsciiString(), password: reader.readAsciiString() };
+      return {
+        kind: "login-request",
+        opcode,
+        username: reader.readAsciiString(),
+        password: reader.readAsciiString(),
+      };
     case CLIENT_OPCODE.worldSelect:
       return { kind: "world-select", opcode, worldId: reader.readByte() };
     case CLIENT_OPCODE.selectCharacter:

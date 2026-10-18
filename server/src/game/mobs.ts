@@ -1,8 +1,8 @@
-import {mobReaction,planMobReactionPath,mobHitName} from "../../../client/mob-reaction.mjs";
-import {artReaderOf} from "./wzart.ts";
-import {mobArtOf,type MobAttackArt} from "./sprites.ts";
-import {chooseMobAttack,replaceMobForced} from "../../../client/mob-attacks.mjs";
-import {elementAttributes} from "./elements.ts";
+import { mobReaction, planMobReactionPath, mobHitName } from "../../../client/mob-reaction.ts";
+import { artReaderOf } from "./wzart.ts";
+import { mobArtOf, type MobAttackArt } from "./sprites.ts";
+import { chooseMobAttack, replaceMobForced } from "../../../client/mob-attacks.ts";
+import { elementAttributes } from "./elements.ts";
 /**
  * The monsters of one field: where they are, and what the server tells the client about them.
  *
@@ -60,7 +60,8 @@ import {elementAttributes} from "./elements.ts";
 import { footholdChain, footholdRange, footholdSegmentAt, footholdYAt } from "../wz/archive.ts";
 import type { FootholdSegment, FootholdSegments, WzArchive } from "../wz/archive.ts";
 import {
-  MOB_ACTION, MOB_ACTION_KEEP,
+  MOB_ACTION,
+  MOB_ACTION_KEEP,
   encodeMobAppear,
   encodeMobEnterField,
   encodeMobLeaveDelayed,
@@ -74,10 +75,10 @@ import { asNumber, entriesOf, infoOf } from "../wz/props.ts";
 import { mobImagePath, mobActionImagePath } from "../wz/paths.ts";
 import type { LifeSpawn, MapData } from "./map.ts";
 import type { MoveElement } from "../protocol/movepath.ts";
-import { planMobAirPath } from "../../../client/mobmotion.mjs";
+import { planMobAirPath } from "../../../client/mobmotion.ts";
 
-type MobMotionPoint = Pick<MoveElement, "x" | "y" | "foothold" | "duration">
-  & Partial<Pick<MoveElement, "vx" | "vy" | "action">>;
+type MobMotionPoint = Pick<MoveElement, "x" | "y" | "foothold" | "duration"> &
+  Partial<Pick<MoveElement, "vx" | "vy" | "action">>;
 
 /** 48D080 tests action subtrees. A jump-only/non-moving template fails native loading. */
 export function mobMoveAbility(root: unknown): 0 | 1 | 2 | 3 | undefined {
@@ -99,7 +100,13 @@ export interface MobTemplate {
   /** `info.maxMP`. What `0x34` carries (`mob+132` is the MP the attack picker spends). */
   maxMP: number;
   /** Native info PA/PD/MD/acc/eva (NOT later-version PADamage/PDDamage names). */
-  pa?:number; pd?:number; md?:number; acc?:number; eva?:number; physicalAttribute?:number; elements?:number[];
+  pa?: number;
+  pd?: number;
+  md?: number;
+  acc?: number;
+  eva?: number;
+  physicalAttribute?: number;
+  elements?: number[];
   exp: number;
   /**
    * Walking speed as a percentage: `clamp(0, 100 + info.speed, 130)`, the client's own formula
@@ -107,12 +114,12 @@ export interface MobTemplate {
    */
   speedPercent: number;
   /** 48D080 pushed defaults1, 487A30 compares each positive hit (not the attack sum). */
-  pushed?:number;
-  hitActions?:number[];
-  attacks?:MobAttackArt[];
+  pushed?: number;
+  hitActions?: number[];
+  attacks?: MobAttackArt[];
   /** 486180 raw frame-delay sum, independent of the 30ms visual clock. */
-  hitDurations?:Record<number,number>;
-  hitVisualDurations?:Record<number,number>;
+  hitDurations?: Record<number, number>;
+  hitVisualDurations?: Record<number, number>;
   /** Root fly=3; jump+move=2; move=1; neither=0. Optional only for legacy fixtures. */
   moveAbility?: 0 | 1 | 2 | 3;
   /**
@@ -151,12 +158,18 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
   if (!actionRoot) return undefined;
   const moveAbility = mobMoveAbility(actionRoot);
   if (moveAbility === undefined) return undefined;
-  const elements=elementAttributes(props.elemAttr);
-  if(!elements)return undefined;
+  const elements = elementAttributes(props.elemAttr);
+  if (!elements) return undefined;
   const speed = asNumber(props.speed, 0);
-  const reader=artReaderOf(archive),art=reader&&mobArtOf(templateId,reader);
-  const hitActions=[7,8,9].filter(action=>!!art?.actions[mobHitName(action)!]?.length);
-  const hitDurations=Object.fromEntries(hitActions.map(action=>[action,art!.actions[mobHitName(action)!]!.reduce((n,f)=>n+f.delay,0)]));
+  const reader = artReaderOf(archive),
+    art = reader && mobArtOf(templateId, reader);
+  const hitActions = [7, 8, 9].filter((action) => !!art?.actions[mobHitName(action)!]?.length);
+  const hitDurations = Object.fromEntries(
+    hitActions.map((action) => [
+      action,
+      art!.actions[mobHitName(action)!]!.reduce((n, f) => n + f.delay, 0),
+    ]),
+  );
   return {
     templateId,
     name: typeof props.name === "string" ? props.name : "",
@@ -165,17 +178,37 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     maxHP: asNumber(props.maxHP),
     maxMP: asNumber(props.maxMP),
     exp: asNumber(props.exp),
-    pa:Math.max(0,Math.min(999,asNumber(props.PA))),
-    pd:Math.max(0,Math.min(999,asNumber(props.PD))),
-    acc:Math.max(0,Math.min(999,asNumber(props.acc))),
-    eva:Math.max(0,Math.min(999,asNumber(props.eva))),
-    md:Math.max(0,Math.min(999,asNumber(props.MD))),
-    elements,physicalAttribute:elements[0],
-    pushed:asNumber(props.pushed,1),hitActions,hitDurations,
-    hitVisualDurations:Object.fromEntries(hitActions.map(action=>[action,art!.actions[mobHitName(action)!]!.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0)])),attacks:art?.attacks??[],
+    pa: Math.max(0, Math.min(999, asNumber(props.PA))),
+    pd: Math.max(0, Math.min(999, asNumber(props.PD))),
+    acc: Math.max(0, Math.min(999, asNumber(props.acc))),
+    eva: Math.max(0, Math.min(999, asNumber(props.eva))),
+    md: Math.max(0, Math.min(999, asNumber(props.MD))),
+    elements,
+    physicalAttribute: elements[0],
+    pushed: asNumber(props.pushed, 1),
+    hitActions,
+    hitDurations,
+    hitVisualDurations: Object.fromEntries(
+      hitActions.map((action) => [
+        action,
+        art!.actions[mobHitName(action)!]!.reduce(
+          (n, f) => n + Math.max(30, Math.ceil(f.delay / 30) * 30),
+          0,
+        ),
+      ]),
+    ),
+    attacks: art?.attacks ?? [],
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
     moveAbility,
-    dieMs: Math.max(0,...['die1','die2','dieF'].map(name=>(art?.actions[name]??[]).reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0))),
+    dieMs: Math.max(
+      0,
+      ...["die1", "die2", "dieF"].map((name) =>
+        (art?.actions[name] ?? []).reduce(
+          (n, f) => n + Math.max(30, Math.ceil(f.delay / 30) * 30),
+          0,
+        ),
+      ),
+    ),
   };
 }
 
@@ -208,13 +241,24 @@ export interface FieldMob {
   direction: 1 | -1;
   /** ms timestamp the current leg ends at; 0 means "no leg in flight". */
   legEndsAt: number;
-  motion?: { x: number; y: number; targetX: number; targetY: number; startedAt: number; endsAt: number; sampledAt: number; points: MobMotionPoint[] } | undefined;
+  motion?:
+    | {
+        x: number;
+        y: number;
+        targetX: number;
+        targetY: number;
+        startedAt: number;
+        endsAt: number;
+        sampledAt: number;
+        points: MobMotionPoint[];
+      }
+    | undefined;
   velocity?: { vx: number; vy: number };
-  reactionUntil?:number;
-  forced?:{action:number;facing:number;since:number;duration:number};
-  attackUntil?:number;
-  aggroCharacterId?:number;
-  mp?:number;
+  reactionUntil?: number;
+  forced?: { action: number; facing: number; since: number; duration: number };
+  attackUntil?: number;
+  aggroCharacterId?: number;
+  mp?: number;
   decisionAt?: number;
   intent?: -1 | 0 | 1;
   /** Foothold chain clipped by spawn rx0/rx1 and the loaded map's physical X bounds. */
@@ -277,8 +321,11 @@ export interface MobDamage {
 }
 
 export interface MobPresentation {
-  mobId:number;mp:number;reactionRemaining:number;
-  forced?:{action:number;facing:number;age:number;duration:number};dyingAge?:number;
+  mobId: number;
+  mp: number;
+  reactionRemaining: number;
+  forced?: { action: number; facing: number; age: number; duration: number };
+  dyingAge?: number;
 }
 
 /** The monsters of one map, as this server knows them. */
@@ -302,7 +349,8 @@ export class MobField {
 
   /** The number of mobs that will actually walk (the rest stand where the map put them). */
   get walking(): number {
-    return this.mobs.filter((mob) => mob.alive && mob.range !== undefined && this.speedOf(mob) > 0).length;
+    return this.mobs.filter((mob) => mob.alive && mob.range !== undefined && this.speedOf(mob) > 0)
+      .length;
   }
 
   /** The mob with this pool id, or `undefined` (the lookup `sub_492400` does on the client). */
@@ -334,7 +382,8 @@ export class MobField {
       alive: true,
       maxHp: template?.maxHP,
       hp: template?.maxHP,
-      maxMp: template?.maxMP,mp:template?.maxMP,
+      maxMp: template?.maxMP,
+      mp: template?.maxMP,
       removeAt: 0,
       respawnAt: 0,
       deaths: 0,
@@ -351,23 +400,32 @@ export class MobField {
    * not recompute it. The browser bridge uses the located native 4C7960 basic-attack formula;
    * the field retains the original packet trust contract rather than rolling a second time.
    */
-  applyDamage(mobId: number, damage: number, now: number,reaction?:{hitAnimation:number;facingLeft:boolean;characterId?:number}): MobDamage | undefined {
+  applyDamage(
+    mobId: number,
+    damage: number,
+    now: number,
+    reaction?: { hitAnimation: number; facingLeft: boolean; characterId?: number },
+  ): MobDamage | undefined {
     const mob = this.mob(mobId);
-    if (mob === undefined || !mob.alive || mob.hp === undefined || mob.maxHp === undefined) return undefined;
+    if (mob === undefined || !mob.alive || mob.hp === undefined || mob.maxHp === undefined)
+      return undefined;
     this.samplePosition(mob, now);
     const maxMp = mob.maxMp ?? 0;
-    const mp=mob.mp??maxMp;
-    if(reaction?.characterId!==undefined)mob.aggroCharacterId=reaction.characterId;
+    const mp = mob.mp ?? maxMp;
+    if (reaction?.characterId !== undefined) mob.aggroCharacterId = reaction.characterId;
     const dealt = Math.max(0, Math.round(damage));
     mob.hp = Math.max(0, mob.hp - dealt);
     const killed = mob.hp === 0;
-    const dieMs = killed ? mob.template?.dieMs ?? 0 : 0;
+    const dieMs = killed ? (mob.template?.dieMs ?? 0) : 0;
     const packets: Uint8Array[] = [encodeMobStat({ mobId, mp })];
     if (killed) {
       mob.alive = false;
       mob.motion = undefined;
-      delete mob.reactionUntil;delete mob.forced;delete mob.attackUntil;delete mob.aggroCharacterId;
-      mob.velocity={vx:0,vy:0};
+      delete mob.reactionUntil;
+      delete mob.forced;
+      delete mob.attackUntil;
+      delete mob.aggroCharacterId;
+      mob.velocity = { vx: 0, vy: 0 };
       mob.deaths += 1;
       mob.removeAt = now + dieMs;
       mob.respawnAt = mob.removeAt + this.respawnMs;
@@ -375,24 +433,61 @@ export class MobField {
       // played its hit animation and its damage numbers by the time this arrives.
       packets.push(encodeMobLeaveDelayed({ mobId, delayMs: 0 }));
     }
-    if(!killed&&reaction){
-      const hit=mobReaction(mob.template,dealt,reaction.hitAnimation,reaction.facingLeft,now,mob.reactionUntil);
-      if(hit){
-        const points=planMobReactionPath(mob,[...(this.options.footholds?.values()??[])],hit,mob.template?.moveAbility??0,this.options.map.physicalBounds);
-        const last=points.at(-1);
-        if(last){
+    if (!killed && reaction) {
+      const hit = mobReaction(
+        mob.template,
+        dealt,
+        reaction.hitAnimation,
+        reaction.facingLeft,
+        now,
+        mob.reactionUntil,
+      );
+      if (hit) {
+        const points = planMobReactionPath(
+          mob,
+          [...(this.options.footholds?.values() ?? [])],
+          hit,
+          mob.template?.moveAbility ?? 0,
+          this.options.map.physicalBounds,
+        );
+        const last = points.at(-1);
+        if (last) {
           // Cancel the old walking/jumping endpoint, not merely its sprite animation.
-          mob.reactionUntil=now+hit.duration;mob.legEndsAt=mob.reactionUntil;
+          mob.reactionUntil = now + hit.duration;
+          mob.legEndsAt = mob.reactionUntil;
           // Both native setters protect an active attack layer, NOT its KB path.
-          const active=mob.forced&&now<mob.forced.since+mob.forced.duration;
-          if(!active||replaceMobForced(mob.forced!.action,hit.action)){
-            mob.facing=hit.facing;
-            mob.forced={action:hit.action,facing:hit.facing,since:now,duration:mob.template?.hitVisualDurations?.[hit.action]??hit.duration};
+          const active = mob.forced && now < mob.forced.since + mob.forced.duration;
+          if (!active || replaceMobForced(mob.forced!.action, hit.action)) {
+            mob.facing = hit.facing;
+            mob.forced = {
+              action: hit.action,
+              facing: hit.facing,
+              since: now,
+              duration: mob.template?.hitVisualDurations?.[hit.action] ?? hit.duration,
+            };
           }
-          mob.motion={x:mob.x,y:mob.y,targetX:last.x,targetY:last.y,startedAt:now,endsAt:mob.reactionUntil,sampledAt:now,points};
-          mob.velocity={vx:points[0]!.vx,vy:points[0]!.vy};
-          packets.push(encodeMobMove(mobId,{actionByte:mobActionByte(hit.action,hit.facing),value:0,
-            path:{originX:Math.trunc(mob.x),originY:Math.trunc(mob.y),elements:points.map(point=>({attr:0,...point}))}}));
+          mob.motion = {
+            x: mob.x,
+            y: mob.y,
+            targetX: last.x,
+            targetY: last.y,
+            startedAt: now,
+            endsAt: mob.reactionUntil,
+            sampledAt: now,
+            points,
+          };
+          mob.velocity = { vx: points[0]!.vx, vy: points[0]!.vy };
+          packets.push(
+            encodeMobMove(mobId, {
+              actionByte: mobActionByte(hit.action, hit.facing),
+              value: 0,
+              path: {
+                originX: Math.trunc(mob.x),
+                originY: Math.trunc(mob.y),
+                elements: points.map((point) => ({ attr: 0, ...point })),
+              },
+            }),
+          );
         }
       }
     }
@@ -414,39 +509,97 @@ export class MobField {
   /** Browser-only relative phase snapshot; NEVER encode this as a made-up native opcode.
    * Late join restores body phase/MP/corpse only, and never replays old releases or hit callbacks.
    */
-  presentation(mobId:number,now:number):MobPresentation|undefined{
-    const mob=this.mobs.find(m=>m.mobId===mobId);if(!mob||(mob.alive===false&&mob.removeAt===0))return;
-    const f=mob.forced;
-    return {mobId,mp:mob.mp??mob.maxMp??0,reactionRemaining:Math.max(0,(mob.reactionUntil??0)-now),
-      ...(f&&now<f.since+f.duration?{forced:{action:f.action,facing:f.facing,age:Math.max(0,now-f.since),duration:f.duration}}:{}),
-      ...(!mob.alive&&mob.removeAt?{dyingAge:Math.max(0,now-(mob.removeAt-(mob.template?.dieMs??0)))}:{})};
+  presentation(mobId: number, now: number): MobPresentation | undefined {
+    const mob = this.mobs.find((m) => m.mobId === mobId);
+    if (!mob || (mob.alive === false && mob.removeAt === 0)) return;
+    const f = mob.forced;
+    return {
+      mobId,
+      mp: mob.mp ?? mob.maxMp ?? 0,
+      reactionRemaining: Math.max(0, (mob.reactionUntil ?? 0) - now),
+      ...(f && now < f.since + f.duration
+        ? {
+            forced: {
+              action: f.action,
+              facing: f.facing,
+              age: Math.max(0, now - f.since),
+              duration: f.duration,
+            },
+          }
+        : {}),
+      ...(!mob.alive && mob.removeAt
+        ? { dyingAge: Math.max(0, now - (mob.removeAt - (mob.template?.dieMs ?? 0))) }
+        : {}),
+    };
   }
 
   /** Authoritative attack admission is server policy. Literal geometry/action/value are native.
    * Only an engaged mob's still-present live attacker is considered; no global nearest-player aggro.
    * Called BEFORE roam so an attack cancels the previous patrol path for every observer.
    */
-  attackPackets(now:number,targets:readonly {characterId:number;x:number;y:number}[]):Uint8Array[]{
-    const packets:Uint8Array[]=[];
-    for(const mob of this.mobs){
-      if(!mob.alive||!mob.template?.attacks?.length)continue;
-      this.samplePosition(mob,now);
-      if(now<(mob.reactionUntil??0)||now<(mob.attackUntil??0)||now<((mob.forced?.since??0)+(mob.forced?.duration??0)))continue;
-      if(!mob.foothold&&mob.template.moveAbility!==3)continue; // 4862C0 grounded OR flyer.
-      const target=targets.find(p=>p.characterId===mob.aggroCharacterId);
-      if(!target){delete mob.aggroCharacterId;continue;}
-      const chosen=chooseMobAttack(mob.template.attacks,mob,target,mob.mp??mob.maxMp??0,this.options.random);
-      if(!chosen)continue;
-      const {attack,facing,value}=chosen;
-      mob.mp=Math.max(0,(mob.mp??mob.maxMp??0)-attack.conMP);
-      mob.forced={action:attack.action,facing,since:now,duration:attack.visualDuration};
-      mob.attackUntil=now+attack.visualDuration;mob.legEndsAt=mob.attackUntil;mob.facing=facing;
-      const action=mobActionByte(mob.foothold?MOB_ACTION.stand:MOB_ACTION.magic,facing);
-      const point={x:Math.trunc(mob.x),y:Math.trunc(mob.y),vx:0,vy:0,foothold:mob.foothold,action,duration:attack.visualDuration};
-      mob.motion={x:mob.x,y:mob.y,targetX:point.x,targetY:point.y,startedAt:now,endsAt:mob.attackUntil,sampledAt:now,points:[point]};
-      mob.velocity={vx:0,vy:0};
-      packets.push(encodeMobMove(mob.mobId,{actionByte:mobActionByte(attack.action,facing),value,
-        path:{originX:point.x,originY:point.y,elements:[{attr:0,...point}]}}),encodeMobStat({mobId:mob.mobId,mp:mob.mp}));
+  attackPackets(
+    now: number,
+    targets: readonly { characterId: number; x: number; y: number }[],
+  ): Uint8Array[] {
+    const packets: Uint8Array[] = [];
+    for (const mob of this.mobs) {
+      if (!mob.alive || !mob.template?.attacks?.length) continue;
+      this.samplePosition(mob, now);
+      if (
+        now < (mob.reactionUntil ?? 0) ||
+        now < (mob.attackUntil ?? 0) ||
+        now < (mob.forced?.since ?? 0) + (mob.forced?.duration ?? 0)
+      )
+        continue;
+      if (!mob.foothold && mob.template.moveAbility !== 3) continue; // 4862C0 grounded OR flyer.
+      const target = targets.find((p) => p.characterId === mob.aggroCharacterId);
+      if (!target) {
+        delete mob.aggroCharacterId;
+        continue;
+      }
+      const chosen = chooseMobAttack(
+        mob.template.attacks,
+        mob,
+        target,
+        mob.mp ?? mob.maxMp ?? 0,
+        this.options.random,
+      );
+      if (!chosen) continue;
+      const { attack, facing, value } = chosen;
+      mob.mp = Math.max(0, (mob.mp ?? mob.maxMp ?? 0) - attack.conMP);
+      mob.forced = { action: attack.action, facing, since: now, duration: attack.visualDuration };
+      mob.attackUntil = now + attack.visualDuration;
+      mob.legEndsAt = mob.attackUntil;
+      mob.facing = facing;
+      const action = mobActionByte(mob.foothold ? MOB_ACTION.stand : MOB_ACTION.magic, facing);
+      const point = {
+        x: Math.trunc(mob.x),
+        y: Math.trunc(mob.y),
+        vx: 0,
+        vy: 0,
+        foothold: mob.foothold,
+        action,
+        duration: attack.visualDuration,
+      };
+      mob.motion = {
+        x: mob.x,
+        y: mob.y,
+        targetX: point.x,
+        targetY: point.y,
+        startedAt: now,
+        endsAt: mob.attackUntil,
+        sampledAt: now,
+        points: [point],
+      };
+      mob.velocity = { vx: 0, vy: 0 };
+      packets.push(
+        encodeMobMove(mob.mobId, {
+          actionByte: mobActionByte(attack.action, facing),
+          value,
+          path: { originX: point.x, originY: point.y, elements: [{ attr: 0, ...point }] },
+        }),
+        encodeMobStat({ mobId: mob.mobId, mp: mob.mp }),
+      );
     }
     return packets;
   }
@@ -495,8 +648,11 @@ export class MobField {
     mob.motion = undefined;
     delete mob.velocity;
     mob.range = this.rangeOn(mob.spawn.foothold, mob.spawn);
-    delete mob.reactionUntil;delete mob.forced;delete mob.attackUntil;delete mob.aggroCharacterId;
-    mob.mp=mob.maxMp;
+    delete mob.reactionUntil;
+    delete mob.forced;
+    delete mob.attackUntil;
+    delete mob.aggroCharacterId;
+    mob.mp = mob.maxMp;
     delete mob.decisionAt;
     delete mob.intent;
     mob.hp = mob.maxHp;
@@ -509,14 +665,27 @@ export class MobField {
     if (!this.chains.has(id)) {
       const linked = footholdChain(footholds, id);
       const index = linked.findIndex((f) => f.id === id);
-      let first = index, last = index;
+      let first = index,
+        last = index;
       const floor = (f: FootholdSegment | undefined): f is FootholdSegment => !!f && f.x1 < f.x2;
       if (index < 0 || !floor(linked[index])) this.chains.set(id, []);
       else {
         // prev/next also link vertical walls and backfaces around a terrain perimeter. Those
         // are not walkable neighbours: do not let a ground path climb a wall or cross a gap.
-        while (first > 0 && floor(linked[first - 1]) && linked[first - 1]!.x2 === linked[first]!.x1 && linked[first - 1]!.y2 === linked[first]!.y1) first--;
-        while (last + 1 < linked.length && floor(linked[last + 1]) && linked[last]!.x2 === linked[last + 1]!.x1 && linked[last]!.y2 === linked[last + 1]!.y1) last++;
+        while (
+          first > 0 &&
+          floor(linked[first - 1]) &&
+          linked[first - 1]!.x2 === linked[first]!.x1 &&
+          linked[first - 1]!.y2 === linked[first]!.y1
+        )
+          first--;
+        while (
+          last + 1 < linked.length &&
+          floor(linked[last + 1]) &&
+          linked[last]!.x2 === linked[last + 1]!.x1 &&
+          linked[last]!.y2 === linked[last + 1]!.y1
+        )
+          last++;
         this.chains.set(id, linked.slice(first, last + 1));
       }
     }
@@ -546,16 +715,18 @@ export class MobField {
 
   /** The `0x2F` packets that put this field's monsters on screen, in map order. */
   spawnPackets(): Uint8Array[] {
-    return this.mobs.filter((mob) => mob.alive).map((mob) => {
-      const body: MobEnterField = {
-        mobId: mob.mobId,
-        templateId: mob.templateId,
-        x: mob.x,
-        y: mob.y,
-        facing: mob.facing,
-      };
-      return encodeMobEnterField(body);
-    });
+    return this.mobs
+      .filter((mob) => mob.alive)
+      .map((mob) => {
+        const body: MobEnterField = {
+          mobId: mob.mobId,
+          templateId: mob.templateId,
+          x: mob.x,
+          y: mob.y,
+          facing: mob.facing,
+        };
+        return encodeMobEnterField(body);
+      });
   }
 
   /** One `0x31 flag=1` (mob appears) packet for a mob that is standing where it should. */
@@ -580,7 +751,13 @@ export class MobField {
     for (const mob of this.mobs) {
       if (!mob.alive) continue;
       this.samplePosition(mob, now);
-      if (now < mob.legEndsAt || now < (mob.reactionUntil??0) || now < (mob.attackUntil??0) || now < ((mob.forced?.since??0)+(mob.forced?.duration??0))) continue;
+      if (
+        now < mob.legEndsAt ||
+        now < (mob.reactionUntil ?? 0) ||
+        now < (mob.attackUntil ?? 0) ||
+        now < (mob.forced?.since ?? 0) + (mob.forced?.duration ?? 0)
+      )
+        continue;
       const ability = mob.template?.moveAbility ?? 1;
       if (ability === 0 || ability === 3) continue;
       const speed = this.speedOf(mob);
@@ -599,7 +776,10 @@ export class MobField {
           // 53DAA0: jump BEFORE timer/direction draws; a jump does not reset the decision timer.
           if (ability === 2 && Math.floor(random() * 5) === 0) {
             const packet = this.airPacket(mob, now, true, speed);
-            if (packet) { packets.push(packet); continue; }
+            if (packet) {
+              packets.push(packet);
+              continue;
+            }
           }
           // Separate timer and direction draws, in the original order (sub_53D980).
           decisionMs = 90 * Math.floor((1000 + Math.floor(random() * 2000)) / 90);
@@ -612,21 +792,44 @@ export class MobField {
         if (edge === undefined || mob.intent === 0 || Math.abs(edge - mob.x) < 1) {
           if (mob.intent) mob.facing = mob.intent < 0 ? 1 : 0;
           mob.legEndsAt = now + decisionMs;
-          packets.push(encodeMobMove(mob.mobId, {
-            actionByte: mobActionByte(MOB_ACTION.stand, mob.facing), value: 0,
-            path: { originX: Math.round(mob.x), originY: Math.round(mob.y), elements: [{
-              attr: 0, x: Math.round(mob.x), y: Math.round(mob.y), vx: 0, vy: 0,
-              foothold: mob.foothold, action: mobActionByte(MOB_ACTION.stand, mob.facing), duration: decisionMs,
-            }] },
-          }));
+          packets.push(
+            encodeMobMove(mob.mobId, {
+              actionByte: mobActionByte(MOB_ACTION.stand, mob.facing),
+              value: 0,
+              path: {
+                originX: Math.round(mob.x),
+                originY: Math.round(mob.y),
+                elements: [
+                  {
+                    attr: 0,
+                    x: Math.round(mob.x),
+                    y: Math.round(mob.y),
+                    vx: 0,
+                    vy: 0,
+                    foothold: mob.foothold,
+                    action: mobActionByte(MOB_ACTION.stand, mob.facing),
+                    duration: decisionMs,
+                  },
+                ],
+              },
+            }),
+          );
           continue;
         }
       }
       if (mob.range === undefined || speed <= 0) continue;
       const leg = this.planLeg(mob, chain, speed, Math.min(this.maxLegMs, decisionMs));
       if (leg === undefined) continue;
-      mob.motion = { x: mob.x, y: mob.y, targetX: leg.targetX, targetY: leg.targetY,
-        startedAt: now, endsAt: now + leg.duration, sampledAt: now, points: leg.points };
+      mob.motion = {
+        x: mob.x,
+        y: mob.y,
+        targetX: leg.targetX,
+        targetY: leg.targetY,
+        startedAt: now,
+        endsAt: now + leg.duration,
+        sampledAt: now,
+        points: leg.points,
+      };
       mob.facing = leg.facing;
       mob.direction = leg.direction;
       mob.legEndsAt = now + leg.duration;
@@ -638,8 +841,13 @@ export class MobField {
           path: {
             originX: leg.fromX,
             originY: leg.fromY,
-            elements: leg.points.map((point) => ({ attr: 0, vx: 0, vy: 0, ...point,
-              action: mobActionByte(MOB_ACTION.move, leg.facing) })),
+            elements: leg.points.map((point) => ({
+              attr: 0,
+              vx: 0,
+              vy: 0,
+              ...point,
+              action: mobActionByte(MOB_ACTION.move, leg.facing),
+            })),
           },
         }),
       );
@@ -647,25 +855,54 @@ export class MobField {
     return packets;
   }
 
-  private airPacket(mob: FieldMob, now: number, launch: boolean, speed: number): Uint8Array | undefined {
+  private airPacket(
+    mob: FieldMob,
+    now: number,
+    launch: boolean,
+    speed: number,
+  ): Uint8Array | undefined {
     if (!this.options.footholds) return undefined;
     const direction = mob.intent ?? 0;
     if (direction) mob.facing = direction < 0 ? 1 : 0;
-    const points = planMobAirPath({ x: mob.x, y: mob.y, facing: mob.facing, foothold: mob.foothold,
-      vx: launch ? direction * speed : mob.velocity?.vx ?? 0,
-      vy: launch ? 0 : mob.velocity?.vy ?? 0 }, [...this.options.footholds.values()], {
-      direction, speedPxPerSecond: speed, launch, physicalBounds: this.options.map.physicalBounds,
-    });
+    const points = planMobAirPath(
+      {
+        x: mob.x,
+        y: mob.y,
+        facing: mob.facing,
+        foothold: mob.foothold,
+        vx: launch ? direction * speed : (mob.velocity?.vx ?? 0),
+        vy: launch ? 0 : (mob.velocity?.vy ?? 0),
+      },
+      [...this.options.footholds.values()],
+      {
+        direction,
+        speedPxPerSecond: speed,
+        launch,
+        physicalBounds: this.options.map.physicalBounds,
+      },
+    );
     const last = points.at(-1);
     if (!last) return undefined;
     const duration = points.reduce((sum, point) => sum + point.duration, 0);
-    mob.motion = { x: mob.x, y: mob.y, targetX: last.x, targetY: last.y,
-      startedAt: now, sampledAt: now, endsAt: now + duration, points };
+    mob.motion = {
+      x: mob.x,
+      y: mob.y,
+      targetX: last.x,
+      targetY: last.y,
+      startedAt: now,
+      sampledAt: now,
+      endsAt: now + duration,
+      points,
+    };
     mob.legEndsAt = now + duration;
     return encodeMobMove(mob.mobId, {
-      actionByte: mobActionByte(MOB_ACTION.jump, mob.facing), value: 0,
-      path: { originX: Math.round(mob.x), originY: Math.round(mob.y),
-        elements: points.map((point) => ({ attr: 0, ...point })) },
+      actionByte: mobActionByte(MOB_ACTION.jump, mob.facing),
+      value: 0,
+      path: {
+        originX: Math.round(mob.x),
+        originY: Math.round(mob.y),
+        elements: points.map((point) => ({ attr: 0, ...point })),
+      },
     });
   }
 
@@ -675,7 +912,8 @@ export class MobField {
     if (!motion || now < motion.sampledAt) return;
     motion.sampledAt = now;
     let elapsed = Math.max(0, now - motion.startedAt);
-    let x = motion.x, y = motion.y;
+    let x = motion.x,
+      y = motion.y;
     for (const point of motion.points) {
       const fraction = point.duration === 0 ? 1 : Math.min(1, elapsed / point.duration);
       mob.x = x + (point.x - x) * fraction;
@@ -684,7 +922,9 @@ export class MobField {
       mob.foothold = (chain && footholdSegmentAt(chain, mob.x))?.id ?? point.foothold;
       mob.velocity = { vx: point.vx ?? 0, vy: point.vy ?? 0 };
       if (fraction < 1) return;
-      elapsed -= point.duration; x = point.x; y = point.y;
+      elapsed -= point.duration;
+      x = point.x;
+      y = point.y;
     }
     mob.motion = undefined;
     if (mob.foothold) mob.range = this.rangeOn(mob.foothold, mob.spawn);
@@ -700,17 +940,32 @@ export class MobField {
       const points: MoveElement[] = [];
       let trimming = true;
       for (const point of motion.points) {
-        if (trimming && elapsed >= point.duration) { elapsed -= point.duration; continue; }
-        points.push({ attr: 0, vx: 0, vy: 0, action: mobActionByte(MOB_ACTION.move, mob.facing),
-          ...point, duration: point.duration === 0 ? 0 : Math.max(1, Math.round(point.duration - elapsed)) });
+        if (trimming && elapsed >= point.duration) {
+          elapsed -= point.duration;
+          continue;
+        }
+        points.push({
+          attr: 0,
+          vx: 0,
+          vy: 0,
+          action: mobActionByte(MOB_ACTION.move, mob.facing),
+          ...point,
+          duration: point.duration === 0 ? 0 : Math.max(1, Math.round(point.duration - elapsed)),
+        });
         elapsed = 0;
         trimming = false;
       }
-      if (points.length) packets.push(encodeMobMove(mob.mobId, {
-        actionByte: mob.forced&&motion.sampledAt<mob.forced.since+mob.forced.duration
-          ?MOB_ACTION_KEEP|(mob.facing&1):points[0]!.action, value: 0,
-        path: { originX: Math.round(mob.x), originY: Math.round(mob.y), elements: points },
-      }));
+      if (points.length)
+        packets.push(
+          encodeMobMove(mob.mobId, {
+            actionByte:
+              mob.forced && motion.sampledAt < mob.forced.since + mob.forced.duration
+                ? MOB_ACTION_KEEP | (mob.facing & 1)
+                : points[0]!.action,
+            value: 0,
+            path: { originX: Math.round(mob.x), originY: Math.round(mob.y), elements: points },
+          }),
+        );
     }
     return packets;
   }
@@ -721,17 +976,19 @@ export class MobField {
     chain: FootholdSegment[],
     speed: number,
     maxLegMs: number,
-  ): {
-    fromX: number;
-    fromY: number;
-    targetX: number;
-    targetY: number;
-    foothold: number;
-    facing: number;
-    direction: 1 | -1;
-    duration: number;
-    points: MobMotionPoint[];
-  } | undefined {
+  ):
+    | {
+        fromX: number;
+        fromY: number;
+        targetX: number;
+        targetY: number;
+        foothold: number;
+        facing: number;
+        direction: 1 | -1;
+        duration: number;
+        points: MobMotionPoint[];
+      }
+    | undefined {
     const range = mob.range;
     if (range === undefined) return undefined;
     let direction = mob.direction;
@@ -745,26 +1002,35 @@ export class MobField {
     // Walk the foothold polyline by ground distance, not horizontal distance. Every slope/flat
     // junction is a separate timed element, so the browser cannot cut a chord through a hill.
     const knots = [...new Set([...chain.flatMap((f) => [f.x1, f.x2]), end])]
-      .filter((x) => direction > 0 ? x > mob.x && x <= end : x < mob.x && x >= end)
+      .filter((x) => (direction > 0 ? x > mob.x && x <= end : x < mob.x && x >= end))
       .sort((a, b) => direction * (a - b));
-    let remaining = speed * maxLegMs / 1000;
-    let x = Math.round(mob.x), y = Math.round(mob.y);
+    let remaining = (speed * maxLegMs) / 1000;
+    let x = Math.round(mob.x),
+      y = Math.round(mob.y);
     const points: MobMotionPoint[] = [];
     for (const knot of knots) {
       const knotY = footholdYAt(chain, knot);
       if (knotY === undefined) break;
       const distance = Math.hypot(knot - x, knotY - y);
-      if (distance < .001) continue;
+      if (distance < 0.001) continue;
       const fraction = Math.min(1, remaining / distance);
       const targetX = Math.round(x + (knot - x) * fraction);
       const targetY = footholdYAt(chain, targetX);
       const segment = footholdSegmentAt(chain, targetX);
       if (targetY === undefined || !segment || targetX === x) break;
       const step = Math.hypot(targetX - x, targetY - y);
-      const duration = Math.max(1, Math.round(step * 1000 / speed));
-      points.push({ x: targetX, y: targetY, foothold: segment.id, duration,
-        vx: Math.round((targetX - x) * 1000 / duration), vy: Math.round((targetY - y) * 1000 / duration) });
-      remaining -= step; x = targetX; y = targetY;
+      const duration = Math.max(1, Math.round((step * 1000) / speed));
+      points.push({
+        x: targetX,
+        y: targetY,
+        foothold: segment.id,
+        duration,
+        vx: Math.round(((targetX - x) * 1000) / duration),
+        vy: Math.round(((targetY - y) * 1000) / duration),
+      });
+      remaining -= step;
+      x = targetX;
+      y = targetY;
       if (fraction < 1 || remaining < 1 || points.length >= 200) break;
     }
     const last = points.at(-1);

@@ -24,7 +24,14 @@ import { miniMapArt, type MiniMapArt } from "./minimap.ts";
  */
 import type { WzArchive } from "../wz/archive.ts";
 import { entriesOf, propertyOf, asNumber, asText } from "../wz/props.ts";
-import { artReaderOf, frameDelay, frameNames, frameAlpha, nodeRecord, type ArtReader } from "./wzart.ts";
+import {
+  artReaderOf,
+  frameDelay,
+  frameNames,
+  frameAlpha,
+  nodeRecord,
+  type ArtReader,
+} from "./wzart.ts";
 import type { WzNode } from "../wz/img.ts";
 
 /** One entry of the map's `back` list, as the page needs it. */
@@ -177,7 +184,13 @@ function framesOf(reader: ArtReader, path: string): MapFrame[] {
     const framePath = name === "" ? path : `${path}/${name}`;
     const art = reader.at(framePath);
     if (art === undefined) continue;
-    out.push({ path: framePath, delay: frameDelay(reader.node(framePath), "", 120), ...frameAlpha(reader.node(framePath)), ox: art.ox, oy: art.oy });
+    out.push({
+      path: framePath,
+      delay: frameDelay(reader.node(framePath), "", 120),
+      ...frameAlpha(reader.node(framePath)),
+      ox: art.ox,
+      oy: art.oy,
+    });
   }
   return out;
 }
@@ -193,7 +206,10 @@ export function mapSprites(root: unknown, reader: ArtReader): MapSprite[] {
 }
 
 /** `mapSprites` plus what it could not draw, for `mapArtFrom`. */
-function mapSpriteScan(root: unknown, reader: ArtReader): { sprites: MapSprite[]; missingTiles: number; missingTileSets: string[] } {
+function mapSpriteScan(
+  root: unknown,
+  reader: ArtReader,
+): { sprites: MapSprite[]; missingTiles: number; missingTileSets: string[] } {
   const out: MapSprite[] = [];
   let missingTiles = 0;
   const missingTileSets = new Set<string>();
@@ -259,7 +275,12 @@ export function mapBounds(root: unknown, reader: ArtReader): MapBounds {
   const top = asNumber(propertyOf(info, "VRTop"), Number.NaN);
   const right = asNumber(propertyOf(info, "VRRight"), Number.NaN);
   const bottom = asNumber(propertyOf(info, "VRBottom"), Number.NaN);
-  if (Number.isFinite(left) && Number.isFinite(top) && Number.isFinite(right) && Number.isFinite(bottom)) {
+  if (
+    Number.isFinite(left) &&
+    Number.isFinite(top) &&
+    Number.isFinite(right) &&
+    Number.isFinite(bottom)
+  ) {
     return { left, top, right, bottom };
   }
   // No `VR*` (68 of the 100 maps): use what the sprites actually cover, plus a screen of slack so a
@@ -269,7 +290,8 @@ export function mapBounds(root: unknown, reader: ArtReader): MapBounds {
   let maxX = Number.NEGATIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
   for (let layer = 0; layer < 8; layer++) {
-    const node = entriesOf(root).find((entry) => entry.name === String(layer))?.value as WzNode | undefined;
+    const node = entriesOf(root).find((entry) => entry.name === String(layer))?.value as
+      WzNode | undefined;
     if (node === undefined) continue;
     const tileSet = asText(propertyOf(propertyOf(node, "info"), "tS"));
     for (const entry of entriesOf(propertyOf(node, "tile"))) {
@@ -307,7 +329,7 @@ export function mapBounds(root: unknown, reader: ArtReader): MapBounds {
 export function mapArtFrom(root: unknown, reader: ArtReader, imagePath?: string): MapArt {
   const scan = mapSpriteScan(root, reader);
   return {
-    ...(imagePath ? {miniMap:miniMapArt(root,reader,imagePath)} : {}),
+    ...(imagePath ? { miniMap: miniMapArt(root, reader, imagePath) } : {}),
     title: mapTitleArt(root, reader),
     backs: mapBacks(root, reader),
     sprites: scan.sprites,
@@ -319,7 +341,11 @@ export function mapArtFrom(root: unknown, reader: ArtReader, imagePath?: string)
 }
 
 /** Reads one map's art out of the archive, or `undefined` when the image is not there. */
-export function loadMapArt(archive: WzArchive, mapId: number, reader = artReaderOf(archive)): MapArt | undefined {
+export function loadMapArt(
+  archive: WzArchive,
+  mapId: number,
+  reader = artReaderOf(archive),
+): MapArt | undefined {
   const imagePath = `Map/Map/${String(mapId).padStart(9, "0")}.img`;
   if (!archive.has(imagePath) || reader === undefined) return undefined;
   const root = archive.objects(imagePath)[0];
@@ -332,7 +358,9 @@ export function loadMapArt(archive: WzArchive, mapId: number, reader = artReader
  * `/api/art` endpoint must see the same cached canvases, or the first field of a session decodes
  * every tile twice.
  */
-export function mapArtProvider(archive: WzArchive | undefined): ((mapId: number) => MapArt | undefined) & {
+export function mapArtProvider(archive: WzArchive | undefined): ((
+  mapId: number,
+) => MapArt | undefined) & {
   reader: ArtReader | undefined;
 } {
   const reader = artReaderOf(archive);

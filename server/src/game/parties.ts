@@ -119,7 +119,9 @@ export class PartyRegistry {
     const index = party.members.findIndex((member) => member.characterId === characterId);
     if (index < 0) {
       // 不該發生：`partyIdOf` 與名冊必須一致。留著這一行是為了讓不一致早點爆出來。
-      throw new Error(`character ${characterId} is in party ${party.id} but not in its member list`);
+      throw new Error(
+        `character ${characterId} is in party ${party.id} but not in its member list`,
+      );
     }
     const members = [...party.members];
     const member = members[index]!;

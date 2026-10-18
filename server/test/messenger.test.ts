@@ -49,14 +49,20 @@ test("0x24 round-trips every request type", () => {
   // a slash command: [opcode][3][u16 len][bytes] - /q never gets here (the client handles it).
   // The command word itself is CP949 on the wire; the codec does not translate it, and the server
   // never matches on it (it takes whatever follows the first space - see `messengerInviteTarget`).
-  assert.equal(hex(encodeClientMessengerRequest({ kind: "command", text: "/invite Alt" })), "24030b002f696e766974652041 6c74".replace(/ /g, ""));
+  assert.equal(
+    hex(encodeClientMessengerRequest({ kind: "command", text: "/invite Alt" })),
+    "24030b002f696e766974652041 6c74".replace(/ /g, ""),
+  );
   assert.deepEqual(parse(encodeClientMessengerRequest({ kind: "command", text: "/invite Alt" })), {
     kind: "command",
     text: "/invite Alt",
   });
   // chat: [opcode][5][u16 len][bytes].
   // The client composes "name : text" itself before sending (sub_4DE490).
-  assert.equal(hex(encodeClientMessengerRequest({ kind: "chat", line: "Hero : hi" })), "240509004865726f203a206869");
+  assert.equal(
+    hex(encodeClientMessengerRequest({ kind: "chat", line: "Hero : hi" })),
+    "240509004865726f203a206869",
+  );
   assert.deepEqual(parse(encodeClientMessengerRequest({ kind: "chat", line: "Hero : hi" })), {
     kind: "chat",
     line: "Hero : hi",
@@ -101,7 +107,10 @@ test("0x4d types 1..5 round-trip", () => {
   assert.deepEqual(event(encodeMessengerLeft(2)), { kind: "left", slot: 2 });
 
   // The invite carries the name the modal shows and the room id its "yes" sends back.
-  assert.equal(hex(encodeMessengerInvite({ inviterName: "Hero", roomId: 7 })), "4d03" + "04004865726f" + "07000000");
+  assert.equal(
+    hex(encodeMessengerInvite({ inviterName: "Hero", roomId: 7 })),
+    "4d03" + "04004865726f" + "07000000",
+  );
   assert.deepEqual(event(encodeMessengerInvite({ inviterName: "Hero", roomId: 7 })), {
     kind: "invite",
     inviterName: "Hero",
@@ -113,11 +122,14 @@ test("0x4d types 1..5 round-trip", () => {
     hex(encodeMessengerInviteResult({ ok: MESSENGER_INVITE_RESULT.notFound, name: "Nobody" })),
     "4d04" + "06004e6f626f6479" + "00",
   );
-  assert.deepEqual(event(encodeMessengerInviteResult({ ok: MESSENGER_INVITE_RESULT.sent, name: "Alt" })), {
-    kind: "inviteResult",
-    ok: 1,
-    name: "Alt",
-  });
+  assert.deepEqual(
+    event(encodeMessengerInviteResult({ ok: MESSENGER_INVITE_RESULT.sent, name: "Alt" })),
+    {
+      kind: "inviteResult",
+      ok: 1,
+      name: "Alt",
+    },
+  );
 
   // One string, already formatted - the client splits on " : " (sub_4E1E30's strstr).
   assert.equal(hex(encodeMessengerChat("Hero : hi")), "4d05" + "09004865726f203a206869");
@@ -189,7 +201,11 @@ test("invites expire, are replaced, and are spent by joining", () => {
 
   registry.invite(ALT.characterId, { roomId: room.id, inviterName: "Hero" }, now);
   const invite = registry.inviteOf(ALT.characterId, now + 1);
-  assert.deepEqual(invite, { roomId: room.id, inviterName: "Hero", expiresAt: now + MESSENGER_INVITE_TTL_MS });
+  assert.deepEqual(invite, {
+    roomId: room.id,
+    inviterName: "Hero",
+    expiresAt: now + MESSENGER_INVITE_TTL_MS,
+  });
 
   // A second invite replaces the first: one slot per character, like the trade invitation.
   registry.invite(ALT.characterId, { roomId: 99, inviterName: "Someone" }, now + 10);

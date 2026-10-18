@@ -143,7 +143,8 @@ export function encodeLoginResult(
   writer.writeByte(LOGIN_OPCODE.login);
   writer.writeByte(result & 0xff);
   if (result !== LOGIN_RESULT.ok) return writer.toBytes();
-  if (!payload) throw new Error("a successful login reply needs the account info and the world list");
+  if (!payload)
+    throw new Error("a successful login reply needs the account info and the world list");
   if (payload.worlds.length > 0xff) throw new RangeError("the world count is a u8");
   writer.writeU32(payload.account.app4);
   writer.writeByte(payload.account.app8);
@@ -159,7 +160,10 @@ export function encodeLoginResult(
  * `sub_54E250` always fills exactly three slots: it reads until the packet's count, then zeroes the
  * rest. A server therefore sends `count` records and stops - it must not pad to three.
  */
-export function encodeWorldSelectResult(result: number, characters: CharacterData[] = []): Uint8Array {
+export function encodeWorldSelectResult(
+  result: number,
+  characters: CharacterData[] = [],
+): Uint8Array {
   const writer = new PacketWriter(512);
   writer.writeByte(LOGIN_OPCODE.worldSelect);
   writer.writeByte(result & 0xff);
@@ -178,7 +182,10 @@ export function encodeWorldSelectResult(result: number, characters: CharacterDat
  */
 export function ipv4WireValue(dotted: string): number {
   const parts = dotted.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
     throw new RangeError(`"${dotted}" is not an IPv4 address`);
   }
   return ((parts[3]! << 24) | (parts[2]! << 16) | (parts[1]! << 8) | parts[0]!) >>> 0;
@@ -208,7 +215,10 @@ export interface GameServerRedirect {
  * `sub_432FB0` builds a sockaddr from ip/port and calls `sub_558BD0` - the same connect path the
  * 0x07 migration packet uses - stores the id in CWvsApp+0x14 and plays "GameIn".
  */
-export function encodeSelectCharacterResult(result: number, redirect?: GameServerRedirect): Uint8Array {
+export function encodeSelectCharacterResult(
+  result: number,
+  redirect?: GameServerRedirect,
+): Uint8Array {
   const writer = new PacketWriter(32);
   writer.writeByte(LOGIN_OPCODE.selectCharacter);
   writer.writeByte(result & 0xff);
@@ -296,7 +306,9 @@ export function encodeEcho(value: number): Uint8Array {
 export function encodeCreateCharacterResult(character?: CharacterData): Uint8Array {
   const writer = new PacketWriter(256);
   writer.writeByte(LOGIN_OPCODE.createCharacter);
-  writer.writeByte(character === undefined ? CREATE_CHARACTER_RESULT.failed : CREATE_CHARACTER_RESULT.created);
+  writer.writeByte(
+    character === undefined ? CREATE_CHARACTER_RESULT.failed : CREATE_CHARACTER_RESULT.created,
+  );
   if (character === undefined) return writer.toBytes();
   writeCharacterData(writer, character);
   return writer.toBytes();
@@ -311,7 +323,9 @@ export function encodeCreateCharacterResult(character?: CharacterData): Uint8Arr
  */
 export function encodeDeleteCharacterResult(characterId: number, flag: number): Uint8Array {
   if (flag === 0) {
-    throw new Error("flag 0 makes the client throw CTerminateException (570425350); send 1 on success");
+    throw new Error(
+      "flag 0 makes the client throw CTerminateException (570425350); send 1 on success",
+    );
   }
   const writer = new PacketWriter(32);
   writer.writeByte(LOGIN_OPCODE.deleteResult);

@@ -50,14 +50,22 @@ test("ids that name no body part have no slot: face, hair, consumables, 0", () =
   assert.equal(avatarSlotOfItem(20000), null, "a face id is not a part code");
   assert.equal(avatarSlotOfItem(2000000), null, "a consumable");
   assert.equal(avatarSlotOfItem(5000000), null, "cash is not a part code either");
-  assert.equal(avatarSlotOfItem(1110000), null, "111xxxx is the one code inside the range that is empty");
+  assert.equal(
+    avatarSlotOfItem(1110000),
+    null,
+    "111xxxx is the one code inside the range that is empty",
+  );
   assert.equal(avatarSlotOfItem(0), null);
 });
 
 test("only 1..14 can be worn - the hair's slot 0 and the empty codes are not", () => {
   assert.equal(wornSlotOfItem(1040001), 5);
   assert.equal(wornSlotOfItem(1302000), 11);
-  assert.equal(wornSlotOfItem(30000), null, "the hair goes to appearanceB, never to the worn group");
+  assert.equal(
+    wornSlotOfItem(30000),
+    null,
+    "the hair goes to appearanceB, never to the worn group",
+  );
   assert.equal(wornSlotOfItem(1110000), null);
   assert.equal(WORN_SLOT_LIMIT, 14);
 });
@@ -94,7 +102,11 @@ test("words a character cannot wear are skipped, not stored somewhere they would
   // A hair id in the clothes word, a face id in the weapon word: the client itself would ignore
   // them (no part code -> no cell), and so does the server.
   const odd = wornOfLook([20000, 30000, 30001, 1060001, 20005, 1040001]);
-  assert.deepEqual([...odd.keys()], [6, 5], "1060001 is pants; the top in the weapon word is still a top");
+  assert.deepEqual(
+    [...odd.keys()],
+    [6, 5],
+    "1060001 is pants; the top in the weapon word is still a top",
+  );
 
   // A shorter array than the client's ten words is not an error either - it is what a save written
   // before the words were known holds.

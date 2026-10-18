@@ -19,7 +19,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CipherState, SERVER_SEND_MAGIC, CLIENT_SEND_MAGIC } from "../src/protocol/cipher.ts";
-import { encodeHandshake, encodeSessionPacket, SessionDeframer, type SessionEvent } from "../src/protocol/session.ts";
+import {
+  encodeHandshake,
+  encodeSessionPacket,
+  SessionDeframer,
+  type SessionEvent,
+} from "../src/protocol/session.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { characterDataOf, readCharacterData } from "../src/protocol/chardata.ts";
 import {
@@ -49,7 +54,9 @@ class FakeClient {
   receive(bytes: Uint8Array): Uint8Array[] {
     const events = this.deframer.push(bytes);
     this.seen.push(...events);
-    return events.filter((event) => event.kind === "packet").map((event) => (event as { plain: Uint8Array }).plain);
+    return events
+      .filter((event) => event.kind === "packet")
+      .map((event) => (event as { plain: Uint8Array }).plain);
   }
 
   /** Asserts every packet so far carried the header the cipher state predicted. */
@@ -68,7 +75,12 @@ test("the login chain works end to end over a real encrypted session", () => {
   client.receive(handshake);
 
   // --- 0x01: the client asks to log in, the server answers with the world list.
-  const loginRequest = encodeClientPacket({ kind: "login-request", opcode: 0x01, username: "admin", password: "hunter2" });
+  const loginRequest = encodeClientPacket({
+    kind: "login-request",
+    opcode: 0x01,
+    username: "admin",
+    password: "hunter2",
+  });
   assert.deepEqual(decodeClientPacket(loginRequest), {
     kind: "login-request",
     opcode: 0x01,
@@ -106,10 +118,27 @@ test("the login chain works end to end over a real encrypted session", () => {
 
   // --- 0x02: world select -> the three character slots (the client only fills what it is given).
   const worldSelect = encodeClientPacket({ kind: "world-select", opcode: 0x02, worldId: 0 });
-  assert.deepEqual(decodeClientPacket(worldSelect), { kind: "world-select", opcode: 0x02, worldId: 0 });
+  assert.deepEqual(decodeClientPacket(worldSelect), {
+    kind: "world-select",
+    opcode: 0x02,
+    worldId: 0,
+  });
 
-  const hero = characterDataOf({ id: 0x1000, name: "Hero", level: 12, job: 0, str: 5, dex: 5, int: 5, luk: 5, hp: 50, maxHp: 50 });
-  client.receive(encodeSessionPacket(encodeWorldSelectResult(LOGIN_RESULT.ok, [hero]), serverSendState));
+  const hero = characterDataOf({
+    id: 0x1000,
+    name: "Hero",
+    level: 12,
+    job: 0,
+    str: 5,
+    dex: 5,
+    int: 5,
+    luk: 5,
+    hp: 50,
+    maxHp: 50,
+  });
+  client.receive(
+    encodeSessionPacket(encodeWorldSelectResult(LOGIN_RESULT.ok, [hero]), serverSendState),
+  );
 
   const worldReply = client.seen.at(-1);
   if (!worldReply || worldReply.kind !== "packet") throw new Error("no world reply");
@@ -122,8 +151,16 @@ test("the login chain works end to end over a real encrypted session", () => {
   assert.equal(worldReader.exhausted, true);
 
   // --- 0x03: select the character -> the client is handed the game server address plus its id.
-  const select = encodeClientPacket({ kind: "select-character", opcode: 0x03, characterId: 0x1000 });
-  assert.deepEqual(decodeClientPacket(select), { kind: "select-character", opcode: 0x03, characterId: 0x1000 });
+  const select = encodeClientPacket({
+    kind: "select-character",
+    opcode: 0x03,
+    characterId: 0x1000,
+  });
+  assert.deepEqual(decodeClientPacket(select), {
+    kind: "select-character",
+    opcode: 0x03,
+    characterId: 0x1000,
+  });
 
   const characterId = 0x1000;
   client.receive(
@@ -147,24 +184,46 @@ test("the login chain works end to end over a real encrypted session", () => {
   assert.equal(selectReader.exhausted, true);
 
   // --- The new connection: handshake again, then the client identifies itself with its id.
-  const gameServerHandshake = encodeHandshake(new Uint8Array(199), CLIENT_SEND_SEED, CLIENT_RECV_SEED);
+  const gameServerHandshake = encodeHandshake(
+    new Uint8Array(199),
+    CLIENT_SEND_SEED,
+    CLIENT_RECV_SEED,
+  );
   const gameServerRecvState = new CipherState(CLIENT_SEND_SEED);
-  const gameServer = new SessionDeframer({ recvState: gameServerRecvState, expectHandshake: false, expectedMagic: CLIENT_SEND_MAGIC });
+  const gameServer = new SessionDeframer({
+    recvState: gameServerRecvState,
+    expectHandshake: false,
+    expectedMagic: CLIENT_SEND_MAGIC,
+  });
   const idEcho = encodeClientPacket({ kind: "handshake-reply", opcode: 0x04, value: receivedId });
-  const echoed = gameServer.push(encodeSessionPacket(idEcho, new CipherState(CLIENT_SEND_SEED), "c2s"));
+  const echoed = gameServer.push(
+    encodeSessionPacket(idEcho, new CipherState(CLIENT_SEND_SEED), "c2s"),
+  );
   assert.equal(gameServerHandshake.length, 211);
   const firstPacket = echoed.find((event) => event.kind === "packet");
   if (!firstPacket || firstPacket.kind !== "packet") throw new Error("the id echo did not arrive");
   assert.equal(firstPacket.headerOk, true);
-  assert.deepEqual(decodeClientPacket(firstPacket.plain), { kind: "handshake-reply", opcode: 0x04, value: characterId });
-  assert.equal(describeClientPacket(firstPacket.plain), `handshake-reply value=0x${characterId.toString(16)}`);
+  assert.deepEqual(decodeClientPacket(firstPacket.plain), {
+    kind: "handshake-reply",
+    opcode: 0x04,
+    value: characterId,
+  });
+  assert.equal(
+    describeClientPacket(firstPacket.plain),
+    `handshake-reply value=0x${characterId.toString(16)}`,
+  );
 });
 
 test("every login-chain opcode is labelled in a trace, none are silently dropped", () => {
   const packets: ClientPacket[] = [
     { kind: "select-character", opcode: 0x03, characterId: 1 },
     { kind: "create-character", opcode: 0x05, name: "Newbie" },
-    { kind: "check-name", opcode: 0x06, name: "Newbie", appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+    {
+      kind: "check-name",
+      opcode: 0x06,
+      name: "Newbie",
+      appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    },
     { kind: "delete-character", opcode: 0x07, characterId: 1 },
   ];
   for (const packet of packets) {

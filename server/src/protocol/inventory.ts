@@ -78,7 +78,9 @@ export type InventoryChange =
 
 function checkInventory(inventory: number): void {
   if (!Number.isInteger(inventory) || inventory < 1 || inventory > 4) {
-    throw new RangeError(`inventory ${inventory} is outside the client's 1..4 (sub_55E8F0 drops it)`);
+    throw new RangeError(
+      `inventory ${inventory} is outside the client's 1..4 (sub_55E8F0 drops it)`,
+    );
   }
 }
 
@@ -107,7 +109,9 @@ function writeChange(writer: PacketWriter, change: InventoryChange): void {
   }
   if (change.op === INVENTORY_OP.key) {
     if (change.inventory === INVENTORY_TAB.equip) {
-      throw new RangeError("op 1 on the equip tab throws CTerminateException on the client (sub_55BAB0)");
+      throw new RangeError(
+        "op 1 on the equip tab throws CTerminateException on the client (sub_55BAB0)",
+      );
     }
     writer.writeU16(change.key & 0xffff);
     return;
@@ -125,7 +129,8 @@ function writeChange(writer: PacketWriter, change: InventoryChange): void {
  * pickup, a shop, a quest reward - should send.
  */
 export function encodeInventoryChange(changes: readonly InventoryChange[], result = 1): Uint8Array {
-  if (changes.length > 0xff) throw new RangeError(`${changes.length} changes do not fit the u8 count`);
+  if (changes.length > 0xff)
+    throw new RangeError(`${changes.length} changes do not fit the u8 count`);
   const writer = new PacketWriter(16 + changes.length * 32);
   writer.writeByte(INVENTORY_OPCODE);
   writer.writeByte(result === 0 ? 0 : 1);
@@ -135,7 +140,10 @@ export function encodeInventoryChange(changes: readonly InventoryChange[], resul
 }
 
 /** Read one `0x0B` body (no opcode byte; the reader must sit at `result`). */
-export function readInventoryChange(reader: PacketReader): { result: number; changes: InventoryChange[] } {
+export function readInventoryChange(reader: PacketReader): {
+  result: number;
+  changes: InventoryChange[];
+} {
   const result = reader.readByte();
   const count = reader.readByte();
   const changes: InventoryChange[] = [];
@@ -157,7 +165,10 @@ export function readInventoryChange(reader: PacketReader): { result: number; cha
 }
 
 /** One line describing a `0x0B` body, for logs and `decode`. */
-export function describeInventoryChange(result: number, changes: readonly InventoryChange[]): string {
+export function describeInventoryChange(
+  result: number,
+  changes: readonly InventoryChange[],
+): string {
   const parts = changes.map((change) => {
     const where = `tab ${change.inventory} slot ${change.slot}`;
     if (change.op === INVENTORY_OP.put) return `${where} put item ${change.item.itemId}`;

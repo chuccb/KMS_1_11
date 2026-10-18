@@ -1,4 +1,4 @@
-import {balloonLayout} from './chatlayout.mjs';
+import {balloonLayout} from './chatlayout.ts';
 /** 50B320 -> 4373A0 -> 4386E0. One current 5000ms balloon per known user, fixed root z250210. */
 export function chatBalloons({image}) {
   const records=new Map();

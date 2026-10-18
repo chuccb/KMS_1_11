@@ -31,13 +31,7 @@ import {
 
 export type CaptureDirection = "c2s" | "s2c";
 export type CaptureKind =
-  | "connect"
-  | "disconnect"
-  | "frame"
-  | "handshake"
-  | "raw"
-  | "framing-error"
-  | "server-info";
+  "connect" | "disconnect" | "frame" | "handshake" | "raw" | "framing-error" | "server-info";
 
 export interface CaptureRecord {
   /** ms since the capture started */
@@ -81,9 +75,7 @@ export type CaptureMode = "session" | "framed" | "raw";
  * still-unknown 199-byte body) for a reproducible experiment.
  */
 export type HandshakePolicy =
-  | "auto"
-  | "off"
-  | { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
+  "auto" | "off" | { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
 
 export interface CaptureServerOptions {
   port: number;
@@ -174,7 +166,9 @@ export class CaptureServer {
     // the trace (verified against the sandbox preview proxy).
     let mismatch = false;
     const sessionDeframer =
-      this.options.mode === "session" ? new SessionDeframer(this.openSession(socket, conn)) : undefined;
+      this.options.mode === "session"
+        ? new SessionDeframer(this.openSession(socket, conn))
+        : undefined;
     const headerDeframer = this.options.mode === "framed" ? new HeaderDeframer() : undefined;
 
     socket.on("data", (chunk: Buffer) => {
@@ -213,7 +207,9 @@ export class CaptureServer {
               plainHex: toHex(event.plain),
               decoded: describeClientPacket(event.plain),
               headerOk: event.headerOk,
-              note: event.headerOk ? undefined : `header mismatch: expected 0x${event.expectedHeader.toString(16)}`,
+              note: event.headerOk
+                ? undefined
+                : `header mismatch: expected 0x${event.expectedHeader.toString(16)}`,
             });
           }
           const failure = sessionDeframer.failure;
@@ -247,7 +243,14 @@ export class CaptureServer {
     });
 
     socket.on("error", (error) => {
-      this.emit({ conn, dir: "c2s", kind: "framing-error", len: 0, hex: "", note: `socket: ${error.message}` });
+      this.emit({
+        conn,
+        dir: "c2s",
+        kind: "framing-error",
+        len: 0,
+        hex: "",
+        note: `socket: ${error.message}`,
+      });
     });
 
     socket.on("close", () => {
@@ -286,7 +289,9 @@ export class CaptureServer {
       seeds: { sendSeed: clientSendSeed, recvSeed: clientRecvSeed },
       note:
         `sent by us: clientSendSeed=0x${hex32(clientSendSeed)} clientRecvSeed=0x${hex32(clientRecvSeed)}` +
-        (pinned.body ? "; body from the caller" : "; body is 199 zero bytes (contents still unknown)"),
+        (pinned.body
+          ? "; body from the caller"
+          : "; body is 199 zero bytes (contents still unknown)"),
     });
     return {
       expectHandshake: false, // already consumed on the way out

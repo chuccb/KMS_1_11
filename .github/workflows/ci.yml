@@ -1,4 +1,4 @@
-name: CI
+name: Bun verification
 
 on:
   push:
@@ -9,42 +9,24 @@ permissions:
   contents: read
 
 jobs:
-  tools:
-    name: tools (python, stdlib only)
+  verify:
+    name: TypeScript / ESNext / Bun
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          python-version-file: ".python-version"
-      - name: Unit tests
-        run: python3 -m unittest discover -s tools/tests -v
-      - name: WZ manifest smoke test
-        run: python3 tools/wz1.py Data.wz
-
-  server:
-    name: server (pinned node, zero runtime deps)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: ".node-version"
-          cache: "npm"
-          cache-dependency-path: "server/package-lock.json"
-      - name: Install pinned npm
-        run: |
-          package="$(node -p "require('./server/package.json').packageManager")"
-          npm install --global "$package" --ignore-scripts --no-audit --no-fund
-      - name: Install development tools
-        working-directory: server
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Tests
-        working-directory: server
-        run: node --test "**/*.test.ts"
-      - name: CLI usage
-        run: node server/src/cli.ts help
+          bun-version-file: .bun-version
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Strict TypeScript
+        run: bun run typecheck
+      - name: Source formatting
+        run: bun run format:check
+      - name: Browser build
+        run: bun run build
+      - name: Regression suite (isolated fixtures, no live accounts)
+        run: bun test --timeout 30000 ./server/test ./tools/tests

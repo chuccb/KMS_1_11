@@ -6,7 +6,9 @@ import type { ItemCatalog } from "./iteminfo.ts";
 import type { CharacterStats } from "../protocol/chardata.ts";
 
 /** The stat pair a job swings with: `[main, secondary]`, the two multiplied as the formula says. */
-export function damageStatsOf(job: number): ["str" | "dex" | "int" | "luk", "str" | "dex" | "int" | "luk"] {
+export function damageStatsOf(
+  job: number,
+): ["str" | "dex" | "int" | "luk", "str" | "dex" | "int" | "luk"] {
   // Legacy approximation; pirate is not a v1.11 class. A beginner
   // (0) swings like a warrior - that is what the class-less starting weapon is.
   const branch = Math.floor(job / 100) * 100;
@@ -50,12 +52,9 @@ export function damageRangeFor(
   const [main, secondary] = damageStatsOf(stats.job);
   // Applying the ammo's WZ incPAD to this existing approximation is a reconstruction policy,
   // NOT proof of the original ranged formula (mastery, defence and weapon coefficients are open).
-  const ammoPad = projectileItemId === undefined
-    ? 0
-    : Math.max(0, catalog?.info(projectileItemId)?.incPAD ?? 0);
-  return damageRangeOf(
-    stats[main], stats[secondary], watkOf(wornItemIds, catalog) + ammoPad,
-  );
+  const ammoPad =
+    projectileItemId === undefined ? 0 : Math.max(0, catalog?.info(projectileItemId)?.incPAD ?? 0);
+  return damageRangeOf(stats[main], stats[secondary], watkOf(wornItemIds, catalog) + ammoPad);
 }
 
 /** One swing's number: uniform in the range, `max` when the range is a point. */

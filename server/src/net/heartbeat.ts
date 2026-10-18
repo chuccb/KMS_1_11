@@ -135,7 +135,9 @@ export class Heartbeat {
         try {
           session.ping();
         } catch (error) {
-          this.options.log?.(`heartbeat: ping to ${session.label} failed: ${(error as Error).message}`);
+          this.options.log?.(
+            `heartbeat: ping to ${session.label} failed: ${(error as Error).message}`,
+          );
         }
       }
     }

@@ -32,7 +32,12 @@
 import { ClientRandom } from "../protocol/random.ts";
 import { DROP_KIND, encodeDropAppear, type DropAppear } from "../protocol/drop.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
-import { footholdChain, footholdYAt, type FootholdSegment, type FootholdSegments } from "../wz/archive.ts";
+import {
+  footholdChain,
+  footholdYAt,
+  type FootholdSegment,
+  type FootholdSegments,
+} from "../wz/archive.ts";
 
 /** Chance (out of 1000) that a killed monster leaves mesos. */
 export const MESO_DROP_CHANCE_PER_MILLE = 600;
@@ -172,7 +177,8 @@ export function defaultDropPolicy(source: DropSource, random: RandomSource): Dro
     if (itemId !== undefined) rolls.push({ itemId, count: 1 });
   }
   if (random.range(0, 1000) < MOB_POTION_CHANCE_PER_MILLE) {
-    const band = POTION_BY_LEVEL.find((entry) => source.level <= entry.upToLevel) ?? POTION_BY_LEVEL[0]!;
+    const band =
+      POTION_BY_LEVEL.find((entry) => source.level <= entry.upToLevel) ?? POTION_BY_LEVEL[0]!;
     rolls.push({ itemId: band.itemId, count: 1 });
   }
   return rolls;
@@ -328,10 +334,7 @@ export class DropField {
   }
 
   /** Player money is a placed reward too, not a fake item or a character-specific visual. */
-  dropMesosFromPlayer(
-    source: { amount: number; x: number; y: number },
-    now: number,
-  ): DropEntry {
+  dropMesosFromPlayer(source: { amount: number; x: number; y: number }, now: number): DropEntry {
     const entry: DropEntry = {
       dropId: this.nextDropId++,
       kind: DROP_KIND.placed,

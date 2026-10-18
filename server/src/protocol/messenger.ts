@@ -110,11 +110,17 @@ export function encodeClientMessengerRequest(request: ClientMessengerRequest): U
   const writer = new PacketWriter().writeByte(MESSENGER_OPCODE.request);
   switch (request.kind) {
     case "enter":
-      return writer.writeByte(MESSENGER_REQUEST_TYPE.enter).writeU32(request.roomId >>> 0).toBytes();
+      return writer
+        .writeByte(MESSENGER_REQUEST_TYPE.enter)
+        .writeU32(request.roomId >>> 0)
+        .toBytes();
     case "leave":
       return writer.writeByte(MESSENGER_REQUEST_TYPE.leave).toBytes();
     case "command":
-      return writer.writeByte(MESSENGER_REQUEST_TYPE.command).writeAsciiString(request.text).toBytes();
+      return writer
+        .writeByte(MESSENGER_REQUEST_TYPE.command)
+        .writeAsciiString(request.text)
+        .toBytes();
     case "chat":
       return writer.writeByte(MESSENGER_REQUEST_TYPE.chat).writeAsciiString(request.line).toBytes();
   }

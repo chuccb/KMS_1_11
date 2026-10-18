@@ -164,11 +164,7 @@ export interface QuestTalkMenu {
 
 /** The five bodies, one per sub-op. */
 export type QuestTalkBody =
-  | QuestTalkSay
-  | QuestTalkConfirm
-  | QuestTalkAskText
-  | QuestTalkAskNumber
-  | QuestTalkMenu;
+  QuestTalkSay | QuestTalkConfirm | QuestTalkAskText | QuestTalkAskNumber | QuestTalkMenu;
 
 /** One `0x47`. */
 export interface QuestTalk {
@@ -245,10 +241,19 @@ export function readQuestTalk(reader: PacketReader): QuestTalk {
       return {
         unknownA,
         npcId,
-        body: { kind: "say", message: decodeCp949(reader.readStringBytes()), unknownA: reader.readByte(), unknownB: reader.readByte() },
+        body: {
+          kind: "say",
+          message: decodeCp949(reader.readStringBytes()),
+          unknownA: reader.readByte(),
+          unknownB: reader.readByte(),
+        },
       };
     case QUEST_TALK.confirm:
-      return { unknownA, npcId, body: { kind: "confirm", message: decodeCp949(reader.readStringBytes()) } };
+      return {
+        unknownA,
+        npcId,
+        body: { kind: "confirm", message: decodeCp949(reader.readStringBytes()) },
+      };
     case QUEST_TALK.askText:
       return {
         unknownA,
@@ -274,7 +279,11 @@ export function readQuestTalk(reader: PacketReader): QuestTalk {
         },
       };
     case QUEST_TALK.menu:
-      return { unknownA, npcId, body: { kind: "menu", message: decodeCp949(reader.readStringBytes()) } };
+      return {
+        unknownA,
+        npcId,
+        body: { kind: "menu", message: decodeCp949(reader.readStringBytes()) },
+      };
     default:
       throw new RangeError(`0x47 sub-op ${subOp} has no handler in this client (0..4 only)`);
   }
@@ -355,9 +364,13 @@ export function readQuestReply(reader: PacketReader): QuestReply {
     case QUEST_TALK.confirm:
       return { kind: "confirm", answer };
     case QUEST_TALK.askText:
-      return carries ? { kind: "askText", answer, text: decodeCp949(reader.readStringBytes()) } : { kind: "askText", answer };
+      return carries
+        ? { kind: "askText", answer, text: decodeCp949(reader.readStringBytes()) }
+        : { kind: "askText", answer };
     case QUEST_TALK.askNumber:
-      return carries ? { kind: "askNumber", answer, value: reader.readU32() } : { kind: "askNumber", answer };
+      return carries
+        ? { kind: "askNumber", answer, value: reader.readU32() }
+        : { kind: "askNumber", answer };
     case QUEST_TALK.menu:
       return carries ? { kind: "menu", answer, value: reader.readU32() } : { kind: "menu", answer };
     default:

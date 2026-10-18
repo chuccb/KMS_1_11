@@ -1,11 +1,11 @@
 /**
  * The `wz` sub-command: the archive, from the command line.
  *
- *   node server/src/cli.ts wz images [--prefix Character/Cap] [--json]
- *   node server/src/cli.ts wz census [--json]
- *   node server/src/cli.ts wz maps [--json] [--out map_meta.json] [<map id>...]
- *   node server/src/cli.ts wz dump <image path> [--json]
- *   node server/src/cli.ts wz png <image path> --out <dir> [--quiet]
+ *   bun server/src/cli.ts wz images [--prefix Character/Cap] [--json]
+ *   bun server/src/cli.ts wz census [--json]
+ *   bun server/src/cli.ts wz maps [--json] [--out map_meta.json] [<map id>...]
+ *   bun server/src/cli.ts wz dump <image path> [--json]
+ *   bun server/src/cli.ts wz png <image path> --out <dir> [--quiet]
  *
  * Every action reads `Data.wz` (or `--data <path>`) through `WzArchive`, so there is exactly one
  * WZ reader in the project and this file only formats its results. `png` is the one that turns the
@@ -15,9 +15,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { WzArchive, plain } from "./archive.ts";
-import {
-  WzCanvas, WzNode, canvasToRgba, getProperty, walkCanvases,
-} from "./img.ts";
+import { WzCanvas, WzNode, canvasToRgba, getProperty, walkCanvases } from "./img.ts";
 import type { WzValue } from "./img.ts";
 import { encodePng } from "./png.ts";
 
@@ -154,7 +152,8 @@ function renderValue(name: string, value: WzValue, out: string[], depth: number)
   if (value instanceof WzNode) {
     if (value.kind === "canvas") {
       canvasLine(name, value.value as WzCanvas, out, depth);
-      for (const entry of (value.value as WzCanvas).props) renderValue(entry.name, entry.value, out, depth + 1);
+      for (const entry of (value.value as WzCanvas).props)
+        renderValue(entry.name, entry.value, out, depth + 1);
       return;
     }
     out.push(`${indent}${name}`);
@@ -165,7 +164,9 @@ function renderValue(name: string, value: WzValue, out: string[], depth: number)
     canvasLine(name, value, out, depth);
     return;
   }
-  out.push(`${indent}${name} = ${JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? Number(item) : item))}`);
+  out.push(
+    `${indent}${name} = ${JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? Number(item) : item))}`,
+  );
 }
 
 function renderNode(node: WzNode, out: string[], depth: number): void {
@@ -212,7 +213,9 @@ function runDump(archive: WzArchive, args: Record<string, string | boolean>): nu
   }
   const out: string[] = [`${path} - ${objects.length} object(s)`];
   objects.forEach((object, index) => {
-    out.push(`[${index}] ${object.cls} (offset ${object.offset}, ${object.end - object.offset} bytes)`);
+    out.push(
+      `[${index}] ${object.cls} (offset ${object.offset}, ${object.end - object.offset} bytes)`,
+    );
     for (const entry of object.props) renderValue(entry.name, entry.value, out, 1);
   });
   print(out.join("\n"));
@@ -237,7 +240,10 @@ function runPng(archive: WzArchive, args: Record<string, string | boolean>): num
       skipped.push(`${index} ${canvas.width}x${canvas.height} (no pixels)`);
       return;
     }
-    const file = join(out, `${String(index).padStart(3, "0")}_${canvas.width}x${canvas.height}.png`);
+    const file = join(
+      out,
+      `${String(index).padStart(3, "0")}_${canvas.width}x${canvas.height}.png`,
+    );
     writeFileSync(file, encodePng(image));
     written += 1;
     if (args.quiet !== true) {
@@ -248,11 +254,13 @@ function runPng(archive: WzArchive, args: Record<string, string | boolean>): num
       );
     }
   });
-  print(`${written}/${canvases.length} canvases -> ${out}${skipped.length ? `; skipped ${skipped.join(", ")}` : ""}`);
+  print(
+    `${written}/${canvases.length} canvases -> ${out}${skipped.length ? `; skipped ${skipped.join(", ")}` : ""}`,
+  );
   return 0;
 }
 
-/** Entry point for `node src/cli.ts wz ...`. */
+/** Entry point for `bun src/cli.ts wz ...`. */
 export function runWzCommand(argv: string[]): number {
   const [command, ...rest] = argv;
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {

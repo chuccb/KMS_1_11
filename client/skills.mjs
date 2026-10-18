@@ -1,6 +1,6 @@
-import {activeSkill} from './active-skills.mjs';
-import {releaseOnInterrupt} from "./pointer.mjs";
-import {tooltipAnchor} from "./tooltip.mjs";
+import {activeSkill} from './active-skills.ts';
+import {releaseOnInterrupt} from "./pointer.ts";
+import {tooltipAnchor} from "./tooltip.ts";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
 export const SKILL_WINDOW = {
   width: 176,

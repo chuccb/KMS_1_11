@@ -161,7 +161,10 @@ export type EquipStat = (typeof EQUIP_STATS)[number];
 
 /** An EMPTY equip structure, as 45E6A0 allocates before decoding. NOT a gameplay item factory.
  * Live item creation must populate template values (478270 -> 47A740) in game/equipment.ts. */
-export function equipSlot(itemId: number, fields: Partial<Omit<ItemSlotEquip, "kind" | "itemId">> = {}): ItemSlotEquip {
+export function equipSlot(
+  itemId: number,
+  fields: Partial<Omit<ItemSlotEquip, "kind" | "itemId">> = {},
+): ItemSlotEquip {
   return {
     kind: "equip",
     itemId,
@@ -237,7 +240,11 @@ function writeBase(writer: PacketWriter, item: ItemSlot): void {
  * category byte `itemId / 1000000` first, any other value writes the body only - the hint is what
  * `CharacterData` uses, because there the inventories announce the kind out of band.
  */
-export function writeItemSlot(writer: PacketWriter, item: ItemSlot, typeHint = ITEM_TYPE_FROM_STREAM): void {
+export function writeItemSlot(
+  writer: PacketWriter,
+  item: ItemSlot,
+  typeHint = ITEM_TYPE_FROM_STREAM,
+): void {
   if (typeHint === ITEM_TYPE_FROM_STREAM) {
     // sub_45E560 writes `itemId / 1000000` - derived, never caller-supplied.
     writer.writeByte(Math.floor(item.itemId / 1000000));
@@ -258,7 +265,10 @@ function readBase(reader: PacketReader): ItemSlotBaseFields {
   const itemId = reader.readU32();
   const hasCashBlock = reader.readByte();
   if (hasCashBlock === 0) return { itemId, cash: null };
-  return { itemId, cash: { sn: reader.readU64(), unknown18: reader.readU16(), unknown1A: reader.readU64() } };
+  return {
+    itemId,
+    cash: { sn: reader.readU64(), unknown18: reader.readU16(), unknown1A: reader.readU64() },
+  };
 }
 
 /**
@@ -266,7 +276,8 @@ function readBase(reader: PacketReader): ItemSlotBaseFields {
  * (`sub_45E6A0`); otherwise the caller knows the kind (1 = equip) and no byte is consumed.
  */
 export function readItemSlot(reader: PacketReader, typeHint = ITEM_TYPE_FROM_STREAM): ItemSlot {
-  const kind = typeHint === ITEM_TYPE_FROM_STREAM ? kindOfType(reader.readByte()) : kindOfType(typeHint);
+  const kind =
+    typeHint === ITEM_TYPE_FROM_STREAM ? kindOfType(reader.readByte()) : kindOfType(typeHint);
   const base = readBase(reader);
   if (kind === "equip") {
     const item: ItemSlotEquip = {

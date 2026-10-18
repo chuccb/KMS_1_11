@@ -33,7 +33,18 @@ import {
 import { FIELD_OPCODE, describeFieldPacket } from "../src/protocol/field.ts";
 
 /** Offset of each field inside an encoded `0x2F`, opcode byte included. */
-const AT = { opcode: 0, mobId: 1, templateId: 5, x: 9, y: 11, facing: 13, unknownA: 14, unknownB: 16, animFlags: 18, channels: 22 };
+const AT = {
+  opcode: 0,
+  mobId: 1,
+  templateId: 5,
+  x: 9,
+  y: 11,
+  facing: 13,
+  unknownA: 14,
+  unknownB: 16,
+  animFlags: 18,
+  channels: 22,
+};
 
 const NO_CHANNELS = AT.channels;
 
@@ -46,7 +57,11 @@ function s16(bytes: Uint8Array, offset: number): number {
 }
 
 function u32(bytes: Uint8Array, offset: number): number {
-  return ((bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16)) + bytes[offset + 3]! * 0x1000000) >>> 0;
+  return (
+    ((bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16)) +
+      bytes[offset + 3]! * 0x1000000) >>>
+    0
+  );
 }
 
 /** The mob the WZ `life` list of `001000000.img` spawns first (`Mob/0120100.img`). */
@@ -90,7 +105,9 @@ test("0x2F round-trips, including negative coordinates and the channel block", (
   assert.equal(decoded.y, 1441);
   assert.deepEqual(
     decoded.channels,
-    [{ index: 3, delay: 7 }, undefined, { index: -1, delay: 0 }].concat(new Array(4).fill(undefined)),
+    [{ index: 3, delay: 7 }, undefined, { index: -1, delay: 0 }].concat(
+      new Array(4).fill(undefined),
+    ),
     "a check-width dense array, gaps included",
   );
 });
@@ -106,7 +123,11 @@ test("channel index i is flag bit 1 << i, and gaps leave their bit clear", () =>
   // The index/delay pairs follow in bit order, so bit 0 comes first and bit 6 last.
   assert.deepEqual(
     [0, 1, 2].map((n) => [s16(bytes, AT.channels + n * 4), s16(bytes, AT.channels + n * 4 + 2)]),
-    [[1, 2], [4, 5], [6, 7]],
+    [
+      [1, 2],
+      [4, 5],
+      [6, 7],
+    ],
   );
   const decoded = readMobEnterField(new PacketReader(bytes, 1));
   assert.deepEqual(decoded.channels, channels, "an undefined entry stays undefined");
@@ -167,7 +188,10 @@ test("describeMobEnterField says what a log line needs", () => {
     describeMobEnterField({ ...MUSHROOM, facing: 3, channels: [{ index: 1, delay: 2 }] }),
     "mobId=1 template=120100 at (509,300) facing=1 animChannels=1",
   );
-  assert.equal(describeMobEnterField(MUSHROOM), "mobId=1 template=120100 at (509,300) facing=0 animChannels=0");
+  assert.equal(
+    describeMobEnterField(MUSHROOM),
+    "mobId=1 template=120100 at (509,300) facing=0 animChannels=0",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -186,7 +210,10 @@ test("0x30 is mobId + a signed delay, and a negative delay survives the wire", (
   assert.equal(bytes[AT_LEAVE.opcode], MOB_OPCODE.leaveDelayed);
   assert.equal(u32(bytes, AT_LEAVE.mobId), 0xfeedface);
   assert.equal(s16(bytes, AT_LEAVE.delayMs), -1, "negative = remove at once, not a u16");
-  assert.deepEqual(readMobLeaveDelayed(new PacketReader(bytes, 1)), { mobId: 0xfeedface, delayMs: -1 });
+  assert.deepEqual(readMobLeaveDelayed(new PacketReader(bytes, 1)), {
+    mobId: 0xfeedface,
+    delayMs: -1,
+  });
 
   const zero = encodeMobLeaveDelayed({ mobId: 1, delayMs: 0 });
   assert.equal(s16(zero, AT_LEAVE.delayMs), 0, "0 = the die animation starts now");
@@ -212,7 +239,14 @@ test("0x31 flag=0 is the removal, flag=1 keeps the mob: same header, different t
 test("0x31 flag=1 reuses the 0x2F body byte for byte after templateId", () => {
   // `sub_491630` reads a templateId and then calls the same `CMob::Init`, so the tails have to be
   // identical - this is the test that keeps the two encoders from drifting apart.
-  const tail = { x: -289, y: 1441, facing: 1, unknownA: 5, unknownB: 6, channels: [{ index: 3, delay: 7 }] };
+  const tail = {
+    x: -289,
+    y: 1441,
+    facing: 1,
+    unknownA: 5,
+    unknownB: 6,
+    channels: [{ index: 3, delay: 7 }],
+  };
   const appear = encodeMobAppear(9, 1210102, tail);
   const enterWidth = encodeMobEnterField({ mobId: 9, templateId: 1210102, ...tail });
   assert.deepEqual(
@@ -234,16 +268,32 @@ test("0x34 is mobId + the mob's MP, 7 bytes", () => {
   assert.equal(u32(bytes, AT_STAT.mobId), 0x01020304);
   assert.equal(u16(bytes, AT_STAT.mp), 2500);
   assert.deepEqual(readMobStat(new PacketReader(bytes, 1)), { mobId: 0x01020304, mp: 2500 });
-  assert.equal(u16(encodeMobStat({ mobId: 1, mp: 0x1ffff }), AT_STAT.mp), 0xffff, "the wire is a u16");
+  assert.equal(
+    u16(encodeMobStat({ mobId: 1, mp: 0x1ffff }), AT_STAT.mp),
+    0xffff,
+    "the wire is a u16",
+  );
 });
 
 test("the field dispatcher reads the three death packets back as text", () => {
-  assert.equal(describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: 0 })), "0x30 CMobPool: mobId=4 leave: the die animation starts in 0ms");
-  assert.equal(describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: -1 })), "0x30 CMobPool: mobId=4 leave: removed at once");
+  assert.equal(
+    describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: 0 })),
+    "0x30 CMobPool: mobId=4 leave: the die animation starts in 0ms",
+  );
+  assert.equal(
+    describeFieldPacket(encodeMobLeaveDelayed({ mobId: 4, delayMs: -1 })),
+    "0x30 CMobPool: mobId=4 leave: removed at once",
+  );
   assert.equal(describeFieldPacket(encodeMobRemove(4)), "0x31 CMobPool: mobId=4 presence=removed");
   const appear = encodeMobAppear(4, 120100, { x: 1, y: 2, facing: 0 });
-  assert.equal(describeFieldPacket(appear), "0x31 CMobPool: mobId=4 presence=kept (created if unknown)");
-  assert.equal(describeFieldPacket(encodeMobStat({ mobId: 4, mp: 200 })), "0x34 CMobPool: mobId=4 mp=200");
+  assert.equal(
+    describeFieldPacket(appear),
+    "0x31 CMobPool: mobId=4 presence=kept (created if unknown)",
+  );
+  assert.equal(
+    describeFieldPacket(encodeMobStat({ mobId: 4, mp: 200 })),
+    "0x34 CMobPool: mobId=4 mp=200",
+  );
   assert.match(describeFieldPacket(new Uint8Array([MOB_OPCODE.stat, 1])) ?? "", /truncated/);
 });
 
@@ -272,10 +322,14 @@ test("0x35 is the animation block on its own, after a mobId", () => {
   assert.deepEqual(readMobAnim(new PacketReader(bytes, 1)), { mobId: 0x01020304, channels });
 });
 
-test("0x35 with no channels is the id plus a zero flag word - i.e. \"switch every channel off\"", () => {
+test('0x35 with no channels is the id plus a zero flag word - i.e. "switch every channel off"', () => {
   const bytes = encodeMobAnim({ mobId: 7 });
   assert.deepEqual([...bytes], [0x35, 7, 0, 0, 0, 0, 0, 0, 0]);
-  assert.deepEqual(readMobAnim(new PacketReader(bytes, 1)), { mobId: 7 }, "no channels means the key is absent");
+  assert.deepEqual(
+    readMobAnim(new PacketReader(bytes, 1)),
+    { mobId: 7 },
+    "no channels means the key is absent",
+  );
   assert.equal(describeMobAnim(readMobAnim(new PacketReader(bytes, 1))), "mobId=7 channels=none");
 });
 
@@ -283,7 +337,9 @@ test("0x35 describes its channels without naming them", () => {
   const channels = new Array(MOB_CHANNEL_COUNT).fill(undefined);
   channels[0] = { index: 13, delay: 72 };
   channels[6] = { index: -1, delay: 0 };
-  const text = describeMobAnim(readMobAnim(new PacketReader(encodeMobAnim({ mobId: 3, channels }), 1)));
+  const text = describeMobAnim(
+    readMobAnim(new PacketReader(encodeMobAnim({ mobId: 3, channels }), 1)),
+  );
   assert.equal(text, "mobId=3 channels=0=(13,72) 6=(-1,0)");
   assert.equal(
     describeFieldPacket(encodeMobAnim({ mobId: 3, channels })),

@@ -22,11 +22,7 @@
  */
 import type { CharacterItems, Inventory } from "../protocol/chardata.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
-import {
-  INVENTORY_OP,
-  INVENTORY_TAB,
-  type InventoryChange,
-} from "../protocol/inventory.ts";
+import { INVENTORY_OP, INVENTORY_TAB, type InventoryChange } from "../protocol/inventory.ts";
 import { TRADE_SLOTS } from "../protocol/miniroom.ts";
 import { grantItem, inventoryTabOfItemId, type MesoWallet } from "./rewards.ts";
 
@@ -102,7 +98,10 @@ export class TradeRegistry {
   }
 
   /** 開一個房間，回傳它；同時清掉兩邊的邀請。 */
-  open(a: { characterId: number; name: string }, b: { characterId: number; name: string }): TradeRoom {
+  open(
+    a: { characterId: number; name: string },
+    b: { characterId: number; name: string },
+  ): TradeRoom {
     const room: TradeRoom = {
       id: this.nextRoomId++,
       sides: [newSide(a), newSide(b)],
@@ -139,7 +138,13 @@ export class TradeRegistry {
 }
 
 function newSide(who: { characterId: number; name: string }): TradeSide {
-  return { characterId: who.characterId, name: who.name, offers: new Map(), mesos: 0, confirmed: false };
+  return {
+    characterId: who.characterId,
+    name: who.name,
+    offers: new Map(),
+    mesos: 0,
+    confirmed: false,
+  };
 }
 
 /** 一邊在成交時需要的東西。 */
@@ -190,16 +195,9 @@ function takeOffers(
     const current = inventory.items.get(offer.slot);
     if (current === undefined || current.itemId !== offer.item.itemId) return undefined;
     const rechargeable = Math.floor(current.itemId / 10000) === 207;
-    if (
-      !Number.isInteger(offer.count) ||
-      offer.count < 0 ||
-      (offer.count === 0 && !rechargeable)
-    )
+    if (!Number.isInteger(offer.count) || offer.count < 0 || (offer.count === 0 && !rechargeable))
       return undefined;
-    if (
-      rechargeable &&
-      (current.kind !== "nonequip" || offer.count !== current.quantity)
-    )
+    if (rechargeable && (current.kind !== "nonequip" || offer.count !== current.quantity))
       return undefined;
     if (current.kind === "equip") {
       if (offer.count !== 1) return undefined;
@@ -233,27 +231,32 @@ export function settleTrade(
   left: TradeSettlementSide,
   right: TradeSettlementSide,
 ): TradeSettlement {
-  if (left.wallet.balance < left.mesos) return { ok: false, reason: "left cannot pay the mesos it offered" };
-  if (right.wallet.balance < right.mesos) return { ok: false, reason: "right cannot pay the mesos it offered" };
+  if (left.wallet.balance < left.mesos)
+    return { ok: false, reason: "left cannot pay the mesos it offered" };
+  if (right.wallet.balance < right.mesos)
+    return { ok: false, reason: "right cannot pay the mesos it offered" };
   const leftItems = structuredClone(left.items);
   const rightItems = structuredClone(right.items);
   const leftTaken = takeOffers(leftItems, left.offers);
   if (leftTaken === undefined) return { ok: false, reason: "left no longer owns an offered item" };
   const rightTaken = takeOffers(rightItems, right.offers);
-  if (rightTaken === undefined) return { ok: false, reason: "right no longer owns an offered item" };
+  if (rightTaken === undefined)
+    return { ok: false, reason: "right no longer owns an offered item" };
 
   // 把兩邊拿出來的東西放進對面的庫存。`grantItem` 會沿用快照（裝備的素質、現金的 sn）——
   // 交易搬的是**同一個道具**，不是重新生成一個。
   const leftChanges = [...leftTaken.changes];
   for (const { offer, item } of rightTaken.taken) {
     const granted = grantItem(leftItems, item.itemId, offer.count, item);
-    if (granted === undefined) return { ok: false, reason: `left has no room for item ${item.itemId}` };
+    if (granted === undefined)
+      return { ok: false, reason: `left has no room for item ${item.itemId}` };
     leftChanges.push(granted.change);
   }
   const rightChanges = [...rightTaken.changes];
   for (const { offer, item } of leftTaken.taken) {
     const granted = grantItem(rightItems, item.itemId, offer.count, item);
-    if (granted === undefined) return { ok: false, reason: `right has no room for item ${item.itemId}` };
+    if (granted === undefined)
+      return { ok: false, reason: `right has no room for item ${item.itemId}` };
     rightChanges.push(granted.change);
   }
 

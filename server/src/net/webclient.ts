@@ -1,28 +1,37 @@
+import { Transpiler } from "bun";
 import { readBrowserMovePath } from "./browsermove.ts";
-import type {MobPresentation} from "../game/mobs.ts";
-import {MOB_BODY_ACTIONS,mobForcedName} from "../../../client/mob-attacks.mjs";
-import {mobHitAction} from "../../../client/mob-reaction.mjs";
-import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
-import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from "../../../client/active-skills.mjs";
-import {learnedActive,activeArt} from "../game/activeskills.ts";
-import {scaledAttackDelays} from "../../../client/attack-timing.mjs";
-import { shotRelease } from "../../../client/attack-timing.mjs";
+import type { MobPresentation } from "../game/mobs.ts";
+import { MOB_BODY_ACTIONS, mobForcedName } from "../../../client/mob-attacks.ts";
+import { mobHitAction } from "../../../client/mob-reaction.ts";
+import { attackProfileAtTier } from "../../../client/attack-presentation.ts";
+import {
+  activeSkill,
+  activeMeleeActions,
+  activeSkillSpeed,
+  activeSkillHits,
+  activeSkillAmmo,
+  activeRangedActions,
+  activeMagicActions,
+  activeMagicSpeed,
+} from "../../../client/active-skills.ts";
+import { learnedActive, activeArt } from "../game/activeskills.ts";
+import { scaledAttackDelays } from "../../../client/attack-timing.ts";
+import { shotRelease } from "../../../client/attack-timing.ts";
 import type { AvatarMotionProfile } from "../game/avatarmotion.ts";
 import { FACE_EMOTIONS, type FaceAnimation } from "../game/face.ts";
 import type { TestToolResult } from "../game/testtools.ts";
-import { nativeSkillBooks } from "../../../client/jobs.mjs";
+import { nativeSkillBooks } from "../../../client/jobs.ts";
 import type { SkillCatalog } from "../game/skills.ts";
 import {
-  firstBasicAmmo, basicShotRange, basicAttackAction, basicAttackPostureAllows,
+  firstBasicAmmo,
+  basicShotRange,
+  basicAttackAction,
+  basicAttackPostureAllows,
   type BasicAttackProvider,
 } from "../game/basicattack.ts";
 import type { SpriteFrame } from "../game/sprites.ts";
 import { ABILITY_FIELDS, type Ability } from "../protocol/ability.ts";
-import {
-  creationCatalogOf,
-  validateCreationLook,
-  validCreationName,
-} from "../game/creation.ts";
+import { creationCatalogOf, validateCreationLook, validCreationName } from "../game/creation.ts";
 /**
  * The browser bridge: an HTTP server that serves `client/` and turns a WebSocket into a 2003
  * session.
@@ -52,7 +61,7 @@ import {
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deathArtOf } from "../game/deathart.ts";
 import { ClientSession, type ClientEvent } from "../client/session.ts";
@@ -60,10 +69,21 @@ import { encodeCp949, decodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import { characterStatBasis, statTotals } from "../game/characterstats.ts";
-import { intersects, playerContactRect, mobContactRect, type ContactPoint } from "../../../client/contact.mjs";
-import { nativeWeaponMastery, rollNativeMagic, rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
+import {
+  intersects,
+  playerContactRect,
+  mobContactRect,
+  type ContactPoint,
+} from "../../../client/contact.ts";
+import {
+  nativeWeaponMastery,
+  rollNativeMagic,
+  rollNativePhysical,
+  rollNativeTouch,
+  type PhysicalAttackTrace,
+} from "../game/nativecombat.ts";
 import type { MobTemplate } from "../game/mobs.ts";
-import { temporaryStats } from "../../../client/temporarystats.mjs";
+import { temporaryStats } from "../../../client/temporarystats.ts";
 import type { AudioProvider } from "../game/audio.ts";
 import type { MapData, MapDestination } from "../game/map.ts";
 import type { MapArt } from "../game/mapart.ts";
@@ -73,14 +93,16 @@ import type { ArtReader } from "../game/wzart.ts";
 import { WebSocket, upgradeResponse } from "./websocket.ts";
 
 /** Where `client/` lives when no root is given: the repository root, one level above `server/`. */
-const DEFAULT_CLIENT_ROOT = fileURLToPath(
-  new URL("../../../client", import.meta.url),
-);
+const DEFAULT_CLIENT_ROOT = fileURLToPath(new URL("../../../client", import.meta.url));
+
+// TypeScript imports stay source-relative; browsers receive JavaScript, never TS syntax.
+const browserTranspiler = new Transpiler({ loader: "ts", target: "browser" });
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
+  ".ts": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
@@ -113,9 +135,13 @@ export interface WebClientOptions {
    */
   itemCatalog?: ItemCatalog;
   skills?: SkillCatalog;
-  mobTemplate?(id:number):MobTemplate|undefined;
-  mobPresentation?(username:string,characterId:number,mobId:number):MobPresentation|undefined;
-  testTools?(username:string, characterId:number, request:unknown): TestToolResult;
+  mobTemplate?(id: number): MobTemplate | undefined;
+  mobPresentation?(
+    username: string,
+    characterId: number,
+    mobId: number,
+  ): MobPresentation | undefined;
+  testTools?(username: string, characterId: number, request: unknown): TestToolResult;
   /**
    * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
    * frames (`game/sprites.ts`). Without them the page still draws the geometry, in flat colours -
@@ -214,11 +240,7 @@ function summaryOf(character: CharacterData): CharacterSummary {
   };
 }
 
-function sendJson(
-  response: ServerResponse,
-  status: number,
-  body: unknown,
-): void {
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -330,16 +352,7 @@ function artJson(art: MapArt): unknown {
  * memoising; this side keeps the decoded canvas in the `ArtReader` cache. Only the folders a field
  * can reference are served - an arbitrary path would turn the endpoint into an archive browser.
  */
-const ART_ROOTS = [
-  "Map/",
-  "Skill/",
-  "Character/",
-  "Mob/",
-  "Npc/",
-  "Effect/",
-  "Item/",
-  "UI/",
-];
+const ART_ROOTS = ["Map/", "Skill/", "Character/", "Mob/", "Npc/", "Effect/", "Item/", "UI/"];
 
 /** Decodes and vets the `<archive path>` segment both canvas endpoints take; `undefined` = refused. */
 function artPathOf(rest: string, response: ServerResponse): string | undefined {
@@ -366,11 +379,7 @@ function artPathOf(rest: string, response: ServerResponse): string | undefined {
   return path;
 }
 
-function servePng(
-  art: ArtProvider | undefined,
-  rest: string,
-  response: ServerResponse,
-): void {
+function servePng(art: ArtProvider | undefined, rest: string, response: ServerResponse): void {
   if (art?.reader === undefined) {
     sendJson(response, 404, {
       error: "this server was started without Data.wz (--data off)",
@@ -429,11 +438,7 @@ function serveCanvasMeta(
 }
 
 /** `/api/avatar.png?face=&hair=&items=&stance=&frame=&flip=&emotion=`: one composed frame. */
-function serveAvatar(
-  art: ArtProvider,
-  url: URL,
-  response: ServerResponse,
-): void {
+function serveAvatar(art: ArtProvider, url: URL, response: ServerResponse): void {
   const number = (name: string, fallback: number): number => {
     const raw = url.searchParams.get(name);
     if (raw === null || raw === "") return fallback;
@@ -449,16 +454,26 @@ function serveAvatar(
       .filter((id) => Number.isFinite(id) && id > 0),
   };
   const rawFaceIndex = url.searchParams.get("faceFrame");
-  const faceIndex = rawFaceIndex === null ? 0 : rawFaceIndex.trim() === "" ? NaN : Number(rawFaceIndex);
+  const faceIndex =
+    rawFaceIndex === null ? 0 : rawFaceIndex.trim() === "" ? NaN : Number(rawFaceIndex);
   const expression = url.searchParams.get("emotion");
-  if (!Number.isInteger(faceIndex) || faceIndex < 0 || faceIndex > 255 ||
-      (expression !== null && expression !== "default" && !(FACE_EMOTIONS as readonly string[]).includes(expression))) {
+  if (
+    !Number.isInteger(faceIndex) ||
+    faceIndex < 0 ||
+    faceIndex > 255 ||
+    (expression !== null &&
+      expression !== "default" &&
+      !(FACE_EMOTIONS as readonly string[]).includes(expression))
+  ) {
     sendJson(response, 400, { error: "invalid face expression/frame" });
     return;
   }
   const faceMetadata = art.face?.(look.face);
   const faceAction = expression === null || expression === "default" ? "blink" : expression;
-  if (faceMetadata && !faceMetadata.actions[faceAction]?.frames.some(f => f.index === faceIndex)) {
+  if (
+    faceMetadata &&
+    !faceMetadata.actions[faceAction]?.frames.some((f) => f.index === faceIndex)
+  ) {
     sendJson(response, 404, { error: "requested face frame does not exist in Data.wz" });
     return;
   }
@@ -483,8 +498,11 @@ function serveAvatar(
     "x-frame-dx": String(frame.dx),
     "x-frame-dy": String(frame.dy),
     "x-frame-damage-origin-y": String(frame.damageOriginY ?? Math.max(0, -frame.dy)),
-    ...(frame.planeHeight !== undefined ? { "x-frame-plane-height": String(frame.planeHeight) } : {}),
-    "access-control-expose-headers": "x-frame-dx, x-frame-dy, x-frame-damage-origin-y, x-frame-plane-height",
+    ...(frame.planeHeight !== undefined
+      ? { "x-frame-plane-height": String(frame.planeHeight) }
+      : {}),
+    "access-control-expose-headers":
+      "x-frame-dx, x-frame-dy, x-frame-damage-origin-y, x-frame-plane-height",
     "cache-control": "public, max-age=3600",
   });
   response.end(Buffer.from(frame.png));
@@ -508,7 +526,8 @@ class BrowserSession {
   /** Ordered move/attack writes; a field transition invalidates queued operations. */
   private motionWrites: Promise<void> = Promise.resolve();
   private serialMotion(operation: () => Promise<void>): Promise<void> {
-    const field = this.contactField, session = this.session;
+    const field = this.contactField,
+      session = this.session;
     const next = this.motionWrites.then(async () => {
       if (this.contactField === field && this.session === session && session) await operation();
     });
@@ -555,25 +574,15 @@ class BrowserSession {
       switch (message.t) {
         case "login":
           return await this.serialLogin(() =>
-            this.login(
-              String(message.user ?? ""),
-              String(message.password ?? ""),
-            ),
+            this.login(String(message.user ?? ""), String(message.password ?? "")),
           );
         case "world":
-          return await this.serialLogin(() =>
-            this.selectWorld(Number(message.index ?? 0)),
-          );
+          return await this.serialLogin(() => this.selectWorld(Number(message.index ?? 0)));
         case "character":
-          return await this.serialLogin(() =>
-            this.selectCharacter(Number(message.id ?? 0)),
-          );
+          return await this.serialLogin(() => this.selectCharacter(Number(message.id ?? 0)));
         case "create":
           return await this.serialLogin(() =>
-            this.createCharacter(
-              String(message.name ?? ""),
-              message.appearance,
-            ),
+            this.createCharacter(String(message.name ?? ""), message.appearance),
           );
         case "check-name":
           return await this.serialLogin(() =>
@@ -581,10 +590,7 @@ class BrowserSession {
           );
         case "delete-character":
           return await this.serialLogin(() =>
-            this.deleteCharacter(
-              Number(message.id),
-              message.confirmed === true,
-            ),
+            this.deleteCharacter(Number(message.id), message.confirmed === true),
           );
         case "say":
           return await this.say(String(message.text ?? ""));
@@ -593,36 +599,51 @@ class BrowserSession {
             const path = readBrowserMovePath(message.path);
             return await this.serialMotion(() => this.require().movePath(path));
           }
-          return await this.serialMotion(() => this.move(
-            Number(message.x ?? 0),
-            Number(message.y ?? 0),
-            Number(message.foothold ?? 0),
-            Number(message.action ?? 0),
-            Number(message.vx ?? 0),
-            Number(message.vy ?? 0),
-            Number(message.attr ?? 0),
-          ));
+          return await this.serialMotion(() =>
+            this.move(
+              Number(message.x ?? 0),
+              Number(message.y ?? 0),
+              Number(message.foothold ?? 0),
+              Number(message.action ?? 0),
+              Number(message.vx ?? 0),
+              Number(message.vy ?? 0),
+              Number(message.attr ?? 0),
+            ),
+          );
         case "attack":
-          return await this.serialMotion(() => this.attack(
-            Number(message.mobId ?? 0),
-            message.facingLeft === true,
-            message.mode === "shoot",
-            Number(message.action),
-            Number(message.targetX),
-            Number(message.targetY),
-            Number(message.attackToken),
-          ));
+          return await this.serialMotion(() =>
+            this.attack(
+              Number(message.mobId ?? 0),
+              message.facingLeft === true,
+              message.mode === "shoot",
+              Number(message.action),
+              Number(message.targetX),
+              Number(message.targetY),
+              Number(message.attackToken),
+            ),
+          );
         case "warp-map":
           return await this.require().warpTo(Number(message.mapId));
         case "portal":
           return await this.usePortal(String(message.name ?? ""));
         case "test-tools": {
-          const session=this.require();
-          if(!session.selfView || !this.username) throw new Error("請先進入地圖。");
+          const session = this.require();
+          if (!session.selfView || !this.username) throw new Error("請先進入地圖。");
           session.assertTestToolsReady();
-          const result=this.options.testTools?.(this.username,session.selfView.characterId,message.action)
-            ?? {enabled:false,message:"此服務未開啟體驗工具。",checkpoint:false,restoreAvailable:false,canMap:false,jobs:[]};
-          this.send({t:"test-tools",...result}); return;
+          const result = this.options.testTools?.(
+            this.username,
+            session.selfView.characterId,
+            message.action,
+          ) ?? {
+            enabled: false,
+            message: "此服務未開啟體驗工具。",
+            checkpoint: false,
+            restoreAvailable: false,
+            canMap: false,
+            jobs: [],
+          };
+          this.send({ t: "test-tools", ...result });
+          return;
         }
         case "revive":
           return await this.require().revive();
@@ -630,39 +651,43 @@ class BrowserSession {
           return await this.touch(message);
         case "recovery":
           return await this.require().recover({
-            ...(message.hpDelta===undefined?{}:{hpDelta:Number(message.hpDelta)}),
-            ...(message.mpDelta===undefined?{}:{mpDelta:Number(message.mpDelta)}),flag:Number(message.flag),
+            ...(message.hpDelta === undefined ? {} : { hpDelta: Number(message.hpDelta) }),
+            ...(message.mpDelta === undefined ? {} : { mpDelta: Number(message.mpDelta) }),
+            flag: Number(message.flag),
           });
         case "use-active-skill":
-          return await this.serialMotion(async()=>{
-            const session=this.require(),character=session.character;
-            const id=Number(message.skillId),learned=character&&learnedActive(character,this.options.skills,id);
-            if(!learned||learned.rule.kind!=='buff')throw new Error('未學習、資源不足或尚未完整實作的技能');
-            await session.useActiveSkill(id,learned.level,!!learned.rule.party);
+          return await this.serialMotion(async () => {
+            const session = this.require(),
+              character = session.character;
+            const id = Number(message.skillId),
+              learned = character && learnedActive(character, this.options.skills, id);
+            if (!learned || learned.rule.kind !== "buff")
+              throw new Error("未學習、資源不足或尚未完整實作的技能");
+            await session.useActiveSkill(id, learned.level, !!learned.rule.party);
           });
         case "active-melee":
         case "active-ranged":
         case "active-magic":
-          return await this.serialMotion(()=>this.activeAttack(message));
+          return await this.serialMotion(() => this.activeAttack(message));
         case "party-response":
-          return await this.require().partyCommand(message.accepted===true?'accept':'decline');
+          return await this.require().partyCommand(
+            message.accepted === true ? "accept" : "decline",
+          );
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {
           const field = String(message.field);
-          if (!ABILITY_FIELDS.includes(field as Ability))
-            throw new Error("unsupported ability");
+          if (!ABILITY_FIELDS.includes(field as Ability)) throw new Error("unsupported ability");
           return await this.require().increaseAbility(field as Ability);
         }
         case "emotion":
           return await this.emotion(Number(message.value ?? 0));
         case "whisper":
-          return await this.whisper(
-            String(message.name ?? ""),
-            String(message.text ?? ""),
-          );
+          return await this.whisper(String(message.name ?? ""), String(message.text ?? ""));
         case "refuse-whisper":
-          return await this.require().refuseWhisper(String.fromCharCode(...encodeCp949(String(message.name??""))));
+          return await this.require().refuseWhisper(
+            String.fromCharCode(...encodeCp949(String(message.name ?? ""))),
+          );
         case "find":
           return await this.find(String(message.name ?? ""));
         case "drop-mesos":
@@ -675,12 +700,14 @@ class BrowserSession {
             count: Number(message.count),
           });
         case "use":
-          return await this.useItem(
-            Number(message.slot ?? 0),
-            Number(message.itemId ?? 0),
-          );
+          return await this.useItem(Number(message.slot ?? 0), Number(message.itemId ?? 0));
         case "npc-idle":
-          return await this.require().npcIdle(Number(message.npcId),Number(message.action),Number(message.speech),Number(message.mapId));
+          return await this.require().npcIdle(
+            Number(message.npcId),
+            Number(message.action),
+            Number(message.speech),
+            Number(message.mapId),
+          );
         case "click":
           return await this.clickObject(Number(message.objectId ?? 0));
         case "shop":
@@ -694,9 +721,14 @@ class BrowserSession {
           });
       }
     } catch (error) {
-      if (message.t === "touch") this.send({ t: "touch-result", contactId: Number(message.contactId),
-        contactField: Number(message.contactField), accepted: false,
-        message: error instanceof Error ? error.message : String(error) });
+      if (message.t === "touch")
+        this.send({
+          t: "touch-result",
+          contactId: Number(message.contactId),
+          contactField: Number(message.contactField),
+          accepted: false,
+          message: error instanceof Error ? error.message : String(error),
+        });
       else this.fail(error);
     }
   }
@@ -711,54 +743,160 @@ class BrowserSession {
    * packet: the attacker's own client drew the number while it built the packet.
    */
   /** The browser supplies selection snapshots, NEVER damage, level, hit count or resource cost. */
-  private async activeAttack(message:Record<string,unknown>):Promise<void> {
-    const session=this.require(),character=session.character,id=Number(message.skillId);
-    const learned=character&&learnedActive(character,this.options.skills,id);
-    const magic=message.t==='active-magic',shoot=message.t==='active-ranged',field=this.contactField,attackToken=Number(message.attackToken);
-    if(!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff)return;
-    if(!character||!learned||learned.rule.kind!==(magic?'magic':shoot?'ranged':'melee')||!session.attackRandom||session.characterOperationPending)return;
-    const weaponId=character.items?.worn.get(11)?.itemId??0;
-    const profile=attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),nativeWeaponMastery(character,this.options.skills,weaponId,shoot));
-    const actionId=Number(message.action),action=(magic?activeMagicActions(profile,id,learned.info.skillType):shoot?activeRangedActions(profile,id):activeMeleeActions(profile,id)).find(a=>a.action===actionId);
-    if(!profile||!action||actionId===32||!basicAttackPostureAllows(actionId,shoot,session.selfMovement.action))return;
-    const ammo=shoot?firstBasicAmmo(character.items,activeSkillAmmo(learned.values)):undefined;
-    if((shoot&&!ammo)||(magic&&session.selfMovement.foothold<=0))return;
-    if(!Array.isArray(message.targets)||message.targets.length>(!magic&&!shoot&&learned.values.range?6:1))return;
-    const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills),temporary=this.buffs.values(performance.now());
-    const totals=statTotals(basis,temporary);totals.pad=basis.secondary.pad!+(temporary.pad??0);
-    const hits=activeSkillHits(learned.values,shoot),records:{mobId:number;x:number;y:number;damage:number;damages:number[];hitAnimation:number}[]=[];
-    const seen=new Set<number>();
+  private async activeAttack(message: Record<string, unknown>): Promise<void> {
+    const session = this.require(),
+      character = session.character,
+      id = Number(message.skillId);
+    const learned = character && learnedActive(character, this.options.skills, id);
+    const magic = message.t === "active-magic",
+      shoot = message.t === "active-ranged",
+      field = this.contactField,
+      attackToken = Number(message.attackToken);
+    if (!Number.isInteger(attackToken) || attackToken < 1 || attackToken > 0x7fffffff) return;
+    if (
+      !character ||
+      !learned ||
+      learned.rule.kind !== (magic ? "magic" : shoot ? "ranged" : "melee") ||
+      !session.attackRandom ||
+      session.characterOperationPending
+    )
+      return;
+    const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
+    const profile = attackProfileAtTier(
+      this.options.art?.attackProfile?.(weaponId),
+      nativeWeaponMastery(character, this.options.skills, weaponId, shoot),
+    );
+    const actionId = Number(message.action),
+      action = (
+        magic
+          ? activeMagicActions(profile, id, learned.info.skillType)
+          : shoot
+            ? activeRangedActions(profile, id)
+            : activeMeleeActions(profile, id)
+      ).find((a) => a.action === actionId);
+    if (
+      !profile ||
+      !action ||
+      actionId === 32 ||
+      !basicAttackPostureAllows(actionId, shoot, session.selfMovement.action)
+    )
+      return;
+    const ammo = shoot
+      ? firstBasicAmmo(character.items, activeSkillAmmo(learned.values))
+      : undefined;
+    if ((shoot && !ammo) || (magic && session.selfMovement.foothold <= 0)) return;
+    if (
+      !Array.isArray(message.targets) ||
+      message.targets.length > (!magic && !shoot && learned.values.range ? 6 : 1)
+    )
+      return;
+    const basis = characterStatBasis(character, this.options.itemCatalog, this.options.skills),
+      temporary = this.buffs.values(performance.now());
+    const totals = statTotals(basis, temporary);
+    totals.pad = basis.secondary.pad! + (temporary.pad ?? 0);
+    const hits = activeSkillHits(learned.values, shoot),
+      records: {
+        mobId: number;
+        x: number;
+        y: number;
+        damage: number;
+        damages: number[];
+        hitAnimation: number;
+      }[] = [];
+    const seen = new Set<number>();
     // Resolve/validate all snapshots BEFORE drawing RNG or sending any packet.
-    const selected: {mob:ReturnType<ClientSession['mob']>;x:number;y:number}[]=[];
-    for(const value of message.targets) {
-      if(!value||typeof value!=='object')return;
-      const target=value as Record<string,unknown>,mobId=Number(target.mobId),x=Number(target.x),y=Number(target.y);
-      const mob=session.mob(mobId);
-      if(!Number.isInteger(mobId)||mobId<=0||mobId>0xffffffff||seen.has(mobId)||
-        ![x,y].every(n=>Number.isFinite(n)&&n>=-32768&&n<=32767))return;
+    const selected: { mob: ReturnType<ClientSession["mob"]>; x: number; y: number }[] = [];
+    for (const value of message.targets) {
+      if (!value || typeof value !== "object") return;
+      const target = value as Record<string, unknown>,
+        mobId = Number(target.mobId),
+        x = Number(target.x),
+        y = Number(target.y);
+      const mob = session.mob(mobId);
+      if (
+        !Number.isInteger(mobId) ||
+        mobId <= 0 ||
+        mobId > 0xffffffff ||
+        seen.has(mobId) ||
+        ![x, y].every((n) => Number.isFinite(n) && n >= -32768 && n <= 32767)
+      )
+        return;
       seen.add(mobId);
-      if(!mob||this.dyingMobs.has(mobId)){if(shoot||magic)continue;return;}
-      if(!this.options.mobTemplate?.(mob.templateId))return;
-      selected.push({mob,x:Math.trunc(x),y:Math.trunc(y)});
+      if (!mob || this.dyingMobs.has(mobId)) {
+        if (shoot || magic) continue;
+        return;
+      }
+      if (!this.options.mobTemplate?.(mob.templateId)) return;
+      selected.push({ mob, x: Math.trunc(x), y: Math.trunc(y) });
     }
-    for(const target of selected) {
-      const mob=target.mob!,template=this.options.mobTemplate!(mob.templateId)!;
+    for (const target of selected) {
+      const mob = target.mob!,
+        template = this.options.mobTemplate!(mob.templateId)!;
       // 4C7960/4C89D0 draw seven values ONCE per target; every hit continues the same cyclic cursor.
-      const random={values:Array.from({length:7},()=>session.attackRandom!.next()),cursor:0};
-      const damages=Array.from({length:hits},()=>magic?rollNativeMagic(basis,totals,template,learned.values,learned.info.elements??[],
-        ()=>session.attackRandom!.next(),random):rollNativePhysical(character,basis,totals,template,actionId,
-        ammo?this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0:0,ammo?.itemId??0,
-        this.options.skills,()=>session.attackRandom!.next(),undefined,{skillId:id,damagePercent:learned.values.damage??0,random}));
-      records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages,hitAnimation:mobHitAction(template)});
+      const random = {
+        values: Array.from({ length: 7 }, () => session.attackRandom!.next()),
+        cursor: 0,
+      };
+      const damages = Array.from({ length: hits }, () =>
+        magic
+          ? rollNativeMagic(
+              basis,
+              totals,
+              template,
+              learned.values,
+              learned.info.elements ?? [],
+              () => session.attackRandom!.next(),
+              random,
+            )
+          : rollNativePhysical(
+              character,
+              basis,
+              totals,
+              template,
+              actionId,
+              ammo ? (this.options.itemCatalog?.info(ammo.itemId)?.incPAD ?? 0) : 0,
+              ammo?.itemId ?? 0,
+              this.options.skills,
+              () => session.attackRandom!.next(),
+              undefined,
+              { skillId: id, damagePercent: learned.values.damage ?? 0, random },
+            ),
+      );
+      records.push({
+        mobId: mob.mobId,
+        x: target.x,
+        y: target.y,
+        damage: damages[0]!,
+        damages,
+        hitAnimation: mobHitAction(template),
+      });
     }
-    const speed=magic?activeMagicSpeed(profile):activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0);
-    await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits,shoot,magic,
-      ...(ammo?{projectileSlot:ammo.slot}:{})});
-    if(this.session!==session||this.contactField!==field)return;
+    const speed = magic
+      ? activeMagicSpeed(profile)
+      : activeSkillSpeed(profile.baseSpeed ?? profile.speed, id, temporary.booster ?? 0);
+    await session.attack(records, message.facingLeft === true, {
+      action: actionId,
+      speed,
+      skillId: id,
+      hits,
+      shoot,
+      magic,
+      ...(ammo ? { projectileSlot: ammo.slot } : {}),
+    });
+    if (this.session !== session || this.contactField !== field) return;
     // Correlate with the original browser action clock, not a second release after bridge I/O.
     // This remains predicted damage, NOT an invented native admission ACK.
-    records.forEach(record=>this.send({t:'active-hit',attackToken,skillId:id,skillLevel:learned.level,
-      mobId:record.mobId,damages:record.damages,contactField:field}));
+    records.forEach((record) =>
+      this.send({
+        t: "active-hit",
+        attackToken,
+        skillId: id,
+        skillLevel: learned.level,
+        mobId: record.mobId,
+        damages: record.damages,
+        contactField: field,
+      }),
+    );
   }
 
   private async attack(
@@ -768,17 +906,33 @@ class BrowserSession {
     actionId: number,
     targetX: number,
     targetY: number,
-    attackToken:number,
+    attackToken: number,
   ): Promise<void> {
     const session = this.require();
     const character = session.character;
-    if (!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff||!character || character.stats.hp <= 0 || session.characterOperationPending) return;
+    if (
+      !Number.isInteger(attackToken) ||
+      attackToken < 1 ||
+      attackToken > 0x7fffffff ||
+      !character ||
+      character.stats.hp <= 0 ||
+      session.characterOperationPending
+    )
+      return;
     const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
-    const profile=attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),nativeWeaponMastery(character,this.options.skills,weaponId,shoot));
+    const profile = attackProfileAtTier(
+      this.options.art?.attackProfile?.(weaponId),
+      nativeWeaponMastery(character, this.options.skills, weaponId, shoot),
+    );
     const action = basicAttackAction(profile, actionId, shoot);
     // 512F90/427F60 rejects unsupported weapon groups/actions. Never translate a browser pose
     // silently to a different attack or a fabricated 480ms bare-hand sword swing.
-    if (!profile || !action || !basicAttackPostureAllows(actionId, shoot, session.selfMovement.action)) return;
+    if (
+      !profile ||
+      !action ||
+      !basicAttackPostureAllows(actionId, shoot, session.selfMovement.action)
+    )
+      return;
     const ammo = shoot ? firstBasicAmmo(character.items) : undefined;
     if (shoot && (!ammo || !action)) return;
     const knownMob = mobId === 0 ? undefined : session.mob(mobId);
@@ -797,30 +951,42 @@ class BrowserSession {
         ? undefined
         : {
             ...knownMob,
-            ...(currentPoint
-              ? { x: Math.trunc(targetX), y: Math.trunc(targetY) }
-              : {}),
+            ...(currentPoint ? { x: Math.trunc(targetX), y: Math.trunc(targetY) } : {}),
           };
     // A target can leave while the browser's command is in flight. Still send an empty shot:
     // the native client fires/consumes a round even without a target (513C80).
-    const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
-    const temporary=this.buffs.values(performance.now());
-    const totals=statTotals(basis,temporary);
-    const speed=activeSkillSpeed(profile.baseSpeed??profile.speed,0,temporary.booster??0);
-    const motion={...action,delays:scaledAttackDelays(action.baseDelays,speed)};
+    const basis = characterStatBasis(character, this.options.itemCatalog, this.options.skills);
+    const temporary = this.buffs.values(performance.now());
+    const totals = statTotals(basis, temporary);
+    const speed = activeSkillSpeed(profile.baseSpeed ?? profile.speed, 0, temporary.booster ?? 0);
+    const motion = { ...action, delays: scaledAttackDelays(action.baseDelays, speed) };
     // 4C7960 clamps base PAD + temporary PAD + ammo together, only once.
-    totals.pad=basis.secondary.pad!+(temporary.pad??0);
-    const template=mob ? this.options.mobTemplate?.(mob.templateId) : undefined;
-    if(mob && (!template || !session.attackRandom)) return; // No invented monster defence.
+    totals.pad = basis.secondary.pad! + (temporary.pad ?? 0);
+    const template = mob ? this.options.mobTemplate?.(mob.templateId) : undefined;
+    if (mob && (!template || !session.attackRandom)) return; // No invented monster defence.
     const attackField = this.contactField;
     let trace: PhysicalAttackTrace | undefined;
-    const damage=mob && template && session.attackRandom ? rollNativePhysical(
-      character,basis,totals,template,action.action,
-      ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0,ammo?.itemId??0,
-      this.options.skills,()=>session.attackRandom!.next(), value => { trace = value; },
-    ) : 0;
+    const damage =
+      mob && template && session.attackRandom
+        ? rollNativePhysical(
+            character,
+            basis,
+            totals,
+            template,
+            action.action,
+            ammo ? (this.options.itemCatalog?.info(ammo.itemId)?.incPAD ?? 0) : 0,
+            ammo?.itemId ?? 0,
+            this.options.skills,
+            () => session.attackRandom!.next(),
+            (value) => {
+              trace = value;
+            },
+          )
+        : 0;
     await session.attack(
-      mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage,hitAnimation:mobHitAction(template) }],
+      mob === undefined
+        ? []
+        : [{ mobId, x: mob.x, y: mob.y, damage, hitAnimation: mobHitAction(template) }],
       facingLeft,
       {
         shoot,
@@ -832,21 +998,28 @@ class BrowserSession {
     if (mob !== undefined && attackField === this.contactField) {
       const release = shotRelease(motion);
       // Browser-local predicted numbers, not an invented TCP acknowledgement.
-      const bounds = attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),0)?.melee[0]?.bounds;
-      const near = bounds
-        ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
-        : 65;
+      const bounds = attackProfileAtTier(this.options.art?.attackProfile?.(weaponId), 0)?.melee[0]
+        ?.bounds;
+      const near = bounds ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1) : 65;
       const delayMs =
         release +
         (shoot
           ? Math.trunc(
               Math.hypot(
                 mob.x - (session.selfPosition.x + (facingLeft ? -near : near)),
-                (currentPoint?mob.y:mob.y-20) - (session.selfPosition.y - 25),
+                (currentPoint ? mob.y : mob.y - 20) - (session.selfPosition.y - 25),
               ) * 1.5,
             )
           : 0);
-      this.send({ t: "hit", attackToken, mobId, damage, delayMs, contactField: attackField, trace });
+      this.send({
+        t: "hit",
+        attackToken,
+        mobId,
+        damage,
+        delayMs,
+        contactField: attackField,
+        trace,
+      });
     }
   }
 
@@ -878,9 +1051,7 @@ class BrowserSession {
     const mobId = Number(message.mobId),
       facing = Number(message.facing);
     const mob = Number.isInteger(mobId) ? session?.mob(mobId) : undefined;
-    const template = mob
-      ? this.options.mobTemplate?.(mob.templateId)
-      : undefined;
+    const template = mob ? this.options.mobTemplate?.(mob.templateId) : undefined;
     const now = performance.now();
     if (
       !session ||
@@ -901,11 +1072,7 @@ class BrowserSession {
       if (!value || typeof value !== "object") return undefined;
       const p = value as { x?: unknown; y?: unknown };
       return [p.x, p.y].every(
-        (n) =>
-          typeof n === "number" &&
-          Number.isInteger(n) &&
-          n >= -32768 &&
-          n <= 32767,
+        (n) => typeof n === "number" && Number.isInteger(n) && n >= -32768 && n <= 32767,
       )
         ? { x: p.x as number, y: p.y as number }
         : undefined;
@@ -914,8 +1081,7 @@ class BrowserSession {
       previousPlayer = point(message.previousPlayer);
     const currentMob = point(message.mob),
       previousMob = point(message.previousMob);
-    if (!player || !previousPlayer || !currentMob || !previousMob)
-      return reply(false);
+    if (!player || !previousPlayer || !currentMob || !previousMob) return reply(false);
     const near = (a: ContactPoint, b: ContactPoint, limit: number) =>
       Math.abs(a.x - b.x) <= limit && Math.abs(a.y - b.y) <= limit;
     // Session movement is sampled at 100ms; bridge mob records retain the latest wire endpoint.
@@ -928,9 +1094,9 @@ class BrowserSession {
     )
       return reply(false);
     const actions = this.options.art?.mob(mob.templateId)?.actions;
-    const frame = MOB_BODY_ACTIONS
-      .flatMap((action) => actions?.[action] ?? [])
-      .find((frame) => frame.path === message.frame);
+    const frame = MOB_BODY_ACTIONS.flatMap((action) => actions?.[action] ?? []).find(
+      (frame) => frame.path === message.frame,
+    );
     if (
       !frame ||
       !intersects(
@@ -939,11 +1105,7 @@ class BrowserSession {
       )
     )
       return reply(false);
-    const basis = characterStatBasis(
-      character,
-      this.options.itemCatalog,
-      this.options.skills,
-    );
+    const basis = characterStatBasis(character, this.options.itemCatalog, this.options.skills);
     const damage = rollNativeTouch(
       basis.basic,
       statTotals(basis, this.buffs.values(now)),
@@ -954,8 +1116,7 @@ class BrowserSession {
     this.touchReadyAt = now + 1500; // Bridge anti-duplicate policy; browser visuals tick the native signed clock.
     try {
       if (damage > 0) await session.reportTouchDamage(damage);
-      if (this.session === session && this.contactField === field)
-        reply(true, { damage });
+      if (this.session === session && this.contactField === field) reply(true, { damage });
     } catch (error) {
       if (this.session === session && this.contactField === field)
         reply(false, {
@@ -967,17 +1128,13 @@ class BrowserSession {
   }
 
   private newSession(): ClientSession {
-    this.username=undefined;
+    this.username = undefined;
     this.unsubscribe?.();
     this.session?.close();
     const session = new ClientSession({
       loginPort: this.options.loginPort,
-      ...(this.options.gamePort !== undefined
-        ? { gamePort: this.options.gamePort }
-        : {}),
-      ...(this.options.gameHost !== undefined
-        ? { gameHost: this.options.gameHost }
-        : {}),
+      ...(this.options.gamePort !== undefined ? { gamePort: this.options.gamePort } : {}),
+      ...(this.options.gameHost !== undefined ? { gameHost: this.options.gameHost } : {}),
       ...(this.options.log !== undefined ? { log: this.options.log } : {}),
     });
     this.buffs.clear();
@@ -985,7 +1142,7 @@ class BrowserSession {
     this.lastContactId = this.touchReadyAt = 0;
     this.touchBusy = false;
     this.dyingMobs.clear();
-    let previousWeapon:number|undefined;
+    let previousWeapon: number | undefined;
     this.unsubscribe = session.onEvent((event) => {
       if (event.kind === "field" || event.kind === "disconnect") {
         this.contactField++;
@@ -996,26 +1153,73 @@ class BrowserSession {
       if (event.kind === "mob-die") this.dyingMobs.add(event.mobId);
       if (event.kind === "mob-leave") this.dyingMobs.delete(event.mobId);
       if (event.kind === "mob-enter") this.dyingMobs.delete(event.mob.mobId);
-      if(event.kind==="temporary-stat") this.buffs.apply(event.update,performance.now());
-      if(event.kind==="disconnect" || event.kind==="field" || (event.kind==="self" && event.self.hp<=0)) this.buffs.clear();
-      const json=this.eventJson(event);
-      if((event.kind==='mob-enter'||event.kind==='mob-move')&&this.username&&session.selfView){
-        const id=event.kind==='mob-enter'?event.mob.mobId:event.mobId;
-        json.presentation=this.options.mobPresentation?.(this.username,session.selfView.characterId,id);
+      if (event.kind === "temporary-stat") this.buffs.apply(event.update, performance.now());
+      if (
+        event.kind === "disconnect" ||
+        event.kind === "field" ||
+        (event.kind === "self" && event.self.hp <= 0)
+      )
+        this.buffs.clear();
+      const json = this.eventJson(event);
+      if (
+        (event.kind === "mob-enter" || event.kind === "mob-move") &&
+        this.username &&
+        session.selfView
+      ) {
+        const id = event.kind === "mob-enter" ? event.mob.mobId : event.mobId;
+        json.presentation = this.options.mobPresentation?.(
+          this.username,
+          session.selfView.characterId,
+          id,
+        );
       }
-      if(event.kind==='mob-move'&&event.actionByte!==undefined&&event.actionByte>=0){
-        const mob=session.mob(event.mobId),name=mobForcedName(event.actionByte>>1);
-        const frames=mob&&name&&this.options.art?.mob(mob.templateId)?.actions[name];
-        if(frames)json.forcedDuration=frames.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0);
+      if (event.kind === "mob-move" && event.actionByte !== undefined && event.actionByte >= 0) {
+        const mob = session.mob(event.mobId),
+          name = mobForcedName(event.actionByte >> 1);
+        const frames = mob && name && this.options.art?.mob(mob.templateId)?.actions[name];
+        if (frames)
+          json.forcedDuration = frames.reduce(
+            (n, f) => n + Math.max(30, Math.ceil(f.delay / 30) * 30),
+            0,
+          );
       }
       this.send(json);
-      if(["field","self","inventory","skills"].includes(event.kind) && session.character) {
-        const character=session.character;
-        const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
-        if(previousWeapon!==undefined&&previousWeapon!==basis.weaponId)this.buffs.removeFields(['booster']);
-        previousWeapon=basis.weaponId;
-        const ammo=firstBasicAmmo(character.items);
-        this.send({t:"stat-basis",basis,shotRange:basicShotRange(character,this.options.skills),wornFacts:[...(character.items?.worn??[])].flatMap(([slot,item])=>item.kind==="equip"?[{slot,itemId:item.itemId,stats:{str:item.str,dex:item.dex,int:item.int,luk:item.luk,pad:item.pad},ruc:item.ruc,cuc:item.cuc,requirements:this.options.itemCatalog?.info(item.itemId)?.requirements}]:[]),ammoPad:basis.effectiveSlots.includes(11) && ammo ? this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0 : 0});
+      if (["field", "self", "inventory", "skills"].includes(event.kind) && session.character) {
+        const character = session.character;
+        const basis = characterStatBasis(character, this.options.itemCatalog, this.options.skills);
+        if (previousWeapon !== undefined && previousWeapon !== basis.weaponId)
+          this.buffs.removeFields(["booster"]);
+        previousWeapon = basis.weaponId;
+        const ammo = firstBasicAmmo(character.items);
+        this.send({
+          t: "stat-basis",
+          basis,
+          shotRange: basicShotRange(character, this.options.skills),
+          wornFacts: [...(character.items?.worn ?? [])].flatMap(([slot, item]) =>
+            item.kind === "equip"
+              ? [
+                  {
+                    slot,
+                    itemId: item.itemId,
+                    stats: {
+                      str: item.str,
+                      dex: item.dex,
+                      int: item.int,
+                      luk: item.luk,
+                      pad: item.pad,
+                    },
+                    ruc: item.ruc,
+                    cuc: item.cuc,
+                    requirements: this.options.itemCatalog?.info(item.itemId)?.requirements,
+                  },
+                ]
+              : [],
+          ),
+          ammoPad:
+            basis.effectiveSlots.includes(11) && ammo
+              ? (this.options.itemCatalog?.info(ammo.itemId)?.incPAD ?? 0)
+              : 0,
+        });
       }
     });
     this.session = session;
@@ -1025,7 +1229,7 @@ class BrowserSession {
   private async login(user: string, password: string): Promise<void> {
     const session = this.newSession();
     const reply = await session.login(user, password);
-    this.username=reply.result===0?user:undefined;
+    this.username = reply.result === 0 ? user : undefined;
     this.gender = reply.gender ?? 0;
     this.characterStage = false;
     this.lastCharacters = [];
@@ -1058,9 +1262,7 @@ class BrowserSession {
       this.send({ t: "characters", result: reply.result, characters: [] });
       return;
     }
-    const character = this.lastCharacters.find(
-      (candidate) => candidate.stats.id === id,
-    );
+    const character = this.lastCharacters.find((candidate) => candidate.stats.id === id);
     if (character !== undefined) session.remember(character);
     this.characterStage = false;
     await session.enterGame(reply);
@@ -1082,14 +1284,10 @@ class BrowserSession {
     return next;
   }
   private requireCharacterStage(): ClientSession {
-    if (!this.characterStage)
-      throw new Error("character selection is not active");
+    if (!this.characterStage) throw new Error("character selection is not active");
     return this.require();
   }
-  private creationArguments(
-    name: string,
-    value: unknown,
-  ): { name: string; appearance: number[] } {
+  private creationArguments(name: string, value: unknown): { name: string; appearance: number[] } {
     const catalog = creationCatalogOf(this.options.art?.reader);
     const wire = String.fromCharCode(...encodeCp949(name));
     if (!validCreationName(wire, catalog?.forbidden))
@@ -1098,9 +1296,7 @@ class BrowserSession {
       );
     const groups = this.gender === 1 ? catalog?.female : catalog?.male;
     const defaults = [
-      ...(groups?.map((g) => g[0]!.id) ?? [
-        20000, 30000, 1040002, 1060002, 1072001, 1302000,
-      ]),
+      ...(groups?.map((g) => g[0]!.id) ?? [20000, 30000, 1040002, 1060002, 1072001, 1302000]),
       4,
       5,
       6,
@@ -1121,8 +1317,7 @@ class BrowserSession {
     const session = this.requireCharacterStage();
     const args = this.creationArguments(name, value);
     const reply = await session.createCharacter(args.name, args.appearance);
-    if (reply.character !== undefined)
-      this.lastCharacters.push(reply.character);
+    if (reply.character !== undefined) this.lastCharacters.push(reply.character);
     this.send({
       t: "characters",
       result: 0,
@@ -1141,25 +1336,17 @@ class BrowserSession {
         ok: false,
         name,
         reason:
-          reply.nameCheck !== 0
-            ? `name check ${reply.nameCheck}`
-            : "the server refused the create",
+          reply.nameCheck !== 0 ? `name check ${reply.nameCheck}` : "the server refused the create",
       });
     }
   }
   private async deleteCharacter(id: number, confirmed: boolean): Promise<void> {
     const session = this.requireCharacterStage();
     if (!confirmed) throw new Error("delete requires explicit confirmation");
-    if (
-      !Number.isInteger(id) ||
-      !this.lastCharacters.some((c) => c.stats.id === id)
-    )
+    if (!Number.isInteger(id) || !this.lastCharacters.some((c) => c.stats.id === id))
       throw new Error("character is not in this account");
     const ok = await session.deleteCharacter(id);
-    if (ok)
-      this.lastCharacters = this.lastCharacters.filter(
-        (c) => c.stats.id !== id,
-      );
+    if (ok) this.lastCharacters = this.lastCharacters.filter((c) => c.stats.id !== id);
     this.send({
       t: "characters",
       result: 0,
@@ -1177,10 +1364,24 @@ class BrowserSession {
   }
 
   private async say(text: string): Promise<void> {
-    const command=/^\/(?:party|파티)\s+(create|leave|invite|kick|accept|decline)(?:\s+(.+))?$/.exec(text.trim());
-    const native=/^\/(파티만들기|파티탈퇴|파티초대|파티강퇴)(?:\s+(.+))?$/.exec(text.trim());
-    if(command)return await this.require().partyCommand(command[1]!,command[2]??'');
-    if(native)return await this.require().partyCommand(({파티만들기:'create',파티탈퇴:'leave',파티초대:'invite',파티강퇴:'kick'} as Record<string,string>)[native[1]!]!,native[2]??'');
+    const command =
+      /^\/(?:party|파티)\s+(create|leave|invite|kick|accept|decline)(?:\s+(.+))?$/.exec(
+        text.trim(),
+      );
+    const native = /^\/(파티만들기|파티탈퇴|파티초대|파티강퇴)(?:\s+(.+))?$/.exec(text.trim());
+    if (command) return await this.require().partyCommand(command[1]!, command[2] ?? "");
+    if (native)
+      return await this.require().partyCommand(
+        (
+          {
+            파티만들기: "create",
+            파티탈퇴: "leave",
+            파티초대: "invite",
+            파티강퇴: "kick",
+          } as Record<string, string>
+        )[native[1]!]!,
+        native[2] ?? "",
+      );
     await this.require().say(encodeCp949(text));
   }
 
@@ -1193,10 +1394,16 @@ class BrowserSession {
     vy: number,
     attr: number,
   ): Promise<void> {
-    if (![x, y, foothold, action, vx, vy, attr].every(Number.isInteger) ||
-        ![x, y, vx, vy].every(n => n >= -32768 && n <= 32767) ||
-        foothold < -32768 || foothold > 65535 || action < 0 || action > 255 ||
-        (attr !== 0 && attr !== 2)) throw new Error("invalid native movement fields");
+    if (
+      ![x, y, foothold, action, vx, vy, attr].every(Number.isInteger) ||
+      ![x, y, vx, vy].every((n) => n >= -32768 && n <= 32767) ||
+      foothold < -32768 ||
+      foothold > 65535 ||
+      action < 0 ||
+      action > 255 ||
+      (attr !== 0 && attr !== 2)
+    )
+      throw new Error("invalid native movement fields");
     await this.require().moveTo(x, y, foothold, 100, action, vx, vy, attr);
   }
 
@@ -1206,8 +1413,7 @@ class BrowserSession {
    * as the `field` event the server's `0x16` produces.
    */
   private async usePortal(name: string): Promise<void> {
-    if (name === "")
-      return this.send({ t: "error", message: "portal needs a name" });
+    if (name === "") return this.send({ t: "error", message: "portal needs a name" });
     await this.require().usePortal(name);
   }
 
@@ -1226,21 +1432,15 @@ class BrowserSession {
    */
   private async whisper(name: string, text: string): Promise<void> {
     const target = name.trim();
-    if (target === "")
-      return this.send({ t: "error", message: "whisper needs a target name" });
-    if (text === "")
-      return this.send({ t: "error", message: "whisper needs a message" });
-    await this.require().whisper(
-      String.fromCharCode(...encodeCp949(target)),
-      encodeCp949(text),
-    );
+    if (target === "") return this.send({ t: "error", message: "whisper needs a target name" });
+    if (text === "") return this.send({ t: "error", message: "whisper needs a message" });
+    await this.require().whisper(String.fromCharCode(...encodeCp949(target)), encodeCp949(text));
   }
 
   /** `/헉추적`: `0x23` kind 0x05, answered by `find-answer` (`0x1A` 0x09). */
   private async find(name: string): Promise<void> {
     const target = name.trim();
-    if (target === "")
-      return this.send({ t: "error", message: "find needs a name" });
+    if (target === "") return this.send({ t: "error", message: "find needs a name" });
     await this.require().find(String.fromCharCode(...encodeCp949(target)));
   }
 
@@ -1294,13 +1494,11 @@ class BrowserSession {
     if (
       !Number.isInteger(count) ||
       count < 0 ||
-      (count === 0 &&
-        !(action === "sell" && Math.floor(itemId / 10000) === 207))
+      (count === 0 && !(action === "sell" && Math.floor(itemId / 10000) === 207))
     )
       return this.send({
         t: "error",
-        message:
-          "shop needs a positive quantity (zero only for a depleted star set sale)",
+        message: "shop needs a positive quantity (zero only for a depleted star set sale)",
       });
     if (action === "buy") {
       const row = Number(message.row ?? 0);
@@ -1317,12 +1515,15 @@ class BrowserSession {
 
   /** The session owns the current kind/ranges. Never coerce arbitrary browser input to a reply. */
   private async talk(message: Record<string, unknown>): Promise<void> {
-    if (typeof message.answer !== "number" || ![0,1,255].includes(message.answer))
+    if (typeof message.answer !== "number" || ![0, 1, 255].includes(message.answer))
       throw new RangeError("talk answer must be 0 or 1 or 255");
     if (message.kind !== undefined && typeof message.kind !== "string")
       throw new RangeError("talk kind must be a string");
-    await this.require().talk(message.answer, {kind:message.kind as string | undefined,
-      text:message.text,value:message.value});
+    await this.require().talk(message.answer, {
+      kind: message.kind as string | undefined,
+      text: message.text,
+      value: message.value,
+    });
   }
 
   private async useItem(slot: number, itemId: number): Promise<void> {
@@ -1333,7 +1534,7 @@ class BrowserSession {
     await this.require().useItem(slot, itemId);
   }
 
-  private eventJson(event: ClientEvent): Record<string,unknown> {
+  private eventJson(event: ClientEvent): Record<string, unknown> {
     const { kind, ...rest } = event;
     return { t: kind, ...rest, ...(kind === "field" ? { contactField: this.contactField } : {}) };
   }
@@ -1342,7 +1543,7 @@ class BrowserSession {
     this.unsubscribe?.();
     this.session?.close();
     this.session = undefined;
-    this.username=undefined;
+    this.username = undefined;
   }
 }
 
@@ -1357,11 +1558,7 @@ class BrowserSession {
  * Icons are cached by the browser for an hour (`immutable` would lie - `--data` can change) and by
  * the catalogue forever.
  */
-function serveItem(
-  catalog: ItemCatalog | undefined,
-  rest: string,
-  response: ServerResponse,
-): void {
+function serveItem(catalog: ItemCatalog | undefined, rest: string, response: ServerResponse): void {
   const match = /^(\d{1,8})(\/icon\.png)?$/.exec(rest);
   if (match === null) {
     sendJson(response, 404, { error: `"${rest}" is not an item id` });
@@ -1397,11 +1594,7 @@ function serveItem(
 }
 
 /** Serves one file out of `root`, or answers 404. */
-function serveStatic(
-  root: string,
-  request: IncomingMessage,
-  response: ServerResponse,
-): void {
+function serveStatic(root: string, request: IncomingMessage, response: ServerResponse): void {
   const url = new URL(request.url ?? "/", "http://localhost");
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
@@ -1416,7 +1609,7 @@ function serveStatic(
   // `normalize` collapses `..`; the prefix check then keeps the result inside `root` no matter what
   // the request looked like (`/%2e%2e/Data.wz` must not be a WZ leak).
   const target = resolve(join(root, normalize(pathname)));
-  if (!target.startsWith(resolve(root))) {
+  if (!target.startsWith(resolve(root) + sep)) {
     response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
     response.end("outside the client directory\n");
     return;
@@ -1424,15 +1617,15 @@ function serveStatic(
   let body: Buffer;
   try {
     body = readFileSync(target);
+    if (extname(target) === ".ts")
+      body = Buffer.from(browserTranspiler.transformSync(body.toString("utf8")));
   } catch {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("not found\n");
     return;
   }
   response.writeHead(200, {
-    "content-type":
-      CONTENT_TYPES[extname(target).toLowerCase()] ??
-      "application/octet-stream",
+    "content-type": CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
     "content-length": body.length,
     // The client is developed and reloaded while the server runs; a cached page hides that.
     "cache-control": "no-store",
@@ -1445,9 +1638,7 @@ function serveStatic(
  * CORS and no second port: `/ws` is the game, `/api/map/<id>` is the terrain, everything else is a
  * file.
  */
-export function startWebClient(
-  options: WebClientOptions,
-): Promise<WebClientServer> {
+export function startWebClient(options: WebClientOptions): Promise<WebClientServer> {
   const root = options.root ?? DEFAULT_CLIENT_ROOT;
   const sockets = new Set<WebSocket>();
   const server = createServer((request, response) => {
@@ -1508,21 +1699,13 @@ export function startWebClient(
         }
         end = Math.min(end, bytes.length - 1);
         response.statusCode = 206;
-        response.setHeader(
-          "Content-Range",
-          `bytes ${start}-${end}/${bytes.length}`,
-        );
+        response.setHeader("Content-Range", `bytes ${start}-${end}/${bytes.length}`);
       }
       response.setHeader("Content-Length", end - start + 1);
-      response.end(
-        request.method === "HEAD" ? undefined : bytes.subarray(start, end + 1),
-      );
+      response.end(request.method === "HEAD" ? undefined : bytes.subarray(start, end + 1));
       return;
     }
-    if (
-      url.pathname.startsWith("/api/attack/") ||
-      url.pathname.startsWith("/api/projectile/")
-    ) {
+    if (url.pathname.startsWith("/api/attack/") || url.pathname.startsWith("/api/projectile/")) {
       const projectile = url.pathname.startsWith("/api/projectile/");
       const rest = url.pathname.slice(
         projectile ? "/api/projectile/".length : "/api/attack/".length,
@@ -1534,8 +1717,7 @@ export function startWebClient(
       const asset = projectile
         ? options.art?.projectile?.(Number(rest))
         : options.art?.attackProfile?.(Number(rest));
-      const known =
-        asset !== undefined && (!Array.isArray(asset) || asset.length > 0);
+      const known = asset !== undefined && (!Array.isArray(asset) || asset.length > 0);
       sendJson(
         response,
         known ? 200 : 404,
@@ -1559,9 +1741,7 @@ export function startWebClient(
     if (url.pathname.startsWith("/api/map/")) {
       const rest = url.pathname.slice("/api/map/".length);
       const artSuffix = rest.endsWith("/art") ? "/art" : "";
-      const id = Number(
-        artSuffix === "" ? rest : rest.slice(0, -artSuffix.length),
-      );
+      const id = Number(artSuffix === "" ? rest : rest.slice(0, -artSuffix.length));
       if (!Number.isFinite(id)) {
         sendJson(response, 404, { error: `map ${rest} is not a map id` });
         return;
@@ -1592,32 +1772,40 @@ export function startWebClient(
       return;
     }
     if (url.pathname.startsWith("/api/canvas/")) {
-      serveCanvasMeta(
-        options.art,
-        url.pathname.slice("/api/canvas/".length),
-        response,
-      );
+      serveCanvasMeta(options.art, url.pathname.slice("/api/canvas/".length), response);
       return;
     }
     if (url.pathname === "/api/death") {
       const art = options.art?.reader && deathArtOf(options.art.reader);
-      if (!art) return sendJson(response, 404, { error: "Original Effect/Tomb.img fall/land unavailable" });
+      if (!art)
+        return sendJson(response, 404, { error: "Original Effect/Tomb.img fall/land unavailable" });
       sendJson(response, 200, art);
       return;
     }
     if (url.pathname.startsWith("/api/avatar-motion/")) {
       const id = url.pathname.slice("/api/avatar-motion/".length);
-      if (!/^\d{1,7}$/.test(id) || (Number(id) !== 0 && (Number(id) < 1300000 || Number(id) >= 1500000)))
+      if (
+        !/^\d{1,7}$/.test(id) ||
+        (Number(id) !== 0 && (Number(id) < 1300000 || Number(id) >= 1500000))
+      )
         return sendJson(response, 404, { error: "invalid avatar weapon id" });
       const profile = options.art?.avatarMotion?.(Number(id));
-      sendJson(response, profile ? 200 : 404, profile ?? { error: "avatar motion unavailable in Data.wz" });
+      sendJson(
+        response,
+        profile ? 200 : 404,
+        profile ?? { error: "avatar motion unavailable in Data.wz" },
+      );
       return;
     }
     if (url.pathname.startsWith("/api/face/")) {
       const id = url.pathname.slice("/api/face/".length);
       if (!/^\d{1,8}$/.test(id)) return sendJson(response, 404, { error: "invalid face id" });
       const face = options.art?.face?.(Number(id));
-      sendJson(response, face ? 200 : 404, face ?? { error: "face animation unavailable in Data.wz" });
+      sendJson(
+        response,
+        face ? 200 : 404,
+        face ?? { error: "face animation unavailable in Data.wz" },
+      );
       return;
     }
     if (url.pathname === "/api/avatar.png") {
@@ -1641,7 +1829,7 @@ export function startWebClient(
         templateId: npc.templateId,
         name: npc.name,
         clickBounds: npc.clickBounds,
-        behavior:npc.behavior,
+        behavior: npc.behavior,
         actions: npc.actions,
       });
       return;
@@ -1656,31 +1844,47 @@ export function startWebClient(
       sendJson(response, 200, {
         templateId: mob.templateId,
         bodyAttack: mob.bodyAttack === true,
-        pushed:mob.pushed??1,maxMP:mob.maxMP??0,attacks:mob.attacks??[],
+        pushed: mob.pushed ?? 1,
+        maxMP: mob.maxMP ?? 0,
+        attacks: mob.attacks ?? [],
         actions: mob.actions,
       });
       return;
     }
-    if(url.pathname.startsWith('/api/active-skill/')) {
-      const raw=url.pathname.slice('/api/active-skill/'.length),id=/^\d{7}$/.test(raw)?Number(raw):NaN;
-      const info=activeSkill(id)?options.skills?.info(id):undefined,reader=options.art?.reader;
-      if(!info||!reader){sendJson(response,404,{error:'active skill is not implemented'});return;}
-      sendJson(response,200,{...info,arts:Object.fromEntries(info.levels.map(row=>[row.level,activeArt(reader,id,row.level)]))});return;
+    if (url.pathname.startsWith("/api/active-skill/")) {
+      const raw = url.pathname.slice("/api/active-skill/".length),
+        id = /^\d{7}$/.test(raw) ? Number(raw) : NaN;
+      const info = activeSkill(id) ? options.skills?.info(id) : undefined,
+        reader = options.art?.reader;
+      if (!info || !reader) {
+        sendJson(response, 404, { error: "active skill is not implemented" });
+        return;
+      }
+      sendJson(response, 200, {
+        ...info,
+        arts: Object.fromEntries(
+          info.levels.map((row) => [row.level, activeArt(reader, id, row.level)]),
+        ),
+      });
+      return;
     }
     // Inline #s: skill name + normal icon (4BAC80/5338A0), independent of learned SP state.
     if (url.pathname.startsWith("/api/skill/")) {
       const raw = url.pathname.slice("/api/skill/".length);
       const id = /^\d{1,10}$/.test(raw) ? Number(raw) : NaN;
-      const skill = Number.isInteger(id) && id >= 0 && id <= 0x7fffffff
-        ? options.skills?.info(id) : undefined;
+      const skill =
+        Number.isInteger(id) && id >= 0 && id <= 0x7fffffff ? options.skills?.info(id) : undefined;
       if (!skill) {
         sendJson(response, 404, { error: "skill absent from Data.wz or invalid id" });
         return;
       }
       const path = `${skill.path}/icon`;
       const canvas = options.art?.reader?.at(path);
-      sendJson(response, 200, { id, name: skill.name,
-        ...(canvas ? { icon: { path, width: canvas.width, height: canvas.height } } : {}) });
+      sendJson(response, 200, {
+        id,
+        name: skill.name,
+        ...(canvas ? { icon: { path, width: canvas.width, height: canvas.height } } : {}),
+      });
       return;
     }
     if (url.pathname.startsWith("/api/skills/")) {
@@ -1689,17 +1893,17 @@ export function startWebClient(
         sendJson(response, 404, { error: "skill catalogue unavailable or invalid job" });
         return;
       }
-      sendJson(response, 200, { job, books: nativeSkillBooks(job).flatMap((id) => {
-        const book = options.skills?.book(id); return book ? [book] : [];
-      }) });
+      sendJson(response, 200, {
+        job,
+        books: nativeSkillBooks(job).flatMap((id) => {
+          const book = options.skills?.book(id);
+          return book ? [book] : [];
+        }),
+      });
       return;
     }
     if (url.pathname.startsWith("/api/item/")) {
-      serveItem(
-        options.itemCatalog,
-        url.pathname.slice("/api/item/".length),
-        response,
-      );
+      serveItem(options.itemCatalog, url.pathname.slice("/api/item/".length), response);
       return;
     }
     if (url.pathname === "/healthz") {
@@ -1718,9 +1922,7 @@ export function startWebClient(
     const upgrade = upgradeResponse(request);
     if (!upgrade.ok) {
       options.log?.(`web: refusing upgrade: ${upgrade.reason}`);
-      socket.end(
-        `HTTP/1.1 ${upgrade.status} ${upgrade.reason}\r\nconnection: close\r\n\r\n`,
-      );
+      socket.end(`HTTP/1.1 ${upgrade.status} ${upgrade.reason}\r\nconnection: close\r\n\r\n`);
       return;
     }
     socket.write(`${upgrade.headers.join("\r\n")}\r\n\r\n`);
@@ -1740,10 +1942,7 @@ export function startWebClient(
     server.listen(options.port, options.host ?? "0.0.0.0", () => {
       server.off("error", reject);
       const address = server.address();
-      const port =
-        typeof address === "object" && address !== null
-          ? address.port
-          : options.port;
+      const port = typeof address === "object" && address !== null ? address.port : options.port;
       resolvePromise({
         port,
         host:

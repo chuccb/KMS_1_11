@@ -12,33 +12,19 @@ export const ABILITY_MASK = {
 } as const;
 export type BaseAbility = "str" | "dex" | "int" | "luk";
 export type Ability = keyof typeof ABILITY_MASK;
-export const ABILITY_FIELDS: readonly Ability[] = [
-  "str",
-  "dex",
-  "int",
-  "luk",
-  "maxHp",
-  "maxMp",
-];
+export const ABILITY_FIELDS: readonly Ability[] = ["str", "dex", "int", "luk", "maxHp", "maxMp"];
 export function encodeAbilityRequest(field: Ability): Uint8Array {
   const mask = ABILITY_MASK[field];
-  if (mask === undefined || !ABILITY_FIELDS.includes(field))
-    throw new Error("unsupported ability");
-  return new PacketWriter(5)
-    .writeByte(ABILITY_REQUEST_OPCODE)
-    .writeU32(mask)
-    .toBytes();
+  if (mask === undefined || !ABILITY_FIELDS.includes(field)) throw new Error("unsupported ability");
+  return new PacketWriter(5).writeByte(ABILITY_REQUEST_OPCODE).writeU32(mask).toBytes();
 }
 export function readAbilityRequest(reader: PacketReader): number {
   const mask = reader.readU32();
-  if (!reader.exhausted)
-    throw new Error("AP request must contain exactly one u32 mask");
+  if (!reader.exhausted) throw new Error("AP request must contain exactly one u32 mask");
   return mask;
 }
 
 export function describeAbilityRequest(mask: number): string {
-  const field = Object.entries(ABILITY_MASK).find(
-    ([, value]) => value === mask,
-  )?.[0];
+  const field = Object.entries(ABILITY_MASK).find(([, value]) => value === mask)?.[0];
   return `0x1b AP request: ${field ?? "unsupported"} mask=0x${mask.toString(16)}`;
 }

@@ -1,5 +1,5 @@
-import {releaseOnInterrupt} from "./pointer.mjs";
-import {wrapChatText,followChat} from './chatlayout.mjs';
+import {releaseOnInterrupt} from "./pointer.ts";
+import {wrapChatText,followChat} from './chatlayout.ts';
 /** 4FB670/4FBEE0: six rows, 13px advance; cap 64 WRAPPED records, not 64 messages.
  * IWzFont is replaced by browser Gulim/fallback measurement, not by CSS auto wrapping.
  */

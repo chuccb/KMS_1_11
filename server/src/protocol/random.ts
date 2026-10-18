@@ -52,15 +52,15 @@ export type RandomState = [number, number, number];
  * masks are what keeps the state away from the degenerate values.
  */
 export function seedState(a: number, b: number, c: number): RandomState {
-  return [((a | 0x100000) >>> 0), ((b | 0x1000) >>> 0), ((c | 0x10) >>> 0)];
+  return [(a | 0x100000) >>> 0, (b | 0x1000) >>> 0, (c | 0x10) >>> 0];
 }
 
 /** One step: advances `state` in place and returns the value `sub_4619F0` returns. */
 export function nextRandom(state: RandomState): number {
   const [s0, s1, s2] = state;
-  const v3 = ((((s0 & 0xfffffffe) << 12) ^ (((s0 & 0x7ffc0) ^ (s0 >>> 13)) >>> 6)) >>> 0);
-  const v4 = (((16 * (s1 & 0xfffffff8)) ^ (((s1 >>> 2) ^ (s1 & 0x3f800000)) >>> 23)) >>> 0);
-  const v5 = ((((s2 & 0xfffffff0) << 17) ^ (((s2 >>> 3) ^ (s2 & 0x1fffff00)) >>> 8)) >>> 0);
+  const v3 = (((s0 & 0xfffffffe) << 12) ^ (((s0 & 0x7ffc0) ^ (s0 >>> 13)) >>> 6)) >>> 0;
+  const v4 = ((16 * (s1 & 0xfffffff8)) ^ (((s1 >>> 2) ^ (s1 & 0x3f800000)) >>> 23)) >>> 0;
+  const v5 = (((s2 & 0xfffffff0) << 17) ^ (((s2 >>> 3) ^ (s2 & 0x1fffff00)) >>> 8)) >>> 0;
   state[0] = v3;
   state[1] = v4;
   state[2] = v5;

@@ -28,7 +28,10 @@ test("key schedule uses the MSVC rand LCG constants", () => {
   assert.equal(nextState(0), LCG_INCREMENT);
   assert.equal(nextState(1), (LCG_MULTIPLIER + LCG_INCREMENT) >>> 0);
   // wraps modulo 2^32
-  assert.equal(nextState(0xffffffff), (Math.imul(0xffffffff, LCG_MULTIPLIER) + LCG_INCREMENT) >>> 0);
+  assert.equal(
+    nextState(0xffffffff),
+    (Math.imul(0xffffffff, LCG_MULTIPLIER) + LCG_INCREMENT) >>> 0,
+  );
 });
 
 test("key byte is the low byte, header magic the XOR of 0xD3 with the high word", () => {
@@ -150,7 +153,10 @@ test("session deframer consumes a 211-byte handshake first and seeds from it", (
   stream.set(handshake, 0);
   stream.set(packet, handshake.length);
 
-  const events = [...deframer.push(stream.subarray(0, 100)), ...deframer.push(stream.subarray(100))];
+  const events = [
+    ...deframer.push(stream.subarray(0, 100)),
+    ...deframer.push(stream.subarray(100)),
+  ];
   assert.equal(events.length, 2);
   const [first, second] = events;
   assert.equal(first!.kind, "handshake");
@@ -198,7 +204,10 @@ test("the two directions use different header magic (measured, not cosmetic)", (
   // and each decoder only accepts its own direction
   const asClient = new SessionDeframer({ recvState: new CipherState(seed) });
   assert.equal((asClient.push(c2s)[0] as { headerOk: boolean }).headerOk, true);
-  const asServer = new SessionDeframer({ recvState: new CipherState(seed), expectedMagic: SERVER_SEND_MAGIC });
+  const asServer = new SessionDeframer({
+    recvState: new CipherState(seed),
+    expectedMagic: SERVER_SEND_MAGIC,
+  });
   assert.equal((asServer.push(s2c)[0] as { headerOk: boolean }).headerOk, true);
   const wrong = new SessionDeframer({ recvState: new CipherState(seed) });
   assert.equal((wrong.push(s2c)[0] as { headerOk: boolean }).headerOk, false);

@@ -133,30 +133,30 @@ globalThis.setInterval = (fn) => { intervals.push(fn); return intervals.length; 
 
 const { readFileSync } = await import("node:fs");
 const { runInThisContext } = await import("node:vm");
-Object.assign(globalThis, await import("../../client/motion.mjs"));
+Object.assign(globalThis, await import("../../client/motion.ts"));
 Object.assign(globalThis, await import("../../client/portals.mjs"));
 Object.assign(globalThis, await import("../../client/display.mjs"));
 Object.assign(globalThis, await import("../../client/minimap.mjs"));
 Object.assign(globalThis, await import("../../client/equipment.mjs"));
 Object.assign(globalThis, await import("../../client/itemdialogs.mjs"));
 Object.assign(globalThis, await import("../../client/audio.mjs"));
-Object.assign(globalThis, await import("../../client/selection.mjs"));
+Object.assign(globalThis, await import("../../client/selection.ts"));
 Object.assign(globalThis, await import("../../client/creation.mjs"));
 Object.assign(globalThis, await import("../../client/scene.mjs"));
 Object.assign(globalThis, await import("../../client/statwindow.mjs"));
 Object.assign(globalThis, await import("../../client/skills.mjs"));
-Object.assign(globalThis, await import("../../client/jobs.mjs"));
+Object.assign(globalThis, await import("../../client/jobs.ts"));
 Object.assign(globalThis, await import("../../client/recovery.mjs"));
 Object.assign(globalThis, await import("../../client/testtools.mjs"));
-Object.assign(globalThis, await import("../../client/temporarystats.mjs"));
+Object.assign(globalThis, await import("../../client/temporarystats.ts"));
 Object.assign(globalThis, await import("../../client/basiccombat.mjs"));
-Object.assign(globalThis, await import("../../client/tooltip.mjs"));
-Object.assign(globalThis, await import("../../client/tooltip-preview.mjs"));
-Object.assign(globalThis, await import("../../client/faces.mjs"));
-Object.assign(globalThis, await import("../../client/avatar-motion.mjs"));
+Object.assign(globalThis, await import("../../client/tooltip.ts"));
+Object.assign(globalThis, await import("../../client/tooltip-preview.ts"));
+Object.assign(globalThis, await import("../../client/faces.ts"));
+Object.assign(globalThis, await import("../../client/avatar-motion.ts"));
 // ADR-069 import shim maintenance only; this historical VM harness was NOT executed/certified.
-Object.assign(globalThis, await import("../../client/posture.mjs"));
-Object.assign(globalThis, await import("../../client/attack-timing.mjs"));
+Object.assign(globalThis, await import("../../client/posture.ts"));
+Object.assign(globalThis, await import("../../client/attack-timing.ts"));
 Object.assign(globalThis, await import("../../client/combat-assets.mjs"));
 runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:combat-assets|posture|attack-timing|avatar-motion|faces|motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {

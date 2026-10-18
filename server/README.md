@@ -1,3 +1,5 @@
+> 現行執行工具為根目錄固定版 Bun，詳 [工具鏈與遷移限制](../docs/TOOLCHAIN.md)。下列功能清單是歷史累積，不代表本輪全部驗收通過。
+
 # server/ — MMO 伺服器與協定工具（TypeScript，執行時零依賴）
 
 > 現行專案入口：[根 README](../README.md) · [文件索引](../docs/README.md) ·
@@ -57,11 +59,11 @@
 **「你自己走這個 NPC」**，§4.28 —— client 自己走、自己在 4–12 秒後重挑目標，所以伺服器不記 timer），
 `npcWalkPolicy("none"|"all"|"id,id,...")` 把 `--npc-walk` 變成一個「這個模板要走嗎」的函式，`npcs` 是唯讀視圖。模板來自 `npcTemplateProvider`（`Npc/<id>.img` 的 `info/name`）；模板查不到就**不生成**並記一行 log。 |
 | `src/protocol/quest.ts` | ✅ **NPC 對話封包**：`0x47`（`u8 unknownA`＋`u32 npcId`＋`u8 subOp`＋body；sub-op 0 `say`／1 `confirm`／2 `askText`／3 `askNumber`／4 kind 4）與 client 的 `0x15`（`u8 subOp`＋`u8 answer`，`answer == 1` 時附帶字串或數字）。台詞是 `Npc/<id>.img -> info/speak` 的原文，牆上沒有我們編的句子（FINDINGS §4.23、ADR-011）。 |
-| `src/protocol/cp949.ts` | ✅ **CP949 編碼**：封包裡的文字是 `u16 長度` + CP949 bytes（client 直接當系統 ANSI 字碼頁用）。Node 只有解碼器，所以編碼是「反轉表」在第一次用到時建出來；編不出來的字元丟例外而不是送亂碼。 |
+| `src/protocol/cp949.ts` | ✅ **CP949 編碼**：封包裡的文字是 `u16 長度` + CP949 bytes（client 直接當系統 ANSI 字碼頁用）。WHATWG TextDecoder 只有解碼器，所以編碼是「反轉表」在第一次用到時建出來；編不出來的字元丟例外而不是送亂碼。 |
 | `src/protocol/mesodrop.ts` | 原0x1F＋u32丟楓幣；10–50000、200ms、非零0x0D成功／拒絕ack；新codec golden來源未執行。 |
 | `src/protocol/shop.ts` | ✅ **NPC 商店封包**：`0x4A` 開窗（`u32 shopId`＋`u16 count`＋每列 `u32 itemId`／`u32 price`／（`itemId/10000 == 207` 時 8 bytes）／`u16 maxCount`）、`0x4B` 結果（`u8`；0 沉默／1・4 東西不夠／2 錢不夠／3 格子不夠／>4 錯誤）、client 的 `0x33`（點擊的物件 id）與 `0x16`（0 買／1 賣／2 充電／3 關窗），以及空的一 byte `0x19`（在 `field.ts`）。207的8 bytes已證實是LE double補充每發費率；保留legacy `cash`欄名相容trace，但可由WZ unitPrice產生，修正家族判斷整數除法。見 `../docs/MESO_RECHARGE.md`（最新改動未測試）。 |
 | `src/game/dialogue.ts` | ✅ **一場對話**：`Npc/<id>.img -> info/speak` 的台詞（`info/quest` 原樣帶著）、`npcDialogueProvider` 快取、`NpcTalk`（哪隻 NPC、第幾句、`advance()`）。沒有 `info/speak` 的 NPC 就是不說話。 |
-| `src/client/session.ts` | ✅ **客戶端那一半（Node）**：把 `test/loginflow.test.ts` 手動走的那條鏈變成一個物件——連線 → 握手（種子在裡面，送出的密鑰是 `0xD3`）→ `0x01` → `0x02` → `0x03` → 第二條連線 `0x04` → `0x16`（空帳號另有 `0x06`＋`0x05` 建立角色；`0x0D` 點傳送門換圖、`0x13` 表情、`0x23` 密語／找人）；之後把場地串流翻成事件（`0x1C`／`0x1D`／`0x22`／`0x27`／`0x29`／`0x1A`／`0x0D`／`0x2F`／`0x33`／`0x30`／`0x31`／`0x39`／`0x3A`），不認識的封包回 `unknown`。它不知道 HTTP 也不知道瀏覽器，所以可以在 `node --test` 裡直接驅動。 |
+| `src/client/session.ts` | ✅ **客戶端那一半（Bun）**：把 `test/loginflow.test.ts` 手動走的那條鏈變成一個物件——連線 → 握手（種子在裡面，送出的密鑰是 `0xD3`）→ `0x01` → `0x02` → `0x03` → 第二條連線 `0x04` → `0x16`（空帳號另有 `0x06`＋`0x05` 建立角色；`0x0D` 點傳送門換圖、`0x13` 表情、`0x23` 密語／找人）；之後把場地串流翻成事件（`0x1C`／`0x1D`／`0x22`／`0x27`／`0x29`／`0x1A`／`0x0D`／`0x2F`／`0x33`／`0x30`／`0x31`／`0x39`／`0x3A`），不認識的封包回 `unknown`。它不知道 HTTP 也不知道瀏覽器，所以可以在 `bun test` 裡直接驅動。 |
 | `src/net/websocket.ts` | ✅ **RFC 6455 的伺服器端**（零依賴）：`Sec-WebSocket-Accept`、text／binary、分片重組、ping/pong、關閉握手、1 MiB 上限；client 訊框一定要遮罩、server 訊框一定不遮罩。測試用 RFC 自己的官方向量。 |
 | `src/net/webclient.ts` | ✅ **瀏覽器橋**：一個 HTTP server 供應 `client/`、`/ws`（每條 WebSocket 配一個 `ClientSession`）、`/api/map/<id>`（`MapData` → 腳踏點／傳送門／life 的 JSON）、`/api/item/<id>` 與 `/api/item/<id>/icon.png`（名字／價格／描述／圖示，來自 `itemCatalog`）與 `/healthz`；`..` 直接 403。JSON 是我們的設計、不是證據（ADR-034）；`portal` 把點擊轉成 c2s `0x0D`（ADR-035），`emotion`／`whisper`／`find` 轉成 `0x13`／`0x23`（ADR-036），`use` 轉成 `0x18`／`0x19`（ADR-037），`click`／`shop`／`talk` 轉成 `0x33`／`0x16`／`0x15`（ADR-038）。 |
 | `client/` | ✅ **頁面**：`index.html`＋`style.css`＋`main.js`，零建置步驟。登入／選世界／選角／建立角色／畫腳踏點與實體／點傳送門換圖／聊天（`/w` 密語、`/f` 找人）／表情按鈕／方向鍵走路／**背包面板**（`I`，四個 tab＋worn＋雙擊用 200–203 家族）、**NPC 商店**（點 NPC → `0x4A` 的列，可買）與 **NPC 對話**（`0x47` 的台詞，用 `0x15` 走）；沒有 WZ、沒有 cipher、沒有傷害與怪物 AI（`docs/CLIENT.md` 有完整的「有與沒有」清單）。 |
@@ -82,7 +84,7 @@
 | `src/wz/props.ts` | ✅ WZ 屬性樹的**共用小層**：`entriesOf`／`propertyOf`／`asNumber`／`asText`／`infoOf`（`game/map.ts`／`game/mobs.ts`／`game/npcs.ts` 都用它）。規則：**形狀不對的值不算值**，預設值由呼叫端給。 |
 | `src/wz/png.ts` | ✅ 零依賴 PNG 寫入器（8-bit RGBA、filter 0），把解出的像素變成看得見的檔案。 |
 | `src/wz/cli.ts` | ✅ `wz images`／`census`／`maps`／`dump`／`png`：唯一一份 WZ 讀取器（ADR-005）。 |
-| 讀反編譯的工具 | ✅ `tools/hexfunc.py`（抽函式）、`tools/kstr.py`（**CP949 字串**：2003 client 沒有符號，字串就是函式的名字，見 FINDINGS §4.13）、`tools/wz1.py`；皆有 unittest（`python3 -m unittest discover -s tools/tests`）|
+| 讀反編譯的工具 | ✅ `tools/hexfunc.ts`（抽函式）、`tools/kstr.ts`（**CP949 字串**：2003 client 沒有符號，字串就是函式的名字，見 FINDINGS §4.13）、`tools/wz.ts`；皆以 Bun 執行（`bun test tools/tests`）；WZ 命令詳 `bun tools/wz.ts help`，不保留 Python CLI 的舊參數拼法|
 
 ## 登入鏈（已解，`docs/protocol/FINDINGS.md` §4.7–§4.9）
 
@@ -122,13 +124,13 @@ ADR-018）。`0x08` 在本伺服器是**雙向**的：client 送來的回聲只�
 
 ```bash
 # 1) 啟動擷取伺服器（預設 session 模式 = 真實連線模型）
-node server/src/cli.ts capture --port 8484 --out traces/login.jsonl
+bun server/src/cli.ts capture --port 8484 --out traces/login.jsonl
 
 #    原 client 在收到 211-byte 握手前不會送任何東西，所以 session 模式「先送握手」
 #    （種子由我們選並寫進 trace；body 的 199 bytes 語意仍未知，可用參數試）
-node server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
+bun server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
      --handshake-body 0000... --out traces/login.jsonl
-node server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl  # 改等 client 先送
+bun server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl  # 改等 client 先送
 
 # 2) 讓原 client 連到它
 #    - 原 client 需先被導向 127.0.0.1:8484（login server 位址）
@@ -137,8 +139,8 @@ node server/src/cli.ts capture --port 8484 --handshake off --out traces/login.js
 head -5 traces/login.jsonl
 
 # 4) 重播成可讀封包（種子自動取自 211-byte 握手；沒有握手時手動給）
-node server/src/cli.ts decode traces/login.jsonl
-node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
+bun server/src/cli.ts decode traces/login.jsonl
+bun server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 ```
 
 輸出格式（每行一個 JSON）；注意 `hex` 是**線上的原始 bytes**（證據），`plainHex` 才是解密的本文：
@@ -163,19 +165,19 @@ conn=1 c2s len=    8 body=    4 op=0x1a
 ## 指令
 
 ```bash
-node --test "**/*.test.ts"       # 全部測試（不需要 npm install）
-cd server && npm install && npm run typecheck   # strict TS 型別檢查（devDependency，見下）
-node server/src/cli.ts help      # 用法
-node server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--handshake auto|off|S:R]
+bun test "**/*.test.ts"       # 全部測試（從根目錄執行）
+bun install --frozen-lockfile --ignore-scripts && bun run typecheck   # strict TS 型別檢查（devDependency，見下）
+bun server/src/cli.ts help      # 用法
+bun server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--handshake auto|off|S:R]
                               [--handshake-body <hex>] [--out trace.jsonl] [--quiet]
-node server/src/cli.ts decode trace.jsonl [--c2s-seed <n>] [--s2c-seed <n>] [--json]
-node server/src/cli.ts wz census                  # 55,379 張 canvas、55,377 完整解碼
-node server/src/cli.ts wz maps                    # 100 張地圖的 info/foothold/portal/life
-node server/src/cli.ts wz dump <image path>       # 單張 image 的屬性樹（--json 為結構化視圖）
-node server/src/cli.ts wz png <image path> --out assets/   # 每張 canvas → PNG
+bun server/src/cli.ts decode trace.jsonl [--c2s-seed <n>] [--s2c-seed <n>] [--json]
+bun server/src/cli.ts wz census                  # 55,379 張 canvas、55,377 完整解碼
+bun server/src/cli.ts wz maps                    # 100 張地圖的 info/foothold/portal/life
+bun server/src/cli.ts wz dump <image path>       # 單張 image 的屬性樹（--json 為結構化視圖）
+bun server/src/cli.ts wz png <image path> --out assets/   # 每張 canvas → PNG
 
 # 登入伺服器：把原 client（或重寫的 client）導到這個 port，就能走到選角畫面
-node server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
+bun server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
      --world Scania[,Bera] --game-ip 127.0.0.1 [--map 1000000] [--start-mesos <n>] \
      [--data Data.wz|off] [--save <path|off>]
 ```
@@ -581,9 +583,9 @@ client 自己先做兩件事：用名字在**同一張圖**的 `CUserPool` 裡�
 （헤네시스），不是伺服器挑的圖。這一段需要 `--start-mesos`（新角色才有錢）：
 
 ```bash
-node server/src/cli.ts serve --port 8495 --game-port 8496 \
+bun server/src/cli.ts serve --port 8495 --game-port 8496 \
      --account admin:admin,alt:alt --save /tmp/whisper.json --data Data.wz --ping off --start-mesos 200
-node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（105 個檢查）
+bun server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS（105 個檢查）
 ```
 
 `schema` 會印出協定目錄（`--json` 給工具用）：只列有證據的封包，每列帶 `status`

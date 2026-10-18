@@ -93,7 +93,9 @@ export function drawCanvas(
 }
 
 /** The smallest box around the non-transparent pixels, or `undefined` for a blank bitmap. */
-export function boundsOf(image: Bitmap): { left: number; top: number; right: number; bottom: number } | undefined {
+export function boundsOf(
+  image: Bitmap,
+): { left: number; top: number; right: number; bottom: number } | undefined {
   let left = image.width;
   let right = -1;
   let top = image.height;
@@ -112,7 +114,10 @@ export function boundsOf(image: Bitmap): { left: number; top: number; right: num
 }
 
 /** A copy of `box` of `image` (clamped to the image); the same bitmap when the box covers it all. */
-export function cropBitmap(image: Bitmap, box: { left: number; top: number; right: number; bottom: number }): Bitmap {
+export function cropBitmap(
+  image: Bitmap,
+  box: { left: number; top: number; right: number; bottom: number },
+): Bitmap {
   const left = Math.max(0, box.left);
   const top = Math.max(0, box.top);
   const right = Math.min(image.width - 1, box.right);

@@ -5,11 +5,7 @@ import { fileURLToPath } from "node:url";
 import { WzArchive } from "../src/wz/archive.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
-import {
-  characterDataOf,
-  startingCharacterItems,
-  zeroStats,
-} from "../src/protocol/chardata.ts";
+import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import { equipSlot } from "../src/protocol/itemslot.ts";
 import { ClientSession, inventoryViewOf } from "../src/client/session.ts";
 const path = fileURLToPath(new URL("../../Data.wz", import.meta.url));
@@ -82,13 +78,22 @@ test("native 0x0B op2 swaps across signed bag/worn groups, even when absolute ke
 });
 
 // Source-only regression added 2026-10-18; not executed in this delivery.
-test("quickslot normal icon metadata must not substitute the raw/drop canvas", {skip:!existsSync(path)},()=>{
-  const a=WzArchive.open(path),r=artReaderOf(a)!,info=itemCatalogOf(a)!.info(2000000)!;
-  assert.equal(info.icon?.path,"Item/Consume/0200.img/02000000/info/icon");
-  assert.equal(info.iconRaw?.path,"Item/Consume/0200.img/02000000/info/iconRaw");
-  const normal=r.at(info.icon!.path)!,raw=r.at(info.iconRaw!.path)!;
-  assert.deepEqual([info.icon!.width,info.icon!.height,info.icon!.ox,info.icon!.oy],
-    [normal.width,normal.height,normal.ox,normal.oy]);
-  assert.deepEqual([info.iconRaw!.width,info.iconRaw!.height],[raw.width,raw.height]);
-  assert.ok(normal.width>raw.width || normal.height>raw.height);
-});
+test(
+  "quickslot normal icon metadata must not substitute the raw/drop canvas",
+  { skip: !existsSync(path) },
+  () => {
+    const a = WzArchive.open(path),
+      r = artReaderOf(a)!,
+      info = itemCatalogOf(a)!.info(2000000)!;
+    assert.equal(info.icon?.path, "Item/Consume/0200.img/02000000/info/icon");
+    assert.equal(info.iconRaw?.path, "Item/Consume/0200.img/02000000/info/iconRaw");
+    const normal = r.at(info.icon!.path)!,
+      raw = r.at(info.iconRaw!.path)!;
+    assert.deepEqual(
+      [info.icon!.width, info.icon!.height, info.icon!.ox, info.icon!.oy],
+      [normal.width, normal.height, normal.ox, normal.oy],
+    );
+    assert.deepEqual([info.iconRaw!.width, info.iconRaw!.height], [raw.width, raw.height]);
+    assert.ok(normal.width > raw.width || normal.height > raw.height);
+  },
+);

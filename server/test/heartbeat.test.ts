@@ -71,7 +71,9 @@ test("a session that answers every ping is never dropped", async (t) => {
   pair.client.on("data", (chunk) => {
     pings += 1;
     heartbeat.note(pair.server);
-    pair.client.write(Buffer.from([chunk[0] ?? 8]));
+    pair.client.write(
+      Buffer.from([typeof chunk === "string" ? chunk.charCodeAt(0) : (chunk[0] ?? 8)]),
+    );
   });
   heartbeat.add(pair.server, "test", () => pair.server.write(Buffer.from([8])));
   await until(() => pings >= 3, "three pings and three answers");
@@ -108,7 +110,10 @@ test("a silent session is pinged and then dropped, which is what frees its accou
   assert.equal(heartbeat.watching, 0, "a dropped session stops being watched");
   // The log line says how long it was quiet and how often it was asked - both in the unit the
   // interval is in, so a test's 20 ms and a server's 30 s read the same way.
-  assert.match(log.join("\n"), /heartbeat: test 127\.0\.0\.1:1 sent nothing for \d+ ms \(pinged every 20 ms\)/);
+  assert.match(
+    log.join("\n"),
+    /heartbeat: test 127\.0\.0\.1:1 sent nothing for \d+ ms \(pinged every 20 ms\)/,
+  );
   assert.match(log.join("\n"), /dropping the connection/);
   // The other end sees the connection go: that is the whole point of destroying the socket - every
   // `close` handler on our side runs as if the client had said goodbye, and the peer is told.

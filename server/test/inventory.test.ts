@@ -8,7 +8,11 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyChangeSlot, type ChangeSlotFailure, type ChangeSlotOutcome } from "../src/game/inventory.ts";
+import {
+  applyChangeSlot,
+  type ChangeSlotFailure,
+  type ChangeSlotOutcome,
+} from "../src/game/inventory.ts";
 import { INVENTORY_OP, INVENTORY_TAB } from "../src/protocol/inventory.ts";
 import {
   startingCharacterItems,
@@ -23,10 +27,14 @@ const SWORD = 1302000; // part code 130 -> body part 11
 const POTION = 2000000;
 
 /** A character whose equip tab holds `equips` and whose consume tab holds `consume`. */
-function items(equips: Array<[number, number]> = [], consume: Array<[number, number]> = []): CharacterItems {
+function items(
+  equips: Array<[number, number]> = [],
+  consume: Array<[number, number]> = [],
+): CharacterItems {
   const block = startingCharacterItems();
   for (const [slot, itemId] of equips) block.inventories[0]!.items.set(slot, equipSlot(itemId));
-  for (const [slot, itemId] of consume) block.inventories[1]!.items.set(slot, nonEquipSlot(itemId, 10));
+  for (const [slot, itemId] of consume)
+    block.inventories[1]!.items.set(slot, nonEquipSlot(itemId, 10));
   return block;
 }
 
@@ -35,7 +43,8 @@ function tab(block: CharacterItems, index: number): Inventory {
 }
 
 function itemIdAt(block: CharacterItems, slot: number): number | undefined {
-  const item: ItemSlot | undefined = slot < 0 ? block.worn.get(-slot) : tab(block, 1).items.get(slot);
+  const item: ItemSlot | undefined =
+    slot < 0 ? block.worn.get(-slot) : tab(block, 1).items.get(slot);
   return item?.itemId;
 }
 
@@ -56,7 +65,10 @@ function snapshot(block: CharacterItems): string {
   return JSON.stringify({ worn: ids(block.worn), equip: ids(tab(block, 1).items) });
 }
 
-function refusal(block: CharacterItems, request: Parameters<typeof applyChangeSlot>[1]): ChangeSlotFailure {
+function refusal(
+  block: CharacterItems,
+  request: Parameters<typeof applyChangeSlot>[1],
+): ChangeSlotFailure {
   const before = snapshot(block);
   const outcome = applyChangeSlot(block, request);
   assert.equal(outcome.kind, "failed", `expected a refusal, got ${JSON.stringify(outcome)}`);
@@ -80,7 +92,11 @@ test("equipping a cap: the tab slot empties and the worn part gets the item", ()
   ]);
   assert.equal(itemIdAt(block, -1), CAP, "worn part 1 is the cap slot");
   assert.equal(itemIdAt(block, 2), undefined);
-  assert.equal(outcome.kind === "done" && outcome.lookChanged, true, "a worn slot moved, so others need 0x28");
+  assert.equal(
+    outcome.kind === "done" && outcome.lookChanged,
+    true,
+    "a worn slot moved, so others need 0x28",
+  );
 });
 
 test("unequipping puts it back in the slot it is dragged to, and the worn part goes empty", () => {
@@ -107,7 +123,10 @@ test("a move inside the tab changes no look", () => {
 });
 
 test("two occupied slots swap, in both directions", () => {
-  const block = items([[1, CAP], [2, TOP]]);
+  const block = items([
+    [1, CAP],
+    [2, TOP],
+  ]);
   assert.deepEqual(shape(applyChangeSlot(block, equip(1, 2))), [
     [INVENTORY_OP.put, 2, CAP],
     [INVENTORY_OP.put, 1, TOP],
@@ -167,7 +186,10 @@ test("the requests the client never sends are refused too", () => {
   assert.equal(refusal(items([[1, CAP]]), equip(1, 0)), "badCount");
   assert.equal(refusal(items([[1, CAP]]), equip(0, -1)), "slotOutOfRange");
   assert.equal(refusal(items([[1, CAP]]), equip(1, -1, 3)), "badCount");
-  assert.equal(refusal(items([[1, CAP]]), { tab: 5, fromSlot: 1, toSlot: 2, count: -1 }), "unknownTab");
+  assert.equal(
+    refusal(items([[1, CAP]]), { tab: 5, fromSlot: 1, toSlot: 2, count: -1 }),
+    "unknownTab",
+  );
   assert.equal(
     refusal(items([[1, CAP]]), { tab: INVENTORY_TAB.consume, fromSlot: -1, toSlot: 2, count: -1 }),
     "slotOutOfRange",
@@ -188,7 +210,12 @@ test("the requests the client never sends are refused too", () => {
 test("a throw-away takes the items out of the slot and leaves the ground to the caller", () => {
   // Some of a stack: the slot keeps the rest and the answer is one `put` of what is left.
   const block = items([], [[3, POTION]]);
-  const partial = applyChangeSlot(block, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 3 });
+  const partial = applyChangeSlot(block, {
+    tab: INVENTORY_TAB.consume,
+    fromSlot: 3,
+    toSlot: 0,
+    count: 3,
+  });
   assert.equal(partial.kind, "drop");
   if (partial.kind !== "drop") return;
   assert.deepEqual([partial.slot.itemId, partial.count, partial.lookChanged], [POTION, 3, false]);
@@ -196,10 +223,19 @@ test("a throw-away takes the items out of the slot and leaves the ground to the 
   assert.equal(partial.slot.kind === "nonequip" && partial.slot.quantity, 3);
   assert.deepEqual(shape(partial), [[INVENTORY_OP.put, 3, POTION]]);
   const left = tab(block, INVENTORY_TAB.consume).items.get(3);
-  assert.equal(left !== undefined && "quantity" in left ? left.quantity : 0, 7, "seven of the ten stay");
+  assert.equal(
+    left !== undefined && "quantity" in left ? left.quantity : 0,
+    7,
+    "seven of the ten stay",
+  );
 
   // All of it (the client asks the stack size when there is more than one): the slot is cleared.
-  const all = applyChangeSlot(block, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 7 });
+  const all = applyChangeSlot(block, {
+    tab: INVENTORY_TAB.consume,
+    fromSlot: 3,
+    toSlot: 0,
+    count: 7,
+  });
   assert.equal(all.kind === "drop" && all.count, 7);
   assert.deepEqual(shape(all), [[INVENTORY_OP.clear, 3, 0]]);
   assert.equal(tab(block, INVENTORY_TAB.consume).items.has(3), false);
@@ -214,15 +250,50 @@ test("a throw-away takes the items out of the slot and leaves the ground to the 
   assert.equal(dressed.worn.has(1), false);
 
   // What cannot be thrown away, and what cannot be dropped at all: nothing is written either way.
-  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 11 }), "badCount");
-  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 0 }), "badCount");
-  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 1.5 }), "badCount");
+  assert.equal(
+    refusal(items([], [[3, POTION]]), {
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 3,
+      toSlot: 0,
+      count: 11,
+    }),
+    "badCount",
+  );
+  assert.equal(
+    refusal(items([], [[3, POTION]]), {
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 3,
+      toSlot: 0,
+      count: 0,
+    }),
+    "badCount",
+  );
+  assert.equal(
+    refusal(items([], [[3, POTION]]), {
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 3,
+      toSlot: 0,
+      count: 1.5,
+    }),
+    "badCount",
+  );
   assert.equal(refusal(items([[1, CAP]]), equip(1, 0, 2)), "badCount", "an equip is never a stack");
-  assert.equal(refusal(items([], [[3, POTION]]), { tab: INVENTORY_TAB.consume, fromSlot: 4, toSlot: 0, count: 1 }), "emptySlot");
+  assert.equal(
+    refusal(items([], [[3, POTION]]), {
+      tab: INVENTORY_TAB.consume,
+      fromSlot: 4,
+      toSlot: 0,
+      count: 1,
+    }),
+    "emptySlot",
+  );
   // A cash item carries a serial number a drop cannot: the client refuses to send one itself
   // (`sub_47A420` reads `info/cash`, `sub_463BE0` checks the item's own serial).
   const cash = items([], [[3, POTION]]);
-  tab(cash, INVENTORY_TAB.consume).items.set(3, nonEquipSlot(POTION, 2, { cash: { sn: 7n, unknown18: 0, unknown1A: 0n } }));
+  tab(cash, INVENTORY_TAB.consume).items.set(
+    3,
+    nonEquipSlot(POTION, 2, { cash: { sn: 7n, unknown18: 0, unknown1A: 0n } }),
+  );
   assert.equal(
     refusal(cash, { tab: INVENTORY_TAB.consume, fromSlot: 3, toSlot: 0, count: 1 }),
     "cashItem",
@@ -236,16 +307,32 @@ test("a drag that lands back on its own slot is an answered no-op", () => {
   assert.equal(itemIdAt(block, 1), CAP, "the item never left");
 });
 
-test("native two-hand/shield and overall/pants conflicts move atomically into the bag",()=>{
- for(const [incoming,conflict,conflictPart,part]of [[1402000,1092000,10,11],[1092000,1402000,11,10],[1050000,1060000,6,5],[1060000,1050000,5,6]]){
-  const block=items([[1,incoming!]]);block.worn.set(conflictPart!,equipSlot(conflict!));
-  const outcome=applyChangeSlot(block,equip(1,-part!));assert.equal(outcome.kind,"done");
-  assert.equal(itemIdAt(block,-part!),incoming);assert.equal(itemIdAt(block,-conflictPart!),undefined);assert.equal(itemIdAt(block,1),conflict);
- }
+test("native two-hand/shield and overall/pants conflicts move atomically into the bag", () => {
+  for (const [incoming, conflict, conflictPart, part] of [
+    [1402000, 1092000, 10, 11],
+    [1092000, 1402000, 11, 10],
+    [1050000, 1060000, 6, 5],
+    [1060000, 1050000, 5, 6],
+  ]) {
+    const block = items([[1, incoming!]]);
+    block.worn.set(conflictPart!, equipSlot(conflict!));
+    const outcome = applyChangeSlot(block, equip(1, -part!));
+    assert.equal(outcome.kind, "done");
+    assert.equal(itemIdAt(block, -part!), incoming);
+    assert.equal(itemIdAt(block, -conflictPart!), undefined);
+    assert.equal(itemIdAt(block, 1), conflict);
+  }
 });
-test("occupied target plus conflict needs one spare bag slot, or refuses without partial writes",()=>{
- const block=items([[1,1402000]]);tab(block,1).capacity=1;block.worn.set(11,equipSlot(1302000));block.worn.set(10,equipSlot(1092000));
- assert.equal(refusal(block,equip(1,-11)),"notEnoughSlots");
- tab(block,1).capacity=2;assert.equal(applyChangeSlot(block,equip(1,-11)).kind,"done");
- assert.deepEqual([itemIdAt(block,1),itemIdAt(block,2),itemIdAt(block,-11),itemIdAt(block,-10)],[1302000,1092000,1402000,undefined]);
+test("occupied target plus conflict needs one spare bag slot, or refuses without partial writes", () => {
+  const block = items([[1, 1402000]]);
+  tab(block, 1).capacity = 1;
+  block.worn.set(11, equipSlot(1302000));
+  block.worn.set(10, equipSlot(1092000));
+  assert.equal(refusal(block, equip(1, -11)), "notEnoughSlots");
+  tab(block, 1).capacity = 2;
+  assert.equal(applyChangeSlot(block, equip(1, -11)).kind, "done");
+  assert.deepEqual(
+    [itemIdAt(block, 1), itemIdAt(block, 2), itemIdAt(block, -11), itemIdAt(block, -10)],
+    [1302000, 1092000, 1402000, undefined],
+  );
 });

@@ -19,13 +19,18 @@ function connectTo(port: number): Promise<Socket> {
   });
 }
 
-function waitFor(records: CaptureRecord[], predicate: (r: CaptureRecord) => boolean, timeoutMs = 2000) {
+function waitFor(
+  records: CaptureRecord[],
+  predicate: (r: CaptureRecord) => boolean,
+  timeoutMs = 2000,
+) {
   return new Promise<CaptureRecord>((resolve, reject) => {
     const started = Date.now();
     const tick = () => {
       const hit = records.find(predicate);
       if (hit) return resolve(hit);
-      if (Date.now() - started > timeoutMs) return reject(new Error("timed out waiting for record"));
+      if (Date.now() - started > timeoutMs)
+        return reject(new Error("timed out waiting for record"));
       setTimeout(tick, 5);
     };
     tick();
@@ -45,7 +50,12 @@ function wire(header: number, bodyHex: string): Uint8Array {
 
 test("capture (framed): decodes the 4-byte header and reports the body length", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "framed", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "framed",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
@@ -64,14 +74,23 @@ test("capture (framed): decodes the 4-byte header and reports the body length", 
 
 test("capture (framed): reassembles a frame split across two writes", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "framed", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "framed",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
     const packet = wire(0x0102, "0102030405");
     socket.write(packet.subarray(0, 3));
     await new Promise((r) => setTimeout(r, 30));
-    assert.equal(records.filter((r) => r.kind === "frame").length, 0, "must not emit a partial frame");
+    assert.equal(
+      records.filter((r) => r.kind === "frame").length,
+      0,
+      "must not emit a partial frame",
+    );
     socket.write(packet.subarray(3));
     const record = await waitFor(records, (r) => r.kind === "frame");
     assert.equal(record.header, 0x0102);
@@ -84,7 +103,12 @@ test("capture (framed): reassembles a frame split across two writes", async () =
 
 test("capture: falls back to a raw dump when the framing assumption fails", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "framed", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "framed",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
@@ -95,7 +119,10 @@ test("capture: falls back to a raw dump when the framing assumption fails", asyn
     assert.ok(error.len >= 4, "the failing chunk must be recorded, not dropped");
     assert.match(error.note ?? "", /exceeds the 1460 cap/);
     // every byte of the failing chunk must still reach the trace (TCP may split it)
-    const raw = records.filter((r) => r.kind === "raw").map((r) => r.hex).join("");
+    const raw = records
+      .filter((r) => r.kind === "raw")
+      .map((r) => r.hex)
+      .join("");
     assert.ok(junk.startsWith(raw) && raw.length > 0, `raw fallback lost data: ${raw}`);
     socket.destroy();
   } finally {
@@ -105,7 +132,12 @@ test("capture: falls back to a raw dump when the framing assumption fails", asyn
 
 test("capture (raw mode): records every chunk verbatim", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "raw", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "raw",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
@@ -121,7 +153,12 @@ test("capture (raw mode): records every chunk verbatim", async () => {
 
 test("capture: lifecycle records and JSONL serialization", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "framed", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "framed",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     assert.equal(records[0]!.kind, "server-info");
@@ -134,7 +171,10 @@ test("capture: lifecycle records and JSONL serialization", async () => {
     assert.equal(lines.length, records.length);
     const parsed = JSON.parse(lines[0]!) as CaptureRecord;
     assert.equal(parsed.kind, "server-info");
-    assert.ok(records.every((r, i) => r.seq === i), "sequence numbers must be monotonic");
+    assert.ok(
+      records.every((r, i) => r.seq === i),
+      "sequence numbers must be monotonic",
+    );
   } finally {
     await server.stop();
   }
@@ -152,7 +192,11 @@ test("capture (session): adopts the handshake seeds and records decrypted opcode
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
-    const handshake = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x41), 0xaabbccdd, 0x11223344);
+    const handshake = encodeHandshake(
+      new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x41),
+      0xaabbccdd,
+      0x11223344,
+    );
     const sender = new CipherState(0x11223344); // the client's receive seed is our send state
     const packet = encodeSessionPacket(fromHex("0a0102"), sender, "c2s"); // client -> server
 
@@ -177,7 +221,12 @@ test("capture (session): adopts the handshake seeds and records decrypted opcode
 
 test("capture (session): an undecodable chunk is flagged once and then dumped raw", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "session", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "session",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
@@ -229,7 +278,12 @@ test("capture (session): sends the handshake itself, since the 2003 client speak
 
 test("capture (session): the 211-byte handshake it sends carries 199 body bytes", async () => {
   const records: CaptureRecord[] = [];
-  const server = new CaptureServer({ port: 0, host: "127.0.0.1", mode: "session", onRecord: (r) => records.push(r) });
+  const server = new CaptureServer({
+    port: 0,
+    host: "127.0.0.1",
+    mode: "session",
+    onRecord: (r) => records.push(r),
+  });
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
@@ -261,7 +315,11 @@ test("capture (session): handshake off waits for a client-sent handshake", async
   try {
     const socket = await connectTo(info.port);
     await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal(records.filter((r) => r.kind === "handshake").length, 0, "nothing is sent unprompted");
+    assert.equal(
+      records.filter((r) => r.kind === "handshake").length,
+      0,
+      "nothing is sent unprompted",
+    );
     socket.write(Buffer.from(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 7, 9)));
     const received = await waitFor(records, (r) => r.kind === "handshake");
     assert.equal(received.dir, "c2s");

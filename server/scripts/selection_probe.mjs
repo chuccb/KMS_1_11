@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WORLD_UI, CHARACTER_UI, SELECTION_BUTTONS, characterSlot } from '../../client/selection.mjs';
+import { WORLD_UI, CHARACTER_UI, SELECTION_BUTTONS, characterSlot } from '../../client/selection.ts';
 
 test('world and character windows retain native creation coordinates and three slots', () => {
   assert.deepEqual([WORLD_UI.x, WORLD_UI.y, WORLD_UI.width, WORLD_UI.height], [250, 89, 305, 403]);

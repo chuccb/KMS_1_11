@@ -17,7 +17,12 @@ import {
   statDiffFlag,
   statDiffFlags,
 } from "../src/protocol/stat.ts";
-import { characterDataOf, startingCharacterItems, zeroStats, type CharacterStats } from "../src/protocol/chardata.ts";
+import {
+  characterDataOf,
+  startingCharacterItems,
+  zeroStats,
+  type CharacterStats,
+} from "../src/protocol/chardata.ts";
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join(" ");
@@ -120,7 +125,11 @@ test("the ack byte is on the wire because the client reads it", () => {
   const body = encodeStatUpdate({ ack: true, diff: { level: 3 } });
   assert.equal(body[1], 1);
   assert.equal(readStatUpdate(new PacketReader(body, 1)).ack, true);
-  assert.equal(encodeStatUpdate({ diff: { level: 3 } })[1], 0, "default is 0: a stat update answers nothing");
+  assert.equal(
+    encodeStatUpdate({ diff: { level: 3 } })[1],
+    0,
+    "default is 0: a stat update answers nothing",
+  );
 });
 
 test("describe names every field it found", () => {
@@ -130,7 +139,10 @@ test("describe names every field it found", () => {
 
 test("values that do not fit the client's reader are refused, not truncated", () => {
   // The sharp edge: `str` is ONE byte in this packet while the record holds it in a u16 pair.
-  assert.throws(() => encodeStatUpdate({ diff: { str: 0x100 } }), /u8\) cannot hold 256.*FINDINGS 4\.21\.1/s);
+  assert.throws(
+    () => encodeStatUpdate({ diff: { str: 0x100 } }),
+    /u8\) cannot hold 256.*FINDINGS 4\.21\.1/s,
+  );
   assert.throws(() => encodeStatUpdate({ diff: { level: 0x100 } }), RangeError);
   assert.throws(() => encodeStatUpdate({ diff: { hp: 0x10000 } }), RangeError);
   assert.throws(() => encodeStatUpdate({ diff: { exp: 0x100000000 } }), RangeError);
@@ -138,7 +150,10 @@ test("values that do not fit the client's reader are refused, not truncated", ()
   assert.throws(() => encodeStatUpdate({ diff: { exp: 1.5 } }), /not an integer/);
   // `sp` is the one signed field (`sub_45DD80`), so its own limits apply.
   assert.throws(() => encodeStatUpdate({ diff: { sp: 0x8000 } }), /s16\) cannot hold 32768/);
-  assert.equal(readStatUpdate(new PacketReader(encodeStatUpdate({ diff: { sp: -1 } }), 1)).diff.sp, -1);
+  assert.equal(
+    readStatUpdate(new PacketReader(encodeStatUpdate({ diff: { sp: -1 } }), 1)).diff.sp,
+    -1,
+  );
 });
 
 test("a nonzero duration requires a complete temporary-stat tail", () => {

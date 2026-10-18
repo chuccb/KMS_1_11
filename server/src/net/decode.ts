@@ -14,7 +14,11 @@
  * sub_4A1B90 (decrypt), sub_43AFA0 (packet loop that reads the +124 receive state).
  */
 import { CipherState, headerMagicOf, magicFor, type Direction } from "../protocol/cipher.ts";
-import { HANDSHAKE_BODY_BYTES, HANDSHAKE_TOTAL_BYTES, decodeHandshake } from "../protocol/session.ts";
+import {
+  HANDSHAKE_BODY_BYTES,
+  HANDSHAKE_TOTAL_BYTES,
+  decodeHandshake,
+} from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
 import { describeClientFieldPacket, describeFieldPacket } from "../protocol/field.ts";
@@ -124,7 +128,9 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
 
     // The opening packet is plaintext and defines the keys for everything after it. The harness
     // marks it `handshake`; a raw 211-byte `frame` is treated the same way.
-    const isHandshake = raw.length === HANDSHAKE_TOTAL_BYTES && (record.kind === "handshake" || record.kind === "frame");
+    const isHandshake =
+      raw.length === HANDSHAKE_TOTAL_BYTES &&
+      (record.kind === "handshake" || record.kind === "frame");
     if (isHandshake) {
       const parsed = decodeHandshake(raw);
       const sendSeed = record.seeds?.sendSeed ?? parsed.sendSeed;
@@ -186,7 +192,8 @@ export function headerForSeed(seed: number, direction: Direction = "s2c"): numbe
 export function formatDecoded(packets: DecodedPacket[]): string {
   const lines: string[] = [];
   for (const packet of packets) {
-    const op = packet.opcode === undefined ? "" : ` op=0x${packet.opcode.toString(16).padStart(2, "0")}`;
+    const op =
+      packet.opcode === undefined ? "" : ` op=0x${packet.opcode.toString(16).padStart(2, "0")}`;
     const check =
       packet.expectedHeader === undefined
         ? ""
@@ -197,7 +204,8 @@ export function formatDecoded(packets: DecodedPacket[]): string {
       `conn=${packet.conn} ${packet.dir} len=${String(packet.len).padStart(5)} body=${String(packet.bodyLength).padStart(5)}${op}${check}`,
     );
     if (packet.decoded) lines.push(`    -> ${packet.decoded}`);
-    if (packet.bodyHex) lines.push(`    ${packet.bodyHex.slice(0, 240)}${packet.bodyHex.length > 240 ? "..." : ""}`);
+    if (packet.bodyHex)
+      lines.push(`    ${packet.bodyHex.slice(0, 240)}${packet.bodyHex.length > 240 ? "..." : ""}`);
     if (packet.note) lines.push(`    // ${packet.note}`);
   }
   return lines.join("\n") + (lines.length ? "\n" : "");

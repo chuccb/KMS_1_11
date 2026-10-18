@@ -12,7 +12,15 @@
  */
 import { entriesOf } from "../wz/props.ts";
 import type { WzArchive } from "../wz/archive.ts";
-import { artReaderOf, frameDelay, frameNames, frameAlpha, type ArtReader, vectorOf, nodeRecord } from "./wzart.ts";
+import {
+  artReaderOf,
+  frameDelay,
+  frameNames,
+  frameAlpha,
+  type ArtReader,
+  vectorOf,
+  nodeRecord,
+} from "./wzart.ts";
 
 /** One frame of one action. */
 export interface SpriteFrame {
@@ -57,8 +65,7 @@ export function spriteFrames(
     const names = frameNames(node);
     const out: SpriteFrame[] = [];
     for (const name of names) {
-      const path =
-        name === "" ? `${image}/${candidate}` : `${image}/${candidate}/${name}`;
+      const path = name === "" ? `${image}/${candidate}` : `${image}/${candidate}/${name}`;
       const art = reader.at(path);
       if (art === undefined) continue;
       const props = entriesOf(reader.node(path)?.value);
@@ -66,9 +73,7 @@ export function spriteFrames(
       const rb = vectorOf(props.find((p) => p.name === "rb")?.value);
       const delay = props.find((p) => p.name === "delay")?.value;
       out.push({
-        ...(lt && rb
-          ? { bounds: { left: lt[0], top: lt[1], right: rb[0], bottom: rb[1] } }
-          : {}),
+        ...(lt && rb ? { bounds: { left: lt[0], top: lt[1], right: rb[0], bottom: rb[1] } } : {}),
         path,
         ...frameAlpha(reader.node(path)),
         // Canvas properties are in node.value.props; nodeProperty(canvas, "delay") is empty.
@@ -78,7 +83,10 @@ export function spriteFrames(
             : frameDelay(
                 node,
                 name,
-                defaultDelay ?? (image.startsWith("Mob/") || image.startsWith("Npc/") || candidate === "move" ? 180 : 1000),
+                defaultDelay ??
+                  (image.startsWith("Mob/") || image.startsWith("Npc/") || candidate === "move"
+                    ? 180
+                    : 1000),
               ),
         ox: art.ox,
         oy: art.oy,
@@ -93,26 +101,65 @@ export function spriteFrames(
 
 /** 48E360 attack<i>/info. Missing mandatory range vectors are NOT guessed from canvas size. */
 export interface MobAttackArt {
-  action:number;name:string;type:0|1|2;conMP:number;duration:number;visualDuration:number;
-  effectAfter:number;attackAfter:number;
-  range?:{left:number;top:number;right:number;bottom:number};sp?:{x:number;y:number};radius?:number;
-  effect:SpriteFrame[];hit:SpriteFrame[];ball:SpriteFrame[];
+  action: number;
+  name: string;
+  type: 0 | 1 | 2;
+  conMP: number;
+  duration: number;
+  visualDuration: number;
+  effectAfter: number;
+  attackAfter: number;
+  range?: { left: number; top: number; right: number; bottom: number };
+  sp?: { x: number; y: number };
+  radius?: number;
+  effect: SpriteFrame[];
+  hit: SpriteFrame[];
+  ball: SpriteFrame[];
 }
-export function mobAttacksOf(reader:ArtReader,image:string,actions:Record<string,SpriteFrame[]>):MobAttackArt[]{
-  const out:MobAttackArt[]=[];
-  for(const [index,name] of ['attack1','attack2','attackF'].entries()){
-    const path=`${image}/${name}/info`,node=reader.node(path),body=actions[name];
-    if(!node||!body?.length)continue;
-    const info=nodeRecord(node),range=nodeRecord(reader.node(`${path}/range`));
-    const number=(key:string)=>typeof info[key]==='number'&&Number.isFinite(info[key])?Math.trunc(info[key] as number):0;
-    const type=number('type');if(type!==0&&type!==1&&type!==2)continue;
-    const lt=vectorOf(range.lt),rb=vectorOf(range.rb),sp=vectorOf(range.sp);
-    if(type===0?(!lt||!rb||lt[0]>=rb[0]||lt[1]>=rb[1]):(!sp||typeof range.r!=='number'||!Number.isFinite(range.r)||range.r<=0))continue;
-    out.push({action:index+10,name,type,conMP:Math.max(0,number('conMP')),
-      duration:body.reduce((n,f)=>n+f.delay,0),visualDuration:body.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0),
-      effectAfter:number('effectAfter'),attackAfter:number('attackAfter'),
-      ...(type===0?{range:{left:lt![0],top:lt![1],right:rb![0],bottom:rb![1]}}:{sp:{x:sp![0],y:sp![1]},radius:Math.trunc(range.r as number)}),
-      effect:spriteFrames(reader,path,'effect',[],120),hit:spriteFrames(reader,path,'hit',[],120),ball:spriteFrames(reader,path,'ball',[],120)});
+export function mobAttacksOf(
+  reader: ArtReader,
+  image: string,
+  actions: Record<string, SpriteFrame[]>,
+): MobAttackArt[] {
+  const out: MobAttackArt[] = [];
+  for (const [index, name] of ["attack1", "attack2", "attackF"].entries()) {
+    const path = `${image}/${name}/info`,
+      node = reader.node(path),
+      body = actions[name];
+    if (!node || !body?.length) continue;
+    const info = nodeRecord(node),
+      range = nodeRecord(reader.node(`${path}/range`));
+    const number = (key: string) =>
+      typeof info[key] === "number" && Number.isFinite(info[key])
+        ? Math.trunc(info[key] as number)
+        : 0;
+    const type = number("type");
+    if (type !== 0 && type !== 1 && type !== 2) continue;
+    const lt = vectorOf(range.lt),
+      rb = vectorOf(range.rb),
+      sp = vectorOf(range.sp);
+    if (
+      type === 0
+        ? !lt || !rb || lt[0] >= rb[0] || lt[1] >= rb[1]
+        : !sp || typeof range.r !== "number" || !Number.isFinite(range.r) || range.r <= 0
+    )
+      continue;
+    out.push({
+      action: index + 10,
+      name,
+      type,
+      conMP: Math.max(0, number("conMP")),
+      duration: body.reduce((n, f) => n + f.delay, 0),
+      visualDuration: body.reduce((n, f) => n + Math.max(30, Math.ceil(f.delay / 30) * 30), 0),
+      effectAfter: number("effectAfter"),
+      attackAfter: number("attackAfter"),
+      ...(type === 0
+        ? { range: { left: lt![0], top: lt![1], right: rb![0], bottom: rb![1] } }
+        : { sp: { x: sp![0], y: sp![1] }, radius: Math.trunc(range.r as number) }),
+      effect: spriteFrames(reader, path, "effect", [], 120),
+      hit: spriteFrames(reader, path, "hit", [], 120),
+      ball: spriteFrames(reader, path, "ball", [], 120),
+    });
   }
   return out;
 }
@@ -154,8 +201,12 @@ export function npcClickBounds(info: Record<string, unknown>): NpcArt["clickBoun
     const value = info[key];
     return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : fallback;
   };
-  return {left: number("dcLeft", -22), top: number("dcTop", -65),
-    right: number("dcRight", 22), bottom: number("dcBottom", 0)};
+  return {
+    left: number("dcLeft", -22),
+    top: number("dcTop", -65),
+    right: number("dcRight", 22),
+    bottom: number("dcBottom", 0),
+  };
 }
 
 export interface NpcBehavior {
@@ -163,81 +214,106 @@ export interface NpcBehavior {
   movable: boolean;
   /** Dense 0..propertyCount-1 lookup, including empty/missing slots, as 49CBF0 does. */
   speak: string[];
-  extraActions: {name:string;speak:string[]}[];
+  extraActions: { name: string; speak: string[] }[];
 }
 
 /** Resolve linked properties WITHOUT decoding canvas pixels. Own info never comes from the link. */
-export function npcNodesOf(templateId: number, reader: ArtReader): {
-  info:Record<string,unknown>; actions:Map<string,string>;
-} | undefined {
-  let image=npcImagePath(templateId);
-  const info=nodeRecord(reader.node(`${image}/info`)), actions=new Map<string,string>(), seen=new Set<string>();
-  for(;;) {
-    const root=reader.node(image);
-    if(seen.has(image)||seen.size>=16||!root||root.kind!=="props")return undefined;
+export function npcNodesOf(
+  templateId: number,
+  reader: ArtReader,
+):
+  | {
+      info: Record<string, unknown>;
+      actions: Map<string, string>;
+    }
+  | undefined {
+  let image = npcImagePath(templateId);
+  const info = nodeRecord(reader.node(`${image}/info`)),
+    actions = new Map<string, string>(),
+    seen = new Set<string>();
+  for (;;) {
+    const root = reader.node(image);
+    if (seen.has(image) || seen.size >= 16 || !root || root.kind !== "props") return undefined;
     seen.add(image);
-    for(const entry of root.props)if(entry.name.toLowerCase()!=="info")actions.set(entry.name,`${image}/${entry.name}`);
-    const link=nodeRecord(reader.node(`${image}/info`)).link;
-    if(typeof link!=="string")break;
-    const id=Number.parseInt(link,10);
-    if(!Number.isSafeInteger(id)||id<0)return undefined;
-    image=npcImagePath(id);
+    for (const entry of root.props)
+      if (entry.name.toLowerCase() !== "info") actions.set(entry.name, `${image}/${entry.name}`);
+    const link = nodeRecord(reader.node(`${image}/info`)).link;
+    if (typeof link !== "string") break;
+    const id = Number.parseInt(link, 10);
+    if (!Number.isSafeInteger(id) || id < 0) return undefined;
+    image = npcImagePath(id);
   }
-  return {info,actions};
+  return { info, actions };
 }
 function npcSpeechOf(value: unknown): string[] {
-  const entries=entriesOf(value);
-  return Array.from({length:entries.length},(_,i)=>{
-    const value=entries.find(entry=>entry.name===String(i))?.value;
-    return typeof value==="string"?value:"";
+  const entries = entriesOf(value);
+  return Array.from({ length: entries.length }, (_, i) => {
+    const value = entries.find((entry) => entry.name === String(i))?.value;
+    return typeof value === "string" ? value : "";
   });
 }
-export function npcBehaviorOf(templateId:number,reader:ArtReader): NpcBehavior | undefined {
+export function npcBehaviorOf(templateId: number, reader: ArtReader): NpcBehavior | undefined {
   // 49CBF0 is NOT 40C020's action-art merge: it replaces the enumerated root with ONE linked
   // image, while retaining this NPC's original info. Own-only art is NOT another idle slot.
-  let image=npcImagePath(templateId);
-  const own=reader.node(image);if(!own||own.kind!=="props")return undefined;
-  const info=nodeRecord(reader.node(`${image}/info`)),link=info.link;
-  if(typeof link==="string") {
-    const id=Number.parseInt(link,10);if(!Number.isSafeInteger(id)||id<0)return undefined;
-    image=npcImagePath(id);
+  let image = npcImagePath(templateId);
+  const own = reader.node(image);
+  if (!own || own.kind !== "props") return undefined;
+  const info = nodeRecord(reader.node(`${image}/info`)),
+    link = info.link;
+  if (typeof link === "string") {
+    const id = Number.parseInt(link, 10);
+    if (!Number.isSafeInteger(id) || id < 0) return undefined;
+    image = npcImagePath(id);
   }
-  const root=reader.node(image);if(!root||root.kind!=="props")return undefined;
-  const extraActions: NpcBehavior["extraActions"]=[];
-  for(const entry of root.props) {
-    if(["info","stand","move"].includes(entry.name.toLowerCase()))continue;
-    extraActions.push({name:entry.name,speak:npcSpeechOf(nodeRecord(reader.node(`${image}/${entry.name}`)).speak)});
+  const root = reader.node(image);
+  if (!root || root.kind !== "props") return undefined;
+  const extraActions: NpcBehavior["extraActions"] = [];
+  for (const entry of root.props) {
+    if (["info", "stand", "move"].includes(entry.name.toLowerCase())) continue;
+    extraActions.push({
+      name: entry.name,
+      speak: npcSpeechOf(nodeRecord(reader.node(`${image}/${entry.name}`)).speak),
+    });
   }
-  return {movable:root.props.some(entry=>entry.name==="move"),speak:npcSpeechOf(info.speak),extraActions};
+  return {
+    movable: root.props.some((entry) => entry.name === "move"),
+    speak: npcSpeechOf(info.speak),
+    extraActions,
+  };
 }
 export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefined {
-  const nodes=npcNodesOf(templateId,reader);if(!nodes)return undefined;
-  const actions: Record<string,SpriteFrame[]>={};
-  for(const [name,path] of nodes.actions) {
-    const split=path.lastIndexOf("/");
-    const frames=spriteFrames(reader,path.slice(0,split),path.slice(split+1),[]);
-    if(frames.length)actions[name]=frames;
+  const nodes = npcNodesOf(templateId, reader);
+  if (!nodes) return undefined;
+  const actions: Record<string, SpriteFrame[]> = {};
+  for (const [name, path] of nodes.actions) {
+    const split = path.lastIndexOf("/");
+    const frames = spriteFrames(reader, path.slice(0, split), path.slice(split + 1), []);
+    if (frames.length) actions[name] = frames;
   }
-  const behavior=npcBehaviorOf(templateId,reader)!;
-  return Object.keys(actions).length===0?undefined:{templateId,
-    name:typeof nodes.info.name==="string"?nodes.info.name:"",clickBounds:npcClickBounds(nodes.info),actions,behavior};
+  const behavior = npcBehaviorOf(templateId, reader)!;
+  return Object.keys(actions).length === 0
+    ? undefined
+    : {
+        templateId,
+        name: typeof nodes.info.name === "string" ? nodes.info.name : "",
+        clickBounds: npcClickBounds(nodes.info),
+        actions,
+        behavior,
+      };
 }
 
 /** What the page needs to draw one mob: its id and its frames by action. */
 export interface MobArt {
   templateId: number;
   bodyAttack?: boolean;
-  attacks?:MobAttackArt[];
-  maxMP?:number;
+  attacks?: MobAttackArt[];
+  maxMP?: number;
   /** Original own info.pushed (48D080 default1), not linked art info. */
-  pushed?:number;
+  pushed?: number;
   actions: Record<string, SpriteFrame[]>;
 }
 
-export function mobArtOf(
-  templateId: number,
-  reader: ArtReader,
-): MobArt | undefined {
+export function mobArtOf(templateId: number, reader: ArtReader): MobArt | undefined {
   let image = mobImagePath(templateId);
   const info = nodeRecord(reader.node(`${image}/info`));
   // 40AE20 recursively loads action art via _wtoi(info.link); original info still owns contact.
@@ -256,7 +332,14 @@ export function mobArtOf(
   const bodyAttack = Number(info.bodyAttack ?? 0) !== 0;
   return Object.keys(actions).length === 0
     ? undefined
-    : { templateId, actions, bodyAttack,pushed:Number(info.pushed??1),maxMP:Number(info.maxMP??0),attacks:mobAttacksOf(reader,image,actions) };
+    : {
+        templateId,
+        actions,
+        bodyAttack,
+        pushed: Number(info.pushed ?? 1),
+        maxMP: Number(info.maxMP ?? 0),
+        attacks: mobAttacksOf(reader, image, actions),
+      };
 }
 
 /** A cached `templateId -> art` reader for the web endpoint (`--data off` has none). */

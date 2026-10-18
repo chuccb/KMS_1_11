@@ -115,8 +115,16 @@ export class WzCanvas {
   readonly end: number;
 
   constructor(fields: {
-    width: number; height: number; format: number; pad: number; flag: number;
-    props: WzEntry[]; pixelRaw: Uint8Array; pixels: Uint8Array | null; offset: number; end: number;
+    width: number;
+    height: number;
+    format: number;
+    pad: number;
+    flag: number;
+    props: WzEntry[];
+    pixelRaw: Uint8Array;
+    pixels: Uint8Array | null;
+    offset: number;
+    end: number;
   }) {
     this.width = fields.width;
     this.height = fields.height;
@@ -135,8 +143,12 @@ export class WzCanvas {
     return pixelBpp(this.format);
   }
 
-  get storageWidth(): number { return Math.max(1, Math.ceil(this.width / 2 ** this.pad)); }
-  get storageHeight(): number { return Math.max(1, Math.ceil(this.height / 2 ** this.pad)); }
+  get storageWidth(): number {
+    return Math.max(1, Math.ceil(this.width / 2 ** this.pad));
+  }
+  get storageHeight(): number {
+    return Math.max(1, Math.ceil(this.height / 2 ** this.pad));
+  }
 
   /** Native buffer size, before the original canvas magnification is applied. */
   get expectedBytes(): number {
@@ -423,7 +435,8 @@ export class ImageStream {
     if (cls === "Shape2D#Vector2D") return new WzNode("vector", [this.compact(), this.compact()]);
     if (cls === "Shape2D#Convex2D") {
       const count = this.compact();
-      if (count < 0 || count > 0x1000) throw new WzImageError(`implausible Convex2D count ${count}`);
+      if (count < 0 || count > 0x1000)
+        throw new WzImageError(`implausible Convex2D count ${count}`);
       const items: WzNode[] = [];
       for (let i = 0; i < count; i++) items.push(this.inlineObject(depth + 1));
       return new WzNode("convex", items);
@@ -461,11 +474,21 @@ export class ImageStream {
     const raw = this.bytes.subarray(this.p, this.p + pixelLen);
     this.p += pixelLen;
     if (pad < 0 || pad > 30) throw new WzImageError(`invalid canvas scale ${pad}`);
-    const expected = Math.max(1, Math.ceil(width / 2 ** pad)) * Math.max(1, Math.ceil(height / 2 ** pad)) * pixelBpp(format);
+    const expected =
+      Math.max(1, Math.ceil(width / 2 ** pad)) *
+      Math.max(1, Math.ceil(height / 2 ** pad)) *
+      pixelBpp(format);
     return new WzCanvas({
-      width, height, format, pad, flag, props, pixelRaw: raw,
+      width,
+      height,
+      format,
+      pad,
+      flag,
+      props,
+      pixelRaw: raw,
       pixels: decodePixels(raw, expected),
-      offset: this.base + start, end: this.base + this.p,
+      offset: this.base + start,
+      end: this.base + this.p,
     });
   }
 
@@ -556,7 +579,9 @@ export class ImageStream {
         break;
       }
       if (![MARK_CLASS, MARK_NAME_REF, MARK_LIST].includes(this.bytes[this.p])) {
-        throw new WzImageError(`not an object marker 0x${this.bytes[this.p].toString(16)} at ${this.p}`);
+        throw new WzImageError(
+          `not an object marker 0x${this.bytes[this.p].toString(16)} at ${this.p}`,
+        );
       }
       out.push(this.one());
     }

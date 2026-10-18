@@ -17,7 +17,11 @@ import {
   schemaJson,
   schemaText,
 } from "../src/protocol/schema.ts";
-import { FIELD_OPCODE, describeClientFieldPacket, describeFieldPacket } from "../src/protocol/field.ts";
+import {
+  FIELD_OPCODE,
+  describeClientFieldPacket,
+  describeFieldPacket,
+} from "../src/protocol/field.ts";
 import { describeClientPacket } from "../src/protocol/login.ts";
 
 test("every codec name in the catalogue still resolves to an exported function", () => {
@@ -39,7 +43,10 @@ test("an opcode appears at most once per direction and stage", () => {
     assert.equal(seen.has(key), false, `duplicate catalogue row for ${key}`);
     seen.add(key);
     assert.ok(entry.name.length > 0, `row ${key} has no name`);
-    assert.ok(entry.evidence.length > 0, `row ${key} has no evidence - and that is the point of the table`);
+    assert.ok(
+      entry.evidence.length > 0,
+      `row ${key} has no evidence - and that is the point of the table`,
+    );
   }
 });
 
@@ -72,7 +79,8 @@ test("every row with a field codec is understood by the decode tool's describer"
     if (entry.codecs.length === 0) continue;
     if (entry.stage === "field") {
       const plain = new Uint8Array([entry.opcode]);
-      const text = entry.direction === "c2s" ? describeClientFieldPacket(plain) : describeFieldPacket(plain);
+      const text =
+        entry.direction === "c2s" ? describeClientFieldPacket(plain) : describeFieldPacket(plain);
       // a one-byte packet is "truncated" - which is still recognition, unlike undefined
       if (text === undefined) undescribed.push(`${entry.name} (0x${entry.opcode.toString(16)})`);
     } else if (entry.direction === "c2s") {

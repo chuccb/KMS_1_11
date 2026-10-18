@@ -1,5 +1,5 @@
-import {validNpcRequest} from "../../../client/npcbehavior.mjs";
-import {encodeNpcState,encodeNpcIdle,type NpcIdle} from "../protocol/npc.ts";
+import { validNpcRequest } from "../../../client/npcbehavior.ts";
+import { encodeNpcState, encodeNpcIdle, type NpcIdle } from "../protocol/npc.ts";
 /**
  * The world: the maps the server is simulating, and the players standing in them.
  *
@@ -28,15 +28,8 @@ import {encodeNpcState,encodeNpcIdle,type NpcIdle} from "../protocol/npc.ts";
  * inventory), `0x0d` (their stats), `0x11` (what they picked up), `0x16` (their own field entry),
  * `0x4a`/`0x47` (the window they alone have open).
  */
-import {
-  encodeDropRemove,
-  DROP_REMOVE_KIND,
-} from "../protocol/drop.ts";
-import {
-  encodeUserEnterField,
-  encodeUserLeaveField,
-  encodeUserMove,
-} from "../protocol/field.ts";
+import { encodeDropRemove, DROP_REMOVE_KIND } from "../protocol/drop.ts";
+import { encodeUserEnterField, encodeUserLeaveField, encodeUserMove } from "../protocol/field.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 import { footholdUnderPoint } from "../wz/archive.ts";
 import { DropField, type DropEntry, type DropFieldOptions, type DropPolicy } from "./drops.ts";
@@ -89,7 +82,7 @@ export interface FieldMember {
    */
   avatarItems: number[];
   /** Optional for fixtures; live sessions expose current HP>0 without the field owning character stats. */
-  readonly combatAlive?:boolean;
+  readonly combatAlive?: boolean;
   /** Where the player is. The field fills it in at spawn and updates it on every `0x22` it sends. */
   at?: FieldPosition;
   /**
@@ -149,8 +142,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   readonly mobs: MobField;
   readonly npcs: NpcField;
   /** Reconstruction policy: first available member controls each NPC, not every viewer. */
-  private readonly npcControllers=new Map<number,number>();
-  private readonly npcReportAt=new Map<number,number>();
+  private readonly npcControllers = new Map<number, number>();
+  private readonly npcReportAt = new Map<number, number>();
   readonly drops: DropField;
   private readonly members = new Map<number, M>();
   private readonly spawnPoint: FieldPosition;
@@ -164,9 +157,13 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     this.mobs = new MobField({
       behavior: "roam",
       map: options.map,
-      ...(options.map.footholdSegments !== undefined ? { footholds: options.map.footholdSegments } : {}),
+      ...(options.map.footholdSegments !== undefined
+        ? { footholds: options.map.footholdSegments }
+        : {}),
       ...(options.mobTemplate !== undefined ? { template: options.mobTemplate } : {}),
-      ...(options.mobSpeedPxPerSecond !== undefined ? { speedPxPerSecond: options.mobSpeedPxPerSecond } : {}),
+      ...(options.mobSpeedPxPerSecond !== undefined
+        ? { speedPxPerSecond: options.mobSpeedPxPerSecond }
+        : {}),
       ...(options.mobRespawnMs !== undefined ? { respawnMs: options.mobRespawnMs } : {}),
     } satisfies MobFieldOptions);
     this.npcs = new NpcField({
@@ -178,7 +175,9 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     // The map's NPCs exist as soon as the field does (their ids are the field's, not a session's).
     this.npcs.spawnAll();
     this.drops = new DropField({
-      ...(options.map.footholdSegments !== undefined ? { footholds: options.map.footholdSegments } : {}),
+      ...(options.map.footholdSegments !== undefined
+        ? { footholds: options.map.footholdSegments }
+        : {}),
       ...(options.dropPolicy !== undefined ? { policy: options.dropPolicy } : {}),
       ...(options.dropLifetimeMs !== undefined ? { lifetimeMs: options.dropLifetimeMs } : {}),
       ...(options.pickupRangeX !== undefined ? { pickupRangePx: options.pickupRangeX } : {}),
@@ -246,7 +245,9 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   join(member: M): void {
     if (this.members.has(member.characterId)) {
       // The same character id twice in one field would make the client's pool keep one of them.
-      this.log?.(`world: character ${member.characterId} is already in map ${this.mapId}; taking the new one`);
+      this.log?.(
+        `world: character ${member.characterId} is already in map ${this.mapId}; taking the new one`,
+      );
       this.leave(member.characterId);
     }
     if (member.at === undefined) member.at = this.spawnAt();
@@ -284,42 +285,62 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   }
 
   private assignNpcControllers(): void {
-    for(const entry of this.npcs.npcs) {
-      const oldId=this.npcControllers.get(entry.npcId);
-      const owner=entry.present&&((entry.behavior!==undefined&&!entry.behavior.movable)||entry.walking)
-        ? (oldId!==undefined&&this.members.has(oldId)?this.members.get(oldId):this.members.values().next().value)
-        : undefined;
-      if(oldId===owner?.characterId)continue;
-      if(oldId!==undefined)this.members.get(oldId)?.send(encodeNpcState(entry.npcId,false));
-      this.npcControllers.delete(entry.npcId);this.npcReportAt.delete(entry.npcId);
-      if(owner) {
-        this.npcControllers.set(entry.npcId,owner.characterId);
-        owner.send(encodeNpcState(entry.npcId,true));
+    for (const entry of this.npcs.npcs) {
+      const oldId = this.npcControllers.get(entry.npcId);
+      const owner =
+        entry.present &&
+        ((entry.behavior !== undefined && !entry.behavior.movable) || entry.walking)
+          ? oldId !== undefined && this.members.has(oldId)
+            ? this.members.get(oldId)
+            : this.members.values().next().value
+          : undefined;
+      if (oldId === owner?.characterId) continue;
+      if (oldId !== undefined) this.members.get(oldId)?.send(encodeNpcState(entry.npcId, false));
+      this.npcControllers.delete(entry.npcId);
+      this.npcReportAt.delete(entry.npcId);
+      if (owner) {
+        this.npcControllers.set(entry.npcId, owner.characterId);
+        owner.send(encodeNpcState(entry.npcId, true));
       }
     }
   }
 
   /** Revoke control before visibility removal so the native two-bit pool cannot retain a ghost. */
-  removeNpc(npcId:number): boolean {
-    const packet=this.npcs.remove(npcId);if(!packet)return false;
-    this.assignNpcControllers();this.broadcast(packet);return true;
+  removeNpc(npcId: number): boolean {
+    const packet = this.npcs.remove(npcId);
+    if (!packet) return false;
+    this.assignNpcControllers();
+    this.broadcast(packet);
+    return true;
   }
 
   /** Transparent byte relay is an explicit server policy; original 2003 server rewriting is unknown.
    * Validate in SENDER index space, acknowledge sender too, and never manufacture a corrected +2.
    */
-  reportNpcIdle(characterId:number,value:NpcIdle,now=Date.now()): boolean {
-    const npc=this.npcs.npcs.find(npc=>npc.npcId===value.npcId&&npc.present);
-    if(!this.members.has(characterId)||this.npcControllers.get(value.npcId)!==characterId||!npc?.behavior
-      || (npc.behavior.movable!==Boolean(value.path))
-      || !(validNpcRequest(npc.behavior,value.action,value.speech)
-        || (value.path&&value.action===-1&&value.speech===-1)))return false;
+  reportNpcIdle(characterId: number, value: NpcIdle, now = Date.now()): boolean {
+    const npc = this.npcs.npcs.find((npc) => npc.npcId === value.npcId && npc.present);
+    if (
+      !this.members.has(characterId) ||
+      this.npcControllers.get(value.npcId) !== characterId ||
+      !npc?.behavior ||
+      npc.behavior.movable !== Boolean(value.path) ||
+      !(
+        validNpcRequest(npc.behavior, value.action, value.speech) ||
+        (value.path && value.action === -1 && value.speech === -1)
+      )
+    )
+      return false;
     // Reconstruction anti-flood bound; natural client decisions are at least 4 seconds apart.
-    if(now-(this.npcReportAt.get(value.npcId)??-Infinity)<250)return false;
-    this.npcReportAt.set(value.npcId,now);
-    const first=value.path?.elements[0];
-    if(first){npc.x=first.x;npc.y=first.y;npc.facing=first.action&1;}
-    this.broadcast(encodeNpcIdle(value));return true;
+    if (now - (this.npcReportAt.get(value.npcId) ?? -Infinity) < 250) return false;
+    this.npcReportAt.set(value.npcId, now);
+    const first = value.path?.elements[0];
+    if (first) {
+      npc.x = first.x;
+      npc.y = first.y;
+      npc.facing = first.action & 1;
+    }
+    this.broadcast(encodeNpcIdle(value));
+    return true;
   }
 
   /**
@@ -335,8 +356,14 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     // Records are chronological. Current authority/late-join/combat must use the endpoint,
     // not the initial zero-duration anchor (single-element tooling calls remain unchanged).
     const last = path.elements.at(-1);
-    if (last !== undefined) member.at = { ...member.at, x: last.x, y: last.y,
-      foothold: last.foothold, action: last.action };
+    if (last !== undefined)
+      member.at = {
+        ...member.at,
+        x: last.x,
+        y: last.y,
+        foothold: last.foothold,
+        action: last.action,
+      };
     // The same clock the tick uses: a pickup compares this against a drop's `bornAt`.
     member.lastMoveAt = Date.now();
     const packet = encodeUserMove({ characterId, path });
@@ -380,10 +407,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   /** c2s0x1F: debit/persistence belong to the caller, appearance belongs to this shared field. */
   dropMesos(member: M, amount: number, now: number): DropEntry {
     const at = member.at ?? this.spawnAt();
-    const entry = this.drops.dropMesosFromPlayer(
-      { amount, x: at.x, y: at.y },
-      now,
-    );
+    const entry = this.drops.dropMesosFromPlayer({ amount, x: at.x, y: at.y }, now);
     this.broadcast(this.drops.appearPacket(entry));
     this.log?.(
       `world: "${member.name}" dropped ${amount} mesos in map ${this.mapId} (drop ${entry.dropId})`,
@@ -413,8 +437,12 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   tick(now: number): void {
     this.assignNpcControllers();
     if (this.members.size > 0) {
-      const targets=[...this.members.values()].flatMap(m=>m.combatAlive!==false&&m.at?[{characterId:m.characterId,x:m.at.x,y:m.at.y}]:[]);
-      for(const packet of this.mobs.attackPackets(now,targets))this.broadcast(packet);
+      const targets = [...this.members.values()].flatMap((m) =>
+        m.combatAlive !== false && m.at
+          ? [{ characterId: m.characterId, x: m.at.x, y: m.at.y }]
+          : [],
+      );
+      for (const packet of this.mobs.attackPackets(now, targets)) this.broadcast(packet);
       for (const packet of this.mobs.movePackets(now)) this.broadcast(packet);
     }
     for (const packet of this.mobs.lifecyclePackets(now)) this.broadcast(packet);
@@ -505,12 +533,22 @@ export class FieldRegistry<M extends FieldMember = FieldMember> {
       ...(this.options.mobSpeedPxPerSecond !== undefined
         ? { mobSpeedPxPerSecond: this.options.mobSpeedPxPerSecond }
         : {}),
-      ...(this.options.mobRespawnMs !== undefined ? { mobRespawnMs: this.options.mobRespawnMs } : {}),
+      ...(this.options.mobRespawnMs !== undefined
+        ? { mobRespawnMs: this.options.mobRespawnMs }
+        : {}),
       ...(this.options.dropPolicy !== undefined ? { dropPolicy: this.options.dropPolicy } : {}),
-      ...(this.options.dropLifetimeMs !== undefined ? { dropLifetimeMs: this.options.dropLifetimeMs } : {}),
-      ...(this.options.pickupRangeX !== undefined ? { pickupRangeX: this.options.pickupRangeX } : {}),
-      ...(this.options.pickupRangeY !== undefined ? { pickupRangeY: this.options.pickupRangeY } : {}),
-      ...(this.options.dropSpreadPx !== undefined ? { dropSpreadPx: this.options.dropSpreadPx } : {}),
+      ...(this.options.dropLifetimeMs !== undefined
+        ? { dropLifetimeMs: this.options.dropLifetimeMs }
+        : {}),
+      ...(this.options.pickupRangeX !== undefined
+        ? { pickupRangeX: this.options.pickupRangeX }
+        : {}),
+      ...(this.options.pickupRangeY !== undefined
+        ? { pickupRangeY: this.options.pickupRangeY }
+        : {}),
+      ...(this.options.dropSpreadPx !== undefined
+        ? { dropSpreadPx: this.options.dropSpreadPx }
+        : {}),
       log: (line) => this.options.log?.(line),
     });
     this.fields.set(mapId, instance);
@@ -530,8 +568,10 @@ export class FieldRegistry<M extends FieldMember = FieldMember> {
 /** sub_511820: CharacterData+101 indexes non-type-3 portals; spawn feet at portal.y - 10.
  * Calls without an index retain the legacy/default sp helper used by world-only fixtures. */
 function spawnPointOf(map: MapData, portalIndex?: number): FieldPosition {
-  const nativePortal = portalIndex === undefined ? undefined : map.portals.filter(p => p.type !== 3)[portalIndex];
-  const portal = nativePortal ??
+  const nativePortal =
+    portalIndex === undefined ? undefined : map.portals.filter((p) => p.type !== 3)[portalIndex];
+  const portal =
+    nativePortal ??
     map.portals.find((entry) => entry.name.toLowerCase() === "sp") ??
     map.portals.find((entry) => entry.type === 0) ??
     map.portals[0];

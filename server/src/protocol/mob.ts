@@ -170,15 +170,42 @@ export const MOB_OPCODE = {
  * `Mob/<id>.img -> info.speed` decides whether it walks at all.
  */
 export const MOB_ACTION_NAMES = [
-  "move", "stand", "jump", "magic", "throw", "ball1", "ball2",
-  "hit1", "hit2", "hitF", "attack1", "attack2", "attackF", "die1", "die2", "dieF",
+  "move",
+  "stand",
+  "jump",
+  "magic",
+  "throw",
+  "ball1",
+  "ball2",
+  "hit1",
+  "hit2",
+  "hitF",
+  "attack1",
+  "attack2",
+  "attackF",
+  "die1",
+  "die2",
+  "dieF",
 ] as const;
 
 /** The action indices above, by name (bit 7 of the action byte is not part of the index). */
 export const MOB_ACTION = {
-  move: 0, stand: 1, jump: 2, magic: 3, throw: 4, ball1: 5, ball2: 6,
-  hit1: 7, hit2: 8, hitF: 9, attack1: 10, attack2: 11, attackF: 12,
-  die1: 13, die2: 14, dieF: 15,
+  move: 0,
+  stand: 1,
+  jump: 2,
+  magic: 3,
+  throw: 4,
+  ball1: 5,
+  ball2: 6,
+  hit1: 7,
+  hit2: 8,
+  hitF: 9,
+  attack1: 10,
+  attack2: 11,
+  attackF: 12,
+  die1: 13,
+  die2: 14,
+  dieF: 15,
 } as const;
 
 /** Bit 7 of `0x33`'s action byte: keep the animation the mob is playing instead of switching. */
@@ -192,7 +219,7 @@ export function mobActionName(actionByte: number): string | undefined {
 
 /** Build the action byte of `0x33` from an action index and a facing (`0` = right, `1` = left). */
 export function mobActionByte(actionIndex: number, facing: number, keep = false): number {
-  return ((actionIndex << 1) | (facing & 1)) | (keep ? MOB_ACTION_KEEP : 0);
+  return (actionIndex << 1) | (facing & 1) | (keep ? MOB_ACTION_KEEP : 0);
 }
 
 /** One animation channel of the `sub_4C6CE0` block: an index and a delay in 100 ms ticks. */
@@ -260,7 +287,10 @@ function writeMobSpawnTail(writer: PacketWriter, body: MobSpawnTail): void {
 }
 
 /** The `sub_4C6CE0` block: a `u32` of channel flags, then `s16 index` + `s16 delay` per set bit. */
-function writeMobChannels(writer: PacketWriter, channels: (MobChannel | undefined)[] | undefined): void {
+function writeMobChannels(
+  writer: PacketWriter,
+  channels: (MobChannel | undefined)[] | undefined,
+): void {
   let flags = 0;
   const list: (MobChannel | undefined)[] = channels ?? [];
   for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
@@ -282,7 +312,9 @@ function readMobChannels(reader: PacketReader): (MobChannel | undefined)[] | und
   // Dense on purpose: the gaps are the channels the client switched off (see `MobEnterField`).
   const channels: (MobChannel | undefined)[] = [];
   for (let i = 0; i < MOB_CHANNEL_COUNT; i++) {
-    channels.push((flags & (1 << i)) === 0 ? undefined : { index: readS16(reader), delay: readS16(reader) });
+    channels.push(
+      (flags & (1 << i)) === 0 ? undefined : { index: readS16(reader), delay: readS16(reader) },
+    );
   }
   return channels;
 }
@@ -468,7 +500,9 @@ export function readMobMove(reader: PacketReader): { mobId: number; body: MobMov
  */
 export function describeMobAnim(body: MobAnim): string {
   const channels = (body.channels ?? [])
-    .map((channel, index) => (channel === undefined ? undefined : `${index}=(${channel.index},${channel.delay})`))
+    .map((channel, index) =>
+      channel === undefined ? undefined : `${index}=(${channel.index},${channel.delay})`,
+    )
     .filter((text): text is string => text !== undefined);
   return `mobId=${body.mobId} channels=${channels.length === 0 ? "none" : channels.join(" ")}`;
 }
@@ -478,7 +512,8 @@ export function describeMobMove(mobId: number, body: MobMove): string {
   const action = mobActionName(body.actionByte) ?? "keep";
   const facing = body.actionByte & 1;
   const first = body.path.elements[0];
-  const where = first === undefined ? "no path" : `-> (${first.x},${first.y}) in ${first.duration}ms`;
+  const where =
+    first === undefined ? "no path" : `-> (${first.x},${first.y}) in ${first.duration}ms`;
   return (
     `mobId=${mobId} action=${action}(${(body.actionByte >> 1) & 0x0f}) facing=${facing} ` +
     `legs=${body.path.elements.length} ${where}`
@@ -496,7 +531,8 @@ export function describeMobEnterField(body: MobEnterField): string {
 
 /** One line describing a `0x30` packet body, for logs and `decode`. */
 export function describeMobLeaveDelayed(body: MobLeaveDelayed): string {
-  const when = body.delayMs < 0 ? "removed at once" : `the die animation starts in ${body.delayMs}ms`;
+  const when =
+    body.delayMs < 0 ? "removed at once" : `the die animation starts in ${body.delayMs}ms`;
   return `mobId=${body.mobId} leave: ${when}`;
 }
 

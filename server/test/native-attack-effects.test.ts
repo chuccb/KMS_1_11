@@ -1,126 +1,263 @@
 /** Regression SOURCES ONLY, 2026-10-18. NOT executed, typechecked or browser/VM/probe validated. */
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {resolve} from 'node:path';
-import {existsSync,readFileSync} from 'node:fs';
-import {WzArchive} from '../src/wz/archive.ts';
-import {artReaderOf} from '../src/game/wzart.ts';
-import {basicAttackProvider} from '../src/game/basicattack.ts';
-import {skillCatalogOf} from '../src/game/skills.ts';
-import {nativeWeaponMastery} from '../src/game/nativecombat.ts';
-import {characterDataOf,startingCharacterItems,zeroStats} from '../src/protocol/chardata.ts';
-import {attackProfileAtTier,attackMasteryTier,weaponMasterySkills,nativeAfterimageFrames,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys,ATTACK_EFFECT_Z} from '../../client/attack-presentation.mjs';
-import {animationFrame} from '../../client/animation.mjs';
-import {shotRelease,attackDuration} from '../../client/attack-timing.mjs';
+import test from "node:test";
+import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { WzArchive } from "../src/wz/archive.ts";
+import { artReaderOf } from "../src/game/wzart.ts";
+import { basicAttackProvider } from "../src/game/basicattack.ts";
+import { skillCatalogOf } from "../src/game/skills.ts";
+import { nativeWeaponMastery } from "../src/game/nativecombat.ts";
+import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
+import {
+  attackProfileAtTier,
+  attackMasteryTier,
+  weaponMasterySkills,
+  nativeAfterimageFrames,
+  attackWorldRect,
+  attackHitPoint,
+  impactPosition,
+  weaponHitKeys,
+  ATTACK_EFFECT_Z,
+} from "../../client/attack-presentation.ts";
+import { animationFrame } from "../../client/animation.ts";
+import { shotRelease, attackDuration } from "../../client/attack-timing.ts";
+
 // @ts-expect-error Pure browser module has no declaration.
-import {projectileLeg} from '../../client/basiccombat.mjs';
-import {encodeUserAttack,readUserAttack,FIELD_OPCODE} from '../src/protocol/field.ts';
-import {PacketReader} from '../src/protocol/packet.ts';
+import { projectileLeg } from "../../client/basiccombat.mjs";
+import { encodeUserAttack, readUserAttack, FIELD_OPCODE } from "../src/protocol/field.ts";
+import { PacketReader } from "../src/protocol/packet.ts";
+
 // @ts-expect-error Pure browser module has no declaration.
-import {createAudio} from '../../client/audio.mjs';
-const data=resolve(import.meta.dirname,'../../Data.wz'),needs={skip:!existsSync(data)};
-const archive=()=>WzArchive.open(data);
-const source=(file:string)=>readFileSync(resolve(import.meta.dirname,'../../',file),'utf8');
-test('40EA70 overrides WZ timing/alpha, starts opaque, 30ms intermediates and last200ms fade; not a body-frame attachment',()=>{
-  const input=Array.from({length:3},(_,i)=>({path:`frame${i}`,ox:0,oy:0,delay:999,a0:0,a1:255}));
-  const frames=nativeAfterimageFrames(input);
-  assert.deepEqual(frames.map(f=>[f.delay,f.a0,f.a1]),[[30,-1,-1],[30,-1,-1],[200,-1,0]]);
-  assert.equal(animationFrame(frames,0,false)!.alpha,1);
-  assert.equal(animationFrame(frames,60,false)!.alpha,1);
-  assert.equal(animationFrame(frames,160,false)!.alpha,.5);
-  assert.equal(animationFrame(frames,260,false)!.alpha,0);
-  assert.equal(input[0]!.delay,999,'metadata is never mutated');
-  const motion={delays:[262,350]};assert.equal(shotRelease(motion),262);assert.equal(attackDuration(motion),630);
+import { createAudio } from "../../client/audio.mjs";
+const data = resolve(import.meta.dirname, "../../Data.wz"),
+  needs = { skip: !existsSync(data) };
+const archive = () => WzArchive.open(data);
+const source = (file: string) => readFileSync(resolve(import.meta.dirname, "../../", file), "utf8");
+test("40EA70 overrides WZ timing/alpha, starts opaque, 30ms intermediates and last200ms fade; not a body-frame attachment", () => {
+  const input = Array.from({ length: 3 }, (_, i) => ({
+    path: `frame${i}`,
+    ox: 0,
+    oy: 0,
+    delay: 999,
+    a0: 0,
+    a1: 255,
+  }));
+  const frames = nativeAfterimageFrames(input);
+  assert.deepEqual(
+    frames.map((f) => [f.delay, f.a0, f.a1]),
+    [
+      [30, -1, -1],
+      [30, -1, -1],
+      [200, -1, 0],
+    ],
+  );
+  assert.equal(animationFrame(frames, 0, false)!.alpha, 1);
+  assert.equal(animationFrame(frames, 60, false)!.alpha, 1);
+  assert.equal(animationFrame(frames, 160, false)!.alpha, 0.5);
+  assert.equal(animationFrame(frames, 260, false)!.alpha, 0);
+  assert.equal(input[0]!.delay, 999, "metadata is never mutated");
+  const motion = { delays: [262, 350] };
+  assert.equal(shotRelease(motion), 262);
+  assert.equal(attackDuration(motion), 630);
 });
-test('actual swordOL first property child2 holds ONE sequence, all mastery tiers preserve bounds and native timings',needs,()=>{
-  const p=basicAttackProvider(artReaderOf(archive())!)(1302000)!;
-  assert.equal(p.masteryLevels?.[1100000]?.[20],10);
-  for(const tier of [0,1,5,10]){
-    const selected=attackProfileAtTier(p,tier)!,motion=selected.melee.find(a=>a.action===5)!;
-    assert.ok(motion.bounds);assert.ok(motion.afterimage?.length);
-    assert.ok(motion.afterimage!.every(f=>f.path.includes(`/swordOL.img/${tier}/swingO1/2/`)));
-    assert.equal(motion.afterimage!.at(-1)!.delay,200);assert.equal(motion.afterimage!.at(-1)!.a1,0);
-    assert.ok(motion.afterimage!.slice(0,-1).every(f=>f.delay===30&&f.a1===-1));
-    assert.deepEqual(motion.effects,{},'old body-frame effect slot cannot animate accidentally');
-  }
-  assert.equal(attackProfileAtTier(p,255)!.melee[0]!.bounds,undefined,'absent tier is not silently tier0');
-  assert.deepEqual(attackProfileAtTier(p,255)!.melee[0]!.afterimage,[]);
+test(
+  "actual swordOL first property child2 holds ONE sequence, all mastery tiers preserve bounds and native timings",
+  needs,
+  () => {
+    const p = basicAttackProvider(artReaderOf(archive())!)(1302000)!;
+    assert.equal(p.masteryLevels?.[1100000]?.[20], 10);
+    for (const tier of [0, 1, 5, 10]) {
+      const selected = attackProfileAtTier(p, tier)!,
+        motion = selected.melee.find((a) => a.action === 5)!;
+      assert.ok(motion.bounds);
+      assert.ok(motion.afterimage?.length);
+      assert.ok(
+        motion.afterimage!.every((f) => f.path.includes(`/swordOL.img/${tier}/swingO1/2/`)),
+      );
+      assert.equal(motion.afterimage!.at(-1)!.delay, 200);
+      assert.equal(motion.afterimage!.at(-1)!.a1, 0);
+      assert.ok(motion.afterimage!.slice(0, -1).every((f) => f.delay === 30 && f.a1 === -1));
+      assert.deepEqual(
+        motion.effects,
+        {},
+        "old body-frame effect slot cannot animate accidentally",
+      );
+    }
+    assert.equal(
+      attackProfileAtTier(p, 255)!.melee[0]!.bounds,
+      undefined,
+      "absent tier is not silently tier0",
+    );
+    assert.deepEqual(attackProfileAtTier(p, 255)!.melee[0]!.afterimage, []);
+  },
+);
+test(
+  "4BE270 native formula and browser art select the same learned WZ passive, mode0 vs1 and ordered sword fallback",
+  needs,
+  () => {
+    const a = archive(),
+      catalog = skillCatalogOf(a),
+      provider = basicAttackProvider(artReaderOf(a)!);
+    const c = characterDataOf(
+      { ...zeroStats(), id: 7, name: "Effects", job: 110, level: 30 },
+      startingCharacterItems(),
+    );
+    c.items!.map32 = [
+      { key: 1100000, value: 20 },
+      { key: 3100000, value: 20 },
+    ];
+    const levelOf = (id: number) => c.items!.map32!.find((r) => r.key === id)?.value ?? 0;
+    assert.deepEqual(weaponMasterySkills(1302000), [1100000, 1200000]);
+    assert.deepEqual(
+      weaponMasterySkills(30),
+      [1100000, 1200000],
+      "physical formula passes native type, presentation passes item ID",
+    );
+    assert.equal(nativeWeaponMastery(c, catalog, 1302000), 10);
+    assert.equal(attackMasteryTier(provider(1302000)!, levelOf), 10);
+    assert.equal(nativeWeaponMastery(c, catalog, 1452002, false), 0);
+    assert.equal(nativeWeaponMastery(c, catalog, 1452002, true), 10);
+    assert.equal(attackMasteryTier(provider(1452002)!, levelOf, true), 10);
+    assert.equal(attackMasteryTier(provider(1452002)!, levelOf, false), 0);
+    assert.deepEqual(weaponMasterySkills(1372005, true), []);
+  },
+);
+test("485B80 intersection centre, off-axis extension, negative truncation and mirrored attack RECT", () => {
+  const left = attackWorldRect(
+    { x: 100, y: 200 },
+    { left: -70, right: -10, top: -60, bottom: 0 },
+    true,
+  )!;
+  assert.deepEqual(left, { left: 30, right: 90, top: 140, bottom: 200 });
+  assert.deepEqual(
+    attackWorldRect({ x: 100, y: 200 }, { left: -70, right: -10, top: -60, bottom: 0 }, false),
+    { left: 110, right: 170, top: 140, bottom: 200 },
+  );
+  assert.deepEqual(attackHitPoint(left, { left: 40, right: 60, top: 150, bottom: 170 }), {
+    x: 50,
+    y: 160,
+  });
+  assert.deepEqual(
+    attackHitPoint(
+      { left: 50, right: 300, top: -25, bottom: -24 },
+      { left: 70, right: 90, top: -60, bottom: -40 },
+    ),
+    { x: 80, y: -40 },
+  );
+  assert.equal(attackHitPoint(left, undefined), undefined);
 });
-test('4BE270 native formula and browser art select the same learned WZ passive, mode0 vs1 and ordered sword fallback',needs,()=>{
-  const a=archive(),catalog=skillCatalogOf(a),provider=basicAttackProvider(artReaderOf(a)!);
-  const c=characterDataOf({...zeroStats(),id:7,name:'Effects',job:110,level:30},startingCharacterItems());
-  c.items!.map32=[{key:1100000,value:20},{key:3100000,value:20}];
-  const levelOf=(id:number)=>c.items!.map32!.find(r=>r.key===id)?.value??0;
-  assert.deepEqual(weaponMasterySkills(1302000),[1100000,1200000]);
-  assert.deepEqual(weaponMasterySkills(30),[1100000,1200000],'physical formula passes native type, presentation passes item ID');
-  assert.equal(nativeWeaponMastery(c,catalog,1302000),10);
-  assert.equal(attackMasteryTier(provider(1302000)!,levelOf),10);
-  assert.equal(nativeWeaponMastery(c,catalog,1452002,false),0);
-  assert.equal(nativeWeaponMastery(c,catalog,1452002,true),10);
-  assert.equal(attackMasteryTier(provider(1452002)!,levelOf,true),10);
-  assert.equal(attackMasteryTier(provider(1452002)!,levelOf,false),0);
-  assert.deepEqual(weaponMasterySkills(1372005,true),[]);
+test("487A30 clamps the stored relative offset at impact, then created coordinates do not follow a moving/dead mob", () => {
+  const mob = { x: 100, y: 100 },
+    rect = { left: 80, right: 120, top: 40, bottom: 100 };
+  const point = impactPosition({ x: 90, y: -90 }, mob, rect)!;
+  assert.deepEqual(point, { x: 120, y: 40 });
+  mob.x = 999;
+  mob.y = 999;
+  assert.deepEqual(point, { x: 120, y: 40 });
+  assert.equal(
+    impactPosition({ x: 0, y: 0 }, mob, { left: 1, right: 1, top: 1, bottom: 2 }),
+    undefined,
+  );
+  assert.equal(ATTACK_EFFECT_Z, 250310);
 });
-test('485B80 intersection centre, off-axis extension, negative truncation and mirrored attack RECT',()=>{
-  const left=attackWorldRect({x:100,y:200},{left:-70,right:-10,top:-60,bottom:0},true)!;
-  assert.deepEqual(left,{left:30,right:90,top:140,bottom:200});
-  assert.deepEqual(attackWorldRect({x:100,y:200},{left:-70,right:-10,top:-60,bottom:0},false),{left:110,right:170,top:140,bottom:200});
-  assert.deepEqual(attackHitPoint(left,{left:40,right:60,top:150,bottom:170}),{x:50,y:160});
-  assert.deepEqual(attackHitPoint({left:50,right:300,top:-25,bottom:-24},{left:70,right:90,top:-60,bottom:-40}),{x:80,y:-40});
-  assert.equal(attackHitPoint(left,undefined),undefined);
+test(
+  "50D7F0 original default sparks, F actions, no unknown weapon fallback and true WZ frames",
+  needs,
+  () => {
+    assert.deepEqual(weaponHitKeys(1302000, 5), ["sword1", "sword2"]);
+    assert.deepEqual(weaponHitKeys(1372005, 6), ["mace1", "mace2"]);
+    assert.deepEqual(weaponHitKeys(1472000, 30), ["maceF"]);
+    assert.deepEqual(weaponHitKeys(1302000, 8), ["swordF"]);
+    assert.deepEqual(weaponHitKeys(0, 5), []);
+    const p = basicAttackProvider(artReaderOf(archive())!)(1302000)!;
+    for (const key of ["sword1", "sword2", "swordF", "mace1", "mace2", "maceF"]) {
+      assert.ok(p.hitEffects![key]!.length);
+      assert.ok(
+        p.hitEffects![key]!.every((f) => f.path.startsWith(`Character/Afterimage/hit.img/${key}/`)),
+      );
+    }
+  },
+);
+test("projectiles use the captured native hit point, not the old hard-coded root-20", () => {
+  const leg = projectileLeg(0, 100, false, { x: 100, y: 100, point: { x: 120, y: 70 } }, 65, 200);
+  assert.equal(leg.x1, 120);
+  assert.equal(leg.y1, 70);
+  assert.equal(leg.y0, 75);
+  assert.equal(leg.duration, Math.trunc(Math.hypot(55, -5) * 1.5));
 });
-test('487A30 clamps the stored relative offset at impact, then created coordinates do not follow a moving/dead mob',()=>{
-  const mob={x:100,y:100},rect={left:80,right:120,top:40,bottom:100};
-  const point=impactPosition({x:90,y:-90},mob,rect)!;
-  assert.deepEqual(point,{x:120,y:40});
-  mob.x=999;mob.y=999;assert.deepEqual(point,{x:120,y:40});
-  assert.equal(impactPosition({x:0,y:0},mob,{left:1,right:1,top:1,bottom:2}),undefined);
-  assert.equal(ATTACK_EFFECT_Z,250310);
+test("0x23/24 relay preserves real mastery tier without changing the native packet layout", () => {
+  const value = {
+    characterId: 7,
+    hits: 1,
+    skillLevel: 0,
+    skillId: 0,
+    action: 5,
+    speed: 2,
+    facingLeft: true,
+    afterimage: 10,
+    projectileItemId: 0,
+    targets: [],
+  };
+  const packet = encodeUserAttack(value, FIELD_OPCODE.userAttack);
+  assert.equal(readUserAttack(new PacketReader(packet, 1)).afterimage, 10);
+  assert.match(source("server/src/client/session.ts"), /afterimage:\s*attack\.afterimage/);
 });
-test('50D7F0 original default sparks, F actions, no unknown weapon fallback and true WZ frames',needs,()=>{
-  assert.deepEqual(weaponHitKeys(1302000,5),['sword1','sword2']);
-  assert.deepEqual(weaponHitKeys(1372005,6),['mace1','mace2']);
-  assert.deepEqual(weaponHitKeys(1472000,30),['maceF']);
-  assert.deepEqual(weaponHitKeys(1302000,8),['swordF']);assert.deepEqual(weaponHitKeys(0,5),[]);
-  const p=basicAttackProvider(artReaderOf(archive())!)(1302000)!;
-  for(const key of ['sword1','sword2','swordF','mace1','mace2','maceF']){
-    assert.ok(p.hitEffects![key]!.length);
-    assert.ok(p.hitEffects![key]!.every(f=>f.path.startsWith(`Character/Afterimage/hit.img/${key}/`)));
-  }
-});
-test('projectiles use the captured native hit point, not the old hard-coded root-20',()=>{
-  const leg=projectileLeg(0,100,false,{x:100,y:100,point:{x:120,y:70}},65,200);
-  assert.equal(leg.x1,120);assert.equal(leg.y1,70);assert.equal(leg.y0,75);
-  assert.equal(leg.duration,Math.trunc(Math.hypot(55,-5)*1.5));
-});
-test('0x23/24 relay preserves real mastery tier without changing the native packet layout',()=>{
-  const value={characterId:7,hits:1,skillLevel:0,skillId:0,action:5,speed:2,facingLeft:true,afterimage:10,projectileItemId:0,targets:[]};
-  const packet=encodeUserAttack(value,FIELD_OPCODE.userAttack);
-  assert.equal(readUserAttack(new PacketReader(packet,1)).afterimage,10);
-  assert.match(source('server/src/client/session.ts'),/afterimage:attack\.afterimage/);
-});
-test('audio validity is rechecked AFTER decoding and preloading does not play a sound',async()=>{
-  let started=0,resolveDecode:((value:unknown)=>void)|undefined,valid=true,notifyDecode!:()=>void;
-  const decoding=new Promise<void>(resolve=>{notifyDecode=resolve;});
-  const context={destination:{},resume:async()=>{},createGain:()=>({gain:{value:0},connect(){},disconnect(){}}),
-    decodeAudioData:()=>new Promise(resolve=>{resolveDecode=resolve;notifyDecode();}),
-    createBufferSource:()=>({connect(){},disconnect(){},stop(){},start(){started++;}})};
-  const audio=createAudio({createContext:()=>context,fetch:async()=>({ok:true,arrayBuffer:async()=>new ArrayBuffer(1)})});
+test("audio validity is rechecked AFTER decoding and preloading does not play a sound", async () => {
+  let started = 0,
+    resolveDecode: ((value: unknown) => void) | undefined,
+    valid = true,
+    notifyDecode!: () => void;
+  const decoding = new Promise<void>((resolve) => {
+    notifyDecode = resolve;
+  });
+  const context = {
+    destination: {},
+    resume: async () => {},
+    createGain: () => ({ gain: { value: 0 }, connect() {}, disconnect() {} }),
+    decodeAudioData: () =>
+      new Promise((resolve) => {
+        resolveDecode = resolve;
+        notifyDecode();
+      }),
+    createBufferSource: () => ({
+      connect() {},
+      disconnect() {},
+      stop() {},
+      start() {
+        started++;
+      },
+    }),
+  };
+  const audio = createAudio({
+    createContext: () => context,
+    fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) }),
+  });
   await audio.unlock();
-  const loading=audio.effect('Weapon/swordL/Attack',1,{valid:()=>valid});
+  const loading = audio.effect("Weapon/swordL/Attack", 1, { valid: () => valid });
   // Wait for the fake decoder boundary; no real timer, microtask-count guess or browser.
   await decoding;
-  assert.ok(resolveDecode);valid=false;resolveDecode!({length:1,numberOfChannels:1});await loading;
-  assert.equal(started,0);await audio.preload('Weapon/swordL/Attack');assert.equal(started,0);
-  await audio.effect('Weapon/swordL/Attack',1,{deadline:-1});assert.equal(started,0);
+  assert.ok(resolveDecode);
+  valid = false;
+  resolveDecode!({ length: 1, numberOfChannels: 1 });
+  await loading;
+  assert.equal(started, 0);
+  await audio.preload("Weapon/swordL/Attack");
+  assert.equal(started, 0);
+  await audio.effect("Weapon/swordL/Attack", 1, { deadline: -1 });
+  assert.equal(started, 0);
 });
-test('both actors use the independent child5 clock; hit art/world damage enter the same ordered root plane',()=>{
-  const main=source('client/main.js'),server=source('server/src/net/loginserver.ts');
-  assert.doesNotMatch(main,/drawMiddle|attack\.effects\?\.|swing\.effects\?\./);
-  assert.match(main,/queueWeaponAfterimage\(entity,selfSwing,now\)/);
-  assert.match(main,/queueWeaponAfterimage\(user,motion,now\)/);
-  assert.match(main,/kind:'hit-effect',effect,z:ATTACK_EFFECT_Z/);
-  assert.match(main,/flip:!presentation\.facingLeft/);
-  assert.match(main,/activePredictions\.consume\(message\.attackToken,message\.mobId\)/);
-  assert.match(server,/queueActiveHits\(session,opcode,attack,now\+shotRelease\(basicMotion\)\)/);
+test("both actors use the independent child5 clock; hit art/world damage enter the same ordered root plane", () => {
+  const main = source("client/main.js"),
+    server = source("server/src/net/loginserver.ts");
+  assert.doesNotMatch(main, /drawMiddle|attack\.effects\?\.|swing\.effects\?\./);
+  assert.match(main, /queueWeaponAfterimage\(entity,selfSwing,now\)/);
+  assert.match(main, /queueWeaponAfterimage\(user,motion,now\)/);
+  assert.match(main, /kind:'hit-effect',effect,z:ATTACK_EFFECT_Z/);
+  assert.match(main, /flip:!presentation\.facingLeft/);
+  assert.match(main, /activePredictions\.consume\(message\.attackToken,message\.mobId\)/);
+  assert.match(
+    server,
+    /queueActiveHits\(\s*session,\s*opcode,\s*attack,\s*now\s*\+\s*shotRelease\(basicMotion\),?\s*\)/,
+  );
 });

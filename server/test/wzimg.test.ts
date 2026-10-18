@@ -16,8 +16,15 @@ import { crc32, deflateSync, inflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 import {
-  ImageStream, PIXEL_FORMATS, WzCanvas, WzImageError, WzNode, canvasToRgba, decodePixels,
-  pixelBpp, walkCanvases,
+  ImageStream,
+  PIXEL_FORMATS,
+  WzCanvas,
+  WzImageError,
+  WzNode,
+  canvasToRgba,
+  decodePixels,
+  pixelBpp,
+  walkCanvases,
 } from "../src/wz/img.ts";
 import { WzArchive, plain } from "../src/wz/archive.ts";
 import { encodePng } from "../src/wz/png.ts";
@@ -95,35 +102,53 @@ function object(cls: string, body: Buffer): Buffer {
 /** `0x73 "Canvas"` - the 8 bytes that precede a canvas body anywhere it appears. */
 const CANVAS_HEADER = object("Canvas", Buffer.alloc(0));
 
-function canvasBody(width: number, height: number, format: number, options: { props?: Buffer; pixelBlock?: Buffer; scale?: number } = {}): Buffer {
+function canvasBody(
+  width: number,
+  height: number,
+  format: number,
+  options: { props?: Buffer; pixelBlock?: Buffer; scale?: number } = {},
+): Buffer {
   const props = options.props ?? Buffer.alloc(0);
   const block = options.pixelBlock ?? Buffer.alloc(0);
   return Buffer.concat([
     Buffer.from([0x00, options.props ? 0x01 : 0x00]),
     props,
-    compact(width), compact(height), compact(format), compact(options.scale ?? 0),
+    compact(width),
+    compact(height),
+    compact(format),
+    compact(options.scale ?? 0),
     ...Array.from({ length: 4 }, () => compact(0)),
     u32(block.length),
     block,
   ]);
 }
 
-function canvasBytes(width: number, height: number, format: number, pixels: Buffer, options: { props?: Buffer; pixelBlock?: Buffer; scale?: number } = {}): Buffer {
+function canvasBytes(
+  width: number,
+  height: number,
+  format: number,
+  pixels: Buffer,
+  options: { props?: Buffer; pixelBlock?: Buffer; scale?: number } = {},
+): Buffer {
   const block = options.pixelBlock ?? Buffer.concat([Buffer.from([0x00]), deflateSync(pixels)]);
-  return Buffer.concat([CANVAS_HEADER, canvasBody(width, height, format, { ...options, pixelBlock: block })]);
+  return Buffer.concat([
+    CANVAS_HEADER,
+    canvasBody(width, height, format, { ...options, pixelBlock: block }),
+  ]);
 }
 
 function canvasOf(inner: Buffer): WzCanvas {
-  return new ImageStream(inner.subarray(CANVAS_HEADER.length)).body("Canvas", Infinity).value as WzCanvas;
+  return new ImageStream(inner.subarray(CANVAS_HEADER.length)).body("Canvas", Infinity)
+    .value as WzCanvas;
 }
 
 // ---------------------------------------------------------------------------
 // primitives
 // ---------------------------------------------------------------------------
 test("compact integers use one byte or the 0x80 escape", () => {
-  const stream = new ImageStream(Buffer.concat([
-    Buffer.from([0x7f, 0x80]), i32(12345), Buffer.from([0xff, 0x81]),
-  ]));
+  const stream = new ImageStream(
+    Buffer.concat([Buffer.from([0x7f, 0x80]), i32(12345), Buffer.from([0xff, 0x81])]),
+  );
   assert.equal(stream.compact(), 127);
   assert.equal(stream.compact(), 12345);
   assert.equal(stream.compact(), -1);
@@ -163,15 +188,26 @@ test("the scalar types have the sizes PCOM dictates", () => {
   const stream = new ImageStream(blob);
   const props = stream.propList();
   assert.equal(stream.p, blob.length, "every entry must be consumed");
-  assert.deepEqual(props.map((item) => item.name), ["a", "b", "c", "d", "e", "f", "g", "h"]);
-  assert.deepEqual(props.map((item) => item.value), [300, 7, -5, 70000, 1, 9n, 1.5, null]);
+  assert.deepEqual(
+    props.map((item) => item.name),
+    ["a", "b", "c", "d", "e", "f", "g", "h"],
+  );
+  assert.deepEqual(
+    props.map((item) => item.value),
+    [300, 7, -5, 70000, 1, 9n, 1.5, null],
+  );
 });
 
 test("a string value can reference an earlier string by name-table key", () => {
   // The key is the offset of the string's own length byte, relative to the image.
   const first = entry("z", 8, Buffer.concat([Buffer.from([0x00]), asciiString("A")]));
   const key = Buffer.byteLength(propList(first)) - Buffer.byteLength(asciiString("A"));
-  const second = Buffer.concat([Buffer.from([0x00]), asciiString("w"), Buffer.from([0x08, 0x01]), u32(key)]);
+  const second = Buffer.concat([
+    Buffer.from([0x00]),
+    asciiString("w"),
+    Buffer.from([0x08, 0x01]),
+    u32(key),
+  ]);
   const stream = new ImageStream(propList(first, second));
   const props = stream.propList();
   assert.equal(props[0].value, "A");
@@ -181,7 +217,13 @@ test("a string value can reference an earlier string by name-table key", () => {
 
 test("an unknown key is read at its own offset and the cursor stays put", () => {
   const first = entry("z", 8, Buffer.concat([Buffer.from([0x00]), asciiString("A")]));
-  const head = Buffer.concat([Buffer.from([0x00, 0x00, 0x02]), first, Buffer.from([0x00]), asciiString("w"), Buffer.from([0x08, 0x01])]);
+  const head = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x02]),
+    first,
+    Buffer.from([0x00]),
+    asciiString("w"),
+    Buffer.from([0x08, 0x01]),
+  ]);
   const key = head.length + 4;
   const blob = Buffer.concat([head, u32(key), asciiString("cached")]);
   const stream = new ImageStream(blob);
@@ -194,7 +236,10 @@ test("entry tag 1 carries a key, tag 0 spells the name out", () => {
   const first = entry("first", 3, compact(1));
   // The name's length byte is one byte behind the entry tag.
   const key = Buffer.byteLength(Buffer.from([0x00, 0x00, 0x02])) + 1;
-  const blob = propList(first, Buffer.concat([Buffer.from([0x01]), u32(key), Buffer.from([0x03]), compact(9)]));
+  const blob = propList(
+    first,
+    Buffer.concat([Buffer.from([0x01]), u32(key), Buffer.from([0x03]), compact(9)]),
+  );
   const props = new ImageStream(blob).propList();
   assert.equal(props[0].name, "first");
   assert.equal(props[1].name, "first");
@@ -242,12 +287,23 @@ test("Shape2D vectors and convex hulls parse", () => {
   const node = new ImageStream(vector).body("Shape2D#Vector2D", vector.length);
   assert.deepEqual(node.value, [-3, 9]);
 
-  const first = Buffer.concat([Buffer.from([0x73]), asciiString("Shape2D#Vector2D"), compact(1), compact(2)]);
+  const first = Buffer.concat([
+    Buffer.from([0x73]),
+    asciiString("Shape2D#Vector2D"),
+    compact(1),
+    compact(2),
+  ]);
   const second = Buffer.concat([Buffer.from([0x1b]), u32(2), compact(3), compact(4)]);
   const body = Buffer.concat([compact(2), first, second]);
   const convex = new ImageStream(body).body("Shape2D#Convex2D", body.length);
   assert.equal(convex.kind, "convex");
-  assert.deepEqual((convex.value as WzNode[]).map((item) => item.value), [[1, 2], [3, 4]]);
+  assert.deepEqual(
+    (convex.value as WzNode[]).map((item) => item.value),
+    [
+      [1, 2],
+      [3, 4],
+    ],
+  );
 });
 
 test("UOL kind 0 spells the target path out, kind 1 reuses the key", () => {
@@ -272,7 +328,13 @@ test("unknown classes keep their bytes (Sound_DX8 and friends)", () => {
 // ---------------------------------------------------------------------------
 test("a canvas keeps its header and decodes its pixels", () => {
   const pixels = Buffer.from(Array.from({ length: 16 * 32 * 2 }, (_, i) => i & 0xff));
-  const inner = propList(entry("icon", 9, Buffer.concat([u32(canvasBytes(16, 32, 1, pixels).length), canvasBytes(16, 32, 1, pixels)])));
+  const inner = propList(
+    entry(
+      "icon",
+      9,
+      Buffer.concat([u32(canvasBytes(16, 32, 1, pixels).length), canvasBytes(16, 32, 1, pixels)]),
+    ),
+  );
   const canvas = walkCanvases(new ImageStream(inner).propList())[0];
   assert.equal(canvas.width, 16);
   assert.equal(canvas.height, 32);
@@ -287,17 +349,21 @@ test("a stream without its adler32 trailer still decodes", () => {
   const pixels = Buffer.from(Array.from({ length: 8 * 8 * 2 }, (_, i) => (i * 7) & 0xff));
   const full = deflateSync(pixels);
   const truncated = full.subarray(0, full.length - 4); // this build's writer drops the trailer
-  const canvas = canvasOf(canvasBytes(8, 8, 1, pixels, {
-    pixelBlock: Buffer.concat([Buffer.from([0x00]), truncated]),
-  }));
+  const canvas = canvasOf(
+    canvasBytes(8, 8, 1, pixels, {
+      pixelBlock: Buffer.concat([Buffer.from([0x00]), truncated]),
+    }),
+  );
   assert.deepEqual(Buffer.from(canvas.pixels!), pixels);
 });
 
 test("a short stream is reported as partial (the rest of the surface stays zero)", () => {
   const pixels = Buffer.alloc(8 * 8 * 2);
-  const canvas = canvasOf(canvasBytes(8, 8, 1, pixels, {
-    pixelBlock: Buffer.concat([Buffer.from([0x00]), deflateSync(pixels.subarray(0, 32))]),
-  }));
+  const canvas = canvasOf(
+    canvasBytes(8, 8, 1, pixels, {
+      pixelBlock: Buffer.concat([Buffer.from([0x00]), deflateSync(pixels.subarray(0, 32))]),
+    }),
+  );
   assert.equal(canvas.pixels!.length, 32);
   assert.equal(canvas.partial, true);
 });
@@ -324,19 +390,26 @@ test("the container header is the one NameSpace.dll checks", needsArchive, () =>
   assert.equal(archive!.images.length, 1056);
 });
 
-test("every image resolves at its declared offset, including referenced entry names", needsArchive, () => {
-  const counts = { declared: 0, scanned: 0, missing: 0 };
-  for (const image of archive!.images) counts[image.source] += 1;
-  assert.deepEqual(counts, { declared: 1056, scanned: 0, missing: 0 });
-  for (const image of archive!.images) {
-    assert.ok(archive!.objects(image.path).length > 0, image.path);
-  }
-});
+test(
+  "every image resolves at its declared offset, including referenced entry names",
+  needsArchive,
+  () => {
+    const counts = { declared: 0, scanned: 0, missing: 0 };
+    for (const image of archive!.images) counts[image.source] += 1;
+    assert.deepEqual(counts, { declared: 1056, scanned: 0, missing: 0 });
+    for (const image of archive!.images) {
+      assert.ok(archive!.objects(image.path).length > 0, image.path);
+    }
+  },
+);
 
 test("all image bytes belong to directory entries; no orphan tile blobs", needsArchive, () => {
   const unlisted = archive!.unlistedObjects();
   assert.equal(unlisted.length, 0);
-  assert.equal(unlisted.reduce((sum, hit) => sum + hit.length, 0), 0);
+  assert.equal(
+    unlisted.reduce((sum, hit) => sum + hit.length, 0),
+    0,
+  );
 });
 
 test("an opaque blob is not accepted as an image", needsArchive, () => {
@@ -376,25 +449,38 @@ test("the canvas census is stable", needsArchive, () => {
   assert.equal(stats["pixels not decoded"], undefined);
 });
 
-test("magnified backgrounds are complete RGB565 canvases, not missing or truncated pixels", needsArchive, () => {
-  for (const [name, width, bytes] of [["dryRock", 256, 512], ["midForest", 128, 128]] as const) {
-    const canvas = archive!.canvases(`Map/Back/${name}.img`).find((c) => c.pad === 4)!;
-    assert.equal(canvas.width, width);
-    assert.equal(canvas.pixels!.length, bytes);
-    assert.equal(canvas.expectedBytes, bytes);
-    assert.equal(canvas.partial, false);
-    const rgba = canvasToRgba(canvas)!;
-    assert.equal(rgba.data.length, width * width * 4);
-    for (let at = 3; at < rgba.data.length; at += 4) assert.equal(rgba.data[at], 255);
-    assert.deepEqual(rgba.data.slice(-4), rgba.data.slice(0, 4));
-  }
-});
+test(
+  "magnified backgrounds are complete RGB565 canvases, not missing or truncated pixels",
+  needsArchive,
+  () => {
+    for (const [name, width, bytes] of [
+      ["dryRock", 256, 512],
+      ["midForest", 128, 128],
+    ] as const) {
+      const canvas = archive!.canvases(`Map/Back/${name}.img`).find((c) => c.pad === 4)!;
+      assert.equal(canvas.width, width);
+      assert.equal(canvas.pixels!.length, bytes);
+      assert.equal(canvas.expectedBytes, bytes);
+      assert.equal(canvas.partial, false);
+      const rgba = canvasToRgba(canvas)!;
+      assert.equal(rgba.data.length, width * width * 4);
+      for (let at = 3; at < rgba.data.length; at += 4) assert.equal(rgba.data[at], 255);
+      assert.deepEqual(rgba.data.slice(-4), rgba.data.slice(0, 4));
+    }
+  },
+);
 
 test("canvas scale magnifies each stored pixel in both dimensions, without interpolation", () => {
-  const body = canvasBytes(32, 32, 513, Buffer.from([0, 248, 224, 7, 31, 0, 255, 255]), { scale: 4 });
-  const canvas = new ImageStream(body.subarray(CANVAS_HEADER.length)).body("Canvas", body.length - CANVAS_HEADER.length).canvas!;
+  const body = canvasBytes(32, 32, 513, Buffer.from([0, 248, 224, 7, 31, 0, 255, 255]), {
+    scale: 4,
+  });
+  const canvas = new ImageStream(body.subarray(CANVAS_HEADER.length)).body(
+    "Canvas",
+    body.length - CANVAS_HEADER.length,
+  ).canvas!;
   const rgba = canvasToRgba(canvas)!;
-  const pixel = (x: number, y: number) => Array.from(rgba.data.slice((y * 32 + x) * 4, (y * 32 + x + 1) * 4));
+  const pixel = (x: number, y: number) =>
+    Array.from(rgba.data.slice((y * 32 + x) * 4, (y * 32 + x + 1) * 4));
   assert.deepEqual(pixel(0, 0), [255, 0, 0, 255]);
   assert.deepEqual(pixel(15, 15), pixel(0, 0));
   assert.deepEqual(pixel(16, 0), [0, 255, 0, 255]);
@@ -404,9 +490,16 @@ test("canvas scale magnifies each stored pixel in both dimensions, without inter
 
 test("the cap's icon pixels are byte-identical to the Python reader's", needsArchive, () => {
   const canvases = archive!.canvases("Character/Cap/01000000.img");
-  assert.deepEqual(canvases.map((canvas) => [canvas.width, canvas.height]), [
-    [29, 30], [29, 28], [45, 47], [4, 13], [41, 33],
-  ]);
+  assert.deepEqual(
+    canvases.map((canvas) => [canvas.width, canvas.height]),
+    [
+      [29, 30],
+      [29, 28],
+      [45, 47],
+      [4, 13],
+      [41, 33],
+    ],
+  );
   assert.equal(canvases[0].pixels!.length, 29 * 30 * 2);
   assert.equal(
     createHash("sha256").update(canvases[0].pixels!).digest("hex").slice(0, 16),
@@ -455,20 +548,43 @@ test("map metadata matches the Python manifest", needsArchive, () => {
 test("ARGB4444 becomes RGBA, alpha nibble included", () => {
   const canvas = canvasOf(canvasBytes(2, 1, 1, Buffer.from([0x00, 0xf0, 0x0f, 0x00])));
   const image = canvasToRgba(canvas)!;
-  assert.deepEqual([...image.data], [
-    0x00, 0x00, 0x00, 0xff, // 0xF000 - opaque black
-    0x00, 0x00, 0xff, 0x00, // 0x000F - transparent blue
-  ]);
+  assert.deepEqual(
+    [...image.data],
+    [
+      0x00,
+      0x00,
+      0x00,
+      0xff, // 0xF000 - opaque black
+      0x00,
+      0x00,
+      0xff,
+      0x00, // 0x000F - transparent blue
+    ],
+  );
 });
 
 test("RGB565 (format 513) has no alpha to lose", () => {
-  const canvas = canvasOf(canvasBytes(3, 1, 513, Buffer.from([0xe0, 0x07, 0x00, 0xf8, 0x1f, 0x00])));
+  const canvas = canvasOf(
+    canvasBytes(3, 1, 513, Buffer.from([0xe0, 0x07, 0x00, 0xf8, 0x1f, 0x00])),
+  );
   const image = canvasToRgba(canvas)!;
-  assert.deepEqual([...image.data], [
-    0x00, 0xff, 0x00, 0xff, // 0x07E0 - pure green
-    0xff, 0x00, 0x00, 0xff, // 0xF800 - pure red
-    0x00, 0x00, 0xff, 0xff, // 0x001F - pure blue
-  ]);
+  assert.deepEqual(
+    [...image.data],
+    [
+      0x00,
+      0xff,
+      0x00,
+      0xff, // 0x07E0 - pure green
+      0xff,
+      0x00,
+      0x00,
+      0xff, // 0xF800 - pure red
+      0x00,
+      0x00,
+      0xff,
+      0xff, // 0x001F - pure blue
+    ],
+  );
 });
 
 test("32bpp canvases are A8R8G8B8 in B, G, R, A byte order", () => {
@@ -479,18 +595,22 @@ test("32bpp canvases are A8R8G8B8 in B, G, R, A byte order", () => {
 
 test("a canvas that did not inflate whole keeps a transparent tail", () => {
   const pixels = Buffer.alloc(4 * 4 * 2);
-  const canvas = canvasOf(canvasBytes(4, 4, 1, pixels, {
-    pixelBlock: Buffer.concat([Buffer.from([0x00]), deflateSync(pixels.subarray(0, 8))]),
-  }));
+  const canvas = canvasOf(
+    canvasBytes(4, 4, 1, pixels, {
+      pixelBlock: Buffer.concat([Buffer.from([0x00]), deflateSync(pixels.subarray(0, 8))]),
+    }),
+  );
   const image = canvasToRgba(canvas)!;
   assert.equal(image.data.length, 4 * 4 * 4);
   assert.deepEqual([...image.data.subarray(8)], new Array(56).fill(0));
 });
 
 test("a canvas with no pixels at all has no image", () => {
-  const canvas = canvasOf(canvasBytes(2, 2, 1, Buffer.alloc(0), {
-    pixelBlock: Buffer.from([0x01, 0x78, 0x9c]),
-  }));
+  const canvas = canvasOf(
+    canvasBytes(2, 2, 1, Buffer.alloc(0), {
+      pixelBlock: Buffer.from([0x01, 0x78, 0x9c]),
+    }),
+  );
   assert.equal(canvas.pixels, null);
   assert.equal(canvasToRgba(canvas), null);
 });
@@ -500,23 +620,28 @@ test("encodePng writes a PNG a reader can un-filter", () => {
     width: 3,
     height: 2,
     data: Uint8Array.from([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-      13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
     ]),
   };
   const png = encodePng(image);
   assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   const chunks: { type: string; data: Buffer }[] = [];
-  for (let at = 8; at < png.length; ) {
+  for (let at = 8; at < png.length;) {
     const length = png.readUInt32BE(at);
     const type = png.subarray(at + 4, at + 8).toString("latin1");
     const data = png.subarray(at + 8, at + 8 + length);
     // The stored CRC has to cover the type and the data, exactly as the spec says.
-    assert.equal(png.readUInt32BE(at + 8 + length), crc32(Buffer.concat([png.subarray(at + 4, at + 8), data])) >>> 0);
+    assert.equal(
+      png.readUInt32BE(at + 8 + length),
+      crc32(Buffer.concat([png.subarray(at + 4, at + 8), data])) >>> 0,
+    );
     chunks.push({ type, data });
     at += 12 + length;
   }
-  assert.deepEqual(chunks.map((chunk) => chunk.type), ["IHDR", "IDAT", "IEND"]);
+  assert.deepEqual(
+    chunks.map((chunk) => chunk.type),
+    ["IHDR", "IDAT", "IEND"],
+  );
   assert.equal(chunks[0].data.readUInt32BE(0), 3);
   assert.equal(chunks[0].data.readUInt32BE(4), 2);
   assert.deepEqual([...chunks[0].data.subarray(8)], [8, 6, 0, 0, 0]);
@@ -525,13 +650,19 @@ test("encodePng writes a PNG a reader can un-filter", () => {
   for (let row = 0; row < 2; row++) {
     const at = row * 13;
     assert.equal(raw[at], 0, "every scanline is stored with filter type 0");
-    assert.deepEqual([...raw.subarray(at + 1, at + 13)], [...image.data.subarray(row * 12, row * 12 + 12)]);
+    assert.deepEqual(
+      [...raw.subarray(at + 1, at + 13)],
+      [...image.data.subarray(row * 12, row * 12 + 12)],
+    );
   }
   assert.equal(chunks[2].data.length, 0);
 });
 
 test("plain() is the same shape the Python tool writes out", needsArchive, () => {
-  const rendered = plain(archive!.canvases("Character/Cap/01000000.img")[0]) as Record<string, unknown>;
+  const rendered = plain(archive!.canvases("Character/Cap/01000000.img")[0]) as Record<
+    string,
+    unknown
+  >;
   assert.equal(rendered.__canvas__, true);
   assert.equal(rendered.width, 29);
   assert.equal(rendered.format, 1);
@@ -558,13 +689,19 @@ test("the orange mushroom renders as an opaque orange cap over nothing", needsAr
     else if (b > r + 8) bluer += 1;
   }
   assert.ok(opaque > 1000, `expected an opaque sprite, got ${opaque} opaque pixels`);
-  assert.ok(redder > bluer * 4, `expected a red-dominant sprite, got ${redder} red and ${bluer} blue`);
+  assert.ok(
+    redder > bluer * 4,
+    `expected a red-dominant sprite, got ${redder} red and ${bluer} blue`,
+  );
 });
 
 test("wz png writes one file per canvas", needsArchive, () => {
   const dir = mkdtempSync(join(tmpdir(), "kms111-wz-"));
   try {
-    assert.equal(runWzCommand(["png", "UI/Basic.img", "--out", dir, "--quiet", "--data", DATA_WZ]), 0);
+    assert.equal(
+      runWzCommand(["png", "UI/Basic.img", "--out", dir, "--quiet", "--data", DATA_WZ]),
+      0,
+    );
     const files = readdirSync(dir).sort();
     assert.equal(files.length, 97);
     assert.equal(files[0], "000_24x23.png");

@@ -73,7 +73,7 @@ export function encryptBody(plain: Uint8Array, state: number): Uint8Array {
 export function decryptBody(cipher: Uint8Array, state: number): Uint8Array {
   const key = keyByteOf(state);
   const out = new Uint8Array(cipher.length);
-  for (let i = 0; i < cipher.length; i++) out[i] = (swapNibbles(key ^ cipher[i]!) ) & 0xff;
+  for (let i = 0; i < cipher.length; i++) out[i] = swapNibbles(key ^ cipher[i]!) & 0xff;
   return out;
 }
 

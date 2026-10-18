@@ -2,13 +2,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { NATIVE_JOB_NAMES, nativeSkillBooks } from "../../client/jobs.mjs";
+import { NATIVE_JOB_NAMES, nativeSkillBooks } from "../../client/jobs.ts";
 import { WzArchive } from "../src/wz/archive.ts";
-import {
-  characterDataOf,
-  startingCharacterItems,
-  zeroStats,
-} from "../src/protocol/chardata.ts";
+import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import {
   encodeSkillRequest,
@@ -22,16 +18,12 @@ import {
   learnedSkillLevel,
   spendSkillPoint,
 } from "../src/game/skills.ts";
-import {
-  characterGrowthContext,
-  growthSkillProvider,
-} from "../src/game/growth.ts";
+import { characterGrowthContext, growthSkillProvider } from "../src/game/growth.ts";
 import { spendAbility } from "../src/game/ability.ts";
 import { ABILITY_MASK } from "../src/protocol/ability.ts";
 import { readSave, saveJson } from "../src/game/save.ts";
 import { findPacket, resolveCodec } from "../src/protocol/schema.ts";
-const archive = () =>
-  WzArchive.open(resolve(import.meta.dirname, "../../Data.wz"));
+const archive = () => WzArchive.open(resolve(import.meta.dirname, "../../Data.wz"));
 const character = (job = 100, sp = 30) =>
   characterDataOf(
     Object.assign(zeroStats(), {
@@ -54,18 +46,9 @@ const character = (job = 100, sp = 30) =>
   );
 
 test("55D140 exact request and 55B6A0 variable skill diff with signed deletion", () => {
-  assert.deepEqual(
-    [...encodeSkillRequest(1000001)],
-    [0x1d, 0x41, 0x42, 0x0f, 0],
-  );
-  assert.equal(
-    readSkillRequest(new PacketReader(encodeSkillRequest(1000001), 1)),
-    1000001,
-  );
-  assert.deepEqual(
-    [...encodeSkillUpdate({ ack: true, changes: [] })],
-    [0x0e, 1, 0, 0],
-  );
+  assert.deepEqual([...encodeSkillRequest(1000001)], [0x1d, 0x41, 0x42, 0x0f, 0]);
+  assert.equal(readSkillRequest(new PacketReader(encodeSkillRequest(1000001), 1)), 1000001);
+  assert.deepEqual([...encodeSkillUpdate({ ack: true, changes: [] })], [0x0e, 1, 0, 0]);
   const update = {
     ack: false,
     changes: [
@@ -74,10 +57,7 @@ test("55D140 exact request and 55B6A0 variable skill diff with signed deletion",
       { skillId: 1000000, level: 0 },
     ],
   };
-  assert.deepEqual(
-    readSkillUpdate(new PacketReader(encodeSkillUpdate(update), 1)),
-    update,
-  );
+  assert.deepEqual(readSkillUpdate(new PacketReader(encodeSkillUpdate(update), 1)), update);
   for (const bytes of [new Uint8Array(0), new Uint8Array(3), new Uint8Array(5)])
     assert.throws(() => readSkillRequest(new PacketReader(bytes)));
   const full = encodeSkillUpdate({
@@ -85,13 +65,8 @@ test("55D140 exact request and 55B6A0 variable skill diff with signed deletion",
     changes: [{ skillId: 1000001, level: 1 }],
   });
   for (let n = 1; n < full.length; n++)
-    assert.throws(() =>
-      readSkillUpdate(new PacketReader(full.subarray(0, n), 1)),
-    );
-  assert.throws(
-    () => readSkillUpdate(new PacketReader(new Uint8Array([0, 0, 0, 0]))),
-    /trailing/,
-  );
+    assert.throws(() => readSkillUpdate(new PacketReader(full.subarray(0, n), 1)));
+  assert.throws(() => readSkillUpdate(new PacketReader(new Uint8Array([0, 0, 0, 0]))), /trailing/);
   assert.equal(findPacket(0x1d, "c2s", "field")?.name, "skillUp");
   assert.equal(findPacket(0x0e, "s2c", "field")?.name, "skillUpdate");
   assert.equal(typeof resolveCodec("readSkillUpdate"), "function");
@@ -116,15 +91,17 @@ test("actual WZ book order, req and level count feed one-SP learning and immedia
     player = character();
   assert.equal(catalog.book(100)?.name, "전사의 기본");
   // ADR-064 source only: icon is normal + full origin, independent of learned levels.
-  assert.deepEqual(catalog.info(1000000)?.icon, {path:"Skill/100.img/skill/1000000/icon",width:32,height:32,ox:0,oy:32});
+  assert.deepEqual(catalog.info(1000000)?.icon, {
+    path: "Skill/100.img/skill/1000000/icon",
+    width: 32,
+    height: 32,
+    ox: 0,
+    oy: 32,
+  });
   const passive = catalog.info(1000001)!;
   assert.equal(passive.maxLevel, 10);
   assert.deepEqual(passive.requirements, [{ skillId: 1000000, level: 5 }]);
-  assert.equal(
-    passive.levels.at(-1)?.values.x,
-    30,
-    "not the erroneous 40 in hs",
-  );
+  assert.equal(passive.levels.at(-1)?.values.x, 30, "not the erroneous 40 in hs");
   const before = structuredClone(player);
   assert.equal(spendSkillPoint(player, 1000001, catalog), undefined);
   assert.deepEqual(player, before);
@@ -148,9 +125,7 @@ test("actual WZ book order, req and level count feed one-SP learning and immedia
     }),
     { maxHp: 88, ap: 1 },
   );
-  const accounts = new Map([
-    ["skills", { password: "skills", characters: [player] }],
-  ]);
+  const accounts = new Map([["skills", { password: "skills", characters: [player] }]]);
   const loaded = readSave(saveJson(accounts)).get("skills")!.characters[0]!;
   assert.equal(learnedSkillLevel(loaded.items?.map32, 1000001), 1);
   assert.equal(loaded.stats.sp, 24);
@@ -183,12 +158,12 @@ test("max/foreign book/unknown skill/death/no-SP refusal leaves character and it
 });
 
 // Recovery passive evidence, distinct from growth x/y; source only, not executed this delivery.
-test("native regeneration WZ uses hp/mp/time, not description formulas or growth x/y",()=>{
-  const catalog=skillCatalogOf(archive());
-  assert.equal(catalog.info(1000000)?.levels[0]?.values.hp,3);
-  assert.equal(catalog.info(1000000)?.levels.at(-1)?.values.hp,50);
-  assert.equal(catalog.info(2000000)?.levels[0]?.values.mp,2);
-  assert.equal(catalog.info(2000000)?.levels.at(-1)?.values.mp,32);
-  assert.equal(catalog.info(1000002)?.levels[0]?.values.time,31);
-  assert.equal(catalog.info(1000002)?.levels.at(-1)?.values.time,10);
+test("native regeneration WZ uses hp/mp/time, not description formulas or growth x/y", () => {
+  const catalog = skillCatalogOf(archive());
+  assert.equal(catalog.info(1000000)?.levels[0]?.values.hp, 3);
+  assert.equal(catalog.info(1000000)?.levels.at(-1)?.values.hp, 50);
+  assert.equal(catalog.info(2000000)?.levels[0]?.values.mp, 2);
+  assert.equal(catalog.info(2000000)?.levels.at(-1)?.values.mp, 32);
+  assert.equal(catalog.info(1000002)?.levels[0]?.values.time, 31);
+  assert.equal(catalog.info(1000002)?.levels.at(-1)?.values.time, 10);
 });

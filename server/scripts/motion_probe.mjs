@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PHYSICS, collisionWorld, createPlayer, advancePlayer, groundY, locomotion,
-  actionOf, beginPath, sampleMotion, actorDepth, animationPose, remoteStance, facingFlip } from '../../client/motion.mjs';
+  actionOf, beginPath, sampleMotion, actorDepth, animationPose, remoteStance, facingFlip } from '../../client/motion.ts';
 
 const segment = (id, x1, y1, x2, y2, prev = 0, next = 0, layer = 1, group = 0) => ({ id, x1, y1, x2, y2, prev, next, layer, group });
 const world = (...footholds) => collisionWorld({ footholds });

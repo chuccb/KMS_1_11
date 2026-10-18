@@ -17,7 +17,7 @@ export function basicAmmo(inventory, weaponId, required=1) {
           : category === 147 && Math.trunc(item.itemId / 10000) === 207;
     });
 }
-export { attackDuration, attackFrame, shotRelease } from './attack-timing.mjs';
+export { attackDuration, attackFrame, shotRelease } from './attack-timing.ts';
 /** Native shot range starts at the near swing boundary, clipped to 65 by 512F90. */
 export function shotNear(motion) {
   const bounds = motion?.bounds;

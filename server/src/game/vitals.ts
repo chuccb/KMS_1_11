@@ -59,8 +59,7 @@ export function applyVitalReport(
   const diff: StatDiff = {};
   if (report.hpDelta !== undefined) {
     // The death rule: at 0 HP the only way up is the revive path, not the regen tick.
-    const delta =
-      report.hpDelta > 0 && stats.hp === 0 ? 0 : whole(report.hpDelta);
+    const delta = report.hpDelta > 0 && stats.hp === 0 ? 0 : whole(report.hpDelta);
     const next = clampVital(stats.hp + delta, caps.maxHp);
     if (next !== stats.hp) {
       stats.hp = next;

@@ -30,8 +30,7 @@ export interface FameLedger {
 
 /** 一次「給人氣」的答案。 */
 export type FameOutcome =
-  | { kind: "ok"; fame: number; ledger: FameLedger }
-  | { kind: "refused"; reason: FameRefusal };
+  { kind: "ok"; fame: number; ledger: FameLedger } | { kind: "refused"; reason: FameRefusal };
 
 /** 拒絕的理由，一一對應 `0x12` 的 type（`self` 走「什麼都不顯示」那一格）。 */
 export type FameRefusal = "self" | "beginner" | "alreadyThisMonth" | "alreadyToday";

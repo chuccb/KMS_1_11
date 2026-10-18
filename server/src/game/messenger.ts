@@ -94,7 +94,9 @@ export class MessengerRegistry {
    * 離開房間。回傳離開後的房間（給廣播 `0x4D type 2` 用）與**離開的那一格**；
    * 房間因此空掉時 `room` 是最後一次看得到的樣子，而且已經從表裡移除。
    */
-  leave(characterId: number): { room: MessengerRoom; member: MessengerMember; slot: number } | undefined {
+  leave(
+    characterId: number,
+  ): { room: MessengerRoom; member: MessengerMember; slot: number } | undefined {
     const room = this.roomOf(characterId);
     if (room === undefined) return undefined;
     const slot = room.members.findIndex((member) => member.characterId === characterId);

@@ -17,17 +17,11 @@ test("sub_55CF60 AP request is opcode 27 and exactly one little-endian u32 mask"
     const packet = encodeAbilityRequest(field);
     assert.equal(packet[0], ABILITY_REQUEST_OPCODE);
     assert.equal(packet.length, 5);
-    assert.equal(
-      readAbilityRequest(new PacketReader(packet, 1)),
-      ABILITY_MASK[field],
-    );
+    assert.equal(readAbilityRequest(new PacketReader(packet, 1)), ABILITY_MASK[field]);
   }
   assert.deepEqual([...encodeAbilityRequest("str")], [0x1b, 0x40, 0, 0, 0]);
   assert.throws(() => readAbilityRequest(new PacketReader(new Uint8Array(3))));
-  assert.throws(
-    () => readAbilityRequest(new PacketReader(new Uint8Array(5))),
-    /exactly/,
-  );
+  assert.throws(() => readAbilityRequest(new PacketReader(new Uint8Array(5))), /exactly/);
   assert.throws(() => encodeAbilityRequest("hp" as "str"), /unsupported/);
 });
 test("four real base-stat allocations each spend one AP and survive the actual 0x0D codec", () => {
@@ -95,10 +89,7 @@ test("invalid masks, unavailable points, death, corruption and u8 overflow never
 });
 
 test("AP requests are discoverable in capture descriptions and the machine-readable protocol catalogue", () => {
-  assert.match(
-    describeClientFieldPacket(encodeAbilityRequest("dex"))!,
-    /0x1b AP request: dex/,
-  );
+  assert.match(describeClientFieldPacket(encodeAbilityRequest("dex"))!, /0x1b AP request: dex/);
   const schema = findPacket(ABILITY_REQUEST_OPCODE, "c2s", "field");
   assert.equal(schema?.name, "abilityUp");
   assert.equal(typeof resolveCodec("readAbilityRequest"), "function");

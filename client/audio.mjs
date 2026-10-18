@@ -1,4 +1,4 @@
-import { nativeVolume, SOUND_DEFAULTS, soundSettings } from './systemsettings.mjs';
+import { nativeVolume, SOUND_DEFAULTS, soundSettings } from './systemsettings.ts';
 /** Original WZ audio over same-origin HTTP. No synthetic tones or external recordings.
  * A user gesture resumes Web Audio; the desired BGM survives autoplay blocking. Map changes are
  * generation-guarded so a slow previous decode cannot start the wrong field's music.

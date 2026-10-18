@@ -22,11 +22,7 @@
  */
 import type { ItemCatalog } from "./iteminfo.ts";
 import { equipmentFromTemplate } from "./equipment.ts";
-import {
-  INVENTORY_OP,
-  INVENTORY_TAB,
-  type InventoryChange,
-} from "../protocol/inventory.ts";
+import { INVENTORY_OP, INVENTORY_TAB, type InventoryChange } from "../protocol/inventory.ts";
 import { equipSlot, isEquipItemId, nonEquipSlot, type ItemSlot } from "../protocol/itemslot.ts";
 import type { CharacterItems, CharacterStats, Inventory } from "../protocol/chardata.ts";
 import type { LootNotice } from "../protocol/drop.ts";
@@ -101,12 +97,19 @@ export interface GrantedItem {
  * it is picked back up with them. The template's own id has to match - a caller that hands over
  * something else is a bug, and the default is the safe answer.
  */
-function freshSlot(itemId: number, count: number, template?: ItemSlot, catalog?: ItemCatalog): ItemSlot | undefined {
+function freshSlot(
+  itemId: number,
+  count: number,
+  template?: ItemSlot,
+  catalog?: ItemCatalog,
+): ItemSlot | undefined {
   if (template !== undefined && template.itemId === itemId) {
     return "quantity" in template ? { ...template, quantity: count } : { ...template };
   }
   return isEquipItemId(itemId)
-    ? catalog ? equipmentFromTemplate(itemId, catalog) : equipSlot(itemId)
+    ? catalog
+      ? equipmentFromTemplate(itemId, catalog)
+      : equipSlot(itemId)
     : nonEquipSlot(itemId, count);
 }
 
@@ -117,7 +120,8 @@ export function grantItem(
   template?: ItemSlot,
   catalog?: ItemCatalog,
 ): GrantedItem | undefined {
-  if (!Number.isInteger(count) || count <= 0 || isEquipItemId(itemId) && count !== 1) return undefined;
+  if (!Number.isInteger(count) || count <= 0 || (isEquipItemId(itemId) && count !== 1))
+    return undefined;
   const tab = inventoryTabOfItemId(itemId);
   const inventory = items.inventories[tab - 1]!;
   const stack = stackableSlot(inventory, itemId, count);
@@ -126,7 +130,11 @@ export function grantItem(
     if (item.kind !== "nonequip") return undefined; // unreachable: stackableSlot only returns those
     const next = { ...item, quantity: item.quantity + count };
     inventory.items.set(stack, next);
-    return { inventory: tab, slot: stack, change: { op: INVENTORY_OP.put, inventory: tab, slot: stack, item: next } };
+    return {
+      inventory: tab,
+      slot: stack,
+      change: { op: INVENTORY_OP.put, inventory: tab, slot: stack, item: next },
+    };
   }
   const slot = freeSlot(inventory);
   if (slot === undefined) return undefined;
@@ -178,7 +186,15 @@ export class MesoWallet {
 /** What taking one drop did, in the terms the packets need. */
 export type PickupResult =
   | { kind: "mesos"; notice: LootNotice; amount: number; total: number }
-  | { kind: "item"; notice: LootNotice; itemId: number; count: number; inventory: number; slot: number; change: InventoryChange }
+  | {
+      kind: "item";
+      notice: LootNotice;
+      itemId: number;
+      count: number;
+      inventory: number;
+      slot: number;
+      change: InventoryChange;
+    }
   | { kind: "no-room"; notice: LootNotice; itemId: number };
 
 /** The parts of a drop this module cares about (`DropEntry` satisfies it). */
@@ -203,11 +219,22 @@ export interface Pickup {
  * server does not, so a player standing on a drop with a full bag is not spammed every tick - see
  * `loginserver.ts` - and the message is left for the day pickups have a request to answer).
  */
-export function pickUpDrop(drop: Pickup, items: CharacterItems, wallet: MesoWallet, catalog?: ItemCatalog): PickupResult {
+export function pickUpDrop(
+  drop: Pickup,
+  items: CharacterItems,
+  wallet: MesoWallet,
+  catalog?: ItemCatalog,
+): PickupResult {
   if (drop.money) {
-    if (wallet.balance + drop.amount > 0xffffffff) return { kind: "no-room", notice: { kind: "rejected" }, itemId: 0 };
+    if (wallet.balance + drop.amount > 0xffffffff)
+      return { kind: "no-room", notice: { kind: "rejected" }, itemId: 0 };
     const total = wallet.earn(drop.amount);
-    return { kind: "mesos", notice: { kind: "mesos", amount: drop.amount }, amount: drop.amount, total };
+    return {
+      kind: "mesos",
+      notice: { kind: "mesos", amount: drop.amount },
+      amount: drop.amount,
+      total,
+    };
   }
   const granted = grantItem(items, drop.itemId, drop.count, drop.slot, catalog);
   if (granted === undefined) {
@@ -252,7 +279,8 @@ export function takeItem(
   slot: number,
   count: number,
 ): TakenItem | undefined {
-  if (!Number.isInteger(count) || count < 0 || (count === 0 && Math.floor(itemId / 10000) !== 207)) return undefined;
+  if (!Number.isInteger(count) || count < 0 || (count === 0 && Math.floor(itemId / 10000) !== 207))
+    return undefined;
   const inventory = inventoryTabOfItemId(itemId);
   const tab = items.inventories[inventory - 1]!;
   const item = tab.items.get(slot);
@@ -260,7 +288,13 @@ export function takeItem(
   if (isEquipItemId(itemId)) {
     if (count !== 1) return undefined;
     tab.items.delete(slot);
-    return { inventory, slot, count: 1, remaining: 0, change: { op: INVENTORY_OP.clear, inventory, slot } };
+    return {
+      inventory,
+      slot,
+      count: 1,
+      remaining: 0,
+      change: { op: INVENTORY_OP.clear, inventory, slot },
+    };
   }
   const quantity = "quantity" in item ? item.quantity : 0;
   if (Math.floor(itemId / 10000) === 207 && count !== quantity) return undefined;
@@ -268,9 +302,21 @@ export function takeItem(
   const remaining = quantity - count;
   if (remaining === 0) {
     tab.items.delete(slot);
-    return { inventory, slot, count, remaining, change: { op: INVENTORY_OP.clear, inventory, slot } };
+    return {
+      inventory,
+      slot,
+      count,
+      remaining,
+      change: { op: INVENTORY_OP.clear, inventory, slot },
+    };
   }
   const left = { ...item, quantity: remaining };
   tab.items.set(slot, left);
-  return { inventory, slot, count, remaining, change: { op: INVENTORY_OP.put, inventory, slot, item: left } };
+  return {
+    inventory,
+    slot,
+    count,
+    remaining,
+    change: { op: INVENTORY_OP.put, inventory, slot, item: left },
+  };
 }

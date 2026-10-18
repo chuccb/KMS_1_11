@@ -19,7 +19,12 @@ import { MOB_OPCODE, readMobEnterField, readMobPresence } from "../src/protocol/
 import { NPC_OPCODE, readNpcEnterField, readNpcState } from "../src/protocol/npc.ts";
 import { npcWalkPolicy } from "../src/game/npcs.ts";
 import { DROP_OPCODE, readDropAppear, readDropRemove } from "../src/protocol/drop.ts";
-import { FieldInstance, FieldRegistry, type FieldMember, type FieldPosition } from "../src/game/world.ts";
+import {
+  FieldInstance,
+  FieldRegistry,
+  type FieldMember,
+  type FieldPosition,
+} from "../src/game/world.ts";
 import type { MapData } from "../src/game/map.ts";
 import type { MobTemplate } from "../src/game/mobs.ts";
 
@@ -92,16 +97,37 @@ function stubMap(overrides: Partial<MapData> = {}): MapData {
     ],
     footholds: 1,
     ladderRopes: 0,
-    footholdSegments: new Map([[32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }]]),
+    footholdSegments: new Map([
+      [32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }],
+    ]),
     ...overrides,
   };
 }
 
 function stubField(overrides: Partial<MapData> = {}): FieldInstance<FakeMember> {
-  return new FieldInstance<FakeMember>({ map: stubMap(overrides), mobTemplate: () => STUB_TEMPLATE });
+  return new FieldInstance<FakeMember>({
+    map: stubMap(overrides),
+    mobTemplate: () => STUB_TEMPLATE,
+  });
 }
 
-function stubMove(x: number, y: number): { originX: number; originY: number; elements: { attr: number; x: number; y: number; vx: number; vy: number; action: number; foothold: number; duration: number }[] } {
+function stubMove(
+  x: number,
+  y: number,
+): {
+  originX: number;
+  originY: number;
+  elements: {
+    attr: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    action: number;
+    foothold: number;
+    duration: number;
+  }[];
+} {
   return {
     originX: 0,
     originY: 0,
@@ -114,10 +140,18 @@ test("the first player is sent the world: every mob, every NPC, and nobody's 0x1
   const hero = new FakeMember(1, "Hero");
   field.join(hero);
 
-  assert.deepEqual(hero.opcodes, [MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField]);
+  assert.deepEqual(hero.opcodes, [
+    MOB_OPCODE.enterField,
+    MOB_OPCODE.enterField,
+    NPC_OPCODE.enterField,
+  ]);
   const first = readMobEnterField(new PacketReader(hero.packets[0]!, 1));
   const second = readMobEnterField(new PacketReader(hero.packets[1]!, 1));
-  assert.deepEqual([first.mobId, first.templateId], [1, 120100], "the map's mobs, in map order, with the field's ids");
+  assert.deepEqual(
+    [first.mobId, first.templateId],
+    [1, 120100],
+    "the map's mobs, in map order, with the field's ids",
+  );
   assert.deepEqual([second.mobId, second.templateId], [2, 1210100]);
   const npc = readNpcEnterField(new PacketReader(hero.packets[2]!, 1), false);
   assert.deepEqual(
@@ -145,13 +179,18 @@ test("0x3B: one designated controller, not every player who joins", () => {
   assert.equal(field.npcs.walking, 1);
 
   // Visibility reaches both players, but only the first controls the NPC.
-  const alt = new FakeMember(2, "Alt");field.join(alt);
-  assert.deepEqual(alt.packets.slice(0,3).map(packet=>packet[0]!),[
-    MOB_OPCODE.enterField,MOB_OPCODE.enterField,NPC_OPCODE.enterField,
-  ]);
-  assert.equal(alt.of(NPC_OPCODE.stateToggle).length,0);
+  const alt = new FakeMember(2, "Alt");
+  field.join(alt);
+  assert.deepEqual(
+    alt.packets.slice(0, 3).map((packet) => packet[0]!),
+    [MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField],
+  );
+  assert.equal(alt.of(NPC_OPCODE.stateToggle).length, 0);
   field.leave(hero.characterId);
-  assert.deepEqual(readNpcState(new PacketReader(alt.of(NPC_OPCODE.stateToggle)[0]!,1)),{npcId:1,on:true});
+  assert.deepEqual(readNpcState(new PacketReader(alt.of(NPC_OPCODE.stateToggle)[0]!, 1)), {
+    npcId: 1,
+    on: true,
+  });
 });
 
 test("a second player and the first learn about each other with one 0x1C each - and never their own", () => {
@@ -170,7 +209,11 @@ test("a second player and the first learn about each other with one 0x1C each - 
   const aboutHero = readUserEnterField(new PacketReader(altSaw[0]!, 1));
   assert.deepEqual([aboutAlt.characterId, aboutAlt.name], [2, "Alt"]);
   assert.deepEqual([aboutHero.characterId, aboutHero.name], [1, "Hero"]);
-  assert.deepEqual(aboutAlt.avatarItems, [30000, 1002001], "the hair and the worn items travel as the avatar list");
+  assert.deepEqual(
+    aboutAlt.avatarItems,
+    [30000, 1002001],
+    "the hair and the worn items travel as the avatar list",
+  );
   assert.deepEqual(aboutHero.avatarItems, []);
   assert.deepEqual(
     [aboutAlt.face, aboutHero.face],
@@ -188,7 +231,11 @@ test("a player who has not moved yet stands on the map's spawn portal, on its ow
   field.join(alt);
 
   const about = alt.of(FIELD_OPCODE.userEnterField);
-  assert.equal(about.length, 1, "the newcomer gets the snapshot first and then the 0x1C about the player there");
+  assert.equal(
+    about.length,
+    1,
+    "the newcomer gets the snapshot first and then the 0x1C about the player there",
+  );
   const aboutHero = readUserEnterField(new PacketReader(about[0]!, 1));
   assert.deepEqual(
     { x: aboutHero.x, y: aboutHero.y, foothold: aboutHero.foothold },
@@ -199,7 +246,11 @@ test("a player who has not moved yet stands on the map's spawn portal, on its ow
 
 test("a map with no portals at all spawns at the origin - and its geometry still places the point", () => {
   const field = stubField({ portals: [] });
-  assert.deepEqual(field.spawnAt(), { x: 0, y: 0, foothold: 32 }, "no portal: the origin, on the segment that covers x = 0");
+  assert.deepEqual(
+    field.spawnAt(),
+    { x: 0, y: 0, foothold: 32 },
+    "no portal: the origin, on the segment that covers x = 0",
+  );
 });
 
 test("a map with no geometry sends foothold 0, which the client reads as no foothold", () => {
@@ -208,7 +259,11 @@ test("a map with no geometry sends foothold 0, which the client reads as no foot
   const alt = new FakeMember(2, "Alt");
   field.join(alt);
   const about = alt.of(FIELD_OPCODE.userEnterField);
-  assert.deepEqual(about, [], "no other player, so no 0x1C at all - which is the point of the field being empty");
+  assert.deepEqual(
+    about,
+    [],
+    "no other player, so no 0x1C at all - which is the point of the field being empty",
+  );
 });
 
 test("a player who has moved is announced where they were, not at the spawn portal", () => {
@@ -220,10 +275,13 @@ test("a player who has moved is announced where they were, not at the spawn port
   const alt = new FakeMember(2, "Alt");
   field.join(alt);
   const about = alt.of(FIELD_OPCODE.userEnterField);
-  assert.deepEqual(about.map((packet) => {
-    const user = readUserEnterField(new PacketReader(packet, 1));
-    return [user.characterId, user.x, user.y];
-  }), [[1, 300, 290]]);
+  assert.deepEqual(
+    about.map((packet) => {
+      const user = readUserEnterField(new PacketReader(packet, 1));
+      return [user.characterId, user.x, user.y];
+    }),
+    [[1, 300, 290]],
+  );
 });
 
 test("a move goes to the other players as 0x22, with the id the sender's own 0x0E does not carry", () => {
@@ -237,11 +295,18 @@ test("a move goes to the other players as 0x22, with the id the sender's own 0x0
 
   field.reportMove(1, stubMove(300, 290));
 
-  assert.deepEqual(hero.opcodes, [], "the mover's own client knows what it did - nothing comes back");
+  assert.deepEqual(
+    hero.opcodes,
+    [],
+    "the mover's own client knows what it did - nothing comes back",
+  );
   assert.deepEqual(alt.opcodes, [FIELD_OPCODE.userMove]);
   const move = readUserMove(new PacketReader(alt.packets[0]!, 1));
   assert.equal(move.characterId, 1);
-  assert.deepEqual(move.path.elements.map((element) => [element.x, element.y]), [[300, 290]]);
+  assert.deepEqual(
+    move.path.elements.map((element) => [element.x, element.y]),
+    [[300, 290]],
+  );
   assert.equal(field.member(1)?.at?.x, 300, "and the field remembers it");
 });
 
@@ -266,7 +331,11 @@ test("leaving tells the others with 0x1D, and leaving twice tells nobody anythin
   field.leave(2);
   assert.deepEqual(alt.opcodes, [], "the one who left is not told about their own departure");
   assert.deepEqual(hero.opcodes, [FIELD_OPCODE.userLeaveField]);
-  assert.equal(new PacketReader(hero.packets[0]!, 1).readU32(), 2, "the id of the character that left");
+  assert.equal(
+    new PacketReader(hero.packets[0]!, 1).readU32(),
+    2,
+    "the id of the character that left",
+  );
   assert.equal(field.memberCount, 1);
 
   hero.clear();
@@ -285,7 +354,11 @@ test("the same character id twice replaces the first, with an 0x1D in between", 
   const again = new FakeMember(1, "HeroAgain");
   field.join(again);
 
-  assert.deepEqual(alt.opcodes, [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField], "one id cannot be in a field twice");
+  assert.deepEqual(
+    alt.opcodes,
+    [FIELD_OPCODE.userLeaveField, FIELD_OPCODE.userEnterField],
+    "one id cannot be in a field twice",
+  );
   const about = readUserEnterField(new PacketReader(alt.packets[1]!, 1));
   assert.equal(about.name, "HeroAgain");
   assert.equal(field.member(1), again);
@@ -307,7 +380,11 @@ test("one hit on a monster is one set of packets, whatever the number of witness
   field.broadcastAll(hit.packets);
 
   assert.deepEqual(hero.opcodes, alt.opcodes, "the same packets, in the same order, to everyone");
-  assert.deepEqual(hero.opcodes, [MOB_OPCODE.stat], "a hit that does not kill reports the monster's MP");
+  assert.deepEqual(
+    hero.opcodes,
+    [MOB_OPCODE.stat],
+    "a hit that does not kill reports the monster's MP",
+  );
   assert.equal(hit.hp, 25, "and the HP is the field's, so the next hit starts from 25");
 });
 
@@ -349,7 +426,11 @@ test("a corpse goes and a monster comes back even with nobody in the map", () =>
 
   const late = new FakeMember(3, "Late");
   field.join(late);
-  assert.deepEqual(late.opcodes, [MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField]);
+  assert.deepEqual(late.opcodes, [
+    MOB_OPCODE.enterField,
+    MOB_OPCODE.enterField,
+    NPC_OPCODE.enterField,
+  ]);
 });
 
 test("the monsters walk only while somebody is watching, and everyone sees the same leg", () => {
@@ -360,7 +441,11 @@ test("the monsters walk only while somebody is watching, and everyone sees the s
 
   const now = Date.now();
   field.tick(now);
-  assert.equal(hero.of(MOB_OPCODE.move).length, 1, "the mob on the foothold gets one leg; the other cannot walk");
+  assert.equal(
+    hero.of(MOB_OPCODE.move).length,
+    1,
+    "the mob on the foothold gets one leg; the other cannot walk",
+  );
   const alt = new FakeMember(2, "Alt");
   field.join(alt);
   hero.clear();
@@ -370,13 +455,21 @@ test("the monsters walk only while somebody is watching, and everyone sees the s
   const heroLegs = hero.of(MOB_OPCODE.move);
   const altLegs = alt.of(MOB_OPCODE.move);
   assert.equal(heroLegs.length, 1);
-  assert.deepEqual(altLegs.map((packet) => [...packet]), heroLegs.map((packet) => [...packet]), "one plan, two clients");
+  assert.deepEqual(
+    altLegs.map((packet) => [...packet]),
+    heroLegs.map((packet) => [...packet]),
+    "one plan, two clients",
+  );
 
   field.leave(1);
   field.leave(2);
   hero.clear();
   field.tick(now + 20_000);
-  assert.deepEqual(hero.opcodes, [], "a leg is a promise to a client; with nobody there the mob stands still");
+  assert.deepEqual(
+    hero.opcodes,
+    [],
+    "a leg is a promise to a client; with nobody there the mob stands still",
+  );
 });
 
 test("loot on the ground expires for everyone, and a late joiner is shown it first", () => {
@@ -395,14 +488,22 @@ test("loot on the ground expires for everyone, and a late joiner is shown it fir
   const alt = new FakeMember(2, "Alt");
   field.join(alt);
   const appear = alt.of(DROP_OPCODE.appear);
-  assert.equal(appear.length, spawned.length, "the joiner is sent every drop already on the ground");
+  assert.equal(
+    appear.length,
+    spawned.length,
+    "the joiner is sent every drop already on the ground",
+  );
   assert.equal(readDropAppear(new PacketReader(appear[0]!, 1)).dropId, drop.dropId);
 
   hero.clear();
   alt.clear();
   field.tick(now + 10 * 60 * 1000);
   const reminders = hero.of(DROP_OPCODE.remove);
-  assert.equal(reminders.length, spawned.length, "every drop of that kill is past DROP_LIFETIME_MS");
+  assert.equal(
+    reminders.length,
+    spawned.length,
+    "every drop of that kill is past DROP_LIFETIME_MS",
+  );
   assert.deepEqual(alt.of(DROP_OPCODE.remove).length, spawned.length, "and both players are told");
   const removed = reminders.map((packet) => readDropRemove(new PacketReader(packet, 1)));
   for (const one of removed) {
@@ -429,7 +530,11 @@ test("a drop one player picks up is off the ground for the others, with the take
   field.broadcastDropTaken(7, 2);
   for (const member of [hero, alt]) {
     assert.deepEqual(member.opcodes, [DROP_OPCODE.remove]);
-    assert.deepEqual(readDropRemove(new PacketReader(member.packets[0]!, 1)), { kind: 2, dropId: 7, characterId: 2 });
+    assert.deepEqual(readDropRemove(new PacketReader(member.packets[0]!, 1)), {
+      kind: 2,
+      dropId: 7,
+      characterId: 2,
+    });
   }
 });
 
@@ -485,23 +590,44 @@ test("the registry hands the same field to every player of a map, and keeps it",
   );
 });
 
-
 test("a portal is found by the name the client sends, and knows where it leads", () => {
   const portal = { name: "west00", type: 2, x: 130, y: 300, toMapId: 2000000, toName: "east00" };
   const field = stubField({ portals: [portal] });
 
-  assert.deepEqual(field.portal("west00"), portal, "the name is the `pn` the client read out of the map file");
-  assert.equal(field.portal("WEST00"), portal, "the name is data, so case must not decide whether a portal works");
-  assert.equal(field.portal("nowhere"), undefined, "a name the map does not have is not a teleport");
+  assert.deepEqual(
+    field.portal("west00"),
+    portal,
+    "the name is the `pn` the client read out of the map file",
+  );
+  assert.equal(
+    field.portal("WEST00"),
+    portal,
+    "the name is data, so case must not decide whether a portal works",
+  );
+  assert.equal(
+    field.portal("nowhere"),
+    undefined,
+    "a name the map does not have is not a teleport",
+  );
   assert.equal(field.mapId, 1000000);
-  assert.equal(field.map.id, 1000000, "a field keeps the map it simulates - the portals and the spawn point are its questions");
+  assert.equal(
+    field.map.id,
+    1000000,
+    "a field keeps the map it simulates - the portals and the spawn point are its questions",
+  );
 });
 
 test("a second map is a second field: its own spawn point, its own mobs, and it is kept too", () => {
   const registry = new FieldRegistry<FakeMember>({
     mapProvider: (mapId: number) =>
       mapId === 2000000
-        ? stubMap({ id: 2000000, name: "stub-alt", portals: [{ name: "east00", type: 2, x: 600, y: 300, toMapId: 1000000, toName: "west00" }] })
+        ? stubMap({
+            id: 2000000,
+            name: "stub-alt",
+            portals: [
+              { name: "east00", type: 2, x: 600, y: 300, toMapId: 1000000, toName: "west00" },
+            ],
+          })
         : undefined,
     mobTemplate: () => STUB_TEMPLATE,
   });
@@ -509,48 +635,98 @@ test("a second map is a second field: its own spawn point, its own mobs, and it 
   const alt = registry.of(2000000);
   assert.ok(alt !== undefined);
   assert.equal(alt.mapId, 2000000);
-  assert.deepEqual(alt.spawnAt(), { x: 600, y: 300, foothold: 32 }, "this map's portal, this map's foothold");
+  assert.deepEqual(
+    alt.spawnAt(),
+    { x: 600, y: 300, foothold: 32 },
+    "this map's portal, this map's foothold",
+  );
   assert.equal(alt.portal("west00"), undefined, "the portal of the other map is not here");
   assert.equal(registry.size, 1);
 
   const hero = new FakeMember(1, "Hero");
   alt.join(hero);
-  assert.deepEqual(hero.opcodes.slice(0, 3), [MOB_OPCODE.enterField, MOB_OPCODE.enterField, NPC_OPCODE.enterField]);
+  assert.deepEqual(hero.opcodes.slice(0, 3), [
+    MOB_OPCODE.enterField,
+    MOB_OPCODE.enterField,
+    NPC_OPCODE.enterField,
+  ]);
   assert.equal(registry.of(2000000), alt);
   assert.equal(registry.size, 1, "and asking for it again is still the same field");
 });
 
 // Latest posture regression SOURCE ONLY, not executed/typechecked for this delivery.
-test("late join retains the mover's prone/rope movement byte, facing and reported foothold",()=>{
-  const field=stubField(),hero=new FakeMember(1,"Hero");field.join(hero);
-  const prone=stubMove(300,290);prone.elements[0]!.action=11;prone.elements[0]!.foothold=32;
-  field.reportMove(1,prone);
-  const alt=new FakeMember(2,"Alt");field.join(alt);
-  const user=readUserEnterField(new PacketReader(alt.of(FIELD_OPCODE.userEnterField)[0]!,1));
-  assert.equal(user.action,11);assert.equal(user.foothold,32);
-  assert.equal(field.member(1)?.at?.action,11);
-  const rope=stubMove(350,240);rope.elements[0]!.action=17;rope.elements[0]!.foothold=65529;
-  field.reportMove(1,rope);
-  const third=new FakeMember(3,"Third");field.join(third);
-  const remote=third.of(FIELD_OPCODE.userEnterField).map(p=>readUserEnterField(new PacketReader(p,1))).find(u=>u.characterId===1)!;
-  assert.equal(remote.action,17);assert.equal(remote.foothold,65529);
+test("late join retains the mover's prone/rope movement byte, facing and reported foothold", () => {
+  const field = stubField(),
+    hero = new FakeMember(1, "Hero");
+  field.join(hero);
+  const prone = stubMove(300, 290);
+  prone.elements[0]!.action = 11;
+  prone.elements[0]!.foothold = 32;
+  field.reportMove(1, prone);
+  const alt = new FakeMember(2, "Alt");
+  field.join(alt);
+  const user = readUserEnterField(new PacketReader(alt.of(FIELD_OPCODE.userEnterField)[0]!, 1));
+  assert.equal(user.action, 11);
+  assert.equal(user.foothold, 32);
+  assert.equal(field.member(1)?.at?.action, 11);
+  const rope = stubMove(350, 240);
+  rope.elements[0]!.action = 17;
+  rope.elements[0]!.foothold = 65529;
+  field.reportMove(1, rope);
+  const third = new FakeMember(3, "Third");
+  field.join(third);
+  const remote = third
+    .of(FIELD_OPCODE.userEnterField)
+    .map((p) => readUserEnterField(new PacketReader(p, 1)))
+    .find((u) => u.characterId === 1)!;
+  assert.equal(remote.action, 17);
+  assert.equal(remote.foothold, 65529);
 });
 
-
 /** Source-only regression added for ADR-077; not executed in this turn. */
-test("ordered multi-record move retains terminal position/posture for combat and late join, relays all records",()=>{
-  const field=stubField(),hero=new FakeMember(1,"Hero"),alt=new FakeMember(2,"Alt");
-  field.join(hero);field.join(alt);hero.clear();alt.clear();
-  const path=stubMove(100,300);
-  path.elements[0]!.duration=0;
-  path.elements.push({...path.elements[0]!,x:300,y:290,vx:125,action:3,foothold:0,duration:30});
-  path.elements.push({...path.elements[0]!,x:310,y:280,vx:125,vy:-270,action:7,foothold:0,duration:30,attr:2});
-  field.reportMove(1,path);
-  assert.deepEqual([field.member(1)?.at?.x,field.member(1)?.at?.y,field.member(1)?.at?.action],[310,280,7]);
-  const relayed=readUserMove(new PacketReader(alt.of(FIELD_OPCODE.userMove)[0]!,1));
-  assert.deepEqual(relayed.path,path);assert.equal(hero.of(FIELD_OPCODE.userMove).length,0);
-  const late=new FakeMember(3,"Late");field.join(late);
-  const enter=late.of(FIELD_OPCODE.userEnterField).map(packet=>readUserEnterField(new PacketReader(packet,1)))
-    .find(user=>user.characterId===1)!;
-  assert.deepEqual([enter.x,enter.y,enter.foothold,enter.action],[310,280,0,7]);
+test("ordered multi-record move retains terminal position/posture for combat and late join, relays all records", () => {
+  const field = stubField(),
+    hero = new FakeMember(1, "Hero"),
+    alt = new FakeMember(2, "Alt");
+  field.join(hero);
+  field.join(alt);
+  hero.clear();
+  alt.clear();
+  const path = stubMove(100, 300);
+  path.elements[0]!.duration = 0;
+  path.elements.push({
+    ...path.elements[0]!,
+    x: 300,
+    y: 290,
+    vx: 125,
+    action: 3,
+    foothold: 0,
+    duration: 30,
+  });
+  path.elements.push({
+    ...path.elements[0]!,
+    x: 310,
+    y: 280,
+    vx: 125,
+    vy: -270,
+    action: 7,
+    foothold: 0,
+    duration: 30,
+    attr: 2,
+  });
+  field.reportMove(1, path);
+  assert.deepEqual(
+    [field.member(1)?.at?.x, field.member(1)?.at?.y, field.member(1)?.at?.action],
+    [310, 280, 7],
+  );
+  const relayed = readUserMove(new PacketReader(alt.of(FIELD_OPCODE.userMove)[0]!, 1));
+  assert.deepEqual(relayed.path, path);
+  assert.equal(hero.of(FIELD_OPCODE.userMove).length, 0);
+  const late = new FakeMember(3, "Late");
+  field.join(late);
+  const enter = late
+    .of(FIELD_OPCODE.userEnterField)
+    .map((packet) => readUserEnterField(new PacketReader(packet, 1)))
+    .find((user) => user.characterId === 1)!;
+  assert.deepEqual([enter.x, enter.y, enter.foothold, enter.action], [310, 280, 0, 7]);
 });

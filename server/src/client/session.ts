@@ -1,11 +1,23 @@
-import {encodeClientSkillUse} from "../protocol/skilluse.ts";
-import {PARTY_OPCODE,readPartyResult,encodeClientPartyRequest,type PartyResult,type PartyMember,type ClientPartyRequest} from "../protocol/party.ts";
-import {questReplyFor, type QuestReplyDetail} from "./questreply.ts";
-import {SYSTEM_NOTICE_OPCODE,readSystemNotice} from '../protocol/notice.ts';
+import { encodeClientSkillUse } from "../protocol/skilluse.ts";
+import {
+  PARTY_OPCODE,
+  readPartyResult,
+  encodeClientPartyRequest,
+  type PartyResult,
+  type PartyMember,
+  type ClientPartyRequest,
+} from "../protocol/party.ts";
+import { questReplyFor, type QuestReplyDetail } from "./questreply.ts";
+import { SYSTEM_NOTICE_OPCODE, readSystemNotice } from "../protocol/notice.ts";
 import { ClientRandom } from "../protocol/random.ts";
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
-import { SKILL_UPDATE_OPCODE, encodeSkillRequest, readSkillUpdate, type SkillChange } from "../protocol/skills.ts";
+import {
+  SKILL_UPDATE_OPCODE,
+  encodeSkillRequest,
+  readSkillUpdate,
+  type SkillChange,
+} from "../protocol/skills.ts";
 import { learnedSkills } from "../game/skills.ts";
 import { emptyCharacterItems } from "../protocol/chardata.ts";
 import { encodeMesoDrop, MESO_DROP_INTERVAL_MS } from "../protocol/mesodrop.ts";
@@ -135,19 +147,20 @@ import {
   readMobStat,
   type MobLeaveDelayed,
 } from "../protocol/mob.ts";
-import { NPC_OPCODE, readNpcEnterField, readNpcId, readNpcState, readNpcIdle, encodeClientNpcIdle } from "../protocol/npc.ts";
 import {
-  STAT_OPCODE,
-  readStatUpdate,
-  type StatDiff,
-} from "../protocol/stat.ts";
+  NPC_OPCODE,
+  readNpcEnterField,
+  readNpcId,
+  readNpcState,
+  readNpcIdle,
+  encodeClientNpcIdle,
+} from "../protocol/npc.ts";
+import { STAT_OPCODE, readStatUpdate, type StatDiff } from "../protocol/stat.ts";
 import { expToNextLevel } from "../game/exp.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 
 /** The ten appearance words the create dialog sends (`CHECK_NAME_APPEARANCE_WORDS`). */
-const CREATE_DIALOG_LOOK = [
-  20000, 30000, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10,
-];
+const CREATE_DIALOG_LOOK = [20000, 30000, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10];
 
 /** What a view needs to know about the character the connection belongs to. */
 export interface SelfView {
@@ -286,9 +299,7 @@ function slotsOf(slots: Map<number, ItemSlot>): ItemView[] {
  * item model sends an empty one - both become four empty tabs, because the page's job is to draw what
  * is there, not to guess a capacity.
  */
-export function inventoryViewOf(
-  items: CharacterItems | undefined,
-): InventoryView {
+export function inventoryViewOf(items: CharacterItems | undefined): InventoryView {
   if (items === undefined) {
     return {
       worn: [],
@@ -340,7 +351,7 @@ export interface UserView {
 }
 
 export interface MobView {
-  mp?:number;
+  mp?: number;
   mobId: number;
   templateId: number;
   x: number;
@@ -350,7 +361,7 @@ export interface MobView {
 
 export interface NpcView {
   /** 4990C0 stores the full spawn movement byte; facing is its low bit. */
-  action?:number;
+  action?: number;
   npcId: number;
   templateId: number;
   x: number;
@@ -375,9 +386,9 @@ export type ClientEvent =
     }
   | { kind: "self"; self: SelfView }
   | { kind: "temporary-stat"; update: TemporaryStatUpdate }
-  | { kind: "active-skill-result"; skillId:number; accepted:boolean }
-  | { kind: "skill-effect"; characterId:number; skillId:number; skillLevel:number }
-  | { kind: "party"; result:PartyResult }
+  | { kind: "active-skill-result"; skillId: number; accepted: boolean }
+  | { kind: "skill-effect"; characterId: number; skillId: number; skillLevel: number }
+  | { kind: "party"; result: PartyResult }
   | { kind: "user-enter"; user: UserView }
   | {
       kind: "user-look";
@@ -415,8 +426,8 @@ export type ClientEvent =
   | { kind: "mob-enter"; mob: MobView }
   | {
       kind: "mob-move";
-      actionByte?:number;
-      value?:number;
+      actionByte?: number;
+      value?: number;
       mobId: number;
       x: number;
       y: number;
@@ -426,17 +437,17 @@ export type ClientEvent =
   /** `0x30`: the monster was hit; its selected die1/die2/dieF frames are the corpse. */
   | { kind: "mob-die"; mobId: number }
   | { kind: "mob-leave"; mobId: number }
-  | { kind: "mob-stat"; mobId:number;mp:number }
+  | { kind: "mob-stat"; mobId: number; mp: number }
   /** `0x23`/`0x24`/`0x25`: another user's melee/shot, including action, speed and projectile id. */
   | {
       kind: "user-attack";
       characterId: number;
-      skillId:number;
-      skillLevel:number;
+      skillId: number;
+      skillLevel: number;
       facingLeft: boolean;
       shoot: boolean;
-      magic?:boolean;
-      afterimage?:number;
+      magic?: boolean;
+      afterimage?: number;
       action: number;
       speed: number;
       projectileItemId: number;
@@ -455,8 +466,8 @@ export type ClientEvent =
   | { kind: "loot"; notice: LootNotice }
   | { kind: "npc-enter"; npc: NpcView }
   | { kind: "npc-leave"; npcId: number }
-  | { kind: "npc-controller"; npcId:number;on:boolean }
-  | { kind: "npc-idle";npcId:number;action:number;speech:number;path?:MovePath }
+  | { kind: "npc-controller"; npcId: number; on: boolean }
+  | { kind: "npc-idle"; npcId: number; action: number; speech: number; path?: MovePath }
   | { kind: "unknown"; opcode: number; bytes: number }
   | { kind: "disconnect"; reason: string };
 
@@ -544,11 +555,11 @@ class Link {
       this.markHandshake = resolve;
     });
     this.socket = net.connect(port, host);
-    this.socket.on("data", (chunk) => this.receive(new Uint8Array(chunk)));
-    this.socket.on("error", (error) => this.fail((error as Error).message));
-    this.socket.on("close", () =>
-      this.fail(this.closeReason ?? "the connection closed"),
+    this.socket.on("data", (chunk) =>
+      this.receive(new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk)),
     );
+    this.socket.on("error", (error) => this.fail((error as Error).message));
+    this.socket.on("close", () => this.fail(this.closeReason ?? "the connection closed"));
   }
 
   private receive(chunk: Uint8Array): void {
@@ -702,11 +713,11 @@ export class ClientSession {
   private attackSequence = 0;
   private abilityPending = false;
   private skillPending = false;
-  private activeSkillPending:number|undefined;
-  private nextActiveAt=0;
-  private partyId=0;
-  private partyMembers:readonly PartyMember[]=[];
-  private partyInvite:number|undefined;
+  private activeSkillPending: number | undefined;
+  private nextActiveAt = 0;
+  private partyId = 0;
+  private partyMembers: readonly PartyMember[] = [];
+  private partyInvite: number | undefined;
   private nextSkillAt = 0;
   private mesoPending = false;
   private nextMesoAt = 0;
@@ -807,10 +818,7 @@ export class ClientSession {
         appearance: [...appearance],
       }),
     );
-    const checked = await link.take(
-      LOGIN_OPCODE.nameCheckResult,
-      this.timeoutMs,
-    );
+    const checked = await link.take(LOGIN_OPCODE.nameCheckResult, this.timeoutMs);
     const reader = new PacketReader(checked, 1);
     if (reader.readAsciiString() !== name)
       throw new Error("name-check reply did not match request");
@@ -831,10 +839,7 @@ export class ClientSession {
         name,
       }),
     );
-    const created = await link.take(
-      LOGIN_OPCODE.createCharacter,
-      this.timeoutMs,
-    );
+    const created = await link.take(LOGIN_OPCODE.createCharacter, this.timeoutMs);
     if ((created[1] ?? 0) === 0) return { nameCheck };
     return {
       nameCheck,
@@ -850,10 +855,7 @@ export class ClientSession {
         characterId,
       }),
     );
-    const reply = new PacketReader(
-      await link.take(LOGIN_OPCODE.deleteResult, this.timeoutMs),
-      1,
-    );
+    const reply = new PacketReader(await link.take(LOGIN_OPCODE.deleteResult, this.timeoutMs), 1);
     if (reply.readU32() !== characterId)
       throw new Error("delete reply did not match requested character");
     return reply.readByte() !== 0;
@@ -872,8 +874,7 @@ export class ClientSession {
     const reply = await link.take(LOGIN_OPCODE.selectCharacter, this.timeoutMs);
     const reader = new PacketReader(reply, 1);
     const result = reader.readByte();
-    if (result !== LOGIN_RESULT.ok)
-      return { result, ip: "", port: 0, characterId: 0 };
+    if (result !== LOGIN_RESULT.ok) return { result, ip: "", port: 0, characterId: 0 };
     const ip = readRedirectIp(reader);
     const port = reader.readU16();
     const id = reader.readU32();
@@ -896,7 +897,11 @@ export class ClientSession {
       port,
       host,
       (plain) => this.handleFieldPacket(plain),
-      (reason) => {this.activeQuest=undefined;this.questGeneration++;this.emit({kind:"disconnect",reason});},
+      (reason) => {
+        this.activeQuest = undefined;
+        this.questGeneration++;
+        this.emit({ kind: "disconnect", reason });
+      },
     );
     this.gameLink = link;
     await link.handshakeDone;
@@ -917,8 +922,7 @@ export class ClientSession {
   }
 
   private requireLink(): Link {
-    if (this.link === undefined)
-      throw new Error("login() must succeed before this call");
+    if (this.link === undefined) throw new Error("login() must succeed before this call");
     return this.link;
   }
 
@@ -937,7 +941,9 @@ export class ClientSession {
   }
 
   /** Latest locally published posture, kept separate from XY for existing consumers. */
-  get selfMovement(): { action: number; foothold: number } { return { ...this.lastMovement }; }
+  get selfMovement(): { action: number; foothold: number } {
+    return { ...this.lastMovement };
+  }
 
   /** First native stream (CWvsApp+632); reseeded by 0x16. */
   attackRandom: ClientRandom | undefined;
@@ -946,7 +952,9 @@ export class ClientSession {
   private nextReviveAt = 0;
 
   /** Read-only public projection; browser bridge must not reach into private session state. */
-  get selfView():Readonly<SelfView>|undefined{return this.self;}
+  get selfView(): Readonly<SelfView> | undefined {
+    return this.self;
+  }
 
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
@@ -958,37 +966,80 @@ export class ClientSession {
    * per target, the damage the caller already rolled (the field takes it on trust - see
    * `game/nativecombat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
    */
-  get characterOperationPending():boolean {
-    return this.skillPending||this.slotPending||this.shopPending||this.mesoPending||this.abilityPending;
+  get characterOperationPending(): boolean {
+    return (
+      this.skillPending ||
+      this.slotPending ||
+      this.shopPending ||
+      this.mesoPending ||
+      this.abilityPending
+    );
   }
-  async useActiveSkill(skillId:number,level:number,party=false):Promise<void> {
-    if(!this.gameLink || !this.self || this.self.hp<=0 || this.skillPending || this.slotPending ||
-      this.shopPending || this.mesoPending || this.abilityPending || performance.now()<Math.max(this.nextActiveAt,this.nextSkillAt))
-      throw new Error('技能等待前一項操作完成');
-    if(party&&!this.partyId)throw new Error('此版本的憤怒入口需要先建立或加入隊伍');
-    const targets=party?this.partyMembers.filter(member=>{
-      const user=this.users.get(member.characterId);
-      return user && user.x>=this.lastPosition.x-50 && user.x<this.lastPosition.x+50 &&
-        user.y>=this.lastPosition.y-50 && user.y<this.lastPosition.y+50;
-    }).map(member=>member.characterId):[];
-    const packet=encodeClientSkillUse({skillId,level,targets});
-    this.activeSkillPending=skillId;this.skillPending=true;this.nextActiveAt=performance.now()+200;
-    try{await this.gameLink.send(packet);}catch(error){this.activeSkillPending=undefined;this.skillPending=false;throw error;}
+  async useActiveSkill(skillId: number, level: number, party = false): Promise<void> {
+    if (
+      !this.gameLink ||
+      !this.self ||
+      this.self.hp <= 0 ||
+      this.skillPending ||
+      this.slotPending ||
+      this.shopPending ||
+      this.mesoPending ||
+      this.abilityPending ||
+      performance.now() < Math.max(this.nextActiveAt, this.nextSkillAt)
+    )
+      throw new Error("技能等待前一項操作完成");
+    if (party && !this.partyId) throw new Error("此版本的憤怒入口需要先建立或加入隊伍");
+    const targets = party
+      ? this.partyMembers
+          .filter((member) => {
+            const user = this.users.get(member.characterId);
+            return (
+              user &&
+              user.x >= this.lastPosition.x - 50 &&
+              user.x < this.lastPosition.x + 50 &&
+              user.y >= this.lastPosition.y - 50 &&
+              user.y < this.lastPosition.y + 50
+            );
+          })
+          .map((member) => member.characterId)
+      : [];
+    const packet = encodeClientSkillUse({ skillId, level, targets });
+    this.activeSkillPending = skillId;
+    this.skillPending = true;
+    this.nextActiveAt = performance.now() + 200;
+    try {
+      await this.gameLink.send(packet);
+    } catch (error) {
+      this.activeSkillPending = undefined;
+      this.skillPending = false;
+      throw error;
+    }
   }
-  async partyCommand(command:string,name=''):Promise<void> {
-    if(!this.gameLink||!this.self||this.self.hp<=0)throw new Error('party needs a living field session');
-    let request:ClientPartyRequest;
-    if(command==='create')request={kind:'create'};
-    else if(command==='leave')request={kind:'leave',unknown:0};
-    else if(command==='accept') {
-      if(this.partyInvite===undefined)throw new Error('no current party invitation');
-      request={kind:'accept',inviterId:this.partyInvite};this.partyInvite=undefined;
-    }else if(command==='decline'){this.partyInvite=undefined;return;}
-    else if(command==='invite'||command==='kick') {
-      const target=command==='invite'?[...this.users.values()].find(u=>u.name===name):this.partyMembers.find(u=>u.name===name);
-      if(!target)throw new Error('找不到可邀請／移除的隊員');
-      request=command==='invite'?{kind:'invite',targetId:target.characterId}:{kind:'kick',targetId:target.characterId};
-    }else throw new Error('party: create | invite <name> | accept | decline | leave | kick <name>');
+  async partyCommand(command: string, name = ""): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0)
+      throw new Error("party needs a living field session");
+    let request: ClientPartyRequest;
+    if (command === "create") request = { kind: "create" };
+    else if (command === "leave") request = { kind: "leave", unknown: 0 };
+    else if (command === "accept") {
+      if (this.partyInvite === undefined) throw new Error("no current party invitation");
+      request = { kind: "accept", inviterId: this.partyInvite };
+      this.partyInvite = undefined;
+    } else if (command === "decline") {
+      this.partyInvite = undefined;
+      return;
+    } else if (command === "invite" || command === "kick") {
+      const target =
+        command === "invite"
+          ? [...this.users.values()].find((u) => u.name === name)
+          : this.partyMembers.find((u) => u.name === name);
+      if (!target) throw new Error("找不到可邀請／移除的隊員");
+      request =
+        command === "invite"
+          ? { kind: "invite", targetId: target.characterId }
+          : { kind: "kick", targetId: target.characterId };
+    } else
+      throw new Error("party: create | invite <name> | accept | decline | leave | kick <name>");
     await this.gameLink.send(encodeClientPartyRequest(request));
   }
 
@@ -998,23 +1049,22 @@ export class ClientSession {
       x: number;
       y: number;
       damage: number;
-      damages?:number[];
+      damages?: number[];
       hitAnimation?: number;
     }[],
     facingLeft = false,
     options: {
       shoot?: boolean;
-      magic?:boolean;
+      magic?: boolean;
       action?: number;
       speed?: number;
       projectileSlot?: number;
-      skillId?:number;
-      hits?:number;
+      skillId?: number;
+      hits?: number;
     } = {},
   ): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("attack() needs a session in a field");
+    if (link === undefined) throw new Error("attack() needs a session in a field");
     if (
       this.skillPending ||
       this.slotPending ||
@@ -1023,11 +1073,11 @@ export class ClientSession {
       this.abilityPending
     )
       throw new Error("attack blocked by a pending character operation");
-    if(options.magic&&options.shoot)throw new RangeError("an attack cannot be both magic and shoot");
+    if (options.magic && options.shoot)
+      throw new RangeError("an attack cannot be both magic and shoot");
     if (
       options.shoot &&
-      (!Number.isInteger(options.projectileSlot) ||
-        (options.projectileSlot ?? 0) <= 0)
+      (!Number.isInteger(options.projectileSlot) || (options.projectileSlot ?? 0) <= 0)
     )
       throw new RangeError("a shot requires a positive USE slot");
     this.attackSequence = (this.attackSequence + 1) & 0xff;
@@ -1037,12 +1087,12 @@ export class ClientSession {
       x: target.x,
       y: target.y,
       sequence: this.attackSequence,
-      damages: target.damages??[target.damage],
+      damages: target.damages ?? [target.damage],
     }));
     const attack: ClientAttack = {
-      hits: options.hits??1,
+      hits: options.hits ?? 1,
       targetCount: records.length,
-      skillId: options.skillId??0,
+      skillId: options.skillId ?? 0,
       facingLeft,
       action: options.action ?? 5,
       speed: options.speed ?? 1,
@@ -1052,9 +1102,11 @@ export class ClientSession {
     await link.send(
       encodeClientAttack(
         attack,
-        options.magic ? CLIENT_FIELD_OPCODE.magicAttack : options.shoot
-          ? CLIENT_FIELD_OPCODE.shootAttack
-          : CLIENT_FIELD_OPCODE.attack,
+        options.magic
+          ? CLIENT_FIELD_OPCODE.magicAttack
+          : options.shoot
+            ? CLIENT_FIELD_OPCODE.shootAttack
+            : CLIENT_FIELD_OPCODE.attack,
       ),
     );
   }
@@ -1080,35 +1132,46 @@ export class ClientSession {
    */
   async whisper(name: string, text: Uint8Array): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("whisper() needs a session in a field");
+    if (link === undefined) throw new Error("whisper() needs a session in a field");
     if (name === "") throw new Error("whisper() needs a target name");
     this.reserveUserRequest();
-    try {await link.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.whisper,name,text}));}
-    catch(error){this.userRequestUntil=0;throw error;}
+    try {
+      await link.send(encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name, text }));
+    } catch (error) {
+      this.userRequestUntil = 0;
+      throw error;
+    }
   }
 
   /** 4717D0 / 4728D0: shared find/whisper gate, expires after 3000ms. */
   private reserveUserRequest(): void {
-    if(performance.now()<this.userRequestUntil)throw new Error("다른 요청을 처리 중입니다");
-    this.userRequestUntil=performance.now()+3000;
+    if (performance.now() < this.userRequestUntil) throw new Error("다른 요청을 처리 중입니다");
+    this.userRequestUntil = performance.now() + 3000;
   }
-  async refuseWhisper(name:string): Promise<void> {
-    if(!this.gameLink || !this.self)throw new Error('refusal needs a session in a field');
+  async refuseWhisper(name: string): Promise<void> {
+    if (!this.gameLink || !this.self) throw new Error("refusal needs a session in a field");
     // The second string is our own character name, NOT the refused message text.
-    await this.gameLink.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name,
-      text:encodeCp949(this.self.name)}));
+    await this.gameLink.send(
+      encodeClientUserRequest({
+        kind: USER_REQUEST_KIND.refuseWhisper,
+        name,
+        text: encodeCp949(this.self.name),
+      }),
+    );
   }
 
   /** 0x23 kind0x05 -> 0x1A sub-op0x09; mapId -1 means not found. */
   async find(name: string): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("find() needs a session in a field");
+    if (link === undefined) throw new Error("find() needs a session in a field");
     if (name === "") throw new Error("find() needs a name");
     this.reserveUserRequest();
-    try {await link.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.find,name}));}
-    catch(error){this.userRequestUntil=0;throw error;}
+    try {
+      await link.send(encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name }));
+    } catch (error) {
+      this.userRequestUntil = 0;
+      throw error;
+    }
   }
 
   /**
@@ -1145,9 +1208,13 @@ export class ClientSession {
   }
 
   async increaseAbility(field: Ability): Promise<void> {
-    if (!this.gameLink || !this.self)
-      throw new Error("AP requires an active field");
-    if (this.abilityPending || this.mesoPending || this.skillPending || performance.now() < this.nextSkillAt)
+    if (!this.gameLink || !this.self) throw new Error("AP requires an active field");
+    if (
+      this.abilityPending ||
+      this.mesoPending ||
+      this.skillPending ||
+      performance.now() < this.nextSkillAt
+    )
       throw new Error("AP request already pending");
     const packet = encodeAbilityRequest(field);
     this.abilityPending = true;
@@ -1161,15 +1228,34 @@ export class ClientSession {
 
   /** Development mutations must not race a native stat/item request. */
   assertTestToolsReady(): void {
-    if(!this.gameLink || !this.self) throw new Error("請先進入地圖。");
-    if(this.skillPending || this.abilityPending || this.slotPending || this.shopPending || this.mesoPending) throw new Error("請等待目前能力／技能／道具操作回覆。");
+    if (!this.gameLink || !this.self) throw new Error("請先進入地圖。");
+    if (
+      this.skillPending ||
+      this.abilityPending ||
+      this.slotPending ||
+      this.shopPending ||
+      this.mesoPending
+    )
+      throw new Error("請等待目前能力／技能／道具操作回覆。");
   }
 
   /** Original positive 0x1C reports from the native recovery clock; no optimistic local HP edits. */
   async recover(report: ClientStatReport): Promise<void> {
-    if(!this.gameLink || !this.self || this.self.hp<=0) return;
-    if(![report.hpDelta??0,report.mpDelta??0].every(n=>Number.isInteger(n)&&n>=0&&n<=32767) || ![0,1].includes(report.flag)) throw new Error("Invalid recovery report");
-    await this.gameLink.send(encodeClientStatReport({hpDelta:report.hpDelta??0,mpDelta:report.mpDelta??0,flag:report.flag}));
+    if (!this.gameLink || !this.self || this.self.hp <= 0) return;
+    if (
+      ![report.hpDelta ?? 0, report.mpDelta ?? 0].every(
+        (n) => Number.isInteger(n) && n >= 0 && n <= 32767,
+      ) ||
+      ![0, 1].includes(report.flag)
+    )
+      throw new Error("Invalid recovery report");
+    await this.gameLink.send(
+      encodeClientStatReport({
+        hpDelta: report.hpDelta ?? 0,
+        mpDelta: report.mpDelta ?? 0,
+        flag: report.flag,
+      }),
+    );
   }
 
   /** Bridge-derived contact damage only. No JSON endpoint accepts an arbitrary negative delta. */
@@ -1178,26 +1264,34 @@ export class ClientSession {
       throw new Error("Invalid native touch damage");
     if (!this.gameLink || !this.self || this.self.hp <= 0)
       throw new Error("Touch report requires a living field session");
-    await this.gameLink.send(
-      encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }),
-    );
+    await this.gameLink.send(encodeClientStatReport({ hpDelta: -damage, mpDelta: 0, flag: 0 }));
   }
 
   async increaseSkill(skillId: number): Promise<void> {
     if (!this.gameLink || !this.self || this.self.hp <= 0 || this.self.sp <= 0)
       throw new Error("SP requires a living character with available points");
-    if (this.skillPending || this.abilityPending || this.mesoPending || this.slotPending || this.shopPending || performance.now() < this.nextSkillAt)
+    if (
+      this.skillPending ||
+      this.abilityPending ||
+      this.mesoPending ||
+      this.slotPending ||
+      this.shopPending ||
+      performance.now() < this.nextSkillAt
+    )
       throw new Error("another stat/item request is pending or too soon");
     const packet = encodeSkillRequest(skillId);
     this.skillPending = true;
-    try { await this.gameLink.send(packet); }
-    catch (error) { this.skillPending = false; throw error; }
+    try {
+      await this.gameLink.send(packet);
+    } catch (error) {
+      this.skillPending = false;
+      throw error;
+    }
   }
 
   async emotion(value: number): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("emotion() needs a session in a field");
+    if (link === undefined) throw new Error("emotion() needs a session in a field");
     await link.send(encodeClientEmotion({ emotion: value }));
     const self = this.self;
     if (self !== undefined) {
@@ -1239,8 +1333,7 @@ export class ClientSession {
           count > 32767 ||
           (count === 0 &&
             Math.floor(
-              (this.latest?.items?.inventories[tab - 1]?.items.get(fromSlot)
-                ?.itemId ?? 0) / 10000,
+              (this.latest?.items?.inventories[tab - 1]?.items.get(fromSlot)?.itemId ?? 0) / 10000,
             ) !== 207)
         : count !== -1)
     )
@@ -1266,13 +1359,10 @@ export class ClientSession {
   async useItem(slot: number, itemId: number): Promise<void> {
     if (this.mesoPending) throw new Error("meso request pending");
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("useItem() needs a session in a field");
+    if (link === undefined) throw new Error("useItem() needs a session in a field");
     const family = Math.floor(itemId / 10000);
     if (family < 200 || family > 203) {
-      throw new Error(
-        `useItem(): ${itemId} is not a USE-tab consumable (200..203)`,
-      );
+      throw new Error(`useItem(): ${itemId} is not a USE-tab consumable (200..203)`);
     }
     const opcode = family === 203 ? 0x19 : 0x18;
     await link.send(encodeClientUseItem({ slot, itemId }, opcode));
@@ -1288,8 +1378,7 @@ export class ClientSession {
    */
   async clickObject(objectId: number): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("clickObject() needs a session in a field");
+    if (link === undefined) throw new Error("clickObject() needs a session in a field");
     await link.send(encodeClientObjectClick({ objectId }));
   }
 
@@ -1301,8 +1390,7 @@ export class ClientSession {
    */
   async shop(request: ClientShopRequest): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("shop() needs a session in a field");
+    if (link === undefined) throw new Error("shop() needs a session in a field");
     if (request.kind === "close") {
       // Original close has no 0x4B response and must not arm the trade gate.
       await link.send(encodeClientShopRequest(request));
@@ -1324,9 +1412,7 @@ export class ClientSession {
       request.kind !== "recharge" &&
       (!Number.isInteger(request.count) ||
         request.count <
-          (request.kind === "sell" && Math.floor(request.itemId / 10000) === 207
-            ? 0
-            : 1) ||
+          (request.kind === "sell" && Math.floor(request.itemId / 10000) === 207 ? 0 : 1) ||
         request.count > 65535 ||
         !Number.isInteger(request.itemId) ||
         request.itemId <= 0 ||
@@ -1343,25 +1429,41 @@ export class ClientSession {
   }
 
   /** Browser CNpc sender. Map identity is a web-bridge safety guard, not original wire data. */
-  async npcIdle(npcId:number,action:number,speech:number,mapId:number): Promise<void> {
-    const npc=this.npcs.get(npcId),link=this.gameLink;
-    if(!link||mapId!==this.mapId||!npc?.controlled)return;
-    if(!Number.isInteger(action)||!Number.isInteger(speech)||action<-128||action>127||speech<-128||speech>127)return;
-    await link.send(encodeClientNpcIdle({npcId,action,speech}));
+  async npcIdle(npcId: number, action: number, speech: number, mapId: number): Promise<void> {
+    const npc = this.npcs.get(npcId),
+      link = this.gameLink;
+    if (!link || mapId !== this.mapId || !npc?.controlled) return;
+    if (
+      !Number.isInteger(action) ||
+      !Number.isInteger(speech) ||
+      action < -128 ||
+      action > 127 ||
+      speech < -128 ||
+      speech > 127
+    )
+      return;
+    await link.send(encodeClientNpcIdle({ npcId, action, speech }));
   }
 
   /** One validated answer to the currently open 0x47; preserve its sub-op, not always say. */
   async talk(answer: number, detail: QuestReplyDetail = {}): Promise<void> {
-    const link = this.gameLink, body = this.activeQuest;
+    const link = this.gameLink,
+      body = this.activeQuest;
     if (link === undefined) throw new Error("talk() needs a session in a field");
     if (body === undefined) throw new Error("talk() needs an open NPC dialog");
     const reply = questReplyFor(body, answer, detail);
-    const packet = encodeQuestReply(reply), generation = this.questGeneration;
+    const packet = encodeQuestReply(reply),
+      generation = this.questGeneration;
     // Release before the write: a next-page 0x47 can arrive before the Promise continuation.
     this.activeQuest = undefined;
-    try { await link.send(packet); }
-    catch (error) {
-      if (this.gameLink === link && this.questGeneration === generation && this.activeQuest === undefined)
+    try {
+      await link.send(packet);
+    } catch (error) {
+      if (
+        this.gameLink === link &&
+        this.questGeneration === generation &&
+        this.activeQuest === undefined
+      )
         this.activeQuest = body;
       throw error;
     }
@@ -1379,10 +1481,7 @@ export class ClientSession {
   private applyInventoryChange(change: InventoryChange): void {
     const items = this.latest?.items;
     if (items === undefined) return;
-    const group =
-      change.slot < 0
-        ? items.worn
-        : items.inventories[change.inventory - 1]?.items;
+    const group = change.slot < 0 ? items.worn : items.inventories[change.inventory - 1]?.items;
     if (group === undefined) return;
     const key = (slot: number): number => (slot < 0 ? -slot : slot);
     if (change.op === INVENTORY_OP.put) {
@@ -1396,10 +1495,7 @@ export class ClientSession {
     if (change.op === INVENTORY_OP.swap) {
       const left = key(change.slot);
       const right = key(change.slot2);
-      const target =
-        change.slot2 < 0
-          ? items.worn
-          : items.inventories[change.inventory - 1]?.items;
+      const target = change.slot2 < 0 ? items.worn : items.inventories[change.inventory - 1]?.items;
       if (!target) return;
       const first = group.get(left);
       const second = target.get(right);
@@ -1427,8 +1523,11 @@ export class ClientSession {
     vy = 0,
     attr = 0,
   ): Promise<void> {
-    return this.movePath({originX: x, originY: y,
-      elements: [{attr, x, y, vx, vy, action, foothold, duration}]});
+    return this.movePath({
+      originX: x,
+      originY: y,
+      elements: [{ attr, x, y, vx, vy, action, foothold, duration }],
+    });
   }
 
   /** Ordered controller records, not a synthetic single 100ms endpoint. The bridge validates
@@ -1439,13 +1538,21 @@ export class ClientSession {
     if (link === undefined) throw new Error("movePath() needs a session in a field");
     const end = path.elements.at(-1);
     if (!end) throw new Error("movePath() needs at least one record");
-    const {x, y, action, foothold} = end;
-    await link.send(encodeClientUserMove({stageByte: 0, path}));
-    this.lastPosition = {x, y};
-    this.lastMovement = {action, foothold};
+    const { x, y, action, foothold } = end;
+    await link.send(encodeClientUserMove({ stageByte: 0, path }));
+    this.lastPosition = { x, y };
+    this.lastMovement = { action, foothold };
     const self = this.self;
-    if (self !== undefined) this.emit({kind: "user-move", characterId: self.characterId,
-      x, y, action, foothold, local: true});
+    if (self !== undefined)
+      this.emit({
+        kind: "user-move",
+        characterId: self.characterId,
+        x,
+        y,
+        action,
+        foothold,
+        local: true,
+      });
   }
 
   /**
@@ -1460,8 +1567,7 @@ export class ClientSession {
    */
   async usePortal(name: string): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("usePortal() needs a session in a field");
+    if (link === undefined) throw new Error("usePortal() needs a session in a field");
     if (name === "") throw new Error("usePortal() needs a portal name");
     await link.send(encodeClientInteract({ kind: INTERACT_KIND_CURSOR, name }));
   }
@@ -1470,13 +1576,10 @@ export class ClientSession {
   async revive(): Promise<void> {
     if (!this.gameLink || !this.self || this.self.hp > 0)
       throw new Error("Revive requires a dead field character");
-    if (performance.now() < this.nextReviveAt)
-      throw new Error("Revive request is already pending");
+    if (performance.now() < this.nextReviveAt) throw new Error("Revive request is already pending");
     this.nextReviveAt = performance.now() + 5000;
     try {
-      await this.gameLink.send(
-        encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }),
-      );
+      await this.gameLink.send(encodeClientInteract({ kind: INTERACT_KIND_REVIVE, name: "" }));
     } catch (error) {
       this.nextReviveAt = 0;
       throw error;
@@ -1485,15 +1588,9 @@ export class ClientSession {
 
   /** Original /헉맵 sender: c2s 0x0D, s32 mapId and an empty name. Server permission is authoritative. */
   async warpTo(mapId: number): Promise<void> {
-    if (
-      !Number.isSafeInteger(mapId) ||
-      mapId < 0 ||
-      mapId > 0x7fffffff ||
-      mapId === 999999999
-    )
+    if (!Number.isSafeInteger(mapId) || mapId < 0 || mapId > 0x7fffffff || mapId === 999999999)
       throw new Error("invalid map id");
-    if (!this.gameLink || !this.self)
-      throw new Error("map command requires an active field");
+    if (!this.gameLink || !this.self) throw new Error("map command requires an active field");
     if (this.self.hp <= 0) throw new Error("revive before using map commands");
     await this.gameLink.send(encodeClientInteract({ kind: mapId, name: "" }));
   }
@@ -1502,18 +1599,18 @@ export class ClientSession {
     this.gameLink?.close();
     this.link?.close();
     this.gameLink = undefined;
-    this.activeQuest = undefined;this.questGeneration++;
+    this.activeQuest = undefined;
+    this.questGeneration++;
     this.link = undefined;
     this.skillPending = false;
-    this.activeSkillPending=undefined;this.nextActiveAt=0;
-    this.partyId=0;this.partyMembers=[];this.partyInvite=undefined;
+    this.activeSkillPending = undefined;
+    this.nextActiveAt = 0;
+    this.partyId = 0;
+    this.partyMembers = [];
+    this.partyInvite = undefined;
     this.nextSkillAt = 0;
     this.userRequestUntil = 0;
-    this.slotPending =
-      this.shopPending =
-      this.mesoPending =
-      this.abilityPending =
-        false;
+    this.slotPending = this.shopPending = this.mesoPending = this.abilityPending = false;
   }
 
   private handleFieldPacket(plain: Uint8Array): void {
@@ -1522,23 +1619,34 @@ export class ClientSession {
     try {
       switch (opcode) {
         case PARTY_OPCODE.result: {
-          const result=readPartyResult(new PacketReader(plain,1));
-          if(result.kind==='invite')this.partyInvite=result.inviterId;
-          else if(result.kind==='created'){
-            this.partyId=result.partyId;this.partyMembers=this.self?[{characterId:this.self.characterId,name:this.self.name}]:[];
-          }else if(result.kind==='sync'||result.kind==='joined'||result.kind==='left'){
-            this.partyMembers=result.members.filter(m=>m.characterId!==0);
-            this.partyId=this.partyMembers.some(m=>m.characterId===this.self?.characterId)?result.partyId:0;
-          }else if(result.kind==='ended'){this.partyId=0;this.partyMembers=[];}
-          this.emit({kind:'party',result});return;
+          const result = readPartyResult(new PacketReader(plain, 1));
+          if (result.kind === "invite") this.partyInvite = result.inviterId;
+          else if (result.kind === "created") {
+            this.partyId = result.partyId;
+            this.partyMembers = this.self
+              ? [{ characterId: this.self.characterId, name: this.self.name }]
+              : [];
+          } else if (result.kind === "sync" || result.kind === "joined" || result.kind === "left") {
+            this.partyMembers = result.members.filter((m) => m.characterId !== 0);
+            this.partyId = this.partyMembers.some((m) => m.characterId === this.self?.characterId)
+              ? result.partyId
+              : 0;
+          } else if (result.kind === "ended") {
+            this.partyId = 0;
+            this.partyMembers = [];
+          }
+          this.emit({ kind: "party", result });
+          return;
         }
         case SYSTEM_NOTICE_OPCODE: {
-          const notice=readSystemNotice(new PacketReader(plain,1));
-          this.emit({kind:'system-notice',text:decodeChatText(notice.text)});return;
+          const notice = readSystemNotice(new PacketReader(plain, 1));
+          this.emit({ kind: "system-notice", text: decodeChatText(notice.text) });
+          return;
         }
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
-          this.activeSkillPending=undefined;this.nextActiveAt=0;
+          this.activeSkillPending = undefined;
+          this.nextActiveAt = 0;
           this.nextReviveAt = 0;
           this.userRequestUntil = 0;
           this.abilityPending = false;
@@ -1549,8 +1657,16 @@ export class ClientSession {
           this.slotPending = false;
           this.shopPending = false;
           this.nextSlotAt = 0;
-          this.attackRandom = new ClientRandom(field.randomSeedA, field.randomSeedB, field.randomSeedC);
-          this.touchRandom = new ClientRandom(field.randomSeedA, field.randomSeedB, field.randomSeedC);
+          this.attackRandom = new ClientRandom(
+            field.randomSeedA,
+            field.randomSeedB,
+            field.randomSeedC,
+          );
+          this.touchRandom = new ClientRandom(
+            field.randomSeedA,
+            field.randomSeedB,
+            field.randomSeedC,
+          );
           this.latest = field.character;
           this.self = selfOf(field.character);
           this.mapId = field.character.stats.mapId;
@@ -1559,7 +1675,8 @@ export class ClientSession {
           this.users.clear();
           this.mobs.clear();
           this.npcs.clear();
-          this.activeQuest = undefined;this.questGeneration++;
+          this.activeQuest = undefined;
+          this.questGeneration++;
           this.emit({
             kind: "field",
             mapId: this.mapId,
@@ -1598,11 +1715,8 @@ export class ClientSession {
         }
         case INVENTORY_OPCODE: {
           const update = readInventoryChange(new PacketReader(plain, 1));
-          for (const change of update.changes)
-            this.applyInventoryChange(change);
-          this.log(
-            `inventory: ${update.changes.length} change(s), timer ${update.result}`,
-          );
+          for (const change of update.changes) this.applyInventoryChange(change);
+          this.log(`inventory: ${update.changes.length} change(s), timer ${update.result}`);
           if (update.result) this.slotPending = false;
           this.emit({
             kind: "inventory",
@@ -1614,8 +1728,7 @@ export class ClientSession {
             this.latest &&
             update.changes.some(
               (c) =>
-                c.inventory === 1 &&
-                (c.slot < 0 || (c.op === INVENTORY_OP.swap && c.slot2 < 0)),
+                c.inventory === 1 && (c.slot < 0 || (c.op === INVENTORY_OP.swap && c.slot2 < 0)),
             )
           ) {
             this.self = selfOf(this.latest);
@@ -1631,9 +1744,7 @@ export class ClientSession {
             kind: "shop-open",
             shop: {
               shopId: opened.shopId,
-              ...(opened.items.some(
-                (line) => shopRechargeUnitPrice(line) !== undefined,
-              )
+              ...(opened.items.some((line) => shopRechargeUnitPrice(line) !== undefined)
                 ? {
                     rechargeables: opened.items.flatMap((line) => {
                       const unitPrice = shopRechargeUnitPrice(line);
@@ -1674,11 +1785,17 @@ export class ClientSession {
           // The packet carries its own text and one of five CUtilDlgEx bodies. The local game
           // currently sends say pages, but the bridge must not discard other original sub-ops.
           const talk = readQuestTalk(new PacketReader(plain, 1));
-          if (this.activeQuest !== undefined) throw new Error("second 0x47 while an NPC dialog is open");
+          if (this.activeQuest !== undefined)
+            throw new Error("second 0x47 while an NPC dialog is open");
           this.activeQuest = talk.body;
           this.questGeneration++;
           // Keep the legacy event name for CLI/bridge subscribers, but retain all five bodies.
-          this.emit({kind:"npc-say",npcId:talk.npcId,message:talk.body.message,body:talk.body});
+          this.emit({
+            kind: "npc-say",
+            npcId: talk.npcId,
+            message: talk.body.message,
+            body: talk.body,
+          });
           return;
         }
         case FIELD_OPCODE.requestRelease: {
@@ -1709,15 +1826,12 @@ export class ClientSession {
             user = this.users.get(look.characterId);
           if (!user) return;
           if (look.face !== undefined) user.face = look.face;
-          if (look.avatarItems !== undefined)
-            user.avatarItems = look.avatarItems;
+          if (look.avatarItems !== undefined) user.avatarItems = look.avatarItems;
           this.emit({
             kind: "user-look",
             characterId: look.characterId,
             ...(look.face !== undefined ? { face: look.face } : {}),
-            ...(look.avatarItems !== undefined
-              ? { avatarItems: look.avatarItems }
-              : {}),
+            ...(look.avatarItems !== undefined ? { avatarItems: look.avatarItems } : {}),
           });
           return;
         }
@@ -1761,24 +1875,41 @@ export class ClientSession {
         }
         case FIELD_OPCODE.userEffect: {
           const effect = readUserEffect(new PacketReader(plain, 1));
-          if(effect.effect===1)this.emit({kind:"skill-effect",characterId:effect.characterId,skillId:effect.skillId!,skillLevel:effect.skillLevel!});
-          else if(effect.effect===0)this.emit({ kind: "level-up", characterId: effect.characterId });
-          else this.emit({kind:"unknown",opcode,bytes:plain.length});
+          if (effect.effect === 1)
+            this.emit({
+              kind: "skill-effect",
+              characterId: effect.characterId,
+              skillId: effect.skillId!,
+              skillLevel: effect.skillLevel!,
+            });
+          else if (effect.effect === 0)
+            this.emit({ kind: "level-up", characterId: effect.characterId });
+          else this.emit({ kind: "unknown", opcode, bytes: plain.length });
           return;
         }
         case FIELD_OPCODE.userBalloon: {
-          const chat=readUserBalloon(new PacketReader(plain,1));
-          const user=chat.characterId===this.self?.characterId?this.self:this.users.get(chat.characterId);
-          if(user)this.emit({kind:"chat",channel:"field",characterId:chat.characterId,
-            name:user.name,text:decodeChatText(chat.text)});
+          const chat = readUserBalloon(new PacketReader(plain, 1));
+          const user =
+            chat.characterId === this.self?.characterId
+              ? this.self
+              : this.users.get(chat.characterId);
+          if (user)
+            this.emit({
+              kind: "chat",
+              channel: "field",
+              characterId: chat.characterId,
+              name: user.name,
+              text: decodeChatText(chat.text),
+            });
           return;
         }
         case FIELD_OPCODE.userMessage: {
           // Four shapes; 0x12 is a received whisper, 0x22 its later refusal notification (ADR-059).
           const subOp = plain[1];
-          if(subOp===USER_MESSAGE_WHISPER_REFUSED){
-            const value=readUserWhisperRefused(new PacketReader(plain,1));
-            this.emit({kind:"whisper-refused",name:decodeByteName(value.name)});return;
+          if (subOp === USER_MESSAGE_WHISPER_REFUSED) {
+            const value = readUserWhisperRefused(new PacketReader(plain, 1));
+            this.emit({ kind: "whisper-refused", name: decodeByteName(value.name) });
+            return;
           }
           if (subOp === USER_MESSAGE_CHAT) {
             const chat = readUserChat(new PacketReader(plain, 1));
@@ -1792,7 +1923,7 @@ export class ClientSession {
           }
           if (subOp === USER_MESSAGE_WHISPER_ANSWER) {
             const answer = readUserWhisperAnswer(new PacketReader(plain, 1));
-            this.userRequestUntil=0;
+            this.userRequestUntil = 0;
             this.emit({
               kind: "whisper-answer",
               name: decodeByteName(answer.name),
@@ -1802,7 +1933,7 @@ export class ClientSession {
           }
           if (subOp === USER_MESSAGE_FIND_ANSWER) {
             const answer = readUserFindAnswer(new PacketReader(plain, 1));
-            this.userRequestUntil=0;
+            this.userRequestUntil = 0;
             this.emit({
               kind: "find-answer",
               name: decodeByteName(answer.name),
@@ -1816,10 +1947,12 @@ export class ClientSession {
         case STAT_OPCODE: {
           const update = readStatUpdate(new PacketReader(plain, 1));
           this.applyStats(update.diff);
-          if(update.ack && this.activeSkillPending!==undefined){
-            const skillId=this.activeSkillPending;this.activeSkillPending=undefined;this.skillPending=false;
-            this.nextActiveAt=performance.now()+200; // 55BEB0 ACK re-stamps CWvsApp+28.
-            this.emit({kind:'active-skill-result',skillId,accepted:!!update.temporary});
+          if (update.ack && this.activeSkillPending !== undefined) {
+            const skillId = this.activeSkillPending;
+            this.activeSkillPending = undefined;
+            this.skillPending = false;
+            this.nextActiveAt = performance.now() + 200; // 55BEB0 ACK re-stamps CWvsApp+28.
+            this.emit({ kind: "active-skill-result", skillId, accepted: !!update.temporary });
           }
           if (update.temporary) this.emit({ kind: "temporary-stat", update: update.temporary });
           if (update.ack && this.mesoPending) {
@@ -1854,7 +1987,7 @@ export class ClientSession {
         }
         case MOB_OPCODE.move: {
           const move = readMobMove(new PacketReader(plain, 1));
-          const actionByte=(move.body.actionByte<<24)>>24; // 488BC0 tests the SIGN bit, 0x80 means keep.
+          const actionByte = (move.body.actionByte << 24) >> 24; // 488BC0 tests the SIGN bit, 0x80 means keep.
           const last = move.body.path.elements.at(-1);
           if (last === undefined) return;
           const mob = this.mobs.get(move.mobId);
@@ -1865,8 +1998,9 @@ export class ClientSession {
             x: last.x,
             y: last.y,
             path: move.body.path,
-            ...(actionByte>=0?{facing:actionByte&1}:{}),
-            actionByte,value:move.body.value,
+            ...(actionByte >= 0 ? { facing: actionByte & 1 } : {}),
+            actionByte,
+            value: move.body.value,
           });
           return;
         }
@@ -1892,13 +2026,14 @@ export class ClientSession {
           this.emit({
             kind: "user-attack",
             characterId: attack.characterId,
-            skillId:attack.skillId,skillLevel:attack.skillLevel,
+            skillId: attack.skillId,
+            skillLevel: attack.skillLevel,
             facingLeft: attack.facingLeft,
             shoot: opcode === FIELD_OPCODE.userShootAttack,
             magic: opcode === FIELD_OPCODE.userMagicAttack,
             action: attack.action,
             speed: attack.speed,
-            afterimage:attack.afterimage,
+            afterimage: attack.afterimage,
             projectileItemId: attack.projectileItemId,
             targets: attack.targets.map((target) => ({
               mobId: target.mobId,
@@ -1917,19 +2052,12 @@ export class ClientSession {
         }
         case DROP_OPCODE.remove: {
           const remove = readDropRemove(new PacketReader(plain, 1));
-          const reason =
-            remove.kind === 2
-              ? "taken"
-              : remove.kind === 1
-                ? "vanished"
-                : "gone";
+          const reason = remove.kind === 2 ? "taken" : remove.kind === 1 ? "vanished" : "gone";
           this.emit({
             kind: "drop-leave",
             dropId: remove.dropId,
             reason,
-            ...(remove.characterId === undefined
-              ? {}
-              : { characterId: remove.characterId }),
+            ...(remove.characterId === undefined ? {} : { characterId: remove.characterId }),
           });
           return;
         }
@@ -1943,29 +2071,31 @@ export class ClientSession {
           return;
         }
         case MOB_OPCODE.stat: {
-          const stat=readMobStat(new PacketReader(plain,1));
-          const mob=this.mobs.get(stat.mobId);if(mob)mob.mp=stat.mp;
-          this.emit({kind:'mob-stat',...stat});
+          const stat = readMobStat(new PacketReader(plain, 1));
+          const mob = this.mobs.get(stat.mobId);
+          if (mob) mob.mp = stat.mp;
+          this.emit({ kind: "mob-stat", ...stat });
           return;
         }
         case NPC_OPCODE.enterField: {
           // The client itself decides which form it is by whether the pool already has the id
           // (`sub_49F6C0`); the reader takes that answer instead of guessing from the bytes.
           const npcId = new PacketReader(plain, 1).readU32();
-          const npc = readNpcEnterField(
-            new PacketReader(plain, 1),
-            this.npcs.has(npcId),
-          );
+          const npc = readNpcEnterField(new PacketReader(plain, 1), this.npcs.has(npcId));
           if (npc.templateId === undefined) {
-            const existing=this.npcs.get(npcId);if(existing)existing.present=true;return;
+            const existing = this.npcs.get(npcId);
+            if (existing) existing.present = true;
+            return;
           } // known-id refresh
           const view: NpcView = {
             npcId: npc.npcId,
             templateId: npc.templateId,
             x: npc.x,
             y: npc.y,
-            facing: npc.facing&1,action:npc.facing,
-            present:true,controlled:false,
+            facing: npc.facing & 1,
+            action: npc.facing,
+            present: true,
+            controlled: false,
           };
           this.npcs.set(view.npcId, view);
           this.emit({ kind: "npc-enter", npc: view });
@@ -1973,33 +2103,45 @@ export class ClientSession {
         }
         case NPC_OPCODE.leaveField: {
           const npcId = readNpcId(new PacketReader(plain, 1));
-          const npc=this.npcs.get(npcId);
-          if(npc)npc.present=false;
-          if(!npc?.controlled) {
+          const npc = this.npcs.get(npcId);
+          if (npc) npc.present = false;
+          if (!npc?.controlled) {
             this.npcs.delete(npcId);
             this.emit({ kind: "npc-leave", npcId });
           }
           return;
         }
         case NPC_OPCODE.stateToggle: {
-          const state=readNpcState(new PacketReader(plain,1));
-          let npc=this.npcs.get(state.npcId);
-          if(!npc&&state.on) {
+          const state = readNpcState(new PacketReader(plain, 1));
+          let npc = this.npcs.get(state.npcId);
+          if (!npc && state.on) {
             // 49F260: unknown controlled id has the full enter tail, one byte after opcode.
-            const body=readNpcEnterField(new PacketReader(plain,2),false);
-            npc={npcId:body.npcId,templateId:body.templateId!,x:body.x,y:body.y,facing:body.facing&1,action:body.facing,
-              present:false,controlled:true};
-            this.npcs.set(npc.npcId,npc);this.emit({kind:"npc-enter",npc});
+            const body = readNpcEnterField(new PacketReader(plain, 2), false);
+            npc = {
+              npcId: body.npcId,
+              templateId: body.templateId!,
+              x: body.x,
+              y: body.y,
+              facing: body.facing & 1,
+              action: body.facing,
+              present: false,
+              controlled: true,
+            };
+            this.npcs.set(npc.npcId, npc);
+            this.emit({ kind: "npc-enter", npc });
           }
-          if(!npc)return;
-          npc.controlled=state.on;
-          this.emit({kind:"npc-controller",...state});
-          if(!npc.present&&!npc.controlled){this.npcs.delete(npc.npcId);this.emit({kind:"npc-leave",npcId:npc.npcId});}
+          if (!npc) return;
+          npc.controlled = state.on;
+          this.emit({ kind: "npc-controller", ...state });
+          if (!npc.present && !npc.controlled) {
+            this.npcs.delete(npc.npcId);
+            this.emit({ kind: "npc-leave", npcId: npc.npcId });
+          }
           return;
         }
         case NPC_OPCODE.update: {
-          const value=readNpcIdle(new PacketReader(plain,1),plain.length>7);
-          if(this.npcs.has(value.npcId))this.emit({kind:"npc-idle",...value});
+          const value = readNpcIdle(new PacketReader(plain, 1), plain.length > 7);
+          if (this.npcs.has(value.npcId)) this.emit({ kind: "npc-idle", ...value });
           return;
         }
         default:
@@ -2088,12 +2230,8 @@ export const CLIENT_EVENT_KINDS = [
  * already gone". The 2003 client plays `Mob/<id>.img/die1` for the first - a picture, not a removal,
  * so the page is told about it instead of silently losing the monster.
  */
-export function mobLeaveEvent(
-  leave: MobLeaveDelayed,
-  present: boolean,
-): ClientEvent | undefined {
-  if (leave.delayMs < 0)
-    return present ? { kind: "mob-leave", mobId: leave.mobId } : undefined;
+export function mobLeaveEvent(leave: MobLeaveDelayed, present: boolean): ClientEvent | undefined {
+  if (leave.delayMs < 0) return present ? { kind: "mob-leave", mobId: leave.mobId } : undefined;
   // The 0x30 delay is 0 for "starts now"; how long the animation runs is the monster's own
   // `die1` frames, which is the same sum the field's `dieMs` is made of (`game/mobs.ts`).
   return present ? { kind: "mob-die", mobId: leave.mobId } : undefined;

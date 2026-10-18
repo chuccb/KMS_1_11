@@ -1,5 +1,5 @@
-import {releaseOnInterrupt} from "./pointer.mjs";
-import {bodyPart,equipConflict,firstBagSlot,canWear} from './equip-rules.mjs';
+import {releaseOnInterrupt} from "./pointer.ts";
+import {bodyPart,equipConflict,firstBagSlot,canWear} from './equip-rules.ts';
 export {bodyPart,equipConflict,firstBagSlot,canWear};
 /** CUIEquip: 4D89F0 / 4D9110. Coordinates read from PE VA 005BC368, fourteen (s32 x,s32 y). */
 export const EQUIP_WINDOW = {

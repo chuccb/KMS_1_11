@@ -28,7 +28,12 @@ import {
   type QuestTalk,
 } from "../src/protocol/quest.ts";
 import { decodeCp949, encodeCp949 } from "../src/protocol/cp949.ts";
-import { NpcTalk, dialogueFromInfo, npcDialogueFrom, npcDialogueProvider } from "../src/game/dialogue.ts";
+import {
+  NpcTalk,
+  dialogueFromInfo,
+  npcDialogueFrom,
+  npcDialogueProvider,
+} from "../src/game/dialogue.ts";
 import {
   FIELD_OPCODE,
   describeClientFieldPacket,
@@ -45,7 +50,11 @@ const HEX = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 function roundTrip(packet: QuestTalk): QuestTalk {
   const bytes = encodeQuestTalk(packet);
   const parsed = readQuestTalk(new PacketReader(bytes, 1));
-  assert.equal(HEX(bytes).slice(0, 2), QUEST_TALK_OPCODE.toString(16), "the packet opens with 0x47");
+  assert.equal(
+    HEX(bytes).slice(0, 2),
+    QUEST_TALK_OPCODE.toString(16),
+    "the packet opens with 0x47",
+  );
   return parsed;
 }
 
@@ -69,11 +78,18 @@ test("0x47 say: u8 unknown, u32 npcId, u8 sub-op, CP949 text, Prev/Next bytes", 
       "bec8b3e7c7cfbcbcbfe421" + // "안녕하세요!" in CP949
       "0000", // the two bytes sub_535C60 stores; the client's own notice box passes 0, 0
   );
-  assert.deepEqual(roundTrip({ unknownA: 0, npcId: 7, body: { kind: "say", message: "안녕하세요!", unknownA: 0, unknownB: 0 } }), {
-    unknownA: 0,
-    npcId: 7,
-    body: { kind: "say", message: "안녕하세요!", unknownA: 0, unknownB: 0 },
-  });
+  assert.deepEqual(
+    roundTrip({
+      unknownA: 0,
+      npcId: 7,
+      body: { kind: "say", message: "안녕하세요!", unknownA: 0, unknownB: 0 },
+    }),
+    {
+      unknownA: 0,
+      npcId: 7,
+      body: { kind: "say", message: "안녕하세요!", unknownA: 0, unknownB: 0 },
+    },
+  );
 });
 
 test("0x47 say carries the two extra bytes verbatim (sub_535C60 stores them)", () => {
@@ -83,26 +99,43 @@ test("0x47 say carries the two extra bytes verbatim (sub_535C60 stores them)", (
     body: { kind: "say", message: "안녕", unknownA: 2, unknownB: 3 },
   });
   assert.equal(HEX(bytes), "470107000000000400bec8b3e70203");
-  const parsed = roundTrip({ unknownA: 1, npcId: 7, body: { kind: "say", message: "안녕", unknownA: 2, unknownB: 3 } });
+  const parsed = roundTrip({
+    unknownA: 1,
+    npcId: 7,
+    body: { kind: "say", message: "안녕", unknownA: 2, unknownB: 3 },
+  });
   assert.deepEqual(parsed.body, { kind: "say", message: "안녕", unknownA: 2, unknownB: 3 });
   assert.equal(parsed.unknownA, 1);
 });
 
 test("0x47 confirm (dialog kind 1) is the message and nothing else", () => {
-  const bytes = encodeQuestTalk({ unknownA: 0, npcId: 259, body: { kind: "confirm", message: "정말로?" } });
+  const bytes = encodeQuestTalk({
+    unknownA: 0,
+    npcId: 259,
+    body: { kind: "confirm", message: "정말로?" },
+  });
   assert.equal(HEX(bytes), "470003010000010700c1a4b8bbb7ce3f");
   assert.equal(bytes.length, 16);
-  assert.deepEqual(roundTrip({ unknownA: 0, npcId: 259, body: { kind: "confirm", message: "정말로?" } }).body, {
-    kind: "confirm",
-    message: "정말로?",
-  });
+  assert.deepEqual(
+    roundTrip({ unknownA: 0, npcId: 259, body: { kind: "confirm", message: "정말로?" } }).body,
+    {
+      kind: "confirm",
+      message: "정말로?",
+    },
+  );
 });
 
 test("0x47 askText: message, default text, then two s16 that are a length range", () => {
   const packet: QuestTalk = {
     unknownA: 0,
     npcId: 3,
-    body: { kind: "askText", message: "길드명을 입력하십시오.", defaultText: "abc", minLength: 4, maxLength: 12 },
+    body: {
+      kind: "askText",
+      message: "길드명을 입력하십시오.",
+      defaultText: "abc",
+      minLength: 4,
+      maxLength: 12,
+    },
   };
   const bytes = encodeQuestTalk(packet);
   assert.equal(
@@ -126,14 +159,26 @@ test("0x47 askText's two numbers are signed: a negative minimum survives", () =>
   });
   assert.equal(HEX(bytes), "470001000000020100780000ffff0c00");
   const parsed = readQuestTalk(new PacketReader(bytes, 1));
-  assert.deepEqual(parsed.body, { kind: "askText", message: "x", defaultText: "", minLength: -1, maxLength: 12 });
+  assert.deepEqual(parsed.body, {
+    kind: "askText",
+    message: "x",
+    defaultText: "",
+    minLength: -1,
+    maxLength: 12,
+  });
 });
 
 test("0x47 askNumber: three u32 - default, minimum, maximum (the client's own caller order)", () => {
   const packet: QuestTalk = {
     unknownA: 0,
     npcId: 3,
-    body: { kind: "askNumber", message: "얼마를 드리시겠습니까?", defaultValue: 1, min: 1, max: 50000 },
+    body: {
+      kind: "askNumber",
+      message: "얼마를 드리시겠습니까?",
+      defaultValue: 1,
+      min: 1,
+      max: 50000,
+    },
   };
   const bytes = encodeQuestTalk(packet);
   assert.equal(
@@ -141,7 +186,8 @@ test("0x47 askNumber: three u32 - default, minimum, maximum (the client's own ca
     "4700" +
       "03000000" +
       "03" + // sub-op 3 = askNumber, dialog kind 2
-      "1600" + "bef3b8b6b8a620b5e5b8aebdc3b0dabdc0b4cfb1ee3f" + // "얼마를 드리시겠습니까?" (22 bytes)
+      "1600" +
+      "bef3b8b6b8a620b5e5b8aebdc3b0dabdc0b4cfb1ee3f" + // "얼마를 드리시겠습니까?" (22 bytes)
       "01000000" + // default 1 - the client's own mesos dialog passes (1, 1, mesos)
       "01000000" + // min 1
       "50c30000", // max 50000
@@ -152,10 +198,13 @@ test("0x47 askNumber: three u32 - default, minimum, maximum (the client's own ca
 test("0x47 kind 4 keeps its shape and is never built by the game layer", () => {
   const bytes = encodeQuestTalk({ unknownA: 0, npcId: 9, body: { kind: "menu", message: "메뉴" } });
   assert.equal(HEX(bytes), "470009000000040400b8deb4ba");
-  assert.deepEqual(roundTrip({ unknownA: 0, npcId: 9, body: { kind: "menu", message: "메뉴" } }).body, {
-    kind: "menu",
-    message: "메뉴",
-  });
+  assert.deepEqual(
+    roundTrip({ unknownA: 0, npcId: 9, body: { kind: "menu", message: "메뉴" } }).body,
+    {
+      kind: "menu",
+      message: "메뉴",
+    },
+  );
 });
 
 test("0x47 refuses a sub-op the client has no branch for", () => {
@@ -165,7 +214,11 @@ test("0x47 refuses a sub-op the client has no branch for", () => {
 
 test("0x47 describes itself in one line, in every shape", () => {
   assert.equal(
-    describeQuestTalk({ unknownA: 0, npcId: 2003, body: { kind: "say", message: "한 줄\n둘째 줄", unknownA: 0, unknownB: 0 } }),
+    describeQuestTalk({
+      unknownA: 0,
+      npcId: 2003,
+      body: { kind: "say", message: "한 줄\n둘째 줄", unknownA: 0, unknownB: 0 },
+    }),
     'talk to npc 2003: say "한 줄" (0,0)',
     "only the first line of a multi-line text is quoted",
   );
@@ -174,11 +227,19 @@ test("0x47 describes itself in one line, in every shape", () => {
     'talk to npc 1: confirm "정말?"',
   );
   assert.equal(
-    describeQuestTalk({ unknownA: 0, npcId: 1, body: { kind: "askText", message: "이름?", defaultText: "abc", minLength: 4, maxLength: 12 } }),
+    describeQuestTalk({
+      unknownA: 0,
+      npcId: 1,
+      body: { kind: "askText", message: "이름?", defaultText: "abc", minLength: 4, maxLength: 12 },
+    }),
     'talk to npc 1: askText "이름?" default="abc" length=4..12',
   );
   assert.equal(
-    describeQuestTalk({ unknownA: 0, npcId: 1, body: { kind: "askNumber", message: "얼마?", defaultValue: 1, min: 1, max: 50000 } }),
+    describeQuestTalk({
+      unknownA: 0,
+      npcId: 1,
+      body: { kind: "askNumber", message: "얼마?", defaultValue: 1, min: 1, max: 50000 },
+    }),
     'talk to npc 1: askNumber "얼마?" default=1 range=1..50000',
   );
   assert.equal(
@@ -193,7 +254,11 @@ test("the field describer knows 0x47 by name and decodes it whole", () => {
     /^0x47 CQuestMan\(npc dialog\): \(truncated: /,
     "an opcode byte on its own is a cut-short body, not a silently empty dialog",
   );
-  const bytes = encodeQuestTalk({ unknownA: 0, npcId: 2003, body: { kind: "say", message: "안녕", unknownA: 0, unknownB: 0 } });
+  const bytes = encodeQuestTalk({
+    unknownA: 0,
+    npcId: 2003,
+    body: { kind: "say", message: "안녕", unknownA: 0, unknownB: 0 },
+  });
   assert.equal(
     describeFieldPacket(bytes),
     '0x47 CQuestMan(npc dialog): talk to npc 2003: say "안녕" (0,0)',
@@ -207,15 +272,27 @@ test("the field describer knows 0x47 by name and decodes it whole", () => {
 test("0x15: u8 sub-op, u8 answer, and the text/number only for a primary answer", () => {
   assert.equal(HEX(encodeQuestReply({ kind: "say", answer: QUEST_ANSWER.primary })), "150001");
   assert.equal(HEX(encodeQuestReply({ kind: "say", answer: QUEST_ANSWER.none })), "1500ff");
-  assert.equal(HEX(encodeQuestReply({ kind: "confirm", answer: QUEST_ANSWER.secondary })), "150100");
-  assert.equal(HEX(encodeQuestReply({ kind: "askText", answer: QUEST_ANSWER.primary, text: "길드" })), "1502010400b1e6b5e5");
+  assert.equal(
+    HEX(encodeQuestReply({ kind: "confirm", answer: QUEST_ANSWER.secondary })),
+    "150100",
+  );
+  assert.equal(
+    HEX(encodeQuestReply({ kind: "askText", answer: QUEST_ANSWER.primary, text: "길드" })),
+    "1502010400b1e6b5e5",
+  );
   assert.equal(
     HEX(encodeQuestReply({ kind: "askText", answer: QUEST_ANSWER.secondary })),
     "150200",
     "a cancelled text input carries nothing: sub_4A5F40 writes the answer byte only",
   );
-  assert.equal(HEX(encodeQuestReply({ kind: "askNumber", answer: QUEST_ANSWER.primary, value: 1234 })), "150301d2040000");
-  assert.equal(HEX(encodeQuestReply({ kind: "menu", answer: QUEST_ANSWER.primary, value: 0xffffffff })), "150401ffffffff");
+  assert.equal(
+    HEX(encodeQuestReply({ kind: "askNumber", answer: QUEST_ANSWER.primary, value: 1234 })),
+    "150301d2040000",
+  );
+  assert.equal(
+    HEX(encodeQuestReply({ kind: "menu", answer: QUEST_ANSWER.primary, value: 0xffffffff })),
+    "150401ffffffff",
+  );
 });
 
 test("0x15 round-trips, and the answer byte is what the client can produce", () => {
@@ -244,8 +321,14 @@ test("0x15 describes itself in one line", () => {
   assert.equal(describeQuestReply({ kind: "say", answer: 1 }), "15 talk answer: primary");
   assert.equal(describeQuestReply({ kind: "confirm", answer: 0 }), "15 talk answer: secondary");
   assert.equal(describeQuestReply({ kind: "say", answer: 0xff }), "15 talk answer: no answer");
-  assert.equal(describeQuestReply({ kind: "askText", answer: 1, text: "로빈" }), '15 talk answer: primary "로빈"');
-  assert.equal(describeQuestReply({ kind: "askNumber", answer: 1, value: 42 }), "15 talk answer: primary 42");
+  assert.equal(
+    describeQuestReply({ kind: "askText", answer: 1, text: "로빈" }),
+    '15 talk answer: primary "로빈"',
+  );
+  assert.equal(
+    describeQuestReply({ kind: "askNumber", answer: 1, value: 42 }),
+    "15 talk answer: primary 42",
+  );
   assert.equal(describeQuestReply({ kind: "say", answer: 7 }), "15 talk answer: answer 7");
   // The client -> server describer names its own opcode, the way "33 object click" does.
   assert.equal(
@@ -293,13 +376,17 @@ test("an NPC's lines come out of its own image, in index order", needsArchive, (
   assert.equal(rina?.lines.length, 4);
 });
 
-test("an NPC with no info/speak says nothing (it is not a dialogue with empty lines)", needsArchive, () => {
-  // 메이플운수 중형택시 carries info/quest but no info/speak - a real case, not a hypothetical one.
-  const taxi = npcDialogueFrom(archive!, 1012000);
-  assert.equal(taxi?.name, "메이플운수 중형택시");
-  assert.deepEqual(taxi?.lines, []);
-  assert.equal(npcDialogueFrom(archive!, 1), undefined, "no Npc/0000001.img in this archive");
-});
+test(
+  "an NPC with no info/speak says nothing (it is not a dialogue with empty lines)",
+  needsArchive,
+  () => {
+    // 메이플운수 중형택시 carries info/quest but no info/speak - a real case, not a hypothetical one.
+    const taxi = npcDialogueFrom(archive!, 1012000);
+    assert.equal(taxi?.name, "메이플운수 중형택시");
+    assert.deepEqual(taxi?.lines, []);
+    assert.equal(npcDialogueFrom(archive!, 1), undefined, "no Npc/0000001.img in this archive");
+  },
+);
 
 test("the provider caches per id, like every other archive provider", needsArchive, () => {
   const provider = npcDialogueProvider(archive!);
@@ -322,7 +409,11 @@ test("dialogueFromInfo sorts by the index the key spells and drops what is not a
     },
   };
   const dialogue = dialogueFromInfo(1, info);
-  assert.deepEqual(dialogue.lines, ["first", "second"], "empty and non-numeric entries are not lines");
+  assert.deepEqual(
+    dialogue.lines,
+    ["first", "second"],
+    "empty and non-numeric entries are not lines",
+  );
   assert.equal(dialogue.quest, undefined, "an empty quest name is not a quest name");
   assert.deepEqual(dialogueFromInfo(2, {}).lines, []);
 });
@@ -337,7 +428,11 @@ test("NpcTalk walks the lines and stops at the last one", () => {
   assert.equal(talk.lineCount, 2);
   assert.equal(talk.lineIndex, 0);
   const first = readQuestTalk(new PacketReader(talk.packet(), 1));
-  assert.deepEqual(first, { unknownA: 0, npcId: 4, body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 } });
+  assert.deepEqual(first, {
+    unknownA: 0,
+    npcId: 4,
+    body: { kind: "say", message: "one", unknownA: 0, unknownB: 1 },
+  });
 
   const second = talk.advance();
   assert.ok(second);

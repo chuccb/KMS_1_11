@@ -1,10 +1,10 @@
 /** Explicit developer-only WZ viewer. Uses the live game's pure rules but its OWN actor, clock,
  * metadata request, effect queue and canvas. No character mutations, sounds, sends or gameplay RNG.
  */
-import {nativeMobActions} from './mob-reaction.mjs';
-import {chooseMobAttack} from './mob-attacks.mjs';
-import {mobAttackEffects} from './mob-attack-effects.mjs';
-import {animationFrame} from './animation.mjs';
+import {nativeMobActions} from './mob-reaction.ts';
+import {chooseMobAttack} from './mob-attacks.ts';
+import {mobAttackEffects} from './mob-attack-effects.ts';
+import {animationFrame} from './animation.ts';
 export function mobAttackPreview({canvas,image}){
   let generation=0,request,data,selected,error,key,start,retryAt=0;
   const layers=[],owners=new Map(),fx=mobAttackEffects({metadata:()=>data,emit:e=>layers.push(e)});

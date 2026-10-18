@@ -18,10 +18,7 @@ import {
   type PartyResult,
 } from "../src/protocol/party.ts";
 import { PartyRegistry } from "../src/game/parties.ts";
-import {
-  describeClientFieldPacket,
-  describeFieldPacket,
-} from "../src/protocol/field.ts";
+import { describeClientFieldPacket, describeFieldPacket } from "../src/protocol/field.ts";
 
 /** `07000000 09000000 00000000 …` for two members, then the 13-byte names, per FINDINGS 4.37. */
 const TWO_MEMBERS: PartyMember[] = [
@@ -74,7 +71,10 @@ test("0x26 round-trips, and refuses a type it has no sender for", () => {
     assert.deepEqual(readClientPartyRequest(new PacketReader(bytes, 1)), request);
   }
   assert.equal(hex(encodeClientPartyRequest({ kind: "create" })).slice(0, 2), "26");
-  assert.throws(() => readClientPartyRequest(new PacketReader(bytesFromHex("2605"), 1)), RangeError);
+  assert.throws(
+    () => readClientPartyRequest(new PacketReader(bytesFromHex("2605"), 1)),
+    RangeError,
+  );
   assert.throws(
     () => readClientPartyRequest(new PacketReader(bytesFromHex("2603"), 1)),
     PacketUnderflowError,
@@ -83,10 +83,22 @@ test("0x26 round-trips, and refuses a type it has no sender for", () => {
 
 test("describeClientPartyRequest names each request", () => {
   assert.equal(describeClientPartyRequest({ kind: "create" }), "0x26 party: create");
-  assert.equal(describeClientPartyRequest({ kind: "leave", unknown: 0 }), "0x26 party: leave (unknown=0)");
-  assert.equal(describeClientPartyRequest({ kind: "accept", inviterId: 7 }), "0x26 party: accept inviter=7");
-  assert.equal(describeClientPartyRequest({ kind: "invite", targetId: 9 }), "0x26 party: invite target=9");
-  assert.equal(describeClientPartyRequest({ kind: "kick", targetId: 9 }), "0x26 party: kick target=9");
+  assert.equal(
+    describeClientPartyRequest({ kind: "leave", unknown: 0 }),
+    "0x26 party: leave (unknown=0)",
+  );
+  assert.equal(
+    describeClientPartyRequest({ kind: "accept", inviterId: 7 }),
+    "0x26 party: accept inviter=7",
+  );
+  assert.equal(
+    describeClientPartyRequest({ kind: "invite", targetId: 9 }),
+    "0x26 party: invite target=9",
+  );
+  assert.equal(
+    describeClientPartyRequest({ kind: "kick", targetId: 9 }),
+    "0x26 party: kick target=9",
+  );
   // The decode tool reaches it through the field describer, like the other c2s packets.
   assert.equal(
     describeClientFieldPacket(encodeClientPartyRequest({ kind: "invite", targetId: 9 })),
@@ -104,7 +116,13 @@ test("the 102-byte roster is `u32 id[6]` + `char name[6][13]`", () => {
   // Six slots is the client's own limit (`sub_45F5C0` copies 0x66 bytes).
   assert.equal(PARTY_MAX_MEMBERS, 6);
   assert.throws(
-    () => encodePartyTable([...TWO_MEMBERS, ...TWO_MEMBERS, ...TWO_MEMBERS, { characterId: 1, name: "x" }]),
+    () =>
+      encodePartyTable([
+        ...TWO_MEMBERS,
+        ...TWO_MEMBERS,
+        ...TWO_MEMBERS,
+        { characterId: 1, name: "x" },
+      ]),
     RangeError,
   );
 });
@@ -140,7 +158,10 @@ test("0x10 party results: bytes for every type the client reads", () => {
     `100a010000000900000001000300616c74${TABLE_ONE}`,
   );
   // `flag = 0` is "the leader left, the party is gone": two u32s and nothing else.
-  assert.equal(hex(encodePartyResult({ kind: "ended", partyId: 1, leaderId: 7 })), "100a010000000700000000");
+  assert.equal(
+    hex(encodePartyResult({ kind: "ended", partyId: 1, leaderId: 7 })),
+    "100a010000000700000000",
+  );
   assert.equal(hex(encodePartyResult({ kind: "alreadyInParty" })), "1007");
   assert.equal(hex(encodePartyResult({ kind: "beginnerCannotCreate" })), "1008");
   assert.equal(hex(encodePartyResult({ kind: "notInParty" })), "100b");

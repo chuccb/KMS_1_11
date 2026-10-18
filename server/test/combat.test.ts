@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { damageRangeFor, damageRangeOf, damageStatsOf, rollDamage, watkOf } from "../src/game/combat.ts";
+import {
+  damageRangeFor,
+  damageRangeOf,
+  damageStatsOf,
+  rollDamage,
+  watkOf,
+} from "../src/game/combat.ts";
 import type { ItemCatalog } from "../src/game/iteminfo.ts";
 
 /** Two weapons and a glove, which is all `watkOf` is allowed to read. */
@@ -44,7 +50,11 @@ test("the damage range is (main*4 + secondary) * watk / 100, with a tenth of it 
   assert.deepEqual(damageRangeOf(12, 5, 0), { min: 1, max: 1 });
   // The floor never exceeds the ceiling on a tiny roll.
   assert.deepEqual(damageRangeOf(0, 0, 1), { min: 1, max: 1 });
-  assert.deepEqual(damageRangeOf(-5, -5, -5), { min: 1, max: 1 }, "a corrupt record cannot make a negative hit");
+  assert.deepEqual(
+    damageRangeOf(-5, -5, -5),
+    { min: 1, max: 1 },
+    "a corrupt record cannot make a negative hit",
+  );
 });
 
 test("a character's range is its job's pair, its own stats and everything it wears", () => {
@@ -55,18 +65,34 @@ test("a character's range is its job's pair, its own stats and everything it wea
   );
   // (12*4 + 5) * 19 / 100 = 10.07 -> 1..10
   assert.deepEqual(range, { min: 1, max: 10 });
-  const magician = damageRangeFor({ job: 200, str: 4, dex: 4, int: 30, luk: 8 }, [1302000], CATALOG);
+  const magician = damageRangeFor(
+    { job: 200, str: 4, dex: 4, int: 30, luk: 8 },
+    [1302000],
+    CATALOG,
+  );
   // (30*4 + 8) * 17 / 100 = 21.76 -> 2..21
   assert.deepEqual(magician, { min: 2, max: 21 });
 });
 
 test("the roll stays inside the range, and both ends are reachable", () => {
   const range = { min: 3, max: 8 };
-  assert.equal(rollDamage(range, () => 0), 3);
-  assert.equal(rollDamage(range, () => 0.999999), 8);
-  assert.equal(rollDamage({ min: 5, max: 5 }, () => 0.5), 5);
+  assert.equal(
+    rollDamage(range, () => 0),
+    3,
+  );
+  assert.equal(
+    rollDamage(range, () => 0.999999),
+    8,
+  );
+  assert.equal(
+    rollDamage({ min: 5, max: 5 }, () => 0.5),
+    5,
+  );
   // Every value in between is one the roll can return, and nothing outside it is.
   const seen = new Set<number>();
   for (let i = 0; i < 1000; i++) seen.add(rollDamage(range, Math.random));
-  assert.deepEqual([...seen].sort((a, b) => a - b), [3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(
+    [...seen].sort((a, b) => a - b),
+    [3, 4, 5, 6, 7, 8],
+  );
 });

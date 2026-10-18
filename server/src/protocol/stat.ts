@@ -65,7 +65,11 @@
  * 4CBBD0 removes overlapping flags from older icon entries before appending the new source.
  * Older notes named the first word panelFlags and the second unknownId; that was incorrect.
  */
-import { readTemporaryStat, writeTemporaryStat, type TemporaryStatUpdate } from "./temporarystat.ts";
+import {
+  readTemporaryStat,
+  writeTemporaryStat,
+  type TemporaryStatUpdate,
+} from "./temporarystat.ts";
 import { PacketReader, PacketWriter } from "./packet.ts";
 import type { CharacterStats } from "./chardata.ts";
 
@@ -77,7 +81,10 @@ export const STAT_OPCODE = 0x0d;
  * never touches (`id`, `name`, `gender`, `mapId`, `unknown101` - the last two only travel in
  * `CharacterData`). Deriving the union from `CharacterStats` keeps the two modules from drifting.
  */
-export type StatDiffName = Exclude<keyof CharacterStats, "id" | "name" | "gender" | "mapId" | "unknown101">;
+export type StatDiffName = Exclude<
+  keyof CharacterStats,
+  "id" | "name" | "gender" | "mapId" | "unknown101"
+>;
 
 /** A diff: only the fields that changed. */
 export type StatDiff = Partial<Record<StatDiffName, number>>;
@@ -182,7 +189,9 @@ function assertFits(field: StatDiffFieldSpec, value: number): void {
   if (field.signed === true) {
     const limit = field.bytes === 2 ? 0x7fff : 0x7f;
     if (value < -limit - 1 || value > limit) {
-      throw new RangeError(`stat diff field "${field.name}" (s${field.bytes * 8}) cannot hold ${value}`);
+      throw new RangeError(
+        `stat diff field "${field.name}" (s${field.bytes * 8}) cannot hold ${value}`,
+      );
     }
     return;
   }
@@ -190,7 +199,9 @@ function assertFits(field: StatDiffFieldSpec, value: number): void {
   if (value < 0 || value > limit) {
     throw new RangeError(
       `stat diff field "${field.name}" (u${field.bytes * 8}) cannot hold ${value}` +
-        (field.bytes === 1 ? " - the 0x0d reader takes one byte for this field (FINDINGS 4.21.1)" : ""),
+        (field.bytes === 1
+          ? " - the 0x0d reader takes one byte for this field (FINDINGS 4.21.1)"
+          : ""),
     );
   }
 }
@@ -215,14 +226,16 @@ export function describeStatUpdate(update: StatUpdate): string {
   const parts = STAT_DIFF_FIELDS.filter((field) => update.diff[field.name] !== undefined).map(
     (field) => `${field.name}=${update.diff[field.name]}`,
   );
-  const tail = update.temporary ? ` temporary=${update.temporary.durationMs}ms source=${update.temporary.sourceIsSkill ? "skill" : "item"}:${update.temporary.sourceId} ${JSON.stringify(update.temporary.values)}` : "";
+  const tail = update.temporary
+    ? ` temporary=${update.temporary.durationMs}ms source=${update.temporary.sourceIsSkill ? "skill" : "item"}:${update.temporary.sourceId} ${JSON.stringify(update.temporary.values)}`
+    : "";
   return `ack=${update.ack === true ? 1 : 0} ${parts.length === 0 ? "(no fields)" : parts.join(" ")}${tail}`;
 }
 
 /** `sp` is the one signed field (`sub_45DD80`); everything else is unsigned in the client's reader. */
 function readSigned(reader: PacketReader, field: StatDiffFieldSpec): number {
   const raw = reader.readU16();
-  return field.signed === true ? ((raw << 16) >> 16) : raw;
+  return field.signed === true ? (raw << 16) >> 16 : raw;
 }
 
 /**

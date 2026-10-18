@@ -46,16 +46,8 @@
  * 4.11.8), and the log line for a refusal. This module knows no packets beyond the two shapes it
  * returns.
  */
-import {
-  INVENTORY_OP,
-  INVENTORY_TAB,
-  type InventoryChange,
-} from "../protocol/inventory.ts";
-import {
-  WORN_SLOT_LIMIT,
-  wornSlotOfItem,
-  type CharacterItems,
-} from "../protocol/chardata.ts";
+import { INVENTORY_OP, INVENTORY_TAB, type InventoryChange } from "../protocol/inventory.ts";
+import { WORN_SLOT_LIMIT, wornSlotOfItem, type CharacterItems } from "../protocol/chardata.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { ClientChangeSlot } from "../protocol/field.ts";
 import { inventoryTabOfItemId } from "./rewards.ts";
@@ -99,9 +91,7 @@ export interface ChangeSlotDrop {
 }
 
 export type ChangeSlotOutcome =
-  | ChangeSlotDone
-  | ChangeSlotDrop
-  | { kind: "failed"; reason: ChangeSlotFailure };
+  ChangeSlotDone | ChangeSlotDrop | { kind: "failed"; reason: ChangeSlotFailure };
 
 /**
  * Applies one `0x17` to a character's items, in place.
@@ -116,20 +106,16 @@ export function applyChangeSlot(
 ): ChangeSlotOutcome {
   const { tab, fromSlot, toSlot, count } = request;
   if (tab < 1 || tab > 4) return fail("unknownTab");
-  if (fromSlot === 0 || toSlot < -WORN_SLOT_LIMIT)
-    return fail("slotOutOfRange");
+  if (fromSlot === 0 || toSlot < -WORN_SLOT_LIMIT) return fail("slotOutOfRange");
   // A negative slot is a worn item, and only the equip tab has one (the client's `0x0B` encoder says
   // the same thing: a negative slot on another tab is not a slot that client can address).
-  if ((fromSlot < 0 || toSlot < 0) && tab !== INVENTORY_TAB.equip)
-    return fail("slotOutOfRange");
+  if ((fromSlot < 0 || toSlot < 0) && tab !== INVENTORY_TAB.equip) return fail("slotOutOfRange");
   // Everything past here needs the slot, and a throw-away needs the item before it can be priced.
   const tabItems = items.inventories[tab - 1]!;
   const read = (slot: number): ItemSlot | undefined =>
     slot < 0 ? items.worn.get(-slot) : tabItems.items.get(slot);
   const fits = (item: ItemSlot, slot: number): boolean =>
-    slot < 0
-      ? wornSlotOfItem(item.itemId) === -slot
-      : inventoryTabOfItemId(item.itemId) === tab;
+    slot < 0 ? wornSlotOfItem(item.itemId) === -slot : inventoryTabOfItemId(item.itemId) === tab;
   const write = (slot: number, item: ItemSlot): void => {
     if (slot < 0) items.worn.set(-slot, item);
     else tabItems.items.set(slot, item);
@@ -143,8 +129,7 @@ export function applyChangeSlot(
   if (source === undefined) return fail("emptySlot");
   // A slot number the client made up: the tab's capacity is what its own window has.
   if (fromSlot > tabItems.capacity) return fail("slotOutOfRange");
-  if (!fits(source, fromSlot))
-    return fail(fromSlot < 0 ? "wrongPart" : "itemNotInTab");
+  if (!fits(source, fromSlot)) return fail(fromSlot < 0 ? "wrongPart" : "itemNotInTab");
 
   // `toSlot = 0` is the ground (`sub_463BE0` sends `tab, from, 0, numberOfItems`): the item leaves and
   // the field is told (`FieldInstance.dropItem`). The count is the client's own choice, so it is
@@ -188,18 +173,15 @@ export function applyChangeSlot(
   // The three move senders always pass -1; only the throw-away path passes a count.
   if (count !== -1) return fail("badCount");
   // Dropped back where it was picked up: a no-op, but an answered one (an empty `0x0B`).
-  if (fromSlot === toSlot)
-    return { kind: "done", changes: [], lookChanged: false };
+  if (fromSlot === toSlot) return { kind: "done", changes: [], lookChanged: false };
 
   if (toSlot > tabItems.capacity) return fail("slotOutOfRange");
   // The destination has to hold it too. For a worn slot that one test *is* "it is an equip and it
   // belongs to that body part" - `wornSlotOfItem` answers `null` for anything else, so no separate
   // "is this even an equip" branch exists.
-  if (!fits(source, toSlot))
-    return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
+  if (!fits(source, toSlot)) return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
   const displaced = read(toSlot);
-  if (displaced !== undefined && !fits(displaced, fromSlot))
-    return fail("displacedItemDoesNotFit");
+  if (displaced !== undefined && !fits(displaced, fromSlot)) return fail("displacedItemDoesNotFit");
 
   // Native sub_465B50/sub_465C60: two-hand/shield and overall/pants cannot coexist.
   // Plan every write before touching the record; the server's atomic relocation is a policy.
@@ -219,8 +201,7 @@ export function applyChangeSlot(
           ? -11
           : part === 105 && read(-6)
             ? -6
-            : part === 106 &&
-                Math.floor((read(-5)?.itemId ?? 0) / 10000) === 105
+            : part === 106 && Math.floor((read(-5)?.itemId ?? 0) / 10000) === 105
               ? -5
               : 0;
     if (conflict && !plan.has(conflict)) {

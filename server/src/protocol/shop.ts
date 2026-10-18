@@ -144,9 +144,7 @@ export function encodeShopOpen(shop: ShopOpen): Uint8Array {
         );
       }
     } else if (line.cash !== undefined) {
-      throw new RangeError(
-        `0x4a: item ${line.itemId} is not a 207 item but carries a cash block`,
-      );
+      throw new RangeError(`0x4a: item ${line.itemId} is not a 207 item but carries a cash block`);
     }
     writer.writeU32(line.itemId);
     writer.writeU32(line.price);
@@ -170,9 +168,7 @@ export function readShopOpen(reader: PacketReader): ShopOpen {
         : undefined;
     const maxCount = reader.readU16();
     items.push(
-      cash === undefined
-        ? { itemId, price, maxCount }
-        : { itemId, price, maxCount, cash },
+      cash === undefined ? { itemId, price, maxCount } : { itemId, price, maxCount, cash },
     );
   }
   return { shopId, items };
@@ -181,9 +177,7 @@ export function readShopOpen(reader: PacketReader): ShopOpen {
 /** One line for the `decode` tool: `shop 2003 with 4 rows (2000000 x25 ...)`. */
 export function describeShopOpen(shop: ShopOpen): string {
   if (shop.items.length === 0) return `shop ${shop.shopId} (empty)`;
-  const rows = shop.items.map(
-    (line) => `${line.itemId} at ${line.price} up to ${line.maxCount}`,
-  );
+  const rows = shop.items.map((line) => `${line.itemId} at ${line.price} up to ${line.maxCount}`);
   return `shop ${shop.shopId} with ${shop.items.length} row(s): ${rows.join(", ")}`;
 }
 
@@ -225,9 +219,7 @@ export type ClientShopRequest =
   | { kind: "close" };
 
 /** Build one `0x16` request (opcode included) - the client's side of the dialogue, for tests and traces. */
-export function encodeClientShopRequest(
-  request: ClientShopRequest,
-): Uint8Array {
+export function encodeClientShopRequest(request: ClientShopRequest): Uint8Array {
   const writer = new PacketWriter(12);
   writer.writeByte(CLIENT_SHOP_OPCODE);
   if (request.kind === "close") {
@@ -239,9 +231,7 @@ export function encodeClientShopRequest(
     writer.writeU16(request.slot);
     return writer.toBytes();
   }
-  writer.writeByte(
-    request.kind === "buy" ? SHOP_REQUEST.buy : SHOP_REQUEST.sell,
-  );
+  writer.writeByte(request.kind === "buy" ? SHOP_REQUEST.buy : SHOP_REQUEST.sell);
   writer.writeU16(request.kind === "buy" ? request.row : request.slot);
   writer.writeU32(request.itemId);
   writer.writeU16(request.count);
@@ -252,8 +242,7 @@ export function encodeClientShopRequest(
 export function readClientShopRequest(reader: PacketReader): ClientShopRequest {
   const action = reader.readByte();
   if (action === SHOP_REQUEST.close) return { kind: "close" };
-  if (action === SHOP_REQUEST.recharge)
-    return { kind: "recharge", slot: reader.readU16() };
+  if (action === SHOP_REQUEST.recharge) return { kind: "recharge", slot: reader.readU16() };
   if (action === SHOP_REQUEST.buy || action === SHOP_REQUEST.sell) {
     const position = reader.readU16();
     const itemId = reader.readU32();
@@ -268,8 +257,7 @@ export function readClientShopRequest(reader: PacketReader): ClientShopRequest {
 /** One line for the `decode` tool: `16 buy row 2 item 2000000 x1`. */
 export function describeClientShopRequest(request: ClientShopRequest): string {
   if (request.kind === "close") return "16 shop close";
-  if (request.kind === "recharge")
-    return `16 shop recharge slot ${request.slot}`;
+  if (request.kind === "recharge") return `16 shop recharge slot ${request.slot}`;
   if (request.kind === "buy") {
     return `16 shop buy row ${request.row} item ${request.itemId} x${request.count}`;
   }
@@ -303,19 +291,13 @@ export function describeClientObjectClick(click: ClientObjectClick): string {
 /** The once-opaque 207 block: `4B4AD0` reads the exact +24 copied by `4B3780` as double.
  * Keep the raw `cash` property for old trace consumers, but never interpret it as a cash serial. */
 export function encodeRechargeUnitPrice(price: number): Uint8Array {
-  if (!Number.isFinite(price) || price <= 0)
-    throw new RangeError("invalid recharge unit price");
+  if (!Number.isFinite(price) || price <= 0) throw new RangeError("invalid recharge unit price");
   const bytes = new Uint8Array(8);
   new DataView(bytes.buffer).setFloat64(0, price, true);
   return bytes;
 }
 export function shopRechargeUnitPrice(line: ShopLine): number | undefined {
-  if (Math.floor(line.itemId / 10000) !== 207 || line.cash?.length !== 8)
-    return undefined;
-  const price = new DataView(
-    line.cash.buffer,
-    line.cash.byteOffset,
-    8,
-  ).getFloat64(0, true);
+  if (Math.floor(line.itemId / 10000) !== 207 || line.cash?.length !== 8) return undefined;
+  const price = new DataView(line.cash.buffer, line.cash.byteOffset, 8).getFloat64(0, true);
   return Number.isFinite(price) && price > 0 ? price : undefined;
 }

@@ -1,4 +1,4 @@
-import {releaseOnInterrupt} from "./pointer.mjs";
+import {releaseOnInterrupt} from "./pointer.ts";
 /** Original CUIMiniMap: sub_4E52C0, sub_4E5C70, sub_4E6430; config sub_43D750.
  * No modern map-name header, invented monster dots or rescaled whole-map thumbnail. */
 export const MINI_FRAME = 'UI/UIWindow.img/MiniMap';

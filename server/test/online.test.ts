@@ -87,7 +87,11 @@ test("a seat keeper claims, watches and releases together", async (t) => {
   assert.equal(online.isOnline("admin"), true);
   assert.equal(online.sessionsOf("admin")[0]?.peer, "10.0.0.9:53140");
   assert.equal(keeper.size, 1);
-  assert.equal(heartbeat.watching, 1, "a seat nobody can prove is alive is a seat that locks a player out");
+  assert.equal(
+    heartbeat.watching,
+    1,
+    "a seat nobody can prove is alive is a seat that locks a player out",
+  );
 
   keeper.release(socket);
   assert.equal(online.isOnline("admin"), false);

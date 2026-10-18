@@ -1,26 +1,54 @@
-import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
-import {nativeWeaponMastery} from "../game/nativecombat.ts";
-import {magicLeg,clipMagicRay,MAGIC_RANGE,MAGIC_HEIGHT} from "../../../client/magiccombat.mjs";
-import {activeSkillAmmo} from "../../../client/active-skills.mjs";
-import {learnedSkillLevel} from "../game/skills.ts";
-import {temporaryStats} from "../../../client/temporarystats.mjs";
-import {learnedActive,activeTemporary,validatedActiveMelee,validatedActiveRanged,validatedActiveMagic,type ActiveArt} from "../game/activeskills.ts";
-import {readClientSkillUse,CLIENT_SKILL_USE_OPCODE} from "../protocol/skilluse.ts";
-import { attackDuration, shotRelease, attackHitDelay } from "../../../client/attack-timing.mjs";
-import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
-import {encodeSystemNotice} from '../protocol/notice.ts';
-import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
+import { attackProfileAtTier } from "../../../client/attack-presentation.ts";
+import { nativeWeaponMastery } from "../game/nativecombat.ts";
+import { magicLeg, clipMagicRay, MAGIC_RANGE, MAGIC_HEIGHT } from "../../../client/magiccombat.ts";
+import { activeSkillAmmo } from "../../../client/active-skills.ts";
+import { learnedSkillLevel } from "../game/skills.ts";
+import { temporaryStats } from "../../../client/temporarystats.ts";
+import {
+  learnedActive,
+  activeTemporary,
+  validatedActiveMelee,
+  validatedActiveRanged,
+  validatedActiveMagic,
+  type ActiveArt,
+} from "../game/activeskills.ts";
+import { readClientSkillUse, CLIENT_SKILL_USE_OPCODE } from "../protocol/skilluse.ts";
+import { attackDuration, shotRelease, attackHitDelay } from "../../../client/attack-timing.ts";
+import { CLIENT_NPC_IDLE_OPCODE, readNpcIdle } from "../protocol/npc.ts";
+import { encodeSystemNotice } from "../protocol/notice.ts";
 import { characterStatBasis } from "../game/characterstats.ts";
 import { equipmentFromTemplate, planBlankStarterRepair } from "../game/equipment.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
-import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
-import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
-import {equipAdmission} from "../game/equipadmission.ts";
-import {planRangedPreparation,rangedPreviewKind,rangedPreviewChoices} from "../game/rangedpreview.ts";
-import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
+import { NATIVE_JOB_NAMES } from "../../../client/jobs.ts";
+import {
+  planTestTool,
+  testToolKind,
+  type TestCheckpoint,
+  type TestToolResult,
+} from "../game/testtools.ts";
+import { equipAdmission } from "../game/equipadmission.ts";
+import {
+  planRangedPreparation,
+  rangedPreviewKind,
+  rangedPreviewChoices,
+} from "../game/rangedpreview.ts";
+import {
+  SKILL_REQUEST_OPCODE,
+  readSkillRequest,
+  encodeSkillUpdate,
+  type SkillChange,
+} from "../protocol/skills.ts";
 import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
-import { planBasicAmmo, spendBasicAmmo, basicShotRange, validatedBasicAttack,
-  BASIC_ATTACK_TRANSPORT_GRACE_MS, BASIC_SHOT_POSITION_SLOP_X, BASIC_SHOT_POSITION_SLOP_Y, type BasicAttackProvider } from "../game/basicattack.ts";
+import {
+  planBasicAmmo,
+  spendBasicAmmo,
+  basicShotRange,
+  validatedBasicAttack,
+  BASIC_ATTACK_TRANSPORT_GRACE_MS,
+  BASIC_SHOT_POSITION_SLOP_X,
+  BASIC_SHOT_POSITION_SLOP_Y,
+  type BasicAttackProvider,
+} from "../game/basicattack.ts";
 import {
   MESO_DROP_OPCODE,
   MESO_DROP_MIN,
@@ -28,10 +56,7 @@ import {
   MESO_DROP_INTERVAL_MS,
   readMesoDrop,
 } from "../protocol/mesodrop.ts";
-import {
-  ABILITY_REQUEST_OPCODE,
-  readAbilityRequest,
-} from "../protocol/ability.ts";
+import { ABILITY_REQUEST_OPCODE, readAbilityRequest } from "../protocol/ability.ts";
 import { spendAbility } from "../game/ability.ts";
 import { characterGrowthContext, type GrowthSkillProvider } from "../game/growth.ts";
 import { foldByteName } from "../protocol/cp949.ts";
@@ -73,11 +98,7 @@ import {
 import type { MobTemplate, MobDamage } from "../game/mobs.ts";
 import type { DropPolicy } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
-import {
-  FieldRegistry,
-  type FieldInstance,
-  type FieldMember,
-} from "../game/world.ts";
+import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
 import { MesoWallet, pickUpDrop, takeItem, grantItem } from "../game/rewards.ts";
 import { applyChangeSlot } from "../game/inventory.ts";
 import { reviveMapId, spawnPortalIndex, type MapData } from "../game/map.ts";
@@ -87,7 +108,6 @@ import {
   CLIENT_FIELD_OPCODE,
   describeClientFieldPacket,
   describeClientStatReport,
-  describeClientUserRequest,
   describeUserChat,
   encodeUserChat,
   encodeUserBalloon,
@@ -160,12 +180,7 @@ import {
   type ClientMiniRoomRequest,
   type MiniRoomParticipant,
 } from "../protocol/miniroom.ts";
-import {
-  TradeRegistry,
-  isTradeSlot,
-  settleTrade,
-  tabOfItem,
-} from "../game/trades.ts";
+import { TradeRegistry, isTradeSlot, settleTrade, tabOfItem } from "../game/trades.ts";
 import {
   MESSENGER_INVITE_RESULT,
   MESSENGER_OPCODE,
@@ -182,7 +197,7 @@ import {
 } from "../protocol/messenger.ts";
 import { MessengerRegistry, type MessengerRoom } from "../game/messenger.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
-import { INVENTORY_TAB, encodeInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
+import { encodeInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
@@ -193,11 +208,7 @@ import {
   readClientObjectClick,
   readClientShopRequest,
 } from "../protocol/shop.ts";
-import {
-  shopResultCode,
-  type ShopDef,
-  type ShopKeeper,
-} from "../game/shops.ts";
+import { shopResultCode, type ShopDef, type ShopKeeper } from "../game/shops.ts";
 import { NpcTalk, type NpcDialogue } from "../game/dialogue.ts";
 import {
   QUEST_ANSWER,
@@ -384,9 +395,7 @@ export class LoginServer {
       where: "login",
     });
     this.server = net.createServer((socket) => this.onConnection(socket));
-    this.server.on("error", (error) =>
-      this.log(`listen error: ${error.message}`),
-    );
+    this.server.on("error", (error) => this.log(`listen error: ${error.message}`));
   }
 
   get port(): number {
@@ -454,7 +463,8 @@ export class LoginServer {
     if (this.options.itemCatalog) {
       for (const [slot, item] of worn) {
         const fresh = equipmentFromTemplate(item.itemId, this.options.itemCatalog);
-        if (!fresh) throw new Error(`Starting equipment ${item.itemId} has no supported WZ template`);
+        if (!fresh)
+          throw new Error(`Starting equipment ${item.itemId} has no supported WZ template`);
         worn.set(slot, fresh);
       }
     }
@@ -467,15 +477,8 @@ export class LoginServer {
     stats.appearanceB = look.hair;
     stats.mapId = this.options.startMapId ?? DEFAULT_MAP_ID;
     stats.level = 1;
-    const dice = validCreationDice(appearance.slice(6))
-      ? appearance.slice(6)
-      : [5, 5, 5, 10];
-    [stats.str, stats.dex, stats.int, stats.luk] = dice as [
-      number,
-      number,
-      number,
-      number,
-    ];
+    const dice = validCreationDice(appearance.slice(6)) ? appearance.slice(6) : [5, 5, 5, 10];
+    [stats.str, stats.dex, stats.int, stats.luk] = dice as [number, number, number, number];
     stats.hp = 50;
     stats.maxHp = 50;
     stats.mp = 50;
@@ -486,12 +489,9 @@ export class LoginServer {
 
   private onConnection(socket: net.Socket): void {
     this.sockets.add(socket);
-    const clientSendSeed =
-      this.options.handshake?.clientSendSeed ?? randomSeed();
-    const clientRecvSeed =
-      this.options.handshake?.clientRecvSeed ?? randomSeed();
-    const body =
-      this.options.handshake?.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
+    const clientSendSeed = this.options.handshake?.clientSendSeed ?? randomSeed();
+    const clientRecvSeed = this.options.handshake?.clientRecvSeed ?? randomSeed();
+    const body = this.options.handshake?.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
     if (body.length !== HANDSHAKE_BODY_BYTES) {
       throw new RangeError(
         `handshake body must be ${HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
@@ -514,14 +514,14 @@ export class LoginServer {
     );
 
     socket.on("data", (chunk) => {
-      for (const event of deframer.push(new Uint8Array(chunk))) {
+      for (const event of deframer.push(
+        new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
+      )) {
         if (event.kind !== "packet") continue;
         // Any packet at all is proof of life for the heartbeat: the client is talking to us.
         this.heartbeat.note(socket);
         if (!event.headerOk) {
-          this.log(
-            `conn: dropping packet with a bad header (0x${hex(event.header)})`,
-          );
+          this.log(`conn: dropping packet with a bad header (0x${hex(event.header)})`);
           continue;
         }
         try {
@@ -530,8 +530,7 @@ export class LoginServer {
           this.log(`conn: handler error: ${(error as Error).message}`);
         }
       }
-      if (deframer.failure)
-        this.log(`conn: session ended: ${deframer.failure}`);
+      if (deframer.failure) this.log(`conn: session ended: ${deframer.failure}`);
     });
     socket.on("error", () => this.sockets.delete(socket));
     socket.on("close", () => {
@@ -541,11 +540,7 @@ export class LoginServer {
     });
   }
 
-  private reply(
-    socket: net.Socket,
-    sendState: CipherState,
-    body: Uint8Array,
-  ): void {
+  private reply(socket: net.Socket, sendState: CipherState, body: Uint8Array): void {
     socket.write(encodeSessionPacket(body, sendState, "s2c"));
   }
 
@@ -577,20 +572,12 @@ export class LoginServer {
         // `sub_4D0DB0`). Telling them apart is what the 2003 client was written for.
         if (!account) {
           this.log(`  login refused: no account named "${packet.username}"`);
-          this.reply(
-            socket,
-            sendState,
-            encodeLoginResult(LOGIN_RESULT.notRegistered),
-          );
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.notRegistered));
           return;
         }
         if (account.password !== packet.password) {
           this.log(`  login refused for "${packet.username}": wrong password`);
-          this.reply(
-            socket,
-            sendState,
-            encodeLoginResult(LOGIN_RESULT.wrongPassword),
-          );
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.wrongPassword));
           return;
         }
         // One account, one live session: the client has a message for exactly this - "현재 접속중인
@@ -601,11 +588,7 @@ export class LoginServer {
           this.log(
             `  login refused: "${packet.username}" is already online (${describeSessions(held)})`,
           );
-          this.reply(
-            socket,
-            sendState,
-            encodeLoginResult(LOGIN_RESULT.alreadyConnected),
-          );
+          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.alreadyConnected));
           return;
         }
         state.stage = "world";
@@ -639,11 +622,7 @@ export class LoginServer {
           this.log(
             `  world index ${packet.worldId} is out of range (${this.options.worlds.length} worlds)`,
           );
-          this.reply(
-            socket,
-            sendState,
-            encodeWorldSelectResult(LOGIN_RESULT.systemError),
-          );
+          this.reply(socket, sendState, encodeWorldSelectResult(LOGIN_RESULT.systemError));
           return;
         }
         state.stage = "char";
@@ -669,11 +648,7 @@ export class LoginServer {
         );
         if (!character) {
           this.log(`  character ${packet.characterId} does not exist`);
-          this.reply(
-            socket,
-            sendState,
-            encodeSelectCharacterResult(LOGIN_RESULT.systemError),
-          );
+          this.reply(socket, sendState, encodeSelectCharacterResult(LOGIN_RESULT.systemError));
           return;
         }
         const characterId = this.handoffs.issue({
@@ -703,10 +678,7 @@ export class LoginServer {
         delete state.checkedName;
         delete state.appearanceHint;
         const taken = this.nameTaken(packet.name);
-        let valid = validCreationName(
-          packet.name,
-          this.options.creationCatalog?.forbidden,
-        );
+        let valid = validCreationName(packet.name, this.options.creationCatalog?.forbidden);
         try {
           state.appearanceHint = validateCreationLook(
             packet.appearance,
@@ -744,18 +716,13 @@ export class LoginServer {
         // for every failure (the *why* is this log), and 0 is the one value it never decodes a record
         // from (`sub_4329A0`; see `encodeCreateCharacterResult`).
         if (account.characters.length >= 3) {
-          this.log(
-            `  create refused: "${state.username}" already has three characters`,
-          );
+          this.log(`  create refused: "${state.username}" already has three characters`);
           this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
         }
         if (
           state.checkedName !== packet.name ||
-          !validCreationName(
-            packet.name,
-            this.options.creationCatalog?.forbidden,
-          ) ||
+          !validCreationName(packet.name, this.options.creationCatalog?.forbidden) ||
           !validCreationDice(state.appearanceHint?.slice(6) ?? []) ||
           this.nameTaken(packet.name)
         ) {
@@ -772,11 +739,7 @@ export class LoginServer {
         );
         delete state.checkedName;
         account.characters.push(created);
-        this.reply(
-          socket,
-          sendState,
-          encodeCreateCharacterResult(withDefaultLook(created)),
-        );
+        this.reply(socket, sendState, encodeCreateCharacterResult(withDefaultLook(created)));
         this.log(
           `  created "${created.stats.name}" (id ${created.stats.id}) ${describeWorn(created)}`,
         );
@@ -794,20 +757,12 @@ export class LoginServer {
         if (index < 0) {
           // The client throws CTerminateException when the id is not in its three slots, so
           // replying with the wrong id would kill the connection. Say nothing instead.
-          this.log(
-            `  delete ignored: character ${packet.characterId} is not in the account`,
-          );
+          this.log(`  delete ignored: character ${packet.characterId} is not in the account`);
           return;
         }
         const [removed] = account.characters.splice(index, 1);
-        this.reply(
-          socket,
-          sendState,
-          encodeDeleteCharacterResult(packet.characterId, 1),
-        );
-        this.log(
-          `  deleted "${removed?.stats.name ?? "?"}" (id ${packet.characterId})`,
-        );
+        this.reply(socket, sendState, encodeDeleteCharacterResult(packet.characterId, 1));
+        this.log(`  deleted "${removed?.stats.name ?? "?"}" (id ${packet.characterId})`);
         this.persist();
         return;
       }
@@ -821,9 +776,7 @@ export class LoginServer {
         return;
 
       case "unknown":
-        this.log(
-          `  note: unmapped opcode kept as ${packet.body.length} raw byte(s)`,
-        );
+        this.log(`  note: unmapped opcode kept as ${packet.body.length} raw byte(s)`);
         return;
     }
   }
@@ -839,20 +792,14 @@ export class LoginServer {
     try {
       this.options.persist?.();
     } catch (error) {
-      this.log(
-        `persist failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      this.log(`persist failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private nameTaken(name: string): boolean {
     const wanted = foldByteName(name);
     for (const account of this.options.accounts.values()) {
-      if (
-        account.characters.some(
-          (entry) => foldByteName(entry.stats.name) === wanted,
-        )
-      )
+      if (account.characters.some((entry) => foldByteName(entry.stats.name) === wanted))
         return true;
     }
     return false;
@@ -961,11 +908,11 @@ export interface GameEntryServerOptions {
   /** WZ basic action/speed facts; absent data refuses shots rather than inventing them. */
   basicAttack?: BasicAttackProvider;
   /** WZ path selection; absent art must not turn an Energy Bolt into an instant/free cast. */
-  activeSkillArt?:(id:number,level:number)=>ActiveArt;
+  activeSkillArt?: (id: number, level: number) => ActiveArt;
   /** Actual learned HP/MP passive x/y values from Skill/100.img and Skill/200.img. */
   growthSkill?: GrowthSkillProvider;
   skills?: SkillCatalog;
-  itemCatalog?:ItemCatalog;
+  itemCatalog?: ItemCatalog;
   /** MakeCharInfo whitelist for explicit legacy-blank starter repair; absent means no candidates. */
   starterEquipmentIds?: ReadonlySet<number>;
   /**
@@ -1055,7 +1002,7 @@ interface FieldSession extends FieldMember {
   attackReadyAt?: number;
   skillReadyAt?: number;
   temporary?: ReturnType<typeof temporaryStats>;
-  temporaryWeaponId?:number;
+  temporaryWeaponId?: number;
 }
 
 export class GameEntryServer {
@@ -1074,7 +1021,7 @@ export class GameEntryServer {
     instance: FieldInstance<FieldSession>;
     attack: ClientAttack;
     dueAt: number;
-    opcode?:number;
+    opcode?: number;
     deaths: Map<number, number>;
   }[] = [];
   /**
@@ -1116,43 +1063,23 @@ export class GameEntryServer {
       where: "game",
     });
     this.fields = new FieldRegistry<FieldSession>({
-      ...(options.mapProvider !== undefined
-        ? { mapProvider: options.mapProvider }
-        : {}),
-      ...(options.mobTemplate !== undefined
-        ? { mobTemplate: options.mobTemplate }
-        : {}),
-      ...(options.npcTemplate !== undefined
-        ? { npcTemplate: options.npcTemplate }
-        : {}),
+      ...(options.mapProvider !== undefined ? { mapProvider: options.mapProvider } : {}),
+      ...(options.mobTemplate !== undefined ? { mobTemplate: options.mobTemplate } : {}),
+      ...(options.npcTemplate !== undefined ? { npcTemplate: options.npcTemplate } : {}),
       ...(options.npcWalk !== undefined ? { npcWalk: options.npcWalk } : {}),
       ...(options.mobSpeedPxPerSecond !== undefined
         ? { mobSpeedPxPerSecond: options.mobSpeedPxPerSecond }
         : {}),
-      ...(options.mobRespawnMs !== undefined
-        ? { mobRespawnMs: options.mobRespawnMs }
-        : {}),
-      ...(options.dropPolicy !== undefined
-        ? { dropPolicy: options.dropPolicy }
-        : {}),
-      ...(options.dropLifetimeMs !== undefined
-        ? { dropLifetimeMs: options.dropLifetimeMs }
-        : {}),
-      ...(options.pickupRangeX !== undefined
-        ? { pickupRangeX: options.pickupRangeX }
-        : {}),
-      ...(options.pickupRangeY !== undefined
-        ? { pickupRangeY: options.pickupRangeY }
-        : {}),
-      ...(options.dropSpreadPx !== undefined
-        ? { dropSpreadPx: options.dropSpreadPx }
-        : {}),
+      ...(options.mobRespawnMs !== undefined ? { mobRespawnMs: options.mobRespawnMs } : {}),
+      ...(options.dropPolicy !== undefined ? { dropPolicy: options.dropPolicy } : {}),
+      ...(options.dropLifetimeMs !== undefined ? { dropLifetimeMs: options.dropLifetimeMs } : {}),
+      ...(options.pickupRangeX !== undefined ? { pickupRangeX: options.pickupRangeX } : {}),
+      ...(options.pickupRangeY !== undefined ? { pickupRangeY: options.pickupRangeY } : {}),
+      ...(options.dropSpreadPx !== undefined ? { dropSpreadPx: options.dropSpreadPx } : {}),
       log: (line) => this.options.log?.(`game: ${line}`),
     });
     this.server = net.createServer((socket) => this.onConnection(socket));
-    this.server.on("error", (error) =>
-      this.options.log?.(`game listen error: ${error.message}`),
-    );
+    this.server.on("error", (error) => this.options.log?.(`game listen error: ${error.message}`));
   }
 
   get port(): number {
@@ -1215,9 +1142,9 @@ export class GameEntryServer {
     this.pendingShots = [];
     for (const shot of ready) {
       if (
-        this.sessionsByCharacter.get(shot.session.characterId) !==
-          shot.session ||
-        shot.session.instance !== shot.instance || (shot.opcode!==undefined && shot.session.character.stats.hp<=0)
+        this.sessionsByCharacter.get(shot.session.characterId) !== shot.session ||
+        shot.session.instance !== shot.instance ||
+        (shot.opcode !== undefined && shot.session.character.stats.hp <= 0)
       )
         continue;
       if (now < shot.dueAt) {
@@ -1225,13 +1152,11 @@ export class GameEntryServer {
         continue;
       }
       const targets = shot.attack.targets.filter(
-        (target) =>
-          shot.instance.mobs.mob(target.mobId)?.deaths ===
-          shot.deaths.get(target.mobId),
+        (target) => shot.instance.mobs.mob(target.mobId)?.deaths === shot.deaths.get(target.mobId),
       );
       this.resolveAttackDamage(
         shot.session,
-        shot.opcode??CLIENT_FIELD_OPCODE.shootAttack,
+        shot.opcode ?? CLIENT_FIELD_OPCODE.shootAttack,
         { ...shot.attack, targets, targetCount: targets.length },
         now,
         false,
@@ -1244,35 +1169,56 @@ export class GameEntryServer {
   }
 
   /** Authenticated browser phase bridge: relative ages only, never grant controller ownership. */
-  mobPresentation(username:string,characterId:number,mobId:number){
-    const session=this.sessionsByCharacter.get(characterId);
-    if(!session||session.username!==username)return;
-    return session.instance.mobs.presentation(mobId,Date.now());
+  mobPresentation(username: string, characterId: number, mobId: number) {
+    const session = this.sessionsByCharacter.get(characterId);
+    if (!session || session.username !== username) return;
+    return session.instance.mobs.presentation(mobId, Date.now());
   }
 
   /** Out-of-band, authenticated development API; deliberately NOT a made-up native opcode. */
   testTools(username: string, characterId: number, request: unknown): TestToolResult {
-    const session=this.sessionsByCharacter.get(characterId);
-    if(!session || session.username!==username) throw new Error("體驗工具只允許操作目前帳號已進場的角色。");
-    const kind=testToolKind(request), key=JSON.stringify([username,characterId]);
-    const enabled=this.options.allowTestTools?.(username)===true;
-    if(!enabled && kind!=="state") throw new Error("此帳號未獲 --test-tools 授權。");
-    const available=(id:number)=>id===0 || this.options.skills?.book(id)!==undefined;
-    let message=enabled?"體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。":"此帳號未獲 --test-tools 授權；未更動角色。";
-    if(enabled && kind!=="state") {
-      if(session.shop || session.talk || this.trades.roomOf(characterId) || this.pendingShots.some(s=>s.session===session)) throw new Error("請先結束商店、對話、交易或等待射擊結算。");
-      if(kind === "repair-starters") {
-        if ((request as {confirmed?: unknown}).confirmed !== true) throw new Error("請勾選確認後才修復舊起始裝備。");
+    const session = this.sessionsByCharacter.get(characterId);
+    if (!session || session.username !== username)
+      throw new Error("體驗工具只允許操作目前帳號已進場的角色。");
+    const kind = testToolKind(request),
+      key = JSON.stringify([username, characterId]);
+    const enabled = this.options.allowTestTools?.(username) === true;
+    if (!enabled && kind !== "state") throw new Error("此帳號未獲 --test-tools 授權。");
+    const available = (id: number) => id === 0 || this.options.skills?.book(id) !== undefined;
+    let message = enabled
+      ? "體驗工具已授權；第一次變更能力前會自動記住能力與技能。還原點不跨服務重啟。"
+      : "此帳號未獲 --test-tools 授權；未更動角色。";
+    if (enabled && kind !== "state") {
+      if (
+        session.shop ||
+        session.talk ||
+        this.trades.roomOf(characterId) ||
+        this.pendingShots.some((s) => s.session === session)
+      )
+        throw new Error("請先結束商店、對話、交易或等待射擊結算。");
+      if (kind === "repair-starters") {
+        if ((request as { confirmed?: unknown }).confirmed !== true)
+          throw new Error("請勾選確認後才修復舊起始裝備。");
         if (session.character.stats.hp <= 0) throw new Error("請先以原復活窗復活。");
-        const plan = planBlankStarterRepair(session.character.items ?? emptyCharacterItems(),
-          this.options.itemCatalog, this.options.starterEquipmentIds ?? new Set());
+        const plan = planBlankStarterRepair(
+          session.character.items ?? emptyCharacterItems(),
+          this.options.itemCatalog,
+          this.options.starterEquipmentIds ?? new Set(),
+        );
         // Pre-encode before touching the authoritative record. No IDs/rolled values/skills are reset.
         const packet = encodeInventoryChange(plan.changes);
         if (plan.changes.length) {
-          const future = {...session.character, items: plan.items, stats: {...session.character.stats}};
-          const diff = applyVitalReport(future.stats, {hpDelta:0, mpDelta:0},
-            characterStatBasis(future, this.options.itemCatalog).basic);
-          const statPacket = encodeStatUpdate({diff});
+          const future = {
+            ...session.character,
+            items: plan.items,
+            stats: { ...session.character.stats },
+          };
+          const diff = applyVitalReport(
+            future.stats,
+            { hpDelta: 0, mpDelta: 0 },
+            characterStatBasis(future, this.options.itemCatalog).basic,
+          );
+          const statPacket = encodeStatUpdate({ diff });
           session.character.items = plan.items;
           session.character.flags |= CHAR_FLAG_ITEMS;
           Object.assign(session.character.stats, diff);
@@ -1283,77 +1229,163 @@ export class GameEntryServer {
         message = plan.changes.length
           ? `已明確修復 ${plan.changes.length} 件舊全零起始裝備為原WZ值（含攻擊／防禦／可升級次數）。未改物品ID、職業、AP/SP、EXP、金錢或地圖；還原點不回溯裝備。`
           : "沒有符合條件的全零起始裝備；未更動角色。非全零／已升級／非MakeCharInfo道具不會重設。";
-      } else if(kind==="ranged-kit"||kind==="ranged-level") {
-        const action=request as {confirmed?:unknown;family?:unknown;raiseLevel?:unknown};
-        if(action.confirmed!==true)throw new Error("請勾選確認後再準備遠距體驗。");
-        if(typeof action.raiseLevel!=='boolean')throw new Error("請明確選擇是否補足等級。");
-        if(kind==='ranged-level'&&!action.raiseLevel)throw new Error("只補等級也須勾選補足等級確認。");
-        const plan=planRangedPreparation(session.character,this.options.itemCatalog,rangedPreviewKind(action.family),
-          action.raiseLevel,kind==='ranged-kit',this.options.growthSkill);
-        const statPacket=encodeStatUpdate({ack:false,diff:diffStats(session.character.stats,plan.stats)});
-        const itemPacket=encodeInventoryChange(plan.changes,0);
-        const effect=plan.raised?encodeUserEffect({characterId, effect:USER_EFFECT_LEVEL_UP}):undefined;
+      } else if (kind === "ranged-kit" || kind === "ranged-level") {
+        const action = request as { confirmed?: unknown; family?: unknown; raiseLevel?: unknown };
+        if (action.confirmed !== true) throw new Error("請勾選確認後再準備遠距體驗。");
+        if (typeof action.raiseLevel !== "boolean") throw new Error("請明確選擇是否補足等級。");
+        if (kind === "ranged-level" && !action.raiseLevel)
+          throw new Error("只補等級也須勾選補足等級確認。");
+        const plan = planRangedPreparation(
+          session.character,
+          this.options.itemCatalog,
+          rangedPreviewKind(action.family),
+          action.raiseLevel,
+          kind === "ranged-kit",
+          this.options.growthSkill,
+        );
+        const statPacket = encodeStatUpdate({
+          ack: false,
+          diff: diffStats(session.character.stats, plan.stats),
+        });
+        const itemPacket = encodeInventoryChange(plan.changes, 0);
+        const effect = plan.raised
+          ? encodeUserEffect({ characterId, effect: USER_EFFECT_LEVEL_UP })
+          : undefined;
         // Whole stats/items/wire transaction prepared before any live write.
-        Object.assign(session.character.stats,plan.stats);session.character.items=plan.items;
-        session.character.flags|=CHAR_FLAG_ITEMS|CHAR_FLAG_INVENTORY_2;
-        this.temporaryValues(session,Date.now());
-        session.send(statPacket);session.send(itemPacket);
-        if(effect)session.instance.broadcast(effect,characterId);
+        Object.assign(session.character.stats, plan.stats);
+        session.character.items = plan.items;
+        session.character.flags |= CHAR_FLAG_ITEMS | CHAR_FLAG_INVENTORY_2;
+        this.temporaryValues(session, Date.now());
+        session.send(statPacket);
+        session.send(itemPacket);
+        if (effect) session.instance.broadcast(effect, characterId);
         this.persist();
-        message=`已明確準備 ${plan.weaponId}（最低Lv${plan.minimumLevel}），目前Lv${plan.stats.level}。`+
-          (plan.raised?`依原HP／MP成長補足${plan.raised}級；不是原版轉職／練等，舊等級能力還原點已失效。`:"未改等級。")+
-          (kind==='ranged-kit'?"相容彈藥已入背包，已有同款武器不重複發放。":"只補足等級，沒有再次發裝備或彈藥。")+
+        message =
+          `已明確準備 ${plan.weaponId}（最低Lv${plan.minimumLevel}），目前Lv${plan.stats.level}。` +
+          (plan.raised
+            ? `依原HP／MP成長補足${plan.raised}級；不是原版轉職／練等，舊等級能力還原點已失效。`
+            : "未改等級。") +
+          (kind === "ranged-kit"
+            ? "相容彈藥已入背包，已有同款武器不重複發放。"
+            : "只補足等級，沒有再次發裝備或彈藥。") +
           "未改職業、AP／SP或技能，不自動穿戴；I穿戴、K學技能。EXP餘額保留；等級／道具不由能力還原回溯。";
-      } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions" || kind==="magic-potions") {
-        if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
-        const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:kind==="magic-potions"?[2002002,2002003]:[2002004,2002005];
-        const items=structuredClone(session.character.items??emptyCharacterItems());
-        const changes:InventoryChange[]=[];
-        for(const id of ids) {
-          const spec=this.options.consumeSpec?.(id);
-          const expected=id===2002000?"eva":id===2002001?"speed":id===2002004?"pad":id===2002002||id===2002003?"mad":"acc";
-          if(!spec || spec.unapplied.length || spec[expected]===undefined || spec.time===undefined) throw new Error("原 WZ 的藥水效果不可用，未發放道具。");
-          const grant=grantItem(items,id,3);
-          if(!grant) throw new Error("消耗欄空間不足以放入全部體驗藥水；背包完全未變更。");
+      } else if (
+        kind === "speed-potions" ||
+        kind === "combat-potions" ||
+        kind === "evasion-potions" ||
+        kind === "magic-potions"
+      ) {
+        if ((request as { confirmed?: unknown }).confirmed !== true)
+          throw new Error("請勾選確認後再領取體驗道具。");
+        const ids =
+          kind === "speed-potions"
+            ? [2002001]
+            : kind === "evasion-potions"
+              ? [2002000]
+              : kind === "magic-potions"
+                ? [2002002, 2002003]
+                : [2002004, 2002005];
+        const items = structuredClone(session.character.items ?? emptyCharacterItems());
+        const changes: InventoryChange[] = [];
+        for (const id of ids) {
+          const spec = this.options.consumeSpec?.(id);
+          const expected =
+            id === 2002000
+              ? "eva"
+              : id === 2002001
+                ? "speed"
+                : id === 2002004
+                  ? "pad"
+                  : id === 2002002 || id === 2002003
+                    ? "mad"
+                    : "acc";
+          if (
+            !spec ||
+            spec.unapplied.length ||
+            spec[expected] === undefined ||
+            spec.time === undefined
+          )
+            throw new Error("原 WZ 的藥水效果不可用，未發放道具。");
+          const grant = grantItem(items, id, 3);
+          if (!grant) throw new Error("消耗欄空間不足以放入全部體驗藥水；背包完全未變更。");
           changes.push(grant.change);
         }
-        const packet=encodeInventoryChange(changes);
-        session.character.items=items;session.character.flags|=CHAR_FLAG_INVENTORY_2;
-        session.send(packet);this.persist();
-        message=kind==="speed-potions"
-          ? "已明確領取 3 瓶 속도향상의 물약（2002001）。"
-          : kind==="evasion-potions" ? "已明確領取 3 瓶 민첩함의 물약（2002000）；原 WZ EVA+5／180秒，已接碰撞迴避。"
-          : kind==="magic-potions" ? "已明確領取 2002002／2002003 魔力藥水各3瓶；MAD+5／180秒與MAD+10／300秒，同欄替換不疊加。"
-          : "已明確領取 2002004 攻擊藥水、2002005 命中藥水各 3 瓶；原 WZ 分別 PAD+5／180秒、ACC+5／300秒。";
-        message+="這是非原版體驗發放，會存檔且還原點不回收道具。開啟 I 道具窗，選消耗欄並連點使用；S→Detail 看目前能力。";
+        const packet = encodeInventoryChange(changes);
+        session.character.items = items;
+        session.character.flags |= CHAR_FLAG_INVENTORY_2;
+        session.send(packet);
+        this.persist();
+        message =
+          kind === "speed-potions"
+            ? "已明確領取 3 瓶 속도향상의 물약（2002001）。"
+            : kind === "evasion-potions"
+              ? "已明確領取 3 瓶 민첩함의 물약（2002000）；原 WZ EVA+5／180秒，已接碰撞迴避。"
+              : kind === "magic-potions"
+                ? "已明確領取 2002002／2002003 魔力藥水各3瓶；MAD+5／180秒與MAD+10／300秒，同欄替換不疊加。"
+                : "已明確領取 2002004 攻擊藥水、2002005 命中藥水各 3 瓶；原 WZ 分別 PAD+5／180秒、ACC+5／300秒。";
+        message +=
+          "這是非原版體驗發放，會存檔且還原點不回收道具。開啟 I 道具窗，選消耗欄並連點使用；S→Detail 看目前能力。";
       } else {
-        const plan=planTestTool(session.character,request,this.testCheckpoints.get(key),available,characterStatBasis(session.character,this.options.itemCatalog).basic);
-        const future={...session.character,stats:{...session.character.stats,...plan.diff}};
-        const caps=characterStatBasis(future,this.options.itemCatalog).basic;
-        if(future.stats.hp>caps.maxHp) plan.diff.hp=Math.max(0,caps.maxHp);
-        if(future.stats.mp>caps.maxMp) plan.diff.mp=Math.max(0,caps.maxMp);
-        const statPacket=encodeStatUpdate({ack:false,diff:plan.diff});
-        const skillPacket=encodeSkillUpdate({ack:false,changes:plan.changes});
-        const wasDead=session.character.stats.hp<=0;
-        Object.assign(session.character.stats,plan.diff);
-        if(plan.skills) {
-          const items=session.character.items??emptyCharacterItems();items.map32=plan.skills;
-          session.character.items=items;session.character.flags|=0x20;
+        const plan = planTestTool(
+          session.character,
+          request,
+          this.testCheckpoints.get(key),
+          available,
+          characterStatBasis(session.character, this.options.itemCatalog).basic,
+        );
+        const future = {
+          ...session.character,
+          stats: { ...session.character.stats, ...plan.diff },
+        };
+        const caps = characterStatBasis(future, this.options.itemCatalog).basic;
+        if (future.stats.hp > caps.maxHp) plan.diff.hp = Math.max(0, caps.maxHp);
+        if (future.stats.mp > caps.maxMp) plan.diff.mp = Math.max(0, caps.maxMp);
+        const statPacket = encodeStatUpdate({ ack: false, diff: plan.diff });
+        const skillPacket = encodeSkillUpdate({ ack: false, changes: plan.changes });
+        const wasDead = session.character.stats.hp <= 0;
+        Object.assign(session.character.stats, plan.diff);
+        if (plan.skills) {
+          const items = session.character.items ?? emptyCharacterItems();
+          items.map32 = plan.skills;
+          session.character.items = items;
+          session.character.flags |= 0x20;
         }
-        this.testCheckpoints.set(key,plan.checkpoint);
-        if(wasDead && session.character.stats.hp>0) this.enterMap(session,session.instance.mapId);
-        else {session.send(statPacket);session.send(skillPacket);}
-        this.persist(); message=plan.message;
+        this.testCheckpoints.set(key, plan.checkpoint);
+        if (wasDead && session.character.stats.hp > 0)
+          this.enterMap(session, session.instance.mapId);
+        else {
+          session.send(statPacket);
+          session.send(skillPacket);
+        }
+        this.persist();
+        message = plan.message;
       }
-      this.options.log?.(`test-tools: ${username} character ${characterId} ${kind} (explicit development action)`);
+      this.options.log?.(
+        `test-tools: ${username} character ${characterId} ${kind} (explicit development action)`,
+      );
     }
-    const checkpoint=enabled?this.testCheckpoints.get(key):undefined;
-    const repairable = enabled ? planBlankStarterRepair(session.character.items ?? emptyCharacterItems(),
-      this.options.itemCatalog, this.options.starterEquipmentIds ?? new Set()).changes.length : 0;
-    if (kind === "state" && repairable) message += ` 發現 ${repairable} 件疑似舊版生成的全零起始裝備；可勾選同意後使用修復按鈕，不會自動修復。`;
-    return {enabled,message,rangedChoices:enabled?rangedPreviewChoices(this.options.itemCatalog):[],equipmentRepairCount:repairable,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
-      canMap:enabled&&this.options.allowMapCommand?.(username)===true,
-      jobs:enabled?[...NATIVE_JOB_NAMES].filter(([id])=>available(id)).map(([id,name])=>({id,name})):[]};
+    const checkpoint = enabled ? this.testCheckpoints.get(key) : undefined;
+    const repairable = enabled
+      ? planBlankStarterRepair(
+          session.character.items ?? emptyCharacterItems(),
+          this.options.itemCatalog,
+          this.options.starterEquipmentIds ?? new Set(),
+        ).changes.length
+      : 0;
+    if (kind === "state" && repairable)
+      message += ` 發現 ${repairable} 件疑似舊版生成的全零起始裝備；可勾選同意後使用修復按鈕，不會自動修復。`;
+    return {
+      enabled,
+      message,
+      rangedChoices: enabled ? rangedPreviewChoices(this.options.itemCatalog) : [],
+      equipmentRepairCount: repairable,
+      checkpoint: !!checkpoint,
+      restoreAvailable: !!checkpoint && checkpoint.level === session.character.stats.level,
+      canMap: enabled && this.options.allowMapCommand?.(username) === true,
+      jobs: enabled
+        ? [...NATIVE_JOB_NAMES].filter(([id]) => available(id)).map(([id, name]) => ({ id, name }))
+        : [],
+    };
   }
 
   /** The map this server puts claimers into (`0x16`). */
@@ -1382,11 +1414,7 @@ export class GameEntryServer {
     sendState: CipherState,
     entry: HandoffEntry,
   ): FieldSession | undefined {
-    const character = withMapId(
-      entry,
-      this.mapId,
-      this.options.mapProvider?.(0) !== undefined,
-    );
+    const character = withMapId(entry, this.mapId, this.options.mapProvider?.(0) !== undefined);
     const send = (packet: Uint8Array): void =>
       void socket.write(encodeSessionPacket(packet, sendState, "s2c"));
     // The account's seat is taken here rather than at the handshake: this is the moment the character
@@ -1415,7 +1443,9 @@ export class GameEntryServer {
       avatarItems: avatarItemsOf(character),
       instance,
       character,
-      get combatAlive():boolean{return this.character.stats.hp>0;},
+      get combatAlive(): boolean {
+        return this.character.stats.hp > 0;
+      },
       wallet: new MesoWallet(character.stats),
       send,
     };
@@ -1446,11 +1476,7 @@ export class GameEntryServer {
    * The shop and the dialog are dropped with the map: the windows belong to NPCs of the map the
    * player just left, and the client tears its own down when the new field is built.
    */
-  private enterMap(
-    session: FieldSession,
-    mapId: number,
-    portalName = "sp",
-  ): boolean {
+  private enterMap(session: FieldSession, mapId: number, portalName = "sp"): boolean {
     const target = this.fields.of(mapId);
     if (target === undefined) {
       this.options.log?.(
@@ -1464,19 +1490,19 @@ export class GameEntryServer {
     session.attackReadyAt = undefined;
     this.pendingShots = this.pendingShots.filter((shot) => shot.session !== session);
     session.character.stats.mapId = mapId;
-    session.character.stats.unknown101 = spawnPortalIndex(
-      target.map,
-      portalName,
-    );
+    session.character.stats.unknown101 = spawnPortalIndex(target.map, portalName);
     session.at = target.spawnAt(session.character.stats.unknown101);
     session.shop = undefined;
     session.talk = undefined;
     session.send(encodeSetField(this.setFieldOf(session.character)));
     // Full field records have no temporary-stat tail. Re-apply only the remaining live duration.
-    this.temporaryValues(session,Date.now());
-    for(const entry of session.temporary?.icons(Date.now())??[]) {
-      const durationMs=Math.ceil(entry.expiresAt-Date.now());
-      if(durationMs>0)session.send(encodeStatUpdate({ack:false,diff:{},temporary:{...entry,durationMs}}));
+    this.temporaryValues(session, Date.now());
+    for (const entry of session.temporary?.icons(Date.now()) ?? []) {
+      const durationMs = Math.ceil(entry.expiresAt - Date.now());
+      if (durationMs > 0)
+        session.send(
+          encodeStatUpdate({ ack: false, diff: {}, temporary: { ...entry, durationMs } }),
+        );
     }
     this.logSetField(session);
     target.join(session);
@@ -1551,10 +1577,7 @@ export class GameEntryServer {
       return;
     }
     if (request.kind >= 0) {
-      const refuse = (message: string) =>
-        session.send(
-          encodeSystemNotice(encodeCp949(message)),
-        );
+      const refuse = (message: string) => session.send(encodeSystemNotice(encodeCp949(message)));
       if (!this.options.allowMapCommand?.(session.username)) {
         refuse("Map command is disabled for this account.");
         return;
@@ -1594,16 +1617,10 @@ export class GameEntryServer {
   private usePortal(session: FieldSession, name: string): void {
     const portal = session.instance.portal(name);
     if (portal === undefined) {
-      this.options.log?.(
-        `game: 0x0D "${name}" is no portal of map ${session.instance.mapId}`,
-      );
+      this.options.log?.(`game: 0x0D "${name}" is no portal of map ${session.instance.mapId}`);
       return;
     }
-    if (
-      portal.type === 0 ||
-      portal.toMapId < 0 ||
-      portal.toMapId === 999999999
-    ) {
+    if (portal.type === 0 || portal.toMapId < 0 || portal.toMapId === 999999999) {
       this.options.log?.(
         `game: portal "${name}" of map ${session.instance.mapId} is disabled (type 0 or invalid tm)`,
       );
@@ -1613,8 +1630,7 @@ export class GameEntryServer {
       `game: "${session.name}" uses portal "${name}" of map ${session.instance.mapId} -> ${portal.toMapId}` +
         (portal.toName === "" ? "" : ` (portal "${portal.toName}")`),
     );
-    if (this.enterMap(session, portal.toMapId, portal.toName || "sp"))
-      this.persist();
+    if (this.enterMap(session, portal.toMapId, portal.toName || "sp")) this.persist();
   }
 
   /**
@@ -1637,13 +1653,16 @@ export class GameEntryServer {
    */
   private revive(session: FieldSession): void {
     const stats = session.character.stats;
-    stats.hp = characterStatBasis(session.character,this.options.itemCatalog).basic.maxHp;
+    stats.hp = characterStatBasis(session.character, this.options.itemCatalog).basic.maxHp;
     const here = session.instance.mapId;
     const target = reviveMapId(session.instance.map);
     this.options.log?.(
       `game: "${session.name}" revives - hp ${stats.hp}/${stats.maxHp}, map ${here} -> ${target}`,
     );
-    if (target !== here && this.enterMap(session, target)) { this.persist(); return; }
+    if (target !== here && this.enterMap(session, target)) {
+      this.persist();
+      return;
+    }
     if (this.enterMap(session, here)) this.persist();
   }
 
@@ -1655,8 +1674,7 @@ export class GameEntryServer {
   /** Native input bounds + a server-owned rate limit. A nonzero 0x0D ack releases the request
    * on success AND refusal, unlike an unsolicited ack0 wallet update. */
   private handleMesoDrop(session: FieldSession, plain: Uint8Array): void {
-    const refuse = () =>
-      session.send(encodeStatUpdate({ ack: true, diff: {} }));
+    const refuse = () => session.send(encodeStatUpdate({ ack: true, diff: {} }));
     let amount: number;
     try {
       amount = readMesoDrop(new PacketReader(plain, 1));
@@ -1684,9 +1702,7 @@ export class GameEntryServer {
       refuse();
       return;
     }
-    session.send(
-      encodeStatUpdate({ ack: true, diff: { mesos: session.wallet.balance } }),
-    );
+    session.send(encodeStatUpdate({ ack: true, diff: { mesos: session.wallet.balance } }));
     session.instance.dropMesos(session, amount, now);
     this.persist();
   }
@@ -1703,7 +1719,11 @@ export class GameEntryServer {
         diff = spendAbility(
           session.character.stats,
           mask,
-          characterGrowthContext(session.character, this.options.growthSkill,this.options.itemCatalog),
+          characterGrowthContext(
+            session.character,
+            this.options.growthSkill,
+            this.options.itemCatalog,
+          ),
         );
       }
     } catch (error) {
@@ -1719,12 +1739,15 @@ export class GameEntryServer {
     let change: SkillChange | undefined;
     try {
       const skillId = readSkillRequest(new PacketReader(plain, 1));
-      const now = performance.now(), last = this.abilityTimes.get(session);
+      const now = performance.now(),
+        last = this.abilityTimes.get(session);
       if (last === undefined || now - last >= 500) {
         this.abilityTimes.set(session, now); // AP and SP share the native gate/rate window.
         change = spendSkillPoint(session.character, skillId, this.options.skills);
       }
-    } catch (error) { this.options.log?.(`game: SP request refused: ${String(error)}`); }
+    } catch (error) {
+      this.options.log?.(`game: SP request refused: ${String(error)}`);
+    }
     if (change) {
       this.persist();
       session.send(encodeStatUpdate({ ack: false, diff: { sp: session.character.stats.sp } }));
@@ -1754,8 +1777,15 @@ export class GameEntryServer {
     try {
       const report = readClientStatReport(new PacketReader(plain, 1));
       const stats = session.character.stats;
-      const diff = applyVitalReport(stats, report, characterStatBasis(session.character,this.options.itemCatalog).basic);
-      if(stats.hp<=0){session.temporary?.clear();session.skillReadyAt=undefined;}
+      const diff = applyVitalReport(
+        stats,
+        report,
+        characterStatBasis(session.character, this.options.itemCatalog).basic,
+      );
+      if (stats.hp <= 0) {
+        session.temporary?.clear();
+        session.skillReadyAt = undefined;
+      }
       if (Object.keys(diff).length > 0) {
         session.send(encodeStatUpdate({ diff }));
         this.persist(); // Legitimate native vital changes must survive a restart, not just logout.
@@ -1766,9 +1796,7 @@ export class GameEntryServer {
           (Object.keys(diff).length === 0 ? " (nothing changed)" : ""),
       );
     } catch (error) {
-      this.options.log?.(
-        `game: 0x1C stat report unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x1C stat report unreadable: ${(error as Error).message}`);
     }
   }
 
@@ -1799,13 +1827,11 @@ export class GameEntryServer {
   private handleChangeSlot(session: FieldSession, plain: Uint8Array): void {
     let request: ClientChangeSlot;
     try {
-      const reader=new PacketReader(plain,1);
+      const reader = new PacketReader(plain, 1);
       request = readClientChangeSlot(reader);
-      if(reader.remaining)throw new Error("trailing change-slot bytes");
+      if (reader.remaining) throw new Error("trailing change-slot bytes");
     } catch (error) {
-      this.options.log?.(
-        `game: 0x17 change slot unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x17 change slot unreadable: ${(error as Error).message}`);
       session.send(encodeInventoryChange([]));
       return;
     }
@@ -1813,9 +1839,13 @@ export class GameEntryServer {
     // The record's item block is what the login server handed over, so a write here is a write to the
     // character (ADR-017). A character without one gets an empty block rather than a crash: the
     // session would have nothing to move anyway.
-    if (session.character.items === undefined)
-      session.character.items = emptyCharacterItems();
-    if (session.character.stats.hp <= 0 || session.shop || session.talk || this.trades.roomOf(session.characterId)) {
+    if (session.character.items === undefined) session.character.items = emptyCharacterItems();
+    if (
+      session.character.stats.hp <= 0 ||
+      session.shop ||
+      session.talk ||
+      this.trades.roomOf(session.characterId)
+    ) {
       session.send(encodeInventoryChange([]));
       return;
     }
@@ -1823,53 +1853,55 @@ export class GameEntryServer {
       const source =
         request.fromSlot < 0
           ? session.character.items.worn.get(-request.fromSlot)
-          : session.character.items.inventories[request.tab - 1]?.items.get(
-              request.fromSlot,
-            );
+          : session.character.items.inventories[request.tab - 1]?.items.get(request.fromSlot);
       if (!source || !this.options.dropItemAllowed(source.itemId)) {
         session.send(encodeInventoryChange([]));
         this.options.log?.(`game: ${label} refused (cash or unknown WZ item)`);
         return;
       }
     }
-    const denied=equipAdmission(session.character,request,this.options.itemCatalog);
-    if(denied){
+    const denied = equipAdmission(session.character, request, this.options.itemCatalog);
+    if (denied) {
       session.send(encodeInventoryChange([]));
       this.options.log?.(`game: ${label} refused (${denied})`);
       return;
     }
-    const nextItems=structuredClone(session.character.items);
+    const nextItems = structuredClone(session.character.items);
     const outcome = applyChangeSlot(nextItems, request);
     if (outcome.kind === "failed") {
       session.send(encodeInventoryChange([]));
-      this.options.log?.(
-        `game: ${label} by "${session.name}" refused (${outcome.reason})`,
-      );
+      this.options.log?.(`game: ${label} by "${session.name}" refused (${outcome.reason})`);
       return;
     }
-    const inventoryPacket=encodeInventoryChange(outcome.changes);
-    const future={...session.character,items:nextItems,stats:{...session.character.stats}};
-    const vitalDiff=outcome.lookChanged?applyVitalReport(future.stats,{hpDelta:0,mpDelta:0},characterStatBasis(future,this.options.itemCatalog,this.options.skills).basic):{};
-    const vitalPacket=encodeStatUpdate({ack:false,diff:vitalDiff});
-    this.temporaryValues(session,Date.now());
-    session.character.items=nextItems;Object.assign(session.character.stats,vitalDiff);
-    this.temporaryValues(session,Date.now());
+    const inventoryPacket = encodeInventoryChange(outcome.changes);
+    const future = {
+      ...session.character,
+      items: nextItems,
+      stats: { ...session.character.stats },
+    };
+    const vitalDiff = outcome.lookChanged
+      ? applyVitalReport(
+          future.stats,
+          { hpDelta: 0, mpDelta: 0 },
+          characterStatBasis(future, this.options.itemCatalog, this.options.skills).basic,
+        )
+      : {};
+    const vitalPacket = encodeStatUpdate({ ack: false, diff: vitalDiff });
+    this.temporaryValues(session, Date.now());
+    session.character.items = nextItems;
+    Object.assign(session.character.stats, vitalDiff);
+    this.temporaryValues(session, Date.now());
     session.send(inventoryPacket);
-    if(outcome.lookChanged) {
+    if (outcome.lookChanged) {
       // Server policy: removing max-vital equipment cannot leave current vitals above the ceiling.
-      if(Object.keys(vitalDiff).length) session.send(vitalPacket);
+      if (Object.keys(vitalDiff).length) session.send(vitalPacket);
     }
     // A throw-away leaves the bag here and lands in the field: the ground half belongs to
     // `game/drops.ts`, exactly like a monster's loot (`FieldInstance.dropItem`), and the whole map -
     // the thrower included - is told with the `0x43` that carries no monster (FINDINGS 4.36).
     let note = "";
     if (outcome.kind === "drop") {
-      session.instance.dropItem(
-        session,
-        outcome.slot,
-        outcome.count,
-        Date.now(),
-      );
+      session.instance.dropItem(session, outcome.slot, outcome.count, Date.now());
       note = ` - dropped item ${outcome.slot.itemId} x${outcome.count} at the player's feet`;
     }
     if (outcome.changes.length) this.persist();
@@ -1894,51 +1926,100 @@ export class GameEntryServer {
   }
 
   /** 55AA80 / 4CC050: native cancellation is effective weapon ID, not any look/stat change. */
-  private temporaryValues(session:FieldSession,now:number) {
-    const weapon=characterStatBasis(session.character,this.options.itemCatalog,this.options.skills).weaponId;
-    if(session.temporaryWeaponId!==undefined&&weapon!==session.temporaryWeaponId)
-      session.temporary?.removeFields(['booster']);
-    session.temporaryWeaponId=weapon;
-    return session.temporary?.values(now)??{};
+  private temporaryValues(session: FieldSession, now: number) {
+    const weapon = characterStatBasis(
+      session.character,
+      this.options.itemCatalog,
+      this.options.skills,
+    ).weaponId;
+    if (session.temporaryWeaponId !== undefined && weapon !== session.temporaryWeaponId)
+      session.temporary?.removeFields(["booster"]);
+    session.temporaryWeaponId = weapon;
+    return session.temporary?.values(now) ?? {};
   }
   /** 55D320 / 519270 / 519950. Validate before cost, recipient or effect mutation. */
-  private handleActiveSkill(session:FieldSession,plain:Uint8Array):void {
-    const refuse=()=>session.send(encodeStatUpdate({ack:true,diff:{}}));
+  private handleActiveSkill(session: FieldSession, plain: Uint8Array): void {
+    const refuse = () => session.send(encodeStatUpdate({ ack: true, diff: {} }));
     let request;
-    try {request=readClientSkillUse(new PacketReader(plain,1));}catch{refuse();return;}
-    const now=Date.now(),learned=learnedActive(session.character,this.options.skills,request.skillId);
-    if(!learned || learned.rule.kind!=='buff' || request.level!==learned.level ||
-      now<(session.skillReadyAt??0) || now<(session.attackReadyAt??0) ||
-      session.shop || session.talk || this.trades.roomOf(session.characterId) || !session.at ||
-      (session.at.action & ~1)===18) {refuse();return;}
-    const temporary=activeTemporary(request.skillId,learned.values);
-    if(!temporary){refuse();return;}
-    const recipients:FieldSession[]=[session];
-    if(learned.rule.party) {
-      const party=this.parties.partyOf(session.characterId);
-      if(!party || new Set(request.targets).size!==request.targets.length){refuse();return;}
-      for(const id of request.targets) {
-        const target=this.sessionsByCharacter.get(id);
-        if(id===session.characterId || !party.members.some(member=>member.characterId===id) ||
-          !target || target.instance!==session.instance || !target.at || target.character.stats.hp<=0 ||
-          target.at.x<session.at.x-50 || target.at.x>=session.at.x+50 ||
-          target.at.y<session.at.y-50 || target.at.y>=session.at.y+50) {refuse();return;}
+    try {
+      request = readClientSkillUse(new PacketReader(plain, 1));
+    } catch {
+      refuse();
+      return;
+    }
+    const now = Date.now(),
+      learned = learnedActive(session.character, this.options.skills, request.skillId);
+    if (
+      !learned ||
+      learned.rule.kind !== "buff" ||
+      request.level !== learned.level ||
+      now < (session.skillReadyAt ?? 0) ||
+      now < (session.attackReadyAt ?? 0) ||
+      session.shop ||
+      session.talk ||
+      this.trades.roomOf(session.characterId) ||
+      !session.at ||
+      ((session.at.action ?? 0) & ~1) === 18
+    ) {
+      refuse();
+      return;
+    }
+    const temporary = activeTemporary(request.skillId, learned.values);
+    if (!temporary) {
+      refuse();
+      return;
+    }
+    const recipients: FieldSession[] = [session];
+    if (learned.rule.party) {
+      const party = this.parties.partyOf(session.characterId);
+      if (!party || new Set(request.targets).size !== request.targets.length) {
+        refuse();
+        return;
+      }
+      for (const id of request.targets) {
+        const target = this.sessionsByCharacter.get(id);
+        if (
+          id === session.characterId ||
+          !party.members.some((member) => member.characterId === id) ||
+          !target ||
+          target.instance !== session.instance ||
+          !target.at ||
+          target.character.stats.hp <= 0 ||
+          target.at.x < session.at.x - 50 ||
+          target.at.x >= session.at.x + 50 ||
+          target.at.y < session.at.y - 50 ||
+          target.at.y >= session.at.y + 50
+        ) {
+          refuse();
+          return;
+        }
         recipients.push(target);
       }
-    }else if(request.targets.length){refuse();return;}
+    } else if (request.targets.length) {
+      refuse();
+      return;
+    }
     // Pre-encode the whole transaction; malformed archive values cannot spend resources.
-    let own:Uint8Array,other:Uint8Array,effect:Uint8Array;
+    let own: Uint8Array, other: Uint8Array, effect: Uint8Array;
     try {
-      own=encodeStatUpdate({ack:true,diff:learned.cost,temporary});
-      other=encodeStatUpdate({ack:false,diff:{},temporary});
-      effect=encodeUserEffect({characterId:session.characterId,effect:1,skillId:request.skillId,skillLevel:learned.level});
-    }catch{refuse();return;}
-    Object.assign(session.character.stats,learned.cost);
-    session.skillReadyAt=now+200; // 55D320 native request interval, not an invented cast animation.
-    for(const target of recipients) {
-      this.temporaryValues(target,now);
-      (target.temporary??=temporaryStats()).apply(temporary,now);
-      target.send(target===session?own:other);
+      own = encodeStatUpdate({ ack: true, diff: learned.cost, temporary });
+      other = encodeStatUpdate({ ack: false, diff: {}, temporary });
+      effect = encodeUserEffect({
+        characterId: session.characterId,
+        effect: 1,
+        skillId: request.skillId,
+        skillLevel: learned.level,
+      });
+    } catch {
+      refuse();
+      return;
+    }
+    Object.assign(session.character.stats, learned.cost);
+    session.skillReadyAt = now + 200; // 55D320 native request interval, not an invented cast animation.
+    for (const target of recipients) {
+      this.temporaryValues(target, now);
+      (target.temporary ??= temporaryStats()).apply(temporary, now);
+      target.send(target === session ? own : other);
     }
     // Native self effect is local after admission; the packet is also safe for the browser self.
     session.instance.broadcast(effect);
@@ -1966,21 +2047,14 @@ export class GameEntryServer {
    * result or `0x0D` ack), so silence would leave the player unable to use anything at all - and
    * since the client's inventory only changes on `0x0B`, an empty one *is* the refusal.
    */
-  private handleUseItem(
-    session: FieldSession,
-    plain: Uint8Array,
-    opcode: number,
-  ): void {
-    const label =
-      opcode === CLIENT_FIELD_OPCODE.useMapItem ? "0x19 map item" : "0x18 item";
+  private handleUseItem(session: FieldSession, plain: Uint8Array, opcode: number): void {
+    const label = opcode === CLIENT_FIELD_OPCODE.useMapItem ? "0x19 map item" : "0x18 item";
     let request: ClientUseItem;
     try {
       request = readClientUseItem(new PacketReader(plain, 1), opcode);
     } catch (error) {
       // Nothing can be answered: the slot is what the answer would name, and it did not parse.
-      this.options.log?.(
-        `game: ${label} unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: ${label} unreadable: ${(error as Error).message}`);
       return;
     }
     const refuse = (reason: string): void => {
@@ -1996,9 +2070,7 @@ export class GameEntryServer {
     }
     const spec = this.options.consumeSpec?.(request.itemId);
     if (spec === undefined) {
-      refuse(
-        "the archive does not say what this item does (no Item/Consume spec)",
-      );
+      refuse("the archive does not say what this item does (no Item/Consume spec)");
       return;
     }
     if (spec.unapplied.length > 0) {
@@ -2011,8 +2083,8 @@ export class GameEntryServer {
       this.useMapItem(session, request, spec, refuse);
       return;
     }
-    const items=structuredClone(session.character.items??emptyCharacterItems());
-    const temporary=consumeTemporary(spec,request.itemId);
+    const items = structuredClone(session.character.items ?? emptyCharacterItems());
+    const temporary = consumeTemporary(spec, request.itemId);
     if (!healsVitals(spec) && !temporary) {
       refuse("no implemented vital or temporary effect in its spec");
       return;
@@ -2020,8 +2092,8 @@ export class GameEntryServer {
     // The rules are `game/vitals.ts`'s, and the copy is how "would anything move?" is asked without
     // applying twice: a potion used at full HP changes nothing, and nothing is what it should cost.
     const probe: CharacterStats = { ...stats };
-    const caps=characterStatBasis(session.character,this.options.itemCatalog).basic;
-    const diff = applyVitalReport(probe, consumeDeltas(spec, {...stats,...caps}),caps);
+    const caps = characterStatBasis(session.character, this.options.itemCatalog).basic;
+    const diff = applyVitalReport(probe, consumeDeltas(spec, { ...stats, ...caps }), caps);
     if (stats.hp <= 0 || (Object.keys(diff).length === 0 && !temporary)) {
       refuse(
         `hp ${stats.hp}/${stats.maxHp} mp ${stats.mp}/${stats.maxMp}: dead or already restored`,
@@ -2032,18 +2104,19 @@ export class GameEntryServer {
     const statPacket = encodeStatUpdate({ diff, temporary });
     const taken = takeItem(items, request.itemId, request.slot, 1);
     if (taken === undefined) {
-      refuse(
-        `slot ${request.slot} of the USE tab does not hold item ${request.itemId}`,
-      );
+      refuse(`slot ${request.slot} of the USE tab does not hold item ${request.itemId}`);
       return;
     }
-    const inventoryPacket=encodeInventoryChange([taken.change]);
-    session.character.items=items;
+    const inventoryPacket = encodeInventoryChange([taken.change]);
+    session.character.items = items;
     stats.hp = probe.hp;
     stats.mp = probe.mp;
     session.send(inventoryPacket);
     session.send(statPacket);
-    if(temporary){this.temporaryValues(session,Date.now());(session.temporary??=temporaryStats()).apply(temporary,Date.now());}
+    if (temporary) {
+      this.temporaryValues(session, Date.now());
+      (session.temporary ??= temporaryStats()).apply(temporary, Date.now());
+    }
     this.persist();
     this.options.log?.(
       `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
@@ -2072,8 +2145,7 @@ export class GameEntryServer {
       refuse("no spec/moveTo: this item does not name a map");
       return;
     }
-    const target =
-      spec.moveTo < 0 ? reviveMapId(session.instance.map) : spec.moveTo;
+    const target = spec.moveTo < 0 ? reviveMapId(session.instance.map) : spec.moveTo;
     if (target <= 0) {
       refuse(`spec/moveTo ${spec.moveTo} is not a map id`);
       return;
@@ -2087,9 +2159,7 @@ export class GameEntryServer {
     const items = session.character.items ?? emptyCharacterItems();
     const taken = takeItem(items, request.itemId, request.slot, 1);
     if (taken === undefined) {
-      refuse(
-        `slot ${request.slot} of the USE tab does not hold item ${request.itemId}`,
-      );
+      refuse(`slot ${request.slot} of the USE tab does not hold item ${request.itemId}`);
       return;
     }
     session.send(encodeInventoryChange([taken.change]));
@@ -2126,9 +2196,7 @@ export class GameEntryServer {
     try {
       objectId = readClientObjectClick(new PacketReader(plain, 1)).objectId;
     } catch (error) {
-      this.options.log?.(
-        `game: 0x33 object click unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x33 object click unreadable: ${(error as Error).message}`);
       return;
     }
     session.send(encodeFieldRequestRelease());
@@ -2173,11 +2241,7 @@ export class GameEntryServer {
    * the walking order. An NPC whose image has no `speak` list - `메이플운수 중형택시` is one in the
    * shipped data - simply has nothing to say, and a click on it stays at the release byte.
    */
-  private talkTo(
-    session: FieldSession,
-    npcId: number,
-    templateId: number,
-  ): void {
+  private talkTo(session: FieldSession, npcId: number, templateId: number): void {
     const dialogue = this.options.npcDialogue?.(templateId);
     if (dialogue === undefined) {
       this.options.log?.(
@@ -2215,16 +2279,12 @@ export class GameEntryServer {
     try {
       reply = readQuestReply(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x15 reply unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x15 reply unreadable: ${(error as Error).message}`);
       return;
     }
     const talk = session.talk;
     if (talk === undefined) {
-      this.options.log?.(
-        `game: ${describeQuestReply(reply)} without a dialog open - dropped`,
-      );
+      this.options.log?.(`game: ${describeQuestReply(reply)} without a dialog open - dropped`);
       return;
     }
     const stopped = `game: NPC ${talk.npcId} (template ${talk.templateId}) conversation ended (${describeQuestReply(reply)})`;
@@ -2251,9 +2311,7 @@ export class GameEntryServer {
       return;
     }
     session.send(next);
-    this.options.log?.(
-      `game: NPC ${talk.npcId} says line ${talk.lineIndex + 1}/${talk.lineCount}`,
-    );
+    this.options.log?.(`game: NPC ${talk.npcId} says line ${talk.lineIndex + 1}/${talk.lineCount}`);
   }
 
   /**
@@ -2273,9 +2331,7 @@ export class GameEntryServer {
     try {
       request = readClientShopRequest(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x16 shop request unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x16 shop request unreadable: ${(error as Error).message}`);
       return;
     }
     const write = session.send;
@@ -2287,9 +2343,7 @@ export class GameEntryServer {
     const keeper = this.options.shops;
     const shop = session.shop;
     if (keeper === undefined || shop === undefined) {
-      this.options.log?.(
-        `game: 0x16 shop request without an open shop - dropped (no 0x4B)`,
-      );
+      this.options.log?.(`game: 0x16 shop request without an open shop - dropped (no 0x4B)`);
       return;
     }
     if (session.character.stats.hp <= 0) {
@@ -2297,9 +2351,7 @@ export class GameEntryServer {
       return;
     }
     if (request.kind === "buy") {
-      const row = keeper.linesOf(shop).filter((line) => line.price !== 0)[
-        request.row
-      ];
+      const row = keeper.linesOf(shop).filter((line) => line.price !== 0)[request.row];
       if (!row || row.itemId !== request.itemId) {
         write(encodeShopResult(SHOP_RESULT.error));
         return;
@@ -2314,25 +2366,11 @@ export class GameEntryServer {
             reason: "notInShop" as const,
           })
         : request.kind === "buy"
-          ? keeper.buy(
-              items,
-              session.wallet,
-              shop,
-              request.itemId,
-              request.count,
-            )
-          : keeper.sell(
-              items,
-              session.wallet,
-              request.slot,
-              request.itemId,
-              request.count,
-            );
+          ? keeper.buy(items, session.wallet, shop, request.itemId, request.count)
+          : keeper.sell(items, session.wallet, request.slot, request.itemId, request.count);
     if (outcome.kind === "failed") {
       write(encodeShopResult(shopResultCode(outcome.reason)));
-      this.options.log?.(
-        `game: shop ${shop.shopId} ${request.kind} refused (${outcome.reason})`,
-      );
+      this.options.log?.(`game: shop ${shop.shopId} ${request.kind} refused (${outcome.reason})`);
       return;
     }
     write(encodeShopResult(SHOP_RESULT.silent));
@@ -2378,11 +2416,7 @@ export class GameEntryServer {
     // Only a drop that was already there when this player last moved can be walked onto, which is
     // what keeps a throw-away from landing on the thrower's own feet and coming straight back
     // (`DropField.reachable`). A session with no stamp at all is treated as just having arrived.
-    const drop = instance.drops.reachable(
-      at.x,
-      at.y,
-      session.lastMoveAt ?? Date.now(),
-    );
+    const drop = instance.drops.reachable(at.x, at.y, session.lastMoveAt ?? Date.now());
     if (drop === undefined) return;
     const items = session.character.items ?? emptyCharacterItems();
     const before = { ...session.character.stats };
@@ -2441,12 +2475,13 @@ export class GameEntryServer {
     try {
       const reader = new PacketReader(plain, 1);
       attack = readClientAttack(reader, opcode);
-      if ((this.options.basicAttack || opcode === CLIENT_FIELD_OPCODE.shootAttack) && reader.remaining !== 0)
+      if (
+        (this.options.basicAttack || opcode === CLIENT_FIELD_OPCODE.shootAttack) &&
+        reader.remaining !== 0
+      )
         throw new RangeError("trailing attack bytes");
     } catch (error) {
-      this.options.log?.(
-        `game: 0x${hex(opcode)} attack unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x${hex(opcode)} attack unreadable: ${(error as Error).message}`);
       return;
     }
     if (
@@ -2460,96 +2495,194 @@ export class GameEntryServer {
     if (now + BASIC_ATTACK_TRANSPORT_GRACE_MS < (session.attackReadyAt ?? 0)) return; // Transport tolerance is server policy.
     const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
     const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
-    const profile=attackProfileAtTier(this.options.basicAttack?.(weaponId),nativeWeaponMastery(session.character,this.options.skills,weaponId,shoot));
-    const booster=this.temporaryValues(session,now).booster??0;
+    const profile = attackProfileAtTier(
+      this.options.basicAttack?.(weaponId),
+      nativeWeaponMastery(session.character, this.options.skills, weaponId, shoot),
+    );
+    const booster = this.temporaryValues(session, now).booster ?? 0;
     // Each active attack family has its OWN admission path; basic guards stay strict.
-    if(opcode===CLIENT_FIELD_OPCODE.magicAttack){
-      const validated=validatedActiveMagic(session.character,this.options.skills,profile,attack,session.at?.action??4,session.at?.foothold??0);
-      if(!validated||!session.at||!session.instance.map.footholdSegments?.has(session.at.foothold??0)||
-        now<(session.skillReadyAt??0)||!this.options.activeSkillArt)return;
-      const {motion,learned}=validated,ball=this.options.activeSkillArt(attack.skillId,learned.level).balls.length>0;
-      const direction=attack.facingLeft?-1:1,at=session.at;
-      const segments=[...(session.instance.map.footholdSegments?.values()??[])];
-      const group=session.instance.map.footholdSegments?.get(at.foothold??0)?.group??0;
-      const targets=attack.targets.filter(target=>{
-        const mob=session.instance.mobs.mob(target.mobId),dx=(target.x-at.x)*direction;
+    if (opcode === CLIENT_FIELD_OPCODE.magicAttack) {
+      const validated = validatedActiveMagic(
+        session.character,
+        this.options.skills,
+        profile,
+        attack,
+        session.at?.action ?? 4,
+        session.at?.foothold ?? 0,
+      );
+      if (
+        !validated ||
+        !session.at ||
+        !session.instance.map.footholdSegments?.has(session.at.foothold ?? 0) ||
+        now < (session.skillReadyAt ?? 0) ||
+        !this.options.activeSkillArt
+      )
+        return;
+      const { motion, learned } = validated,
+        ball = this.options.activeSkillArt(attack.skillId, learned.level).balls.length > 0;
+      const direction = attack.facingLeft ? -1 : 1,
+        at = session.at;
+      const segments = [...(session.instance.map.footholdSegments?.values() ?? [])];
+      const group = session.instance.map.footholdSegments?.get(at.foothold ?? 0)?.group ?? 0;
+      const targets = attack.targets.filter((target) => {
+        const mob = session.instance.mobs.mob(target.mobId),
+          dx = (target.x - at.x) * direction;
         // Native report coordinates are impact points, not monster-root coordinates.
         // Snapshot slop is reconstruction safety policy; native swept RECT ordering isn't server AI.
-        return mob?.alive&&dx>=-BASIC_SHOT_POSITION_SLOP_X&&dx<=MAGIC_RANGE+BASIC_SHOT_POSITION_SLOP_X&&
-          Math.abs(target.y-(at.y-MAGIC_HEIGHT))<=MAGIC_RANGE/4+BASIC_SHOT_POSITION_SLOP_Y&&
-          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X&&Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y&&
-          (!ball||!clipMagicRay(at,target,segments,group).blocked);
+        return (
+          mob?.alive &&
+          dx >= -BASIC_SHOT_POSITION_SLOP_X &&
+          dx <= MAGIC_RANGE + BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(target.y - (at.y - MAGIC_HEIGHT)) <=
+            MAGIC_RANGE / 4 + BASIC_SHOT_POSITION_SLOP_Y &&
+          Math.abs(target.x - mob.x) <= BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(target.y - mob.y) <= BASIC_SHOT_POSITION_SLOP_Y &&
+          (!ball || !clipMagicRay(at, target, segments, group).blocked)
+        );
       });
-      const packet=encodeStatUpdate({ack:false,diff:learned.cost});
-      Object.assign(session.character.stats,learned.cost);session.attackReadyAt=now+attackDuration(motion);
-      session.send(packet);this.persist();
-      const accepted={...attack,targets,targetCount:targets.length};
-      this.relayAttack(session,opcode,accepted,targets);
-      if(targets.length){const target=targets[0]!;
-        this.queueActiveHits(session,opcode,accepted,now+shotRelease(motion)+(ball?magicLeg(at,attack.facingLeft,target).duration:0));
+      const packet = encodeStatUpdate({ ack: false, diff: learned.cost });
+      Object.assign(session.character.stats, learned.cost);
+      session.attackReadyAt = now + attackDuration(motion);
+      session.send(packet);
+      this.persist();
+      const accepted = { ...attack, targets, targetCount: targets.length };
+      this.relayAttack(session, opcode, accepted, targets);
+      if (targets.length) {
+        const target = targets[0]!;
+        this.queueActiveHits(
+          session,
+          opcode,
+          accepted,
+          now + shotRelease(motion) + (ball ? magicLeg(at, attack.facingLeft, target).duration : 0),
+        );
       }
       return;
     }
-    if(attack.skillId!==0 && shoot) {
-      const validated=validatedActiveRanged(session.character,this.options.skills,profile,attack,session.at?.action??4,booster);
-      if(!validated||!session.at||now<(session.skillReadyAt??0)||!session.character.items)return;
-      const {motion,learned,ammo}=validated,range=basicShotRange(session.character,this.options.skills);
-      const direction=attack.facingLeft?-1:1;
-      const targets=attack.targets.filter(target=>{
-        const mob=session.instance.mobs.mob(target.mobId),dx=mob?(mob.x-session.at!.x)*direction:-1;
-        return mob?.alive&&dx>=0&&dx<=range+BASIC_SHOT_POSITION_SLOP_X&&
-          Math.abs(mob.y-session.at!.y)<=BASIC_SHOT_POSITION_SLOP_Y&&
-          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X&&Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y;
+    if (attack.skillId !== 0 && shoot) {
+      const validated = validatedActiveRanged(
+        session.character,
+        this.options.skills,
+        profile,
+        attack,
+        session.at?.action ?? 4,
+        booster,
+      );
+      if (
+        !validated ||
+        !session.at ||
+        now < (session.skillReadyAt ?? 0) ||
+        !session.character.items
+      )
+        return;
+      const { motion, learned, ammo } = validated,
+        range = basicShotRange(session.character, this.options.skills);
+      const direction = attack.facingLeft ? -1 : 1;
+      const targets = attack.targets.filter((target) => {
+        const mob = session.instance.mobs.mob(target.mobId),
+          dx = mob ? (mob.x - session.at!.x) * direction : -1;
+        return (
+          mob?.alive &&
+          dx >= 0 &&
+          dx <= range + BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(mob.y - session.at!.y) <= BASIC_SHOT_POSITION_SLOP_Y &&
+          Math.abs(target.x - mob.x) <= BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(target.y - mob.y) <= BASIC_SHOT_POSITION_SLOP_Y
+        );
       });
-      const spending=planBasicAmmo(session.character.items,ammo.slot,activeSkillAmmo(learned.values));
-      if(!spending)return;
-      let statPacket:Uint8Array,inventoryPacket:Uint8Array;
+      const spending = planBasicAmmo(
+        session.character.items,
+        ammo.slot,
+        activeSkillAmmo(learned.values),
+      );
+      if (!spending) return;
+      let statPacket: Uint8Array, inventoryPacket: Uint8Array;
       try {
-        statPacket=encodeStatUpdate({ack:false,diff:learned.cost});
-        inventoryPacket=encodeInventoryChange([spending.change],0);
-      }catch{return;}
+        statPacket = encodeStatUpdate({ ack: false, diff: learned.cost });
+        inventoryPacket = encodeInventoryChange([spending.change], 0);
+      } catch {
+        return;
+      }
       // No mutation before ALL validations/encodings; empty shots still spend both MP and ammo.
-      spending.apply();Object.assign(session.character.stats,learned.cost);
-      session.attackReadyAt=now+attackDuration(motion);
-      session.send(inventoryPacket);session.send(statPacket);this.persist();
-      const accepted={...attack,targets,targetCount:targets.length};
-      this.relayAttack(session,opcode,accepted,targets,spending.itemId);
-      if(targets.length){
-        const target=targets[0]!,bounds=attackProfileAtTier(this.options.basicAttack?.(weaponId),0)?.melee[0]?.bounds;
-        const near=bounds?-Math.min(Math.max(bounds.left,-65),bounds.right-1):65;
-        const travel=Math.trunc(Math.hypot(target.x-(session.at.x+direction*near),target.y-(session.at.y-25))*1.5);
-        this.queueActiveHits(session,opcode,accepted,now+shotRelease(motion)+travel);
+      spending.apply();
+      Object.assign(session.character.stats, learned.cost);
+      session.attackReadyAt = now + attackDuration(motion);
+      session.send(inventoryPacket);
+      session.send(statPacket);
+      this.persist();
+      const accepted = { ...attack, targets, targetCount: targets.length };
+      this.relayAttack(session, opcode, accepted, targets, spending.itemId);
+      if (targets.length) {
+        const target = targets[0]!,
+          bounds = attackProfileAtTier(this.options.basicAttack?.(weaponId), 0)?.melee[0]?.bounds;
+        const near = bounds ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1) : 65;
+        const travel = Math.trunc(
+          Math.hypot(target.x - (session.at.x + direction * near), target.y - (session.at.y - 25)) *
+            1.5,
+        );
+        this.queueActiveHits(session, opcode, accepted, now + shotRelease(motion) + travel);
       }
       return;
     }
-    if(attack.skillId!==0) {
-      const validated=opcode===CLIENT_FIELD_OPCODE.attack
-        ? validatedActiveMelee(session.character,this.options.skills,profile,attack,session.at?.action??4,booster):undefined;
-      if(!validated || !session.at || now<(session.skillReadyAt??0))return;
-      const {motion,learned}=validated,base=motion.bounds;
-      if(!base)return;
+    if (attack.skillId !== 0) {
+      const validated =
+        opcode === CLIENT_FIELD_OPCODE.attack
+          ? validatedActiveMelee(
+              session.character,
+              this.options.skills,
+              profile,
+              attack,
+              session.at?.action ?? 4,
+              booster,
+            )
+          : undefined;
+      if (!validated || !session.at || now < (session.skillReadyAt ?? 0)) return;
+      const { motion, learned } = validated,
+        base = motion.bounds;
+      if (!base) return;
       // Safety envelope is reconstruction policy (native mob CShape2D is not ported).
-      const within=(id:number,far:number)=>{
-        const mob=session.instance.mobs.mob(id);if(!mob?.alive)return false;
-        const dx=(mob.x-session.at!.x)*(attack.facingLeft?-1:1);
-        return dx>=-base.right-BASIC_SHOT_POSITION_SLOP_X && dx<=far+BASIC_SHOT_POSITION_SLOP_X &&
-          mob.y>=session.at!.y+base.top-BASIC_SHOT_POSITION_SLOP_Y &&
-          mob.y<=session.at!.y+base.bottom+BASIC_SHOT_POSITION_SLOP_Y;
+      const within = (id: number, far: number) => {
+        const mob = session.instance.mobs.mob(id);
+        if (!mob?.alive) return false;
+        const dx = (mob.x - session.at!.x) * (attack.facingLeft ? -1 : 1);
+        return (
+          dx >= -base.right - BASIC_SHOT_POSITION_SLOP_X &&
+          dx <= far + BASIC_SHOT_POSITION_SLOP_X &&
+          mob.y >= session.at!.y + base.top - BASIC_SHOT_POSITION_SLOP_Y &&
+          mob.y <= session.at!.y + base.bottom + BASIC_SHOT_POSITION_SLOP_Y
+        );
       };
-      const extended=!!learned.values.range && attack.targets.some(t=>within(t.mobId,-base.left));
-      const far=extended?Math.max(-base.left,learned.values.range!):-base.left;
-      if(attack.targets.some(t=>!within(t.mobId,far)))return;
-      const costPacket=encodeStatUpdate({ack:false,diff:learned.cost});
-      Object.assign(session.character.stats,learned.cost);
-      session.attackReadyAt=now+attackDuration(motion);
-      session.send(costPacket);this.persist();
-      this.relayAttack(session,opcode,attack,attack.targets);
-      attack.targets.forEach((target,index)=>this.queueActiveHits(session,opcode,
-        {...attack,targets:[target],targetCount:1},now+shotRelease(motion)+Math.min(index*70,280)));
+      const extended =
+        !!learned.values.range && attack.targets.some((t) => within(t.mobId, -base.left));
+      const far = extended ? Math.max(-base.left, learned.values.range!) : -base.left;
+      if (attack.targets.some((t) => !within(t.mobId, far))) return;
+      const costPacket = encodeStatUpdate({ ack: false, diff: learned.cost });
+      Object.assign(session.character.stats, learned.cost);
+      session.attackReadyAt = now + attackDuration(motion);
+      session.send(costPacket);
+      this.persist();
+      this.relayAttack(session, opcode, attack, attack.targets);
+      attack.targets.forEach((target, index) =>
+        this.queueActiveHits(
+          session,
+          opcode,
+          { ...attack, targets: [target], targetCount: 1 },
+          now + shotRelease(motion) + Math.min(index * 70, 280),
+        ),
+      );
       return;
     }
-    const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4,booster);
-    if (this.options.basicAttack && ((opcode !== CLIENT_FIELD_OPCODE.attack && !shoot) || !basicMotion)) return;
+    const basicMotion = validatedBasicAttack(
+      profile,
+      attack,
+      shoot,
+      session.at?.action ?? 4,
+      booster,
+    );
+    if (
+      this.options.basicAttack &&
+      ((opcode !== CLIENT_FIELD_OPCODE.attack && !shoot) || !basicMotion)
+    )
+      return;
     if (shoot) {
       // This path is a basic one-round attack, not an accidental free skill/multi-shot service.
       const motion = basicMotion;
@@ -2567,14 +2700,12 @@ export class GameEntryServer {
           dx >= 0 &&
           dx <= range + BASIC_SHOT_POSITION_SLOP_X &&
           Math.abs(mob.y - session.at!.y) <= BASIC_SHOT_POSITION_SLOP_Y &&
-          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X && Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y
+          Math.abs(target.x - mob.x) <= BASIC_SHOT_POSITION_SLOP_X &&
+          Math.abs(target.y - mob.y) <= BASIC_SHOT_POSITION_SLOP_Y
         );
       });
       const items = session.character.items;
-      const spent =
-        items === undefined
-          ? undefined
-          : spendBasicAmmo(items, attack.projectileSlot);
+      const spent = items === undefined ? undefined : spendBasicAmmo(items, attack.projectileSlot);
       if (!spent) return;
       session.attackReadyAt = now + duration;
       session.send(encodeInventoryChange([spent.change], 0)); // A shot must not release a slot-move pending gate.
@@ -2592,10 +2723,9 @@ export class GameEntryServer {
         spent.itemId,
       );
       if (targets.length > 0) {
-        const bounds = attackProfileAtTier(this.options.basicAttack?.(weaponId),0)?.melee[0]?.bounds;
-        const near = bounds
-          ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
-          : 65;
+        const bounds = attackProfileAtTier(this.options.basicAttack?.(weaponId), 0)?.melee[0]
+          ?.bounds;
+        const near = bounds ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1) : 65;
         const travel = Math.trunc(
           Math.hypot(
             targets[0]!.x - (session.at.x + direction * near),
@@ -2607,26 +2737,49 @@ export class GameEntryServer {
           instance: session.instance,
           attack: accepted,
           dueAt: now + release + travel,
-          deaths: new Map([[mob.mobId, mob.deaths]]),
+          deaths: new Map(
+            targets.flatMap((target) => {
+              const mob = session.instance?.mobs.mob(target.mobId);
+              return mob ? [[mob.mobId, mob.deaths] as const] : [];
+            }),
+          ),
         });
       }
       return;
     }
     if (basicMotion) {
-      session.attackReadyAt=now+attackDuration(basicMotion);
-      this.relayAttack(session,opcode,attack,attack.targets);
-      this.queueActiveHits(session,opcode,attack,now+shotRelease(basicMotion));
+      session.attackReadyAt = now + attackDuration(basicMotion);
+      this.relayAttack(session, opcode, attack, attack.targets);
+      this.queueActiveHits(session, opcode, attack, now + shotRelease(basicMotion));
     } else this.resolveAttackDamage(session, opcode, attack, now, true);
   }
 
   /** Native presentation has 120ms per hit. Matching HP/reward settlement to that clock is
    * reconstruction policy (the original server isn't available); resources/relay happen ONCE. */
-  private queueActiveHits(session:FieldSession,opcode:number,attack:ClientAttack,dueAt:number):void {
-    for(const target of attack.targets){
-      const mob=session.instance.mobs.mob(target.mobId);if(!mob)continue;
-      target.damages.forEach((damage,ordinal)=>this.pendingShots.push({session,instance:session.instance,opcode,
-        attack:{...attack,hits:1,targetCount:1,targets:[{...target,damages:[damage]}]},
-        dueAt:dueAt+attackHitDelay(ordinal),deaths:new Map([[mob.mobId,mob.deaths]])}));
+  private queueActiveHits(
+    session: FieldSession,
+    opcode: number,
+    attack: ClientAttack,
+    dueAt: number,
+  ): void {
+    for (const target of attack.targets) {
+      const mob = session.instance.mobs.mob(target.mobId);
+      if (!mob) continue;
+      target.damages.forEach((damage, ordinal) =>
+        this.pendingShots.push({
+          session,
+          instance: session.instance,
+          opcode,
+          attack: {
+            ...attack,
+            hits: 1,
+            targetCount: 1,
+            targets: [{ ...target, damages: [damage] }],
+          },
+          dueAt: dueAt + attackHitDelay(ordinal),
+          deaths: new Map([[mob.mobId, mob.deaths]]),
+        }),
+      );
     }
   }
 
@@ -2645,12 +2798,17 @@ export class GameEntryServer {
       const damage = target.damages.reduce((total, value) => total + value, 0);
       // Normal admitted attacks are already split by queueActiveHits. Keep even the legacy
       // immediate path per-number: sub-threshold hits must never sum into a false KB.
-      let hit:MobDamage|undefined;
-      for(const value of target.damages){
-        const part=session.instance.mobs.applyDamage(target.mobId,value,now,{hitAnimation:target.hitAnimation,facingLeft:attack.facingLeft,characterId:session.characterId});
-        if(!part)break;
-        hit=part;mobPackets.push(...part.packets);
-        if(part.killed)break;
+      let hit: MobDamage | undefined;
+      for (const value of target.damages) {
+        const part = session.instance.mobs.applyDamage(target.mobId, value, now, {
+          hitAnimation: target.hitAnimation,
+          facingLeft: attack.facingLeft,
+          characterId: session.characterId,
+        });
+        if (!part) break;
+        hit = part;
+        mobPackets.push(...part.packets);
+        if (part.killed) break;
       }
       if (hit === undefined) {
         this.options.log?.(
@@ -2672,8 +2830,7 @@ export class GameEntryServer {
               `- die animation ${hit.dieMs}ms, corpse goes at +${hit.dieMs}ms, respawn at +${hit.dieMs + hit.respawnMs}ms`
           : `game: mob ${hit.mobId} hit for ${damage} - hp ${hit.hp}/${hit.maxHp}`,
       );
-      if (hit.killed)
-        kills.push({ mobId: hit.mobId, templateId: hit.templateId });
+      if (hit.killed) kills.push({ mobId: hit.mobId, templateId: hit.templateId });
     }
     if (relay) this.relayAttack(session, opcode, attack, relayed);
     session.instance.broadcastAll(mobPackets);
@@ -2725,12 +2882,22 @@ export class GameEntryServer {
       {
         characterId: session.characterId,
         hits: attack.hits,
-        skillLevel: attack.skillId ? Math.min(this.options.skills?.info(attack.skillId)?.maxLevel??0,learnedSkillLevel(session.character.items?.map32,attack.skillId)):0,
+        skillLevel: attack.skillId
+          ? Math.min(
+              this.options.skills?.info(attack.skillId)?.maxLevel ?? 0,
+              learnedSkillLevel(session.character.items?.map32, attack.skillId),
+            )
+          : 0,
         skillId: attack.skillId,
         facingLeft: attack.facingLeft,
         action: attack.action,
         speed: attack.speed,
-        afterimage:nativeWeaponMastery(session.character,this.options.skills,session.character.items?.worn.get(11)?.itemId??0,opcode===CLIENT_FIELD_OPCODE.shootAttack),
+        afterimage: nativeWeaponMastery(
+          session.character,
+          this.options.skills,
+          session.character.items?.worn.get(11)?.itemId ?? 0,
+          opcode === CLIENT_FIELD_OPCODE.shootAttack,
+        ),
         projectileItemId,
         targets,
       },
@@ -2762,9 +2929,7 @@ export class GameEntryServer {
     const template = this.options.mobTemplate?.(templateId);
     const amount = template?.exp ?? 0;
     if (amount <= 0) {
-      this.options.log?.(
-        `game: mob template ${templateId} carries no exp, nothing awarded`,
-      );
+      this.options.log?.(`game: mob template ${templateId} carries no exp, nothing awarded`);
       return;
     }
     const before = { ...session.character.stats };
@@ -2772,13 +2937,14 @@ export class GameEntryServer {
       session.character.stats,
       amount,
       undefined,
-      characterGrowthContext(session.character, this.options.growthSkill,this.options.itemCatalog),
+      characterGrowthContext(session.character, this.options.growthSkill, this.options.itemCatalog),
     );
     if (!gain.changed) return;
     const stats = session.character.stats;
-    if(gain.levels>0 && stats.hp>0) {
-      const caps=characterStatBasis(session.character,this.options.itemCatalog).basic;
-      stats.hp=caps.maxHp; stats.mp=caps.maxMp;
+    if (gain.levels > 0 && stats.hp > 0) {
+      const caps = characterStatBasis(session.character, this.options.itemCatalog).basic;
+      stats.hp = caps.maxHp;
+      stats.mp = caps.maxMp;
     }
     session.send(encodeStatUpdate({ diff: diffStats(before, stats) }));
     this.persist(); // Persist EXP/maxima now, including delayed projectile kills.
@@ -2842,33 +3008,29 @@ export class GameEntryServer {
           `${drop.money ? `${drop.amount} mesos` : `item ${drop.itemId} x${drop.count}`} at (${drop.x},${drop.y})`,
       );
     }
-    if (spawned.length === 0)
-      this.options.log?.(`game: mob ${mobId} died and left nothing`);
+    if (spawned.length === 0) this.options.log?.(`game: mob ${mobId} died and left nothing`);
   }
 
   private onConnection(socket: net.Socket): void {
     this.sockets.add(socket);
-    const clientSendSeed =
-      this.options.handshake?.clientSendSeed ?? randomSeed();
-    const clientRecvSeed =
-      this.options.handshake?.clientRecvSeed ?? randomSeed();
-    const body =
-      this.options.handshake?.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
+    const clientSendSeed = this.options.handshake?.clientSendSeed ?? randomSeed();
+    const clientRecvSeed = this.options.handshake?.clientRecvSeed ?? randomSeed();
+    const body = this.options.handshake?.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
     const deframer = new SessionDeframer({
       recvState: new CipherState(clientSendSeed),
       expectHandshake: false,
       expectedMagic: CLIENT_SEND_MAGIC,
     });
     socket.write(encodeHandshake(body, clientSendSeed, clientRecvSeed));
-    this.options.log?.(
-      "game: handshake sent, waiting for the 0x04 character id",
-    );
+    this.options.log?.("game: handshake sent, waiting for the 0x04 character id");
 
     const sendState = new CipherState(clientRecvSeed);
     let entered = false;
     let session: FieldSession | undefined;
     socket.on("data", (chunk) => {
-      for (const event of deframer.push(new Uint8Array(chunk))) {
+      for (const event of deframer.push(
+        new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
+      )) {
         if (event.kind !== "packet") continue;
         // Any packet at all is proof of life for the heartbeat: the client is talking to us.
         this.heartbeat.note(socket);
@@ -2901,26 +3063,30 @@ export class GameEntryServer {
           }
           entered = true;
           session = this.enterField(socket, sendState, entry);
-          if (session !== undefined)
-            this.sessionsByCharacter.set(entry.characterId, session);
+          if (session !== undefined) this.sessionsByCharacter.set(entry.characterId, session);
           continue;
         }
         const opcode = event.plain[0] ?? -1;
-        if(session!==undefined && opcode===CLIENT_SKILL_USE_OPCODE){
-          this.handleActiveSkill(session,event.plain);continue;
+        if (session !== undefined && opcode === CLIENT_SKILL_USE_OPCODE) {
+          this.handleActiveSkill(session, event.plain);
+          continue;
         }
         // A walk is the server's only source of where a player is: the field keeps it (a pickup needs
         // it) and relays it to the rest of the map as 0x22.
-        if(session!==undefined&&opcode===CLIENT_NPC_IDLE_OPCODE) {
+        if (session !== undefined && opcode === CLIENT_NPC_IDLE_OPCODE) {
           // Decode the optional path from the CURRENT field's template, never a claimed browser flag.
           try {
-            const id=new PacketReader(event.plain,1).readU32();
-            const npc=session.instance.npcs.byId(id);
-            if(npc?.behavior) {
-              const reader=new PacketReader(event.plain,1),value=readNpcIdle(reader,npc.behavior.movable);
-              if(reader.remaining===0)session.instance.reportNpcIdle(session.characterId,value);
+            const id = new PacketReader(event.plain, 1).readU32();
+            const npc = session.instance.npcs.byId(id);
+            if (npc?.behavior) {
+              const reader = new PacketReader(event.plain, 1),
+                value = readNpcIdle(reader, npc.behavior.movable);
+              if (reader.remaining === 0)
+                session.instance.reportNpcIdle(session.characterId, value);
             }
-          } catch { /* Malformed/truncated controller reports are ignored, never broadcast. */ }
+          } catch {
+            /* Malformed/truncated controller reports are ignored, never broadcast. */
+          }
           continue;
         }
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userMove) {
@@ -2941,10 +3107,7 @@ export class GameEntryServer {
           this.handleAbility(session, event.plain);
           continue;
         }
-        if (
-          session !== undefined &&
-          opcode === CLIENT_FIELD_OPCODE.statReport
-        ) {
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.statReport) {
           this.handleStatReport(session, event.plain);
           continue;
         }
@@ -2961,10 +3124,7 @@ export class GameEntryServer {
         }
         // A drag in the inventory window: an equip, an unequip, or a move between slots. The window
         // follows the `0x0B` this answers with, and the field hears a `0x28` when the worn set moved.
-        if (
-          session !== undefined &&
-          opcode === CLIENT_FIELD_OPCODE.changeSlot
-        ) {
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.changeSlot) {
           this.handleChangeSlot(session, event.plain);
           continue;
         }
@@ -2985,10 +3145,7 @@ export class GameEntryServer {
           continue;
         }
         // The NPC dialog's answer: the other half of the 0x47 the click sent.
-        if (
-          session !== undefined &&
-          opcode === CLIENT_FIELD_OPCODE.questReply
-        ) {
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.questReply) {
           this.handleQuestReply(session, event.plain);
           continue;
         }
@@ -3006,10 +3163,7 @@ export class GameEntryServer {
         }
         // A message about **one** user, sent by name: a whisper, or a find (`/헉추적`). The only
         // packet in the field stage that reaches a player on another map (see `handleUserRequest`).
-        if (
-          session !== undefined &&
-          opcode === CLIENT_FIELD_OPCODE.userRequest
-        ) {
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userRequest) {
           this.handleUserRequest(session, event.plain);
           continue;
         }
@@ -3086,9 +3240,7 @@ export class GameEntryServer {
     try {
       text = readClientChat(new PacketReader(plain, 1)).text;
     } catch (error) {
-      this.options.log?.(
-        `game: 0x12 chat unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x12 chat unreadable: ${(error as Error).message}`);
       return;
     }
     this.options.log?.(
@@ -3117,9 +3269,7 @@ export class GameEntryServer {
       if (plain.length !== 5) throw new Error("0x13 requires exactly one u32 emotion");
       emotion = readClientEmotion(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x13 emotion unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x13 emotion unreadable: ${(error as Error).message}`);
       return;
     }
     session.instance.broadcast(
@@ -3183,39 +3333,40 @@ export class GameEntryServer {
       return;
     }
     if (request.kind === USER_REQUEST_KIND.refuseWhisper) {
-      const source=this.sessionNamed(request.name), receipts=this.whisperReceipts.get(session);
-      if(!source || !receipts || (receipts.get(source)??0)<performance.now() ||
-          String.fromCharCode(...(request.text??new Uint8Array()))!==session.name)return;
+      const source = this.sessionNamed(request.name),
+        receipts = this.whisperReceipts.get(session);
+      if (
+        !source ||
+        !receipts ||
+        (receipts.get(source) ?? 0) < performance.now() ||
+        String.fromCharCode(...(request.text ?? new Uint8Array())) !== session.name
+      )
+        return;
       receipts.delete(source);
-      source.send(encodeUserWhisperRefused({name:session.name}));
+      source.send(encodeUserWhisperRefused({ name: session.name }));
       this.options.log?.(`game: "${session.name}" refuses whisper from "${source.name}"`);
       return;
     }
     const text = request.text ?? new Uint8Array(0);
     const target = this.sessionNamed(request.name);
     if (target === undefined) {
-      this.options.log?.(
-        `game: whisper "${session.name}" -> "${request.name}": no such player`,
-      );
-      session.send(
-        encodeUserWhisperAnswer({ name: request.name, delivered: false }),
-      );
+      this.options.log?.(`game: whisper "${session.name}" -> "${request.name}": no such player`);
+      session.send(encodeUserWhisperAnswer({ name: request.name, delivered: false }));
       return;
     }
-    this.options.log?.(
-      `game: whisper "${session.name}" -> "${target.name}": ${decodeCp949(text)}`,
-    );
+    this.options.log?.(`game: whisper "${session.name}" -> "${target.name}": ${decodeCp949(text)}`);
     // 472910 renders `%s>> %s` in font1, or refuses it if goWhisper=0. The sender's own echo
     // (`0x0A`) carries no text: their client kept what it sent and prints "name<< text" from it.
-    let receipts=this.whisperReceipts.get(target);
-    if(!receipts){receipts=new Map();this.whisperReceipts.set(target,receipts);}
-    const now=performance.now();
-    for(const [id,until] of receipts)if(until<now)receipts.delete(id);
-    receipts.set(session,now+3000);
+    let receipts = this.whisperReceipts.get(target);
+    if (!receipts) {
+      receipts = new Map();
+      this.whisperReceipts.set(target, receipts);
+    }
+    const now = performance.now();
+    for (const [id, until] of receipts) if (until < now) receipts.delete(id);
+    receipts.set(session, now + 3000);
     target.send(encodeUserChat({ name: session.name, text }));
-    session.send(
-      encodeUserWhisperAnswer({ name: target.name, delivered: true }),
-    );
+    session.send(encodeUserWhisperAnswer({ name: target.name, delivered: true }));
   }
 
   /**
@@ -3250,9 +3401,7 @@ export class GameEntryServer {
         }
         const party = this.parties.create(partyMemberOf(session));
         session.send(encodePartyResult({ kind: "created", partyId: party.id }));
-        this.options.log?.(
-          `game: party: "${session.name}" created party ${party.id}`,
-        );
+        this.options.log?.(`game: party: "${session.name}" created party ${party.id}`);
         return;
       }
       case "leave": {
@@ -3272,15 +3421,8 @@ export class GameEntryServer {
           return;
         }
         const invite = this.parties.inviteOf(session.characterId);
-        const party =
-          invite === undefined
-            ? undefined
-            : this.parties.partyOf(invite.inviterId);
-        if (
-          invite === undefined ||
-          party === undefined ||
-          party.id !== invite.partyId
-        ) {
+        const party = invite === undefined ? undefined : this.parties.partyOf(invite.inviterId);
+        if (invite === undefined || party === undefined || party.id !== invite.partyId) {
           this.options.log?.(
             `game: party: "${session.name}" accepted an invite from ${request.inviterId} that is no longer valid`,
           );
@@ -3349,18 +3491,11 @@ export class GameEntryServer {
           session.send(encodePartyResult({ kind: "notInParty" }));
           return;
         }
-        if (
-          party.leaderId !== session.characterId ||
-          request.targetId === session.characterId
-        ) {
+        if (party.leaderId !== session.characterId || request.targetId === session.characterId) {
           session.send(encodePartyResult({ kind: "unknown" }));
           return;
         }
-        if (
-          !party.members.some(
-            (member) => member.characterId === request.targetId,
-          )
-        ) {
+        if (!party.members.some((member) => member.characterId === request.targetId)) {
           session.send(encodePartyResult({ kind: "unknown" }));
           return;
         }
@@ -3391,9 +3526,7 @@ export class GameEntryServer {
     try {
       request = readClientFameRequest(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x20 fame unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x20 fame unreadable: ${(error as Error).message}`);
       return;
     }
     this.options.log?.(`game: ${describeClientFameRequest(request)}`);
@@ -3446,9 +3579,7 @@ export class GameEntryServer {
     );
     const diff = diffStats(before, target.character.stats);
     if (Object.keys(diff).length > 0) target.send(encodeStatUpdate({ diff }));
-    session.send(
-      encodeFameResult({ kind: "changed", name: target.name, up: request.up }),
-    );
+    session.send(encodeFameResult({ kind: "changed", name: target.name, up: request.up }));
     this.options.log?.(
       `game: fame: "${session.name}" -> "${target.name}" ${request.up ? "up" : "down"} (now ${outcome.fame})`,
     );
@@ -3464,33 +3595,23 @@ export class GameEntryServer {
    * 幾個 2003 client 自己就有的閘門，伺服器仍然重做一次（封包是別人可以偽造的）：
    * 邀請只找**同一張圖**的人、一次只能開一個房間、確認之後不能再改內容。
    */
-  private handleMiniRoomRequest(
-    session: FieldSession,
-    plain: Uint8Array,
-  ): void {
+  private handleMiniRoomRequest(session: FieldSession, plain: Uint8Array): void {
     let request: ClientMiniRoomRequest;
     try {
       request = readClientMiniRoomRequest(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x25 miniroom unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x25 miniroom unreadable: ${(error as Error).message}`);
       return;
     }
     this.options.log?.(`game: ${describeClientMiniRoomRequest(request)}`);
     switch (request.kind) {
       case "invite":
-        this.inviteToTrade(
-          session,
-          this.sessionsByCharacter.get(request.targetId),
-        );
+        this.inviteToTrade(session, this.sessionsByCharacter.get(request.targetId));
         return;
       case "inviteByName": {
         const target = this.sessionNamed(request.name);
         if (target === undefined || target.instance !== session.instance) {
-          session.send(
-            encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }),
-          );
+          session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
           return;
         }
         this.inviteToTrade(session, target);
@@ -3515,10 +3636,7 @@ export class GameEntryServer {
   }
 
   /** 一個玩家在交易房間裡的樣子。 */
-  private tradeParticipant(
-    session: FieldSession,
-    index: number,
-  ): MiniRoomParticipant {
+  private tradeParticipant(session: FieldSession, index: number): MiniRoomParticipant {
     return {
       index,
       name: session.name,
@@ -3534,15 +3652,8 @@ export class GameEntryServer {
    * `type 2` 的 `code 0` 什麼都不顯示——它是「請求收到了」的意思，不是「對方答應了」。對方答應時
    * 兩邊都會收到 `type 4`（進房間）。
    */
-  private inviteToTrade(
-    session: FieldSession,
-    target: FieldSession | undefined,
-  ): void {
-    if (
-      target === undefined ||
-      target === session ||
-      target.instance !== session.instance
-    ) {
+  private inviteToTrade(session: FieldSession, target: FieldSession | undefined): void {
+    if (target === undefined || target === session || target.instance !== session.instance) {
       session.send(encodeMiniRoomRefused({ code: MINIROOM_REFUSAL.notFound }));
       this.options.log?.(
         `game: trade: "${session.name}" tried to invite someone who is not in this map`,
@@ -3606,10 +3717,7 @@ export class GameEntryServer {
       return;
     }
     const room = this.trades.open(inviter, session);
-    const participants = [
-      this.tradeParticipant(inviter, 0),
-      this.tradeParticipant(session, 1),
-    ];
+    const participants = [this.tradeParticipant(inviter, 0), this.tradeParticipant(session, 1)];
     inviter.send(
       encodeMiniRoomEnter({
         roomKind: MINIROOM_KIND.trade,
@@ -3639,9 +3747,7 @@ export class GameEntryServer {
     const side = this.trades.sideOf(room, session.characterId);
     if (side === undefined || side.confirmed) return;
     if (!isTradeSlot(request.roomSlot)) {
-      this.options.log?.(
-        `game: trade: room slot ${request.roomSlot} is outside 1..8`,
-      );
+      this.options.log?.(`game: trade: room slot ${request.roomSlot} is outside 1..8`);
       return;
     }
     const inventory = session.character.items?.inventories[request.tab - 1];
@@ -3690,8 +3796,7 @@ export class GameEntryServer {
       roomSlot: request.roomSlot,
       item: shown,
     });
-    for (const member of room.sides)
-      this.sessionsByCharacter.get(member.characterId)?.send(packet);
+    for (const member of room.sides) this.sessionsByCharacter.get(member.characterId)?.send(packet);
     this.options.log?.(
       `game: trade: ${room.id} "${session.name}" put item ${item.itemId} x${count} in slot ${request.roomSlot}`,
     );
@@ -3714,8 +3819,7 @@ export class GameEntryServer {
       index: room.sides.indexOf(side),
       amount,
     });
-    for (const member of room.sides)
-      this.sessionsByCharacter.get(member.characterId)?.send(packet);
+    for (const member of room.sides) this.sessionsByCharacter.get(member.characterId)?.send(packet);
   }
 
   /**
@@ -3738,9 +3842,7 @@ export class GameEntryServer {
       return;
     }
     const sides = room.sides;
-    const sessions = sides.map((member) =>
-      this.sessionsByCharacter.get(member.characterId),
-    );
+    const sessions = sides.map((member) => this.sessionsByCharacter.get(member.characterId));
     const [left, right] = sessions;
     if (left === undefined || right === undefined) {
       this.trades.close(room);
@@ -3765,9 +3867,7 @@ export class GameEntryServer {
     );
     this.trades.close(room);
     if (!settlement.ok) {
-      this.options.log?.(
-        `game: trade: ${room.id} failed - ${settlement.reason}`,
-      );
+      this.options.log?.(`game: trade: ${room.id} failed - ${settlement.reason}`);
       left.send(encodeMiniRoomFinish(TRADE_FINISH.failed));
       right.send(encodeMiniRoomFinish(TRADE_FINISH.failed));
       return;
@@ -3812,17 +3912,12 @@ export class GameEntryServer {
    * 2003 的 client 也沒有「只邀同圖」的限制（`sub_4E1BB0` 直接跳模態，不像 `/교환` 要先用
    * `CUserPool` 找名字）。
    */
-  private handleMessengerRequest(
-    session: FieldSession,
-    plain: Uint8Array,
-  ): void {
+  private handleMessengerRequest(session: FieldSession, plain: Uint8Array): void {
     let request: ClientMessengerRequest;
     try {
       request = readClientMessengerRequest(new PacketReader(plain, 1));
     } catch (error) {
-      this.options.log?.(
-        `game: 0x24 messenger unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x24 messenger unreadable: ${(error as Error).message}`);
       return;
     }
     this.options.log?.(`game: ${describeClientMessengerRequest(request)}`);
@@ -3851,29 +3946,21 @@ export class GameEntryServer {
   private enterMessenger(session: FieldSession, roomId: number): void {
     if (this.messenger.roomOf(session.characterId) !== undefined) {
       // 已經在房間裡：client 自己不會送第二個 type 0，送了就是壞掉的狀態。
-      this.options.log?.(
-        `game: messenger: "${session.name}" is already in a room`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" is already in a room`);
       return;
     }
     const member = { characterId: session.characterId, name: session.name };
     const room =
-      roomId === 0
-        ? this.messenger.create(member)
-        : this.joinMessengerRoom(roomId, member);
+      roomId === 0 ? this.messenger.create(member) : this.joinMessengerRoom(roomId, member);
     if (room === undefined) {
       session.send(encodeMessengerJoinFailed());
-      this.options.log?.(
-        `game: messenger: "${session.name}" could not enter room ${roomId}`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" could not enter room ${roomId}`);
       return;
     }
     // 新進來的人要讓其他人（與自己）看到。`announce` 只有「剛進來」的那一格是 1：
     // `sub_4DF3E0` 用它決定要不要印「- '%s'님이 입장하셨습니다」——所以每個人（含剛進來的那個）
     // 都會在房間的訊息區看到那一行，跟自己開一間房時看到的一樣。
-    const slot = room.members.findIndex(
-      (entry) => entry.characterId === session.characterId,
-    );
+    const slot = room.members.findIndex((entry) => entry.characterId === session.characterId);
     const packets = this.messengerPackets(room, slot);
     for (const entry of room.members) {
       const recipient = this.sessionsByCharacter.get(entry.characterId);
@@ -3907,16 +3994,12 @@ export class GameEntryServer {
   private inviteToMessenger(session: FieldSession, text: string): void {
     const room = this.messenger.roomOf(session.characterId);
     if (room === undefined) {
-      this.options.log?.(
-        `game: messenger: "${session.name}" has no room to invite into`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" has no room to invite into`);
       return;
     }
     const name = messengerInviteTarget(text);
     if (name === "") {
-      this.options.log?.(
-        `game: messenger: "${session.name}" sent an incomplete invite "${text}"`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" sent an incomplete invite "${text}"`);
       return;
     }
     const target = this.sessionNamed(name);
@@ -3927,9 +4010,7 @@ export class GameEntryServer {
           name,
         }),
       );
-      this.options.log?.(
-        `game: messenger: "${session.name}" invited "${name}": no such player`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" invited "${name}": no such player`);
       return;
     }
     session.send(
@@ -3938,9 +4019,7 @@ export class GameEntryServer {
         name: target.name,
       }),
     );
-    target.send(
-      encodeMessengerInvite({ inviterName: session.name, roomId: room.id }),
-    );
+    target.send(encodeMessengerInvite({ inviterName: session.name, roomId: room.id }));
     this.messenger.invite(
       target.characterId,
       { roomId: room.id, inviterName: session.name },
@@ -3965,9 +4044,7 @@ export class GameEntryServer {
   private sayInMessenger(session: FieldSession, line: string): void {
     const room = this.messenger.roomOf(session.characterId);
     if (room === undefined) {
-      this.options.log?.(
-        `game: messenger: "${session.name}" said "${line}" outside a room`,
-      );
+      this.options.log?.(`game: messenger: "${session.name}" said "${line}" outside a room`);
       return;
     }
     const separator = line.indexOf(" : ");
@@ -3999,10 +4076,7 @@ export class GameEntryServer {
   }
 
   /** 一間房的成員包（`0x4D type 0`）：每一格一個封包，**只有 `announceSlot` 那一格帶 announce**。 */
-  private messengerPackets(
-    room: MessengerRoom,
-    announceSlot: number,
-  ): Uint8Array[] {
+  private messengerPackets(room: MessengerRoom, announceSlot: number): Uint8Array[] {
     return room.members.map((entry, slot) =>
       encodeMessengerParticipant(
         this.messengerParticipant(entry.characterId, entry.name, slot),
@@ -4035,11 +4109,7 @@ export class GameEntryServer {
    * 名冊）——退隊的人也要收到，否則它的 client 不會清掉自己的 `partyId`；下線的人不在
    * `sessionsByCharacter` 裡，`?.send` 自然跳過。
    */
-  private broadcastPartyLeave(
-    leave: PartyLeave,
-    kicked: boolean,
-    why: string,
-  ): void {
+  private broadcastPartyLeave(leave: PartyLeave, kicked: boolean, why: string): void {
     if (leave.leaderLeft) {
       const ended = encodePartyResult({
         kind: "ended",
@@ -4110,9 +4180,7 @@ export class GameEntryServer {
       const move = readClientUserMove(new PacketReader(plain, 1));
       session.instance.reportMove(session.characterId, move.path);
     } catch (error) {
-      this.options.log?.(
-        `game: 0x0E move unreadable: ${(error as Error).message}`,
-      );
+      this.options.log?.(`game: 0x0E move unreadable: ${(error as Error).message}`);
     }
   }
 }
@@ -4121,11 +4189,7 @@ export class GameEntryServer {
  * The character record to send back in `0x16`: the login server's own record with the map id
  * replaced. A handoff issued without a record (tests, tooling) gets a minimal but complete one.
  */
-function withMapId(
-  entry: HandoffEntry,
-  fallbackMapId: number,
-  hasMapZero = false,
-): CharacterData {
+function withMapId(entry: HandoffEntry, fallbackMapId: number, hasMapZero = false): CharacterData {
   if (entry.character) {
     // A character's own `mapId` is where they were when they left: the record is the truth for the
     // map the same way it is for level and mesos, and it is the only field `sub_4C2780` reads to pick
@@ -4137,8 +4201,7 @@ function withMapId(
     // `mapId` when a portal moves them), and `persist` saves that one object when the session ends.
     // A copy would mean two records with one name, and only one of them would ever be saved.
     const character = entry.character;
-    if (character.stats.mapId === 0 && !hasMapZero)
-      character.stats.mapId = fallbackMapId;
+    if (character.stats.mapId === 0 && !hasMapZero) character.stats.mapId = fallbackMapId;
     return character;
   }
   const stats = zeroStats();
@@ -4200,15 +4263,9 @@ function avatarItemsOf(character: CharacterData): number[] {
  */
 function describeLookWords(appearance: readonly number[]): string {
   const word = (index: number): number => appearance[index] ?? 0;
-  const clothes = [
-    LOOK_WORD.clothes,
-    LOOK_WORD.pants,
-    LOOK_WORD.shoes,
-    LOOK_WORD.weapon,
-  ].map(word);
+  const clothes = [LOOK_WORD.clothes, LOOK_WORD.pants, LOOK_WORD.shoes, LOOK_WORD.weapon].map(word);
   const dice: number[] = [];
-  for (let index = LOOK_WORD.dice; index < LOOK_WORDS; index++)
-    dice.push(word(index));
+  for (let index = LOOK_WORD.dice; index < LOOK_WORDS; index++) dice.push(word(index));
   return (
     `face ${word(LOOK_WORD.face)}, hair ${word(LOOK_WORD.hair)} ` +
     `clothes ${clothes.join("/")}, dice ${dice.join("/")}`
@@ -4217,11 +4274,8 @@ function describeLookWords(appearance: readonly number[]): string {
 
 /** What of the look words reached the record: the worn group the client draws the avatar from. */
 function describeWorn(character: CharacterData): string {
-  const entries =
-    character.items === undefined ? [] : [...character.items.worn];
-  const worn = entries
-    .sort((a, b) => a[0] - b[0])
-    .map(([slot, item]) => `${slot}:${item.itemId}`);
+  const entries = character.items === undefined ? [] : [...character.items.worn];
+  const worn = entries.sort((a, b) => a[0] - b[0]).map(([slot, item]) => `${slot}:${item.itemId}`);
   return worn.length > 0 ? `wearing ${worn.join(" ")}` : "wearing nothing";
 }
 

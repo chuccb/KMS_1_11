@@ -4,13 +4,17 @@
  */
 import { spriteFrames, type SpriteFrame } from "./sprites.ts";
 import type { ArtReader } from "./wzart.ts";
-export interface DeathArt { fall: SpriteFrame[]; land: SpriteFrame[] }
+export interface DeathArt {
+  fall: SpriteFrame[];
+  land: SpriteFrame[];
+}
 export function deathArtOf(reader: ArtReader): DeathArt | undefined {
   const fall = spriteFrames(reader, "Effect/Tomb.img", "fall", [], 90);
   const land = spriteFrames(reader, "Effect/Tomb.img", "land", [], 90);
   if (!fall.length || !land.length) return undefined;
   const queued: SpriteFrame[] = [];
-  let elapsed = 0, index = 0;
+  let elapsed = 0,
+    index = 0;
   while (elapsed < 800) {
     const frame = fall[index++ % fall.length]!;
     queued.push(frame);

@@ -1,9 +1,9 @@
-import {dialogueAssets} from './dialogue-assets.mjs';
-import {drawSimpleTooltip} from './tooltip.mjs';
-import {releaseOnInterrupt} from './pointer.mjs';
-import {drawUtilFrame, drawUtilTextFrame} from './utildialog.mjs';
+import {dialogueAssets} from './dialogue-assets.ts';
+import {drawSimpleTooltip} from './tooltip.ts';
+import {releaseOnInterrupt} from './pointer.ts';
+import {drawUtilFrame, drawUtilTextFrame} from './utildialog.ts';
 import {DIALOGUE_FONT, DIALOGUE_COLORS, dialogueRuns, dialogueLayout, dialogueButtons,
-  dialogueInputError, dialoguePlainText, dialogueAssetKey} from './npcdialogue-layout.mjs';
+  dialogueInputError, dialoguePlainText, dialogueAssetKey} from './npcdialogue-layout.ts';
 
 /** Server CUtilDlgEx: native Ex2 art on canvas; DOM only for editing, focus and hit targets.
  * No NPC portrait/title is invented: 4A5910 reads but does not use the packet's NPC id.

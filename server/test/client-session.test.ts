@@ -41,13 +41,7 @@ test(
       sockets.add(socket);
       socket.on("close", () => sockets.delete(socket));
       const sendState = new CipherState(0x22222222);
-      socket.write(
-        encodeHandshake(
-          new Uint8Array(HANDSHAKE_BODY_BYTES),
-          0x11111111,
-          0x22222222,
-        ),
-      );
+      socket.write(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222));
       socket.once("data", () => {
         // A single TCP write forces the first take(0x16) and the subsequent frames into one read.
         const packets = [
@@ -76,17 +70,11 @@ test(
           encodeStatUpdate({ diff: { level: 2, exp: 0, str: 9, ap: 2 } }),
         ];
         socket.write(
-          Buffer.concat(
-            packets.map((packet) =>
-              encodeSessionPacket(packet, sendState, "s2c"),
-            ),
-          ),
+          Buffer.concat(packets.map((packet) => encodeSessionPacket(packet, sendState, "s2c"))),
         );
       });
     });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -111,11 +99,7 @@ test(
       "setField must not erase its initial mob snapshot",
     );
     assert.deepEqual(
-      [
-        session.character!.stats.str,
-        session.character!.stats.ap,
-        session.character!.stats.level,
-      ],
+      [session.character!.stats.str, session.character!.stats.ap, session.character!.stats.level],
       [9, 2, 2],
     );
     const self = received.find((e) => e.kind === "self");

@@ -55,17 +55,33 @@ export interface EquipmentTemplate {
   stats: Record<EquipStat, number>;
 }
 export const EQUIPMENT_WZ_FIELDS: Readonly<Record<EquipStat, string>> = {
-  str: "incSTR", dex: "incDEX", int: "incINT", luk: "incLUK",
-  maxHp: "incMHP", maxMp: "incMMP", pad: "incPAD", mad: "incMAD",
-  pdd: "incPDD", mdd: "incMDD", acc: "incACC", eva: "incEVA",
-  craft: "incCraft", speed: "incSpeed", jump: "incJump",
+  str: "incSTR",
+  dex: "incDEX",
+  int: "incINT",
+  luk: "incLUK",
+  maxHp: "incMHP",
+  maxMp: "incMMP",
+  pad: "incPAD",
+  mad: "incMAD",
+  pdd: "incPDD",
+  mdd: "incMDD",
+  acc: "incACC",
+  eva: "incEVA",
+  craft: "incCraft",
+  speed: "incSpeed",
+  jump: "incJump",
 };
 function equipmentTemplate(info: Record<string, unknown>): EquipmentTemplate {
-  const integer = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
+  const integer = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
   return {
     ruc: integer(info.tuc) & 0xff,
-    stats: Object.fromEntries(Object.entries(EQUIPMENT_WZ_FIELDS).map(([stat, field]) =>
-      [stat, (integer(info[field]) << 16) >> 16])) as Record<EquipStat, number>,
+    stats: Object.fromEntries(
+      Object.entries(EQUIPMENT_WZ_FIELDS).map(([stat, field]) => [
+        stat,
+        (integer(info[field]) << 16) >> 16,
+      ]),
+    ) as Record<EquipStat, number>,
   };
 }
 
@@ -179,8 +195,7 @@ function infoNodeOf(
   location: ItemLocation,
 ): Record<string, unknown> | undefined {
   if (root === undefined) return undefined;
-  const node =
-    location.nodeName === null ? root : propertyOf(root, location.nodeName);
+  const node = location.nodeName === null ? root : propertyOf(root, location.nodeName);
   if (node === undefined || node === null) return undefined;
   const info = propertyOf(node, "info");
   if (info === undefined || info === null) return undefined;
@@ -201,8 +216,7 @@ function iconCanvasOf(
   raw = true,
 ): { canvas: WzCanvas; name: string } | undefined {
   if (root === undefined) return undefined;
-  const node =
-    location.nodeName === null ? root : propertyOf(root, location.nodeName);
+  const node = location.nodeName === null ? root : propertyOf(root, location.nodeName);
   if (node === undefined || node === null) return undefined;
   const info = propertyOf(node, "info");
   for (const name of raw ? ["iconRaw", "icon"] : ["icon"]) {
@@ -222,9 +236,7 @@ function iconCanvasOf(
  * "no data, no answer" for maps, drops and shops the same way. The parsed roots are cached per image
  * path (a shop page asks about many ids of one image) and the resolved location per item id.
  */
-export function itemCatalogOf(
-  source: ItemSource | undefined,
-): ItemCatalog | undefined {
+export function itemCatalogOf(source: ItemSource | undefined): ItemCatalog | undefined {
   if (source === undefined) return undefined;
   const imagePaths = source.images.map((image) => image.path);
   const locations = new Map<number, ItemLocation | undefined>();
@@ -232,8 +244,7 @@ export function itemCatalogOf(
   const icons = new Map<number, Uint8Array | undefined>();
 
   const locate = (itemId: number): ItemLocation | undefined => {
-    if (!locations.has(itemId))
-      locations.set(itemId, locateItemImage(imagePaths, itemId));
+    if (!locations.has(itemId)) locations.set(itemId, locateItemImage(imagePaths, itemId));
     return locations.get(itemId);
   };
   const rootOf = (path: string): WzObject | undefined => {
@@ -256,8 +267,7 @@ export function itemCatalogOf(
           const origin = entry.value;
           if (origin instanceof WzNode && Array.isArray(origin.value)) {
             const [x, y] = origin.value as [number, number];
-            if (typeof x === "number" && typeof y === "number")
-              [ox, oy] = [x, y];
+            if (typeof x === "number" && typeof y === "number") [ox, oy] = [x, y];
           }
         }
         const parent =
@@ -280,8 +290,7 @@ export function itemCatalogOf(
   return {
     info(itemId: number): ItemInfo | undefined {
       const location = locate(itemId);
-      if (location === undefined || !source.has(location.imagePath))
-        return undefined;
+      if (location === undefined || !source.has(location.imagePath)) return undefined;
       const info = infoNodeOf(rootOf(location.imagePath), location);
       if (info === undefined) return undefined;
       const name = asText(info.name, "");
@@ -309,13 +318,10 @@ export function itemCatalogOf(
         cash: asNumber(info.cash) !== 0,
         ...(name === "" ? {} : { name }),
         ...(Number.isFinite(price) ? { price } : {}),
-        ...(typeof info.unitPrice === "number" &&
-        Number.isFinite(info.unitPrice)
+        ...(typeof info.unitPrice === "number" && Number.isFinite(info.unitPrice)
           ? { unitPrice: info.unitPrice }
           : {}),
-        ...(typeof info.slotMax === "number" &&
-        Number.isInteger(info.slotMax) &&
-        info.slotMax > 0
+        ...(typeof info.slotMax === "number" && Number.isInteger(info.slotMax) && info.slotMax > 0
           ? { slotMax: info.slotMax }
           : {}),
         ...(desc === "" ? {} : { desc }),
@@ -331,10 +337,7 @@ export function itemCatalogOf(
       let png: Uint8Array | undefined;
       const location = locate(itemId);
       if (location !== undefined && source.has(location.imagePath)) {
-        const canvas = iconCanvasOf(
-          rootOf(location.imagePath),
-          location,
-        )?.canvas;
+        const canvas = iconCanvasOf(rootOf(location.imagePath), location)?.canvas;
         if (canvas !== undefined) {
           const rgba = canvasToRgba(canvas);
           if (rgba !== null) png = encodePng(rgba);

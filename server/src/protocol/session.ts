@@ -23,7 +23,13 @@
  *                          The body cannot be encrypted with the session cipher because the
  *                          cipher state arrives inside this same packet (state unverified).
  */
-import { CipherState, CLIENT_SEND_MAGIC, SERVER_SEND_MAGIC, magicFor, type Direction } from "./cipher.ts";
+import {
+  CipherState,
+  CLIENT_SEND_MAGIC,
+  SERVER_SEND_MAGIC,
+  magicFor,
+  type Direction,
+} from "./cipher.ts";
 import { FramingError, toHex } from "./frame.ts";
 
 export const HANDSHAKE_TOTAL_BYTES = 211;
@@ -50,7 +56,11 @@ export interface Handshake {
  * `clientRecvSeed` seeds its RECEIVE state (+124); a server should pick these and mirror
  * them (server recv = client send, server send = client recv).
  */
-export function encodeHandshake(body: Uint8Array, clientSendSeed: number, clientRecvSeed: number): Uint8Array {
+export function encodeHandshake(
+  body: Uint8Array,
+  clientSendSeed: number,
+  clientRecvSeed: number,
+): Uint8Array {
   if (body.length !== HANDSHAKE_BODY_BYTES) {
     throw new FramingError(
       `handshake body must be ${HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
@@ -80,7 +90,9 @@ export function decodeHandshake(wire: Uint8Array): Handshake {
   }
   const bodyLength = view.getUint16(2, true);
   if (bodyLength !== HANDSHAKE_BODY_BYTES) {
-    throw new FramingError(`handshake body length is ${bodyLength}, expected ${HANDSHAKE_BODY_BYTES}`);
+    throw new FramingError(
+      `handshake body length is ${bodyLength}, expected ${HANDSHAKE_BODY_BYTES}`,
+    );
   }
   return {
     body: wire.slice(4, 4 + bodyLength),
@@ -251,7 +263,8 @@ export function describePacket(event: SessionEvent): string {
       `recvSeed=0x${event.handshake.recvSeed.toString(16)} body=${toHex(event.handshake.body)}`
     );
   }
-  const opcode = event.opcode === undefined ? "--" : "0x" + event.opcode.toString(16).padStart(2, "0");
+  const opcode =
+    event.opcode === undefined ? "--" : "0x" + event.opcode.toString(16).padStart(2, "0");
   return (
     `header=0x${event.header.toString(16).padStart(4, "0")} opcode=${opcode} body=${toHex(event.plain)}` +
     (event.headerOk ? "" : ` !! expected header 0x${event.expectedHeader.toString(16)}`)

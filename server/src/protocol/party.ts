@@ -55,11 +55,7 @@
  *    丟掉。我們的伺服器只在遊戲內送它，所以一定會被讀到。
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
-import {
-  CHARACTER_NAME_BYTES,
-  nameFieldBytes,
-  nameFieldToString,
-} from "./chardata.ts";
+import { CHARACTER_NAME_BYTES, nameFieldBytes, nameFieldToString } from "./chardata.ts";
 
 /** 兩個方向的號碼（同名不同方向，跟 `0x0B`／`0x0F` 一樣）。 */
 export const PARTY_OPCODE = {
@@ -198,7 +194,14 @@ export type PartyResult =
   | { kind: "sync"; partyId: number; members: readonly PartyMember[] }
   | { kind: "created"; partyId: number }
   | { kind: "joined"; partyId: number; name: string; members: readonly PartyMember[] }
-  | { kind: "left"; partyId: number; characterId: number; kicked: boolean; name: string; members: readonly PartyMember[] }
+  | {
+      kind: "left";
+      partyId: number;
+      characterId: number;
+      kicked: boolean;
+      name: string;
+      members: readonly PartyMember[];
+    }
   | { kind: "ended"; partyId: number; leaderId: number }
   | { kind: "alreadyInParty" }
   | { kind: "notInParty" }
@@ -217,7 +220,11 @@ export function encodePartyResult(result: PartyResult): Uint8Array {
         .writeAsciiString(result.inviterName)
         .toBytes();
     case "sync":
-      return writer.writeByte(PARTY_RESULT_TYPE.sync).writeU32(result.partyId).writeBytes(encodePartyTable(result.members)).toBytes();
+      return writer
+        .writeByte(PARTY_RESULT_TYPE.sync)
+        .writeU32(result.partyId)
+        .writeBytes(encodePartyTable(result.members))
+        .toBytes();
     case "created":
       return writer.writeByte(PARTY_RESULT_TYPE.created).writeU32(result.partyId).toBytes();
     case "joined":

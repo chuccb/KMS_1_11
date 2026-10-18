@@ -1,0 +1,13 @@
+.git/
+node_modules/
+generated/
+dist/
+assets/
+analysis/
+*.c
+*.lst
+*.exe
+*.dll
+*.acm
+*.wz
+client/fonts/

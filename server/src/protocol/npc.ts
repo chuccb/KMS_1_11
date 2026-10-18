@@ -66,7 +66,7 @@
  * form - inventing one without a caller would be dead code with a guessed field meaning.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
-import {readMovePath,writeMovePath,type MovePath} from "./movepath.ts";
+import { readMovePath, writeMovePath, type MovePath } from "./movepath.ts";
 
 /** The `CNpcPool` opcodes with a located handler (`sub_49F560`). */
 export const NPC_OPCODE = {
@@ -184,19 +184,33 @@ export function readNpcState(reader: PacketReader): { npcId: number; on: boolean
   return { npcId: reader.readU32(), on };
 }
 
-
 /** 49A3C0: u8 opcode2F, u32 npcId, signed action, signed speech, then CMovePath ONLY if the template has move. */
-export const CLIENT_NPC_IDLE_OPCODE=0x2f;
-export interface NpcIdle {npcId:number;action:number;speech:number;path?:MovePath}
-function writeNpcIdle(opcode:number,value:NpcIdle): Uint8Array {
-  const out=new PacketWriter(7);out.writeByte(opcode);out.writeU32(value.npcId>>>0);
-  out.writeByte(value.action&255);out.writeByte(value.speech&255);
-  if(value.path)writeMovePath(out,value.path);return out.toBytes();
+export const CLIENT_NPC_IDLE_OPCODE = 0x2f;
+export interface NpcIdle {
+  npcId: number;
+  action: number;
+  speech: number;
+  path?: MovePath;
 }
-export const encodeClientNpcIdle=(value:NpcIdle):Uint8Array=>writeNpcIdle(CLIENT_NPC_IDLE_OPCODE,value);
-export const encodeNpcIdle=(value:NpcIdle):Uint8Array=>writeNpcIdle(NPC_OPCODE.update,value);
+function writeNpcIdle(opcode: number, value: NpcIdle): Uint8Array {
+  const out = new PacketWriter(7);
+  out.writeByte(opcode);
+  out.writeU32(value.npcId >>> 0);
+  out.writeByte(value.action & 255);
+  out.writeByte(value.speech & 255);
+  if (value.path) writeMovePath(out, value.path);
+  return out.toBytes();
+}
+export const encodeClientNpcIdle = (value: NpcIdle): Uint8Array =>
+  writeNpcIdle(CLIENT_NPC_IDLE_OPCODE, value);
+export const encodeNpcIdle = (value: NpcIdle): Uint8Array => writeNpcIdle(NPC_OPCODE.update, value);
 /** 49A280 explicitly sign-extends both bytes. 0xFF is -1, NOT action 255. */
-export function readNpcIdle(reader:PacketReader, movable=false): NpcIdle {
-  const value:NpcIdle={npcId:reader.readU32(),action:(reader.readByte()<<24)>>24,speech:(reader.readByte()<<24)>>24};
-  if(movable)value.path=readMovePath(reader);return value;
+export function readNpcIdle(reader: PacketReader, movable = false): NpcIdle {
+  const value: NpcIdle = {
+    npcId: reader.readU32(),
+    action: (reader.readByte() << 24) >> 24,
+    speech: (reader.readByte() << 24) >> 24,
+  };
+  if (movable) value.path = readMovePath(reader);
+  return value;
 }

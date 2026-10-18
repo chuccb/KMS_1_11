@@ -1,6 +1,6 @@
-import {releaseOnInterrupt} from "./pointer.mjs";
-import {gameProfile, gameSettings} from './gameoptions.mjs';
-import { soundProfile, soundSettings, nativeVolume, sliderCenter, sliderStep } from './systemsettings.mjs';
+import {releaseOnInterrupt} from "./pointer.ts";
+import {gameProfile, gameSettings} from './gameoptions.ts';
+import { soundProfile, soundSettings, nativeVolume, sliderCenter, sliderStep } from './systemsettings.ts';
 
 /** CUIGameMenu 52C8E0 and CUISysOpt 52D800. Native art, transparent DOM hit targets.
  * Unsupported Quest/Party/Community and DirectX/video/screenshot controls stay disabled.

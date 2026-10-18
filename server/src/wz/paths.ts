@@ -14,7 +14,8 @@
  * formats this path and loads that `.img`. `mapImagePath(1000000)` is `"Map/Map/001000000.img"`.
  */
 export function mapImagePath(mapId: number): string {
-  if (!Number.isInteger(mapId) || mapId < 0) throw new RangeError(`map id must be a non-negative integer, got ${mapId}`);
+  if (!Number.isInteger(mapId) || mapId < 0)
+    throw new RangeError(`map id must be a non-negative integer, got ${mapId}`);
   return `Map/Map/${String(mapId).padStart(9, "0")}.img`;
 }
 
@@ -70,7 +71,8 @@ export function itemImagePath(itemId: number): string {
   }
   const padded = String(itemId).padStart(8, "0");
   const kind = ITEM_KIND_BY_PREFIX[padded.slice(0, 2)];
-  if (kind === undefined) throw new RangeError(`item ${itemId} is not one of the item kinds Data.wz has`);
+  if (kind === undefined)
+    throw new RangeError(`item ${itemId} is not one of the item kinds Data.wz has`);
   return `Item/${kind}/${padded.slice(0, 4)}.img`;
 }
 

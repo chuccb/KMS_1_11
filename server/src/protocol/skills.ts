@@ -15,20 +15,15 @@ export interface SkillUpdate {
 export function encodeSkillRequest(skillId: number): Uint8Array {
   if (!Number.isInteger(skillId) || skillId <= 0 || skillId > 0x7fffffff)
     throw new RangeError("invalid skill id");
-  return new PacketWriter(5)
-    .writeByte(SKILL_REQUEST_OPCODE)
-    .writeU32(skillId)
-    .toBytes();
+  return new PacketWriter(5).writeByte(SKILL_REQUEST_OPCODE).writeU32(skillId).toBytes();
 }
 export function readSkillRequest(reader: PacketReader): number {
   const skillId = reader.readU32();
-  if (!reader.exhausted)
-    throw new Error("skill request must contain exactly one u32 id");
+  if (!reader.exhausted) throw new Error("skill request must contain exactly one u32 id");
   return skillId;
 }
 export function encodeSkillUpdate(update: SkillUpdate): Uint8Array {
-  if (update.changes.length > 0xffff)
-    throw new RangeError("too many skill changes");
+  if (update.changes.length > 0xffff) throw new RangeError("too many skill changes");
   const writer = new PacketWriter()
     .writeByte(SKILL_UPDATE_OPCODE)
     .writeByte(update.ack ? 1 : 0)

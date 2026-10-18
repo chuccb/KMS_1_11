@@ -246,8 +246,16 @@ export function readDropRemove(reader: PacketReader): DropRemove {
 
 /** One line describing a `0x44`, for logs and `decode`. */
 export function describeDropRemove(drop: DropRemove): string {
-  const named = drop.kind === 0 ? "gone" : drop.kind === 1 ? "vanished" : drop.kind === 2 ? "taken" : `kind ${drop.kind}`;
-  const by = drop.characterId === undefined ? "" : ` by character 0x${drop.characterId.toString(16)}`;
+  const named =
+    drop.kind === 0
+      ? "gone"
+      : drop.kind === 1
+        ? "vanished"
+        : drop.kind === 2
+          ? "taken"
+          : `kind ${drop.kind}`;
+  const by =
+    drop.characterId === undefined ? "" : ` by character 0x${drop.characterId.toString(16)}`;
   return `dropId=${drop.dropId} ${named}${by}`;
 }
 

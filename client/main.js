@@ -1,33 +1,33 @@
 import {mobAttackPreview} from "./mob-attack-preview.mjs";
-import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.mjs";
-import {mobAttackEffects} from "./mob-attack-effects.mjs";
-import {nativeMobActions} from "./mob-reaction.mjs";
-import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.mjs";
-import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.mjs";
-import {attackPredictions} from './attack-predictions.mjs';
-import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout,activeMagicActions,activeMagicSpeed} from './active-skills.mjs';
+import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
+import {mobAttackEffects} from "./mob-attack-effects.ts";
+import {nativeMobActions} from "./mob-reaction.ts";
+import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.ts";
+import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.ts";
+import {attackPredictions} from './attack-predictions.ts';
+import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout,activeMagicActions,activeMagicSpeed} from './active-skills.ts';
 import { combatAssets } from "./combat-assets.mjs";
-import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
-import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackHitDelay } from "./attack-timing.mjs";
-import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.mjs";
-import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.mjs";
-import {tooltipPreview} from "./tooltip-preview.mjs";
-import {npcPresentation} from "./npcmotion.mjs";
-import {dialogueExample} from "./dialogue-examples.mjs";
+import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.ts";
+import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackHitDelay } from "./attack-timing.ts";
+import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.ts";
+import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.ts";
+import {tooltipPreview} from "./tooltip-preview.ts";
+import {npcPresentation} from "./npcmotion.ts";
+import {dialogueExample} from "./dialogue-examples.ts";
 import {npcDialogue} from "./npcdialogue.mjs";
-import {nativeCursor} from "./cursor.mjs";
-import {npcContains, releaseOnInterrupt} from "./pointer.mjs";
-import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.mjs";
-import { backgroundLayout } from "./background.mjs";
-import { mobLocomotion } from "./mobmotion.mjs";
+import {nativeCursor} from "./cursor.ts";
+import {npcContains, releaseOnInterrupt} from "./pointer.ts";
+import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.ts";
+import { backgroundLayout } from "./background.ts";
+import { mobLocomotion } from "./mobmotion.ts";
 import { systemMenu } from "./systemmenu.mjs";
-import { whisperNameError } from "./whisper.mjs";
+import { whisperNameError } from "./whisper.ts";
 import {chatBalloons} from "./chatballoons.mjs";
 import { chatHistory } from "./chatlog.mjs";
-import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
-import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.mjs";
-import { animationFrame } from "./animation.mjs";
-import { deathEffects, deathPose } from "./death.mjs";
+import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.ts";
+import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.ts";
+import { animationFrame } from "./animation.ts";
+import { deathEffects, deathPose } from "./death.ts";
 import { reviveWindow } from "./revive.mjs";
 import {
   contactClock,
@@ -36,14 +36,14 @@ import {
   mobContactRect,
   playerContactRect,
   intersects,
-} from "./contact.mjs";
-import { damageNumbers } from "./damage-render.mjs";
-import { statTotals } from "./characterstats.mjs";
-import { temporaryStats, drawTemporaryStats } from "./temporarystats.mjs";
+} from "./contact.ts";
+import { damageNumbers } from "./damage-render.ts";
+import { statTotals } from "./characterstats.ts";
+import { temporaryStats, drawTemporaryStats } from "./temporarystats.ts";
 import { naturalRecovery } from "./recovery.mjs";
 import { testTools } from "./testtools.mjs";
 import { skillWindow } from "./skills.mjs";
-import { NATIVE_JOB_NAMES } from "./jobs.mjs";
+import { NATIVE_JOB_NAMES } from "./jobs.ts";
 import {
   weaponIdOf,
   basicAmmo,
@@ -67,7 +67,7 @@ import {
   SELECTION_BUTTONS,
   characterSlot,
   worldPopulation,
-} from "./selection.mjs";
+} from "./selection.ts";
 import { createAudio, spatialVolume } from "./audio.mjs";
 import {
   collisionWorld,
@@ -85,13 +85,13 @@ import {
   animationPose,
   remoteStance,
   facingFlip,
-} from "./motion.mjs";
+} from "./motion.ts";
 
 /**
  * The browser view.
  *
  * JSON bridge to the 2003 packet implementation. The field, map layers, UI and composed avatars
- * come from the original Data.wz, not placeholder geometry. motion.mjs handles fixed-step local
+ * come from the original Data.wz, not placeholder geometry. motion.ts handles fixed-step local
  * ground/air/climbing physics and timed remote paths; combat and ground-mob roaming live server-side.
  * This is a reconstruction, not a claim that every original client state is already implemented.
  */

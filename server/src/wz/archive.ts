@@ -1,8 +1,9 @@
 /**
  * `Data.wz` (PKG1) reader: the directory tree, and where each image's bytes really are.
  *
- * The Python twin is `tools/wz1.py` + `tools/wzdata.py`; the numbers in `test/wzimg.test.ts` are
- * the same ones `tools/tests/test_wzimg.py` pins, so the two readers verify each other.
+ * The analysis CLI tools/wz.ts shares this implementation. Independent hand-built byte fixtures
+ * and historical archive goldens live in server/test/wzimg.test.ts; the Python twin was retired
+ * during the Bun migration, so do not claim two independent runtime readers still agree.
  *
  * EVIDENCE / MEASURED LAYOUT (docs/WZ1_FORMAT.md §1, §2, §4.7)
  * -----------------------------------------------------------
@@ -24,14 +25,20 @@
  */
 import { readFileSync } from "node:fs";
 
-import {
-  ImageStream, WzCanvas, WzNode, getProperty, parseImage, walkCanvases,
-} from "./img.ts";
+import { ImageStream, WzCanvas, WzNode, getProperty, parseImage, walkCanvases } from "./img.ts";
 import type { WzEntry, WzObject, WzTree, WzValue } from "./img.ts";
 
 // Callers of this module work with `WzObject` (a parsed image) as much as with an archive, so the
 // type is re-exported instead of making every caller import from `img.ts` as well.
-export type { WzEntry, WzObject, WzNode, WzCanvas, WzValue, WzTree, WzEntry as WzProperty } from "./img.ts";
+export type {
+  WzEntry,
+  WzObject,
+  WzNode,
+  WzCanvas,
+  WzValue,
+  WzTree,
+  WzEntry as WzProperty,
+} from "./img.ts";
 
 export const TYPE_NAME_REFERENCE = 2;
 export const TYPE_DIRECTORY = 3;
@@ -41,7 +48,9 @@ export const TYPE_IMAGE = 4;
 export const IMAGE_ROOT_CLASSES = ["Property", "#"];
 
 /** The literal every plain `Property` object starts with - the scan's needle. */
-export const PROPERTY_MARKER = Buffer.from([0x73, 0xf8, 0xfa, 0xd9, 0xc3, 0xdd, 0xcb, 0xdd, 0xc4, 0xc8]);
+export const PROPERTY_MARKER = Buffer.from([
+  0x73, 0xf8, 0xfa, 0xd9, 0xc3, 0xdd, 0xcb, 0xdd, 0xc4, 0xc8,
+]);
 
 export type ResolveSource = "declared" | "scanned" | "missing";
 
@@ -110,12 +119,27 @@ export class WzArchive {
     const wzVersion = bytes.readUInt16LE(dataStart);
     const { tree, treeEnd } = parseTree(bytes, dataStart);
     const images = resolveImages(bytes, tree, treeEnd);
-    return new WzArchive({ path, bytes, shellSize, dataStart, description, wzVersion, treeEnd, images });
+    return new WzArchive({
+      path,
+      bytes,
+      shellSize,
+      dataStart,
+      description,
+      wzVersion,
+      treeEnd,
+      images,
+    });
   }
 
   private constructor(fields: {
-    path: string; bytes: Buffer; shellSize: number; dataStart: number; description: string;
-    wzVersion: number; treeEnd: number; images: WzImageInfo[];
+    path: string;
+    bytes: Buffer;
+    shellSize: number;
+    dataStart: number;
+    description: string;
+    wzVersion: number;
+    treeEnd: number;
+    images: WzImageInfo[];
   }) {
     this.path = fields.path;
     this.bytes = fields.bytes;
@@ -249,7 +273,8 @@ function parseTree(bytes: Buffer, dataStart: number): { tree: TreeNode[]; treeEn
       if (type === TYPE_NAME_REFERENCE) {
         const ref = stream.u32();
         const known = nameRefs.get(ref);
-        if (known === undefined) throw new Error(`unresolved name reference ${ref} at ${tagOffset}`);
+        if (known === undefined)
+          throw new Error(`unresolved name reference ${ref} at ${tagOffset}`);
         // Tag 2 is an encoding of the referenced name AND directory-entry kind, not a third
         // kind of resource. Keeping type=2 here silently removed four Map/Tile images.
         name = known.name;
@@ -257,11 +282,13 @@ function parseTree(bytes: Buffer, dataStart: number): { tree: TreeNode[]; treeEn
       } else {
         name = stream.string();
       }
-      if (type !== TYPE_DIRECTORY && type !== TYPE_IMAGE) throw new Error(`invalid directory entry kind ${type} at ${tagOffset}`);
+      if (type !== TYPE_DIRECTORY && type !== TYPE_IMAGE)
+        throw new Error(`invalid directory entry kind ${type} at ${tagOffset}`);
       nameRefs.set(tagOffset - dataStart, { name, type });
       entries.push({
         path: prefix ? `${prefix}/${name}` : name,
-        name, type,
+        name,
+        type,
         size: stream.compact(),
         checksum: stream.compact(),
         cacheKey: stream.u32(),
@@ -287,8 +314,13 @@ function* walkTree(nodes: TreeNode[]): Generator<TreeNode> {
 
 function imageInfo(node: TreeNode, dataOffset: number | null, source: ResolveSource): WzImageInfo {
   return {
-    path: node.path, name: node.name, size: node.size, checksum: node.checksum,
-    cacheKey: node.cacheKey, dataOffset, source,
+    path: node.path,
+    name: node.name,
+    size: node.size,
+    checksum: node.checksum,
+    cacheKey: node.cacheKey,
+    dataOffset,
+    source,
   };
 }
 
@@ -345,7 +377,8 @@ function resolveImages(bytes: Buffer, tree: TreeNode[], treeEnd: number): WzImag
       bySize.set(hit.length, list);
     }
     const taken = new Set<number>();
-    for (const image of resolved.values()) if (image.dataOffset !== null) taken.add(image.dataOffset);
+    for (const image of resolved.values())
+      if (image.dataOffset !== null) taken.add(image.dataOffset);
     for (const node of pending) {
       const candidate = (bySize.get(node.size) ?? []).find((at) => !taken.has(at));
       if (candidate === undefined) {
@@ -378,7 +411,9 @@ export function plain(value: WzTree): unknown {
   if (value instanceof WzNode) return plain(value.value);
   if (value instanceof Uint8Array) return { __bytes__: value.length };
   if (Array.isArray(value)) {
-    return value.map((item) => (isEntry(item) ? [item.name, item.type, plain(item.value)] : plain(item)));
+    return value.map((item) =>
+      isEntry(item) ? [item.name, item.type, plain(item.value)] : plain(item),
+    );
   }
   if (typeof value === "bigint") return Number(value);
   return value;
@@ -400,7 +435,13 @@ function asRecord(node: WzValue | undefined): Record<string, WzValue> {
     for (const entry of node.props) out[entry.name] = entry.value;
     return out;
   }
-  if (typeof node !== "object" || node === null || Array.isArray(node) || node instanceof Uint8Array) return {};
+  if (
+    typeof node !== "object" ||
+    node === null ||
+    Array.isArray(node) ||
+    node instanceof Uint8Array
+  )
+    return {};
   // A canvas is an object too, but its fields are not properties of a WZ node; the parser returns
   // `[]` for everything that is not a property list, so this does the same.
   if (node instanceof WzCanvas) return {};
@@ -409,11 +450,12 @@ function asRecord(node: WzValue | undefined): Record<string, WzValue> {
 
 /** A property list (`portal`, `life`, ...) as plain records, from a `WzNode` or a plain array. */
 function asList(node: WzValue | undefined): Record<string, WzValue>[] {
-  const items: WzValue[] = node instanceof WzNode
-    ? node.props.map((entry) => entry.value)
-    : Array.isArray(node)
-      ? (node as WzValue[])
-      : [];
+  const items: WzValue[] =
+    node instanceof WzNode
+      ? node.props.map((entry) => entry.value)
+      : Array.isArray(node)
+        ? (node as WzValue[])
+        : [];
   const out: Record<string, WzValue>[] = [];
   for (const item of items) {
     const record = asRecord(item);
@@ -548,7 +590,10 @@ export function footholdChain(segments: FootholdSegments, id: number): FootholdS
 }
 
 /** The segment of a chain that covers `x` (the chain is a polyline, so at most one should). */
-export function footholdSegmentAt(chain: FootholdSegment[], x: number): FootholdSegment | undefined {
+export function footholdSegmentAt(
+  chain: FootholdSegment[],
+  x: number,
+): FootholdSegment | undefined {
   let best: FootholdSegment | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const segment of chain) {

@@ -1,5 +1,12 @@
-import {SYSTEM_NOTICE_OPCODE,readSystemNotice} from './notice.ts';
-import { SKILL_REQUEST_OPCODE, SKILL_UPDATE_OPCODE, readSkillRequest, describeSkillRequest, readSkillUpdate, describeSkillUpdate } from "./skills.ts";
+import { SYSTEM_NOTICE_OPCODE, readSystemNotice } from "./notice.ts";
+import {
+  SKILL_REQUEST_OPCODE,
+  SKILL_UPDATE_OPCODE,
+  readSkillRequest,
+  describeSkillRequest,
+  readSkillUpdate,
+  describeSkillUpdate,
+} from "./skills.ts";
 import { MESO_DROP_OPCODE, readMesoDrop, describeMesoDrop } from "./mesodrop.ts";
 import { ABILITY_REQUEST_OPCODE, readAbilityRequest, describeAbilityRequest } from "./ability.ts";
 /**
@@ -365,7 +372,19 @@ export function readUserEnterField(reader: PacketReader): UserEnterField {
   const y = toS16(reader.readU16());
   const action = reader.readByte();
   const foothold = reader.readU16();
-  return { characterId, name, unknown64, face, unknownA, unknownB, avatarItems, x, y, action, foothold };
+  return {
+    characterId,
+    name,
+    unknown64,
+    face,
+    unknownA,
+    unknownB,
+    avatarItems,
+    x,
+    y,
+    action,
+    foothold,
+  };
 }
 
 /** Writes a 0x1C body. The avatar list always gets its terminating 0 u32. */
@@ -465,7 +484,8 @@ export function readSetField(reader: PacketReader): SetField {
 }
 
 export function encodeSetField(field: SetField): Uint8Array {
-  if (!field.full) throw new Error("the 0x16 form without CharacterData is not decoded yet (see FINDINGS 4.11)");
+  if (!field.full)
+    throw new Error("the 0x16 form without CharacterData is not decoded yet (see FINDINGS 4.11)");
   const writer = new PacketWriter(256);
   writer.writeByte(FIELD_OPCODE.setField);
   writer.writeByte(field.mode & 0xff);
@@ -503,8 +523,10 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.emotion) {
       return `0x13 emotion: ${describeClientEmotion(readClientEmotion(new PacketReader(plain, 1)))}`;
     }
-    if (opcode === MESO_DROP_OPCODE) return describeMesoDrop(readMesoDrop(new PacketReader(plain, 1)));
-    if (opcode === SKILL_REQUEST_OPCODE) return describeSkillRequest(readSkillRequest(new PacketReader(plain, 1)));
+    if (opcode === MESO_DROP_OPCODE)
+      return describeMesoDrop(readMesoDrop(new PacketReader(plain, 1)));
+    if (opcode === SKILL_REQUEST_OPCODE)
+      return describeSkillRequest(readSkillRequest(new PacketReader(plain, 1)));
     if (opcode === ABILITY_REQUEST_OPCODE) {
       return describeAbilityRequest(readAbilityRequest(new PacketReader(plain, 1)));
     }
@@ -536,7 +558,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     }
     if (opcode === MESSENGER_OPCODE.request) {
       try {
-        return describeClientMessengerRequest(readClientMessengerRequest(new PacketReader(plain, 1)));
+        return describeClientMessengerRequest(
+          readClientMessengerRequest(new PacketReader(plain, 1)),
+        );
       } catch (error) {
         return `0x24 messenger: (truncated: ${(error as Error).message})`;
       }
@@ -573,7 +597,10 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     ) {
       const attack = readClientAttack(new PacketReader(plain, 1), opcode);
       const targets = attack.targets
-        .map((target) => `${target.mobId}@(${target.x},${target.y})[${target.damages.join("+")}] anim=${target.hitAnimation}`)
+        .map(
+          (target) =>
+            `${target.mobId}@(${target.x},${target.y})[${target.damages.join("+")}] anim=${target.hitAnimation}`,
+        )
         .join(" ");
       return (
         `${hexOpcode(opcode)} attack: ${attack.facingLeft ? "left" : "right"} action=${attack.action} ` +
@@ -601,8 +628,11 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   // `0x0B` and `0x11` belong to `CWvsApp` (`sub_55A900`), i.e. they are below the field dispatcher's
   // range but a field session is where they arrive, so they are described here.
   if (opcode === SKILL_UPDATE_OPCODE) {
-    try { return describeSkillUpdate(readSkillUpdate(new PacketReader(plain, 1))); }
-    catch (error) { return `0x0e skills: (truncated: ${(error as Error).message})`; }
+    try {
+      return describeSkillUpdate(readSkillUpdate(new PacketReader(plain, 1)));
+    } catch (error) {
+      return `0x0e skills: (truncated: ${(error as Error).message})`;
+    }
   }
   if (opcode === INVENTORY_OPCODE) {
     try {
@@ -655,9 +685,12 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `0x0d stat: (truncated: ${(error as Error).message})`;
     }
   }
-  if(opcode===SYSTEM_NOTICE_OPCODE){
-    try{return `0x13 system notice: ${decodeCp949(readSystemNotice(new PacketReader(plain,1)).text)}`;}
-    catch(error){return `0x13 system notice: (unreadable: ${(error as Error).message})`;}
+  if (opcode === SYSTEM_NOTICE_OPCODE) {
+    try {
+      return `0x13 system notice: ${decodeCp949(readSystemNotice(new PacketReader(plain, 1)).text)}`;
+    } catch (error) {
+      return `0x13 system notice: (unreadable: ${(error as Error).message})`;
+    }
   }
   if (opcode < 0x15 || opcode > 0x52) return undefined;
   const name = describeFieldOpcode(opcode);
@@ -669,8 +702,11 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
     }
   }
   if (opcode === FIELD_OPCODE.userBalloon) {
-    try {return `${name}: ${describeUserBalloon(readUserBalloon(new PacketReader(plain,1)))}`;}
-    catch(error){return `${name}: (unreadable: ${(error as Error).message})`;}
+    try {
+      return `${name}: ${describeUserBalloon(readUserBalloon(new PacketReader(plain, 1)))}`;
+    } catch (error) {
+      return `${name}: (unreadable: ${(error as Error).message})`;
+    }
   }
   if (opcode === FIELD_OPCODE.userMessage) {
     try {
@@ -678,7 +714,7 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       // byte any of the readers would read - so the peek and the reader always agree.
       const subOp = plain[1] ?? -1;
       if (subOp === USER_MESSAGE_WHISPER_REFUSED) {
-        return `${name}: whisper refused "${readUserWhisperRefused(new PacketReader(plain,1)).name}"`;
+        return `${name}: whisper refused "${readUserWhisperRefused(new PacketReader(plain, 1)).name}"`;
       }
       if (subOp === USER_MESSAGE_FIND_ANSWER) {
         return `${name}: ${describeUserFindAnswer(readUserFindAnswer(new PacketReader(plain, 1)))}`;
@@ -747,7 +783,10 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
     try {
       const move = readUserMove(new PacketReader(plain, 1));
       const first = move.path.elements[0];
-      const where = first === undefined ? "no elements" : `first=(${first.x},${first.y}) action=${first.action} fh=${first.foothold}`;
+      const where =
+        first === undefined
+          ? "no elements"
+          : `first=(${first.x},${first.y}) action=${first.action} fh=${first.foothold}`;
       return `${name}: characterId=${move.characterId} elements=${move.path.elements.length} ${where}`;
     } catch (error) {
       return `${name}: characterId=${new PacketReader(plain, 1).readU32()} (truncated: ${(error as Error).message})`;
@@ -837,10 +876,13 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
   }
-  if(opcode===NPC_OPCODE.update) {
-    try {const value=readNpcIdle(new PacketReader(plain,1),plain.length>7);
-      return `${name}: npcId=${value.npcId} action=${value.action} speech=${value.speech}${value.path?` path=${value.path.elements.length}`:""}`;
-    } catch(error){return `${name}: (truncated: ${(error as Error).message})`;}
+  if (opcode === NPC_OPCODE.update) {
+    try {
+      const value = readNpcIdle(new PacketReader(plain, 1), plain.length > 7);
+      return `${name}: npcId=${value.npcId} action=${value.action} speech=${value.speech}${value.path ? ` path=${value.path.elements.length}` : ""}`;
+    } catch (error) {
+      return `${name}: (truncated: ${(error as Error).message})`;
+    }
   }
   if (opcode === MOB_OPCODE.enterField) {
     // No length guard: the reader throws `PacketUnderflowError` and the catch reports it, which is
@@ -886,7 +928,8 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode === 0x46 || opcode === 0x48) return `0x${opcode.toString(16)} CQuestMan(no handler)`;
   if (opcode === SHOP_OPEN_OPCODE) return "0x4a CShopDlg(open)";
   if (opcode === SHOP_RESULT_OPCODE) return "0x4b CShopDlg(result)";
-  if (opcode === 0x49 || opcode === 0x4c) return `0x${opcode.toString(16)} field dialogs(no handler)`;
+  if (opcode === 0x49 || opcode === 0x4c)
+    return `0x${opcode.toString(16)} field dialogs(no handler)`;
   if (opcode >= 0x49 && opcode <= 0x4c) return `0x${opcode.toString(16)} field dialogs`;
   if (opcode >= 0x4d && opcode <= 0x4f) return `0x${opcode.toString(16)} CUIMessenger`;
   if (opcode >= 0x50 && opcode <= 0x52) return `0x${opcode.toString(16)} CMiniRoomBaseDlg`;
@@ -1244,7 +1287,9 @@ export const USE_ITEM_OPCODES: readonly number[] = [
 
 function checkUseItemOpcode(opcode: number): void {
   if (!USE_ITEM_OPCODES.includes(opcode)) {
-    throw new RangeError(`0x${opcode.toString(16)} is not one of the use-item opcodes (0x18, 0x19)`);
+    throw new RangeError(
+      `0x${opcode.toString(16)} is not one of the use-item opcodes (0x18, 0x19)`,
+    );
   }
 }
 
@@ -1395,7 +1440,10 @@ function attackShapeOf(opcode: number): AttackShape {
   return ATTACK_SHAPE[opcode] ?? ATTACK_SHAPE[CLIENT_FIELD_OPCODE.attack]!;
 }
 
-export function readClientAttack(reader: PacketReader, opcode: number = CLIENT_FIELD_OPCODE.attack): ClientAttack {
+export function readClientAttack(
+  reader: PacketReader,
+  opcode: number = CLIENT_FIELD_OPCODE.attack,
+): ClientAttack {
   const packed = reader.readByte();
   const hits = packed & 0x0f;
   const targetCount = (packed >> 4) & 0x0f;
@@ -1430,13 +1478,19 @@ export function readClientAttack(reader: PacketReader, opcode: number = CLIENT_F
   return attack;
 }
 
-export function encodeClientAttack(attack: ClientAttack, opcode: number = CLIENT_FIELD_OPCODE.attack): Uint8Array {
+export function encodeClientAttack(
+  attack: ClientAttack,
+  opcode: number = CLIENT_FIELD_OPCODE.attack,
+): Uint8Array {
   const hits = attack.hits & 0x0f;
   const targetCount = attack.targets.length;
-  if (targetCount > 0x0f) throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
+  if (targetCount > 0x0f)
+    throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
   const shape = attackShapeOf(opcode);
   const writer = new PacketWriter(
-    ATTACK_HEADER_BYTES + (shape.extraU16AfterHeader ? 2 : 0) + targetCount * (ATTACK_TARGET_FIXED_BYTES + 2 * hits),
+    ATTACK_HEADER_BYTES +
+      (shape.extraU16AfterHeader ? 2 : 0) +
+      targetCount * (ATTACK_TARGET_FIXED_BYTES + 2 * hits),
   );
   writer.writeByte(opcode);
   writer.writeByte(hits | (targetCount << 4));
@@ -1446,7 +1500,9 @@ export function encodeClientAttack(attack: ClientAttack, opcode: number = CLIENT
   if (shape.extraU16AfterHeader) writer.writeU16(attack.projectileSlot ?? 0);
   for (const target of attack.targets) {
     if (target.damages.length !== hits) {
-      throw new RangeError(`a target carries exactly ${hits} damage value(s), got ${target.damages.length}`);
+      throw new RangeError(
+        `a target carries exactly ${hits} damage value(s), got ${target.damages.length}`,
+      );
     }
     writer.writeU32(target.mobId >>> 0);
     writer.writeByte(target.hitAnimation & 0xff);
@@ -1569,9 +1625,11 @@ export function encodeUserAttack(
 ): Uint8Array {
   const hits = attack.hits & 0x0f;
   const targetCount = attack.targets.length;
-  if (targetCount > 0x0f) throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
+  if (targetCount > 0x0f)
+    throw new RangeError(`the attack header packs at most 15 targets, got ${targetCount}`);
   const writer = new PacketWriter(
-    USER_ATTACK_HEADER_BYTES + (attack.skillLevel === 0 ? 0 : 4) +
+    USER_ATTACK_HEADER_BYTES +
+      (attack.skillLevel === 0 ? 0 : 4) +
       targetCount * (USER_ATTACK_TARGET_FIXED_BYTES + 2 * hits),
   );
   writer.writeByte(opcode);
@@ -1585,10 +1643,14 @@ export function encodeUserAttack(
   writer.writeU32(attack.projectileItemId >>> 0);
   for (const target of attack.targets) {
     if (target.mobId === 0) {
-      throw new RangeError("a target record with mobId 0 has no tail on the wire (the reader skips it)");
+      throw new RangeError(
+        "a target record with mobId 0 has no tail on the wire (the reader skips it)",
+      );
     }
     if (target.damages.length !== hits) {
-      throw new RangeError(`a target carries exactly ${hits} damage value(s), got ${target.damages.length}`);
+      throw new RangeError(
+        `a target carries exactly ${hits} damage value(s), got ${target.damages.length}`,
+      );
     }
     writer.writeU32(target.mobId >>> 0);
     writer.writeByte(target.hitAnimation & 0xff);
@@ -1659,8 +1721,8 @@ export function readClientMobAttack(reader: PacketReader): ClientMobAttack {
     actionByte,
     action: actionByte === 0xff ? undefined : (actionByte >> 1) & 0x7f,
     facing: actionByte & 1,
-    positionX: (raw & 0xffff) << 16 >> 16,
-    positionY: (raw >>> 16) << 16 >> 16,
+    positionX: ((raw & 0xffff) << 16) >> 16,
+    positionY: ((raw >>> 16) << 16) >> 16,
     hasPosition: raw !== 0,
     tail: reader.readBytes(reader.remaining),
   };
@@ -1685,7 +1747,7 @@ export function encodeClientMobAttack(attack: ClientMobAttackBody): Uint8Array {
   writer.writeU32(attack.mobId >>> 0);
   writer.writeByte(attack.flags & 0xff);
   writer.writeByte(attack.actionByte & 0xff);
-  writer.writeU32(((attack.positionY & 0xffff) << 16 >>> 0) | (attack.positionX & 0xffff));
+  writer.writeU32((((attack.positionY & 0xffff) << 16) >>> 0) | (attack.positionX & 0xffff));
   writer.writeBytes(attack.tail);
   return writer.toBytes();
 }
@@ -1933,7 +1995,9 @@ export function readClientUserRequest(reader: PacketReader): ClientUserRequest {
   if (kind === USER_REQUEST_KIND.whisper || kind === USER_REQUEST_KIND.refuseWhisper) {
     return { kind, name, text: reader.readStringBytes() };
   }
-  throw new RangeError(`0x23 kind 0x${kind.toString(16)} is not a user request (0x05 / 0x06 / 0x22)`);
+  throw new RangeError(
+    `0x23 kind 0x${kind.toString(16)} is not a user request (0x05 / 0x06 / 0x22)`,
+  );
 }
 
 export function encodeClientUserRequest(request: ClientUserRequest): Uint8Array {
@@ -1978,7 +2042,8 @@ export interface UserEffect {
 export function readUserEffect(reader: PacketReader): UserEffect {
   const characterId = reader.readU32();
   const effect = reader.readByte();
-  if (effect === 1) return {characterId,effect,skillId:reader.readU32(),skillLevel:reader.readByte()};
+  if (effect === 1)
+    return { characterId, effect, skillId: reader.readU32(), skillLevel: reader.readByte() };
   if (effect !== USER_EFFECT_LEVEL_UP) {
     throw new RangeError(
       `0x29 effect ${effect} is not the located one (${USER_EFFECT_LEVEL_UP} = level-up)`,
@@ -1991,17 +2056,31 @@ export function encodeUserEffect(effect: UserEffect): Uint8Array {
   const writer = new PacketWriter(8);
   writer.writeByte(FIELD_OPCODE.userEffect);
   writer.writeU32(effect.characterId >>> 0);
-  if(effect.effect!==0 && (effect.effect!==1 || !Number.isInteger(effect.skillId) || !Number.isInteger(effect.skillLevel) || (effect.skillLevel??0)<1 || (effect.skillLevel??0)>255 || (effect.skillId??0)<=0 || (effect.skillId??0)>0xffffffff))throw new RangeError("invalid native user effect");
+  if (
+    effect.effect !== 0 &&
+    (effect.effect !== 1 ||
+      !Number.isInteger(effect.skillId) ||
+      !Number.isInteger(effect.skillLevel) ||
+      (effect.skillLevel ?? 0) < 1 ||
+      (effect.skillLevel ?? 0) > 255 ||
+      (effect.skillId ?? 0) <= 0 ||
+      (effect.skillId ?? 0) > 0xffffffff)
+  )
+    throw new RangeError("invalid native user effect");
   writer.writeByte(effect.effect);
-  if(effect.effect===1){writer.writeU32(effect.skillId!);writer.writeByte(effect.skillLevel!);}
+  if (effect.effect === 1) {
+    writer.writeU32(effect.skillId!);
+    writer.writeByte(effect.skillLevel!);
+  }
   return writer.toBytes();
 }
 
 export function describeUserEffect(effect: UserEffect): string {
   return effect.effect === USER_EFFECT_LEVEL_UP
     ? `level-up effect for characterId=${effect.characterId}`
-    : effect.effect===1?`skill ${effect.skillId}/${effect.skillLevel} effect for characterId=${effect.characterId}`
-    : `effect ${effect.effect} for characterId=${effect.characterId}`;
+    : effect.effect === 1
+      ? `skill ${effect.skillId}/${effect.skillLevel} effect for characterId=${effect.characterId}`
+      : `effect ${effect.effect} for characterId=${effect.characterId}`;
 }
 
 /**
@@ -2222,33 +2301,42 @@ export function describeUserLook(look: UserLook): string {
   if (look.unknownA !== undefined) parts.push(`unknownA=${look.unknownA}`);
   if (look.unknownB !== undefined) parts.push(`unknownB=${look.unknownB}`);
   parts.push(
-    look.avatarItems === undefined ? "avatar=keep" : `avatar=${look.avatarItems.length} items [${look.avatarItems.join(",")}]`,
+    look.avatarItems === undefined
+      ? "avatar=keep"
+      : `avatar=${look.avatarItems.length} items [${look.avatarItems.join(",")}]`,
   );
   return parts.join(" ");
 }
 
-
 /** 51D530 / 50B320. Body has no name or channel byte; resolve id in the field pool. */
-export interface UserBalloon { characterId: number; text: Uint8Array; }
+export interface UserBalloon {
+  characterId: number;
+  text: Uint8Array;
+}
 export function readUserBalloon(reader: PacketReader): UserBalloon {
-  return {characterId:reader.readU32(),text:reader.readStringBytes()};
+  return { characterId: reader.readU32(), text: reader.readStringBytes() };
 }
 export function encodeUserBalloon(value: UserBalloon): Uint8Array {
-  const writer=new PacketWriter(value.text.length+7);
-  writer.writeByte(FIELD_OPCODE.userBalloon);writer.writeU32(value.characterId);writer.writeStringBytes(value.text);
+  const writer = new PacketWriter(value.text.length + 7);
+  writer.writeByte(FIELD_OPCODE.userBalloon);
+  writer.writeU32(value.characterId);
+  writer.writeStringBytes(value.text);
   return writer.toBytes();
 }
 export function describeUserBalloon(value: UserBalloon): string {
   return `field chat ${value.characterId}: ${decodeCp949(value.text)}`;
 }
 /** 472910 case 0x22: string of the recipient who refused, no delivery flag or message body. */
-export const USER_MESSAGE_WHISPER_REFUSED=0x22;
-export function readUserWhisperRefused(reader: PacketReader): {name:string} {
-  if(reader.readByte()!==USER_MESSAGE_WHISPER_REFUSED)throw new RangeError('not a whisper refusal (0x22)');
-  return {name:reader.readAsciiString()};
+export const USER_MESSAGE_WHISPER_REFUSED = 0x22;
+export function readUserWhisperRefused(reader: PacketReader): { name: string } {
+  if (reader.readByte() !== USER_MESSAGE_WHISPER_REFUSED)
+    throw new RangeError("not a whisper refusal (0x22)");
+  return { name: reader.readAsciiString() };
 }
-export function encodeUserWhisperRefused(value:{name:string}): Uint8Array {
-  const writer=new PacketWriter(value.name.length+4);
-  writer.writeByte(FIELD_OPCODE.userMessage);writer.writeByte(USER_MESSAGE_WHISPER_REFUSED);writer.writeAsciiString(value.name);
+export function encodeUserWhisperRefused(value: { name: string }): Uint8Array {
+  const writer = new PacketWriter(value.name.length + 4);
+  writer.writeByte(FIELD_OPCODE.userMessage);
+  writer.writeByte(USER_MESSAGE_WHISPER_REFUSED);
+  writer.writeAsciiString(value.name);
   return writer.toBytes();
 }

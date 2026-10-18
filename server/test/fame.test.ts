@@ -35,22 +35,37 @@ const CLOCK = { day: 20_000, month: 2026 * 12 + 9 };
 test("0x20 is a u32 target and one up/down byte", () => {
   assert.equal(hex(encodeClientFameRequest({ targetId: 7, up: true })), UP_SEVEN);
   assert.equal(hex(encodeClientFameRequest({ targetId: 7, up: false })), DOWN_SEVEN);
-  assert.deepEqual(readClientFameRequest(new PacketReader(encodeClientFameRequest({ targetId: 7, up: true }), 1)), {
-    targetId: 7,
-    up: true,
-  });
-  assert.deepEqual(readClientFameRequest(new PacketReader(encodeClientFameRequest({ targetId: 7, up: false }), 1)), {
-    targetId: 7,
-    up: false,
-  });
+  assert.deepEqual(
+    readClientFameRequest(new PacketReader(encodeClientFameRequest({ targetId: 7, up: true }), 1)),
+    {
+      targetId: 7,
+      up: true,
+    },
+  );
+  assert.deepEqual(
+    readClientFameRequest(new PacketReader(encodeClientFameRequest({ targetId: 7, up: false }), 1)),
+    {
+      targetId: 7,
+      up: false,
+    },
+  );
   assert.equal(describeClientFameRequest({ targetId: 7, up: true }), "0x20 fame: up 7");
   assert.equal(describeClientFameRequest({ targetId: 7, up: false }), "0x20 fame: down 7");
 });
 
 test("0x12: the two shapes that carry a name, and the four that carry nothing", () => {
-  assert.equal(hex(encodeFameResult({ kind: "changed", name: "Alt", up: true })), "12000300416c7401");
-  assert.equal(hex(encodeFameResult({ kind: "changed", name: "Alt", up: false })), "12000300416c7400");
-  assert.equal(hex(encodeFameResult({ kind: "received", name: "Hero", up: true })), "120504004865726f01");
+  assert.equal(
+    hex(encodeFameResult({ kind: "changed", name: "Alt", up: true })),
+    "12000300416c7401",
+  );
+  assert.equal(
+    hex(encodeFameResult({ kind: "changed", name: "Alt", up: false })),
+    "12000300416c7400",
+  );
+  assert.equal(
+    hex(encodeFameResult({ kind: "received", name: "Hero", up: true })),
+    "120504004865726f01",
+  );
   assert.equal(hex(encodeFameResult({ kind: "ignored" })), "1201");
   assert.equal(hex(encodeFameResult({ kind: "beginner" })), "1202");
   assert.equal(hex(encodeFameResult({ kind: "alreadyToday" })), "1203");
@@ -179,14 +194,22 @@ test("the same target in the same month is type 4, anyone else today is type 3",
     reason: "alreadyToday",
   });
   // Yesterday the day is free again, and the month still remembers who was famed.
-  assert.deepEqual(applyFame({ ...attempt, targetId: 3, ledger, clock: { ...CLOCK, day: CLOCK.day + 1 } }), {
-    kind: "ok",
-    fame: 6,
-    ledger: { day: CLOCK.day + 1, month: CLOCK.month, targets: [2, 3] },
-  });
+  assert.deepEqual(
+    applyFame({ ...attempt, targetId: 3, ledger, clock: { ...CLOCK, day: CLOCK.day + 1 } }),
+    {
+      kind: "ok",
+      fame: 6,
+      ledger: { day: CLOCK.day + 1, month: CLOCK.month, targets: [2, 3] },
+    },
+  );
   // A new month forgets the targets but keeps the day stamp (which is by definition a new day too).
   assert.deepEqual(
-    applyFame({ ...attempt, targetId: 2, ledger, clock: { day: CLOCK.day + 40, month: CLOCK.month + 1 } }),
+    applyFame({
+      ...attempt,
+      targetId: 2,
+      ledger,
+      clock: { day: CLOCK.day + 40, month: CLOCK.month + 1 },
+    }),
     {
       kind: "ok",
       fame: 6,

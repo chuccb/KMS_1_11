@@ -1,11 +1,7 @@
 /** New regression sources only. Not executed for this delivery, per user instruction. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  characterDataOf,
-  startingCharacterItems,
-  zeroStats,
-} from "../src/protocol/chardata.ts";
+import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import { captureTestCheckpoint, planTestTool } from "../src/game/testtools.ts";
 import { encodeStatUpdate } from "../src/protocol/stat.ts";
 import { encodeSkillUpdate } from "../src/protocol/skills.ts";
@@ -62,9 +58,7 @@ test("configure plans a bounded diff without modifying source; first checkpoint 
     { skillId: 1000001, level: 0 },
   ]);
   assert.doesNotThrow(() => encodeStatUpdate({ diff: plan.diff }));
-  assert.doesNotThrow(() =>
-    encodeSkillUpdate({ ack: false, changes: plan.changes }),
-  );
+  assert.doesNotThrow(() => encodeSkillUpdate({ ack: false, changes: plan.changes }));
   c.items!.map32[0]!.value = 9;
   assert.equal(plan.checkpoint.skills[0]!.value, 5);
   assert.equal("exp" in plan.checkpoint.stats, false);
@@ -127,12 +121,7 @@ test("restore never rewinds experience, items or money; level mismatch refuses; 
   c.stats.exp = 12;
   c.stats.mesos = 99;
   c.items!.map32 = [];
-  const plan = planTestTool(
-    c,
-    { kind: "restore", confirmed: true },
-    point,
-    available,
-  );
+  const plan = planTestTool(c, { kind: "restore", confirmed: true }, point, available);
   assert.deepEqual(plan.diff, { job: 100, sp: 5 });
   assert.deepEqual(plan.skills, point.skills);
   Object.assign(c.stats, plan.diff);
@@ -147,49 +136,45 @@ test("restore never rewinds experience, items or money; level mismatch refuses; 
   assert.deepEqual(loaded.items!.map32, point.skills);
   c.stats.level++;
   assert.throws(
-    () =>
-      planTestTool(c, { kind: "restore", confirmed: true }, point, available),
+    () => planTestTool(c, { kind: "restore", confirmed: true }, point, available),
     /升級/,
   );
 });
 
 test("heal and nonlethal drain are explicit test-only plans; repeated operations preserve the first restore point", () => {
   const c = fixture(),
-    heal = planTestTool(
-      c,
-      { kind: "heal", confirmed: true },
-      undefined,
-      available,
-    );
+    heal = planTestTool(c, { kind: "heal", confirmed: true }, undefined, available);
   assert.deepEqual(heal.diff, { hp: 50, mp: 30 });
   Object.assign(c.stats, heal.diff);
-  const drain = planTestTool(
-    c,
-    { kind: "drain", confirmed: true },
-    heal.checkpoint,
-    available,
-  );
+  const drain = planTestTool(c, { kind: "drain", confirmed: true }, heal.checkpoint, available);
   assert.equal(drain.checkpoint, heal.checkpoint);
   assert.deepEqual(drain.diff, { hp: 25, mp: 15 });
   c.stats.hp = 0;
   assert.throws(() =>
-    planTestTool(
-      c,
-      { kind: "drain", confirmed: true },
-      heal.checkpoint,
-      available,
-    ),
+    planTestTool(c, { kind: "drain", confirmed: true }, heal.checkpoint, available),
   );
   assert.equal(c.stats.hp, 0);
 });
 
 // Unexecuted addition: convenient death entry is explicit and nonfatal, never an automatic reset.
 test("near-death requires confirmation, preserves MP and does not mutate character until applied", () => {
-  const character = fixture(), before = structuredClone(character);
-  assert.throws(() => planTestTool(character,{kind:"near-death"},undefined,available),/確認/);
-  const plan=planTestTool(character,{kind:"near-death",confirmed:true},undefined,available);
-  assert.deepEqual(plan.diff,{hp:1});
-  assert.deepEqual(character,before);
-  character.stats.hp=0;
-  assert.throws(()=>planTestTool(character,{kind:"near-death",confirmed:true},undefined,available),/復活/);
+  const character = fixture(),
+    before = structuredClone(character);
+  assert.throws(
+    () => planTestTool(character, { kind: "near-death" }, undefined, available),
+    /確認/,
+  );
+  const plan = planTestTool(
+    character,
+    { kind: "near-death", confirmed: true },
+    undefined,
+    available,
+  );
+  assert.deepEqual(plan.diff, { hp: 1 });
+  assert.deepEqual(character, before);
+  character.stats.hp = 0;
+  assert.throws(
+    () => planTestTool(character, { kind: "near-death", confirmed: true }, undefined, available),
+    /復活/,
+  );
 });

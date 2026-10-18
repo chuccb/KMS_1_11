@@ -31,7 +31,11 @@ import {
   readShopOpen,
   readShopResult,
 } from "../src/protocol/shop.ts";
-import { FIELD_OPCODE, describeClientFieldPacket, describeFieldPacket } from "../src/protocol/field.ts";
+import {
+  FIELD_OPCODE,
+  describeClientFieldPacket,
+  describeFieldPacket,
+} from "../src/protocol/field.ts";
 import {
   DEFAULT_SHOP_MAX_COUNT,
   SELL_PRICE_RATIO,
@@ -69,8 +73,12 @@ test("0x4A opens a shop with its rows: u32 shopId, u16 count, then id/price/max 
     "4a" + // the opcode
       "b4690f00" + // shopId 1010100
       "0200" + // two rows
-      "80841e00" + "19000000" + "c800" + // 2000000, 25, up to 200
-      "81841e00" + "50000000" + "0a00", // 2000001, 80, up to 10
+      "80841e00" +
+      "19000000" +
+      "c800" + // 2000000, 25, up to 200
+      "81841e00" +
+      "50000000" +
+      "0a00", // 2000001, 80, up to 10
   );
   assert.deepEqual(readShopOpen(new PacketReader(bytes, 1)), {
     shopId: 1010100,
@@ -79,7 +87,10 @@ test("0x4A opens a shop with its rows: u32 shopId, u16 count, then id/price/max 
       { itemId: 2000001, price: 80, maxCount: 10 },
     ],
   });
-  assert.equal(describeShopOpen(readShopOpen(new PacketReader(bytes, 1))), "shop 1010100 with 2 row(s): 2000000 at 25 up to 200, 2000001 at 80 up to 10");
+  assert.equal(
+    describeShopOpen(readShopOpen(new PacketReader(bytes, 1))),
+    "shop 1010100 with 2 row(s): 2000000 at 25 up to 200, 2000001 at 80 up to 10",
+  );
 });
 
 test("an empty shop is legal: the client shows the window with no rows", () => {
@@ -91,8 +102,14 @@ test("an empty shop is legal: the client shows the window with no rows", () => {
 
 test("a 207 row carries its 8 bytes verbatim, and only a 207 row may", () => {
   const cash = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]);
-  const bytes = encodeShopOpen({ shopId: 1, items: [{ itemId: 2070000, price: 500, maxCount: 1, cash }] });
-  assert.equal(HEX(bytes), "4a" + "01000000" + "0100" + "f0951f00" + "f4010000" + "0102030405060708" + "0100");
+  const bytes = encodeShopOpen({
+    shopId: 1,
+    items: [{ itemId: 2070000, price: 500, maxCount: 1, cash }],
+  });
+  assert.equal(
+    HEX(bytes),
+    "4a" + "01000000" + "0100" + "f0951f00" + "f4010000" + "0102030405060708" + "0100",
+  );
   const back = readShopOpen(new PacketReader(bytes, 1));
   assert.deepEqual(back.items[0]?.cash, cash);
   // Refusing is the whole point: the 8 bytes have no located meaning, so they cannot be invented.
@@ -101,8 +118,7 @@ test("a 207 row carries its 8 bytes verbatim, and only a 207 row may", () => {
     /207 item/,
   );
   assert.throws(
-    () =>
-      encodeShopOpen({ shopId: 1, items: [{ itemId: 2000000, price: 25, maxCount: 1, cash }] }),
+    () => encodeShopOpen({ shopId: 1, items: [{ itemId: 2000000, price: 25, maxCount: 1, cash }] }),
     /not a 207 item/,
   );
 });
@@ -119,34 +135,70 @@ test("0x4B is one result byte, and the client's own messages sit behind it", () 
 });
 
 test("0x16 is the action byte plus the fields that action has", () => {
-  assert.equal(HEX(encodeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 })), "1600" + "0200" + "80841e00" + "0100");
-  assert.equal(HEX(encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 })), "1601" + "0300" + "83841e00" + "0500");
+  assert.equal(
+    HEX(encodeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 })),
+    "1600" + "0200" + "80841e00" + "0100",
+  );
+  assert.equal(
+    HEX(encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 })),
+    "1601" + "0300" + "83841e00" + "0500",
+  );
   assert.equal(HEX(encodeClientShopRequest({ kind: "recharge", slot: 1 })), "1602" + "0100");
   assert.equal(HEX(encodeClientShopRequest({ kind: "close" })), "1603");
   assert.equal(SHOP_REQUEST.buy, 0);
   assert.equal(SHOP_REQUEST.sell, 1);
   assert.equal(CLIENT_SHOP_OPCODE, 0x16);
-  assert.deepEqual(readClientShopRequest(new PacketReader(encodeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 }), 1)), {
-    kind: "buy",
-    row: 2,
-    itemId: 2000000,
-    count: 1,
-  });
-  assert.deepEqual(readClientShopRequest(new PacketReader(encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 }), 1)), {
-    kind: "sell",
-    slot: 3,
-    itemId: 2000003,
-    count: 5,
-  });
-  assert.deepEqual(readClientShopRequest(new PacketReader(encodeClientShopRequest({ kind: "recharge", slot: 1 }), 1)), {
-    kind: "recharge",
-    slot: 1,
-  });
-  assert.deepEqual(readClientShopRequest(new PacketReader(encodeClientShopRequest({ kind: "close" }), 1)), { kind: "close" });
-  assert.equal(describeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 }), "16 shop buy row 2 item 2000000 x1");
+  assert.deepEqual(
+    readClientShopRequest(
+      new PacketReader(
+        encodeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 }),
+        1,
+      ),
+    ),
+    {
+      kind: "buy",
+      row: 2,
+      itemId: 2000000,
+      count: 1,
+    },
+  );
+  assert.deepEqual(
+    readClientShopRequest(
+      new PacketReader(
+        encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 }),
+        1,
+      ),
+    ),
+    {
+      kind: "sell",
+      slot: 3,
+      itemId: 2000003,
+      count: 5,
+    },
+  );
+  assert.deepEqual(
+    readClientShopRequest(
+      new PacketReader(encodeClientShopRequest({ kind: "recharge", slot: 1 }), 1),
+    ),
+    {
+      kind: "recharge",
+      slot: 1,
+    },
+  );
+  assert.deepEqual(
+    readClientShopRequest(new PacketReader(encodeClientShopRequest({ kind: "close" }), 1)),
+    { kind: "close" },
+  );
+  assert.equal(
+    describeClientShopRequest({ kind: "buy", row: 2, itemId: 2000000, count: 1 }),
+    "16 shop buy row 2 item 2000000 x1",
+  );
   assert.equal(describeClientShopRequest({ kind: "close" }), "16 shop close");
   // An action the client never sends is refused, not guessed at.
-  assert.throws(() => readClientShopRequest(new PacketReader(Uint8Array.from([9]), 0)), /unknown shop action/);
+  assert.throws(
+    () => readClientShopRequest(new PacketReader(Uint8Array.from([9]), 0)),
+    /unknown shop action/,
+  );
 });
 
 test("0x33 is the clicked object's id, and its answer is the empty 0x19", () => {
@@ -158,56 +210,81 @@ test("0x33 is the clicked object's id, and its answer is the empty 0x19", () => 
 });
 
 test("the decode tool understands all five new opcodes", () => {
-  const open = encodeShopOpen({ shopId: 1010100, items: [{ itemId: 2000000, price: 25, maxCount: 200 }] });
-  assert.equal(describeFieldPacket(open), "0x4a CShopDlg(open): shop 1010100 with 1 row(s): 2000000 at 25 up to 200");
-  assert.equal(describeFieldPacket(encodeShopResult(2)), "0x4b CShopDlg(result): shop result 2 (not enough mesos)");
+  const open = encodeShopOpen({
+    shopId: 1010100,
+    items: [{ itemId: 2000000, price: 25, maxCount: 200 }],
+  });
   assert.equal(
-    describeClientFieldPacket(encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 })),
+    describeFieldPacket(open),
+    "0x4a CShopDlg(open): shop 1010100 with 1 row(s): 2000000 at 25 up to 200",
+  );
+  assert.equal(
+    describeFieldPacket(encodeShopResult(2)),
+    "0x4b CShopDlg(result): shop result 2 (not enough mesos)",
+  );
+  assert.equal(
+    describeClientFieldPacket(
+      encodeClientShopRequest({ kind: "sell", slot: 3, itemId: 2000003, count: 5 }),
+    ),
     "16 shop sell slot 3 item 2000003 x5",
   );
-  assert.equal(describeClientFieldPacket(encodeClientObjectClick({ objectId: 2003 })), "33 object click: id=2003");
-  assert.equal(describeFieldPacket(Uint8Array.from([FIELD_OPCODE.requestRelease])), "0x19 CField(cached-character reset)");
+  assert.equal(
+    describeClientFieldPacket(encodeClientObjectClick({ objectId: 2003 })),
+    "33 object click: id=2003",
+  );
+  assert.equal(
+    describeFieldPacket(Uint8Array.from([FIELD_OPCODE.requestRelease])),
+    "0x19 CField(cached-character reset)",
+  );
 });
 
 // ---------------------------------------------------------------------------
 // the shop table, the prices, and the two transactions
 // ---------------------------------------------------------------------------
 
-test("every shop row is priced by the archive, and the three shops name real NPCs", needsArchive, () => {
-  const keeper = shopKeeper(archive!);
-  for (const shop of SHOPS) assert.deepEqual(unpricedShopItems(shop, keeper.priceOf), []);
-  assert.equal(keeper.shopOfNpc(1010100)?.shopId, 1010100); // 리나, 헤네시스
-  assert.equal(keeper.shopOfNpc(2003)?.shopId, 2003); // 로빈, 달팽이사냥터
-  assert.equal(keeper.shopOfNpc(12100)?.shopId, 12100); // 마이, 암허스트
-  assert.equal(keeper.shopOfNpc(2004), undefined); // an NPC without a shop
-  assert.equal(keeper.priceOf(2000000), 25); // 빨간 포션
-  assert.equal(keeper.priceOf(2000001), 80); // 주황 포션
-  assert.equal(keeper.priceOf(2000002), 160); // 하얀 포션
-  assert.equal(keeper.priceOf(2000003), 100); // 파란 포션
-  assert.equal(keeper.priceOf(5000000), undefined); // a book: no price in this build
-  assert.equal(itemPrice(archive!, 2000000), 25); // the reader behind every row
-  assert.equal(itemPrice(undefined, 2000000), undefined); // `--data off` prices nothing
-});
+test(
+  "every shop row is priced by the archive, and the three shops name real NPCs",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    for (const shop of SHOPS) assert.deepEqual(unpricedShopItems(shop, keeper.priceOf), []);
+    assert.equal(keeper.shopOfNpc(1010100)?.shopId, 1010100); // 리나, 헤네시스
+    assert.equal(keeper.shopOfNpc(2003)?.shopId, 2003); // 로빈, 달팽이사냥터
+    assert.equal(keeper.shopOfNpc(12100)?.shopId, 12100); // 마이, 암허스트
+    assert.equal(keeper.shopOfNpc(2004), undefined); // an NPC without a shop
+    assert.equal(keeper.priceOf(2000000), 25); // 빨간 포션
+    assert.equal(keeper.priceOf(2000001), 80); // 주황 포션
+    assert.equal(keeper.priceOf(2000002), 160); // 하얀 포션
+    assert.equal(keeper.priceOf(2000003), 100); // 파란 포션
+    assert.equal(keeper.priceOf(5000000), undefined); // a book: no price in this build
+    assert.equal(itemPrice(archive!, 2000000), 25); // the reader behind every row
+    assert.equal(itemPrice(undefined, 2000000), undefined); // `--data off` prices nothing
+  },
+);
 
-test("the rows the client is sent carry the archive's price and the shop's cap", needsArchive, () => {
-  const keeper = shopKeeper(archive!);
-  const lines = keeper.linesOf(SHOPS[0]!);
-  assert.deepEqual(
-    lines.map((line) => [line.itemId, line.price, line.maxCount]),
-    [
-      [2000000, 25, DEFAULT_SHOP_MAX_COUNT],
-      [2000001, 80, DEFAULT_SHOP_MAX_COUNT],
-      [2000002, 160, DEFAULT_SHOP_MAX_COUNT],
-      [2000003, 100, DEFAULT_SHOP_MAX_COUNT],
-      [2000004, 1000, DEFAULT_SHOP_MAX_COUNT],
-      [2030000, 75, DEFAULT_SHOP_MAX_COUNT],
-    ],
-  );
-  // A row without a price is skipped rather than sent as 0 - the client would print the 0.
-  const unpriced = { shopId: 1, npcTemplateId: 1, items: [{ itemId: 5000000 }] };
-  assert.deepEqual(keeper.linesOf(unpriced), []);
-  assert.deepEqual(unpricedShopItems(unpriced, keeper.priceOf), [5000000]);
-});
+test(
+  "the rows the client is sent carry the archive's price and the shop's cap",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const lines = keeper.linesOf(SHOPS[0]!);
+    assert.deepEqual(
+      lines.map((line) => [line.itemId, line.price, line.maxCount]),
+      [
+        [2000000, 25, DEFAULT_SHOP_MAX_COUNT],
+        [2000001, 80, DEFAULT_SHOP_MAX_COUNT],
+        [2000002, 160, DEFAULT_SHOP_MAX_COUNT],
+        [2000003, 100, DEFAULT_SHOP_MAX_COUNT],
+        [2000004, 1000, DEFAULT_SHOP_MAX_COUNT],
+        [2030000, 75, DEFAULT_SHOP_MAX_COUNT],
+      ],
+    );
+    // A row without a price is skipped rather than sent as 0 - the client would print the 0.
+    const unpriced = { shopId: 1, npcTemplateId: 1, items: [{ itemId: 5000000 }] };
+    assert.deepEqual(keeper.linesOf(unpriced), []);
+    assert.deepEqual(unpricedShopItems(unpriced, keeper.priceOf), [5000000]);
+  },
+);
 
 test("buying deducts the mesos and grants the item", needsArchive, () => {
   const keeper = shopKeeper(archive!);
@@ -227,22 +304,44 @@ test("buying deducts the mesos and grants the item", needsArchive, () => {
   assert.equal(items.inventories[1]!.items.get(outcome.slot)?.itemId, 2000000);
 });
 
-test("a purchase the wallet cannot pay for, or one the shop will not sell, is refused", needsArchive, () => {
-  const keeper = shopKeeper(archive!);
-  const items = startingCharacterItems();
-  const stats = zeroStats();
-  stats.mesos = 30;
-  const wallet = new MesoWallet(stats);
-  const shop = SHOPS[0]!;
-  assert.deepEqual(keeper.buy(items, wallet, shop, 2000003, 1), { kind: "failed", reason: "notEnoughMesos" }); // 100 mesos
-  assert.equal(stats.mesos, 30); // nothing moved
-  assert.deepEqual(keeper.buy(items, wallet, shop, 2000000, 0), { kind: "failed", reason: "badRequest" });
-  assert.deepEqual(keeper.buy(items, wallet, shop, 2000000, 201), { kind: "failed", reason: "badRequest" });
-  assert.deepEqual(keeper.buy(items, wallet, shop, 2000001, 1), { kind: "failed", reason: "notEnoughMesos" }); // 80
-  assert.deepEqual(keeper.buy(items, wallet, shop, 2000002, 1), { kind: "failed", reason: "notEnoughMesos" }); // 160
-  // An item no ordinary shop stocks is not in this shop either.
-  assert.deepEqual(keeper.buy(items, wallet, shop, 4000019, 1), { kind: "failed", reason: "notInShop" });
-});
+test(
+  "a purchase the wallet cannot pay for, or one the shop will not sell, is refused",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const items = startingCharacterItems();
+    const stats = zeroStats();
+    stats.mesos = 30;
+    const wallet = new MesoWallet(stats);
+    const shop = SHOPS[0]!;
+    assert.deepEqual(keeper.buy(items, wallet, shop, 2000003, 1), {
+      kind: "failed",
+      reason: "notEnoughMesos",
+    }); // 100 mesos
+    assert.equal(stats.mesos, 30); // nothing moved
+    assert.deepEqual(keeper.buy(items, wallet, shop, 2000000, 0), {
+      kind: "failed",
+      reason: "badRequest",
+    });
+    assert.deepEqual(keeper.buy(items, wallet, shop, 2000000, 201), {
+      kind: "failed",
+      reason: "badRequest",
+    });
+    assert.deepEqual(keeper.buy(items, wallet, shop, 2000001, 1), {
+      kind: "failed",
+      reason: "notEnoughMesos",
+    }); // 80
+    assert.deepEqual(keeper.buy(items, wallet, shop, 2000002, 1), {
+      kind: "failed",
+      reason: "notEnoughMesos",
+    }); // 160
+    // An item no ordinary shop stocks is not in this shop either.
+    assert.deepEqual(keeper.buy(items, wallet, shop, 4000019, 1), {
+      kind: "failed",
+      reason: "notInShop",
+    });
+  },
+);
 
 test("selling pays half the item's price and takes the stack down correctly", needsArchive, () => {
   assert.equal(SELL_PRICE_RATIO, 0.5);
@@ -276,10 +375,22 @@ test("selling what is not there, or what cannot be priced, is refused", needsArc
   assert.ok(granted);
   const stats = zeroStats();
   const wallet = new MesoWallet(stats);
-  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 2000000, 2), { kind: "failed", reason: "notEnoughItems" });
-  assert.deepEqual(keeper.sell(items, wallet, granted.slot + 1, 2000000, 1), { kind: "failed", reason: "notEnoughItems" });
-  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 2000001, 1), { kind: "failed", reason: "notEnoughItems" });
-  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 5000000, 1), { kind: "failed", reason: "unsellable" });
+  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 2000000, 2), {
+    kind: "failed",
+    reason: "notEnoughItems",
+  });
+  assert.deepEqual(keeper.sell(items, wallet, granted.slot + 1, 2000000, 1), {
+    kind: "failed",
+    reason: "notEnoughItems",
+  });
+  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 2000001, 1), {
+    kind: "failed",
+    reason: "notEnoughItems",
+  });
+  assert.deepEqual(keeper.sell(items, wallet, granted.slot, 5000000, 1), {
+    kind: "failed",
+    reason: "unsellable",
+  });
   assert.equal(stats.mesos, 0); // nothing paid out
   assert.equal(items.inventories[1]!.items.get(granted.slot)?.itemId, 2000000); // and nothing taken
 });
@@ -293,14 +404,24 @@ test("a failure code is one of the messages the client can print", () => {
   assert.equal(shopResultCode("badRequest"), SHOP_RESULT.error);
   // The client's switch has cases 0..4 and a default, so every code this server sends is either one
   // of the five or lands on the default ("오류가 발생해 거래를 하지 못했습니다").
-  for (const failure of ["notEnoughMesos", "notEnoughSlots", "notEnoughItems", "unsellable", "notInShop", "badRequest"] as const) {
+  for (const failure of [
+    "notEnoughMesos",
+    "notEnoughSlots",
+    "notEnoughItems",
+    "unsellable",
+    "notInShop",
+    "badRequest",
+  ] as const) {
     const code = shopResultCode(failure);
     assert.ok(
       (code >= 0 && code <= 4) || code > 4,
       `${failure} -> ${code} is neither a case nor the default of the client's switch`,
     );
   }
-  assert.ok(shopResultCode("badRequest") > 4, "an unusable request is the client's error line, not a case");
+  assert.ok(
+    shopResultCode("badRequest") > 4,
+    "an unusable request is the client's error line, not a case",
+  );
 });
 
 test("without an archive no shop can be priced, so nothing is sold and nothing is bought", () => {
@@ -310,7 +431,10 @@ test("without an archive no shop can be priced, so nothing is sold and nothing i
   const items = startingCharacterItems();
   const stats = zeroStats();
   const wallet = new MesoWallet(stats);
-  assert.deepEqual(keeper.buy(items, wallet, SHOPS[0]!, 2000000, 1), { kind: "failed", reason: "notInShop" });
+  assert.deepEqual(keeper.buy(items, wallet, SHOPS[0]!, 2000000, 1), {
+    kind: "failed",
+    reason: "notInShop",
+  });
 });
 
 test("what a shop sells is something the use path understands", needsArchive, () => {
@@ -337,6 +461,9 @@ test("what a shop sells is something the use path understands", needsArchive, ()
 
 test("the shop id of every row is the NPC that opens it (a stable key, not a shared counter)", () => {
   const ids = SHOPS.map((shop) => shop.shopId);
-  assert.deepEqual(ids, SHOPS.map((shop) => shop.npcTemplateId));
+  assert.deepEqual(
+    ids,
+    SHOPS.map((shop) => shop.npcTemplateId),
+  );
   assert.equal(new Set(ids).size, ids.length);
 });

@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CipherState } from "../src/protocol/cipher.ts";
-import { encodeHandshake, encodeSessionPacket, HANDSHAKE_BODY_BYTES } from "../src/protocol/session.ts";
+import {
+  encodeHandshake,
+  encodeSessionPacket,
+  HANDSHAKE_BODY_BYTES,
+} from "../src/protocol/session.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import { decodeTrace, type TraceRecord } from "../src/net/decode.ts";
 import { encodeUserMove } from "../src/protocol/field.ts";
@@ -32,9 +36,21 @@ function traceOf(seed: number, bodies: Uint8Array[], dir: "c2s" | "s2c" = "c2s")
 
 test("decode adopts the seeds from a 211-byte handshake and decrypts what follows", () => {
   // The server opens the session (as the 2003 client expects), assigning the client its seeds.
-  const handshake = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x5a), SEND_SEED, RECV_SEED);
+  const handshake = encodeHandshake(
+    new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x5a),
+    SEND_SEED,
+    RECV_SEED,
+  );
   const records: TraceRecord[] = [
-    { t: 0, conn: 1, dir: "s2c", kind: "handshake", len: handshake.length, hex: toHex(handshake), bodyLength: HANDSHAKE_BODY_BYTES },
+    {
+      t: 0,
+      conn: 1,
+      dir: "s2c",
+      kind: "handshake",
+      len: handshake.length,
+      hex: toHex(handshake),
+      bodyLength: HANDSHAKE_BODY_BYTES,
+    },
     ...traceOf(SEND_SEED, [Uint8Array.from([0x07, 0x01, 0x02, 0x03])]), // the client sends with u32#1
   ];
   const result = decodeTrace(records);
@@ -53,7 +69,15 @@ test("decode keys the two directions from the handshake, not from one shared see
   // into plausible-looking garbage and flags the header, which is how it was caught.
   const handshake = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 0x11223344, 0x55667788);
   const records: TraceRecord[] = [
-    { t: 0, conn: 1, dir: "s2c", kind: "handshake", len: 211, hex: toHex(handshake), bodyLength: HANDSHAKE_BODY_BYTES },
+    {
+      t: 0,
+      conn: 1,
+      dir: "s2c",
+      kind: "handshake",
+      len: 211,
+      hex: toHex(handshake),
+      bodyLength: HANDSHAKE_BODY_BYTES,
+    },
     ...traceOf(0x55667788, [Uint8Array.from([0x0a, 0xaa])], "s2c"), // server -> client uses u32#2
     ...traceOf(0x11223344, [Uint8Array.from([0x1a, 0xbb])], "c2s"), // client -> server uses u32#1
   ];
@@ -69,7 +93,15 @@ test("decode of a client-sent handshake seeds the server's states instead", () =
   // With --handshake off the client dictates the seeds; then the SERVER sends with u32#1.
   const handshake = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 0x0a0b0c0d, 0x0e0f1011);
   const records: TraceRecord[] = [
-    { t: 0, conn: 1, dir: "c2s", kind: "handshake", len: 211, hex: toHex(handshake), bodyLength: HANDSHAKE_BODY_BYTES },
+    {
+      t: 0,
+      conn: 1,
+      dir: "c2s",
+      kind: "handshake",
+      len: 211,
+      hex: toHex(handshake),
+      bodyLength: HANDSHAKE_BODY_BYTES,
+    },
     ...traceOf(0x0a0b0c0d, [Uint8Array.from([0x01, 0x02])], "s2c"),
   ];
   const result = decodeTrace(records);
@@ -120,7 +152,14 @@ test("decode names a server -> client field packet instead of leaving it anonymo
   });
   const records: TraceRecord[] = traceOf(RECV_SEED, [move, Uint8Array.from([0x01, 0x00])], "s2c");
   const result = decodeTrace(records, { s2cSeed: RECV_SEED, c2sSeed: SEND_SEED });
-  assert.equal(result.packets[0]!.decoded, "0x22 CUserPool: characterId=1000 elements=1 first=(12,34) action=1 fh=5");
-  assert.equal(result.packets[1]!.decoded, undefined, "a login-stage reply must not be labelled a CField packet");
+  assert.equal(
+    result.packets[0]!.decoded,
+    "0x22 CUserPool: characterId=1000 elements=1 first=(12,34) action=1 fh=5",
+  );
+  assert.equal(
+    result.packets[1]!.decoded,
+    undefined,
+    "a login-stage reply must not be labelled a CField packet",
+  );
   assert.equal(result.packets[1]!.opcode, 0x01);
 });

@@ -28,9 +28,7 @@ export interface TemporaryStatUpdate {
   sourceIsSkill: boolean;
   sourceId: number;
 }
-export function temporaryStatMask(
-  values: TemporaryStatUpdate["values"],
-): number {
+export function temporaryStatMask(values: TemporaryStatUpdate["values"]): number {
   for (const name of Object.keys(values)) {
     if (!(TEMPORARY_STAT_FIELDS as readonly string[]).includes(name))
       throw new RangeError(`Unknown temporary stat ${name}`);
@@ -40,23 +38,14 @@ export function temporaryStatMask(
     0,
   );
 }
-export function writeTemporaryStat(
-  writer: PacketWriter,
-  update?: TemporaryStatUpdate,
-): void {
+export function writeTemporaryStat(writer: PacketWriter, update?: TemporaryStatUpdate): void {
   if (!update) {
     writer.writeU32(0);
     return;
   }
   const { durationMs, values, sourceId } = update;
-  if (
-    !Number.isInteger(durationMs) ||
-    durationMs <= 0 ||
-    durationMs > 0x7fffffff
-  )
-    throw new RangeError(
-      "Temporary-stat duration must be a positive s32 millisecond interval",
-    );
+  if (!Number.isInteger(durationMs) || durationMs <= 0 || durationMs > 0x7fffffff)
+    throw new RangeError("Temporary-stat duration must be a positive s32 millisecond interval");
   if (!Number.isInteger(sourceId) || sourceId < 0 || sourceId > 0xffffffff)
     throw new RangeError("Temporary-stat source must fit u32");
   const mask = temporaryStatMask(values);
@@ -70,9 +59,7 @@ export function writeTemporaryStat(
   }
   writer.writeByte(update.sourceIsSkill ? 1 : 0).writeU32(sourceId);
 }
-export function readTemporaryStat(
-  reader: PacketReader,
-): TemporaryStatUpdate | undefined {
+export function readTemporaryStat(reader: PacketReader): TemporaryStatUpdate | undefined {
   const durationMs = reader.readU32();
   if (durationMs === 0) return undefined;
   const mask = reader.readU32();

@@ -95,7 +95,8 @@ export class OnlineAccounts {
  * connection is holding it and for how long, and every part of that answer is one of these fields.
  */
 export function describeSessions(sessions: OnlineSession[], now = Date.now()): string {
-  const age = (session: OnlineSession): string => `${Math.max(0, Math.round((now - session.since) / 1000))}s`;
+  const age = (session: OnlineSession): string =>
+    `${Math.max(0, Math.round((now - session.since) / 1000))}s`;
   return sessions.map((session) => `${session.where} ${session.peer} (${age(session)})`).join(", ");
 }
 
