@@ -61,7 +61,9 @@
  *
  * `attr` (offset 0) is a bit field: 537B00 stages external force with 495D60(attr=2), which ORs
  * it into the current record. 4967C0 uses 1 for its synthetic stale-path record. The located
- * playback reads do not turn bit2 into a damage/emotion event; do not invent such a broadcast.
+ * playback chain is now traced: 495F70 ORs attr into its out-param BEFORE consuming each
+ * fragment, 539900 returns it via 5398B0, and 520950 bit2 applies hit/1500 locally to that remote
+ * user. This is presentation of the existing move, NOT a new HP/damage/emotion broadcast.
  * The browser retains bit2 until its existing 100ms snapshot is published (not native 30ms batching).
  */
 import { PacketReader, PacketWriter } from "./packet.ts";

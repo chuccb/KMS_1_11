@@ -1,3 +1,4 @@
+import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.mjs";
 import {tooltipPreview} from "./tooltip-preview.mjs";
 import {npcPresentation} from "./npcmotion.mjs";
 import {dialogueExample} from "./dialogue-examples.mjs";
@@ -258,8 +259,10 @@ let hoveredPortal;
 /** The last time a portal was asked for; `sub_472590` refuses a second request within 500 ms. */
 let lastPortalAt = -Infinity;
 let portalPending = false;
-/** The face the local player is wearing, and until when - the server's `0x27` excludes the mover. */
-let selfEmotion;
+/** Immutable face data and bounded pose warm-up markers; clocks live on visual actors. */
+const faceCatalog = faceProfiles();
+const avatarWarmLooks = new Set();
+let emoteAvailable; // First presentation tick also disables buttons outside an active field.
 /**
  * The last whisper this page sent, kept the way the 2003 client keeps it (`CField+28`, written by
  * `sub_4717D0`): the answer (`0x1A` 0x0A) carries no text, so the sender's own line is printed from
@@ -314,17 +317,7 @@ function slotName(slot) {
  * read out of `Character/Face/*` and the drawing code's table). 1..7 are what the 2003 client's
  * F1..F7 send; 0 (the neutral blink) and 8 have no key there, and this page has no button for them.
  */
-const EMOTE_NAMES = [
-  "blink",
-  "hit",
-  "smile",
-  "troubled",
-  "cry",
-  "angry",
-  "bewildered",
-  "stunned",
-  "vomit",
-];
+const EMOTE_NAMES = FACE_NAMES;
 const EMOTE_KEYS = [1, 2, 3, 4, 5, 6, 7];
 
 const MOVE_TICK_MS = 100;
@@ -387,6 +380,7 @@ function connect() {
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
     resetContact();
+    resetFace(selfView);
     deathFx.reset();
     speechBalloons.clear();
     npcVisuals.clear();
@@ -437,6 +431,7 @@ function handle(message) {
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
     resetContact();
+    resetFace(selfView);
     deathFx.reset();
     speechBalloons.clear();
     npcVisuals.clear();
@@ -664,7 +659,7 @@ function handle(message) {
       });
       if (damage > 0 && playerBody && selfView) {
         queueKnockback(playerBody, pending.impulse.x, pending.impulse.y);
-        selfView.emotion = { value: 1, until: now + 1500 };
+        setFace(selfView, 1, now, 1500);
       }
       return;
     }
@@ -684,7 +679,9 @@ function handle(message) {
         combatEpoch++;
         keys.clear();
       }
+      const priorLook = selfView && JSON.stringify(lookOf(selfView));
       selfView = selfView?.characterId === message.self.characterId ? { ...selfView, ...message.self } : message.self;
+      if (priorLook !== JSON.stringify(lookOf(selfView))) resetFace(selfView);
       if (selfView.hp > 0) deathFx.remove(selfView.characterId);
       if (selfView.hp <= 0) {
         itemDialog.close(false);
@@ -755,6 +752,7 @@ function handle(message) {
         user.avatarItems = message.avatarItems;
       user.attackTicket = (user.attackTicket ?? 0) + 1;
       delete user.swing;
+      resetFace(user);
       preloadAvatar(lookOf(user));
       return;
     }
@@ -797,16 +795,11 @@ function handle(message) {
     }
 
     case "user-emotion": {
-      const until = performance.now() + 2500;
-      // The server sends 0x27 to everyone but the mover, so this branch is the page's own echo of
-      // what it just sent - the same reason `user-move` for `self` is applied without an event.
-      if (selfView && message.characterId === selfView.characterId) {
-        selfEmotion = { value: message.emotion, until };
-        selfView.emotion = selfEmotion;
-        return;
-      }
+      // ClientSession emits a local bridge echo; native already set its own face before 0x13.
+      // Do not restart its timer, and do not let a delayed older echo replace the latest keypress.
+      if (message.characterId === selfView?.characterId) return;
       const user = users.get(String(message.characterId));
-      if (user) user.emotion = { value: message.emotion, until };
+      if (user) setFace(user, message.emotion, performance.now(), -1, remoteStance(user));
       return;
     }
 
@@ -1820,7 +1813,7 @@ function updateContact(now) {
       state.stance,
       state.frame,
       facingFlip(selfView.facing),
-      emotionFace(selfView.emotion, now),
+      undefined,
       true,
     );
     contactPending = {
@@ -2279,16 +2272,15 @@ function drawSelectionScreen(now) {
           (now - (index === selectedCharacter ? selectedCharacterSince : 0)) /
             (stance === "walk1" ? 100 : 500),
         ) % (stance === "walk1" ? 4 : 3);
-      const image = avatarFrame(
-        {
-          face: character.face ?? 20000,
-          hair: character.hair ?? 30000,
-          items: character.items ?? [],
-        },
+      const look = {face: character.face ?? 20000, hair: character.hair ?? 30000, items: character.items ?? []};
+      const face = sampleAvatarFace(character, look, now);
+      let image = avatarFrame(
+        look,
         stance,
         frame,
-        facingFlip(0),
+        facingFlip(0), face.emotion, false, face.frame,
       );
+      if (!image.ready) image = avatarFrame(look, stance, frame, facingFlip(0));
       if (image.ready)
         ctx.drawImage(image.img, slot.feetX + image.dx, slot.feetY + image.dy);
       ctx.globalAlpha = index === selectedCharacter ? 1 : 0.5;
@@ -2356,8 +2348,16 @@ function lookOf(entity) {
  * `dx`/`dy` say where the PNG's top-left corner goes relative to the character's feet; the server
  * composes at the WZ origins, so the page never adds anchors of its own.
  */
-function avatarFrame(look, stance, frame, flip, emotion, planes = false) {
-  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}|${planes ? "planes" : "merged"}`;
+function avatarFrame(look, stance, frame, flip, emotion, planes = false, faceFrame = 0) {
+  const key = `${look.face}|${look.hair}|${look.items.join(".")}|${stance}|${frame}|${flip ? "mirrored" : "native"}|${emotion ?? "default"}|${faceFrame}|${planes ? "planes" : "merged"}`;
+  // Keep the active neutral pose's tiny blink sequence warm. Look up actual PNG-cache entries
+  // again after eviction, not a stale once-only marker; also covers selection/creation previews.
+  if (emotion === undefined) {
+    const profile = faceCatalog.get(look.face)?.data;
+    if (profile) {
+      for (const f of profile.actions.blink.frames) avatarFrame(look, stance, frame, flip, "blink", planes, f.index);
+    }
+  }
   let entry = avatarFrames.get(key);
   if (entry) {
     avatarFrames.delete(key);
@@ -2375,7 +2375,7 @@ function avatarFrame(look, stance, frame, flip, emotion, planes = false) {
   avatarFrames.set(key, entry);
   const query =
     `?face=${look.face}&hair=${look.hair}&items=${look.items.join(",")}` +
-    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&v=20261018-native-layers`;
+    `&stance=${encodeURIComponent(stance)}&frame=${frame}&flip=${flip ? 1 : 0}&emotion=${encodeURIComponent(emotion ?? "default")}&planes=${planes ? 1 : 0}&faceFrame=${faceFrame}&v=20261018-native-faces`;
   entry.requested = true;
   entry.loading = fetch(`/api/avatar.png${query}`)
     .then(async (response) => {
@@ -2410,6 +2410,20 @@ function avatarFrame(look, stance, frame, flip, emotion, planes = false) {
 /** Warms the frames a look needs: idle (3) and the two walk cycles (4 each), both ways. */
 function preloadAvatar(look) {
   const key = `${look.face}|${look.hair}|${look.items.join(".")}`;
+  const faces = faceCatalog.get(look.face);
+  if (avatarWarmLooks.has(key)) return;
+  if (avatarWarmLooks.size >= 64) avatarWarmLooks.delete(avatarWarmLooks.values().next().value);
+  avatarWarmLooks.add(key);
+  const warmBlink = (profile) => {
+    for (const f of profile?.actions?.blink?.frames ?? []) {
+      for (const [stance, count] of [["stand1",3],["walk1",4],["jump",1]]) {
+        for (let bodyFrame = 0; bodyFrame < count; bodyFrame++) for (const flip of [false,true])
+          avatarFrame(look, stance, bodyFrame, flip, "blink", true, f.index);
+      }
+    }
+  };
+  if (faces?.data) warmBlink(faces.data);
+  else if (faces?.promise) void faces.promise.then(warmBlink);
   if (!attackLooks.has(key)) {
     if (attackLooks.size >= 128) attackLooks.clear();
     attackLooks.add(key);
@@ -2600,10 +2614,10 @@ function stanceOfEntity(entity, now) {
   );
 }
 
-/** The face folder an active emotion names, or undefined when it has expired. */
-function emotionFace(emotion, now) {
-  if (!emotion || emotion.until <= now) return undefined;
-  return EMOTE_NAMES[emotion.value];
+/** One face clock for field actors, character slots and the creation preview. No body-clock reset. */
+function sampleAvatarFace(entity, look, now) {
+  return facePose(entity, `${look.face}|${look.hair}|${look.items.join(".")}`,
+    faceCatalog.get(look.face)?.data, now);
 }
 
 /** An avatar at `(screenX, screenY)`; native WZ faces left, right-facing pictures are mirrored. */
@@ -2646,9 +2660,11 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   const look = lookOf(entity);
   preloadAvatar(look);
   const state = stanceOfEntity(entity, now);
-  let frame = avatarFrame(look, state.stance, state.frame, flip, emotionFace(entity.emotion, now), true);
+  const face = sampleAvatarFace(entity, look, now);
+  let frame = avatarFrame(look, state.stance, state.frame, flip, face.emotion, true, face.frame);
   const attackPose = /^(swing|stab|shoot)/.test(state.stance);
-  if (!frame.ready && attackPose) frame = avatarFrame(look, state.stance, state.frame, flip, undefined, true);
+  // Cold facial art must not replace the body action with stand1 or a gray box.
+  if (!frame.ready) frame = avatarFrame(look, state.stance, state.frame, flip, undefined, true);
   const draw = (entry) => {
     entity.chatOriginY=entry.damageOriginY;
     const x = Math.round(screenX + entry.dx), y = Math.round(screenY + entry.dy);
@@ -2664,7 +2680,7 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   };
   if (frame.ready) { draw(frame); return; }
   if (state.stance !== "stand1" && !attackPose) {
-    const stand = avatarFrame(look, "stand1", 0, flip, emotionFace(entity.emotion, now), true);
+    const stand = avatarFrame(look, "stand1", 0, flip, undefined, true);
     if (stand.ready) { draw(stand); return; }
   }
   ctx.fillStyle = "rgba(120, 170, 210, 0.35)";
@@ -2899,6 +2915,11 @@ function statusButtonClick(button) {
 }
 
 function frame() {
+  const enabled = !!canSendEmotion();
+  if (enabled !== emoteAvailable) {
+    emoteAvailable = enabled;
+    for (const button of ui.emotes.children) button.disabled = !enabled;
+  }
   if (loginStage !== "game") {
     if (loginStage === "title") drawTitleScreen();
     else drawSelectionScreen(performance.now());
@@ -2969,6 +2990,7 @@ function frame() {
     sampleMotion(npc,now,terrain);npcVisuals.locomotion(npc.npcId,npc.action??npc.facing,now);
   }
   for (const user of users.values()) {
+    movementFace(user, now);
     sampleMotion(user, now, terrain);
     const dead = remoteStance(user) === "dead";
     if (dead) delete user.swing;
@@ -5222,24 +5244,27 @@ document
   .getElementById("inv-toggle")
   ?.addEventListener("click", () => toggleInventory());
 
-// The 2003 client sends these from F1..F7 (`sub_511E20` case 10); a browser cannot take those keys
-// (F1 is help, F5 reloads), so the page offers the same seven faces as buttons.
-ui.emotes.replaceChildren(
-  ...EMOTE_KEYS.map((value) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = EMOTE_NAMES[value];
-    button.title = `表情 ${value}：${EMOTE_NAMES[value]}`;
-    button.addEventListener("click", () => {
-      // The 2003 client paints the face before it sends (`.text:00511FD8` precedes `push 0x13`), and
-      // the server does not echo `0x27` to the sender - so the page does the same and keeps it.
-      selfEmotion = { value, until: performance.now() + 2500 };
-      if (selfView) selfView.emotion = selfEmotion;
-      send({ t: "emotion", value });
-    });
-    return button;
-  }),
-);
+// Native F1..F7 plus explicitly browser-only helper buttons. Both go through the same gates.
+function canSendEmotion() {
+  return loginStage === "game" && visualFieldActive && selfView && !portalPending &&
+    socket?.readyState === WebSocket.OPEN && !document.hidden &&
+    !(selfSwing && performance.now() < selfSwing.start + attackDuration(selfSwing)) &&
+    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !testToolsPanel.open &&
+    !npcDialog.open && !tooltipViewer.open && !talkingNpc && !shop;
+}
+function requestEmotion(value) {
+  if (!canSendEmotion()) return;
+  const now = performance.now();
+  if (setFace(selfView, value, now, -1, stanceOfEntity(selfView, now).stance)) send({t:"emotion",value});
+}
+ui.emotes.setAttribute("aria-label", "瀏覽器表情輔助按鈕；原快捷鍵F1–F7");
+ui.emotes.replaceChildren(...EMOTE_KEYS.map((value) => {
+  const button = document.createElement("button");
+  button.type = "button"; button.textContent = EMOTE_NAMES[value]; button.disabled = true;
+  button.title = `F${value} · ${EMOTE_NAMES[value]}（瀏覽器輔助入口）`;
+  button.addEventListener("click", () => requestEmotion(value));
+  return button;
+}));
 
 // Keys feed the fixed-step vecctrl reconstruction; network snapshots do not drive local physics.
 window.addEventListener("keydown", (event) => {
@@ -5256,6 +5281,11 @@ window.addEventListener("keydown", (event) => {
     return;
   if (document.activeElement === ui.say) {
     if (event.key === "Escape") ui.say.blur();
+    return;
+  }
+  if (/^F[1-7]$/.test(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    event.preventDefault();
+    if (!event.repeat) requestEmotion(Number(event.key.slice(1)));
     return;
   }
   if (event.key === "Enter") {
@@ -5514,6 +5544,7 @@ const creationDialogs = characterDialogs({
   ctx,
   image: artImage,
   avatar: avatarFrame,
+  face: sampleAvatarFace,
   send,
   audio,
   log: logLine,

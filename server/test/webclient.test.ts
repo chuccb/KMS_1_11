@@ -483,6 +483,23 @@ artTest("the map's art, its canvases and a composed avatar are served", { timeou
   assert.ok(Number(avatar.headers.get("x-frame-dx")) < 0);
   assert.ok(Number(avatar.headers.get("x-frame-dy")) < 0);
 
+  // Source-only facial chain addition (not executed): metadata, independent PNG cache and input gate.
+  const faceResponse = await fetch(`http://127.0.0.1:${world.webPort}/api/face/20000`);
+  assert.equal(faceResponse.status,200);
+  const faceBody = await faceResponse.json() as {actions:Record<string,{duration:number;frames:{index:number;delay:number}[]}>};
+  assert.deepEqual(faceBody.actions.blink!.frames.map(f=>f.delay),[60,60,60]);
+  assert.equal(faceBody.actions.smile!.duration,5000);
+  const facePng = (index:number) => fetch(`http://127.0.0.1:${world.webPort}/api/avatar.png?face=20000&hair=30000&emotion=blink&faceFrame=${index}`);
+  const a=await facePng(0), b=await facePng(1);
+  assert.equal(a.status,200); assert.equal(b.status,200);
+  assert.notDeepEqual(new Uint8Array(await a.arrayBuffer()),new Uint8Array(await b.arrayBuffer()));
+  assert.equal((await facePng(-1)).status,400);
+  assert.equal((await facePng(99)).status,404);
+  for (const invalid of ["NaN","Infinity","abc","1.5",""]) {
+    assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/avatar.png?faceFrame=${invalid}`)).status,400);
+  }
+  assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/face/not-an-id`)).status,404);
+
   const npc = await fetch(`http://127.0.0.1:${world.webPort}/api/npc/1010100`);
   assert.equal(npc.status, 200);
   const npcBody = (await npc.json()) as { actions: Record<string, { path: string; ox: number }[]> };
@@ -732,6 +749,16 @@ test("a face goes to the others, and a whisper comes back as an answer", { timeo
   assert.deepEqual([own.characterId, own.emotion], [heroId, 2]);
   const seen = await alt.browser.nextKind("user-emotion");
   assert.deepEqual([seen.characterId, seen.emotion], [heroId, 2]);
+
+  // Source-only addition: all F-key faces, unbound vomit and neutral use the SAME authority/relay.
+  // This checks bridge/wire coverage, not the local browser's independent animation clock.
+  for (const value of [1,3,4,5,6,7,8,0]) {
+    hero.browser.send({t:"emotion",value});
+    const local=await hero.browser.nextKind("user-emotion");
+    const remote=await alt.browser.nextKind("user-emotion");
+    assert.deepEqual([local.characterId,local.emotion],[heroId,value]);
+    assert.deepEqual([remote.characterId,remote.emotion],[heroId,value]);
+  }
 
   // 0x13 with a value the client cannot produce: the codec refuses it, and the page gets a reason.
   hero.browser.send({ t: "emotion", value: 99 });

@@ -152,7 +152,8 @@ Object.assign(globalThis, await import("../../client/temporarystats.mjs"));
 Object.assign(globalThis, await import("../../client/basiccombat.mjs"));
 Object.assign(globalThis, await import("../../client/tooltip.mjs"));
 Object.assign(globalThis, await import("../../client/tooltip-preview.mjs"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+Object.assign(globalThis, await import("../../client/faces.mjs"));
+runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:faces|motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
   testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},

@@ -15,7 +15,7 @@ export function rollCreationDice(random = Math.random) {
 }
 
 /** Paint native art; HTML is only transparent hit targets and the real name input. */
-export function characterDialogs({ ctx, image, avatar, send, audio, log = () => {}, busy, getSelected, isCharacterStage }) {
+export function characterDialogs({ ctx, image, avatar, face = () => ({emotion:undefined,frame:0}), send, audio, log = () => {}, busy, getSelected, isCharacterStage }) {
   const el = (id) => document.getElementById(id);
   const root = el('character-dialogs'), createRoot = el('new-character'), confirmRoot = el('character-confirm');
   const input = el('new-name'), choices = el('creation-options');
@@ -23,6 +23,7 @@ export function characterDialogs({ ctx, image, avatar, send, audio, log = () => 
   let catalog, catalogPromise, gender = 0, picks = [], groups = [], dice = [4, 4, 4, 13];
   let checkedName = '', dropdown = -1, dropdownHover = -1, hover, pressed, deleteTarget;
   let diceStep = 0, diceAt = 0;
+  const previewActor = {};
   const stamp = (path, x, y) => { const art = image(path); if (art.ready) ctx.drawImage(art.img, x, y); };
   const setBox = (element, x, y, width, height) => Object.assign(element.style, { left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
   const setBusy = (value) => { pending = value; busy(value); sync(); };
@@ -185,7 +186,10 @@ export function characterDialogs({ ctx, image, avatar, send, audio, log = () => 
       if (mode === 'create') {
         while (diceStep > 0 && now >= diceAt) { dice = rollCreationDice(); diceStep++; diceAt += 30; if (diceStep >= 12) { diceStep = 0; sync(); } }
         stamp('UI/Login.img/CharSelect/newDlg', 270, 88);
-        const preview = avatar({ face: picks[0], hair: picks[1], items: picks.slice(2) }, 'stand1', Math.floor(now / 500) % 3, true);
+        const look = {face:picks[0],hair:picks[1],items:picks.slice(2)};
+        const pose = face(previewActor, look, now), bodyFrame = Math.floor(now / 500) % 3;
+        let preview = avatar(look, 'stand1', bodyFrame, true, pose.emotion, false, pose.frame);
+        if (!preview.ready) preview = avatar(look, 'stand1', bodyFrame, true);
         if (preview.ready) ctx.drawImage(preview.img, 411 + preview.dx, 211 + preview.dy);
         for (let i = 0; i < 6; i++) {
           const y = 248 + i * 20; ctx.fillStyle = '#c4d4e2'; ctx.fillRect(378, y, 127, 18);

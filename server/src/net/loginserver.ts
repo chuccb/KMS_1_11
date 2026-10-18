@@ -2895,6 +2895,7 @@ export class GameEntryServer {
   private handleEmotion(session: FieldSession, plain: Uint8Array): void {
     let emotion: ClientEmotion;
     try {
+      if (plain.length !== 5) throw new Error("0x13 requires exactly one u32 emotion");
       emotion = readClientEmotion(new PacketReader(plain, 1));
     } catch (error) {
       this.options.log?.(

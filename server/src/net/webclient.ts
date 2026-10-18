@@ -1,3 +1,4 @@
+import { FACE_EMOTIONS, type FaceAnimation } from "../game/face.ts";
 import type { TestToolResult } from "../game/testtools.ts";
 import { nativeSkillBooks } from "../../../client/jobs.mjs";
 import type { SkillCatalog } from "../game/skills.ts";
@@ -123,6 +124,7 @@ export interface WebClientOptions {
  */
 export interface ArtProvider {
   attackProfile?: BasicAttackProvider;
+  face?(faceId: number): FaceAnimation | undefined;
   projectile?(itemId: number): SpriteFrame[];
   /** `Map/Map/%09d.img` as a flat sprite list, or `undefined` when the map is not in the archive. */
   mapArt(mapId: number): MapArt | undefined;
@@ -134,6 +136,7 @@ export interface ArtProvider {
       stance?: string;
       frame?: number;
       emotion?: string;
+      faceFrame?: number;
       flip?: boolean;
       planes?: boolean;
     },
@@ -432,9 +435,24 @@ function serveAvatar(
       .map((piece) => Number(piece))
       .filter((id) => Number.isFinite(id) && id > 0),
   };
+  const rawFaceIndex = url.searchParams.get("faceFrame");
+  const faceIndex = rawFaceIndex === null ? 0 : rawFaceIndex.trim() === "" ? NaN : Number(rawFaceIndex);
+  const expression = url.searchParams.get("emotion");
+  if (!Number.isInteger(faceIndex) || faceIndex < 0 || faceIndex > 255 ||
+      (expression !== null && expression !== "default" && !(FACE_EMOTIONS as readonly string[]).includes(expression))) {
+    sendJson(response, 400, { error: "invalid face expression/frame" });
+    return;
+  }
+  const faceMetadata = art.face?.(look.face);
+  const faceAction = expression === null || expression === "default" ? "blink" : expression;
+  if (faceMetadata && !faceMetadata.actions[faceAction]?.frames.some(f => f.index === faceIndex)) {
+    sendJson(response, 404, { error: "requested face frame does not exist in Data.wz" });
+    return;
+  }
   const frame = art.avatar(look, {
     stance: url.searchParams.get("stance") ?? "stand1",
     frame: number("frame", 0),
+    faceFrame: faceIndex,
     flip: url.searchParams.get("flip") === "1",
     planes: url.searchParams.get("planes") === "1",
     ...(url.searchParams.get("emotion") !== null
@@ -1477,6 +1495,13 @@ export function startWebClient(
       const art = options.art?.reader && deathArtOf(options.art.reader);
       if (!art) return sendJson(response, 404, { error: "Original Effect/Tomb.img fall/land unavailable" });
       sendJson(response, 200, art);
+      return;
+    }
+    if (url.pathname.startsWith("/api/face/")) {
+      const id = url.pathname.slice("/api/face/".length);
+      if (!/^\d{1,8}$/.test(id)) return sendJson(response, 404, { error: "invalid face id" });
+      const face = options.art?.face?.(Number(id));
+      sendJson(response, face ? 200 : 404, face ?? { error: "face animation unavailable in Data.wz" });
       return;
     }
     if (url.pathname === "/api/avatar.png") {

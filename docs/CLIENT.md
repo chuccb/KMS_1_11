@@ -1,5 +1,14 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：臉部／眨眼／表情／臉飾（未測試）
+
+臉部不再固定emotion/0或跟body frame跑。依原509070／509560／50B590與Gr2D／WZ接獨立時鐘、
+2–5秒待機及1–3次眨眼、一般5000ms／WZ duration與受傷1500ms、vomit多幀及101同表情配件。
+選角／創角／本人／旁觀者共用，換裝／換場／斷線與舊echo處理；F1–F7與按鈕共用guard，長按不重送。
+另追完495F70 OR attr2 →539900→5398B0→520950，遠端受傷沿原movement relay，不造新HP／emotion packet。
+API metadata、faceFrame合成／PNG cache／預熱、異常輸入與回歸來源一起補；沒有執行測試或登入probe。
+詳細證據、未精確復刻的Gr2D／全movement界線、新隔離LIVE帳號見[NATIVE_FACE_ANIMATION](NATIVE_FACE_ANIMATION.md)／ADR-067。
+
 ## 2026-10-18：原道具／裝備／技能提示框（未測試）
 
 按 CUIToolTip `5014C0/502780/5029A0/503210/5034E0/503840/503AF0/504480/525AE0` 與 listing、WZ 交叉還原。
@@ -266,8 +275,8 @@ node src/cli.ts serve \
 | `/w 名字 訊息` | c2s 0x23 kind0x06 密語；原 CP949 bytes |
 | `/f 名字` | c2s 0x23 kind0x05 找人；回地圖 ID 或 −1 |
 
-串流上面那一排按鈕是**表情**（`0x13`）：2003 client 用 F1–F7 送 1–7，瀏覽器不能用那幾顆鍵（F1 是
-說明、F5 是重新整理），所以同樣的七張臉做成按鈕。0（中性眨眼）與 8 沒有對應的鍵，頁面也就沒有按鈕。
+串流上面那一排按鈕是**表情**（`0x13`）：2003 client 用 F1–F7 送 1–7，目前也在場地可操作時攔截這七鍵；
+瀏覽器／OS仍保留某鍵時可用同樣七張臉按鈕。0（中性眨眼）與 8 沒有對應的鍵，頁面也就沒有按鈕。
 
 點 NPC 就是 `0x33`（`{t:"click",objectId}`），回來的可能是**商店**（`0x4A` → `CShopDlg`）或
 **一句台詞**（`0x47` → 下面的對話框）。哪一個由伺服器決定：商店是 `game/shops.ts` 的表，台詞是
@@ -353,7 +362,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,z,front:false,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，依tile／obj各自原公式排序，同z保留原插入順序；`bounds` 是相機可以顯示的矩形 |
 | `GET /api/death` | `{fall[],land[]}`：原 Tomb queue／delay／origin；fall只排到至少800ms，land全格。原素材無法讀取時404，不生成替代圖 |
 | `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
-| `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |
+| `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion&faceFrame` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |
 | `GET /api/npc/<id>`、`GET /api/mob/<id>` | `{templateId, actions}`，`actions` 是 `move`／`stand`／`hit` 各自的 `frames[]`；WZ 沒有的模板是 404 |
 
 `missingTiles` 是「這張圖放了、但這份 `Data.wz` 裡沒有的圖塊」數量：這個 repo 的 `Data.wz` 是

@@ -11,7 +11,7 @@
 | [ROADMAP](ROADMAP.md) | 現況入口、未完成玩法、工程優先序與交付界線 |
 | [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md) | 原檔／listing／WZ證據優先序、保護規則與研究入口 |
 | [TOOLCHAIN](TOOLCHAIN.md) | 最新正式版鎖定、安裝／啟用、CI與未驗證風險 |
-| [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066，舊編號不重編 |
+| [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066、臉部／新隔離體驗見067，舊編號不重編 |
 | [server README](../server/README.md) | CLI、模組、協定／保存細節與歷史結果 |
 | [CLIENT](CLIENT.md) | 瀏覽器操作、各輪功能與界線；歷史「最新」不能蓋過後續更正 |
 | [RECOVERY_TEST_TOOLS](RECOVERY_TEST_TOOLS.md) | 非原版體驗工具、唯讀UI範例、授權寫入與還原點保護 |
@@ -27,6 +27,7 @@
 
 | 主題 | 文件 |
 |---|---|
+| 臉部獨立動畫／眨眼／F鍵／臉飾／遠端受傷 | [NATIVE_FACE_ANIMATION](NATIVE_FACE_ANIMATION.md) |
 | 原tooltip三類版型／實例需求／技能當前下一級 | [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md) |
 | NPC圖文／選項／資源生命週期 | [NATIVE_DIALOGUE_RICHTEXT](NATIVE_DIALOGUE_RICHTEXT.md) |
 | NPC metadata／controller／未解索引矛盾 | [NATIVE_NPC_BEHAVIOR](NATIVE_NPC_BEHAVIOR.md) |
@@ -61,4 +62,4 @@
 - [DISPLAY_MINIMAP_VALIDATION](DISPLAY_MINIMAP_VALIDATION.md)：DPR清晰縮放／小地圖。
 - [EQUIPMENT_VALIDATION](EQUIPMENT_VALIDATION.md)：裝備窗／穿脫與外觀。
 
-本輪只做文件／註解／忽略項整理及工具鏈升級，不以舊PASS代替測試，不更改玩家進度。
+近期另已補臉部完整鏈與經同意的全新隔離體驗；見ADR-067，不以舊PASS代替驗證，不冒充恢復進度。

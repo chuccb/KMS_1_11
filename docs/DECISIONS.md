@@ -2538,3 +2538,33 @@ Python release asset下載受限，改由官方tag source建置，不跑PGO／ma
 
 **界線**：本輪未執行test/check/typecheck/語法檢查/browser/VM/遊戲HTTP或登入probe。
 版本顯示與依賴安裝不等於相容性PASS；CI保留流程但提交[skip ci]不執行。只非force推目前Arena分支。
+
+
+## ADR-067：臉部家族以獨立時鐘完整接線，原move attr2回傳與新隔離save分清
+
+**日期**：2026-10-18 ｜ **狀態**：已寫實作／回歸來源，未測試；新隔離LIVE僅確認啟服。
+
+沿408400／509070／509560／509790／50B590／511E20、Gr2D100167C0、listing與真WZ交叉。
+一般duration5000、frame缺省60、待機2000..4999、1..3次；按F1不等於受傷hit/1500。
+101配件跟face表情／幀而非body stance；背面face=0同時隱藏臉／臉飾。
+
+**重要更正**：495F70先OR attr再消費duration，539900回out flags、5398B0返回、520950 bit2設hit/1500。
+此前僅追到out-param就說不觸發remote表情不正確；現沿原movement relay補上，不另造HP／emotion封包。
+30ms face presentation quantum不等於重寫全部CMovePath append/merge或幾何；不宣稱remote閃色／魔法效果完成。
+
+**決策**：全avatar合成加獨立faceFrame，metadata／PNG cache鍵／HTTP／prewarm一起接，無另造atlas。
+actor-owned clock不跟body stance重啟；selection／creation共用；本機先SetFace且忽略自身echo。
+F1..F7／輔助按鈕共guard，換look／場地／斷線重設，metadata晚回覆不復活actor。
+有界cache、5秒失敗退避、abort eviction、frame範圍／缺失與packet恰5bytes屬重建防護政策。
+Gr2D精確queue內部／眨眼首尾細節未完全等價，不據此宣稱全遊戲1:1。
+
+**取代ADR-066的當時阻擋**：使用者後續明示「沒存檔也沒關係」，允許全新隔離體驗。
+exclusive-create建立ignored generated/preview-faces-20261018.json，原MakeCharInfo／裝備模板路徑產生
+新Preview／Observer初心者；城鎮101000000為明示體驗起點、無自動職業／SP／金錢。
+不是恢復已遺失舊save，不覆寫既有資料。啟動前另有ignored冷備；重要資料仍須另外匯出。
+LIVE web8515/login8516/game8517，0.0.0.0；帳號與操作見根README。
+
+**交付界線**：未執行test/check/typecheck/語法檢查/browser/VM/HTTP/登入或遊戲probe。
+建立新save是已授權的資料準備，不是功能測試。新增native-faces與HTTP／雙人relay回歸僅來源。
+只憑啟服日誌確認2帳號／2新角色已讀入與三port監聽，未驗收功能；提交[skip ci]，只推目前Arena分支。
+詳NATIVE_FACE_ANIMATION.md。

@@ -13,6 +13,7 @@ import { mapArtProvider, type MapArt } from "./mapart.ts";
 import { composeAvatar, zRanksOf, type AvatarFrame } from "./avatar.ts";
 import { spriteLibrary } from "./sprites.ts";
 import { basicAttackProvider, basicProjectileFrames } from "./basicattack.ts";
+import { faceAnimationOf, type FaceAnimation } from "./face.ts";
 import type { ArtProvider } from "../net/webclient.ts";
 
 /** How many composed avatar frames one process keeps (a look x stance x frame x flip key). */
@@ -24,9 +25,17 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
   const ranks = zRanksOf(archive);
   const reader = mapProvider.reader ?? library.reader;
   const avatars = new Map<string, AvatarFrame | undefined>();
+  const faces = new Map<number, FaceAnimation | undefined>();
 
   return {
     reader,
+    face(faceId: number) {
+      if (!faces.has(faceId)) {
+        if (faces.size >= 64) faces.delete(faces.keys().next().value!);
+        faces.set(faceId, faceAnimationOf(reader, faceId));
+      }
+      return faces.get(faceId);
+    },
     ...(reader === undefined
       ? {}
       : {
@@ -50,6 +59,7 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
         options.stance ?? "stand1",
         options.frame ?? 0,
         options.emotion ?? "",
+        options.faceFrame ?? 0,
         options.flip === true ? "l" : "r",
         options.planes === true ? "planes" : "merged",
       ].join("|");
@@ -58,6 +68,7 @@ export function artProviderOf(archive: WzArchive): ArtProvider {
         ...(options.stance !== undefined ? { stance: options.stance } : {}),
         ...(options.frame !== undefined ? { frame: options.frame } : {}),
         ...(options.emotion !== undefined ? { emotion: options.emotion } : {}),
+        ...(options.faceFrame !== undefined ? { faceFrame: options.faceFrame } : {}),
         ...(options.flip !== undefined ? { flip: options.flip } : {}),
         ...(options.planes === true ? { planes: true } : {}),
         ranks,

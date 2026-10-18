@@ -41,7 +41,7 @@ server/src/game/        世界、物品、規則、資源呈現資料與保存
 server/src/wz/          產品 WZ 解碼與 PNG 輸出
 server/test/            回歸來源；有來源不等於已執行通過
 server/scripts/         歷史 probe 與輔助腳本，不自動執行
-tools/                 Python 靜態分析工具、工具鏈 bootstrap／環境腳本
+tools/                 靜態分析、工具鏈 bootstrap／環境、明示新隔離體驗建立腳本
 analysis/               已保存的 manifest、RTTI 與靜態分析結果
 docs/                   現行規劃、原版證據、ADR 與歷史驗證
 generated/             本機工具安裝、存檔、冷備份；忽略，不進 Git
@@ -77,6 +77,31 @@ node server/src/cli.ts serve \
 恢復原檔可使用 `bash tools/serve-existing-save.sh <真實save路徑>`；檔案不存在／空白會拒絕啟動。
 這個保護入口不自行停服或冷備，必須先由操作者確認。
 
+## 這輪的隔離 LIVE（2026-10-18）
+
+使用者已同意無舊save也繼續；此輪建立 **全新** `generated/preview-faces-20261018.json`，不是恢復舊角色。
+先用exclusive-create的 `node tools/create-isolated-preview.ts generated/<新的檔名>.json` 走WZ／原建角模板，
+再停服冷備／啟服；重跑seed遇既有檔案會拒絕，不重設已玩進度。
+
+- LIVE web **8515**，native login8516／game8517，全部綁0.0.0.0。
+- `preview / preview` → 新初心者Preview；`observer / observer` → 新初心者Observer。
+- 初始101000000無怪城鎮是明示體驗安排，不是原版建角起點；沒有自動轉職／給技能／金錢。
+- 可兩個分頁觀察同圖；F1–F7或表情按鈕看一般表情／自行眨眼，選角與創角預覽也接獨立時鐘。
+- 「體驗工具（非原版）」可找地圖／前往獵場、唯讀UI；修改配置／領物仍需自行確認。
+- 僅確認啟服日誌與監聽狀態，沒有登入、測試、typecheck、browser、VM或probe，不代表驗收PASS。
+
+此輪原碼／listing／WZ證據、臉飾、旁觀者attr2、HTTP／cache與界線見 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
+新save與冷備均ignored；**Git push不含進度，仍須另行保存重要save**。
+
+重啟既有新體驗檔（先停服、冷備；不要再seed）：
+
+```sh
+source tools/env.sh
+node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-port 8515 \
+  --map 101000000 --data Data.wz --save generated/preview-faces-20261018.json \
+  --account preview:preview,observer:observer --map-command preview,observer --test-tools preview,observer --ping off
+```
+
 ## 操作與體驗工具
 
 | 操作 | 功能 |
@@ -84,6 +109,7 @@ node server/src/cli.ts serve \
 | ←／→、A／D | 移動 |
 | Alt／空白 | 跳躍 |
 | ↑／↓ | 繩梯；地面靠門 ↑ 使用，type3 自動門靠近觸發 |
+| F1–F7／上方表情按鈕 | hit／smile／troubled／cry／angry／bewildered／stunned，長按不重送 |
 | Ctrl | 已接的一般攻擊路徑，不代表主動技能已完成 |
 | I／E／S／K／M | 背包／裝備／能力／技能／小地圖 |
 | 背包雙擊／拖放 | 支援的消耗品、穿脫、換位；拖到真正場景可能丟棄 |

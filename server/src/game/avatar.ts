@@ -31,6 +31,8 @@ import { artReaderOf, frameNames, nodeRecord, type ArtReader, type CanvasArt } f
 import { bitmapOf, boundsOf, cropBitmap, drawCanvas, type Bitmap } from "./raster.ts";
 import { encodePng } from "../wz/png.ts";
 import { WzNode } from "../wz/img.ts";
+import { faceFramePath, faceImagePath } from "./face.ts";
+export { faceImagePath, FACE_EMOTIONS } from "./face.ts";
 
 /** The look: what the packets carry, plus the body/head images that are always the same. */
 export interface AvatarLook {
@@ -94,9 +96,7 @@ export function itemImagePath(itemId: number): string | undefined {
 export function hairImagePath(hairId: number): string {
   return `Character/Hair/${String(hairId).padStart(8, "0")}.img`;
 }
-export function faceImagePath(faceId: number): string {
-  return `Character/Face/${String(faceId).padStart(8, "0")}.img`;
-}
+
 
 const BODY_IMAGE = "Character/00002000.img";
 const HEAD_IMAGE = "Character/00012000.img";
@@ -271,19 +271,6 @@ function stanceNode(reader: ArtReader, image: string, stance: string, frame: num
   return undefined;
 }
 
-/** The emotion folders `Face/*.img` carries, in the wire's order (`EMOTION_NAMES`). */
-export const FACE_EMOTIONS = [
-  "blink",
-  "hit",
-  "smile",
-  "troubled",
-  "cry",
-  "angry",
-  "bewildered",
-  "stunned",
-  "vomit",
-] as const;
-
 /** How many frames a stance has (`stand1`: 3, `walk1`: 4) - the client's animation uses this. */
 export function frameCountOf(reader: ArtReader, stance: string): number {
   const node = reader.node(`${BODY_IMAGE}/${stance}`);
@@ -328,6 +315,8 @@ export function composeAvatarBitmap(
     stance?: string;
     frame?: number;
     emotion?: string;
+    /** Independent face clock index, not the body frame. */
+    faceFrame?: number;
     flip?: boolean;
     /** Two same-origin native avatar planes packed vertically; used by the field compositor. */
     planes?: boolean;
@@ -392,7 +381,7 @@ export function composeAvatarBitmap(
   // -- worn items ---------------------------------------------------------
   for (const itemId of look.items) {
     const image = itemImagePath(itemId);
-    if (image === undefined) continue;
+    if (image === undefined || Math.floor(itemId / 10000) === 101) continue;
     const framePath = stanceNode(reader, image, stance, frame);
     if (framePath === undefined) continue;
     const parents: Parent[] = hand === undefined ? [head, body] : [hand, head, body];
@@ -413,14 +402,20 @@ export function composeAvatarBitmap(
     : undefined;
   if (hairFrame !== undefined) addFrameParts(reader, layers, hairFrame, ranks, order, head);
 
-  const faceImage = faceImagePath(look.faceId);
-  const emotion = options.emotion;
-  const facePath = emotion !== undefined && reader.node(`${faceImage}/${emotion}/0/face`) !== undefined
-    ? `${faceImage}/${emotion}/0`
-    : `${faceImage}/default`;
-  // Body frame face=0 is the original back-facing action flag, not an absent face asset.
+  // 408400 merges the 101 face accessory's same expression/frame with the face, on the brow.
+  // 102 eyewear/103 earrings still follow their own original body-stance lists above.
   const faceVisible = reader.node(bodyFrame ?? "")?.get("face") !== 0;
-  if (faceVisible) addFrameParts(reader, layers, facePath, ranks, order, head);
+  if (faceVisible) {
+    const expression = options.emotion;
+    const faceFrame = options.faceFrame ?? 0;
+    const images = [faceImagePath(look.faceId), ...look.items
+      .filter((id) => Math.floor(id / 10000) === 101)
+      .map(itemImagePath).filter((path): path is string => path !== undefined)];
+    for (const image of images) {
+      const path = faceFramePath(reader, image, expression, faceFrame);
+      if (path) addFrameParts(reader, layers, path, ranks, order, head);
+    }
+  }
 
   // -- compose ------------------------------------------------------------
   if (layers.length === 0) return undefined;
@@ -493,6 +488,8 @@ export function composeAvatar(
     stance?: string;
     frame?: number;
     emotion?: string;
+    /** Independent face clock index, not the body frame. */
+    faceFrame?: number;
     flip?: boolean;
     /** Two same-origin native avatar planes packed vertically; used by the field compositor. */
     planes?: boolean;
