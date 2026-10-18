@@ -1,3 +1,5 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
+import {drawTextTooltip} from "./tooltip.mjs";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
 export const SKILL_WINDOW = {
   width: 176,
@@ -274,7 +276,7 @@ export function skillWindow({
     pressed = undefined;
   };
   window.addEventListener("mouseup", release);
-  window.addEventListener("blur", release);
+  releaseOnInterrupt(() => { release(); tooltip = undefined; });
   root.addEventListener("keydown", (e) => {
     if (isModal()) return;
     if (
@@ -343,26 +345,7 @@ export function skillWindow({
       s.levels.find((r) => r.level === level)?.hs,
       level < s.maxLevel ? s.levels.find((r) => r.level === level + 1)?.hs : "",
     ].filter(Boolean);
-    const wrapped = [];
-    for (const line of lines) {
-      let row = "";
-      for (const c of line.replace(/\\n/g, "\n")) {
-        if (c === "\n" || ctx.measureText(row + c).width > 262) {
-          wrapped.push(row);
-          row = c === "\n" ? "" : c;
-        } else row += c;
-      }
-      if (row) wrapped.push(row);
-    }
-    const h = 16 * wrapped.length + 14,
-      x = Math.min(512, tooltip.x + 16),
-      y = Math.max(0, Math.min(600 - h, tooltip.y + 20));
-    ctx.fillStyle = "rgba(245,250,255,.97)";
-    ctx.fillRect(x, y, 284, h);
-    ctx.strokeStyle = "#59677b";
-    ctx.strokeRect(x + 0.5, y + 0.5, 283, h - 1);
-    ctx.fillStyle = "#111";
-    wrapped.forEach((line, i) => ctx.fillText(line, x + 9, y + 7 + i * 16));
+    drawTextTooltip(ctx, tooltip.x + 20, tooltip.y + 20, lines, {maxWidth: 290, keyline: true});
   }
   sync();
   return {

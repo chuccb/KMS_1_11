@@ -1,3 +1,6 @@
+import {nativeCursor} from "./cursor.mjs";
+import {npcContains, releaseOnInterrupt} from "./pointer.mjs";
+import {drawTextTooltip} from "./tooltip.mjs";
 import { backgroundLayout } from "./background.mjs";
 import { mobLocomotion } from "./mobmotion.mjs";
 import { systemMenu } from "./systemmenu.mjs";
@@ -154,6 +157,11 @@ const ui = {
     document.getElementById("dialogue-close")
   ),
 };
+
+const gameCursor = nativeCursor({
+  surfaces: [canvas, ui.gameUi, ui.dialogue],
+  onError: error => logLine(`cursor: ${error.message}`),
+});
 
 // All login stages share the original 800x600 WZ surface and transparent accessible hit targets.
 const titleUi = document.getElementById("title-ui");
@@ -1084,6 +1092,7 @@ async function loadMap(mapId, generation) {
     mapScene = [];
     layerOrder = sceneOrdering();
     npcArts.clear();
+    npcMetadata.clear();
     mobArts.clear();
     artMissing.clear();
     if (cameraMapId !== mapId) {
@@ -1229,39 +1238,66 @@ function requestPortal(portal, now) {
 
 // ---------------------------------------------------------------- NPCs
 
-/**
- * The click box around an NPC: wide enough for the widest shipped `Npc/*` sprite (~70 px) and tall
- * enough for the tallest, measured up from the feet. It is only a click target - the picture itself
- * comes from the archive.
- */
-const NPC_BOX = { left: 36, right: 36, up: 96, down: 8 };
-
-/**
- * The NPC under a screen point, or undefined.
- *
- * The click itself is the whole interaction: `0x33` with the runtime id `0x39` gave the NPC. What
- * comes back is the NPC's shop (`0x4A`) or its line (`0x47`) - the page does not decide which, it
- * only sends the click.
+/** 49F1F0 -> 49A670: first pool rectangle containing the point. The rectangle comes from
+ * the NPC's OWN info.dc*, not the current/linked sprite, and does not flip with its facing.
+ * Wait for metadata instead of guessing an oversized hit area while HTTP art is loading.
  */
 function npcAt(clientX, clientY) {
   if (!self) return undefined;
-  const x = clientX + camera.x;
-  const y = clientY + camera.y;
-  let found;
-  let best = Infinity;
+  const x = clientX + camera.x, y = clientY + camera.y;
   for (const npc of npcs.values()) {
-    const dx = x - npc.x;
-    const dy = y - npc.y;
-    if (dx < -NPC_BOX.left || dx > NPC_BOX.right) continue;
-    if (dy < -NPC_BOX.up || dy > NPC_BOX.down) continue;
-    const distance = dx * dx + dy * dy;
-    if (distance < best) {
-      best = distance;
-      found = npc;
-    }
+    ensureEntityArt("npc", npc.templateId);
+    if (npcContains(npc, npcMetadata.get(npc.templateId)?.clickBounds, x, y)) return npc;
   }
-  return found;
+  return undefined;
 }
+
+let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
+function canvasButtonAt(p) {
+  if (loginStage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
+      systemPanel.visible || testToolsPanel.open || itemDrag || quickDrag || shopDrag || inventoryDrag ||
+      shopScrollDrag || inventoryScrollDrag || statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
+  const shopHit = shopWindowAt(p.x,p.y);
+  if (shopHit) {
+    if (shopHit.kind === "close") return "shop:close";
+    if (shopHit.kind === "button") {
+      if (shopHit.button === "recharge" && (!rechargeQuote(shopSellPick) || shopPending)) return;
+      return `shop:${shopHit.button}`;
+    }
+    return; // Rows/tabs/scrollbars are not CCtrlButton sprite controls.
+  }
+  if (equipPanel.hit(p.x,p.y)) return;
+  const bag = inventoryWindowAt(p.x,p.y);
+  if (bag) return bag.kind === "close" ? "inventory:close" : undefined;
+  if (shop === undefined && talkingNpc === undefined) {
+    const button = statusButtonAt(p.x,p.y);
+    if (button) return `status:${button.action}`;
+  }
+}
+canvas.addEventListener("mousemove", event => {
+  const id = canvasButtonAt(viewPoint(event));
+  if (id && id !== canvasButtonHover) void audio.effect("UI/BtMouseOver");
+  canvasButtonHover = id;
+});
+canvas.addEventListener("mousedown", event => {
+  if (event.button !== 0) return;
+  canvasButtonPress = canvasButtonAt(viewPoint(event));
+  canvasButtonActivation = undefined;
+  inventorySuppressClick = shopSuppressClick = false;
+});
+// One canvas is many native controls. A browser click whose down/up hit different controls must
+// not activate the button that merely happens to be under the release position.
+window.addEventListener("mouseup", event => {
+  if (event.button !== 0) return;
+  const id = event.target === canvas ? canvasButtonAt(viewPoint(event)) : undefined;
+  canvasButtonActivation = id && id === canvasButtonPress ? id : undefined;
+  canvasButtonPress = undefined;
+});
+canvas.addEventListener("click", event => {
+  if (event.button !== 0 || inventorySuppressClick || shopSuppressClick) return;
+  const id = canvasButtonAt(viewPoint(event));
+  if (id && id === canvasButtonActivation) void audio.effect("UI/BtMouseClick");
+});
 
 /** Where the pointer is (surface pixels), so the item tooltip can follow it. */
 let pointerAt;
@@ -1283,7 +1319,6 @@ canvas.addEventListener("mousemove", (event) => {
         Math.round((position * geometry.max) / geometry.travel),
       );
     }
-    canvas.style.cursor = "default";
     return;
   }
   if (shopDrag !== undefined) {
@@ -1304,7 +1339,6 @@ canvas.addEventListener("mousemove", (event) => {
           Math.min(VIEW_H - 32, Math.round(point.y - shopDrag.dy)),
         ),
       };
-      canvas.style.cursor = "move";
       return;
     }
   }
@@ -1330,7 +1364,6 @@ canvas.addEventListener("mousemove", (event) => {
           Math.min(VIEW_H - 32, Math.round(point.y - inventoryDrag.dy)),
         ),
       };
-      canvas.style.cursor = "move";
       return;
     }
   }
@@ -1340,14 +1373,6 @@ canvas.addEventListener("mousemove", (event) => {
     inventoryHover = undefined;
     statusHover = undefined;
     hoveredPortal = undefined;
-    const pointer =
-      shopHit.kind === "close" ||
-      shopHit.kind === "button" ||
-      shopHit.kind === "tab" ||
-      shopHit.kind === "buy-row" ||
-      shopHit.kind === "sell-row" ||
-      shopHit.kind === "scrollbar";
-    canvas.style.cursor = pointer ? "pointer" : "default";
     return;
   }
   shopHover = undefined;
@@ -1355,20 +1380,11 @@ canvas.addEventListener("mousemove", (event) => {
   if (inventoryHover !== undefined) {
     statusHover = undefined;
     hoveredPortal = undefined;
-    const pointer =
-      inventoryHover.kind === "close" ||
-      inventoryHover.kind === "coin" ||
-      inventoryHover.kind === "tab" ||
-      (inventoryHover.kind === "slot" && inventoryHover.item !== undefined);
-    canvas.style.cursor = pointer ? "pointer" : "default";
     return;
   }
   const button = statusButtonAt(point.x, point.y);
   statusHover = button?.action;
   hoveredPortal = button ? undefined : portalAt(point.x, point.y);
-  const quick = quickHoverItem();
-  const npc = button || quick ? undefined : npcAt(point.x, point.y);
-  canvas.style.cursor = button || quick || hoveredPortal || npc ? "pointer" : "default";
 });
 
 canvas.addEventListener("mousedown", (event) => {
@@ -1400,9 +1416,11 @@ canvas.addEventListener("mousedown", (event) => {
       };
     }
     if (shopHit.kind === "button") shopPressed = shopHit.button;
+    else if (shopHit.kind === "close") shopPressed = "close";
   }
   const hit =
     shopHit === undefined ? inventoryWindowAt(point.x, point.y) : undefined;
+  inventoryPressed = hit?.kind === "close" ? "close" : undefined;
   if (hit?.kind === "coin") {
     coinPressed = true;
     event.preventDefault();
@@ -1437,6 +1455,7 @@ canvas.addEventListener("mousedown", (event) => {
 });
 
 function finishWindowPress(event) {
+  if (event?.type === "mouseup" && event.button !== 0) return;
   coinPressed = false;
   if (inventoryDrag?.moved === true) {
     // A drag is not a click: the window moved, so the sheet under the press must not act.
@@ -1448,32 +1467,45 @@ function finishWindowPress(event) {
     }
   }
   if (shopDrag?.moved === true) {
-    shopSuppressClick = true;
+    shopSuppressClick = event?.target === canvas;
     try {
       localStorage.setItem("kms111.shopAt", JSON.stringify(shopAt));
     } catch {
       // A blocked localStorage only costs the position.
     }
   }
-  if (shopScrollDrag !== undefined) shopSuppressClick = true;
+  if (shopScrollDrag !== undefined) shopSuppressClick = event?.target === canvas;
   shopScrollDrag = undefined;
   inventoryDrag = undefined;
   shopDrag = undefined;
-  shopScrollDrag = undefined;
-  shopSuppressClick = false;
   shopPressed = undefined;
   statusPressed = undefined;
+  inventoryPressed = undefined;
 }
-canvas.addEventListener("mouseup", finishWindowPress);
 window.addEventListener("mouseup", finishWindowPress);
-window.addEventListener("blur", finishWindowPress);
 
-canvas.addEventListener("mouseleave", () => {
+function clearCanvasHover() {
   pointerAt = undefined;
-  shopHover = undefined;
-  inventoryHover = undefined;
-  statusHover = undefined;
+  shopHover = inventoryHover = equipHover = statusHover = hoveredPortal = undefined;
+  canvasButtonHover = undefined;
+}
+canvas.addEventListener("mouseleave", clearCanvasHover);
+// Capture runs before equipment's own DOM hover callback, which can then install a fresh tooltip.
+window.addEventListener("mousemove", event => {
+  if (event.target !== canvas) clearCanvasHover();
+}, {capture: true});
+releaseOnInterrupt(() => {
+  finishWindowPress();
+  inventoryScrollDrag = itemDrag = quickDrag = undefined;
+  inventorySuppressClick = shopSuppressClick = false;
+  clearCanvasHover();
+  canvasButtonPress = canvasButtonActivation = undefined;
+  titlePressed = titleHover = selectionPressed = selectionHover = undefined;
+  localActionEpoch++;
+  keys.clear();
 });
+for (const surface of [canvas, ui.gameUi])
+  surface.addEventListener("contextmenu", event => event.preventDefault());
 
 /** Set by a finished window drag so the `click` that follows does not also hit a slot. */
 let inventorySuppressClick = false;
@@ -1508,6 +1540,7 @@ canvas.addEventListener("dblclick", (event) => {
 });
 
 canvas.addEventListener("click", (event) => {
+  if (event.button !== 0) return;
   if (revivePanel.open || (itemDialog.open || systemPanel.visible)) return;
   // The status bar is drawn over the world, so its buttons win over anything behind them - and the
   // inventory window is above both.
@@ -1520,6 +1553,10 @@ canvas.addEventListener("click", (event) => {
     shopSuppressClick = false;
     return;
   }
+  const control = canvasButtonAt(point);
+  const activation = canvasButtonActivation;
+  canvasButtonActivation = undefined;
+  if (control && control !== activation) return;
   const shopHit = shopWindowAt(point.x, point.y);
   if (shopHit !== undefined) {
     if (shopHit.kind === "close") {
@@ -1685,6 +1722,7 @@ let mapGeneration = 0, mapAnimationStart = 0;
 const avatarFrames = new Map();
 /** `npc templateId -> actions` and `mob templateId -> actions` from `/api/npc` and `/api/mob`. */
 const npcArts = new Map();
+const npcMetadata = new Map();
 const mobArts = new Map();
 /** `mobId -> when its 0x30 (die) arrived`; the corpse plays the monster's own `die1` frames. */
 const dying = new Map();
@@ -1862,6 +1900,7 @@ function resize() {
     top: `${layout.top}px`,
     transform: `scale(${layout.scale})`,
   });
+  gameCursor.resize(layout.scale);
   ctx.imageSmoothingEnabled = false;
   canvas.dataset.displayMode = displayMode;
   scaleSelect.title = `800×600 → ${Math.round(layout.width)}×${Math.round(layout.height)} CSS px · DPR ${layout.dpr} · 每原像素 ${Number(layout.deviceScale.toFixed(3))} 實體像素${layout.downsampled ? "（視窗太小，正在縮小）" : ""}`;
@@ -2069,8 +2108,8 @@ for (const button of SELECTION_BUTTONS) {
     selectionHover = undefined;
     selectionPressed = undefined;
   });
-  element.addEventListener("pointerdown", () => {
-    selectionPressed = button.id;
+  element.addEventListener("pointerdown", event => {
+    if (event.button === 0 && !element.disabled) selectionPressed = button.id;
   });
   element.addEventListener("pointerup", () => {
     selectionPressed = undefined;
@@ -2408,6 +2447,7 @@ function ensureEntityArt(kind, templateId) {
     .then((data) => {
       table.set(templateId, data.actions ?? {});
       if (kind === "mob") mobBodyAttack.set(templateId, data.bodyAttack === true);
+      else npcMetadata.set(templateId, {name: data.name, clickBounds: data.clickBounds});
       for (const frames of Object.values(data.actions ?? {})) {
         for (const frame of frames) artImage(frame.path);
       }
@@ -2708,6 +2748,9 @@ function statusButtonAt(x, y) {
 }
 
 /** The job names `CUIStatusBar` prints from its own table (this archive has no String.wz). */
+for (const button of STATUS_BAR.buttons)
+  for (const state of ["normal", "mouseOver", "pressed"])
+    artImage(`UI/StatusBar.img/${button.name}/${state}/0`);
 const JOB_NAMES = NATIVE_JOB_NAMES;
 
 function jobNameOf(job) {
@@ -2798,7 +2841,7 @@ function drawStatusBar() {
   drawStatusGauge("exp", selfView.exp, selfView.expToNext ?? 0);
   for (const button of STATUS_BAR.buttons) {
     let state = "normal";
-    if (statusPressed === button.action) state = "pressed";
+    if (statusPressed === button.action && statusHover === button.action) state = "pressed";
     else if (statusHover === button.action) state = "mouseOver";
     const entry = artImage(`UI/StatusBar.img/${button.name}/${state}/0`);
     if (entry.ready)
@@ -3010,6 +3053,8 @@ function frame() {
         undefined,
         mapAnimationStart,
       );
+      // 498CF0 passes font index 3 to CLife::47D110; 527720(3) = Gulim 12, FFFFFF20.
+      drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
       drawEntitySprite(
@@ -3494,7 +3539,7 @@ async function swing() {
 /** CLife::47D110: child z=5, at feet +(-width/2,2), text +(2,2), A0-black
  * rectangle with transparent 1px corners. Browser Gulim fallback metrics are not original GDI.
  */
-function drawName(name, x, y) {
+function drawName(name, x, y, color = "#ffffff") {
   if (!name) return;
   ctx.save();
   ctx.font = HUD_FONT;
@@ -3506,7 +3551,7 @@ function drawName(name, x, y) {
   ctx.fillRect(left + 1, top, w - 2, h);
   ctx.fillRect(left, top + 1, 1, h - 2);
   ctx.fillRect(left + w - 1, top + 1, 1, h - 2);
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = color;
   ctx.fillText(name, left + 2, top + 2);
   ctx.restore();
 }
@@ -3639,6 +3684,7 @@ window.addEventListener("mousemove",e=>{
   }
 });
 window.addEventListener("mouseup",e=>{
+  if(e.button!==0)return;
   const d=quickDrag;quickDrag=undefined;
   if(!d?.moved)return;
   inventorySuppressClick=e.target===canvas;
@@ -3748,7 +3794,7 @@ window.addEventListener("mousemove", (e) => {
   }
 });
 window.addEventListener("mouseup", (e) => {
-  if (!itemDrag) return;
+  if (e.button !== 0 || !itemDrag) return;
   const d = itemDrag;
   itemDrag = undefined;
   if (!d.moved) return;
@@ -3911,6 +3957,7 @@ let inventoryOpen = false;
 let inventoryAt = { ...INVENTORY.home };
 /** The window the pointer is over, or the piece it is dragging. */
 let inventoryHover;
+let inventoryPressed;
 let inventoryDrag;
 /** The item a click last picked (its tooltip stays up while it is set). */
 let inventoryPick;
@@ -3949,6 +3996,7 @@ window.addEventListener("mousemove", (event) => {
   );
 });
 window.addEventListener("mouseup", (event) => {
+  if (event.button !== 0) return;
   if (inventoryScrollDrag) inventorySuppressClick = event.target === canvas;
   inventoryScrollDrag = undefined;
 });
@@ -4119,7 +4167,9 @@ function drawInventoryWindow() {
   const x = Math.round(inventoryAt.x);
   const y = Math.round(inventoryAt.y);
   ctx.drawImage(entry.img, x, y);
-  const close = artImage("UI/UIWindow.img/BtUIClose/normal/0");
+  const closeState = inventoryPressed === "close" && inventoryHover?.kind === "close" ? "pressed"
+    : inventoryHover?.kind === "close" ? "mouseOver" : "normal";
+  const close = artImage(`UI/UIWindow.img/BtUIClose/${closeState}/0`);
   if (close.ready) ctx.drawImage(close.img, x + 114, y + 9);
 
   // Stamp the tab faces: the lit one over the open tab, an idle one over the sheet's own lit tab.
@@ -4343,31 +4393,10 @@ function itemTooltipLines(item) {
 /** A dark tooltip beside the pointer, the way the client's item box sits next to the cursor. */
 function drawItemTooltip(x, y, item) {
   if (item === undefined) return;
-  drawTooltipLines(x, y, itemTooltipLines(item));
+  drawTooltipLines(x, y, itemTooltipLines(item), true);
 }
-function drawTooltipLines(x, y, lines) {
-  ctx.save();
-  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-  ctx.textBaseline = "top";
-  let width = 0;
-  for (const line of lines)
-    width = Math.max(width, ctx.measureText(line).width);
-  const height = lines.length * 14 + 6;
-  let left = x + 16;
-  let top = y + 18;
-  if (left + width + 8 > VIEW_W) left = VIEW_W - width - 12;
-  if (top + height > VIEW_H) top = VIEW_H - height - 4;
-  ctx.fillStyle = "rgba(8, 14, 24, 0.9)";
-  ctx.fillRect(left, top, width + 8, height);
-  ctx.strokeStyle = "rgba(136, 170, 204, 0.8)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(left + 0.5, top + 0.5, width + 7, height - 1);
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "left";
-  for (let index = 0; index < lines.length; index++) {
-    ctx.fillText(lines[index], left + 4, top + 3 + index * 14);
-  }
-  ctx.restore();
+function drawTooltipLines(x, y, lines, keyline = false) {
+  drawTextTooltip(ctx, x + 20, y + 20, lines, {keyline});
 }
 
 /** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
@@ -4822,6 +4851,10 @@ function drawShopWindow() {
   drawShopButton("buy", x, y);
   drawShopButton("sell", x, y);
   drawShopButton("recharge", x, y);
+  const closeState = shopPressed === "close" && shopHover?.kind === "close" ? "pressed"
+    : shopHover?.kind === "close" ? "mouseOver" : "normal";
+  const close = artImage(`UI/UIWindow.img/BtUIClose/${closeState}/0`);
+  if (close.ready) ctx.drawImage(close.img, x + SHOP.close.x, y + SHOP.close.y);
   statusText(
     String(selfView.mesos),
     x + SHOP.mesos.right,
@@ -4834,6 +4867,9 @@ function drawShopWindow() {
 
 /** Opens the window at its saved position (centred by default), with nothing picked. */
 function openShop(view) {
+  for (const base of ["UI/UIWindow.img/BtUIClose", ...["Buy", "Sell", "Recharge"].map(name => `UI/UIWindow.img/Shop/Bt${name}`)])
+    for (const state of base.endsWith("BtRecharge") ? ["normal", "mouseOver", "pressed", "disabled"] : ["normal", "mouseOver", "pressed"])
+      artImage(`${base}/${state}/0`);
   itemDialog.close(false);
   shopPending = false;
   shop = view;
@@ -5057,11 +5093,13 @@ function closeDialogue(notify = true, answer = 0) {
  */
 function toggleInventory(force) {
   const show = force ?? !inventoryOpen;
+  if (show) for (const state of ["normal", "mouseOver", "pressed"])
+    artImage(`UI/UIWindow.img/BtUIClose/${state}/0`);
   if (show !== inventoryOpen)
     void audio.effect(show ? "UI/MenuUp" : "UI/MenuDown");
   inventoryOpen = show;
   if (!show) {
-    inventoryHover = undefined;
+    inventoryHover = inventoryPressed = undefined;
     inventoryPick = undefined;
     inventoryDrag = undefined;
     inventoryScrollDrag = undefined;
@@ -5127,8 +5165,8 @@ for (const button of TITLE_BUTTONS) {
     titleHover = undefined;
     titlePressed = undefined;
   });
-  element.addEventListener("mousedown", () => {
-    titlePressed = button.id;
+  element.addEventListener("mousedown", event => {
+    if (event.button === 0) titlePressed = button.id;
   });
   element.addEventListener("mouseup", () => {
     titlePressed = undefined;
@@ -5635,7 +5673,7 @@ const testToolsPanel = testTools({
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
   onOpen(){localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
 });
-document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();});
+document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();if(document.hidden){keys.clear();lastPhysicsAt=undefined;}});
 
 const itemDialog = itemDialogs({
   ctx,

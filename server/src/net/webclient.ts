@@ -1493,6 +1493,8 @@ export function startWebClient(
       }
       sendJson(response, 200, {
         templateId: npc.templateId,
+        name: npc.name,
+        clickBounds: npc.clickBounds,
         actions: npc.actions,
       });
       return;

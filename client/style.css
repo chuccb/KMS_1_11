@@ -786,3 +786,11 @@ body {
 #system-menu { position:absolute; inset:0; z-index:49; pointer-events:auto; }
 #system-menu button { pointer-events:auto; }
 #item-quantity { font-family:"Gulim","굴림","KMSCJK",sans-serif; }
+
+/* The 1.11 arrow belongs to the cursor plane, not a canvas RAF overlay. Override inline/child
+ * pointer/move/text hints ONLY inside game surfaces; leave the browser toolbar/QA shell alone.
+ * A failed/unloaded WZ request never hides the system cursor. */
+.native-cursor-ready,
+.native-cursor-ready * {
+  cursor: var(--native-cursor, default) !important;
+}

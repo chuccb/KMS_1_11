@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 import { effectiveWorn, signedEquipStat } from "./characterstats.mjs";
 /** CUIEquip: 4D89F0 / 4D9110. Coordinates read from PE VA 005BC368, fourteen (s32 x,s32 y). */
 export const EQUIP_WINDOW = {
@@ -242,7 +243,7 @@ export function equipmentWindow({
     pressed = false;
   };
   window.addEventListener("mouseup", release);
-  window.addEventListener("blur", release);
+  releaseOnInterrupt(() => { release(); hover(undefined); });
   function toggle(value) {
     const show = value ?? !opened;
     if (show === opened) return;

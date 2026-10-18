@@ -4,7 +4,17 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原GameOpt、公開聊天氣泡與密語拒收（2026-10-18，未測試）
+## 最新實作：原游標、NPC 命中／名牌與滑鼠互動（2026-10-18，未測試）
+
+原 `UI/Basic.img/Cursor/arrow`，24×23／origin 0,0；此版本沒有後期 hand/pressed/move。
+透過 browser cursor plane 顯示，覆蓋遊戲與透明 DOM 控件，沿用既有 CSS scale，不做 RAF 追鼠 sprite。
+NPC 使用原 dc* 框（未指定時 -22,-65,22,0）、info.name 黃色名牌與 linked 動作素材，不再用猜測的大點擊框。
+原 navy 提示框切角／keyline／邊界；item／skill 仍是 compact 內容，不聲稱完整原 icon／分區排版。
+補 Canvas CCtrlButton 的狀態／進入音效與 logical down/up 配對；拖窗 release 不再執行兩次並抹除 click suppression。
+blur／pointercancel／隱藏分頁取消拖曳／pressed，清舊 hover、移動鍵與 cold-action ticket；不提交物品操作或接受對話。
+[交叉來源、方便入口、仍未完成範圍及保存紀錄](NATIVE_CURSOR_NPC_POINTER.md)／ADR-060。未執行測試／typecheck／browser／VM／probe。
+
+## 前輪實作：原GameOpt、公開聊天氣泡與密語拒收（2026-10-18，未測試）
 
 Menu→게임 옵션接原166×246視窗與六項位置；miniMap／whisper可操作，即時套用、OK本機存／Cancel還原。
 公開聊天用原0x1F id+text，含自己且限同圖，白字log＋normal/dead五秒WZ氣泡；密語另為0x1A/0x12綠字。

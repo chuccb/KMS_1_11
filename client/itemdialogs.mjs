@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 /** CUtilDlgEx numeric input: 4643F0 / 4B7960 / 535EF0 / 532A80 / 531110.
  * Native art on canvas, DOM only for text/numeric editing, focus and hit targets.
  * No inventory writes: callers revalidate their source snapshot before sending.
@@ -163,15 +164,15 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
     button.addEventListener("blur", () => {
       hover = pressed = undefined;
     });
-    button.addEventListener("mousedown", () => {
-      pressed = button.id;
+    button.addEventListener("mousedown", event => {
+      if (event.button === 0 && !button.disabled) pressed = button.id;
     });
     button.addEventListener("mouseup", () => {
       pressed = undefined;
     });
   }
-  window.addEventListener("blur", () => {
-    pressed = undefined;
+  releaseOnInterrupt(() => {
+    pressed = hover = undefined;
   });
   // A full-surface modal owns game keys even when focus is on a button or moved by the browser.
   window.addEventListener(

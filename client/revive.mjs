@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 /** CUIRevive: 4E94E0 / 4E9750 / 4E99C0 / 4E9E30 / 4E9E70.
  * Native Notice skin, original Korean text, (268,104), OK at +(100,92).
  * The browser starts the 2200ms clock on authoritative HP=0 (native 509AF0 writes CField+680).
@@ -37,14 +38,14 @@ export function reviveWindow({ ctx, image, send, isInGame, onOpen }) {
   ok.addEventListener("pointerleave", () => {
     hover = pressed = false;
   });
-  ok.addEventListener("pointerdown", () => {
-    pressed = true;
+  ok.addEventListener("pointerdown", event => {
+    if (event.button === 0 && !ok.disabled) pressed = true;
   });
   window.addEventListener("pointerup", () => {
     pressed = false;
   });
-  window.addEventListener("blur", () => {
-    pressed = false;
+  releaseOnInterrupt(() => {
+    pressed = hover = false;
   });
   window.addEventListener(
     "keydown",

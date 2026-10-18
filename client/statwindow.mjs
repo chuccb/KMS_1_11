@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 import { detailRows } from "./characterstats.mjs";
 /** CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D. */
 export const STAT_WINDOW = {
@@ -175,7 +176,7 @@ export function statWindow({
     } catch {}
   };
   window.addEventListener("mouseup", release);
-  window.addEventListener("blur", release);
+  releaseOnInterrupt(release);
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();

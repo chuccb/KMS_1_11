@@ -113,16 +113,45 @@ export function mobImagePath(templateId: number): string {
   return `Mob/${String(templateId).padStart(7, "0")}.img`;
 }
 
-/** What the page needs to draw one NPC: its id and its frames by action. */
+/** CNpc/NpcAttribute: own info owns name and dc bounds, even with linked action art. */
 export interface NpcArt {
   templateId: number;
+  name: string;
+  clickBounds: { left: number; top: number; right: number; bottom: number };
   actions: Record<string, SpriteFrame[]>;
 }
 
+/** 49CBF0 defaults, not a guessed canvas-sized interaction target. */
+export function npcClickBounds(info: Record<string, unknown>): NpcArt["clickBounds"] {
+  const number = (key: string, fallback: number): number => {
+    const value = info[key];
+    return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : fallback;
+  };
+  return {left: number("dcLeft", -22), top: number("dcTop", -65),
+    right: number("dcRight", 22), bottom: number("dcBottom", 0)};
+}
+
 export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefined {
-  const image = npcImagePath(templateId);
-  const actions = spriteActions(reader, image);
-  return Object.keys(actions).length === 0 ? undefined : { templateId, actions };
+  let image = npcImagePath(templateId);
+  const info = nodeRecord(reader.node(`${image}/info`));
+  const actions: Record<string, SpriteFrame[]> = {};
+  const seen = new Set<string>();
+  // 40C020 copies linked non-info children into the NPC namespace, retaining own-only actions.
+  // Never rewrite the archive/cache namespace: merge frame tables, and bound broken link cycles.
+  for (;;) {
+    if (seen.has(image) || seen.size >= 16 || reader.node(image) === undefined) return undefined;
+    seen.add(image);
+    Object.assign(actions, spriteActions(reader, image));
+    const link = nodeRecord(reader.node(`${image}/info`)).link;
+    if (typeof link !== "string") break;
+    const id = Number.parseInt(link, 10);
+    if (!Number.isSafeInteger(id) || id < 0) return undefined;
+    image = npcImagePath(id);
+  }
+  return Object.keys(actions).length === 0 ? undefined : {
+    templateId, name: typeof info.name === "string" ? info.name : "",
+    clickBounds: npcClickBounds(info), actions,
+  };
 }
 
 /** What the page needs to draw one mob: its id and its frames by action. */

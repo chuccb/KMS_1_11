@@ -2385,3 +2385,28 @@ metadata／字型重排不復活pruned或舊owner記錄；不每RAF重排。Esc�
 
 未執行test/check/typecheck/browser/VM/probe。原碼／PE／WZ閱讀及git空白檢查不是功能PASS。
 完整來源、操作與缺口見NATIVE_GAME_OPTIONS_CHAT.md；沿用同save停服冷備份再開LIVE、[skip ci]非force推送。
+
+
+## ADR-060：單張原 arrow 游標、NPC dc 框／名牌與滑鼠互動一起補接
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作／回歸來源，未執行驗證。
+
+553320／556D60、DLL 10008430／10008120 與 Basic.img 交叉：Cursor 只有 arrow24×23、origin0,0。
+原為32×32 hardware surface，不套後期多狀態手指游標；browser 使用 CSS cursor plane，非 RAF overlay。
+已有 canvas/png metadata API，沒有另造 endpoint；只在載入／resize raster，隨 CSS scale、不 double DPR，極大尺寸128上限／原PNG fallback。
+覆蓋 canvas、game-ui 原控件與暫行NPC對話，外部 toolbar／QA不冒充原UI；載入失敗不隱藏 OS cursor。
+
+49CBF0 讀 NPC 自有 info.dc*，預設 -22,-65,22,0；49A670 平移不鏡射，49F1F0 PtInRect 不含right/bottom。
+移除72×104猜測框和最近距離選擇；沿runtime pool順序，metadata未到不猜。498CF0→47D110/font3→527720(-224)補原黃色名字。
+40C020 linked action merge保留原info與獨有動作，合併不改archive namespace，cycle/斷鏈有界；既有API serializer同步name/rect。
+NPC隨機表情、speak及完整0x3B/CVecCtrl仍缺，不能把讀到action當已按原AI播放。
+
+500F50／502CE0 與listing證ARGB A0000040、四角00FFFFFF、a5內keyline、799/599邊界；StatusBar +20,+20、font172 Gulim12。
+共用tooltip frame，不擦掉下方場景；item/skill compact內容加安全wrap/clipping，但原每類固定寬高／icon／requirements／位置尚非完整。
+
+444D70／445310／445330補Canvas真按鈕進入音效與CLOSE states；down/up logical-control配對是browser防誤觸，不冒稱全CWndMan。
+finishWindowPress改單一window mouseup，不再double執行或無條件抹掉shopSuppressClick；新gesture清舊suppression。
+releaseOnInterrupt統一blur/pointercancel/hidden-tab，取消視窗／物品／快捷格／scroll／slider press，清hover／移動鍵與cold-action ticket；不fake click、accept或發drop。
+
+新增native-cursor-npc-tooltip與HTTP serializer回歸來源，**均未執行**，亦未執行test/check/typecheck/browser/VM/probe。
+詳NATIVE_CURSOR_NPC_POINTER.md；沿用同save停服冷備份再開LIVE、提交[skip ci]、非force推送目前Arena分支。

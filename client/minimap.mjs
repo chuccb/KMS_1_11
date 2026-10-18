@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 /** Original CUIMiniMap: sub_4E52C0, sub_4E5C70, sub_4E6430; config sub_43D750.
  * No modern map-name header, invented monster dots or rescaled whole-map thumbnail. */
 export const MINI_FRAME = 'UI/UIWindow.img/MiniMap';
@@ -44,7 +45,7 @@ export function miniMapWindow({ctx,image,getSelf,getUsers,isInGame,point,isCover
   root.addEventListener('mousedown',e=>{if(!map||!shown||e.button>0)return;const p=point(e);drag={x:p.x-at.x,y:p.y-at.y};e.preventDefault();});
   window.addEventListener('mousemove',e=>{const p=point(e);pointer=p;if(!drag){sync();return;}at={x:Math.max(0,Math.min(784,Math.round(p.x-drag.x))),y:Math.max(0,Math.min(584,Math.round(p.y-drag.y)))};sync();});
   const release=()=>{if(drag){drag=undefined;save();}};
-  window.addEventListener('mouseup',release);window.addEventListener('blur',release);
+  window.addEventListener('mouseup',release);releaseOnInterrupt(release);
   const stamp=(name,x,y,w,h)=>{const a=image(`${MINI_FRAME}/${name}`);if(!a.ready)return false;
     if(w===undefined)cacheCtx.drawImage(a.img,x,y);else cacheCtx.drawImage(a.img,x,y,w,h);return true;};
   return {

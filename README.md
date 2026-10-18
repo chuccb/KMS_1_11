@@ -1,15 +1,20 @@
 # KMS 1.11 重建工作區
 
-最新還原（2026-10-18，未測試）：原GameOpt的miniMap／密語開關、0x1F公開聊天與五秒原WZ氣泡、
-密語拒收／三秒請求閘門、64換行記錄與原系統公告。
-[原檔交叉證據、操作入口與未完成範圍](docs/NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；啟服不代表功能PASS。
+最新還原（2026-10-18，未測試）：原版 arrow 游標與熱點、遊戲／DOM 控件統一游標、NPC 原 dc 命中框／黃色名牌／linked 素材，
+原提示框 frame、Canvas 按鈕狀態／音效與拖曳／失焦清理。
+[原檔交叉證據、實作界線與保存紀錄](docs/NATIVE_CURSOR_NPC_POINTER.md)／ADR-060；啟服不代表功能 PASS。
 
 以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
 瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：原GameOpt小地圖／密語即時設定、OK／Cancel；公開聊天原0x1F＋normal/dead五秒氣泡。
+- **本輪（2026-10-18，未測試）**：依原 EXE／listing／Gr2D／WZ 補單張 arrow 游標，覆蓋登入／選角／遊戲及原生 DOM 控件，隨既有顯示縮放。
+  NPC 改讀原 dc 框與 name，補黃色名牌與 linked 動作圖；提示框改原 A0000040／切角／邊界，item／skill 完整排版仍未完成。
+  補 Canvas 按鈕 hover 音效／CLOSE states、logical-button 配對，修重複 mouseup 與拖窗誤點；失焦／取消／隱藏分頁取消拖曳。
+  [完整交叉來源與界線](docs/NATIVE_CURSOR_NPC_POINTER.md)／ADR-060；保留同 save，冷備份再開 LIVE，不 seed 或修角色。
+
+- **前輪（2026-10-18，未測試）**：原GameOpt小地圖／密語即時設定、OK／Cancel；公開聊天原0x1F＋normal/dead五秒氣泡。
   接密語拒收與shared三秒gate、64換行record／五秒追尾，找人首回補地名、原色與13/type0公告。
   [原檔交叉證據與完整界線](docs/NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；沿用save，冷備份後重啟LIVE，非force推送。
 

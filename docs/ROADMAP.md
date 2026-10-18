@@ -1,6 +1,11 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行測試／typecheck／browser／VM／probe**）：原GameOpt miniMap與whisper即時預覽、OK存／Cancel回滾，
+> 最新交付2026-10-18（**未執行 test/check/typecheck/browser/VM/probe**）：原 arrow cursor-plane／hotspot、DOM 與 Canvas 統一，
+> NPC dc 命中框／原黃色名字／linked 素材、原提示 frame／邊界、Canvas 按鈕狀態與音效、拖曳 release／失焦清理。
+> 不宣稱完整 item/skill tooltip 排版、NPC 隨機動作／自言自語或 CWndMan；[NATIVE_CURSOR_NPC_POINTER](NATIVE_CURSOR_NPC_POINTER.md)／ADR-060。
+> 保留同 save，停服冷備份後開 LIVE；啟服非功能 PASS。
+
+> 前輪交付2026-10-18（**未執行測試／typecheck／browser／VM／probe**）：原GameOpt miniMap與whisper即時預覽、OK存／Cancel回滾，
 > 公開聊天0x1F id+text／normal-dead五秒氣泡、密語1A12綠字與拒收、shared三秒find/whisper gate、64換行record／五秒追尾。
 > 系統公告改13/type0，不偽裝System密語；Messenger／交換／Party／小遊戲仍disabled。保留同save，冷備份後更新LIVE。
 > 原檔交叉來源與未完成界線見 [NATIVE_GAME_OPTIONS_CHAT](NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；啟服不是PASS。

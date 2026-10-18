@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 import {wrapChatText,followChat} from './chatlayout.mjs';
 /** 4FB670/4FBEE0: six rows, 13px advance; cap 64 WRAPPED records, not 64 messages.
  * IWzFont is replaced by browser Gulim/fallback measurement, not by CSS auto wrapping.
@@ -56,7 +57,7 @@ export function chatHistory({root,list,bar,clock=()=>performance.now()}) {
     scroll(drag.scroll+(e.clientY-drag.y)/scale*max()/46);
   });
   const release=()=>{drag=undefined;};
-  window.addEventListener('mouseup',release);window.addEventListener('blur',release);
+  window.addEventListener('mouseup',release);releaseOnInterrupt(release);
   // Re-measure only on font availability changes, never on every RAF or every unrelated image load.
   document.fonts?.addEventListener('loadingdone',()=>{
     const groups=new Set([...list.children].map(row=>row.chatGroup));

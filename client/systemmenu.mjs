@@ -1,3 +1,4 @@
+import {releaseOnInterrupt} from "./pointer.mjs";
 import {gameProfile, gameSettings} from './gameoptions.mjs';
 import { soundProfile, soundSettings, nativeVolume, sliderCenter, sliderStep } from './systemsettings.mjs';
 
@@ -134,7 +135,7 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit, o
     draft[sliding.id]=sliderStep(point(e).x-at.x-sliding.x);updateSound();
   });
   window.addEventListener('mouseup',()=>{sliding=pressed=undefined;});
-  window.addEventListener('blur',()=>{sliding=pressed=undefined;});
+  releaseOnInterrupt(()=>{sliding=pressed=undefined;hover=undefined;});
   window.addEventListener('keydown',e=>{
     if(!mode)return;
     e.stopImmediatePropagation();e.preventDefault();
