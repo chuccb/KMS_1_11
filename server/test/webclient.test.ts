@@ -1433,6 +1433,10 @@ test('inline dialogue catalogue: normal item/skill icons, original names, no lea
     };
     assert.deepEqual(skill,{id:1000000,name:'HP 회복력 향상',
       icon:{path:'Skill/100.img/skill/1000000/icon',width:32,height:32}});
+    // ADR-064 source only: the full book carries native normal-icon placement metadata.
+    const book=await (await get('/api/skills/100')).json() as {books:{skills:{id:number;icon:unknown}[]}[]};
+    assert.deepEqual(book.books.flatMap(b=>b.skills).find(s=>s.id===1000000)?.icon,
+      {path:'Skill/100.img/skill/1000000/icon',width:32,height:32,ox:0,oy:32});
     for(const id of ['-1','NaN','1.5','2147483648','999999999999','0','1000000/icon.png'])
       assert.equal((await get(`/api/skill/${id}`)).status,404);
     assert.equal(JSON.stringify([...world.accounts]),before);assert.equal(world.store.saved,saved);

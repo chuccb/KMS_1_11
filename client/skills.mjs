@@ -1,5 +1,5 @@
 import {releaseOnInterrupt} from "./pointer.mjs";
-import {drawTextTooltip} from "./tooltip.mjs";
+import {tooltipAnchor} from "./tooltip.mjs";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
 export const SKILL_WINDOW = {
   width: 176,
@@ -22,6 +22,7 @@ export function skillState(skill, learned) {
 }
 export function skillWindow({
   ctx,
+  tooltipRenderer,
   image,
   send,
   audio,
@@ -247,7 +248,7 @@ export function skillWindow({
     const p = local(e),
       i = skillRowAt(p.x, p.y, rows().length, offset);
     tooltip =
-      i >= 0 && !drag && scrollDrag === undefined
+      !isModal() && i >= 0 && !drag && scrollDrag === undefined
         ? { skill: rows()[i], x: p.x + at.x, y: p.y + at.y }
         : undefined;
   });
@@ -335,17 +336,12 @@ export function skillWindow({
     ctx.textAlign = "left";
   };
   function drawTooltip() {
-    if (!tooltip || isModal()) return;
-    // Original descriptions/hs, but this compact browser tooltip layout is not the full native 5029A0 renderer.
-    const s = tooltip.skill,
-      level = learned.get(s.id) ?? 0;
-    const lines = [
-      `${s.name} (${level}/${s.maxLevel})`,
-      s.desc,
-      s.levels.find((r) => r.level === level)?.hs,
-      level < s.maxLevel ? s.levels.find((r) => r.level === level + 1)?.hs : "",
-    ].filter(Boolean);
-    drawTextTooltip(ctx, tooltip.x + 20, tooltip.y + 20, lines, {maxWidth: 290, keyline: true});
+    if (isModal()) {tooltip = undefined; return;}
+    if (!tooltip) return;
+    // Level is resolved every frame, so an SP reply updates a stationary hover too.
+    const s = tooltip.skill, level = learned.get(s.id) ?? 0;
+    const at = tooltipAnchor('skill', tooltip.x, tooltip.y);
+    tooltipRenderer.skill(at.x, at.y, s, level);
   }
   sync();
   return {

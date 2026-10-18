@@ -111,3 +111,8 @@ linked table／循環、tooltip frame／wrap、真 WZ arrow／Robin 的資料斷
    ```
 5. 工作分支固定為 `arena/593e75b0-kms-1-11`；提交使用 `[skip ci]`，僅非 force push 此分支。
    Commit／push 結果以交付訊息及 Git 紀錄為準；此段不預先聲稱尚未執行的操作成功。
+
+### 後續 ADR-064（2026-10-18，未測試）
+
+此頁原 compact item/skill tooltip 註記屬當時狀態；已由 [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md)
+的三類原版 plan／painter 取代。保留此頁歷史啟服紀錄，不把舊程序識別或舊結果當成本輪驗證。

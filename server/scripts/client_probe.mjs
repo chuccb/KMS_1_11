@@ -150,11 +150,13 @@ Object.assign(globalThis, await import("../../client/recovery.mjs"));
 Object.assign(globalThis, await import("../../client/testtools.mjs"));
 Object.assign(globalThis, await import("../../client/temporarystats.mjs"));
 Object.assign(globalThis, await import("../../client/basiccombat.mjs"));
+Object.assign(globalThis, await import("../../client/tooltip.mjs"));
+Object.assign(globalThis, await import("../../client/tooltip-preview.mjs"));
 runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
 ;globalThis.clientProbe = {
   testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},
-  runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt, itemTooltipLines,
+  runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt, drawItemTooltip,
   get scroll() { return { ...shopScroll }; },
   get shopPosition() { return { ...shopAt }; },
   get picked() { return shopSellPick; },
@@ -517,9 +519,11 @@ canvasEl.fire("mousemove", shopPoint(30, 30));
 for (const handler of windowListeners.mouseup) handler({});
 assert.equal(clientProbe.dragging, false);
 assert.deepEqual(JSON.parse(storage.get("kms111.shopAt")), { x: 206, y: 164 });
-// Both literal WZ escapes and actual line breaks are kept as separate tooltip lines.
-clientProbe.setFacts(2000000, { name: "Potion", desc: "First\\nSecond\nThird\r\nFourth" });
-assert.deepEqual(clientProbe.itemTooltipLines({ itemId: 2000000 }), ["Potion", "First", "Second", "Third", "Fourth"]);
+// ADR-064 SOURCE ONLY: native tooltip parsing is separate from dialogue/legacy compact wrapping.
+assert.deepEqual(nativeTooltipRows("First\\nSecond", text => text.length * 6, 178), ["First", "Second"]);
+const nativePlan=nativeItemTooltip({name:"Potion",desc:"First\\nSecond"},
+  {width:text=>text.length*6,height:()=>13});
+assert.deepEqual(nativePlan.commands.filter(c=>c.kind==="text").map(c=>c.text),["Potion","First","Second"]);
 console.log("SHOP REGRESSIONS OK");
 
 // ---------------------------------------------------------------- failed login and retry

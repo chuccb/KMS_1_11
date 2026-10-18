@@ -2490,3 +2490,26 @@ canonical lexer由UI與reply authority共用，escaped ##L與空標記不是選�
 新增native-dialogue-richtext與webclient回歸來源、更新舊inline literal斷言，**全部未執行**。
 依使用者要求不test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
 詳NATIVE_DIALOGUE_RICHTEXT.md。同save停服冷備再開LIVE，[skip ci]提交、非force推目前Arena分支。
+
+## ADR-064：CUIToolTip 三類原版 plan 共用，但實例與商店模板不得混用
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作與回歸來源，未執行驗證。
+
+沿5014C0／502780／5029A0、503210／5034E0／503840／503AF0、504480／525AE0及4FFE30、原hover callers交叉listing／PE字串／WZ。
+修正DWORD pointer arithmetic誤讀：title／footer measure+20、footer總高與draw都是fontHeight+4、job起點12。
+normal canvas原點與2倍放大、需求Can/Cannot label／digit實際寬、Gulim七字色、性別／CUC、目前／下一級hs皆進共用plan。
+
+**決策**：背包／穿戴／賣出只讀instance；僅shop買入顯式template construct。需求逐項比有效BasicStat，不用raw或整件canWear。
+原stats順序及signed>0、原ruc/cuc byte不變，不塞中文價格／數量。技能0無current、max無next；hover每幀取已學等級。
+各caller anchor分開，inventory／shop重新hit當前view，不讓selected或舊hover instance黏住。
+
+runtime字型metrics＋loadingdone失效、64plan上限及facts identity避免每幀量測整段catalogue。
+CSS Gulim／fallback不是GDI像素等價；極端字串799×599clip屬browser防護，非native超大／崩潰行為。
+
+**唯讀工具**：原始renderer供普通item、shop template、持有快照、需求0／合成CUC3、skill0/1/MAX閱覽。
+非原版工具列明示、不send、不學技能不給物品不改存檔；真server dialog／field／death優先，abort＋identityguard拒舊回覆。
+不以工具補造轉職／卷軸／技能施放或缺證據的NPC server腳本。
+
+新增／更新native-rich-tooltip、native-tooltip-preview、skills、webclient、client_probe回歸**來源，全部未執行**。
+依使用者要求不test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
+詳NATIVE_RICH_TOOLTIPS.md。沿用同save，停服冷備再開LIVE，[skip ci]提交、只非force推目前Arena分支。

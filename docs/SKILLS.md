@@ -44,8 +44,13 @@ Gate=0 才用 skill0／iconDisabled；max 的 -1 仍是 skill1／正常 icon，�
 `kms111.skillAt`。DOM 透明命中層配 canvas 原圖；提供 tab／SP ARIA、鍵盤操作。這是瀏覽器輸入整合，
 **不是已重建整套 CConfig 自訂按鍵**。視窗全矩形阻擋穿透，原數量 modal 優先，避免背景背包 tooltip 蓋上來。
 
-說明顯示 WZ 的 name／desc／當前與下一級 hs，但 **tooltip 版面是明示的瀏覽器簡化版，不是完整
-`sub_5029A0` 1:1 renderer**。字型仍受前輪 Dotum／fallback 差異限制；Tab／VScr 是從原元件拼接，未做像素驗收。
+2026-10-18 ADR-064 已取代舊簡化 tooltip：按 `5029A0` 的 type5／290×128／separator114、
+14px BA 標題、原 normal icon 兩倍、desc(92,35)及原 `503AF0` 字符折行；底部依目前已學等級
+顯示 `[현재레벨 N]`／hs、下一級 `[다음레벨 N]`／hs。0 級不顯目前、滿級不顯下一級；
+SP 回覆後停在同一列也讀取新等級。hs 不套自創公式或當代技能說明。
+完整 catalogue 新增 normal icon 的 path／width／height／ox／oy，並不取 disabled／mouseOver 當放大圖。
+字型以 runtime metrics 量測，字型到達會清 layout；瀏覽器 fallback 仍非原 Win32 Gulim，不能宣稱像素驗收。
+Tab／VScr 仍為原元件拼接。詳 [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md)。
 
 ## 3. 端到端流程與保存
 

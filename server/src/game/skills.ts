@@ -3,7 +3,8 @@ import { nativeSkillBooks } from "../../../client/jobs.mjs";
 import type { CharacterData, InventoryRecord } from "../protocol/chardata.ts";
 import { emptyCharacterItems } from "../protocol/chardata.ts";
 import type { SkillChange } from "../protocol/skills.ts";
-import type { ItemSource } from "./iteminfo.ts";
+import type { ItemSource, ItemIcon } from "./iteminfo.ts";
+import { artReaderOf } from "./wzart.ts";
 import { asNumber, asText, entriesOf, propertyOf } from "../wz/props.ts";
 export interface SkillLevel {
   level: number;
@@ -19,6 +20,8 @@ export interface SkillInfo {
   requirements: SkillChange[];
   levels: SkillLevel[];
   path: string;
+  /** Native normal icon geometry, including origin, for CUIToolTip 503840. */
+  icon?: ItemIcon;
 }
 export interface SkillBook {
   id: number;
@@ -33,6 +36,7 @@ export function skillCatalogOf(
   source: Pick<ItemSource, "has" | "objects">,
 ): SkillCatalog {
   const books = new Map<number, SkillBook | undefined>();
+  const art = artReaderOf(source);
   const book = (id: number): SkillBook | undefined => {
     if (!Number.isInteger(id) || id < 100 || id >= 500) return undefined;
     if (books.has(id)) return books.get(id);
@@ -79,6 +83,8 @@ export function skillCatalogOf(
         )
       )
         continue;
+      const iconPath = `${path}/skill/${name}/icon`;
+      const icon = art.at(iconPath);
       skills.push({
         id: skillId,
         bookId: id,
@@ -88,6 +94,7 @@ export function skillCatalogOf(
         requirements,
         levels,
         path: `${path}/skill/${name}`,
+        ...(icon ? {icon: {path: iconPath, width: icon.width, height: icon.height, ox: icon.ox, oy: icon.oy}} : {}),
       });
     }
     const result = {

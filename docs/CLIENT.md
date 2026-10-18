@@ -1,5 +1,17 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18：原道具／裝備／技能提示框（未測試）
+
+按 CUIToolTip `5014C0/502780/5029A0/503210/5034E0/503840/503AF0/504480/525AE0` 與 listing、WZ 交叉還原。
+背包、穿戴、商店、快捷道具與技能窗共用 renderer，不再用中文價格／數量／模板能力列表冒充原 tip。
+新增需求 Can／Cannot 原圖字、normal icon 兩倍與 origin、原職業遮罩字色、性別／CUC 標題、signed 實例能力、
+目前／下一級 hs、runtime 字型行高與各 caller anchor；資料更新後重命中，modal／拖曳／失焦清理舊 hover。
+裝備需求逐項比有效 BasicStat，只有商店買入明確用模板；讀不到持有 instance stats 不回退到 WZ。
+工具新增唯讀提示框閱覽，初心者不用套配置就能看技能 0／1／MAX。合成比較值與 CUC 明確標示，不改角色。
+仍不代表技能施放、卷軸、cash／pet、任務腳本或完整原 GDI 字型已完成。
+詳 [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md)／ADR-064；新來源未執行，不以啟服當 PASS。
+
+
 > 這不是 2003 client 的替代品，也不是 Phase 3 的終點：它是一個**視窗**——能登入、能看到世界、
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
@@ -151,7 +163,7 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
 ## 最新實作：原技能窗與 SP 學習（未測試）
 
 - K／HUD Skill 開啟原 176×315 CUISkill，四行與 I–IV 真 WZ 書、前置／滿級三態、原圖示與 SP 按鈕。
-- 支援 tabs／鍵盤、捲軸／滾輪／拖曳滑塊、標題拖窗保存、modal 隔離與說明；tooltip 是明示的簡化版，非完整原 renderer。
+- 支援 tabs／鍵盤、捲軸／滾輪／拖曳滑塊、標題拖窗保存、modal 隔離；tooltip 的舊簡化版已由 ADR-064 原 type5／目前下一級版型取代，仍未做字型／像素驗收。
 - SP 經原 0x1D／0x0E、500ms／pending、server 檢查、保存與已學 snapshot；同一 map32 接入成長被動。
 - 職業名稱改讀原 PE 表，不再套後期名稱；初學者沒有書，現有隔離角色／SP／進度不變。
 - **主動施放／快捷鍵拖放、其餘被動與 buff 仍未完成，不將學習紀錄冒充技能效果。**

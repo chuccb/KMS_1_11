@@ -36,6 +36,14 @@
       coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
     -->
     <div id="game-ui">
+      <section id="tooltip-preview" class="hidden" role="dialog" aria-modal="true" aria-label="提示框唯讀閱覽；非原版工具" tabindex="-1">
+        <div class="tooltip-preview-toolbar">
+          <strong>UI PREVIEW · 提示框唯讀閱覽（非原版工具）</strong>
+          <button id="tooltip-preview-close" type="button">關閉 · Esc</button>
+          <div id="tooltip-preview-choices" role="group" aria-label="原提示框範例"></div>
+          <p id="tooltip-preview-status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
       <section id="revive-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="revive-text">
         <p id="revive-text" class="accessible-only">확인을 누르시면 부활하게 됩니다. 부활을 하시면 안전한 마을로 이동됩니다.</p>
         <button id="revive-ok" class="sprite-hit" type="button" aria-label="부활 확인 / 確定復活；Enter">OK</button>
@@ -495,6 +503,16 @@
       <aside id="test-tools-panel" role="dialog" aria-modal="true" aria-labelledby="qa-heading">
         <div class="qa-heading"><h2 id="qa-heading">體驗工具 · 非原版功能</h2><button id="qa-close" type="button" aria-label="關閉體驗工具">關閉</button></div>
         <p id="qa-character"></p>
+        <fieldset>
+          <legend>原提示框閱覽 · 非原版工具／唯讀</legend>
+          <p>使用遊戲各視窗的同一 renderer。可看需求圖字、實例裝備與技能 0／1／MAX；不轉職、不給物品、不學技能、不改存檔。場景不暫停。</p>
+          <div class="qa-buttons">
+            <button id="qa-tooltip-item" type="button">普通道具</button>
+            <button id="qa-tooltip-equipment" type="button">商店裝備模板</button>
+            <button id="qa-tooltip-instance" type="button">持有裝備快照</button>
+            <button id="qa-tooltip-skill0" type="button">技能各級說明</button>
+          </div>
+        </fieldset>
         <fieldset>
           <legend>對話窗範例 · 非原版工具／唯讀</legend>
           <p>僅開啟本地 UI 範例，不執行任務、不發送 0x15、不變更角色或存檔。真 NPC 的任務腳本尚未還原；工具不暫停場景。</p>

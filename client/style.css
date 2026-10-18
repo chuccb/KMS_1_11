@@ -760,3 +760,11 @@ body {
 .native-cursor-ready * {
   cursor: var(--native-cursor, default) !important;
 }
+
+/* Deliberately labelled developer viewer. Only the canvas tooltip beneath is native artwork. */
+#tooltip-preview { position:absolute; inset:0; z-index:52; pointer-events:auto; outline:none; }
+#tooltip-preview .tooltip-preview-toolbar { position:absolute; left:20px; top:12px; width:740px;
+  padding:10px; color:#eef3fa; background:#17202df0; font:12px/1.5 system-ui,sans-serif; }
+#tooltip-preview button { margin:3px; padding:4px 7px; color:#fff; background:#354b68; border:1px solid #8393a9; border-radius:3px; }
+#tooltip-preview button[aria-pressed=true] { border-color:#ffcb66; background:#516988; }
+#tooltip-preview-status { margin:4px 0 0; min-height:3em; }

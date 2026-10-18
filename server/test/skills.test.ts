@@ -115,6 +115,8 @@ test("actual WZ book order, req and level count feed one-SP learning and immedia
     catalog = skillCatalogOf(wz),
     player = character();
   assert.equal(catalog.book(100)?.name, "전사의 기본");
+  // ADR-064 source only: icon is normal + full origin, independent of learned levels.
+  assert.deepEqual(catalog.info(1000000)?.icon, {path:"Skill/100.img/skill/1000000/icon",width:32,height:32,ox:0,oy:32});
   const passive = catalog.info(1000001)!;
   assert.equal(passive.maxLevel, 10);
   assert.deepEqual(passive.requirements, [{ skillId: 1000000, level: 5 }]);

@@ -1,9 +1,10 @@
+import {tooltipPreview} from "./tooltip-preview.mjs";
 import {npcPresentation} from "./npcmotion.mjs";
 import {dialogueExample} from "./dialogue-examples.mjs";
 import {npcDialogue} from "./npcdialogue.mjs";
 import {nativeCursor} from "./cursor.mjs";
 import {npcContains, releaseOnInterrupt} from "./pointer.mjs";
-import {drawTextTooltip} from "./tooltip.mjs";
+import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.mjs";
 import { backgroundLayout } from "./background.mjs";
 import { mobLocomotion } from "./mobmotion.mjs";
 import { systemMenu } from "./systemmenu.mjs";
@@ -116,6 +117,7 @@ const canvas = /** @type {HTMLCanvasElement} */ (
   document.getElementById("view")
 );
 const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+const nativeTips = nativeTooltipRenderer({ctx, image: artImage});
 
 const ui = {
   where: /** @type {HTMLElement} */ (document.getElementById("where")),
@@ -718,6 +720,7 @@ function handle(message) {
       return;
 
     case "shop-open":
+      if (tooltipViewer.open) closeDialogue(false);
       openShop(message.shop);
       return;
 
@@ -728,7 +731,7 @@ function handle(message) {
       return;
 
     case "npc-say":
-      if (npcDialog.preview) closeDialogue(false); // Real server dialog always supersedes a local example.
+      if (npcDialog.preview || tooltipViewer.open) closeDialogue(false); // Real server dialog always supersedes a local example.
       if (!npcDialog.show(message.npcId, message.body ?? {kind:"say",message:String(message.message)}))
         logLine("NPC dialog already open; did not replace the current modal.");
       return;
@@ -3115,21 +3118,22 @@ function frame() {
   statPanel.draw();
   skillPanel.draw();
   if (pointerAt !== undefined) {
-    const pointed =
-      shop !== undefined && shopHover !== undefined
-        ? shopHover.row
-        : equipPanel.hit(pointerAt.x, pointerAt.y)
-          ? equipHover
-          : (inventoryPick ?? inventoryHover?.item ?? quickHoverItem());
-    if (!itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open &&
+    // Re-hit current state, not the object captured on the last mousemove/selection. Inventory
+    // replies, scrolling and shop reconciliation can change the row under a stationary pointer.
+    const shopHit = shopWindowAt(pointerAt.x, pointerAt.y);
+    const equipHit = equipPanel.hit(pointerAt.x, pointerAt.y);
+    const bagHit = inventoryWindowAt(pointerAt.x, pointerAt.y);
+    const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
+    const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y))
-      drawItemTooltip(pointerAt.x, pointerAt.y, pointed);
-    if (!itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open && !pointed &&
+      drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
       const line = statusVitalText(pointerAt.x, pointerAt.y, selfView, effectiveSelf());
-      if (line) drawTooltipLines(pointerAt.x, pointerAt.y, [line]);
+      if (line) drawSimpleTooltip(ctx, pointerAt.x + 20, pointerAt.y + 20, line);
     }
   }
 
@@ -3138,6 +3142,7 @@ function frame() {
   systemPanel.draw();
   itemDialog.draw();
   npcDialog.draw();
+  tooltipViewer.draw();
   revivePanel.draw(now);
   requestAnimationFrame(frame);
 }
@@ -4369,63 +4374,14 @@ function dropMesosDialog(at) {
   });
 }
 
-/** Item facts as tooltip lines: the archive's name, its description, and the stack's count. */
-function itemTooltipLines(item) {
-  const facts = itemInfo.get(item.itemId);
-  const lines = [facts?.name ?? `Item ${item.itemId}`];
-  if (item.price !== undefined) lines.push(`價格 ${item.price} 메소`);
-  if (
-    item.quantity !== undefined &&
-    (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207)
-  )
-    lines.push(`數量 ${item.quantity}`);
-  const ruc = item.ruc ?? facts?.equipment?.ruc;
-  if (ruc > 0) lines.push(`可升級次數 ${ruc}`);
-  if (item.cuc > 0) lines[0] += ` (+${item.cuc})`;
-  const statNames = {
-    str: "STR",
-    dex: "DEX",
-    int: "INT",
-    luk: "LUK",
-    maxHp: "HP",
-    maxMp: "MP",
-    pad: "攻擊力",
-    mad: "魔力",
-    pdd: "物理防禦",
-    mdd: "魔法防禦",
-    acc: "命中",
-    eva: "迴避",
-    craft: "手技",
-    speed: "移動速度",
-    jump: "跳躍力",
-  };
-  if (facts?.requirements) {
-    const r = facts.requirements;
-    lines.push(`需求等級 ${r.level}`);
-    for (const k of ["str", "dex", "int", "luk"])
-      if (r[k]) lines.push(`需求 ${k.toUpperCase()} ${r[k]}`);
-  }
-  for (const [k, value] of Object.entries(item.stats ?? facts?.equipment?.stats ?? {}))
-    if (value) lines.push(`${statNames[k] ?? k} ${value > 0 ? "+" : ""}${value}`);
-  if (facts?.desc) {
-    // The archive stores the description with `\n` line breaks; the tooltip keeps them.
-    for (const line of String(facts.desc)
-      .replace(/\\r\\n|\\n|\\r/g, "\n")
-      .split(/\r?\n/))
-      if (line !== "") lines.push(line);
-  } else if (facts !== undefined && facts.name === undefined) {
-    lines.push("（Data.wz 查不到這個道具）");
-  }
-  return lines;
-}
-
-/** A dark tooltip beside the pointer, the way the client's item box sits next to the cursor. */
-function drawItemTooltip(x, y, item) {
+/** Original per-source anchor and native item/equipment renderer. No template rescue for
+ * missing inventory stats: only buy rows explicitly request a freshly constructed shop template. */
+function drawItemTooltip(x, y, item, source) {
   if (item === undefined) return;
-  drawTooltipLines(x, y, itemTooltipLines(item), true);
-}
-function drawTooltipLines(x, y, lines, keyline = false) {
-  drawTextTooltip(ctx, x + 20, y + 20, lines, {keyline});
+  if (!itemInfo.has(item.itemId)) void describeItem(item.itemId);
+  const at = tooltipAnchor(source, x, y);
+  nativeTips.item(at.x, at.y, itemInfo.get(item.itemId), item, nativeBasis?.basic,
+    {template: source === 'shop' && shopWindowAt(x, y)?.kind === 'buy-row'});
 }
 
 /** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
@@ -5106,6 +5062,7 @@ function closeShop(notify = true) {
 
 /** ESC/header close is 0xFF for say/confirm, not the previous-page answer (0). */
 function closeDialogue(notify = true) {
+  tooltipViewer.close(notify);
   npcDialog.close(notify);
   if (!notify) talkingNpc = undefined;
 }
@@ -5290,7 +5247,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
     return;
   }
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     document.activeElement instanceof HTMLInputElement &&
@@ -5582,9 +5539,11 @@ const statPanel = statWindow({
 });
 
 const skillPanel = skillWindow({
-  ctx, image: artImage, send, audio, point: viewPoint,
+  ctx,
+  tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
-  log: logLine, isModal: () => (itemDialog.open || systemPanel.visible) || testToolsPanel.open || talkingNpc !== undefined,
+  log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
+    (itemDialog.open || systemPanel.visible) || testToolsPanel.open || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5710,8 +5669,9 @@ const testToolsPanel = testTools({
       secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
   },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
-  onOpen(){localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
+  onOpen(){if(tooltipViewer.open)closeDialogue(false);localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
   openDialogue:openDialogueExample,
+  openTooltip:openTooltipExample,
 });
 document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();if(document.hidden){keys.clear();lastPhysicsAt=undefined;}});
 
@@ -5731,14 +5691,7 @@ const itemDialog = itemDialogs({
 
 
 const npcDialog = npcDialogue({ctx,image:artImage,audio,point:viewPoint,
-  onOpen() {
-    talkingNpc = true; // Modal sentinel only; native code does not use the packet NPC id.
-    localActionEpoch++;keys.clear();ui.say.blur();
-    itemDialog.close(false);systemPanel.close(false,false);testToolsPanel.close();
-    chatHistoryPanel.cancelDrag();quickDrag=itemDrag=undefined;
-    inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
-    inventoryPick=inventoryHover=equipHover=pointerAt=undefined;
-  },
+  onOpen: beginContentModal,
   onReply(reply, context) {
     talkingNpc=undefined;
     if(context?.preview) {
@@ -5751,6 +5704,28 @@ const npcDialog = npcDialogue({ctx,image:artImage,audio,point:viewPoint,
     send({t:"talk",...reply});
   },
 });
+
+function beginContentModal() {
+  talkingNpc = true; // Shared content-modal sentinel, not a fabricated NPC identity.
+  localActionEpoch++; keys.clear(); ui.say.blur();
+  itemDialog.close(false); systemPanel.close(false,false); testToolsPanel.close();
+  chatHistoryPanel.cancelDrag(); quickDrag=itemDrag=undefined;
+  inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
+  inventoryPick=inventoryHover=equipHover=pointerAt=undefined;
+}
+
+const tooltipViewer = tooltipPreview({renderer:nativeTips, point:viewPoint,
+  getBasic:()=>nativeBasis?.basic,
+  getInstance:()=>inventory?.worn?.find(i=>i.slot===11) ?? inventory?.worn?.[0] ?? inventory?.tabs?.find(t=>t.tab===1)?.items?.[0],
+  onOpen:beginContentModal, onClose(){talkingNpc=undefined;},
+});
+
+function openTooltipExample(kind) {
+  if(loginStage!=="game" || !visualFieldActive || selfView?.hp<=0 || talkingNpc!==undefined ||
+      revivePanel.open || itemDialog.open || systemPanel.visible || shop!==undefined ||
+      shopPending || slotPending || mesoPending || portalPending)return false;
+  return tooltipViewer.show(kind);
+}
 
 function openDialogueExample(kind, page = 0) {
   const body=dialogueExample(kind,page);
