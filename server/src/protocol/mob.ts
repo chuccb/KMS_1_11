@@ -73,10 +73,12 @@
  *                            mob's **MP**, and this is the packet that tells a client what a mob may
  *                            use. The handler also moves `mob+116` (the mob's state): 1 -> 5,
  *                            2 -> 4, 3 -> 5, and every other value calls `sub_485330(mob, 1)`, which
- *                            switches the mob's flash on and sets the state to 4. Both 4 and 5 are
- *                            the states the damage display wants - `sub_487A30` replays the hit
- *                            animation only while `mob+116` is -2, 4 or 5 - so **0x34 is what makes a
- *                            mob flinch**: without it a hit shows a number but never plays hit1.
+ *                            switches flash on and sets the state to4. ADR-075 corrects the old
+ *                            blanket-flinch interpretation: 487A30 also requires positive damage
+ *                            >= info.pushed, no active hit window, and the local attacker. Then
+ *                            4885D0 uses the supplied hit action7..9 and replaces its movement path.
+ *                            The reconstructed server now broadcasts this reaction in0x33 so all
+ *                            browsers share one path (server policy, not a recovered original server).
  *
  *  0x30 `u32 mobId` + `s16 delay` (`sub_4926B0`) A non-negative delay queues `(mobId, now + delay)`
  *                            in the pool's timed queue; when that expires (`sub_492100`) the pool

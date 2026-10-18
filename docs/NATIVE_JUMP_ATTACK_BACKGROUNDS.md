@@ -1,3 +1,5 @@
+> **續作／未測試**：[NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：真KB路徑取代巡邏、hit action與門檻／互斥／時鐘，NPC完整方向byte／forced flip、當前canvas氣泡錨點與冷載名牌可見性。本文舊限制依該續作閱讀。
+
 # 原版跳躍怪、攻擊組圖與移動雲層
 
 2026-10-18。**已實作，未執行 test/check/typecheck/browser/VM/probe；不是功能 PASS。**

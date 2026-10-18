@@ -1,3 +1,4 @@
+import {mobHitAction} from "../../../client/mob-reaction.mjs";
 import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from "../../../client/active-skills.mjs";
 import {learnedActive,activeArt} from "../game/activeskills.ts";
@@ -716,7 +717,7 @@ class BrowserSession {
     if(!Array.isArray(message.targets)||message.targets.length>(!magic&&!shoot&&learned.values.range?6:1))return;
     const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills),temporary=this.buffs.values(performance.now());
     const totals=statTotals(basis,temporary);totals.pad=basis.secondary.pad!+(temporary.pad??0);
-    const hits=activeSkillHits(learned.values,shoot),records:{mobId:number;x:number;y:number;damage:number;damages:number[]}[]=[];
+    const hits=activeSkillHits(learned.values,shoot),records:{mobId:number;x:number;y:number;damage:number;damages:number[];hitAnimation:number}[]=[];
     const seen=new Set<number>();
     // Resolve/validate all snapshots BEFORE drawing RNG or sending any packet.
     const selected: {mob:ReturnType<ClientSession['mob']>;x:number;y:number}[]=[];
@@ -739,7 +740,7 @@ class BrowserSession {
         ()=>session.attackRandom!.next(),random):rollNativePhysical(character,basis,totals,template,actionId,
         ammo?this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0:0,ammo?.itemId??0,
         this.options.skills,()=>session.attackRandom!.next(),undefined,{skillId:id,damagePercent:learned.values.damage??0,random}));
-      records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages});
+      records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages,hitAnimation:mobHitAction(template)});
     }
     const speed=magic?activeMagicSpeed(profile):activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0);
     await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits,shoot,magic,
@@ -810,7 +811,7 @@ class BrowserSession {
       this.options.skills,()=>session.attackRandom!.next(), value => { trace = value; },
     ) : 0;
     await session.attack(
-      mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage }],
+      mob === undefined ? [] : [{ mobId, x: mob.x, y: mob.y, damage,hitAnimation:mobHitAction(template) }],
       facingLeft,
       {
         shoot,

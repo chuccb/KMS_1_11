@@ -46,3 +46,6 @@ export function receiveNpcIdle(behavior, action, speech) {
 /** 499D60 resets each frame's delay after a single 30ms decrement; overshoot is discarded. */
 export const npcFrameDelay = frame => Math.max(30,Math.ceil(Math.max(1,Number.isFinite(frame.delay)?frame.delay:180)/30)*30);
 export const npcActionDuration = frames => (frames??[]).reduce((sum,frame)=>sum+npcFrameDelay(frame),0);
+
+/** 499B70 + 499900: wire low bit selects facing; put_flip is (bit == 0), NOT velocity sign. */
+export function npcMovementPose(action){return {name:(action>>1)===2?'move':'stand',facing:action&1,flip:(action&1)===0};}

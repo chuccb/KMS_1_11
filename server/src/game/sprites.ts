@@ -201,6 +201,8 @@ export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefi
 export interface MobArt {
   templateId: number;
   bodyAttack?: boolean;
+  /** Original own info.pushed (48D080 default1), not linked art info. */
+  pushed?:number;
   actions: Record<string, SpriteFrame[]>;
 }
 
@@ -226,7 +228,7 @@ export function mobArtOf(
   const bodyAttack = Number(info.bodyAttack ?? 0) !== 0;
   return Object.keys(actions).length === 0
     ? undefined
-    : { templateId, actions, bodyAttack };
+    : { templateId, actions, bodyAttack,pushed:Number(info.pushed??1) };
 }
 
 /** A cached `templateId -> art` reader for the web endpoint (`--data off` has none). */

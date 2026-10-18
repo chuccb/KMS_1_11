@@ -1,3 +1,5 @@
+> **續作／未測試**：[NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：真KB路徑取代巡邏、hit action與門檻／互斥／時鐘，NPC完整方向byte／forced flip、當前canvas氣泡錨點與冷載名牌可見性。本文舊限制依該續作閱讀。
+
 # 攻擊殘影、命中特效與時序整鏈（2026-10-18；未測試）
 
 本輪對使用者「攻擊的特效等，看起來和原版有出入」的續作。依指示，**沒有執行 test、check、typecheck、語法檢查、browser、VM 或 probe**；新增／修訂的回歸來源不代表通過。資料來自本 repo 的 `MapleStory.exe.c/.lst/.exe` 與 `Data.wz`，不是其他年代客戶端。啟服不視為測試成功。

@@ -9,6 +9,8 @@ export function chatBalloons({image}) {
     put(id,text,now,options={}){records.set(id,{text:options.preserveWhitespace?String(text):String(text).trim(),
       color:options.color??'#000000',until:now+5000});},
     clear(){records.clear();},remove(id){records.delete(id);},
+    visible(id,originY,now){const r=records.get(id);return !!r&&now<r.until&&Number.isFinite(originY)&&
+      names.every(k=>image(`UI/ChatBalloon.img/normal/${k}`).ready);},
     active(now){for(const [id,r] of records)if(now>=r.until)records.delete(id);return records.entries();},
     draw(ctx,id,x,y,originY,dead,now){
       const record=records.get(id);if(!record||now>=record.until||!Number.isFinite(originY))return;

@@ -1,3 +1,6 @@
+import {mobReaction,planMobReactionPath,mobHitName} from "../../../client/mob-reaction.mjs";
+import {artReaderOf} from "./wzart.ts";
+import {mobArtOf} from "./sprites.ts";
 import {elementAttributes} from "./elements.ts";
 /**
  * The monsters of one field: where they are, and what the server tells the client about them.
@@ -101,6 +104,11 @@ export interface MobTemplate {
    * (`sub_48D080`, `n130 = clamp(v72 + 100, 0, 130)`). 100 = normal, 130 = the cap, 0 = never moves.
    */
   speedPercent: number;
+  /** 48D080 pushed defaults1, 487A30 compares each positive hit (not the attack sum). */
+  pushed?:number;
+  hitActions?:number[];
+  /** 486180 raw frame-delay sum, independent of the 30ms visual clock. */
+  hitDurations?:Record<number,number>;
   /** Root fly=3; jump+move=2; move=1; neither=0. Optional only for legacy fixtures. */
   moveAbility?: 0 | 1 | 2 | 3;
   /**
@@ -199,6 +207,9 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
   const elements=elementAttributes(props.elemAttr);
   if(!elements)return undefined;
   const speed = asNumber(props.speed, 0);
+  const reader=artReaderOf(archive),art=reader&&mobArtOf(templateId,reader);
+  const hitActions=[7,8,9].filter(action=>!!art?.actions[mobHitName(action)!]?.length);
+  const hitDurations=Object.fromEntries(hitActions.map(action=>[action,art!.actions[mobHitName(action)!]!.reduce((n,f)=>n+f.delay,0)]));
   return {
     templateId,
     name: typeof props.name === "string" ? props.name : "",
@@ -213,6 +224,7 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     eva:Math.max(0,Math.min(999,asNumber(props.eva))),
     md:Math.max(0,Math.min(999,asNumber(props.MD))),
     elements,physicalAttribute:elements[0],
+    pushed:asNumber(props.pushed,1),hitActions,hitDurations,
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
     moveAbility,
     dieMs: dieAnimationMs(actionRoot),
@@ -250,6 +262,7 @@ export interface FieldMob {
   legEndsAt: number;
   motion?: { x: number; y: number; targetX: number; targetY: number; startedAt: number; endsAt: number; sampledAt: number; points: MobMotionPoint[] } | undefined;
   velocity?: { vx: number; vy: number };
+  reactionUntil?:number;
   decisionAt?: number;
   intent?: -1 | 0 | 1;
   /** The x range this mob may walk in: its foothold chain clipped by the spawn's `rx0`/`rx1`. */
@@ -389,7 +402,7 @@ export class MobField {
    * not recompute it. The browser bridge uses the located native 4C7960 basic-attack formula;
    * the field retains the original packet trust contract rather than rolling a second time.
    */
-  applyDamage(mobId: number, damage: number, now: number): MobDamage | undefined {
+  applyDamage(mobId: number, damage: number, now: number,reaction?:{hitAnimation:number;facingLeft:boolean}): MobDamage | undefined {
     const mob = this.mob(mobId);
     if (mob === undefined || !mob.alive || mob.hp === undefined || mob.maxHp === undefined) return undefined;
     this.samplePosition(mob, now);
@@ -402,12 +415,29 @@ export class MobField {
     if (killed) {
       mob.alive = false;
       mob.motion = undefined;
+      delete mob.reactionUntil;
+      mob.velocity={vx:0,vy:0};
       mob.deaths += 1;
       mob.removeAt = now + dieMs;
       mob.respawnAt = mob.removeAt + this.respawnMs;
       // 0x30 last, so the die action is the one the mob ends up in: the attacker's client already
       // played its hit animation and its damage numbers by the time this arrives.
       packets.push(encodeMobLeaveDelayed({ mobId, delayMs: 0 }));
+    }
+    if(!killed&&reaction){
+      const hit=mobReaction(mob.template,dealt,reaction.hitAnimation,reaction.facingLeft,now,mob.reactionUntil);
+      if(hit){
+        const points=planMobReactionPath(mob,[...(this.options.footholds?.values()??[])],hit,mob.template?.moveAbility??0);
+        const last=points.at(-1);
+        if(last){
+          // Cancel the old walking/jumping endpoint, not merely its sprite animation.
+          mob.reactionUntil=now+hit.duration;mob.legEndsAt=mob.reactionUntil;mob.facing=hit.facing;
+          mob.motion={x:mob.x,y:mob.y,targetX:last.x,targetY:last.y,startedAt:now,endsAt:mob.reactionUntil,sampledAt:now,points};
+          mob.velocity={vx:points[0]!.vx,vy:points[0]!.vy};
+          packets.push(encodeMobMove(mobId,{actionByte:mobActionByte(hit.action,hit.facing),value:0,
+            path:{originX:Math.trunc(mob.x),originY:Math.trunc(mob.y),elements:points.map(point=>({attr:0,...point}))}}));
+        }
+      }
     }
     return {
       mobId,
@@ -468,6 +498,7 @@ export class MobField {
     mob.motion = undefined;
     delete mob.velocity;
     mob.range = this.rangeOn(mob.spawn.foothold, mob.spawn);
+    delete mob.reactionUntil;
     delete mob.decisionAt;
     delete mob.intent;
     mob.hp = mob.maxHp;
@@ -547,7 +578,7 @@ export class MobField {
     for (const mob of this.mobs) {
       if (!mob.alive) continue;
       this.samplePosition(mob, now);
-      if (now < mob.legEndsAt) continue;
+      if (now < mob.legEndsAt || now < (mob.reactionUntil??0)) continue;
       const ability = mob.template?.moveAbility ?? 1;
       if (ability === 0 || ability === 3) continue;
       const speed = this.speedOf(mob);

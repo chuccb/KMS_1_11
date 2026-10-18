@@ -1294,7 +1294,7 @@ export interface ClientAttackTarget {
   /** The mob's object id (`*(mob + 120)`) - the same field the server -> client packets carry. */
   mobId: number;
   /**
-   * Which hit animation the client played: `-1` when the mob's max damage stat
+   * Which forced hit action the client selected: `-1` when the template's hit-action count
    * (`*(*(mob + 124) + 112)`) is `<= 0`, else `rand() % that + 7`. Sent as a signed byte.
    */
   hitAnimation: number;

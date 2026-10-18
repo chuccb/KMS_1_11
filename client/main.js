@@ -1,3 +1,4 @@
+import {nativeMobActions,mobHitPose,mobHitName} from "./mob-reaction.mjs";
 import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.mjs";
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.mjs";
 import {attackPredictions} from './attack-predictions.mjs';
@@ -841,7 +842,7 @@ function handle(message) {
         beginPath(
           user,
           message.path ?? { elements: [{ ...message, duration: 100 }] },
-          performance.now(),
+          now,
         );
       }
       return;
@@ -932,15 +933,27 @@ function handle(message) {
     case "mob-move": {
       const mob = mobs.get(String(message.mobId));
       if (mob) {
-        // 0x33 carries a timed CMovePath, not a teleport to its last element.
-        sampleMotion(mob, performance.now(), terrain);
+        // 488BC0: the signed header controls forced sprite action; path actions control locomotion.
+        const now=performance.now();
+        sampleMotion(mob,now,terrain);
+        const action=message.actionByte===undefined?-1:message.actionByte>>1;
+        if(message.actionByte>=0&&action>=7&&action<=9){
+          mobHits.set(String(message.mobId),{action,since:now,facing:message.actionByte&1});
+          // A replacement controller path begins at its authoritative origin, never the old patrol endpoint.
+          if(Number.isFinite(message.path?.originX)&&Number.isFinite(message.path?.originY)){
+            mob.x=message.path.originX;mob.y=message.path.originY;
+          }
+        }
+        else if(message.actionByte>=0){
+          mobHits.delete(String(message.mobId));mob.actionSince=now;
+        }
         mob.facing =
-          message.facing ??
+          (message.actionByte<0?mob.facing:message.facing) ??
           (message.x === mob.x ? mob.facing : message.x < mob.x ? 1 : 0);
         beginPath(
           mob,
           message.path ?? { elements: [{ ...message, duration: 100 }] },
-          performance.now(),
+          now,
         );
       }
       return;
@@ -959,8 +972,9 @@ function handle(message) {
         );
       if (corpse) {
         sampleMotion(corpse, performance.now(), terrain);
-        corpse.motion = undefined;
+        corpse.motion = undefined;corpse.vx=corpse.vy=0;
       }
+      mobHits.delete(String(message.mobId));
       dying.set(String(message.mobId), performance.now());
       return;
     }
@@ -1803,6 +1817,7 @@ const damageMarks = [];
 function addDamageMark(mark){mark.order??=layerOrder(mark,ATTACK_EFFECT_Z);damageMarks.push(mark);}
 const mobHits = new Map();
 const mobBodyAttack = new Map();
+const mobPushThreshold=new Map();
 const contact = contactClock();
 let contactField, contactPending, previousContactPlayer;
 let contactSerial = 0,
@@ -1857,7 +1872,7 @@ function updateContact(now) {
     if (
       !intersects(
         playerRect,
-        mobContactRect(frame, current, facingFlip(mob.facing), previousMob),
+        mobContactRect(frame, current, facingFlip(mobRenderFacing(mob)), previousMob),
       )
     )
       continue;
@@ -2517,8 +2532,8 @@ function ensureEntityArt(kind, templateId) {
     )
     .then((data) => {
       if(generation!==mapGeneration)return;
-      table.set(templateId, data.actions ?? {});
-      if (kind === "mob") mobBodyAttack.set(templateId, data.bodyAttack === true);
+      table.set(templateId, kind==="mob"?nativeMobActions(data.actions??{}):data.actions??{});
+      if (kind === "mob") {mobBodyAttack.set(templateId,data.bodyAttack===true);mobPushThreshold.set(templateId,data.pushed??1);}
       else {
         npcMetadata.set(templateId, {name:data.name,clickBounds:data.clickBounds,behavior:data.behavior});
         npcVisuals.load(templateId,data.actions??{},data.behavior,performance.now());
@@ -2727,7 +2742,10 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
   ctx.fillRect(Math.round(screenX) - 9, Math.round(screenY) - 42, 18, 42);
 }
 
-/** Actual current WZ frame. Corpse wins over hit1, which plays ONCE for its true total delay. */
+function mobRenderFacing(mob){
+  return mobHitPose(mobArts.get(mob.templateId),mobHits.get(String(mob.mobId)),performance.now())?.facing??mob.facing;
+}
+/** Actual WZ frame. Corpse wins; forced hit1/hit2/hitF plays once on the 30ms sprite clock. */
 function currentMobFrame(mob, now) {
   const id = String(mob.mobId),
     actions = mobArts.get(mob.templateId);
@@ -2735,13 +2753,10 @@ function currentMobFrame(mob, now) {
   const once = (frames, elapsed) => animationFrame(frames, elapsed, false);
   const corpseSince = dying.get(id);
   if (corpseSince !== undefined) return once(actions.die1, now - corpseSince);
-  const hitAt = mobHits.get(id);
-  if (hitAt !== undefined && actions.hit1?.length) {
-    const duration = actions.hit1.reduce(
-      (sum, frame) => sum + Math.max(1, frame.delay),
-      0,
-    );
-    if (now - hitAt < duration) return once(actions.hit1, now - hitAt);
+  const hit=mobHits.get(id),pose=mobHitPose(actions,hit,now);
+  if(pose)return once(pose.frames,pose.elapsed);
+  if(hit){
+    mob.actionSince=hit.since+(actions[mobHitName(hit.action)]??[]).reduce((n,f)=>n+f.delay,0);
     mobHits.delete(id);
   }
   return playAction(
@@ -2767,12 +2782,12 @@ function drawEntitySprite(
   if (kind === "mob") {
     const mob = mobs.get(entityKey);
     const frame = mob && currentMobFrame(mob, now);
-    if (frame) drawArchiveImage(frame, x, y, facingFlip(facing));
+    if (frame) drawArchiveImage(frame, x, y, facingFlip(mobRenderFacing(mob)));
     return;
   }
   const frame = npcVisuals.frame(Number(entityKey),now);
   if (frame === undefined) return;
-  drawArchiveImage(frame, x, y, facingFlip(facing));
+  drawArchiveImage(frame, x, y, npcVisuals.flip(Number(entityKey),now)??facingFlip(facing));
 }
 
 /* --------------------------------------------------------------------------------------------
@@ -3161,8 +3176,8 @@ function frame() {
         mapAnimationStart,
       );
       // 498CF0 passes font index 3 to CLife::47D110; 527720(3) = Gulim 12, FFFFFF20.
-      // 499D60 sets name layer color 00FFFFFF while its CChatBalloon exists (alpha zero).
-      if(!npcVisuals.speaking(actor.npc.npcId,now))
+      // 499D60 hides the name while the real balloon exists. Cold browser art must not leave BOTH invisible.
+      if(!npcVisuals.speaking(actor.npc.npcId,now)||!npcBalloons.visible(actor.npc.npcId,npcVisuals.originY(actor.npc.npcId),now))
         drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
@@ -3410,7 +3425,7 @@ function hitPresentation(mob,point,facingLeft,profile,action,magic=false){
   return {offset:point?{x:point.x-mob.x,y:point.y-mob.y}:undefined,facingLeft,profile,action,magic};
 }
 function physicalHitPoint(source,mob,facingLeft,bounds,shoot=false,near=65,range=nativeShotRange){
-  const rect=mob.rect??mobRect(currentMobFrame(mob.mob??mob,performance.now()),mob,facingFlip((mob.mob??mob).facing));
+  const rect=mob.rect??mobRect(currentMobFrame(mob.mob??mob,performance.now()),mob,facingFlip(mobRenderFacing(mob.mob??mob)));
   return attackHitPoint(attackWorldRect(source,shoot?{left:-range,right:-near,top:-25,bottom:-24}:bounds,facingLeft),rect);
 }
 async function hitFrames(skillId,level,presentation){
@@ -3460,11 +3475,11 @@ function scheduleAttackHit(mobId, damage, at, ordinal=0, onImpact) {
       {deadline:at+1000,valid:()=>self===field&&combatEpoch===epoch&&mobs.get(String(mobId))===originalMob},
     );
     const frame=currentMobFrame(mob,now);
-    if(damage>0) mobHits.set(String(mobId),now);
+    // Flinch is authoritative 0x33 (threshold/action/window), not every positive floating number.
     if(frame){const mark={x:mob.x,y:mob.y-Math.max(0,frame.oy??0)-ordinal*30,value:damage,start:at,
       jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))};
       mark.order=layerOrder(mark,ATTACK_EFFECT_Z);addDamageMark(mark);}
-    onImpact?.(mob,mobRect(frame,mob,facingFlip(mob.facing)));
+    onImpact?.(mob,mobRect(frame,mob,facingFlip(mobRenderFacing(mob))));
   };
   const delay = at - performance.now();
   if (delay > 0) setTimeout(show, delay);
@@ -3505,7 +3520,7 @@ function magicAttackPlan(source,facingLeft,ball,target,group=0){
   if(selected===undefined){
     outer:for(const rect of magicSearchRects(source,facingLeft))for(const mob of mobs.values()){
       if(dying.has(String(mob.mobId)))continue;
-      const bounds=mobRect(currentMobFrame(mob,performance.now()),mob,facingFlip(mob.facing));
+      const bounds=mobRect(currentMobFrame(mob,performance.now()),mob,facingFlip(mobRenderFacing(mob)));
       if(intersects(rect,bounds)){selected={mob,rect:bounds};break outer;}
     }
   }
@@ -3538,7 +3553,7 @@ async function receiveUserAttack(message, now) {
   const look = lookOf(user), lookKey = JSON.stringify(look);
   const source={x:Math.trunc(user.x),y:Math.trunc(user.y)},z=actorDepth(user,terrain,'user'),group=user.group??0;
   const targets=new Map((message.targets??[]).flatMap(target=>{
-    const mob=mobs.get(String(target.mobId));return mob?[[target.mobId,{mob,x:mob.x,y:mob.y,rect:mobRect(currentMobFrame(mob,now),mob,facingFlip(mob.facing))}]]:[];
+    const mob=mobs.get(String(target.mobId));return mob?[[target.mobId,{mob,x:mob.x,y:mob.y,rect:mobRect(currentMobFrame(mob,now),mob,facingFlip(mobRenderFacing(mob)))}]]:[];
   }));
   const [baseProfile,skillData]=await Promise.all([ensureAttackProfile(look),
     message.skillId?combatCatalog.skill(message.skillId):undefined]);
@@ -3622,7 +3637,7 @@ function mobsInAttackRect(bounds, facingLeft, clampNear = false) {
   for (const mob of mobs.values()) {
     if (dying.has(String(mob.mobId))) continue;
     const frame = currentMobFrame(mob, performance.now());
-    const target = mobRect(frame, mob, facingFlip(mob.facing));
+    const target = mobRect(frame, mob, facingFlip(mobRenderFacing(mob)));
     if (!intersects(target, { left: x0, right: x1, top: self.y + bounds.top, bottom: self.y + bounds.bottom })) continue;
     found.push(mob);
   }
@@ -5982,10 +5997,10 @@ const testToolsPanel = testTools({
     const now=performance.now(),lines=[];
     for(const npc of [...npcs.values()].slice(0,8)) {
       const state=npcVisuals.snapshot(npc.npcId,now);if(!state)continue;
-      const title=npcMetadata.get(npc.templateId)?.name||npc.templateId;
+      const title=`${npcMetadata.get(npc.templateId)?.name||'NPC'} #${npc.templateId} (${Math.round(npc.x)},${Math.round(npc.y)})`;
       lines.push(`${title}：${state.controlled?'本頁控制':'接收端'}／${state.action}`+
         `${state.metadata?'':'／資料讀取中'}${state.waiting?'／等待回包':''}${state.speaking?'／氣泡中':''}`+
-        `${state.reply?`／收 ${state.reply.action},${state.reply.speech}`:''}`);
+        `${state.reply?`／收 ${state.reply.action},${state.reply.speech}`:''}／方向bit ${state.facing}／${state.flip?'鏡像':'原圖'}／名牌${npcVisuals.speaking(npc.npcId,now)&&npcBalloons.visible(npc.npcId,npcVisuals.originY(npc.npcId),now)?'隨原氣泡暫隱':'顯示'}`);
     }
     return `NPC 唯讀（非原版工具，不強制演出）：${lines.join('；')||'此圖沒有NPC。'}${npcs.size>8?`；另${npcs.size-8}位`:''}`;
   },
@@ -6013,6 +6028,13 @@ const testToolsPanel = testTools({
       else if (t.reason === "no-effective-weapon") text += " 原因：沒有有效武器。";
       else if (t.reason === "minimum") text += " 本次低擲值／等差／防禦／特殊倍率後落在最低傷害區間。";
     }
+    const now=performance.now(),near=[...mobs.values()].filter(m=>!dying.has(String(m.mobId)))
+      .sort((a,b)=>Math.abs(a.x-(self?.x??0))-Math.abs(b.x-(self?.x??0))).slice(0,3);
+    if(near.length)text+=' 附近怪物KB（唯讀）：'+near.map(m=>{
+      const hit=mobHits.get(String(m.mobId)),frames=hit&&(mobArts.get(m.templateId)?.[mobHitName(hit.action)]??[]);
+      const remaining=hit?Math.max(0,hit.since+frames.reduce((n,f)=>n+(f.rawDelay??f.delay),0)-now):0;
+      return `#${m.mobId}/${m.templateId} pushed=${mobPushThreshold.get(m.templateId)??'載入中'}、${remaining>0?`${mobHitName(hit.action)} ${Math.ceil(remaining)}ms`:'未在KB視窗'}`;
+    }).join('；')+'。';
     return text;
   },
   getMovement(){

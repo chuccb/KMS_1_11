@@ -348,6 +348,8 @@ export interface MobView {
 }
 
 export interface NpcView {
+  /** 4990C0 stores the full spawn movement byte; facing is its low bit. */
+  action?:number;
   npcId: number;
   templateId: number;
   x: number;
@@ -412,6 +414,7 @@ export type ClientEvent =
   | { kind: "mob-enter"; mob: MobView }
   | {
       kind: "mob-move";
+      actionByte?:number;
       mobId: number;
       x: number;
       y: number;
@@ -1024,7 +1027,7 @@ export class ClientSession {
     this.attackSequence = (this.attackSequence + 1) & 0xff;
     const records: ClientAttackTarget[] = targets.slice(0, 6).map((target) => ({
       mobId: target.mobId,
-      hitAnimation: target.hitAnimation ?? 0,
+      hitAnimation: target.hitAnimation ?? -1,
       x: target.x,
       y: target.y,
       sequence: this.attackSequence,
@@ -1851,6 +1854,7 @@ export class ClientSession {
         }
         case MOB_OPCODE.move: {
           const move = readMobMove(new PacketReader(plain, 1));
+          const actionByte=(move.body.actionByte<<24)>>24; // 488BC0 tests the SIGN bit, 0x80 means keep.
           const last = move.body.path.elements.at(-1);
           if (last === undefined) return;
           const mob = this.mobs.get(move.mobId);
@@ -1861,7 +1865,8 @@ export class ClientSession {
             x: last.x,
             y: last.y,
             path: move.body.path,
-            facing: move.body.actionByte & 1,
+            ...(actionByte>=0?{facing:actionByte&1}:{}),
+            actionByte,
           });
           return;
         }
@@ -1960,7 +1965,7 @@ export class ClientSession {
             templateId: npc.templateId,
             x: npc.x,
             y: npc.y,
-            facing: npc.facing,
+            facing: npc.facing&1,action:npc.facing,
             present:true,controlled:false,
           };
           this.npcs.set(view.npcId, view);
@@ -1983,7 +1988,7 @@ export class ClientSession {
           if(!npc&&state.on) {
             // 49F260: unknown controlled id has the full enter tail, one byte after opcode.
             const body=readNpcEnterField(new PacketReader(plain,2),false);
-            npc={npcId:body.npcId,templateId:body.templateId!,x:body.x,y:body.y,facing:body.facing,
+            npc={npcId:body.npcId,templateId:body.templateId!,x:body.x,y:body.y,facing:body.facing&1,action:body.facing,
               present:false,controlled:true};
             this.npcs.set(npc.npcId,npc);this.emit({kind:"npc-enter",npc});
           }

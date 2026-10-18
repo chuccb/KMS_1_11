@@ -1,5 +1,5 @@
 import {animationFrame} from './animation.mjs';
-import {npcRandom,npcIdleDelay,chooseNpcIdle,receiveNpcIdle,npcFrameDelay,npcActionDuration} from './npcbehavior.mjs';
+import {npcRandom,npcIdleDelay,chooseNpcIdle,receiveNpcIdle,npcFrameDelay,npcActionDuration,npcMovementPose} from './npcbehavior.mjs';
 
 /** CNpc presentation/controller, separate from users, combat RNG, dialogue and persistence.
  * Authority lives on the server: only a designated controller proposes; EVERY client (sender too)
@@ -22,13 +22,13 @@ export function npcPresentation({send,balloons,seed}) {
     const result=receiveNpcIdle(data.behavior,value.action,value.speech);
     if(result.name!==undefined) {
       const frames=data.actions[result.name];
-      if(frames?.length)r.forced={name:result.name,since:value.at,duration:npcActionDuration(frames)};
+      if(frames?.length)r.forced={name:result.name,since:value.at,duration:npcActionDuration(frames),flip:r.baseFacing===0};
     }
     if(result.text!==undefined&&value.at+5000>now) {
       r.speechUntil=value.at+5000;
       const name=r.forced?.name??r.baseName;
-      // 4373A0 takes canvas0 height from the current NPC layer; not the clickable rectangle.
-      r.chatOriginY=data.actions[name]?.[0]?.height;
+      // 433F50/4373A0: canvas0 of the CURRENT shifted layer, not always animation frame0.
+      r.chatOriginY=animationFrame(data.actions[name],value.at-(r.forced?.since??r.baseSince))?.height;
       balloons.put(r.npcId,result.text,value.at,{color:'#800000',preserveWhitespace:true});
     }
     settle(r,now);
@@ -38,7 +38,7 @@ export function npcPresentation({send,balloons,seed}) {
     add(npc,now) {
       api.remove(npc.npcId);
       const r={npcId:npc.npcId,templateId:npc.templateId,controlled:false,tickAt:now,
-        idle:0,inflight:false,baseSince:now,baseName:'stand',speechUntil:0,pending:[]};
+        idle:0,inflight:false,baseSince:now,baseName:npcMovementPose(npc.action??npc.facing??0).name,baseFacing:(npc.action??npc.facing??0)&1,speechUntil:0,pending:[]};
       records.set(npc.npcId,r);api.controller(npc.npcId,npc.controlled===true,now);
     },
     remove(id){records.delete(id);balloons.remove(id);},
@@ -73,8 +73,9 @@ export function npcPresentation({send,balloons,seed}) {
     },
     locomotion(id,action,now) {
       const r=records.get(id);if(!r)return;
-      const name=(action>>1)===2?'move':'stand'; // 499B70: NPC-specific, not mob/user stance table.
-      if(r.baseName!==name){r.baseName=name;r.baseSince=now;}
+      const {name,facing}=npcMovementPose(action); // 4998D0 resets base art on direction-only changes too.
+      if(r.baseName!==name||r.baseFacing!==facing){r.baseName=name;r.baseSince=now;}
+      r.baseFacing=facing;
     },
     frame(id,now) {
       const r=records.get(id);if(!r)return undefined;settle(r,now);
@@ -82,11 +83,12 @@ export function npcPresentation({send,balloons,seed}) {
       return animationFrame(data.actions[r.forced?.name??r.baseName],now-(r.forced?.since??r.baseSince));
     },
     snapshot(id,now) {
-      const r=records.get(id);if(!r)return undefined;
+      const r=records.get(id);if(!r)return undefined;settle(r,now);
       return {controlled:r.controlled,waiting:r.inflight,action:r.forced?.name??r.baseName,
-        idleMs:Math.max(0,r.idle),speaking:r.speechUntil>now,metadata:art.has(r.templateId),
+        facing:r.baseFacing,flip:r.forced?.flip??(r.baseFacing===0),idleMs:Math.max(0,r.idle),speaking:r.speechUntil>now,metadata:art.has(r.templateId),
         ...(r.lastReply?{reply:{...r.lastReply}}:{}),...(r.lastRequest?{request:{...r.lastRequest}}:{})};
     },
+    flip(id,now){const r=records.get(id);if(r&&Number.isFinite(now))settle(r,now);return r?(r.forced?.flip??(r.baseFacing===0)):undefined;},
     speaking(id,now){return (records.get(id)?.speechUntil??0)>now;},
     originY(id){return records.get(id)?.chatOriginY;},
   };

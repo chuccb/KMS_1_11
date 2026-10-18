@@ -2735,3 +2735,18 @@ JSON預測不是native ACK、TCP damage仍client-reported。來源、公式、�
 
 證據、常數、保存冷備、回歸來源與未完成邊界見 [NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)。
 舊文件的 body-frame afterimage、child1、fixed tier0、root−20 endpoint 以此更正；不稱全技能或逐像素完成。
+
+## ADR-075：怪物 forced KB 與巡邏互斥、NPC layer-bound flip／氣泡名牌（2026-10-18）
+
+**狀態：來源已實裝；未test／check／typecheck／語法／browser／VM／probe。**
+
+487A30 pushed門檻與hit window、4885D0 forced7..9、53D3F0切線130／drag400／<=30ms路徑串起。
+修正attack target default0，真hit1/2/F或−1；受擊替換巡邏、不每段重啟，死亡／重生清理。
+0x33 signed header與path locomotion分離；render／contact／impact共用forced-facing，原raw窗口與量化顯示clock分開。
+由server統一結算／廣播是重建政策，不聲稱原controller零延遲或全CVecCtrl完成。
+
+499D60的00FFFFFF name alpha0證明自言自語時暫隱名牌確為原行為，保留；但browser冷氣泡未可畫前不隱藏兩者。
+433F50／4373A0使用當前layer canvas0高度，非永遠序列第0格。4990C0保留完整movement byte，499B70解方向／base，
+499900 flip=(bit==0)；4998D0 forced期間不重建flip，結束才接最新base方向。未憑印象反轉全部NPC／改life.f缺省。
+
+原證、固定常數意義、未完成邊界、唯讀入口與同save冷備見 [NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)。

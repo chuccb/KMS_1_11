@@ -70,7 +70,7 @@ import {
   encodeSessionPacket,
   type SessionEvent,
 } from "../protocol/session.ts";
-import type { MobTemplate } from "../game/mobs.ts";
+import type { MobTemplate, MobDamage } from "../game/mobs.ts";
 import type { DropPolicy } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
 import {
@@ -2634,9 +2634,16 @@ export class GameEntryServer {
     const kills: { mobId: number; templateId: number }[] = [];
     const relayed: UserAttackTarget[] = [];
     for (const target of attack.targets) {
-      // One target record carries `hits` numbers; the mob loses their sum, as the client drew it.
       const damage = target.damages.reduce((total, value) => total + value, 0);
-      const hit = session.instance.mobs.applyDamage(target.mobId, damage, now);
+      // Normal admitted attacks are already split by queueActiveHits. Keep even the legacy
+      // immediate path per-number: sub-threshold hits must never sum into a false KB.
+      let hit:MobDamage|undefined;
+      for(const value of target.damages){
+        const part=session.instance.mobs.applyDamage(target.mobId,value,now,{hitAnimation:target.hitAnimation,facingLeft:attack.facingLeft});
+        if(!part)break;
+        hit=part;mobPackets.push(...part.packets);
+        if(part.killed)break;
+      }
       if (hit === undefined) {
         this.options.log?.(
           `game: 0x${hex(opcode)} hit mob ${target.mobId} for ${damage}, but this field has no such ` +
@@ -2644,7 +2651,6 @@ export class GameEntryServer {
         );
         continue;
       }
-      mobPackets.push(...hit.packets);
       // Only a mob this field accepted is worth drawing numbers over: the receiver's client drops
       // records it cannot resolve in its own mob pool anyway (FINDINGS 4.11.7b).
       relayed.push({

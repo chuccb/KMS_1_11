@@ -146,3 +146,29 @@ test('session receives 3B/3D and retains native pool until visibility AND contro
     'controller-only entry is freed when its sole bit clears');
   session.close();
 });
+
+// ADR-075 additions: source only, not executed.
+test('forced NPC art freezes its bound flip; latest movement direction is applied only on return to base',()=>{
+  const {view}=visual();
+  view.locomotion(1,1,50);assert.equal(view.flip(1,50),false);
+  view.receive({npcId:1,action:2,speech:-1},100);
+  view.locomotion(1,0,110);assert.equal(view.flip(1,110),false,'4998D0 must not rebuild forced art on movement change');
+  assert.equal(view.flip(1,340),true,'forced240ms completes, current base direction becomes visible');
+  assert.equal(view.snapshot(1,340).facing,0);
+});
+test('NPC spawn byte retains movement action4/5 instead of truncating it into facing0/1',()=>{
+  const session=new ClientSession({loginPort:0}),events:ClientEvent[]=[];session.onEvent(e=>events.push(e));
+  const fake=session as unknown as {handleFieldPacket(bytes:Uint8Array):void};
+  fake.handleFieldPacket(encodeNpcEnterField({npcId:9,templateId:7,x:10,y:20,facing:5}));
+  const event=events[0];assert.equal(event?.kind,'npc-enter');
+  if(event?.kind==='npc-enter'){assert.equal(event.npc.action,5);assert.equal(event.npc.facing,1);}
+  session.close();
+});
+test('speech origin uses CURRENT canvas0 after frame shifts, not the first stored animation frame height',()=>{
+  const bubbles:unknown[][]=[];
+  const view=npcPresentation({seed:1,send(){return false;},balloons:{put(...args:unknown[]){bubbles.push(args);},remove(){},clear(){}}});
+  view.add({npcId:1,templateId:7,facing:1},0);
+  view.load(7,{stand:[f('short',180,40),f('tall',180,70)]},{movable:false,speak:['line'],extraActions:[]},0);
+  view.receive({npcId:1,action:-1,speech:0},250);
+  assert.equal(view.originY(1),70);assert.equal(bubbles.length,1);
+});

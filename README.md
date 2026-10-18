@@ -131,7 +131,8 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 
 ## 最近功能與限制
 
-- 最新續作：[原版攻擊特效整鏈](docs/NATIVE_ATTACK_EFFECTS.md)／ADR-074：更正殘影 child5／獨立時鐘、真 mastery tier、普通命中火花、命中點與世界層排序、release 聲音及本機／旁觀／預覽生命週期；未執行測試。
+- 最新續作：[怪物KB／NPC氣泡名牌與方向狀態](docs/NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：KB真正替換巡邏、門檻與多段互斥、原受傷動作／時鐘／KEEP、NPC強制表情翻面與冷氣泡名牌、唯讀入口；未執行測試。
+- 前輪：[原版攻擊特效整鏈](docs/NATIVE_ATTACK_EFFECTS.md)／ADR-074：更正殘影 child5／獨立時鐘、真 mastery tier、普通命中火花、命中點與世界層排序、release 聲音及本機／旁觀／預覽生命週期；未執行測試。
 - 前輪：[兩招原版魔法與完整消費／生命週期](docs/NATIVE_MAGIC_SKILLS.md)／ADR-073。修正120ms多段時鐘與EVA/PDD入口漏接、新增MAD藥水；已列十二招，不宣稱全技能，未執行測試。
 - 前輪補原穿戴順序、server正反換裝驗需求與原子提交、主動攻擊原時鐘關聯／遠端冷載入身份守衛；[證據與政策](docs/NATIVE_EQUIP_ADMISSION.md)／ADR-072。遠距工具可分族、明確補最低級；已有武器可只補級，不改原需求。
 

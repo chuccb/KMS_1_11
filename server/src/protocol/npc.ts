@@ -87,7 +87,7 @@ export interface NpcEnterField {
   templateId?: number;
   x: number;
   y: number;
-  /** 0 = right, 1 = left (the map's `life.f`), the same meaning the mob body gives it. */
+  /** Full NPC movement byte (4990C0); bit0 is facing (0 right, 1 left), >>1==2 is move. */
   facing: number;
   /**
    * `u16` looked up in a ZMap on the client; a miss is handled, so 0 is the "nothing here" value
@@ -116,7 +116,7 @@ export function encodeNpcEnterField(npc: NpcEnterField): Uint8Array {
   writer.writeU32(npc.templateId >>> 0);
   writeSigned16(writer, npc.x);
   writeSigned16(writer, npc.y);
-  writer.writeByte(npc.facing & 1);
+  writer.writeByte(npc.facing & 0xff);
   writer.writeU16((npc.lookupKey ?? 0) & 0xffff);
   writeSigned16(writer, npc.pointX ?? 0);
   writeSigned16(writer, npc.pointY ?? 0);
