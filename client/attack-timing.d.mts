@@ -8,3 +8,4 @@ export function attackFrame(motion: (AttackTiming & {start: number}) | undefined
 export function attackCanvasFrame(motion: AttackTiming | undefined, ordinal: number): number;
 export function shotRelease(motion?: AttackTiming): number;
 export function basicAttackAction<T extends {action: number}>(profile: {melee: T[]; shoot: T[]; prone?: T} | undefined, action: number, shoot?: boolean): T | undefined;
+export function attackHitDelay(ordinal:number):number;

@@ -1,5 +1,7 @@
 # 原技能視窗、SP 學習與已學成長被動（2026-10-17）
 
+> **2026-10-18 最新續作（未測試）**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)／ADR-073：兩招獨立魔法、原動作與MD／元素、foothold／彈道、120ms多段時鐘更正、MAD藥水及EVA／PDD實際使用漏接修復。下文歷史範圍以該續作為準，不代表全技能或逐像素1:1。
+
 > **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
 
 > **2026-10-18 後續（未測試）**：[ACTIVE_SKILLS](ACTIVE_SKILLS.md)／ADR-070已接七個主動技能、原七鍵、消耗、多段／範圍、增益與隊伍入口。下方保留當輪歷史範圍；不代表其他技能／魔法／完整幾何已完成。

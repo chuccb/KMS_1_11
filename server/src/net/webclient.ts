@@ -1,4 +1,4 @@
-import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions} from "../../../client/active-skills.mjs";
+import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from "../../../client/active-skills.mjs";
 import {learnedActive,activeArt} from "../game/activeskills.ts";
 import {scaledAttackDelays} from "../../../client/attack-timing.mjs";
 import { shotRelease } from "../../../client/attack-timing.mjs";
@@ -56,7 +56,7 @@ import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import { characterStatBasis, statTotals } from "../game/characterstats.ts";
 import { intersects, playerContactRect, mobContactRect, type ContactPoint } from "../../../client/contact.mjs";
-import { rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
+import { rollNativeMagic, rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
 import type { MobTemplate } from "../game/mobs.ts";
 import { temporaryStats } from "../../../client/temporarystats.mjs";
 import type { AudioProvider } from "../game/audio.ts";
@@ -630,7 +630,8 @@ class BrowserSession {
           });
         case "active-melee":
         case "active-ranged":
-          return await this.serialMotion(()=>this.activePhysical(message));
+        case "active-magic":
+          return await this.serialMotion(()=>this.activeAttack(message));
         case "party-response":
           return await this.require().partyCommand(message.accepted===true?'accept':'decline');
         case "skill-up":
@@ -698,18 +699,18 @@ class BrowserSession {
    * packet: the attacker's own client drew the number while it built the packet.
    */
   /** The browser supplies selection snapshots, NEVER damage, level, hit count or resource cost. */
-  private async activePhysical(message:Record<string,unknown>):Promise<void> {
+  private async activeAttack(message:Record<string,unknown>):Promise<void> {
     const session=this.require(),character=session.character,id=Number(message.skillId);
     const learned=character&&learnedActive(character,this.options.skills,id);
-    const shoot=message.t==='active-ranged',field=this.contactField,attackToken=Number(message.attackToken);
+    const magic=message.t==='active-magic',shoot=message.t==='active-ranged',field=this.contactField,attackToken=Number(message.attackToken);
     if(!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff)return;
-    if(!character||!learned||learned.rule.kind!==(shoot?'ranged':'melee')||!session.attackRandom||session.characterOperationPending)return;
+    if(!character||!learned||learned.rule.kind!==(magic?'magic':shoot?'ranged':'melee')||!session.attackRandom||session.characterOperationPending)return;
     const profile=this.options.art?.attackProfile?.(character.items?.worn.get(11)?.itemId??0);
-    const actionId=Number(message.action),action=(shoot?activeRangedActions(profile,id):activeMeleeActions(profile,id)).find(a=>a.action===actionId);
+    const actionId=Number(message.action),action=(magic?activeMagicActions(profile,id,learned.info.skillType):shoot?activeRangedActions(profile,id):activeMeleeActions(profile,id)).find(a=>a.action===actionId);
     if(!profile||!action||actionId===32||!basicAttackPostureAllows(actionId,shoot,session.selfMovement.action))return;
     const ammo=shoot?firstBasicAmmo(character.items,activeSkillAmmo(learned.values)):undefined;
-    if(shoot&&!ammo)return;
-    if(!Array.isArray(message.targets)||message.targets.length>(!shoot&&learned.values.range?6:1))return;
+    if((shoot&&!ammo)||(magic&&session.selfMovement.foothold<=0))return;
+    if(!Array.isArray(message.targets)||message.targets.length>(!magic&&!shoot&&learned.values.range?6:1))return;
     const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills),temporary=this.buffs.values(performance.now());
     const totals=statTotals(basis,temporary);totals.pad=basis.secondary.pad!+(temporary.pad??0);
     const hits=activeSkillHits(learned.values,shoot),records:{mobId:number;x:number;y:number;damage:number;damages:number[]}[]=[];
@@ -723,21 +724,22 @@ class BrowserSession {
       if(!Number.isInteger(mobId)||mobId<=0||mobId>0xffffffff||seen.has(mobId)||
         ![x,y].every(n=>Number.isFinite(n)&&n>=-32768&&n<=32767))return;
       seen.add(mobId);
-      if(!mob||this.dyingMobs.has(mobId)){if(shoot)continue;return;}
+      if(!mob||this.dyingMobs.has(mobId)){if(shoot||magic)continue;return;}
       if(!this.options.mobTemplate?.(mob.templateId))return;
       selected.push({mob,x:Math.trunc(x),y:Math.trunc(y)});
     }
     for(const target of selected) {
       const mob=target.mob!,template=this.options.mobTemplate!(mob.templateId)!;
-      // 4C7960 draws seven values ONCE per target; every hit continues the same cyclic cursor.
+      // 4C7960/4C89D0 draw seven values ONCE per target; every hit continues the same cyclic cursor.
       const random={values:Array.from({length:7},()=>session.attackRandom!.next()),cursor:0};
-      const damages=Array.from({length:hits},()=>rollNativePhysical(character,basis,totals,template,actionId,
+      const damages=Array.from({length:hits},()=>magic?rollNativeMagic(basis,totals,template,learned.values,learned.info.elements??[],
+        ()=>session.attackRandom!.next(),random):rollNativePhysical(character,basis,totals,template,actionId,
         ammo?this.options.itemCatalog?.info(ammo.itemId)?.incPAD??0:0,ammo?.itemId??0,
         this.options.skills,()=>session.attackRandom!.next(),undefined,{skillId:id,damagePercent:learned.values.damage??0,random}));
       records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages});
     }
-    const speed=activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0);
-    await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits,shoot,
+    const speed=magic?activeMagicSpeed(profile):activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0);
+    await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits,shoot,magic,
       ...(ammo?{projectileSlot:ammo.slot}:{})});
     if(this.session!==session||this.contactField!==field)return;
     // Correlate with the original browser action clock, not a second release after bridge I/O.

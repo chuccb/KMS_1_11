@@ -65,6 +65,7 @@ export function testTools({
       "qa-speed-potions",
       "qa-combat-potions",
       "qa-evasion-potions",
+      "qa-magic-potions",
     ])
       el(id).disabled = !ready;
     const rangedReady=ready&&rangedChoices.some(choice=>choice.kind===el('qa-ranged-family').value);
@@ -219,6 +220,7 @@ export function testTools({
     "speed-potions",
     "combat-potions",
     "evasion-potions",
+    "magic-potions",
   ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));
   el("qa-map-filter").addEventListener("input", filterMaps);

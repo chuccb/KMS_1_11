@@ -104,9 +104,11 @@ GameEntry於結構性applyChangeSlot之前用equipAdmission檢查：
 冷備`generated/backups/preview-faces-before-equipment-20261018-*.json`保留**這次使用者操作後**最新進度；
 本輪不重seed／不改角色進度。完成後以同`generated/preview-faces-20261018.json`、preview與observer授權重開8515／8516／8517。
 
-### 續追而未冒充完成的魔法入口
+### 前輪續追的魔法入口（後續已由ADR-073接通）
 
 本輪另讀518BF0→5195D0→514D30與4C89D0：prone退普通近戰；magic action另由428040／PE5B2374決定，
 不是把射擊動作改名；514D30選X±50到±300的shape ray、Skill ball有無又影響travel與牆檢查。
 4C89D0有獨立七字cursor、INT／LUK命中、MAD／level mastery／技能mad與元素／MD，不是物理damage%公式。
 這些路徑本輪**沒有開放施放**：尚未完整移植selector表、姿勢素材與shape／元素鏈，不用一半公式湊技能數。
+
+**最新續作**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)已補selector／WZ動作／元素與完整施放鏈；並更正初讀細ray為491F20逐片擴高搜尋。原CShape2D／Gr2D界線仍保留，未執行測試。

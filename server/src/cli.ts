@@ -1,3 +1,4 @@
+import {activeArt} from "./game/activeskills.ts";
 import { skillCatalogOf, type SkillCatalog } from "./game/skills.ts";
 import { creationCatalogOf } from "./game/creation.ts";
 /**
@@ -586,6 +587,7 @@ async function runServe(rest: string[]): Promise<number> {
       ...(skills !== undefined ? { skills } : {}),
       ...(itemCatalog !== undefined ? { itemCatalog } : {}),
       ...(art?.attackProfile !== undefined ? { basicAttack: art.attackProfile } : {}),
+      ...(art?.reader ? {activeSkillArt:(id:number,level:number)=>activeArt(art!.reader!,id,level)}:{}),
       ...(itemCatalog !== undefined
         ? {
             dropItemAllowed: (id: number) =>

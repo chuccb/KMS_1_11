@@ -150,9 +150,9 @@ test("native speed potion reads milliseconds, while mixed unknown mechanics refu
   assert.deepEqual(spec.unapplied, []);
   assert.equal(healsVitals(spec), false, "speed is not a fake HP/MP restoration");
   const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002001": { spec: { speed: 8, time: 180000, mad: 5 } },
+    "02002001": { spec: { speed: 8, time: 180000, mdd: 5 } },
   })), 2002001)!;
-  assert.deepEqual(mixed.unapplied, ["mad"]);
+  assert.deepEqual(mixed.unapplied, ["mdd"]);
   for (const time of [0, -1, 1.5, 0x80000000]) {
     const bad = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
       "02002001": { spec: { speed: 8, time } },
@@ -167,20 +167,20 @@ test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still
   for(const key of ["pad","acc"] as const) {
     const spec=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000}}})),2002004)!;
     assert.equal(spec[key],5);assert.equal(spec.time,180000);assert.deepEqual(spec.unapplied,[]);
-    const mixed=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000,mad:10}}})),2002004)!;
-    assert.deepEqual(mixed.unapplied,["mad"]);
+    const mixed=consumeSpecOf(fakeArchive("Item/Consume/0200.img",image({"02002004":{spec:{[key]:5,time:180000,mdd:10}}})),2002004)!;
+    assert.deepEqual(mixed.unapplied,["mdd"]);
   }
 });
 
 
 // Unexecuted source: defensive specs are accepted only now that 4C8ED0 consumes PDD/EVA.
-test("timed PDD and EVA feed contact; an unimplemented MAD still refuses a mixed item", () => {
+test("timed PDD and EVA feed contact; an unimplemented MDD still refuses a mixed item", () => {
   const spec = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
     "02002000": { spec: { pdd: 10, eva: 5, time: 180000 } },
   })), 2002000)!;
   assert.equal(spec.pdd, 10); assert.equal(spec.eva, 5); assert.deepEqual(spec.unapplied, []);
   const mixed = consumeSpecOf(fakeArchive("Item/Consume/0200.img", image({
-    "02002000": { spec: { pdd: 10, eva: 5, mad: 3, time: 180000 } },
+    "02002000": { spec: { pdd: 10, eva: 5, mdd: 3, time: 180000 } },
   })), 2002000)!;
-  assert.deepEqual(mixed.unapplied, ["mad"]);
+  assert.deepEqual(mixed.unapplied, ["mdd"]);
 });

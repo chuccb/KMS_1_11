@@ -1,5 +1,5 @@
 import {activeSkillSpeed} from "../../../client/active-skills.mjs";
-/** Basic attacks only. Native selectors: 427F60 / 427FE0; ammo scan: 511630.
+/** Archive attack profiles. Native selectors: 427F60 / 427FE0 / 428040; ammo scan: 511630.
  * Skill admission remains separate; the 511630 ammo planner is shared with validated multi-shot.
  */
 import type { ClientAttack } from "../protocol/field.ts";
@@ -43,6 +43,8 @@ export const BASIC_ATTACK_STANCES: Readonly<Record<number, string>> = {
   24: "swingO1",
   25: "swingO2",
   26: "swingO3",
+  28: "swingO1", // 43FC80: magic aliases, NOT magic1/magic2 or heal.
+  29: "swingO3",
   32: "proneStab",
 };
 // PE VA 005B2144: seven groups, two rows/group, six u32/row; normal rows only.
@@ -61,6 +63,8 @@ const SHOOT_ACTIONS: Readonly<Record<number, readonly number[]>> = {
   4: [23],
   7: [24, 25, 26],
 };
+// PE 005B2374: 14 rows, 3 dwords/row. Only normal rows of groups1/6 are nonzero.
+const MAGIC_ACTIONS: Readonly<Record<number, readonly number[]>>={1:[28,29],6:[28,29]};
 export interface BasicAttackAction {
   action: number;
   stance: string;
@@ -85,6 +89,8 @@ export interface BasicAttackProfile {
   sfx?: string;
   melee: BasicAttackAction[];
   shoot: BasicAttackAction[];
+  /** 428040 normal rows; optional only for historical fixture profiles. */
+  magic?:BasicAttackAction[];
   /** 512F90 action32: never a member of the standing random melee table. */
   prone?: BasicAttackAction;
 }
@@ -97,7 +103,7 @@ export function basicAttackPostureAllows(action: number, shoot: boolean, movemen
   return state === 10 ? !shoot && action === 32 : action !== 32;
 }
 /** Supported LIVE attack contract. Original server validation is unavailable; reject unsupported
- * skills/magic elsewhere, and do not let unknown actions skip timing/ammo checks here.
+ * skills in their dedicated paths, and do not let unknown actions skip timing/ammo checks here.
  */
 export function validatedBasicAttack(
   profile: BasicAttackProfile | undefined, attack: ClientAttack, shoot: boolean, movement: number, booster=0,
@@ -143,7 +149,7 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
         typeof info.attackSpeed === "number" ? Math.trunc(info.attackSpeed) : 3,
       ),
     );
-    const actionsOf = (ids: readonly number[]): BasicAttackAction[] =>
+    const actionsOf = (ids: readonly number[], magic=false): BasicAttackAction[] =>
       ids.flatMap((action) => {
         const stance = BASIC_ATTACK_STANCES[action];
         if (!stance || !reader.node(`${weapon}/${stance}`)) return [];
@@ -154,7 +160,7 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
         );
         if (frames.length === 0) return [];
         const effect =
-          typeof info.afterImage === "string"
+          !magic && typeof info.afterImage === "string"
             ? `Character/Afterimage/${info.afterImage}.img/0/${stance}`
             : undefined;
         const boundsNode: Record<string, unknown> =
@@ -199,6 +205,7 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
             ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),
             melee: actionsOf(MELEE_ACTIONS[group]!),
             shoot: actionsOf(SHOOT_ACTIONS[group] ?? []),
+            magic: actionsOf(MAGIC_ACTIONS[group] ?? [],true),
             prone: actionsOf([32])[0],
           };
     // Resource bound, not an original gameplay limit; all parsing is synchronous here.

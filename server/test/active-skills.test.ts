@@ -52,7 +52,7 @@ test('HP strictly greater than cost, MP equality allowed, no mutation on refusal
   assert.deepEqual(activeSkillCost({hp:9,mp:7},{hpCon:8,mpCon:7}),{hp:1,mp:0});
   assert.equal(activeSkillCost({hp:0,mp:500},{}),undefined);
   assert.equal(activeSkillCost({hp:50,mp:6},{mpCon:7}),undefined);
-  assert.equal(activeSkill(2001005),undefined); // No free Magic Claw path.
+  assert.equal(activeSkill(2001005)?.kind,"magic"); // Independent magic admission, not a free physical path.
   assert.equal(activeSkill(2001002),undefined); // No pretend Magic Guard without damage transfer.
   assert.equal(activeSkill(1301006),undefined); // Present in archive, absent from native dispatch.
 });

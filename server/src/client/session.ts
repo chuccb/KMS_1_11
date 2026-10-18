@@ -421,7 +421,7 @@ export type ClientEvent =
   /** `0x30`: the monster was hit; its `die1` frames are the corpse. */
   | { kind: "mob-die"; mobId: number }
   | { kind: "mob-leave"; mobId: number }
-  /** `0x23`/`0x24`: another user's melee/shot, including action, speed and projectile id. */
+  /** `0x23`/`0x24`/`0x25`: another user's melee/shot, including action, speed and projectile id. */
   | {
       kind: "user-attack";
       characterId: number;
@@ -429,6 +429,7 @@ export type ClientEvent =
       skillLevel:number;
       facingLeft: boolean;
       shoot: boolean;
+      magic?:boolean;
       action: number;
       speed: number;
       projectileItemId: number;
@@ -993,6 +994,7 @@ export class ClientSession {
     facingLeft = false,
     options: {
       shoot?: boolean;
+      magic?:boolean;
       action?: number;
       speed?: number;
       projectileSlot?: number;
@@ -1011,6 +1013,7 @@ export class ClientSession {
       this.abilityPending
     )
       throw new Error("attack blocked by a pending character operation");
+    if(options.magic&&options.shoot)throw new RangeError("an attack cannot be both magic and shoot");
     if (
       options.shoot &&
       (!Number.isInteger(options.projectileSlot) ||
@@ -1039,7 +1042,7 @@ export class ClientSession {
     await link.send(
       encodeClientAttack(
         attack,
-        options.shoot
+        options.magic ? CLIENT_FIELD_OPCODE.magicAttack : options.shoot
           ? CLIENT_FIELD_OPCODE.shootAttack
           : CLIENT_FIELD_OPCODE.attack,
       ),
@@ -1875,8 +1878,9 @@ export class ClientSession {
           return;
         }
         case FIELD_OPCODE.userAttack:
-        case FIELD_OPCODE.userShootAttack: {
-          // `0x23`/`0x24`: the others' half of an attack. The attacker already drew it, so this
+        case FIELD_OPCODE.userShootAttack:
+        case FIELD_OPCODE.userMagicAttack: {
+          // `0x23`/`0x24`/`0x25`: the others' half of an attack. The attacker already drew it, so this
           // only ever arrives for somebody else (`relayAttack`).
           const attack = readUserAttack(new PacketReader(plain, 1));
           this.emit({
@@ -1885,6 +1889,7 @@ export class ClientSession {
             skillId:attack.skillId,skillLevel:attack.skillLevel,
             facingLeft: attack.facingLeft,
             shoot: opcode === FIELD_OPCODE.userShootAttack,
+            magic: opcode === FIELD_OPCODE.userMagicAttack,
             action: attack.action,
             speed: attack.speed,
             projectileItemId: attack.projectileItemId,

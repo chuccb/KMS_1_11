@@ -48,6 +48,7 @@ export function combatAssets({fetcher = globalThis.fetch, now = () => performanc
       if (!Number.isInteger(id) || id < 1300000 || id >= 1500000) return Promise.resolve(undefined);
       return get(attacks, id, 'attack', p => p?.weaponId === id && Number.isInteger(p.speed) && p.speed >= 0 && p.speed <= 6 && (p.baseSpeed===undefined||Number.isInteger(p.baseSpeed)) &&
         Array.isArray(p.melee) && Array.isArray(p.shoot) && [...p.melee, ...p.shoot].every(validAction) &&
+        (p.magic===undefined || (Array.isArray(p.magic)&&p.magic.every(validAction))) &&
         (!p.prone || (validAction(p.prone) && p.prone.action === 32 && p.prone.stance === 'proneStab')), onAttack);
     },
     projectile(id) {

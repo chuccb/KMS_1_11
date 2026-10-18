@@ -131,7 +131,8 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 
 ## 最近功能與限制
 
-- 本輪補原穿戴順序、server正反換裝驗需求與原子提交、主動攻擊原時鐘關聯／遠端冷載入身份守衛；[證據與政策](docs/NATIVE_EQUIP_ADMISSION.md)／ADR-072。遠距工具可分族、明確補最低級；已有武器可只補級，不改原需求。
+- 最新續作：[兩招原版魔法與完整消費／生命週期](docs/NATIVE_MAGIC_SKILLS.md)／ADR-073。修正120ms多段時鐘與EVA/PDD入口漏接、新增MAD藥水；已列十二招，不宣稱全技能，未執行測試。
+- 前輪補原穿戴順序、server正反換裝驗需求與原子提交、主動攻擊原時鐘關聯／遠端冷載入身份守衛；[證據與政策](docs/NATIVE_EQUIP_ADMISSION.md)／ADR-072。遠距工具可分族、明確補最低級；已有武器可只補級，不改原需求。
 
 - 本輪射擊技能與彈藥交易、原攻速欄識別／換武器失效、ACK時鐘更正已實作；沒有猜Booster施放幅度或Magic Guard的server規則。
 

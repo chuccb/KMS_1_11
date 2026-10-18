@@ -1,3 +1,4 @@
+import type {TemporaryStatUpdate} from "../protocol/temporarystat.ts";
 /**
  * Using a consumable: what an item in the USE tab does, and what the server does about it.
  *
@@ -50,6 +51,7 @@ import type { CharacterStats } from "../protocol/chardata.ts";
 import type { VitalReport } from "./vitals.ts";
 
 /** The `spec` fields this server knows how to apply, in the order the archive lists them. */
+export const TIMED_CONSUME_FIELDS=["speed","pad","mad","acc","eva","pdd"] as const;
 const APPLIED_SPEC_FIELDS = ["hp", "mp", "hpR", "mpR"] as const;
 
 /**
@@ -70,7 +72,8 @@ export interface ConsumeSpec {
   mpR?: number;
   /** Destination of a 203-family item; `-1` is "the nearest town" (`spec/moveTo`). */
   moveTo?: number;
-  /** Implemented timed mechanics: movement, basic physical attack/accuracy and contact evasion/defence. */
+  /** Implemented timed mechanics: movement, physical attack, magic MAD, accuracy and contact evasion/defence. */
+  mad?:number;
   pad?: number;
   acc?: number;
   eva?: number;
@@ -78,7 +81,7 @@ export interface ConsumeSpec {
   speed?: number;
   time?: number;
   /**
-   * `spec` field names that exist on this item but are **not** applied (`mad`, `mdd`, …: the buff line). A use of one of these is refused, so nothing is lost silently.
+   * `spec` field names that exist on this item but are **not** applied (`mdd`, …: unimplemented mechanics). A use of one of these is refused, so nothing is lost silently.
    */
   unapplied: string[];
 }
@@ -118,16 +121,16 @@ export function consumeSpecOf(
       : undefined;
   };
   const applied = new Set<string>([...APPLIED_SPEC_FIELDS, MOVE_TO_FIELD]);
-  // Only mechanics with a live consumer are accepted. MAD/MDD/etc still refuse whole items.
+  // Only mechanics with a live consumer are accepted. MDD/unknown mechanics still refuse whole items.
   const time = read("time");
-  const timed: Pick<ConsumeSpec, "speed" | "pad" | "acc" | "eva" | "pdd" | "time"> = {};
+  const timed: Pick<ConsumeSpec, typeof TIMED_CONSUME_FIELDS[number] | "time"> = {};
   if (
     time !== undefined &&
     Number.isInteger(time) &&
     time > 0 &&
     time <= 0x7fffffff
   ) {
-    for (const key of ["speed", "pad", "acc", "eva", "pdd"] as const) {
+    for (const key of TIMED_CONSUME_FIELDS) {
       const n = read(key);
       if (
         n !== undefined &&
@@ -203,4 +206,16 @@ export function consumeDeltas(
   if (hpDelta !== 0) report.hpDelta = hpDelta;
   if (mpDelta !== 0) report.mpDelta = mpDelta;
   return report;
+}
+
+/** Same allowlist as the spec reader: a decoded EVA/PDD/MAD must reach the wire and ledger.
+ * Missing duration/unsupported fields refuses the WHOLE item; no partial effect/consumption. */
+export function consumeTemporary(spec:ConsumeSpec,itemId:number):TemporaryStatUpdate|undefined {
+  if(spec.unapplied.length||!Number.isInteger(spec.time)||!spec.time||spec.time<=0||spec.time>0x7fffffff)return;
+  const values:TemporaryStatUpdate['values']={};
+  for(const key of TIMED_CONSUME_FIELDS)if(spec[key]!==undefined){
+    const value=spec[key]!;if(!Number.isInteger(value)||value===0||value< -32768||value>32767)return;
+    values[key]=value;
+  }
+  return Object.keys(values).length?{durationMs:spec.time,values,sourceIsSkill:false,sourceId:itemId}:undefined;
 }

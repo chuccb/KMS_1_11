@@ -1,5 +1,5 @@
 /** Archive-backed active rules. The original server is unavailable: admission/atomicity are policy. */
-import {activeSkill,activeSkillCost,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions} from '../../../client/active-skills.mjs';
+import {activeSkill,activeSkillCost,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from '../../../client/active-skills.mjs';
 import {scaledAttackDelays} from '../../../client/attack-timing.mjs';
 import type {CharacterData} from '../protocol/chardata.ts';
 import type {ClientAttack} from '../protocol/field.ts';
@@ -50,6 +50,18 @@ export function validatedActiveRanged(character:CharacterData,catalog:SkillCatal
   if(!action||!ammo||attack.projectileSlot!==ammo.slot)return;
   return {learned,ammo,motion:{...action,delays:scaledAttackDelays(action.baseDelays,attack.speed)}};
 }
+/** 5195D0 -> 514D30. Prone fallback is ordinary melee, never a skill32 packet. */
+export function validatedActiveMagic(character:CharacterData,catalog:SkillCatalog|undefined,
+  profile:BasicAttackProfile|undefined,attack:ClientAttack,movement:number,foothold:number) {
+  const learned=learnedActive(character,catalog,attack.skillId);
+  if(!learned||learned.rule.kind!=='magic'||!profile||!Number.isInteger(foothold)||foothold<=0||attack.speed!==activeMagicSpeed(profile)||
+    !basicAttackPostureAllows(attack.action,false,movement)||attack.action===32||
+    attack.projectileSlot!==undefined||attack.targetCount!==attack.targets.length||attack.targets.length>1||
+    attack.hits!==activeSkillHits(learned.values)||
+    attack.targets.some(t=>t.damages.length!==attack.hits||t.damages.some(d=>!Number.isInteger(d)||d<0||d>9999)))return;
+  const action=activeMagicActions(profile,attack.skillId,learned.info.skillType).find(a=>a.action===attack.action);
+  return action?{learned,motion:{...action,delays:scaledAttackDelays(action.baseDelays,attack.speed)}}:undefined;
+}
 export interface ActiveArt {
   skillId:number;balls:SpriteFrame[];effects:SpriteFrame[];hits:SpriteFrame[];hitVariants:SpriteFrame[][];
   armorFlash:boolean;useSound?:string;
@@ -70,7 +82,7 @@ export function activeArt(reader:ArtReader,id:number,level:number):ActiveArt {
     .filter(key=>/^\d+$/.test(key)).sort((a,b)=>Number(a)-Number(b))
     .map(key=>spriteFrames(reader,hitRoot,key,[],120)).filter(frames=>frames.length);
   const ballRoot=levelProps.ball!==undefined?`${root}/level`:root;
-  const balls=spriteFrames(reader,ballRoot,'ball',[],120); // 514BA0; empty selects the actual ammo's bullet.
+  const balls=spriteFrames(reader,ballRoot,'ball',[],120); // 514BA0; only RANGED may fall back to ammo. Magic with no ball is instantaneous.
   const sound=`Skill/${String(id).padStart(7,'0')}/Use`;
   return {skillId:id,balls,effects,hits:hitVariants[0]??[],hitVariants,
     armorFlash:id===1001003||id===2001003,

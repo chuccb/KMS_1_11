@@ -1,9 +1,10 @@
+import {magicLeg,clipMagicRay,MAGIC_RANGE,MAGIC_HEIGHT} from "../../../client/magiccombat.mjs";
 import {activeSkillAmmo} from "../../../client/active-skills.mjs";
 import {learnedSkillLevel} from "../game/skills.ts";
 import {temporaryStats} from "../../../client/temporarystats.mjs";
-import {learnedActive,activeTemporary,validatedActiveMelee,validatedActiveRanged} from "../game/activeskills.ts";
+import {learnedActive,activeTemporary,validatedActiveMelee,validatedActiveRanged,validatedActiveMagic,type ActiveArt} from "../game/activeskills.ts";
 import {readClientSkillUse,CLIENT_SKILL_USE_OPCODE} from "../protocol/skilluse.ts";
-import { attackDuration, shotRelease } from "../../../client/attack-timing.mjs";
+import { attackDuration, shotRelease, attackHitDelay } from "../../../client/attack-timing.mjs";
 import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
 import {encodeSystemNotice} from '../protocol/notice.ts';
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
@@ -204,7 +205,7 @@ import {
 } from "../protocol/quest.ts";
 import { awardExp } from "../game/exp.ts";
 import { applyVitalReport } from "../game/vitals.ts";
-import { consumeDeltas, healsVitals, type ConsumeSpec } from "../game/items.ts";
+import { consumeDeltas, healsVitals, consumeTemporary, type ConsumeSpec } from "../game/items.ts";
 import { DEFAULT_PING_MS, Heartbeat } from "./heartbeat.ts";
 import { OnlineAccounts, SeatKeeper, describeSessions } from "./online.ts";
 import { PacketReader } from "../protocol/packet.ts";
@@ -957,6 +958,8 @@ export interface GameEntryServerOptions {
   dropItemAllowed?: (itemId: number) => boolean;
   /** WZ basic action/speed facts; absent data refuses shots rather than inventing them. */
   basicAttack?: BasicAttackProvider;
+  /** WZ path selection; absent art must not turn an Energy Bolt into an instant/free cast. */
+  activeSkillArt?:(id:number,level:number)=>ActiveArt;
   /** Actual learned HP/MP passive x/y values from Skill/100.img and Skill/200.img. */
   growthSkill?: GrowthSkillProvider;
   skills?: SkillCatalog;
@@ -1292,14 +1295,14 @@ export class GameEntryServer {
           (plan.raised?`依原HP／MP成長補足${plan.raised}級；不是原版轉職／練等，舊等級能力還原點已失效。`:"未改等級。")+
           (kind==='ranged-kit'?"相容彈藥已入背包，已有同款武器不重複發放。":"只補足等級，沒有再次發裝備或彈藥。")+
           "未改職業、AP／SP或技能，不自動穿戴；I穿戴、K學技能。EXP餘額保留；等級／道具不由能力還原回溯。";
-      } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
+      } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions" || kind==="magic-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
-        const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:[2002004,2002005];
+        const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:kind==="magic-potions"?[2002002,2002003]:[2002004,2002005];
         const items=structuredClone(session.character.items??emptyCharacterItems());
         const changes:InventoryChange[]=[];
         for(const id of ids) {
           const spec=this.options.consumeSpec?.(id);
-          const expected=id===2002000?"eva":id===2002001?"speed":id===2002004?"pad":"acc";
+          const expected=id===2002000?"eva":id===2002001?"speed":id===2002004?"pad":id===2002002||id===2002003?"mad":"acc";
           if(!spec || spec.unapplied.length || spec[expected]===undefined || spec.time===undefined) throw new Error("原 WZ 的藥水效果不可用，未發放道具。");
           const grant=grantItem(items,id,3);
           if(!grant) throw new Error("消耗欄空間不足以放入全部體驗藥水；背包完全未變更。");
@@ -1311,6 +1314,7 @@ export class GameEntryServer {
         message=kind==="speed-potions"
           ? "已明確領取 3 瓶 속도향상의 물약（2002001）。"
           : kind==="evasion-potions" ? "已明確領取 3 瓶 민첩함의 물약（2002000）；原 WZ EVA+5／180秒，已接碰撞迴避。"
+          : kind==="magic-potions" ? "已明確領取 2002002／2002003 魔力藥水各3瓶；MAD+5／180秒與MAD+10／300秒，同欄替換不疊加。"
           : "已明確領取 2002004 攻擊藥水、2002005 命中藥水各 3 瓶；原 WZ 分別 PAD+5／180秒、ACC+5／300秒。";
         message+="這是非原版體驗發放，會存檔且還原點不回收道具。開啟 I 道具窗，選消耗欄並連點使用；S→Detail 看目前能力。";
       } else {
@@ -1992,16 +1996,13 @@ export class GameEntryServer {
       refuse(`spec field(s) ${spec.unapplied.join(", ")} are not applied yet`);
       return;
     }
-    const items = session.character.items ?? emptyCharacterItems();
     const stats = session.character.stats;
     if (opcode === CLIENT_FIELD_OPCODE.useMapItem) {
       this.useMapItem(session, request, spec, refuse);
       return;
     }
-    const values:TemporaryStatUpdate["values"]={};
-    for(const key of ["speed","pad","acc"] as const) if(spec[key]!==undefined) values[key]=spec[key];
-    const temporary:TemporaryStatUpdate|undefined=Object.keys(values).length && spec.time!==undefined
-      ? {durationMs:spec.time,values,sourceIsSkill:false,sourceId:request.itemId} : undefined;
+    const items=structuredClone(session.character.items??emptyCharacterItems());
+    const temporary=consumeTemporary(spec,request.itemId);
     if (!healsVitals(spec) && !temporary) {
       refuse("no implemented vital or temporary effect in its spec");
       return;
@@ -2026,9 +2027,11 @@ export class GameEntryServer {
       );
       return;
     }
+    const inventoryPacket=encodeInventoryChange([taken.change]);
+    session.character.items=items;
     stats.hp = probe.hp;
     stats.mp = probe.mp;
-    session.send(encodeInventoryChange([taken.change]));
+    session.send(inventoryPacket);
     session.send(statPacket);
     if(temporary){this.temporaryValues(session,Date.now());(session.temporary??=temporaryStats()).apply(temporary,Date.now());}
     this.persist();
@@ -2449,8 +2452,34 @@ export class GameEntryServer {
     const profile = this.options.basicAttack?.(weaponId);
     const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
     const booster=this.temporaryValues(session,now).booster??0;
-    // Active physical skills have their OWN admission path; basic guards stay strict.
-    // Unknown/magic skills must never bypass cooldown, resources or motion validation.
+    // Each active attack family has its OWN admission path; basic guards stay strict.
+    if(opcode===CLIENT_FIELD_OPCODE.magicAttack){
+      const validated=validatedActiveMagic(session.character,this.options.skills,profile,attack,session.at?.action??4,session.at?.foothold??0);
+      if(!validated||!session.at||!session.instance.map.footholdSegments?.has(session.at.foothold??0)||
+        now<(session.skillReadyAt??0)||!this.options.activeSkillArt)return;
+      const {motion,learned}=validated,ball=this.options.activeSkillArt(attack.skillId,learned.level).balls.length>0;
+      const direction=attack.facingLeft?-1:1,at=session.at;
+      const segments=[...(session.instance.map.footholdSegments?.values()??[])];
+      const group=session.instance.map.footholdSegments?.get(at.foothold??0)?.group??0;
+      const targets=attack.targets.filter(target=>{
+        const mob=session.instance.mobs.mob(target.mobId),dx=(target.x-at.x)*direction;
+        // Native report coordinates are impact points, not monster-root coordinates.
+        // Snapshot slop is reconstruction safety policy; native swept RECT ordering isn't server AI.
+        return mob?.alive&&dx>=-BASIC_SHOT_POSITION_SLOP_X&&dx<=MAGIC_RANGE+BASIC_SHOT_POSITION_SLOP_X&&
+          Math.abs(target.y-(at.y-MAGIC_HEIGHT))<=MAGIC_RANGE/4+BASIC_SHOT_POSITION_SLOP_Y&&
+          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X&&Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y&&
+          (!ball||!clipMagicRay(at,target,segments,group).blocked);
+      });
+      const packet=encodeStatUpdate({ack:false,diff:learned.cost});
+      Object.assign(session.character.stats,learned.cost);session.attackReadyAt=now+attackDuration(motion);
+      session.send(packet);this.persist();
+      const accepted={...attack,targets,targetCount:targets.length};
+      this.relayAttack(session,opcode,accepted,targets);
+      if(targets.length){const target=targets[0]!;
+        this.queueActiveHits(session,opcode,accepted,now+shotRelease(motion)+(ball?magicLeg(at,attack.facingLeft,target).duration:0));
+      }
+      return;
+    }
     if(attack.skillId!==0 && shoot) {
       const validated=validatedActiveRanged(session.character,this.options.skills,profile,attack,session.at?.action??4,booster);
       if(!validated||!session.at||now<(session.skillReadyAt??0)||!session.character.items)return;
@@ -2478,8 +2507,7 @@ export class GameEntryServer {
         const mob=session.instance.mobs.mob(targets[0]!.mobId)!,bounds=profile?.melee[0]?.bounds;
         const near=bounds?-Math.min(Math.max(bounds.left,-65),bounds.right-1):65;
         const travel=Math.trunc(Math.hypot(mob.x-(session.at.x+direction*near),mob.y-20-(session.at.y-25))*1.5);
-        this.pendingShots.push({session,instance:session.instance,opcode,attack:accepted,
-          dueAt:now+shotRelease(motion)+travel,deaths:new Map([[mob.mobId,mob.deaths]])});
+        this.queueActiveHits(session,opcode,accepted,now+shotRelease(motion)+travel);
       }
       return;
     }
@@ -2505,10 +2533,8 @@ export class GameEntryServer {
       session.attackReadyAt=now+attackDuration(motion);
       session.send(costPacket);this.persist();
       this.relayAttack(session,opcode,attack,attack.targets);
-      attack.targets.forEach((target,index)=>this.pendingShots.push({session,instance:session.instance,
-        opcode,attack:{...attack,targets:[target],targetCount:1},
-        dueAt:now+shotRelease(motion)+Math.min(index*70,280), // 512F90 -> 515CA0
-        deaths:new Map([[target.mobId,session.instance.mobs.mob(target.mobId)!.deaths]])}));
+      attack.targets.forEach((target,index)=>this.queueActiveHits(session,opcode,
+        {...attack,targets:[target],targetCount:1},now+shotRelease(motion)+Math.min(index*70,280)));
       return;
     }
     const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4,booster);
@@ -2577,6 +2603,17 @@ export class GameEntryServer {
     }
     if (basicMotion) session.attackReadyAt = now + attackDuration(basicMotion);
     this.resolveAttackDamage(session, opcode, attack, now, true);
+  }
+
+  /** Native presentation has 120ms per hit. Matching HP/reward settlement to that clock is
+   * reconstruction policy (the original server isn't available); resources/relay happen ONCE. */
+  private queueActiveHits(session:FieldSession,opcode:number,attack:ClientAttack,dueAt:number):void {
+    for(const target of attack.targets){
+      const mob=session.instance.mobs.mob(target.mobId);if(!mob)continue;
+      target.damages.forEach((damage,ordinal)=>this.pendingShots.push({session,instance:session.instance,opcode,
+        attack:{...attack,hits:1,targetCount:1,targets:[{...target,damages:[damage]}]},
+        dueAt:dueAt+attackHitDelay(ordinal),deaths:new Map([[mob.mobId,mob.deaths]])}));
+    }
   }
 
   private resolveAttackDamage(

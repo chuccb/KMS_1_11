@@ -40,3 +40,5 @@ export function basicAttackAction(profile, action, shoot = false) {
   if (!profile) return undefined;
   return !shoot && action === 32 ? profile.prone : (shoot ? profile.shoot : profile.melee)?.find(entry => entry.action === action);
 }
+/** 4882F0 DAMAGEINFO[0]=impact+120*ordinal; 4862C0's update compares it with world time. */
+export function attackHitDelay(ordinal) {return 120*Math.max(0,Math.trunc(ordinal));}

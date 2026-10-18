@@ -1,5 +1,7 @@
 # 主動技能第一批：施放、七鍵、消耗、近戰、多段、增益與隊伍鏈
 
+> **2026-10-18 最新續作（未測試）**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)／ADR-073：兩招獨立魔法、原動作與MD／元素、foothold／彈道、120ms多段時鐘更正、MAD藥水及EVA／PDD實際使用漏接修復。下文歷史範圍以該續作為準，不代表全技能或逐像素1:1。
+
 > 本輪續作（未測試）：[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)／ADR-072。最低級方便入口、原穿戴順序與server正反swap、主動預測時鐘及remote身份鏈已有續作；本文下列前輪範圍／工具描述保留歷史背景。
 
 > **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
@@ -36,7 +38,7 @@ Disorder 的怪物暫時能力、武器 booster、箭／飛鏢主動技能、魔
 | `5192B0`／`512F90`／`427F60` | prone 不准主動近戰；Double Stab 只准 dagger33，選16／17；其他兩招沿普通武器 action pool。 |
 | `4BE8B0` | Double Stab 先將武器攻速值減一，然後扣 booster 值，再 clamp0..6；本批未啟用語意尚未完整的 booster。不是把 Double Stab 寫死為某個 speed。 |
 | `512F90` | range 不為0時，先在原 Afterimage hit rect 找到一隻，才將遠邊延伸到 range，最多6隻；attackCount 缺失為1，最大15。不是直接放大整個框或上下左右同時乘倍率。 |
-| `512F90 → 515CA0` | impact 為 raw release＋`min(targetIndex×70,280)`；身體仍逐格整數縮放、每格30ms換格。Server 排程與本機／remote 數字一起接，不把全動畫長度當出手點；4882F0的120×ordinal是character識別計算，不能當時間。 |
+| `512F90 → 515CA0` | impact 為 raw release＋`min(targetIndex×70,280)`；身體仍逐格整數縮放、每格30ms換格。Server 排程與本機／remote 數字一起接，不把全動畫長度當出手點；**續追更正（ADR-073）**：4882F0的120×ordinal確為deadline，4862C0以世界時鐘消費；已補每段120ms，不再援用舊判讀。 |
 | `4C7960 LABEL_177` | damage% **在扣 PD 後、critical 前、最後1..9999 clamp前**。每目標預取七個 RNG 值，多段沿同一 cursor 繼續，不能每段再取七個。 |
 | `522300` type1 | s2c **0x29**：u32 characterId、u8 type1、u32 skillId、**u8 level**，4BAC80→50C460。補齊遠端技能；type0升級保留。 |
 | `50D570`／`50D9F0` | 已選level的marker優先，否則root；effect是loader建立的路徑，不是把BSTR內容當路徑。hit/0、hit/1是可隨機選的動畫，各自再包含canvas frames，不可把variant當frame。 |
@@ -98,10 +100,10 @@ Disorder 的怪物暫時能力、武器 booster、箭／飛鏢主動技能、魔
 - Canvas白色 armor mask／3×縮放對應原程序式分支，但瀏覽器合成、過濾與原 Gr2D 的 raster／blend／裁切並未逐像素驗證。
   續讀 Gr2D `10015290` 確認 InsertCanvas 的三個 VT_I4 參數保存進frame record；
   50C460呼叫傳入400／212／0，並非猜測的400ms／白輪廓opacity；白色過濾本身仍列為Canvas近似。
-- hit canvas 以mob root向上20px呈現、多段數字間隔20px、128條效果資源上限、至少200ms的無圖音效載入期限是**重建政策**，不是原版確定常數。
+- hit canvas 以mob root向上20px呈現、128條效果資源上限、至少200ms的無圖音效載入期限是**重建政策**，不是原版確定常數。
 - hit暫時先放在HUD之前的場景overlay，不聲稱已重現原mob child全部z排序；人物effect跟隨自身root，非全場最高z。
 - buff受信任的runtime ledger與死亡清除、recipient拒絕整包、未結算技能死亡取消，均為伺服器安全政策；原server不存在於倉庫。
-- 尚未支援未知temp bits、全部武器booster、怪物debuff、魔法／投射技能與手動解除。不能把「七個已實作」寫成「全技能完成」。
+- 尚未支援未知temp bits、全部武器booster、怪物debuff與手動解除。魔法／遠距後續見ADR-071／073，不能把已列十二招寫成「全技能完成」。
 
 ### level.effect 的續追結論（不是未解字串fallback）
 

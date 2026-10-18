@@ -1,5 +1,7 @@
 # 有效裝備、能力詳情與普通物理攻擊（2026-10-18）
 
+> **2026-10-18 最新續作（未測試）**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)／ADR-073：兩招獨立魔法、原動作與MD／元素、foothold／彈道、120ms多段時鐘更正、MAD藥水及EVA／PDD實際使用漏接修復。下文歷史範圍以該續作為準，不代表全技能或逐像素1:1。
+
 > **後續重大修補**：實例計算沒有替新物品填數值，真建角的起始劍PAD0使成功命中被clamp為1；
 > 本次才補生成工廠與confirmed舊起始裝備修復。見 [NATIVE_EQUIPMENT_DAMAGE_FIX.md](NATIVE_EQUIPMENT_DAMAGE_FIX.md)。
 > 不能把本文件的手造PAD fixture／靜態公式研究當作原建角鏈已驗證。

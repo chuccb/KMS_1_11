@@ -4454,3 +4454,19 @@ GameEntry共用純規則亦驗反向swap；clone／預encode再commit，0x17尾�
 工具所需level讀真WZ，明確raiseLevel才以原EXP／HPMP成長補足；不是新native opcode或原版任務獎勵。
 主動attackToken只加browser/bridge JSON，不改0x0F/10或0x23/24；回原動作clock，不造admission ACK。
 遠端固定receipt source/z/target identity。原證／重建政策詳[NATIVE_EQUIP_ADMISSION](../NATIVE_EQUIP_ADMISSION.md)。
+
+### 4.46 0x11→0x25魔法獨立鏈、120ms段序更正與道具欄位漏接（2026-10-18，未測試）
+
+- 514D30／428040／PE5B2374：正常row僅group1/6的28/29；skillType3奇列全空。43FC80 alias是swingO1/O3，非magic1/2。
+- 514DDA..514DE8直接傳avatar+152 attackSpeed；不套4BE8B0的物理Booster減速。508700仍逐格clamp縮放。
+- 50D6D0取avatar+52 CVecCtrl；514D30檢查ctrl+112 foothold，537260與落地路徑寫此值及page/group。
+- 491F20在±50..±300每20px切片，half-height=距人物/4；485B80取與薄ray延展後RECT交集中心。不是單一細ray。
+- 514BA0的真ball存在才走564600 directed foothold ray與distance×1.5；Magic Claw無ball無travel且不查牆，不能落入ammo fallback。
+- 4C89D0獨立INT/LUK命中、MAD與技能mastery/mad、MD與元素。4C8B6D每次只inc1，miss1slot／hit3slot，預取7字沿cursor循環。
+- 4BE150 P/I/F/L/W/H/D/U八槽、無數字或0=>999、未知字元失敗；4C89D0以mob P起，skill標999的I..D取max，U不讀，1×.5／2×1.5。
+- **更正舊判讀**：4882F0 DAMAGEINFO[0]=impact+120*ordinal；listing4863C8..4863CD減世界時間再條件跳過、486404呼487A30。
+  這是到期時間，不是character識別。487A30以30px*ordinal提高數字，damage>0才畫skill hit art。
+- 道具reader已允許eva/pdd但handleUseItem只列speed/pad/acc，是實際漏接。共用清單接通，並新增MAD消費者與原藥水；未知MDD仍拒。
+
+原公式、常數表、封包／bridge／remote／消費／生命週期與重建政策詳
+[NATIVE_MAGIC_SKILLS](../NATIVE_MAGIC_SKILLS.md)／ADR-073。所有本輪回歸來源均未執行，不援用歷史PASS。

@@ -1,3 +1,4 @@
+import {elementAttributes} from "./elements.ts";
 /** Native skill books/prerequisites: sub_43FFB0, sub_4BAD60, sub_55ABE0. No invented SP rewards. */
 import { nativeSkillBooks } from "../../../client/jobs.mjs";
 import type { CharacterData, InventoryRecord } from "../protocol/chardata.ts";
@@ -26,6 +27,9 @@ export interface SkillInfo {
   bookId: number;
   name: string;
   desc: string;
+  /** 4BC590 root metadata; not inferred from the skill book or effect art. */
+  skillType?:number;
+  elements?:number[];
   maxLevel: number;
   requirements: SkillChange[];
   levels: SkillLevel[];
@@ -94,6 +98,8 @@ export function skillCatalogOf(
         )
       )
         continue;
+      const elements=elementAttributes(propertyOf(value,"elemAttr"));
+      if(!elements)continue;
       const iconPath = `${path}/skill/${name}/icon`;
       const icon = art.at(iconPath);
       skills.push({
@@ -101,6 +107,8 @@ export function skillCatalogOf(
         bookId: id,
         name: asText(propertyOf(value, "name")),
         desc: asText(propertyOf(value, "desc")),
+        skillType:skillNumericValue(propertyOf(value,"skillType"))??0,
+        elements,
         maxLevel,
         requirements,
         levels,

@@ -2693,3 +2693,24 @@ Magic Guard的WZ百分比存在，但client仍送完整HP傷害／MP0，server�
 不在bridge回覆後再加一次完整delay，也不改native opcode／冒充ACK。多目標消費一次、field／death清理與序列不重用；
 遠端receipt source/z/target snapshot，防冷載入漂移／新生同ID誤中，effect綁remote entity，不回放過期body聲。
 128筆／10秒是資源政策，非原cooldown。詳[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)。
+
+## ADR-073：獨立初階魔法、原hit時鐘更正與實際消費欄位閉合（2026-10-18）
+
+**狀態：已實作來源，未測試／未typecheck／未browser或VM/probe驗證。**
+
+不將物理或射擊改名為魔法：Energy Bolt／Magic Claw用428040／PE5B2374，43FC80原alias28/29=
+swingO1/O3、514D30的raw weapon speed／foothold／491F20逐片擴高搜尋／485B80命中點／514BA0ball／
+564600有向foothold ray；以獨立4C89D0 INT/LUK／MAD/mastery/mad／MD／元素／七字cursor，原0x11→0x25。
+SkillType與八元素槽自WZ讀入，未知元素讓loader拒絕；不猜後版技能動作、免疫、飛彈fallback。
+
+**撤回ADR-070附表衍生的錯誤120×ordinal判讀**：4882F0確實寫到deadline；listing4863C8..4863CD與486404
+證明4862C0按世界時鐘消費。所有已開放主動多段用120ms段序、原30px數字層距、逐段hit art、MISS無技能hit。
+server以此逐段結算HP／獎勵是重建政策，資源／relay仍每次施放一次，保留session/field/mob generation守衛。
+
+**消費鏈缺口**：原reader已接受EVA/PDD，但use-item只轉speed/pad/acc，導致既有2002000實際拒絕；
+共用TIMED_CONSUME_FIELDS修通並加入真正由新魔法消費的MAD。未知MDD仍全拒。藥水clone/preencode兩包才commit，
+工具明確領兩種真WZ MAD藥水，不自動發物。十技加兩技共十二，不稱全完成。
+
+原CShape2D swept pool／同片ZList順序／全CVecCtrl／Gr2D像素與hit child z仍明列界線；
+JSON預測不是native ACK、TCP damage仍client-reported。來源、公式、常數、實際save冷備與工具詳
+[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)。

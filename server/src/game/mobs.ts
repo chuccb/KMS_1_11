@@ -1,3 +1,4 @@
+import {elementAttributes} from "./elements.ts";
 /**
  * The monsters of one field: where they are, and what the server tells the client about them.
  *
@@ -92,8 +93,8 @@ export interface MobTemplate {
   maxHP: number;
   /** `info.maxMP`. What `0x34` carries (`mob+132` is the MP the attack picker spends). */
   maxMP: number;
-  /** Native info PA/PD/acc/eva (NOT later-version PADamage/PDDamage names). */
-  pa?:number; pd?:number; acc?:number; eva?:number; physicalAttribute?:number;
+  /** Native info PA/PD/MD/acc/eva (NOT later-version PADamage/PDDamage names). */
+  pa?:number; pd?:number; md?:number; acc?:number; eva?:number; physicalAttribute?:number; elements?:number[];
   exp: number;
   /**
    * Walking speed as a percentage: `clamp(0, 100 + info.speed, 130)`, the client's own formula
@@ -182,14 +183,6 @@ function dieAnimationMs(root: unknown): number {
   return longest;
 }
 
-/** Physical slot of 4BE150's case-insensitive element parser; missing digits mean 999. */
-function physicalAttributeOf(value:unknown):number {
-  if(typeof value!=="string") return 0;
-  let physical=0;
-  for(const match of value.matchAll(/([A-Za-z])(\d*)/g)) if(match[1]!.toLowerCase()==="p") physical=Number(match[2])||999;
-  return physical;
-}
-
 /** `Mob/<id>.img -> info`, or `undefined` when the archive has no such mob. */
 export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemplate | undefined {
   const path = mobImagePath(templateId);
@@ -203,6 +196,8 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
   if (!actionRoot) return undefined;
   const moveAbility = mobMoveAbility(actionRoot);
   if (moveAbility === undefined) return undefined;
+  const elements=elementAttributes(props.elemAttr);
+  if(!elements)return undefined;
   const speed = asNumber(props.speed, 0);
   return {
     templateId,
@@ -216,7 +211,8 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     pd:Math.max(0,Math.min(999,asNumber(props.PD))),
     acc:Math.max(0,Math.min(999,asNumber(props.acc))),
     eva:Math.max(0,Math.min(999,asNumber(props.eva))),
-    physicalAttribute:physicalAttributeOf(props.elemAttr),
+    md:Math.max(0,Math.min(999,asNumber(props.MD))),
+    elements,physicalAttribute:elements[0],
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
     moveAbility,
     dieMs: dieAnimationMs(actionRoot),

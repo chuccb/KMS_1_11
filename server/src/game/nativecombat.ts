@@ -226,3 +226,35 @@ export function rollNativeTouch(
   }
   return Math.trunc(clamp(damage, 1, 9999));
 }
+
+/** 4C89D0; no physical PAD/accuracy/percentage/level damage penalty/critical substitution. */
+export interface MagicMobStats {level:number;md?:number;eva?:number;physicalAttribute?:number;elements?:number[]}
+export interface MagicAttackTrace {
+  mad:number;accuracy:number;hitRoll:number;mobEva:number;mastery:number;
+  raw:number;attribute:number;afterAttribute:number;defense:number;beforeClamp:number;damage:number;
+}
+export function rollNativeMagic(basis:StatBasis,totals:Record<string,number>,mob:MagicMobStats,
+  values:Record<string,number>,elements:readonly number[],next:()=>number,
+  random?:{values:number[];cursor:number},report?:(trace:MagicAttackTrace)=>void):number {
+  const stream=random??{values:Array.from({length:7},()=>next()),cursor:0};
+  const uniform=(a:number,b:number)=>nativeUniform(stream.values[stream.cursor++%7]!,a,b);
+  const b=basis.basic,mad=clamp(totals.mad??0),eva=clamp(mob.eva??0);
+  const accuracy=(7*Math.trunc(b.luk/10)+3*Math.trunc(b.int/10))*100/(255+10*Math.max(0,mob.level-b.level));
+  const hitRoll=uniform(accuracy*.4,accuracy*.8),mastery=values.mastery??0;
+  const trace:MagicAttackTrace={mad,accuracy,hitRoll,mobEva:eva,mastery,raw:0,attribute:0,afterAttribute:0,defense:0,beforeClamp:0,damage:0};
+  // Listing4C8B6D increments ONCE. A miss consumes one slot; a hit consumes three.
+  if(hitRoll<eva){report?.(trace);return 0;}
+  const factor=(mastery*5+10)*.009000000000000001;
+  let raw=(b.int+3*uniform(mad,mad*factor))*(values.mad??0)*.01;
+  trace.raw=raw;
+  // Native starts from mob P unconditionally, then takes max of skill-selected I..D.
+  // U is parsed but is NOT inspected here; code999 itself is not an invented immunity.
+  let attribute=Math.max(0,mob.elements?.[0]??mob.physicalAttribute??0);
+  for(let slot=1;slot<=6;slot++)if(elements[slot]===999)attribute=Math.max(attribute,mob.elements?.[slot]??0);
+  if(attribute===1)raw*=.5;
+  else if(attribute===2)raw=Math.min(9999,Math.max(raw,raw*1.5));
+  trace.attribute=attribute;trace.afterAttribute=raw;
+  const md=clamp(mob.md??0);trace.defense=uniform(md*.5,md*.6);
+  trace.beforeClamp=raw-trace.defense;trace.damage=Math.trunc(clamp(trace.beforeClamp,1,9999));
+  const result=trace.damage;report?.(trace);return result;
+}

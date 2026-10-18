@@ -1,5 +1,5 @@
 import type {BasicAttackProfile,BasicAttackAction} from '../server/src/game/basicattack.ts';
-export interface ActiveSkill {kind:'buff'|'melee'|'ranged';party?:boolean}
+export interface ActiveSkill {kind:'buff'|'melee'|'ranged'|'magic';party?:boolean}
 export const ACTIVE_SKILLS:Readonly<Record<number,ActiveSkill>>;
 export function activeSkill(id:number):ActiveSkill|undefined;
 export function activeSkillSpeed(speed:number,id:number,booster?:number):number;
@@ -10,3 +10,5 @@ export function activeRangedActions(profile:BasicAttackProfile|undefined,id:numb
 export function activeProjectileLayout(count:number,star?:boolean):{offsetY:number;delayMs:number}[];
 export function activeSkillCost(stats:{hp:number;mp:number},values:Record<string,number>):{hp:number;mp:number}|undefined;
 export function activeMeleeBounds(bounds:BasicAttackAction['bounds'],range:number,facingLeft:boolean,hasNearTarget:boolean):BasicAttackAction['bounds'];
+export function activeMagicActions(profile:BasicAttackProfile|undefined,id:number,skillType?:number):BasicAttackAction[];
+export function activeMagicSpeed(profile:BasicAttackProfile):number;

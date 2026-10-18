@@ -3,6 +3,7 @@ export const ACTIVE_SKILLS = Object.freeze({
   1001003: {kind:'buff'}, 2001003: {kind:'buff'}, 3001003: {kind:'buff'},
   1101006: {kind:'buff', party:true},
   3001004:{kind:'ranged'},3001005:{kind:'ranged'},4001344:{kind:'ranged'},
+  2001004:{kind:'magic'},2001005:{kind:'magic'},
   1001004: {kind:'melee'}, 1001005: {kind:'melee'}, 4001334: {kind:'melee'},
 });
 export const activeSkill = id => Number.isInteger(id)?ACTIVE_SKILLS[id]:undefined;
@@ -43,3 +44,10 @@ export function activeSkillCost(stats,values) {
   // 4BDDC0: HP must remain >0; consuming the last MP is allowed.
   return {hp:stats.hp-hp,mp:stats.mp-mp};
 }
+
+/** 428040 uses the odd row ONLY for root skillType=3 (all its PE rows are empty).
+ * 514D30 passes raw weapon attackSpeed, not the physical Booster/Double Stab calculation. */
+export function activeMagicActions(profile,id,skillType=0) {
+  return activeSkill(id)?.kind==='magic'&&profile&&skillType!==3?profile.magic??[]:[];
+}
+export function activeMagicSpeed(profile) {return profile.baseSpeed??profile.speed;}
