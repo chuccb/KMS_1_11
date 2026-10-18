@@ -1,3 +1,4 @@
+import type { PhysicsStepMs } from "./motion-tuning.ts";
 import type { MoveElement } from "../server/src/protocol/movepath.ts";
 import type {
   NormalizedSegment,
@@ -83,6 +84,8 @@ export interface PlayerBody extends PostureBody, TerrainVelocity {
   jumpQueued: boolean;
   groundJumps: number;
   accumulator: number;
+  /** Selected local experiment; absent legacy bodies retain the original 30ms interval. */
+  simulationStepMs?: PhysicsStepMs;
   /** Last completed controller interval, presentation only; optional for legacy external bodies. */
   renderPrevious?: Readonly<TerrainPoint>;
   knockback?: { x: number; y: number };

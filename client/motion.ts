@@ -1,3 +1,4 @@
+import { physicsStep, type PhysicsStepMs } from "./motion-tuning.ts";
 import type { PostureBody } from "./posture.ts";
 import type { DepthActor } from "./motion-types.ts";
 import type {
@@ -559,21 +560,27 @@ function step(
 }
 /** Native-sized 30ms local controller updates, NOT a claim of the EXE's shared global phase.
  * RAF latches a short jump press until the next update; UI/death clears pending requests.
- * 250ms background-tab cap is explicit browser catch-up policy, not an original constant.
+ * Optional whole-ms steps are browser experiments, not native parity. All force constants and
+ * elapsed time units stay unchanged. 250ms catch-up cap and journal/network limits remain policy.
  */
 export function advancePlayer(
   body: PlayerBody,
   input: MovementInput,
   world: CollisionWorld,
   elapsedMs: number,
+  requestedStep: PhysicsStepMs = NATIVE_STEP_MS,
 ) {
+  const interval = physicsStep(requestedStep);
+  if ((body.simulationStepMs ?? NATIVE_STEP_MS) !== interval) resetPlayerPresentation(body);
+  // Keep the exact unintegrated milliseconds on a live switch: never rescale time or the velocity.
+  body.simulationStepMs = interval;
   latchJump(body, input);
   body.accumulator += clamp(Number.isFinite(elapsedMs) ? elapsedMs : 0, 0, 250);
-  while (body.accumulator + EPS >= PHYSICS.stepMs) {
+  while (body.accumulator + EPS >= interval) {
     resetPlayerPresentation(body);
-    step(body, input, world, PHYSICS.stepMs / 1000);
-    recordMovementTick(body, PHYSICS.stepMs);
-    body.accumulator -= PHYSICS.stepMs;
+    step(body, input, world, interval / 1000);
+    recordMovementTick(body, interval);
+    body.accumulator -= interval;
   }
   return body;
 }

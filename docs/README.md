@@ -31,7 +31,7 @@
 | 主題 | 文件 |
 |---|---|
 | 有向整數地形／雙接觸／物理場界／接觸時刻／KB分支 | [NATIVE_TERRAIN](NATIVE_TERRAIN.md)，非完整R-tree／CVecCtrl |
-| 本機走跳顯示插值／四種自訂鏡頭／偏好與回中 | [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)，保留最多30ms呈現延遲，非全域時相等價 |
+| 可選本機物理步長／插值與十種鏡頭 | [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)；原版呈現原證見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)，非完整全域時相 |
 | 普通地空力學／斜坡切線／抓繩／30ms路徑／wire末端權威 | [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)，非完整CVecCtrl／全域相位 |
 | 怪物主動攻擊／MP／楔形射程／原hit回呼／攻擊中KB與唯讀閱覽 | [NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md) |
 | 怪物KB／NPC名牌與forced方向／冷氣泡readiness | [NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md) |

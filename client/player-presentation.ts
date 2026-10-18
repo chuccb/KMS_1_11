@@ -1,7 +1,7 @@
 import type { PlayerBody } from "./motion-types.ts";
 import type { TerrainPoint } from "./native-terrain.ts";
 import { collisionRound } from "./native-terrain.ts";
-import { NATIVE_STEP_MS } from "./native-locomotion.ts";
+import { physicsStep, type PresentationMode } from "./motion-tuning.ts";
 
 /** CVecCtrl 537520 copies current to previous; 53C2B0 reads the two positions at Gr2D time.
  * The browser retains its existing floor-based accumulator (not the native app's global phase).
@@ -9,12 +9,17 @@ import { NATIVE_STEP_MS } from "./native-locomotion.ts";
  * integration. Never feed this point into physics, collision, attack admission or movement packets.
  */
 export function samplePlayerPosition(
-  body: Pick<PlayerBody, "x" | "y" | "accumulator" | "renderPrevious">,
+  body: Pick<PlayerBody, "x" | "y" | "accumulator" | "renderPrevious" | "simulationStepMs">,
+  mode: PresentationMode = "interpolate",
 ): TerrainPoint {
+  if (mode === "direct") return { x: collisionRound(body.x), y: collisionRound(body.y) };
   const previous = body.renderPrevious ?? body;
   const alpha = Math.max(
     0,
-    Math.min(1, Number.isFinite(body.accumulator) ? body.accumulator / NATIVE_STEP_MS : 0),
+    Math.min(
+      1,
+      Number.isFinite(body.accumulator) ? body.accumulator / physicsStep(body.simulationStepMs) : 0,
+    ),
   );
   const phase = 1 - alpha;
   return {

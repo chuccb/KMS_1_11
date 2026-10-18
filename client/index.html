@@ -24,10 +24,21 @@
       </select>
       <select id="camera-mode" aria-label="鏡頭模式（瀏覽器自訂）"></select>
       <button id="camera-recenter" type="button" title="將鏡頭重新對準角色；固定鏡頭模式也可使用">鏡頭回中</button>
+      <details id="motion-lab">
+        <summary>手感實驗 · 非原版</summary>
+        <section class="motion-lab-panel" aria-label="本機物理與呈現實驗">
+          <strong>本機角色更新；可隨時切換</strong>
+          <label>物理步長 <select id="physics-step" aria-label="本機角色物理步長（實驗）"></select></label>
+          <label>呈現方式 <select id="presentation-mode" aria-label="角色位置呈現"></select></label>
+          <p id="motion-status" role="status" aria-live="polite"></p>
+          <p>小步長增加 CPU 工作；會改變碰撞／軌跡，不保證比原版更好。走速、重力、攻擊動畫、怪物時鐘與網路批次不變。選單開啟時暫停角色輸入，不暫停世界。</p>
+          <button id="motion-reset" type="button">還原 30ms ＋ 平滑插值</button>
+          <small>Esc 關閉並回到遊戲；鏡頭可在旁邊獨立選擇。</small>
+        </section>
+      </details>
       <button id="sound-toggle" type="button" aria-pressed="false">
         聲音：開
       </button>
-      <button id="inv-toggle" type="button">背包</button>
       <button id="test-tools-toggle" type="button" aria-controls="test-tools-shell" aria-expanded="false" disabled>體驗工具（非原版）</button>
       <button id="log-toggle" type="button">日誌</button>
     </header>

@@ -33,7 +33,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 76個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 78個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
@@ -88,6 +89,6 @@ ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checko
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
 main.js與10支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整958/44，既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+完整976/44，既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
 本輪有真Chromium唯讀載入／DPR／PNG測試，不登入LIVE、不操作角色／save、不restart。
-詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
+詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。

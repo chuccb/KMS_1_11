@@ -4,6 +4,7 @@ import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
 import { createCamera, updateCamera } from "./camera.ts";
 import { cameraControls } from "./camera-controls.ts";
+import { motionControls } from "./motion-controls.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
@@ -1293,7 +1294,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
-    itemDialog.open || systemPanel.visible || testToolsPanel.open || talkingNpc !== undefined ||
+    itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) || talkingNpc !== undefined ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -1325,7 +1326,7 @@ function npcAt(clientX, clientY) {
 let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
 function canvasButtonAt(p) {
   if (loginStage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
-      systemPanel.visible || testToolsPanel.open || itemDrag || quickDrag || shopDrag || inventoryDrag ||
+      systemPanel.visible || (testToolsPanel.open || motionSettings.open) || itemDrag || quickDrag || shopDrag || inventoryDrag ||
       shopScrollDrag || inventoryScrollDrag || statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
   const shopHit = shopWindowAt(p.x,p.y);
   if (shopHit) {
@@ -1926,6 +1927,21 @@ const projectiles = [];
 const artMissing = new Set();
 /** The camera: world coordinate shown at the top-left of the 800x600 view. */
 const camera = createCamera();
+const motionSettings = motionControls({
+  panel: requireElement("motion-lab", "details"),
+  step: requireElement("physics-step", "select"),
+  presentation: requireElement("presentation-mode", "select"),
+  reset: requireElement("motion-reset", "button"),
+  status: requireElement("motion-status", "p"),
+  onInteract() {
+    keys.clear();
+    if (playerBody) {
+      playerBody.jumpQueued = false;
+      playerBody.jumpHeld = false;
+    }
+  },
+  onClose() { canvas.focus(); },
+});
 const cameraSettings = cameraControls(
   requireElement("camera-mode", "select"),
   requireElement("camera-recenter", "button"),
@@ -1940,7 +1956,7 @@ const cameraSettings = cameraControls(
  */
 function selfDisplayPosition() {
   return self && playerBody && map?.id === self.mapId
-    ? { ...self, ...samplePlayerPosition(playerBody) }
+    ? { ...self, ...samplePlayerPosition(playerBody, motionSettings.presentation()) }
     : self;
 }
 
@@ -2157,7 +2173,7 @@ ui.worldList.addEventListener("wheel", (event) => {
 window.addEventListener("keydown", (event) => {
   if (
     !["worlds", "characters"].includes(loginStage) ||
-    creationDialogs.open ||
+    motionSettings.open || creationDialogs.open ||
     isEditingControl(document.activeElement)
   )
     return;
@@ -2768,7 +2784,7 @@ function loadQuickItems() {
 function useBagItem(item) {
   const now = performance.now();
   if (!item || loginStage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
-      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || shop !== undefined ||
+      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
   nextBagUseAt = now + 200;
@@ -2855,7 +2871,7 @@ function statusButtonClick(button) {
  * from a focused input/modal/hidden document into the next gameplay update. */
 function movementBlocked() {
   return document.hidden || !document.hasFocus() || portalPending || itemDialog.open ||
-    systemPanel.visible || testToolsPanel.open || selfView?.hp <= 0 || shop !== undefined ||
+    systemPanel.visible || (testToolsPanel.open || motionSettings.open) || selfView?.hp <= 0 || shop !== undefined ||
     talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
 function frame() {
@@ -2904,6 +2920,7 @@ function frame() {
       },
       terrain,
       elapsed,
+      motionSettings.stepMs(),
     );
     if (playerBody.groundJumps !== groundJumps)
       void audio.effect("Game/Jump");
@@ -2951,6 +2968,7 @@ function frame() {
     VIEW_W,
     VIEW_H,
     mapArt?.bounds,
+    playerBody,
   );
   const cameraX = camera.x;
   const cameraY = camera.y;
@@ -3117,12 +3135,12 @@ function frame() {
     const bagHit = inventoryWindowAt(pointerAt.x, pointerAt.y);
     const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
     const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !(testToolsPanel.open || motionSettings.open) &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y)) {
       if(pointed?.skill){const at=tooltipAnchor('skill',pointerAt.x,pointerAt.y);nativeTips.skill(at.x,at.y,pointed.skill,pointed.level);}
       else drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
     }
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open && !pointed &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !(testToolsPanel.open || motionSettings.open) && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
@@ -3552,7 +3570,7 @@ async function swing(skillId=0) {
     !selfView ||
     !playerBody ||
     !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN ||
-    testToolsPanel.open || npcDialog.open || tooltipViewer.open ||
+    (testToolsPanel.open || motionSettings.open) || npcDialog.open || tooltipViewer.open ||
     isEditingControl(document.activeElement) ||
     map?.id !== self.mapId ||
     (playerBody?.ladder && rule?.kind!=='buff') ||
@@ -3583,7 +3601,7 @@ async function swing(skillId=0) {
       entity=selfView;
       if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
         selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible)||
-        testToolsPanel.open||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
+        (testToolsPanel.open || motionSettings.open)||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
         socket?.readyState!==WebSocket.OPEN||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
       if(rule.kind==='buff'){
         if(!activeSkillCost(entity,skillValues)||!publishPlayerMotion())return;
@@ -3669,7 +3687,7 @@ async function swing(skillId=0) {
       || (magic&&!playerBody.grounded)
       || (locomotion(playerBody) === "prone") !== prone
       || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
-      || testToolsPanel.open || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
+      || (testToolsPanel.open || motionSettings.open) || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
       || isEditingControl(document.activeElement)) return;
     if ((shoot&&!bulletFrames.length)||[...frames,...effects,...bullets].some(frame=>!frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
@@ -3826,7 +3844,7 @@ function drawWhisperRecipient() {
   ctx.fillText(whisperRecipient || "모두에게",246,581);ctx.restore();
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open ||
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) ||
       loginStage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
   const owner=quickOwner, epoch=itemEpoch;
@@ -3889,7 +3907,7 @@ function beginSkillDrag(skill,p) {
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
   if (!itemId || loginStage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
-      portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open || shop!==undefined ||
+      portalPending || itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
   if (quickSkillAllowed(itemId)?!skillPanel.level(itemId.skillId):!quickItemState(inventory,itemId).item) return false;
@@ -3913,7 +3931,7 @@ window.addEventListener("mouseup",e=>{
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
       (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginStage!=="game" || !visualFieldActive ||
-      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open ||
+      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) ||
       shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
@@ -4043,7 +4061,7 @@ window.addEventListener("mouseup", (e) => {
   const bag = inventoryWindowAt(p.x, p.y);
   const quickIndex = quickSlotAt(p.x, p.y);
   if (!bag && quickIndex >= 0 && e.target === canvas) {
-    if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !testToolsPanel.open)
+    if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !(testToolsPanel.open || motionSettings.open))
       quickProfile?.bind(quickIndex, d.item.itemId);
     return; // This is never a field drop, even for an unsupported item.
   }
@@ -5277,6 +5295,7 @@ function toggleInventory(force) {
 }
 
 function showPanel(panel) {
+  motionSettings.dismiss();
   loginStage =
     panel === ui.connect
       ? "title"
@@ -5297,6 +5316,7 @@ function showPanel(panel) {
 }
 
 function hidePanels() {
+  motionSettings.dismiss();
   loginStage = "game";
   titleUi.classList.add("hidden");
   pageBar.classList.remove("hidden");
@@ -5406,17 +5426,12 @@ ui.user.addEventListener("keydown", (event) => {
   if (event.key === "Enter") ui.pass.focus();
 });
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
-// The page's own header keeps a button for the same window the ITEM button opens.
-document
-  .getElementById("inv-toggle")
-  ?.addEventListener("click", () => toggleInventory());
-
 // Native F1..F7 plus explicitly browser-only helper buttons. Both go through the same gates.
 function canSendEmotion() {
   return loginStage === "game" && visualFieldActive && selfView && !portalPending &&
     socket?.readyState === WebSocket.OPEN && !document.hidden &&
     !(selfSwing && performance.now() < selfSwing.start + attackDuration(selfSwing)) &&
-    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !testToolsPanel.open &&
+    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !(testToolsPanel.open || motionSettings.open) &&
     !npcDialog.open && !tooltipViewer.open && !talkingNpc && !shop;
 }
 function requestEmotion(value) {
@@ -5437,6 +5452,10 @@ ui.emotes.replaceChildren(...EMOTE_KEYS.map((value) => {
 window.addEventListener("keydown", (event) => {
   if (loginStage !== "game") {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
+    return;
+  }
+  if (motionSettings.open) {
+    if (event.key === "Escape") { event.preventDefault(); motionSettings.close(); }
     return;
   }
   if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
@@ -5542,7 +5561,7 @@ window.addEventListener("keyup", (event) =>
   keys.delete(event.key.toLowerCase()),
 );
 
-// 30ms controller records are batched at 10Hz; flush their ordered path before an attack.
+// Selected-step controller records are batched at 10Hz; flush their ordered path before an attack.
 function publishPlayerMotion() {
   if (
     !self ||
@@ -5741,7 +5760,7 @@ const skillPanel = skillWindow({
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
-    (itemDialog.open || systemPanel.visible) || testToolsPanel.open || talkingNpc !== undefined,
+    (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -6013,7 +6032,7 @@ function openDialogueExample(kind, page = 0) {
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),
   canOpen:()=>loginStage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
-    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !testToolsPanel.open &&
+    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !(testToolsPanel.open || motionSettings.open) &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
   onOpen(){
     localActionEpoch++; keys.clear(); chatHistoryPanel.cancelDrag();itemDrag=quickDrag=undefined;

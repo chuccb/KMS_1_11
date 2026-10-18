@@ -254,7 +254,7 @@ test("typed camera controls populate real HTML schema, persist independently and
     const button = requireElement("camera-recenter", "button");
     const controls = cameraControls(select, button, () => recentered++, f.storage);
     assert.equal(controls.mode(), "zone");
-    assert.equal(select.children.length, 4);
+    assert.equal(select.children.length, CAMERA_MODES.length);
     assert.match(select.title, /晃動/);
     for (const { id } of CAMERA_MODES) {
       select.value = id;

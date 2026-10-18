@@ -2844,3 +2844,21 @@ Chromium排除single-process，避免多context生命週期crash，仍不放寬w
 完整958pass/44fail（1002tests/109files，197.48s），相對c8b52d7 failure multiset新增0／移除0。
 LIVE同PID6097，74modules與唯讀Chromium首幀通過、0WS；未登入／角色操作／save／restart。
 client76TS但main.js、其餘10MJS與44fail仍WIP；完整界線見 [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)。
+
+## ADR-081：明示可選非原版物理步長與十種自訂鏡頭（2026-10-18）
+
+使用者明確要求30ms物理可選、嘗試比原版更順的手感與更多酷鏡頭，並移除重複背包按鈕。
+這是主動選擇的browser實驗，不再將所有非30ms改動視作未授權掩蓋；預設30ms仍保留，原證常數與default branch不變。
+新增純motion-tuning及typed controls：5/8/10/15/20/30/45/60ms、插值／即時位置、獨立localStorage／還原／事件清理。
+interval進入真正advancePlayer積分與journal duration；取樣除以實際step，切換保留pending毫秒而非重設時速。
+只開放本機角色；不改server／mob／動畫／回復／contact時鐘、100ms網路批次或原codec／admission限制。
+
+camera加velocity lead、解析欠阻尼spring／臨界阻尼cinema、platform jump hold、soft-zone與facing shoulder，連既有四種共十種。
+共用VR與單一raster origin；邊界anti-windup、換場／回中／模式切換清動量；不做半套zoom/rotation造成pointer偏移。
+原ITEM／I不變，只刪header重複背包入口。展開面板遮蔽輸入／待完成攻擊請求但不暫停世界；Esc／外部點擊／stage生命週期關閉。
+
+strict／format／build通過，focused81/0與完整976/44（1020tests/110files），既有44 failure multiset無增減。
+預設30ms與9e10525交叉20 scenarios／3540frames／425 movement packet bytes相同，只排除local preference與presentation metadata。
+真source/bundle controls與800px popup、storage／reset／Escape通過；LIVE同PID6097、76modules／首幀、0WS。
+沒有自動登入／操作玩家／save／restart；主觀遊戲手感未替使用者驗收。不宣稱低step保證更順或非原版軌跡與原版相同。
+完整數值意義、取捨與未完成界線見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。

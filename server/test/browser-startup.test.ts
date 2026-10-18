@@ -9,6 +9,11 @@ import { artProviderOf } from "../src/game/art.ts";
 import { isRecord } from "../../client/resource-validation.ts";
 import { CAMERA_MODES } from "../../client/camera.ts";
 import { CAMERA_STORAGE_KEY } from "../../client/camera-controls.ts";
+import { PHYSICS_STEPS } from "../../client/motion-tuning.ts";
+import {
+  MOTION_STEP_STORAGE_KEY,
+  MOTION_PRESENTATION_STORAGE_KEY,
+} from "../../client/motion-controls.ts";
 
 interface FixtureOptions {
   root?: string;
@@ -122,10 +127,70 @@ test("actual HTML and the complete source and bundled module graphs finish start
         );
         assert.ok((await modes.getAttribute("title"))?.length);
       }
+      assert.equal(
+        await page.locator("#inv-toggle").count(),
+        0,
+        "no duplicate header inventory button",
+      );
+      // Header is intentionally hidden at title. Reveal ONLY this DOM component for interaction
+      // tests, not a field/login/actor state. Production shows the identical header in game.
+      await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
+      await page.locator("#motion-lab summary").click();
+      const step = page.locator("#physics-step"),
+        presentation = page.locator("#presentation-mode");
+      assert.deepEqual(
+        await step
+          .locator("option")
+          .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
+        PHYSICS_STEPS.map(String),
+      );
+      for (const ms of PHYSICS_STEPS) {
+        await step.selectOption(String(ms));
+        assert.equal(
+          await page.evaluate((key) => localStorage.getItem(key), MOTION_STEP_STORAGE_KEY),
+          String(ms),
+        );
+      }
+      await step.selectOption("8");
+      await presentation.selectOption("direct");
+      assert.match(await page.locator("#motion-status").innerText(), /8ms.*不加插值延遲/);
+      assert.equal(
+        await page.evaluate((key) => localStorage.getItem(key), MOTION_PRESENTATION_STORAGE_KEY),
+        "direct",
+      );
+      // The popup must remain within the viewport on the 800px game-sized window as well.
+      await page.setViewportSize({ width: 800, height: 600 });
+      const popup = await page.locator(".motion-lab-panel").boundingBox();
+      assert.ok(popup && popup.x >= 0 && popup.x + popup.width <= 800);
       // A page-only preference reload, not login/field entry/character input.
       await page.reload({ waitUntil: "load" });
       await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
       assert.equal(await modes.inputValue(), "fixed");
+      assert.equal(await step.inputValue(), "8");
+      assert.equal(await presentation.inputValue(), "direct");
+      await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
+      await page.locator("#motion-lab summary").click();
+      await page.locator("#motion-reset").click();
+      assert.equal(await step.inputValue(), "30");
+      assert.equal(await presentation.inputValue(), "interpolate");
+      assert.equal(
+        await modes.inputValue(),
+        "fixed",
+        "resetting motion must not overwrite camera preference",
+      );
+      await step.press("Escape");
+      assert.equal(
+        await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
+        false,
+      );
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
+      await page.locator("#motion-lab summary").click();
+      await page.locator("#camera-recenter").click();
+      assert.equal(
+        await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
+        false,
+        "outside pointer closes settings without leaking a stale input lock",
+      );
       await page.locator("#camera-recenter").evaluate((button) => {
         if (!(button instanceof HTMLButtonElement)) throw new Error("Expected camera button");
         button.click();

@@ -41,7 +41,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 76 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 78 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
   **`client/main.js` 及 server/scripts 剩餘 10 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
@@ -112,7 +112,15 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 
 ## 實際驗證狀態
 
-最新顯示／快取／工具增量：strict／format／build 通過，最終focused63/0（8 files）；完整
+最新手感實驗增量：strict／format／build通過，focused81/0（9 files），完整976/44（1020 tests / 110 files）；
+相對9e10525 failure multiset新增0／移除0，預設30ms的3540frames／425原movement packet bytes與修改前相同。
+LIVE同PID6097，76 modules與唯讀首幀通過、0WS；不登入／角色／save／restart。
+新增兩個typed controls/rules實作，只有原生TS／ESNext／Bun；main與10MJS仍待實際遷移。
+非原版步長／鏡頭的授權與限制見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。
+
+### 前輪顯示／影像快取與工具（9e10525）
+
+顯示／快取／工具增量：strict／format／build 通過，最終focused63/0（8 files）；完整
 **958 pass / 44 fail，1002 tests / 109 files**，相對c8b52d7失敗multiset新增0／移除0。
 真Chromium五DPR、同頁DPR-only切換、title120畫格、真WZ avatar decode/revoke後像素通過。
 LIVE仍同PID6097、74 modules與首幀通過、0WS，不登入／操作角色／save／restart。

@@ -17,7 +17,7 @@
 | 查還原方法與證據規則 | [還原原則](docs/REBUILD_PRINCIPLES.md) |
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
 | 查啟動參數與協定工具 | [server 說明](server/README.md) |
-| 走跳顯示插值、四種鏡頭與驗證限制 | [呈現與鏡頭](docs/PLAYER_PRESENTATION_CAMERA.md) |
+| 可選物理步長、插值與十種自訂鏡頭 | [手感實驗](docs/MOTION_EXPERIMENTS.md)／[原版呈現原證](docs/PLAYER_PRESENTATION_CAMERA.md) |
 | 顯示／影像快取與安全診斷工具、遷移進度 | [整理與限制](docs/BROWSER_TOOL_CLEANUP.md)／[嚴格TS遷移](docs/BUN_MIGRATION.md) |
 | 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
 
@@ -80,6 +80,14 @@ bun server/src/cli.ts serve \
 重要 save 請另行匯出保存，不能期待 Git push 會帶走它。
 恢復原檔可使用 `bun tools/serve-existing-save.ts <真實save路徑>`；檔案不存在／空白會拒絕啟動。
 這個保護入口不自行停服或冷備，必須先由操作者確認。
+
+## 可選手感與鏡頭
+
+遊戲上方「手感實驗 · 非原版」可切換本機角色 **5／8／10／15／20／30／45／60ms**物理步長與「平滑插值／即時位置」。
+預設仍30ms，可一鍵還原；新鏡頭含疾速領航、彈簧追蹤、電影滑軌、平台跑酷、柔性區域、方向側肩，共十種。
+可先比較10ms＋插值＋疾速領航；低步長增加CPU工作並改變數值軌跡，不保證一定更順。
+偏好僅存瀏覽器，不調整人物能力或server時鐘。上方重複背包按鈕已移除，原ITEM／I保留。
+詳見 [手感實驗與驗證界線](docs/MOTION_EXPERIMENTS.md)。
 
 ## 普通角色動作（單元回歸已執行；完整瀏覽器驗收未完成）
 

@@ -1,5 +1,8 @@
 # 普通移動力學、地形狀態、繩梯與有序移動路徑
 
+> ADR-081後續依使用者要求加入明示的本機步長實驗（5–60ms），預設仍30ms；不改此處原證常數、server／怪物時鐘。
+> 非原版差異、切換政策與驗證見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)。
+
 > 2026-10-18 後續：已補原537520／53C2B0的本機前後位置顯示取樣，涵蓋走路與跳躍而非改力學。
 > 原553F40的ceil全域時相尚未移植；browser保留floor權威時鐘與最多30ms呈現延遲。
 > 四種camera政策、來源交叉、實際執行結果及LIVE保存見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)。

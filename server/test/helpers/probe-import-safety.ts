@@ -28,4 +28,6 @@ await import("../../scripts/browser_display_probe.ts");
 await import("../../scripts/browser_render_probe.ts");
 await import("../../../client/display-controls.ts");
 await import("../../../client/image-cache.ts");
-console.log(JSON.stringify({ imported: 8, attempts }));
+await import("../../../client/motion-tuning.ts");
+await import("../../../client/motion-controls.ts");
+console.log(JSON.stringify({ imported: 10, attempts }));

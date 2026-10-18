@@ -2,10 +2,22 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：顯示／影像快取與診斷工具
+## 最新增量：使用者可選物理與十種鏡頭
+
+依明確要求開放非原版5/8/10/15/20/30/45/60ms本機角色物理步長；預設30ms保留。
+獨立插值／即時呈現選項、還原與typed local preference；camera增加六種真實構圖／解析彈簧模式，共十種。
+移除重複header背包入口，不移除原ITEM／I。新增motion-controls／motion-tuning，client目前 **78支TS**；main與10MJS仍WIP。
+
+strict／format／build通過，focused **81/0，9 files**；完整 **976/44，1020 tests / 110 files**。
+相對9e10525失敗multiset新增0／移除0；新增18案例，沒有skip或調低原admission。
+原9e10525與新預設30ms的20 scenarios／3540frames／425 movement packet bytes一致（排除local preference與顯示history）。
+真source/bundle UI驗證與LIVE76 modules首幀通過、0WS；LIVE保持PID6097，未登入／操作角色／save／restart。
+具體實驗界線見 [MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)；本機日誌在ignored generated/motion-experiments/。
+
+## 前輪增量：顯示／影像快取與診斷工具
 
 本輪實際抽出 `display-controls.ts`／`image-cache.ts`，含拒絕 storage、dispose、DPR-only 畫格更新、
-archive hard bound／avatar LRU、cold retry／stale identity／blob URL 完整生命週期。client 目前 **76 支 TS**，main 仍是 JS。
+archive hard bound／avatar LRU、cold retry／stale identity／blob URL 完整生命週期。當輪client **76 支 TS**，main 仍是 JS。
 三支 display/render/whisper 工具改為嚴格 TS＋純 import／顯式 runner，移除其舊 MJS；其餘 **10 支 MJS** 仍未遷移。
 whisper 的跨系統歷史場景仍欠 native admission 對齊；**不能沿稱舊105項通過**。
 
@@ -49,7 +61,7 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 ## 已落實
 
 - Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI。
-- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（本輪增加至76）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
+- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前78）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
 - 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的兩個 entry／完整 import graph 均驗過狀態、MIME、JS parser；本輪另以真正 Chromium 執行初始化及 rendering，不登入 LIVE。
