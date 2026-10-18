@@ -1,12 +1,18 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-18。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-19。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-最新顯示端點修正（ADR-085）：整數canvas layout＋inverse DPR transform，42組原素材完整screenshot RGBA差異全0，未加銳化。
+本輪三個login UI實作模組strict TS遷移：main5963→5356行、client89支TS，保留主入口／3MJS未完債務。
+六項registry latest重新查證與下表exact pins一致（UTC2026-10-18T16:09:10Z／台北2026-10-19）；不為升級而虛構版號。
+strict／format／build與focused45/0通過，21組舊／新完整邏輯畫布RGBA全0差異、30純imports／0 I/O。
+完整1054/44（1098tests／122files，285.07s），對1520ac9 failure multiset新增0／移除0，CI仍不綠。
+完整回歸與原證／安全界線見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
+
+前輪顯示端點修正（ADR-085）：整數canvas layout＋inverse DPR transform，42組原素材完整screenshot RGBA差異全0，未加銳化。
 strict／format／build通過；完整1038/44（1082 tests／120 files，287.81s），對c773329 failure multiset新增0／移除0，CI仍不綠。
 詳見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。工具版本與下表不變；main／3MJS仍待實際遷移。
 
-前輪鏡頭增量：六個registry latest仍與下表exact pins一致；新增合成／lens／控制的strict TS責任，client現86支TS。
+前輪鏡頭增量：當輪六個registry latest與下表exact pins一致；新增合成／lens／控制的strict TS責任，當輪client86支TS。
 strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s），對2eaa5f2失敗multiset新增0／移除0，CI仍不綠。
 七DPR×五尺寸／游標、16組原PNG分層與LIVE同PID唯讀驗證見 [PIXEL_CAMERA](PIXEL_CAMERA.md)；main／3MJS仍待實際遷移。
 
@@ -23,12 +29,12 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 | checkout Action | v7.0.1 | CI 固定完整 commit SHA |
 | setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
-本日查證：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
+版本來源（六項registry latest本輪已重查；release頁與CI Action SHA沿用前輪查證）：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
 [TypeScript registry](https://registry.npmjs.org/typescript/latest)、
 [Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、
 [Prettier registry](https://registry.npmjs.org/prettier/latest)、
 [setup-bun release](https://github.com/oven-sh/setup-bun/releases/tag/v2.2.0)。
-此為本日最新穩定版基線，不宣稱永遠最新；升版要重新檢查 lockfile、型別、回歸及瀏覽器建置。
+六項runtime／compiler／tool套件為本輪最新穩定版基線，不宣稱永遠最新；升版要重新檢查 lockfile、型別、回歸及瀏覽器建置。
 
 先用官方發行版安裝固定 Bun，再從 repository 根目錄執行：
 
@@ -49,7 +55,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 86 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 89 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
   **`client/main.js` 及 server/scripts 剩餘 3 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。

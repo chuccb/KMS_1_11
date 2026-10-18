@@ -200,7 +200,12 @@ test("integration source: field/offscreen, selection, creation and reset all sha
   const main = source("../../client/main.js"),
     creation = source("../../client/creation.ts");
   assert.match(main, /bodyPose: sampleAvatarMotion/);
-  assert.match(main, /sampleAvatarMotion\(character, look,/);
+  // Character selection delegates through the strict screen controller to the same body clock.
+  const login = source("../../client/login-screen.ts"),
+    painting = source("../../client/login-presentation.ts");
+  assert.match(main, /const loginScreens = loginScreen\(/);
+  assert.match(login, /drawSelectionScreen\(options,/);
+  assert.match(painting, /bodyPose\(\s*character,\s*look,/);
   assert.match(main, /stanceOfEntity\(user, now\);.*off-screen/);
   assert.match(main, /resetAvatarMotion\(selfView\)/);
   assert.match(creation, /bodyPose\(previewActor,\s*look,\s*["']stand1["'],\s*now\)/);

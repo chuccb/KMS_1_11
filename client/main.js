@@ -1,3 +1,4 @@
+import { loginScreen } from "./login-screen.ts";
 import { sceneSurface, screenToWorld } from "./scene-surface.ts";
 import { lensControls } from "./lens-controls.ts";
 import {
@@ -79,13 +80,6 @@ import { movementPortal, arrivalPortal } from "./portals.ts";
 import { statWindow } from "./statwindow.ts";
 import { prepareMapScene, mergeScene, visibleSprite, sceneOrdering } from "./scene.ts";
 import { characterDialogs } from "./creation.ts";
-import {
-  WORLD_UI,
-  CHARACTER_UI,
-  SELECTION_BUTTONS,
-  characterSlot,
-  worldPopulation,
-} from "./selection.ts";
 import { createAudio, spatialVolume } from "./audio.ts";
 import {
   collisionWorld,
@@ -157,78 +151,27 @@ const gameCursor = nativeCursor({
   onError: error => logLine(`cursor: ${error.message}`),
 });
 
-// All login stages share the original 800x600 WZ surface and transparent accessible hit targets.
-const titleUi = document.getElementById("title-ui");
-const titleMenu = document.getElementById("title-menu");
-const titleNotice = document.getElementById("title-notice");
-const rememberUser = document.getElementById("remember-user");
-const pageBar = document.getElementById("bar");
-let loginStage = "title";
-let titleDialogOpen = false;
-let titleHover;
-let titlePressed;
-let loginPending = false;
-let loginWorlds = [],
-  loginCharacters = [];
-let selectedWorld = -1,
-  selectedCharacter = -1;
-let worldScroll = 0,
-  selectionPending = false;
-let selectionHover, selectionPressed;
-const TITLE_BUTTONS = [
-  {
-    id: "title-new",
-    path: "UI/Login.img/Title/BtNew",
-    x: 356,
-    y: 394,
-    dialog: false,
+// Typed login UI owns all title/selection state; callbacks run only after module startup.
+const loginScreens = loginScreen({
+  ctx,
+  ui,
+  image: artImage,
+  avatar: avatarFrame,
+  bodyPose: sampleAvatarMotion,
+  face: sampleAvatarFace,
+  jobName: jobNameOf,
+  audio,
+  connect,
+  send,
+  preload: preloadAvatar,
+  log: logLine,
+  dismissLabs() {
+    motionSettings.dismiss();
+    lensSettings.dismiss();
   },
-  {
-    id: "title-continue",
-    path: "UI/Login.img/Title/BtContinue",
-    x: 356,
-    y: 423,
-    dialog: false,
-  },
-  {
-    id: "title-homepage",
-    path: "UI/Login.img/Title/BtHomepage",
-    x: 356,
-    y: 452,
-    dialog: false,
-  },
-  {
-    id: "title-quit",
-    path: "UI/Login.img/Title/BtQuit",
-    x: 356,
-    y: 481,
-    dialog: false,
-  },
-  {
-    id: "login-lost",
-    path: "UI/Login.img/Title/BtIdPasswdLost",
-    x: 287,
-    y: 331,
-    dialog: true,
-  },
-  { id: "login", path: "UI/Basic.img/BtOK", x: 373, y: 342, dialog: true },
-  {
-    id: "login-cancel",
-    path: "UI/Basic.img/BtCancel",
-    x: 445,
-    y: 342,
-    dialog: true,
-  },
-];
-try {
-  const saved = localStorage.getItem("kms111.loginUser");
-  if (saved) {
-    ui.user.value = saved;
-    rememberUser.checked = true;
-  }
-} catch {
-  // Browser privacy settings may disable persistence. Never store a password.
-}
+  labOpen: () => motionSettings.open || lensSettings.open,
+  creation: () => creationDialogs,
+});
 
 /** @type {WebSocket | undefined} */
 let socket, quitToTitle = false;
@@ -332,20 +275,13 @@ function send(message) {
   socket.send(JSON.stringify(message));
 }
 
-function setLoginPending(pending) {
-  loginPending = pending;
-  ui.login.disabled = pending;
-  ui.user.disabled = pending;
-  ui.pass.disabled = pending;
-  document.getElementById("login-cancel").disabled = pending;
-}
 
 function connect() {
-  if (!clientStartupReady(document.documentElement) || loginPending) return;
+  if (!clientStartupReady(document.documentElement) || loginScreens.loginPending) return;
   quitToTitle=false;
   buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
-  showPanel(ui.connect);
-  setLoginPending(true);
+  loginScreens.showPanel(ui.connect);
+  loginScreens.setLoginPending(true);
   ui.status.textContent = "連線中…";
   ui.status.classList.remove("bad");
   const previous = socket;
@@ -361,7 +297,7 @@ function connect() {
   });
   connection.addEventListener("error", () => {
     if (socket !== connection) return;
-    setLoginPending(false);
+    loginScreens.setLoginPending(false);
     // The usual cause is a proxy that does not forward the upgrade (an https page whose proxy
     // refuses `wss`). Saying so beats a page that silently does nothing.
     ui.status.textContent =
@@ -371,7 +307,7 @@ function connect() {
   });
   connection.addEventListener("close", () => {
     if (socket !== connection) return;
-    setLoginPending(false);
+    loginScreens.setLoginPending(false);
     systemPanel.close(false, false);
     itemDialog.close(false);
     quickDrag = undefined;
@@ -412,7 +348,7 @@ function connect() {
       ui.chatbox.classList.add("hidden");
       testToolsPanel.close(); skillPanel.toggle(false); statPanel.toggle(false); equipPanel.toggle(false);
       toggleInventory(false); closeShop(false); closeDialogue(false);
-      audio.stop(); showPanel(ui.connect); closeTitleLogin();
+      audio.stop(); loginScreens.showPanel(ui.connect); loginScreens.closeTitleLogin();
     }
   });
   connection.addEventListener("message", (event) => {
@@ -471,93 +407,42 @@ function handle(message) {
   }
   switch (message.t) {
     case "login":
-      setLoginPending(false);
+      loginScreens.setLoginPending(false);
       if (message.result !== 0) {
         ui.status.textContent = `登入失敗（結果 ${message.result}）`;
         ui.status.classList.add("bad");
         return;
       }
-      try {
-        localStorage.setItem(
-          "kms111.loginUser",
-          rememberUser.checked ? ui.user.value : "",
-        );
-      } catch {
-        /* Only the account name is optional persistence. */
-      }
+      loginScreens.rememberAccount();
       creationDialogs.setGender(message.gender);
       ui.pass.value = "";
       ui.status.textContent = "";
-      showPanel(ui.worlds);
-      loginWorlds = message.worlds;
-      selectedWorld = -1;
-      worldScroll = 0;
-      selectionPending = false;
-      rebuildWorldRows();
+      if (!loginScreens.replaceWorlds(message.worlds)) return;
+      loginScreens.showPanel(ui.worlds);
       logLine(`login ok: ${message.worlds.length} world(s)`);
       return;
 
     case "characters":
       if (message.result !== 0) {
-        selectionPending = false;
-        updateSelectionControls();
+        loginScreens.setSelectionPending(false);
         ui.characterStatus.textContent = `讀取角色失敗（結果 ${message.result}）`;
         ui.characterStatus.classList.add("bad");
         return;
       }
-      selectionPending = false;
+      loginScreens.setSelectionPending(false);
       ui.characterStatus.textContent = "";
       ui.characterStatus.classList.remove("bad");
-      const priorId = loginCharacters[selectedCharacter]?.id;
-      loginCharacters = message.characters.slice(0, CHARACTER_UI.slots);
-      const retained = loginCharacters.findIndex((c) => c.id === priorId);
-      selectedCharacter =
-        retained >= 0
-          ? retained
-          : loginCharacters.length
-            ? Math.min(
-                Math.max(selectedCharacter, 0),
-                loginCharacters.length - 1,
-              )
-            : -1;
-      ui.characterList.replaceChildren(
-        ...loginCharacters.map((character, index) => {
-          const button = document.createElement("button");
-          const slot = characterSlot(index);
-          button.type = "button";
-          button.className = "sprite-hit";
-          button.textContent = character.name;
-          button.title = `${character.name} · Lv.${character.level}`;
-          button.setAttribute?.("aria-label", button.title);
-          Object.assign(button.style, {
-            left: `${slot.x}px`,
-            top: `${slot.y}px`,
-            width: `${slot.width}px`,
-            height: `${slot.height}px`,
-          });
-          button.addEventListener("click", () => selectLoginCharacter(index));
-          button.addEventListener("dblclick", enterLoginCharacter);
-          preloadAvatar({
-            face: character.face ?? 20000,
-            hair: character.hair ?? 30000,
-            items: character.items ?? [],
-          });
-          return button;
-        }),
-      );
-      updateSelectionControls();
+      if (!loginScreens.replaceCharacters(message.characters)) return;
       logLine(`characters: ${message.characters.length}`);
       return;
 
     case "created":
       if (message.ok) ui.newName.value = "";
-      selectionPending = false;
-      updateSelectionControls();
+      loginScreens.setSelectionPending(false);
       ui.characterStatus.textContent = ""; // CUINewChar already owns native failure notices; no extra HTML overlay.
       ui.characterStatus.classList.remove("bad");
       if (message.ok) {
-        const index = loginCharacters.findIndex((c) => c.id === message.id);
-        if (index >= 0) selectLoginCharacter(index);
+        loginScreens.selectCharacterId(message.id);
       }
       logLine(
         message.ok
@@ -619,7 +504,7 @@ function handle(message) {
       for (const npc of message.npcs) {
         npcs.set(String(npc.npcId), npc);npcVisuals.add(npc,performance.now());
       }
-      hidePanels();
+      loginScreens.hidePanels();
       // The server drops the windows with the map (the shop and the dialog belong to its NPCs), so
       // this side must not tell it to close something it already forgot.
       closeShop(false);
@@ -1105,7 +990,7 @@ function handle(message) {
       mobAttackFx.clear();mobWorldEffects.length=0;mobPreview.reset();
       closeDialogue(false);
       portalPending = false;
-      setLoginPending(false);
+      loginScreens.setLoginPending(false);
       ui.status.textContent = `伺服器斷線：${message.reason}`;
       ui.status.classList.add("bad");
       logLine(`disconnect: ${message.reason}`);
@@ -1121,10 +1006,9 @@ function handle(message) {
         : message.message;
       if (self) chatLine("系統", text);
       else {
-        setLoginPending(false);
-        selectionPending = false;
-        updateSelectionControls();
-        if (loginStage !== "title") ui.characterStatus.textContent = text;
+        loginScreens.setLoginPending(false);
+        loginScreens.setSelectionPending(false);
+        if (loginScreens.stage !== "title") ui.characterStatus.textContent = text;
         ui.status.textContent = text;
         ui.status.classList.add("bad");
       }
@@ -1331,7 +1215,7 @@ function npcAt(clientX, clientY) {
 
 let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
 function canvasButtonAt(p) {
-  if (loginStage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
+  if (loginScreens.stage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
       systemPanel.visible || browserLabOpen() || itemDrag || quickDrag || shopDrag || inventoryDrag ||
       shopScrollDrag || inventoryScrollDrag || statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
   const shopHit = shopWindowAt(p.x,p.y);
@@ -1577,7 +1461,7 @@ releaseOnInterrupt(() => {
   inventorySuppressClick = shopSuppressClick = false;
   clearCanvasHover();
   canvasButtonPress = canvasButtonActivation = undefined;
-  titlePressed = titleHover = selectionPressed = selectionHover = undefined;
+  loginScreens.clearPointer();
   localActionEpoch++;
   keys.clear();
 });
@@ -2004,362 +1888,6 @@ function artImage(path) {
   return archiveCache.get(path);
 }
 
-/** Title positions are CUITitle/sub_4D05A0 and CUILogin/sub_4CEEC0's control coordinates. */
-function drawTitleScreen() {
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  const stamp = (path, x, y) => {
-    const art = artImage(path);
-    if (art.ready) ctx.drawImage(art.img, x, y);
-  };
-  stamp("UI/Login.img/Title/backgrnd", 0, 0);
-  if (loginStage === "title") {
-    stamp("UI/Login.img/Title/menu", 302, 358);
-    // Modal login sits above the still-visible title menu, centred by sub_461C50.
-    for (const button of TITLE_BUTTONS.filter((entry) => !entry.dialog)) {
-      const state =
-        !titleDialogOpen && titlePressed === button.id
-          ? "pressed"
-          : !titleDialogOpen && titleHover === button.id
-            ? "mouseOver"
-            : "normal";
-      stamp(`${button.path}/${state}/0`, button.x, button.y);
-    }
-    if (titleDialogOpen) {
-      stamp("UI/Login.img/Title/loginDlg", 247, 215);
-      stamp(`UI/Basic.img/CheckBox/${rememberUser.checked ? 1 : 0}`, 331, 299);
-      ctx.font = "12px 'Dotum', '돋움', 'KMSCJK', sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = "#000000";
-      ctx.fillText("메일주소 저장", 347, 299);
-      for (const button of TITLE_BUTTONS.filter((entry) => entry.dialog)) {
-        const disabled = document.getElementById(button.id).disabled;
-        const state = disabled
-          ? "disabled"
-          : titlePressed === button.id
-            ? "pressed"
-            : titleHover === button.id
-              ? "mouseOver"
-              : "normal";
-        stamp(`${button.path}/${state}/0`, button.x, button.y);
-      }
-    }
-  }
-  // CTitle/sub_4D0000 prints Ver. 1.11 at right=796, top=584.
-  ctx.font = "11px 'Dotum', '돋움', 'KMSCJK', sans-serif";
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "top";
-  ctx.fillText("Ver. 1.11", 796, 584);
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-}
-
-function updateSelectionControls() {
-  document.getElementById("world-connect").disabled =
-    selectionPending ||
-    selectedWorld < 0 ||
-    worldPopulation(loginWorlds[selectedWorld]) < 0;
-  document.getElementById("character-enter").disabled =
-    selectionPending || selectedCharacter < 0;
-  document.getElementById("character-delete").disabled =
-    selectionPending || selectedCharacter < 0;
-  document.getElementById("character-new").disabled =
-    selectionPending || loginCharacters.length >= 3;
-  [...ui.worldList.children].forEach((element, index) =>
-    element.setAttribute?.(
-      "aria-pressed",
-      String(worldScroll + index === selectedWorld),
-    ),
-  );
-  [...ui.characterList.children].forEach((element, index) =>
-    element.setAttribute?.("aria-pressed", String(index === selectedCharacter)),
-  );
-}
-function rebuildWorldRows() {
-  ui.worldList.replaceChildren(
-    ...loginWorlds
-      .slice(worldScroll, worldScroll + WORLD_UI.visibleRows)
-      .map((world, offset) => {
-        const index = worldScroll + offset;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "sprite-hit";
-        button.textContent = world.name;
-        button.setAttribute?.("aria-label", world.name);
-        Object.assign(button.style, {
-          left: "274px",
-          top: `${288 + 25 * offset}px`,
-          width: "240px",
-          height: "25px",
-        });
-        button.addEventListener("click", () => {
-          if (!selectionPending) {
-            selectedWorld = index;
-            updateSelectionControls();
-          }
-        });
-        button.addEventListener("dblclick", connectLoginWorld);
-        return button;
-      }),
-  );
-  updateSelectionControls();
-}
-function connectLoginWorld() {
-  if (
-    loginStage !== "worlds" ||
-    selectionPending ||
-    selectedWorld < 0 ||
-    worldPopulation(loginWorlds[selectedWorld]) < 0
-  )
-    return;
-  selectionPending = true;
-  updateSelectionControls();
-  send({ t: "world", index: selectedWorld });
-  showPanel(ui.characters);
-  ui.characterStatus.textContent = "讀取角色…";
-}
-function selectLoginCharacter(index) {
-  if (selectionPending || creationDialogs.open || !loginCharacters[index])
-    return;
-  selectedCharacter = index;
-  void audio.effect("UI/CharSelect");
-  updateSelectionControls();
-}
-function enterLoginCharacter() {
-  const character = loginCharacters[selectedCharacter];
-  if (
-    loginStage !== "characters" ||
-    selectionPending ||
-    creationDialogs.open ||
-    !character
-  )
-    return;
-  selectionPending = true;
-  updateSelectionControls();
-  ui.characterStatus.textContent = "進入遊戲…";
-  send({ t: "character", id: character.id });
-}
-for (const button of SELECTION_BUTTONS) {
-  const element = document.getElementById(button.id);
-  Object.assign(element.style, {
-    left: `${button.x}px`,
-    top: `${button.y}px`,
-    width: `${button.width}px`,
-    height: `${button.height}px`,
-  });
-  element.addEventListener("pointerenter", () => {
-    selectionHover = button.id;
-    if (!element.disabled) void audio.effect("UI/BtMouseOver");
-  });
-  element.addEventListener("pointerleave", () => {
-    selectionHover = undefined;
-    selectionPressed = undefined;
-  });
-  element.addEventListener("pointerdown", event => {
-    if (event.button === 0 && !element.disabled) selectionPressed = button.id;
-  });
-  element.addEventListener("pointerup", () => {
-    selectionPressed = undefined;
-  });
-  element.addEventListener("focus", () => {
-    selectionHover = button.id;
-  });
-  element.addEventListener("blur", () => {
-    selectionHover = undefined;
-    selectionPressed = undefined;
-  });
-}
-window.addEventListener("blur", () => {
-  selectionHover = undefined;
-  selectionPressed = undefined;
-});
-document
-  .getElementById("world-connect")
-  .addEventListener("click", connectLoginWorld);
-document
-  .getElementById("character-enter")
-  .addEventListener("click", enterLoginCharacter);
-document.getElementById("character-new").addEventListener("click", () => {
-  if (!selectionPending && loginCharacters.length < CHARACTER_UI.slots)
-    void creationDialogs.openCreate();
-});
-document
-  .getElementById("character-delete")
-  .addEventListener("click", () => creationDialogs.openDelete());
-ui.worldList.addEventListener("wheel", (event) => {
-  event.preventDefault();
-  if (selectionPending) return;
-  worldScroll = Math.max(
-    0,
-    Math.min(
-      Math.max(0, loginWorlds.length - WORLD_UI.visibleRows),
-      worldScroll + Math.sign(event.deltaY),
-    ),
-  );
-  rebuildWorldRows();
-});
-window.addEventListener("keydown", (event) => {
-  if (
-    !["worlds", "characters"].includes(loginStage) ||
-    motionSettings.open || creationDialogs.open ||
-    isEditingControl(document.activeElement)
-  )
-    return;
-  if (
-    event.key === "Enter" &&
-    [...SELECTION_BUTTONS.map((b) => b.id), "create", "create-cancel"].includes(
-      document.activeElement?.id,
-    )
-  )
-    return;
-  if (event.key === "Enter") {
-    event.preventDefault();
-    loginStage === "worlds" ? connectLoginWorld() : enterLoginCharacter();
-  }
-  if (selectionPending) return;
-  if (
-    loginStage === "characters" &&
-    ["ArrowLeft", "ArrowRight"].includes(event.key)
-  ) {
-    event.preventDefault();
-    selectLoginCharacter(
-      Math.max(
-        0,
-        Math.min(
-          loginCharacters.length - 1,
-          selectedCharacter + (event.key === "ArrowLeft" ? -1 : 1),
-        ),
-      ),
-    );
-  } else if (
-    loginStage === "worlds" &&
-    ["ArrowUp", "ArrowDown"].includes(event.key)
-  ) {
-    event.preventDefault();
-    selectedWorld = Math.max(
-      0,
-      Math.min(
-        loginWorlds.length - 1,
-        selectedWorld + (event.key === "ArrowUp" ? -1 : 1),
-      ),
-    );
-    worldScroll = Math.max(
-      0,
-      Math.min(selectedWorld, Math.max(worldScroll, selectedWorld - 5)),
-    );
-    rebuildWorldRows();
-  }
-});
-function drawSelectionScreen(now) {
-  const worldStage = loginStage === "worlds";
-  const root = `UI/Login.img/${worldStage ? "WorldSelect" : "CharSelect"}`;
-  const layout = worldStage ? WORLD_UI : CHARACTER_UI;
-  const stamp = (path, x, y) => {
-    const art = artImage(path);
-    if (art.ready) ctx.drawImage(art.img, x, y);
-  };
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, 800, 600);
-  stamp(`${root}/backgrnd`, 0, 0);
-  stamp(`${root}/menu`, layout.x, layout.y);
-  ctx.font = "12px 'Dotum', '돋움', 'KMSCJK', sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  if (worldStage) {
-    stamp(`${root}/wsHeader`, 274, 270);
-    loginWorlds.slice(worldScroll, worldScroll + 6).forEach((world, index) => {
-      const y = 288 + index * 25;
-      stamp(`${root}/wsItem`, 274, y);
-      if (selectedWorld === index + worldScroll) {
-        ctx.fillStyle = "rgba(0,0,0,.25)";
-        ctx.fillRect(274, y, 240, 25);
-      }
-      ctx.globalAlpha = selectedWorld === index + worldScroll ? 1 : 140 / 255;
-      stamp(`${root}/wsIcon`, 276, y + 3);
-      const count = worldPopulation(world);
-      const gauge = artImage(`${root}/wsGauge`);
-      const crop =
-        5 * (20 - Math.max(1, Math.min(20, Math.trunc((20 * count) / 3000))));
-      if (gauge.ready)
-        ctx.drawImage(
-          gauge.img,
-          crop,
-          0,
-          101 - crop,
-          7,
-          412 + crop,
-          y + 15,
-          101 - crop,
-          7,
-        );
-      ctx.fillStyle = "#000";
-      ctx.fillText(world.name, 296, y + 7, 110);
-      ctx.textAlign = "right";
-      ctx.fillText(
-        count < 0 ? "접속불가" : `${count.toLocaleString("ko-KR")} 명`,
-        514,
-        y,
-      );
-      ctx.textAlign = "left";
-      ctx.globalAlpha = 1;
-    });
-  } else {
-    loginCharacters.forEach((character, index) => {
-      const slot = characterSlot(index);
-      const look = {face: character.face ?? 20000, hair: character.hair ?? 30000, items: character.items ?? []};
-      const {stance, frame} = sampleAvatarMotion(character, look,
-        index === selectedCharacter ? "walk1" : "stand1", now);
-      const face = sampleAvatarFace(character, look, now);
-      let image = avatarFrame(
-        look,
-        stance,
-        frame,
-        facingFlip(0), face.emotion, false, face.frame,
-      );
-      if (!image.ready) image = avatarFrame(look, stance, frame, facingFlip(0));
-      if (image.ready)
-        ctx.drawImage(image.img, slot.feetX + image.dx, slot.feetY + image.dy);
-      ctx.globalAlpha = index === selectedCharacter ? 1 : 0.5;
-      ctx.textAlign = "center";
-      ctx.fillStyle = "#000";
-      ctx.fillText(character.name, slot.feetX + 3, 325);
-      ctx.globalAlpha = 1;
-    });
-    const character = loginCharacters[selectedCharacter];
-    if (character) {
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#fff";
-      ctx.fillText(character.name, 253, 388);
-      ctx.fillText(jobNameOf(character.job), 211, 408);
-      ctx.fillText(String(character.level), 349, 408);
-      ctx.textAlign = "center";
-      [character.str, character.dex, character.int, character.luk].forEach(
-        (value, index) =>
-          ctx.fillText(String(value ?? "—"), 207 + index * 62, 451),
-      );
-    }
-  }
-  for (const button of SELECTION_BUTTONS.filter(
-    (b) => b.stage === loginStage,
-  )) {
-    const disabled = document.getElementById(button.id).disabled;
-    const state = disabled
-      ? "disabled"
-      : selectionPressed === button.id
-        ? "pressed"
-        : selectionHover === button.id
-          ? "mouseOver"
-          : "normal";
-    stamp(`${button.path}/${state}/0`, button.x, button.y);
-  }
-  ctx.globalAlpha = 1;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  creationDialogs.draw(now);
-}
-
 /**
  * Asks the server for one composed frame.
  *
@@ -2765,7 +2293,7 @@ function loadQuickItems() {
 }
 function useBagItem(item) {
   const now = performance.now();
-  if (!item || loginStage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
+  if (!item || loginScreens.stage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
       portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || browserLabOpen() || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
@@ -2867,10 +2395,9 @@ function frame() {
     emoteAvailable = enabled;
     for (const button of ui.emotes.children) button.disabled = !enabled;
   }
-  if (loginStage !== "game") {
+  if (loginScreens.stage !== "game") {
     renderSurface.beginUi(true);
-    if (loginStage === "title") drawTitleScreen();
-    else drawSelectionScreen(performance.now());
+    loginScreens.draw(performance.now());
     renderSurface.presentUi();
     requestAnimationFrame(frame);
     return;
@@ -3757,13 +3284,13 @@ function drawWhisperRecipient() {
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
   if (revivePanel.open || (itemDialog.open || systemPanel.visible) || browserLabOpen() ||
-      loginStage !== "game" || !visualFieldActive || !selfView || portalPending) return;
+      loginScreens.stage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
   const owner=quickOwner, epoch=itemEpoch;
   itemDialog.text({text:"귓속말 상대를 입력하세요.",initial:lastWhisperRecipient,maxLength:12,
     validate:value=>whisperNameError(value,selfView?.name),
     accept(name) {
-      if(owner!==quickOwner || epoch!==itemEpoch || loginStage!=="game")return;
+      if(owner!==quickOwner || epoch!==itemEpoch || loginScreens.stage!=="game")return;
       whisperRecipient=lastWhisperRecipient=name; updateWhisperControl();ui.say.focus();
     },
   });
@@ -3818,7 +3345,7 @@ function beginSkillDrag(skill,p) {
 }
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
-  if (!itemId || loginStage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
+  if (!itemId || loginScreens.stage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
       portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
@@ -3842,7 +3369,7 @@ window.addEventListener("mouseup",e=>{
   inventorySuppressClick=e.target===canvas;
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
-      (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginStage!=="game" || !visualFieldActive ||
+      (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginScreens.stage!=="game" || !visualFieldActive ||
       selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() ||
       shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
@@ -4006,7 +3533,7 @@ async function dropInventoryItem(d, at) {
   const snapshot = JSON.stringify(d.item);
   const valid = () =>
     epoch === itemEpoch &&
-    loginStage === "game" &&
+    loginScreens.stage === "game" &&
     selfView?.hp > 0 &&
     !shop &&
     talkingNpc === undefined &&
@@ -4455,7 +3982,7 @@ function dropMesosDialog(at) {
   const valid = () =>
     epoch === itemEpoch &&
     characterId === selfView?.characterId &&
-    loginStage === "game" &&
+    loginScreens.stage === "game" &&
     selfView?.hp > 0 &&
     !shop &&
     talkingNpc === undefined &&
@@ -5206,143 +4733,13 @@ function toggleInventory(force) {
   }
 }
 
-function showPanel(panel) {
-  motionSettings.dismiss();
-  lensSettings.dismiss();
-  loginStage =
-    panel === ui.connect
-      ? "title"
-      : panel === ui.worlds
-        ? "worlds"
-        : "characters";
-  audio.setBgm(loginStage === "title" ? "BgmUI/Title" : "BgmUI/WCSelect");
-  titleDialogOpen = panel === ui.connect;
-  titleHover = undefined;
-  titlePressed = undefined;
-  titleUi.classList.toggle("hidden", loginStage !== "title");
-  titleMenu.classList.toggle("hidden", titleDialogOpen);
-  pageBar.classList.add("hidden");
-  for (const element of [ui.connect, ui.worlds, ui.characters])
-    element.classList.add("hidden");
-  panel.classList.remove("hidden");
-  updateSelectionControls();
-}
-
-function hidePanels() {
-  motionSettings.dismiss();
-  lensSettings.dismiss();
-  loginStage = "game";
-  titleUi.classList.add("hidden");
-  pageBar.classList.remove("hidden");
-  for (const element of [ui.connect, ui.worlds, ui.characters])
-    element.classList.add("hidden");
-}
 
 // ---------------------------------------------------------------- input
 
-function closeTitleLogin() {
-  if (loginPending) return;
-  titleDialogOpen = false;
-  titleHover = undefined;
-  titlePressed = undefined;
-  ui.connect.classList.add("hidden");
-  titleMenu.classList.remove("hidden");
-  ui.pass.value = "";
-  ui.status.textContent = "";
-  document.getElementById("title-continue").focus();
-}
-for (const button of TITLE_BUTTONS) {
-  const element = document.getElementById(button.id);
-  element.addEventListener("mouseenter", () => {
-    titleHover = button.id;
-    void audio.effect("UI/BtMouseOver");
-  });
-  element.addEventListener("mouseleave", () => {
-    titleHover = undefined;
-    titlePressed = undefined;
-  });
-  element.addEventListener("focus", () => {
-    titleHover = button.id;
-  });
-  element.addEventListener("blur", () => {
-    titleHover = undefined;
-    titlePressed = undefined;
-  });
-  element.addEventListener("mousedown", event => {
-    if (event.button === 0) titlePressed = button.id;
-  });
-  element.addEventListener("mouseup", () => {
-    titlePressed = undefined;
-  });
-  element.addEventListener("keydown", (event) => {
-    if (event.key === " " || event.key === "Enter") titlePressed = button.id;
-  });
-  element.addEventListener("keyup", () => {
-    titlePressed = undefined;
-  });
-}
-window.addEventListener("mouseup", () => {
-  titlePressed = undefined;
-});
-window.addEventListener("blur", () => {
-  titlePressed = undefined;
-  titleHover = undefined;
-});
-document.getElementById("title-continue").addEventListener("click", () => {
-  titleNotice.textContent = "";
-  showPanel(ui.connect);
-  (rememberUser.checked && ui.user.value ? ui.pass : ui.user).focus();
-});
-document
-  .getElementById("login-cancel")
-  .addEventListener("click", closeTitleLogin);
-document.getElementById("title-new").addEventListener("click", () => {
-  titleNotice.textContent =
-    "此重建伺服器的帳號由管理員設定；登入後可建立角色，未提供網站註冊。";
-});
-document.getElementById("title-homepage").addEventListener("click", () => {
-  titleNotice.textContent =
-    "原版按鈕連至 MapleStory 官網；此重建版未連接官方帳號服務。";
-});
-document.getElementById("title-quit").addEventListener("click", () => {
-  titleNotice.textContent = "遊戲尚未連線；可直接關閉此瀏覽器分頁離開。";
-});
-document.getElementById("login-lost").addEventListener("click", () => {
-  ui.status.textContent =
-    "帳號及密碼由此重建伺服器的管理員管理，未連接官方帳密查詢服務。";
-});
-// Keep keyboard focus in the modal; the title menu is hidden from tab order while it is open.
-ui.connect.addEventListener("keydown", (event) => {
-  if (event.key !== "Tab") return;
-  const controls = [
-    ui.user,
-    ui.pass,
-    rememberUser,
-    document.getElementById("login-lost"),
-    ui.login,
-    document.getElementById("login-cancel"),
-  ].filter((element) => !element.disabled);
-  const index = controls.indexOf(document.activeElement);
-  if (event.shiftKey && index <= 0) {
-    event.preventDefault();
-    controls.at(-1)?.focus();
-  } else if (!event.shiftKey && index === controls.length - 1) {
-    event.preventDefault();
-    controls[0]?.focus();
-  }
-});
-ui.login.addEventListener("click", connect);
-
-ui.pass.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") connect();
-});
-ui.user.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") ui.pass.focus();
-});
 ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 // Native F1..F7 plus explicitly browser-only helper buttons. Both go through the same gates.
 function canSendEmotion() {
-  return loginStage === "game" && visualFieldActive && selfView && !portalPending &&
+  return loginScreens.stage === "game" && visualFieldActive && selfView && !portalPending &&
     socket?.readyState === WebSocket.OPEN && !document.hidden &&
     !(selfSwing && performance.now() < selfSwing.start + attackDuration(selfSwing)) &&
     !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
@@ -5364,8 +4761,7 @@ ui.emotes.replaceChildren(...EMOTE_KEYS.map((value) => {
 
 // Keys feed the fixed-step vecctrl reconstruction; network snapshots do not drive local physics.
 window.addEventListener("keydown", (event) => {
-  if (loginStage !== "game") {
-    if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
+  if (loginScreens.stage !== "game") {
     return;
   }
   if (motionSettings.open) {
@@ -5518,7 +4914,7 @@ window.addEventListener("blur", () => {
  */
 function runCommand(text, local) {
   if (/^\/(tools|test)$/i.test(text)) {
-    if (loginStage === "game") testToolsPanel.openPanel();
+    if (loginScreens.stage === "game") testToolsPanel.openPanel();
     else local("系統", "請先進入地圖；體驗工具只對伺服器明確授權帳號開放。");
     return true;
   }
@@ -5631,9 +5027,7 @@ ui.say.addEventListener("blur", () => {
 });
 
 /** The first thing a user sees; also what a refresh returns to. */
-pageBar.classList.add("hidden");
-ui.connect.classList.add("hidden");
-document.getElementById("title-continue").focus();
+loginScreens.start();
 logLine(
   `page loaded; ws target ${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
 );
@@ -5648,11 +5042,10 @@ const creationDialogs = characterDialogs({
   audio,
   log: logLine,
   busy(value) {
-    selectionPending = value;
-    updateSelectionControls();
+    loginScreens.setSelectionPending(value);
   },
-  getSelected: () => loginCharacters[selectedCharacter],
-  isCharacterStage: () => loginStage === "characters",
+  getSelected: () => loginScreens.selectedCharacter,
+  isCharacterStage: () => loginScreens.stage === "characters",
 });
 
 const statPanel = statWindow({
@@ -5661,7 +5054,7 @@ const statPanel = statWindow({
   send,
   audio,
   getSelf: () => selfView,
-  isInGame: () => loginStage === "game",
+  isInGame: () => loginScreens.stage === "game",
   point: viewPoint,
   jobName: jobNameOf,
   getBasis:()=>nativeBasis, getTemporary:()=>buffs.values(performance.now()), getAmmoPad:()=>nativeAmmoPad,
@@ -5672,7 +5065,7 @@ const skillPanel = skillWindow({
   ctx,
   onUse:id=>void swing(id),onBindDrag:beginSkillDrag,
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
-  getSelf: () => selfView, isInGame: () => loginStage === "game",
+  getSelf: () => selfView, isInGame: () => loginScreens.stage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
     (itemDialog.open || systemPanel.visible) || browserLabOpen() || talkingNpc !== undefined,
 });
@@ -5682,7 +5075,7 @@ const miniMapPanel = miniMapWindow({
   image: artImage,
   getSelf: selfDisplayPosition,
   getUsers: () => [...users.values()],
-  isInGame: () => loginStage === "game",
+  isInGame: () => loginScreens.stage === "game",
   point: viewPoint,
   onVisibilityChange:shown=>systemPanel.setMiniMap(shown),
   isCovered: (p) =>
@@ -5698,7 +5091,7 @@ const equipPanel = equipmentWindow({
   icon: itemIcon,
   getInventory: () => inventory,
   getSelf: () => selfView,
-  isInGame: () => loginStage === "game",
+  isInGame: () => loginScreens.stage === "game",
   point: viewPoint,
   audio,
   beginItem: beginItemDrag,
@@ -5732,7 +5125,7 @@ const revivePanel = reviveWindow({
   image: artImage,
   send,
   isInGame: () =>
-    loginStage === "game" && socket?.readyState === WebSocket.OPEN,
+    loginScreens.stage === "game" && socket?.readyState === WebSocket.OPEN,
   onOpen() {
     localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;
     itemDialog.close(false);
@@ -5754,7 +5147,7 @@ const revivePanel = reviveWindow({
 const recovery = naturalRecovery({
   getSelf:effectiveSelf, getBody:()=>playerBody, getMap:()=>map,
   getAction:()=>selfSwing && attackFrame(selfSwing,performance.now())>=0 ? selfSwing.action : nativeBodyAction(playerBody, selfView?.bodyProfile),
-  isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
+  isInGame:()=>loginScreens.stage==="game"&&!document.hidden,send,log:logLine,
 });
 /** Read-only ordinary-action inspector: its actor/look/virtual rope Y are NOT the field actor. */
 function resetAvatarPreview() {
@@ -5869,14 +5262,14 @@ const testToolsPanel = testTools({
     return text;
   },
   getMovement(){
-    if (loginStage!=="game") return;
+    if (loginScreens.stage!=="game") return;
     const now=performance.now();
     const active=buffs.icons(now).find(entry=>entry.values.speed!==undefined);
     const totals=statTotals(nativeBasis,buffs.values(now));
     return {...effectiveMovement(now), eva:totals?.eva,pdd:totals?.pdd,contactRemaining:contact.remaining, contactPending:!!contactPending,
       secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
   },
-  send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
+  send,getSelf:()=>selfView,isInGame:()=>loginScreens.stage==="game",log:logLine,
   onOpen(){if(tooltipViewer.open)closeDialogue(false);localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
   openDialogue:openDialogueExample,
   openTooltip:openTooltipExample,
@@ -5929,7 +5322,7 @@ const tooltipViewer = tooltipPreview({renderer:nativeTips, point:viewPoint,
 });
 
 function openTooltipExample(kind) {
-  if(loginStage!=="game" || !visualFieldActive || selfView?.hp<=0 || talkingNpc!==undefined ||
+  if(loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 || talkingNpc!==undefined ||
       revivePanel.open || itemDialog.open || systemPanel.visible || shop!==undefined ||
       shopPending || slotPending || mesoPending || portalPending)return false;
   return tooltipViewer.show(kind);
@@ -5937,7 +5330,7 @@ function openTooltipExample(kind) {
 
 function openDialogueExample(kind, page = 0) {
   const body=dialogueExample(kind,page);
-  if(!body || loginStage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
+  if(!body || loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
       talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible ||
       shop!==undefined || shopPending || slotPending || mesoPending || portalPending)return false;
   return npcDialog.show(0,body,{preview:true,page,exampleKind:kind});
@@ -5945,7 +5338,7 @@ function openDialogueExample(kind, page = 0) {
 
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),
-  canOpen:()=>loginStage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
+  canOpen:()=>loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
     socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
   onOpen(){

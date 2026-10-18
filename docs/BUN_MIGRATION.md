@@ -1,8 +1,18 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新修正：放大後的最終螢幕像素（ADR-085）
+## 最新增量：標題／登入／世界與選角 strict UI（ADR-086）
+
+實際抽出login-data／login-presentation／login-screen，連同清單unknown守衛、純選擇狀態、
+原WZ繪圖、DOM／鍵盤／modal／pending／storage／dispose與transport接線；main **5963→5356行**，client **89支TS**。
+不是改副檔名、declaration或allowJs；main與3支MJS仍未完成，舊client-ui失敗測試未移除。
+六項registry latest於2026-10-19台北日期重新核對與exact pins一致；strict／format／build通過，focused45/0（7 files），30純imports／0 I/O。
+原renderer與新實作21組完整邏輯畫布RGBA完全相同；真HTML／WZ component0WS，LIVE同PID4942、87modules與只讀120幀，不登入／角色／save／restart。
+完整1054/44（1098tests／122files，285.07s），對1520ac9 failure multiset新增0／移除0（含重複），CI仍不綠。
+完整證據與明確限制見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
+
+## 前輪修正：放大後的最終螢幕像素（ADR-085）
 
 補足原先只查buffer／取樣條紋的缺口：真原WZ角色、背景與tile經production CSS／DPR的整張screenshot RGBA比對。
 42組修正前14組有差異（含4組DPR3拉近／特寫內部），修正後全0；不是加sharpen遮掩。

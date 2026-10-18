@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-18。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-19。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 ## 執行資料流
@@ -33,7 +33,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 86個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 89個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/drop-presentation.ts`／`drop-renderer.ts` | unknown drop/remove守衛、連續動畫、原PNG底部貼地與固定金幣幀；不代替server選fh |
 | `server/src/game/drop-landing.ts` | 所有掉落的有向真地板／下射線／虛空邊緣權威選點，原0x43格式不變 |
 | `client/entity-assets.ts`／`entity-resource-validation.ts`／`avatar-look.ts` | NPC/mob metadata驗證、field ownership／取消、native action量化與local/remote look規則 |
@@ -58,7 +59,7 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 ## 普通身體動作與幾何分界
 
 `game/avatarmotion.ts`讀body幀表與武器walk/stand → ArtProvider／HTTP metadata →
-`client/avatar-motion.ts`普通倒數 → `main.js`場地／selection／creation →既有avatar PNG compositor。
+`client/avatar-motion.ts`普通倒數 → `main.js`場地／typed login-presentation／creation →既有avatar PNG compositor。
 `motion.ts`保留幾何並re-export普通clock；不讓新身體時序改movement byte、傷害或attack forced override。
 actor持有clock與已完成的immutable weapon profile；64座metadata cache去重／退避，滿pending不逐RAF相互驅逐。
 只讀開發閱覽用獨立actor及look副本，不與selfView／inventory／save混用；見[NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md)。
@@ -95,8 +96,9 @@ ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checko
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
 main.js與3支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整1038/44（1082tests／120files），既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
-本輪有真Chromium七DPR×五尺寸／游標與16組world/UI原PNG component；LIVE同PID4942、84modules與唯讀標題120幀，0WS，不登入或操作玩家。
+完整1054/44（1098tests／122files，285.07s），對1520ac9既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+本輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
 上一輪因舊沙箱程序／ignored save不在，已明示新建獨立入口；本輪保留其正在使用的同一程序與進度，不再重啟或重置。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+標題／登入／世界與選角責任、原證及驗證見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
 鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

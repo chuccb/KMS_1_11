@@ -7,6 +7,7 @@ export const WORLD_UI = {
   height: 403,
   rowX: 24,
   rowY: 199,
+  headerY: 181,
   rowWidth: 240,
   rowHeight: 25,
   visibleRows: 6,
@@ -60,7 +61,7 @@ export const SELECTION_BUTTONS = [
   },
 ];
 export function characterSlot(index: number) {
-  if (index < 0 || index >= 3) return undefined;
+  if (!Number.isInteger(index) || index < 0 || index >= CHARACTER_UI.slots) return undefined;
   return {
     x: CHARACTER_UI.x + 70 + index * 140,
     y: CHARACTER_UI.y + 178,
@@ -74,4 +75,13 @@ export function characterSlot(index: number) {
 /** Login reader transports u32; native WorldSelect interprets the count as signed LONG. */
 export function worldPopulation(world?: { unknownId?: number }) {
   return (world?.unknownId ?? 0) | 0;
+}
+
+/** sub_54C7B0: 20 visual levels at count/3000, five source pixels per level, 101×7 WZ gauge.
+ * This is UI clipping, NOT server population capacity or an admission/gameplay policy.
+ */
+export function worldGaugeClip(world: { unknownId?: number }) {
+  const level = Math.max(1, Math.min(20, Math.trunc((20 * worldPopulation(world)) / 3000)));
+  const x = 5 * (20 - level);
+  return { x, width: 101 - x, height: 7 };
 }

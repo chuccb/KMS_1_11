@@ -2940,3 +2940,19 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 新回歸為strict TS隔離component，無登入／角色／save操作；LIVE保持原程序。
 
 實測範圍、舊驗證缺口與公式見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+
+## ADR-086：標題／登入／世界與選角的完整 strict UI 責任（2026-10-19）
+
+- 不將main.js直接改名或用declaration包住；抽出login-data／login-presentation／login-screen，連同原transport與creation／avatar／audio接線。
+- unknown清單完整驗證、只投影所用欄位；wire-width而非假造遊戲上限，三槽／選取保留／空清單與索引／pending為純狀態。
+- 損壞清單保留原資料但明確block；generic error清pending不能解鎖，直到有效清單抵達。不宣稱完整WS phase／epoch／深schema已完成。
+- 原800×600 WZ坐標、普通body／face時鐘與PNG cache不變；54C7B0的3000僅為20階gauge顯示分母，不是server容量設定。
+- DOM標籤先驗證；modal／編輯／lab持有輸入，也阻擋底層click的原生Enter activation；列事件委派與AbortController收斂listener生命週期。
+- 僅記住帳號名、拒絕storage可用；不儲存密碼。現有物理／camera／戰鬥／掉落fh／原協定與save不改。
+- main5963→5356行、client89支TS；仍有main／3MJS／44舊失敗，未降低strict、未刪舊client-ui失敗或用bundle成功冒充全案完成。
+- 六項registry latest重查與exact pins一致；strict／format／build通過，focused45/0（7files）、30純imports／0 I/O。
+- 真HTML／WZ隔離component0WS；baseline1520ac9舊renderer對新實作21組完整邏輯畫布RGBA完全一致，不混稱最終CSS screenshot矩陣。
+- 完整1054/44（1098tests／122files，285.07s），對1520ac9 failure multiset新增0／移除0（含重複標題），CI仍不綠。
+- LIVE同PID4942、87modules全部200與只讀120幀／errors[]／0WS；未自動登入、操作角色／save或restart。
+
+原證、狀態／安全邊界與重跑命令見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。

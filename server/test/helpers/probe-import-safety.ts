@@ -61,4 +61,7 @@ await import("../../../client/camera-lens.ts");
 await import("../../../client/lens-controls.ts");
 await import("../../../client/camera-controls.ts");
 await import("../../../client/cursor.ts");
-console.log(JSON.stringify({ imported: 27, attempts }));
+await import("../../../client/login-data.ts");
+await import("../../../client/login-presentation.ts");
+await import("../../../client/login-screen.ts");
+console.log(JSON.stringify({ imported: 30, attempts }));

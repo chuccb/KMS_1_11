@@ -1,5 +1,14 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-19：標題／登入／世界與選角整條鏈 strict TS 整理
+
+原WZ畫面、三槽、avatar普通body／face clocks與creation dialog不變；拆出清單守衛、選擇狀態、繪圖與DOM／鍵盤生命週期。
+main5963→5356行，client89支TS；空清單／無效索引不再變成可連接目標，損壞清單明確阻擋而非套假角色／預設素材。
+焦點／Tab圈／pending／remember-only-user／拒絕storage／modal與設定擋底層Enter activation／dispose一併驗證。
+focused45/0；真HTML／原WZ component及21組完整邏輯畫布before/after RGBA相同，30純imports／0 I/O。
+LIVE同PID4942，87modules與標題120幀唯讀確認；未自動登入或操作角色／save。main／3MJS與完整suite既有紅燈仍未解決，
+完整結果與原證／未完成清單見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
+
 ## 2026-10-18：掉落最終在fh，權威與呈現一起整理
 
 怪物戰利品、玩家道具與金幣丟棄共用真WZ有向地板選點，處理空中／斜坡／上下平台／平台邊緣／虛空。

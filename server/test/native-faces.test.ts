@@ -272,7 +272,12 @@ test("integration source: native F1..F7, no local echo reset, shared creation/se
   assert.match(images, /emotion \?\? "default",\s*faceFrame,\s*planes/);
   assert.match(images, /faceFrame: String\(faceFrame\)/);
   assert.match(main, /message\.characterId === selfView\?\.characterId\) return/);
-  assert.match(main, /sampleAvatarFace\(character, look, now\)/);
+  assert.match(main, /face: sampleAvatarFace/);
+  const login = source("../../client/login-screen.ts"),
+    painting = source("../../client/login-presentation.ts");
+  assert.match(login, /drawSelectionScreen\(options,/);
+  assert.match(painting, /face: sampleFace/);
+  assert.match(painting, /sampleFace\(character, look, now\)/);
   assert.match(creation, /face\(previewActor, look, now\)/);
   assert.match(web, /\/api\/face\//);
   assert.match(web, /faceFrame: faceIndex/);
