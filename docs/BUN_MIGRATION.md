@@ -2,7 +2,16 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：清晰尺寸與strict TS鏡頭／合成責任
+## 最新修正：放大後的最終螢幕像素（ADR-085）
+
+補足原先只查buffer／取樣條紋的缺口：真原WZ角色、背景與tile經production CSS／DPR的整張screenshot RGBA比對。
+42組修正前14組有差異（含4組DPR3拉近／特寫內部），修正後全0；不是加sharpen遮掩。
+canvas保持整數CSS/backing，inverse DPR transform取代小數layout寬高；stage clip隔離未縮小的scroll overflow。
+strict／format／build通過；完整1038/44（1082 tests／120 files，287.81s），對c773329 failure multiset新增0／移除0，CI仍不綠。
+LIVE同PID4942、84modules與唯讀120幀／0WS，無登入／角色／save變更。
+新fixture／test皆strict TS；原有86個client TS、main.js／3MJS未完債務不變。細節見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+
+## 前輪增量：清晰尺寸與strict TS鏡頭／合成責任
 
 新增scene-surface／camera-lens／lens-controls，整理display／cursor／camera／drop視野與輸入整條鏈。
 五種清晰等比例尺寸（自動與1–4實體倍率）；小視窗捲動不降採樣。四種lens＋cut/fade/shutter，世界與原800×600 UI分開。

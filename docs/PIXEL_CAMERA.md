@@ -3,6 +3,32 @@
 2026-10-18，ADR-084。這是使用者要求的瀏覽器呈現擴充，不冒充原 EXE 的縮放／轉場。
 相關責任先收斂成 strict TypeScript，再接遠近與效果；全案 main.js／3 支 legacy MJS 的遷移仍未完成。
 
+## 後續修正：放大後的最終顯示像素（ADR-085）
+
+使用者回報放大／拉近看似模糊後，補查了原先不足的**整張角色／背景經CSS到螢幕**驗證，而非先加銳化。
+前輪32來源欄的條紋和buffer原PNG檢查，不能證明最終sprite沒有位移／邊界遺失；先前這部分保證過強。
+
+- 舊方法直接設定小數CSS寬高，例如DPR3的800/3；Chromium layout以1/64 CSS px量化，
+  然後再呈現bitmap。能重現最底／最右像素遺失，以及拉近／特寫的內部像素不一致。
+- 新方法讓canvas的CSS box與backing同為**整數尺寸**，用原點(0,0)的`scale(1/DPR)`做密度補償。
+  不先把bitmap經小數layout寬高取樣；UI仍用原`u/DPR`，兩者最終rect對齊。
+- transform縮小不會自動縮小CSS scrollable layout overflow；stage加`overflow:clip`，
+  保留明確的共用格尺寸，防止整數backing原始box製造幽靈空白捲動區。小視窗正常捲動仍保留。
+- 新真Chromium回歸使用原WZ背景／tile及production avatar cache的packed back/front PNG，
+  經production compositor／display-controls與**實際style.css**，將整張screenshot和輸出PNG的每個RGBA通道比較。
+- 七DPR（1/1.1/1.25/1.5/1.75/2/3）× 1/2實體UI倍率 × 標準/拉近/特寫，共**42組**。
+  修正前14組有差異，其中4組是DPR3拉近／特寫的畫面內部；修正後全部**差異通道0、最大差異0、非整數像素塊0**。
+- 這是隔離原素材component，不登入或注入LIVE角色；並非所有look／動畫／瀏覽器／OS顯示路徑已逐一驗收。
+- **未加sharpen、模糊filter、AI/xBRZ超解析或替換素材**。最近鄰放大保持來源資訊，像素方塊仍會變大；
+  原圖解析度／色階本來不足的細節無法靠銳化復原。銳化會改色與製造光暈，不應拿來掩蓋縮放缺陷。
+
+來源：`server/test/zoom-display-browser.test.ts`／`fixtures/zoom-display-browser.ts`。
+前後實測、42組JSON與回歸log保留於ignored `generated/zoom-sharpness/`。
+strict／format／build通過；focused39/0，加上整張screenshot案例1/0（42組、確認67.92s）。
+完整**1038 pass／44 fail，1082 tests／120 files，287.81s**；對c773329的failure multiset含重複新增0／移除0，CI仍不綠。
+完整suite同時重驗原七DPR×五尺寸的捲動／overlay／游標與source/bundle startup；沒有降低容忍度以避開新失敗。
+LIVE同PID4942，84modules與唯讀title120幀、errors=[]、0WS；未登入、操作角色／save或重啟。
+
 ## 實際操作
 
 - 上方尺寸選單：**清晰自動、1×、2×、3×、4×**，不是只留一種尺寸。
@@ -21,7 +47,7 @@
 
 倍率是**實體像素**，不是 CSS 像素。設顯示倍率 `u`、瀏覽器 DPR `d`：
 
-| 尺寸 | 輸出 backing | CSS 尺寸 |
+| 尺寸 | 輸出 backing | 呈現後CSS尺寸（transform後） |
 | --- | --- | --- |
 | 1× | 800×600 | 800/d × 600/d |
 | 2× | 1600×1200 | 1600/d × 1200/d |
@@ -34,7 +60,8 @@
 舊 `fit`／無效保存值讀成清晰自動，舊 `native` 讀成清晰 1×；啟動不擅自寫偏好。
 
 這也不代表把原素材半透明柔邊、TTF/GDI 字型差異「修成無鋸齒」。
-Chromium DOM 尺寸會有 1/64 CSS px 量化，例如 DPR1.5 的533.333…讀回533.328125；實際 screenshot 逐像素檢查仍等寬、沒有縮放混灰。
+舊CSS寬高會有1/64 CSS px量化，例如DPR1.5的533.333…讀回533.328125；只有條紋測試不足以涵蓋sprite。
+現改以整數layout box＋inverse DPR transform，不沿用當時量測的尺寸；詳見上方ADR-085修正。
 七種 DPR 的實測不是所有任意非有理 DPR、瀏覽器或 OS cursor plane 都已逐像素驗收的承諾。
 
 ## 遠近不犧牲像素，也不放大 UI
@@ -91,7 +118,7 @@ UI 的 800×600 座標不變：背包、商店、聊天、tooltip、小地圖、
 沒有關 strict、skipLibCheck、allowJs、no-check、加入 production any 或假的 declaration 代替實作型別。
 client 現86支 TS，**main.js、3支legacy MJS、深層 runtime schemas 仍是未完債務**。
 
-## 實際驗證（本輪）
+## ADR-084當輪驗證（後續端點修正見上方ADR-085）
 
 - 六個 npm registry latest 再查均與 exact pins 一致：Bun1.4.3／TS7.0.2／@types/bun1.4.3／Prettier3.9.10／Playwright1.64.1／Chromium153.0.0。
 - strict、全 TS format check、HTML/CSS 格式與 browser build、diff whitespace 通過。

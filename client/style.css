@@ -45,6 +45,9 @@ body {
 }
 #game-stage {
   position: relative;
+  /* CSS transforms may shrink paint but cannot shrink scrollable layout overflow. Keep the
+     integer backing box from creating phantom scrollbars beyond the measured pixel stage. */
+  overflow: clip;
 }
 #view {
   position: absolute;

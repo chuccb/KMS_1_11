@@ -2,7 +2,11 @@
 
 更新：2026-10-18。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-最新鏡頭增量：六個registry latest仍與下表exact pins一致；新增合成／lens／控制的strict TS責任，client現86支TS。
+最新顯示端點修正（ADR-085）：整數canvas layout＋inverse DPR transform，42組原素材完整screenshot RGBA差異全0，未加銳化。
+strict／format／build通過；完整1038/44（1082 tests／120 files，287.81s），對c773329 failure multiset新增0／移除0，CI仍不綠。
+詳見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。工具版本與下表不變；main／3MJS仍待實際遷移。
+
+前輪鏡頭增量：六個registry latest仍與下表exact pins一致；新增合成／lens／控制的strict TS責任，client現86支TS。
 strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s），對2eaa5f2失敗multiset新增0／移除0，CI仍不綠。
 七DPR×五尺寸／游標、16組原PNG分層與LIVE同PID唯讀驗證見 [PIXEL_CAMERA](PIXEL_CAMERA.md)；main／3MJS仍待實際遷移。
 

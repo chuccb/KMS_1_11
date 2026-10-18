@@ -70,6 +70,7 @@ actor持有clock與已完成的immutable weapon profile；64座metadata cache去
 - Web Audio 解碼／播放原資料所對應的音訊；不重寫 DirectSound／ACM 相容層。
 - `game/wzart.ts` 做 path／UOL／canvas reader 與快取；mapart／avatar／sprites 等供應渲染資料。
 - PNG、metadata、音訊由既有 `/api/...` 輸出，瀏覽器資源快取與取消／identity guard 管理生命週期。
+- 最終canvas以整數layout box＋inverse DPR transform呈現，避免1/64 CSS px寬高量化；stage clip隔離未縮小的layout overflow。42組完整原素材screenshot像素比較通過（ADR-085）。
 - `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；只在實體倍率變化時重配800u×600u輸出backing。
 - archive1024 FIFO/UI優先（仍hard bound）、avatar256 LRU/實際blink預熱是browser policy，不是原EXE常數。
 - `assets/` 離線輸出仍可供分析，但不是 runtime 必經的「先全量轉檔」階段。
@@ -94,7 +95,7 @@ ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checko
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
 main.js與3支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整1037/44（1081tests／119files），既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+完整1038/44（1082tests／120files），既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
 本輪有真Chromium七DPR×五尺寸／游標與16組world/UI原PNG component；LIVE同PID4942、84modules與唯讀標題120幀，0WS，不登入或操作玩家。
 上一輪因舊沙箱程序／ignored save不在，已明示新建獨立入口；本輪保留其正在使用的同一程序與進度，不再重啟或重置。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。

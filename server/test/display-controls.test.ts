@@ -40,7 +40,9 @@ test("typed display owns validated independent preference, DPR-only refresh, int
     assert.equal(scales, 1);
     viewport.devicePixelRatio = 1.25;
     controls.refresh();
-    assert.equal(canvas.style.width, "640px");
+    assert.equal(canvas.style.width, "800px");
+    assert.equal(canvas.style.transform, "scale(0.8)");
+    assert.equal(canvas.style.transformOrigin, "0 0");
     assert.equal(scales, 2);
     assert.equal(canvas.width, 800);
     assert.equal(canvas.height, 600);
@@ -51,7 +53,8 @@ test("typed display owns validated independent preference, DPR-only refresh, int
     viewport.innerWidth = 1203;
     viewport.innerHeight = 903;
     viewport.dispatchEvent(new Event("resize"));
-    assert.equal(canvas.style.width, "1280px");
+    assert.equal(canvas.style.width, "1600px");
+    assert.equal(canvas.style.transform, "scale(0.8)");
     assert.equal(canvas.width, 1600);
     assert.equal(canvas.height, 1200);
     assert.equal(select.children.length, 5);

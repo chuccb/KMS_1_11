@@ -2927,3 +2927,16 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 1×已無法更遠而保留所有來源像素，介面明說；不宣稱任意DPR／OS指標plane或全部遊戲場景已pixel-perfect。
 
 政策公式、操作、真實驗證與仍未完成範圍見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+
+
+## ADR-085：以整數layout box＋inverse DPR transform保留最終放大像素（2026-10-18）
+
+- 使用者回報拉近似乎模糊；不能用銳化或「buffer檢查已通過」直接否定最終顯示問題。
+- 真實原WZ角色／背景／tile、production CSS與完整screenshot比對重現：42組有14組差異，含4組DPR3拉近／特寫內部。
+- 不再設定會被1/64px量化的小數canvas CSS寬高；保留整數backing box，transform(1/DPR)補償密度。
+- stage overflow:clip阻止未縮小的layout box傳播額外scroll overflow，不取消正常小視窗捲動；UI座標、world lens、物理／封包不變。
+- 同42組修正後所有RGBA通道與原輸出完全一致，沒有混入非整數像素塊；不放寬比較容忍度或略過邊界。
+- 不加sharpen／AI／平滑濾鏡，不冒稱低解析素材放大就會新增細節；不宣稱所有使用者端都已驗收。
+- 新回歸為strict TS隔離component，無登入／角色／save操作；LIVE保持原程序。
+
+實測範圍、舊驗證缺口與公式見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。

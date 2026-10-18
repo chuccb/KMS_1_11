@@ -72,8 +72,12 @@ export function displayControls({
     if (canvas.width !== layout.backingWidth) canvas.width = layout.backingWidth;
     if (canvas.height !== layout.backingHeight) canvas.height = layout.backingHeight;
     Object.assign(canvas.style, {
-      width: `${layout.width}px`,
-      height: `${layout.height}px`,
+      // CSS layout quantizes fractional widths to 1/64px. Keep the bitmap at its exact
+      // integer size and compensate density in the transform, not a lossy layout resize.
+      width: `${layout.backingWidth}px`,
+      height: `${layout.backingHeight}px`,
+      transformOrigin: "0 0",
+      transform: `scale(${1 / layout.dpr})`,
       left: `${layout.left}px`,
       top: `${layout.top}px`,
     });
