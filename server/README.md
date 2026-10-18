@@ -1,3 +1,4 @@
+> frame／play兩支舊MJS已刪，現行strict TS／Bun工具與手動／唯讀界線見 [工具續作](../docs/STRICT_FRAME_PLAY_TOOLS.md)。
 > 現行執行工具為根目錄固定版 Bun，詳 [工具鏈與遷移限制](../docs/TOOLCHAIN.md)。下列功能清單是歷史累積，不代表本輪全部驗收通過。
 
 # server/ — MMO 伺服器與協定工具（TypeScript，執行時零依賴）

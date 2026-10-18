@@ -2956,3 +2956,17 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - LIVE同PID4942、87modules全部200與只讀120幀／errors[]／0WS；未自動登入、操作角色／save或restart。
 
 原證、狀態／安全邊界與重跑命令見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
+
+## ADR-087：以明示 fixture 與真實瀏覽器證據取代舊 frame／play 工具（2026-10-19）
+
+- 刪除frame_probe.mjs的DOM／Image shim與play_probe.mjs的直接協定走查，真正重寫為strict TS實作／Bun runner，匯入不啟動任何連線。
+- 唯讀title預設只許明示origin、同origin GET、0WS；手動field／keyboard另需隔離admission、明示帳密／世界索引／角色id／預期map，不猜第一個角色或使用玩家LIVE。
+- 觀測保留真WebSocket交付，深投影新增hit／mob／drop／loot與wallet；序號由本地產生、history溢出明報，不以at或陳舊inventory假成功。原生quantity=0的耗盡飛鏢仍合法。
+- 原PNG與avatar API在同一具名RAF／buffer／內容世代真正blit到view，clear／reset／resize不殘留舊繪圖證據，含native解碼尺寸、完整CTM、source crop／buffer crop／view bounds，拒絕透明、畫外、跨幀與未呈現；不是全像素或遮擋證明。
+- 手動計畫只有有界方向鍵／Alt／Control與fresh await，不直接送攻擊／移動／傳送／掉落；錯誤時逐一釋放已按下的鍵並關閉browser。
+- 關聯同field epoch／目標template／mobId／dropId／self taken／notice，分別驗證item count或meso wallet增量；hit是bridge本地預測、notice沒有dropId，不冒稱原TCP逐擊／逐掉落ack。
+- 本輪六項registry latest與exact pins一致；strict／format／build／diff通過，focused25/0（4files），35純imports／0 I/O。
+- 整理前1054/44，最終1064/44（1108tests／124files，267.35s）；相同44個failure multiset新增0／移除0，CI仍不綠。主入口5356行與client_probe.mjs709行／其餘深schema仍待實作遷移。
+- 依既有授權開全新隔離進度，而非舊save恢復；只跑title-only、0WS、save SHA256不變，不替玩家登入／操作角色。舊PID4942已不在當前沙箱。
+
+現行命令、全部明示參數、證據限制與新入口見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。

@@ -1,6 +1,10 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
-## 2026-10-19：標題／登入／世界與選角整條鏈 strict TS 整理
+## 2026-10-19：frame／play手動工具strict TS整理
+
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+
+## 前輪2026-10-19：標題／登入／世界與選角整條鏈 strict TS 整理
 
 原WZ畫面、三槽、avatar普通body／face clocks與creation dialog不變；拆出清單守衛、選擇狀態、繪圖與DOM／鍵盤生命週期。
 main5963→5356行，client89支TS；空清單／無效索引不再變成可連接目標，損壞清單明確阻擋而非套假角色／預設素材。
@@ -597,21 +601,12 @@ bun test --timeout 30000 server/test/websocket.test.ts server/test/webclient.tes
 以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
 兩句台詞用 `0x15` 走完）。
 
-以下frame/play三段保留早期設計記錄；**這兩支MJS仍未遷移、未按當前客戶端驗收，不可照歷史預設帳密／port執行**。
-現行唯讀startup／render驗證與七支typed手動工具見本頁開頭連結；舊shim不能證明真PNG解碼或現在遊戲功能通過。
+現行 `frame_probe.ts` 使用真正Chromium／原PNG／同RAF來源canvas→view證據；預設title-only、GET-only、0WS。
+`play_probe.ts` 只接受明示隔離身分與有界鍵盤計畫，不直接製造攻擊／移動／掉落封包。
+兩支舊MJS已刪除，不再保留可被誤執行的舊帳密／port命令。
+明示參數、手動與唯讀界線及實際驗證見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。
 
-另外還有一支**對真的伺服器**跑的畫面探針：`node server/scripts/frame_probe.mjs 8495`。它把
-`client/main.js` 放進一個 DOM shim（元素、會算次數的 2D context、會 `onload` 的 `Image`、Node 的
-`WebSocket`）裡真的登入、選角、進圖，再跑真的 `requestAnimationFrame`；它斷言背景、圖塊／物件、
-NPC 與角色的 avatar 都在**同一幀**被畫出來（헤네시스：3 幀 4118 次 `drawImage`、152 個不同來源）。
-它不取代眼睛，但它釘住「資料到得了畫面」這一段；同一支探針還會把兩筆 `0x43`（一件道具、
-一堆金幣）注入頁面，確認掉落的 `iconRaw`／`Item/Special/0900.img` 真的被畫出來。
-
-還有一支**不用瀏覽器**的實機走查：`node server/scripts/play_probe.mjs 8495`——直接走瀏覽器協定
-登入、從 헤네시스 過 `west00` 進獵場、Ctrl 式揮擊打到怪死、走到掉落物上等撿起，把每一步收到的
-訊息（`hit`／`mob-die`／`drop-enter`／`drop-leave` taken／`loot`／`inventory`）印出來。
-
-頁面的**繪圖**本身仍然只有眼睛能驗，但把它切開的那幾層有測試：`test/art.test.ts`（17 則）釘住
+畫面品質仍需視覺驗收，另有原PNG／像素／繪圖證據的自動檢查。以下保留早期分層測試說明，實際項目及規模以目前來源與完整suite為準，非現行全綠聲明：`test/art.test.ts`（17 則）釘住
 compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM` 的深度、背景的 origin 與
 「缺 canvas 就跳過」、`Character/*` 的槽位對應、avatar 的錨點合成（用真的 `Data.wz` 驗尺寸與
 `dx/dy`），以及 NPC／mob 的圖檔名與 frame 表；`test/webclient.test.ts` 另外對**真的** HTTP 伺服器

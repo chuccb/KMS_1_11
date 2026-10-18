@@ -33,7 +33,12 @@ await import("../../../client/motion-tuning.ts");
 await import("../../../client/motion-controls.ts");
 await import("../../scripts/browser-fixture.ts");
 await import("../../scripts/browser-observation.ts");
+await import("../../scripts/probe-field.ts");
+await import("../../scripts/probe-frame.ts");
+await import("../../scripts/probe-play.ts");
 const probes = [
+  (await import("../../scripts/frame_probe.ts")).probeFrame,
+  (await import("../../scripts/play_probe.ts")).probePlay,
   (await import("../../scripts/browser_motion_probe.ts")).probeMotion,
   (await import("../../scripts/browser_portal_probe.ts")).probePortal,
   (await import("../../scripts/browser_minimap_probe.ts")).probeMinimap,
@@ -64,4 +69,4 @@ await import("../../../client/cursor.ts");
 await import("../../../client/login-data.ts");
 await import("../../../client/login-presentation.ts");
 await import("../../../client/login-screen.ts");
-console.log(JSON.stringify({ imported: 30, attempts }));
+console.log(JSON.stringify({ imported: 35, attempts }));

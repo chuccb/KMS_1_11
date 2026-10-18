@@ -132,6 +132,8 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
         source.onerror = () => reject(new Error("Mock echo failed"));
       });
       const self = {
+        characterId: 7,
+        mesos: 200,
         str: 8,
         dex: 6,
         int: 6,
@@ -148,7 +150,7 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
           t: "inventory",
           inventory: {
             worn: [{ slot: 1, itemId: 1002008, cuc: 2, ruc: 4, stats: { str: 3 } }],
-            tabs: [{ tab: 2, items: [{ slot: 4, itemId: 2000000, quantity: 3 }] }],
+            tabs: [{ tab: 2, items: [{ slot: 4, itemId: 2070000, quantity: 0 }] }],
           },
         },
         {
@@ -170,6 +172,17 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
         { t: "character", id: 1 },
         { t: "ability-up", field: "str" },
         { t: "error", message: "fixture" },
+        { t: "mob-enter", mob: { mobId: 5, templateId: 100100 } },
+        { t: "hit", mobId: 5, damage: 12 },
+        { t: "mob-die", mobId: 5 },
+        { t: "drop-enter", drop: { kind: 0, dropId: 10, mobId: 5, money: false, value: 4000000 } },
+        { t: "drop-enter", drop: { kind: 2, dropId: 11, money: true, value: 50 } },
+        { t: "drop-leave", dropId: 10, reason: "taken", characterId: 7 },
+        { t: "drop-leave", dropId: 11, reason: "gone" },
+        { t: "loot", notice: { kind: "item", itemId: 4000000, count: 1 } },
+        { t: "loot", notice: { kind: "mesos", amount: 50 } },
+        { t: "loot", notice: { kind: "rejected" } },
+        { t: "self", self: { ...self, mesos: 250 } },
         { t: "future-packet", extra: { value: 123 } },
         { t: "move", x: 1, y: 2, vx: 125, vy: 0, action: 0, foothold: 32 },
       ];
@@ -182,6 +195,9 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
         '{"t":"inventory","inventory":{"worn":[{}],"tabs":[]}}',
         '{"t":"mob-move","path":{"originX":1,"originY":2,"elements":[{"duration":"wrong"}]}}',
         '{"t":"created","ok":"yes"}',
+        '{"t":"hit","mobId":1,"damage":-1}',
+        '{"t":"drop-enter","drop":{"kind":0,"dropId":1,"money":false,"value":4000000}}',
+        '{"t":"loot","notice":{"kind":"item","itemId":4000000}}',
         "[]",
         "{bad",
       ])
@@ -189,7 +205,7 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
       await new Promise<void>((resolve, reject) => {
         const deadline = performance.now() + 3000;
         function check() {
-          if (received.length === packets.length + 7) resolve();
+          if (received.length === packets.length + 10) resolve();
           else if (performance.now() > deadline) reject(new Error("Lost echo delivery"));
           else setTimeout(check, 5);
         }
@@ -250,20 +266,41 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
       };
     });
     assert.equal(connects, 1);
-    assert.equal(result.delivered, 29, "Invalid observation must not alter real delivery");
-    assert.equal(result.sent.length, 22);
+    assert.equal(result.delivered, 43, "Invalid observation must not alter real delivery");
+    assert.equal(result.sent.length, 33);
     assert.deepEqual(
       result.sent.map((p) => p.t),
       result.messages.map((p) => p.t),
     );
-    assert.equal(result.invalid.length, 14, "Each bad packet diagnosed in both directions");
+    assert.equal(result.invalid.length, 20, "Each bad packet diagnosed in both directions");
     assert.ok(
       result.messages.every((p) => p.at >= 0),
       "Wire-provided timestamps do not override local observation time",
     );
     assert.equal(JSON.stringify(result.sent).includes("never-retained"), false);
+    const sequences = [...result.sent, ...result.messages]
+      .map((p) => p.sequence)
+      .sort((a, b) => a - b);
+    assert.deepEqual(
+      sequences,
+      Array.from({ length: 66 }, (_, index) => index + 1),
+    );
+    assert.ok(result.messages.filter((p) => p.t === "field").every((p) => p.characterId === 7));
+    assert.ok(result.messages.some((p) => p.t === "self" && p.self.mesos === 250));
+    assert.ok(result.messages.some((p) => p.t === "hit" && p.damage === 12));
+    assert.ok(
+      result.messages.some(
+        (p) => p.t === "inventory" && p.inventory.tabs[0]?.items[0]?.quantity === 0,
+      ),
+      "depleted throwing-star stacks are valid native inventory",
+    );
+    assert.ok(
+      result.messages.some(
+        (p) => p.t === "loot" && p.notice.kind === "item" && p.notice.count === 1,
+      ),
+    );
     assert.deepEqual(result.args, [2, 4, 8, 2]);
-    assert.deepEqual(result.transform, { a: -1, e: 20, f: 30 });
+    assert.deepEqual(result.transform, { a: -1, b: 0, c: 0, d: 1, e: 20, f: 30 });
     assert.deepEqual(result.pixel, [255, 0, 0, 255]);
     assert.deepEqual(result.marks, [[1, 2, 3, 4]]);
     assert.deepEqual(result.text, { text: "observed", x: 10, y: 20 });
@@ -282,6 +319,29 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
       window.__kmsProbe.invalid.length = 0;
     });
     await assertProbePackets(page);
+    const overflow = await page.evaluate(async () => {
+      await new Promise<void>((resolve, reject) => {
+        const socket = new WebSocket(location.origin.replace("http:", "ws:") + "/ws");
+        let received = 0;
+        socket.addEventListener("open", () => {
+          for (let i = 0; i < 5100; i++) socket.send('{"t":"ping"}');
+        });
+        socket.addEventListener("message", () => {
+          if (++received === 5100) {
+            socket.close();
+            resolve();
+          }
+        });
+        socket.addEventListener("error", () => reject(Error("Echo fixture failed")));
+      });
+      return {
+        dropped: window.__kmsProbe.droppedMessages,
+        sequence: window.__kmsProbe.sequence,
+        messages: window.__kmsProbe.messages.length,
+        sent: window.__kmsProbe.sent.length,
+      };
+    });
+    assert.deepEqual(overflow, { dropped: 133, sequence: 10266, messages: 5000, sent: 5000 });
   } finally {
     await browser.close();
     server.stop(true);

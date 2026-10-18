@@ -1,5 +1,7 @@
 # 朝向、地面怪物移動與世界／角色選擇（2026-10-17）
 
+> 後續frame／play舊MJS已刪，真Chromium／有界keyboard的現行入口與限制見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)；下列舊名稱只作歷史紀錄。
+
 > 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
 > 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
 

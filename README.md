@@ -18,6 +18,7 @@
 | 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
 | 查啟動參數與協定工具 | [server 說明](server/README.md) |
 | 掉落權威落點／圖示貼地／原WZ全圖驗證 | [掉落與fh](docs/DROP_FOOTHOLD_LANDING.md) |
+| 真實畫布／有界鍵盤探針、安全入口與驗證界線 | [frame／play整理](docs/STRICT_FRAME_PLAY_TOOLS.md) |
 | 手動瀏覽器工具／NPC與怪物素材整理 | [嚴格TS工具與素材](docs/STRICT_BROWSER_TOOL_MIGRATION.md) |
 | 多種清晰尺寸、拉近／拉遠、淡出／淡入與分層UI | [清晰鏡頭](docs/PIXEL_CAMERA.md) |
 | 可選物理步長、插值與十種自訂鏡頭 | [手感實驗](docs/MOTION_EXPERIMENTS.md)／[原版呈現原證](docs/PLAYER_PRESENTATION_CAMERA.md) |
@@ -32,15 +33,15 @@
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
 - **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-2026-10-18 工具鏈鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**。
+2026-10-19 重新核對 latest 並鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**。
 根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
-**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘3支 `.mjs` 尚未完成型別化；
+**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘1支 `server/scripts/client_probe.mjs` 尚未完成型別化；
 不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；86支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；89支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
@@ -101,7 +102,7 @@ bun server/src/cli.ts serve \
 
 ## 隔離體驗與進度安全
 
-2026-10-18 本輪環境沒有找到先前的玩家 save；過往文件的檔名／冷備路徑不代表檔案仍存在。
+2026-10-19 當前沙箱沒有先前的玩家 save；過往文件的檔名／冷備路徑不代表檔案仍存在。
 **不聲稱恢復舊角色，不自行重建相同名字的角色，不覆寫玩家資料。**
 有真實 save 時用 `bun tools/serve-existing-save.ts <真實路徑>`；必須先停服並冷備。
 
@@ -122,7 +123,7 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 - 型別／格式／建置與回歸狀態見 [Bun 遷移記錄](docs/BUN_MIGRATION.md)；提供入口不是宣稱全案驗收通過。
 
 原碼／listing／WZ、臉飾與 attr2 原證保留在 [NATIVE_FACE_ANIMATION](docs/NATIVE_FACE_ANIMATION.md)。
-`create-isolated-preview.ts` 仍是**明示寫入新檔**的人工工具，不能拿來假恢復舊進度；本次自動驗證不執行它。
+`create-isolated-preview.ts` 仍是**明示寫入新檔**的人工工具，不能拿來假恢復舊進度；只在明示開全新隔離進度時使用，不屬於功能驗證或恢復程序。
 
 ## 操作與體驗工具
 
@@ -170,5 +171,6 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 原 quest／taxi／trunk scripts、完整交易／組隊瀏覽器介面與正式營運防護仍有缺口。
 原 server 缺失的規則明示為重建政策；不以後期版本或「缺素材」猜測代替原證據。
 
-本輪不執行 test／check／typecheck／語法檢查／browser／VM／遊戲 HTTP 或登入 probe。
+本輪依授權執行 strict型別／格式／單元與完整回歸／建置、隔離component與唯讀title驗證；不自動登入／操作玩家角色或修改玩家save。
+最新結果與未完成項目見 [frame／play整理](docs/STRICT_FRAME_PLAY_TOOLS.md)。
 套件安裝、版本顯示、工具編譯、靜態閱讀與啟服都不算功能 PASS。舊測試數字只對應當時提交。

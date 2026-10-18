@@ -46,7 +46,7 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |
 | `server/src/game/` | 場地、保存、數值與物品權威；另含 WZ 資源呈現資料與重建政策 |
 | `server/src/wz/` | WZ 產品 reader、值層／像素／PNG；執行時直接讀 archive |
-| `server/scripts/browser-fixture.ts`／`browser-observation.ts` | 明示手動fixture admission、有界純觀測；匯入無連線／登入；7支browser runner為strict TS |
+| `server/scripts/browser-fixture.ts`／`browser-observation.ts` | 明示手動fixture admission、有界純觀測；匯入無連線／登入；7支browser runner與frame／play為strict TS；後者共用probe-field／probe-frame／probe-play |
 | `tools/` | Bun TS靜態分析、工具鏈安裝、browser build、保護既有save與明示新fixture啟動 |
 | `analysis/` | 既有研究輸出，不能把過時 manifest 描述當現在的解析結果 |
 | `generated/` | 可重建工具／素材與不可隨意重建的玩家 save／備份並存；均忽略但重要性不同 |
@@ -95,10 +95,11 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-main.js與3支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整1054/44（1098tests／122files，285.07s），對1520ac9既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
-本輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
-上一輪因舊沙箱程序／ignored save不在，已明示新建獨立入口；本輪保留其正在使用的同一程序與進度，不再重啟或重置。
+main.js與client_probe.mjs仍未完成型別化；frame／play已刪舊MJS並遷為真正strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已typed whisper還有未按當前admission重建的歷史情境。
+最新frame／play增量：strict／format／build、focused25/0；完整1064/44（1108tests／124files，267.35s），對本輪前基準failure multiset新增0／移除0。
+前輪完整1054/44（1098tests／122files，285.07s），對1520ac9既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
+歷史PID4942／入口已不在當前沙箱；本輪不宣稱恢復其程序或ignored save。本輪已依既有授權開全新隔離入口：8515與ignored generated/preview-20261019-tool-cleanup.json，preview／observer新level1進度，非恢復；title-only驗證0WS且save hash不變，不覆蓋既有save。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
 標題／登入／世界與選角責任、原證及驗證見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
 鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

@@ -3,6 +3,7 @@
  * Parsed packets expose only validated fields used by these probes; unknown kinds remain visible.
  */
 export interface ProbeSelf {
+  mesos?: number;
   str: number;
   dex: number;
   int: number;
@@ -28,12 +29,24 @@ export interface ProbePath {
   originY: number;
   elements: { x?: number; y?: number; duration: number }[];
 }
-export type ProbePacket = (
+type ProbePacketValue = (
   | { t: "move"; x: number; y: number; vx: number; vy: number; foothold: number; action: number }
-  | { t: "field"; mapId: number; self: ProbeSelf }
+  | { t: "field"; mapId: number; characterId?: number; self: ProbeSelf }
   | { t: "self"; self: ProbeSelf }
   | { t: "characters"; characters: { id: number; name: string; str: number; luk: number }[] }
   | { t: "inventory"; inventory: ProbeInventory }
+  | { t: "mob-enter"; mob: { mobId: number; templateId: number } }
+  | { t: "hit"; mobId: number; damage: number }
+  | { t: "mob-die"; mobId: number }
+  | { t: "drop-enter"; drop: { dropId: number; mobId?: number; money: boolean; value: number } }
+  | { t: "drop-leave"; dropId: number; reason: "gone" | "vanished" | "taken"; characterId?: number }
+  | {
+      t: "loot";
+      notice:
+        | { kind: "mesos"; amount: number }
+        | { kind: "item"; itemId: number; count: number }
+        | { kind: "rejected" };
+    }
   | { t: "mob-move"; path?: ProbePath }
   | { t: "user-look"; avatarItems?: number[] }
   | { t: "create"; appearance: number[] }
@@ -48,11 +61,20 @@ export type ProbePacket = (
   | { t: "login" | "world" | "character" | "ability-up" | "error" }
   | { t: "other"; kind: string; payload: Record<string, unknown> }
 ) & { at: number };
+export type ProbePacket = ProbePacketValue & { sequence: number };
 export interface ProbeDraw {
+  frame: number;
+  target: number;
+  targetId: string;
+  targetGeneration: number;
+  sourceCanvas?: number;
+  sourceGeneration?: number;
+  sourceSize: [number, number];
+  alpha: number;
   src: string;
   args: number[];
   canvas: [number, number];
-  matrix: { a: number; e: number; f: number };
+  matrix: { a: number; b: number; c: number; d: number; e: number; f: number };
 }
 export interface ProbeGameSnapshot {
   camera: { x: number; y: number };
@@ -67,6 +89,9 @@ export interface ProbeGameSnapshot {
   arts: [number, Record<string, { path: string; ox: number; oy: number }[]>][];
 }
 export interface BrowserObservation {
+  sequence: number;
+  droppedMessages: number;
+  frame: number;
   game(): ProbeGameSnapshot;
   sent: ProbePacket[];
   messages: ProbePacket[];
@@ -96,6 +121,9 @@ declare global {
 export function installBrowserObservation() {
   if (window.__kmsProbe) throw new Error("Probe observations already installed");
   const state: BrowserObservation = (window.__kmsProbe = {
+    sequence: 0,
+    droppedMessages: 0,
+    frame: 0,
     game,
     sent: [],
     messages: [],
@@ -119,6 +147,9 @@ export function installBrowserObservation() {
   function number(value: unknown): value is number {
     return typeof value === "number" && Number.isFinite(value);
   }
+  function u32(value: unknown): value is number {
+    return number(value) && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+  }
   function numbers(value: unknown): value is number[] {
     return Array.isArray(value) && value.every(number);
   }
@@ -131,10 +162,12 @@ export function installBrowserObservation() {
       !number(value.luk) ||
       !number(value.ap) ||
       !number(value.spawnPortal) ||
+      (value.mesos !== undefined && !u32(value.mesos)) ||
       !numbers(value.avatarItems)
     )
       throw new Error("Invalid self observation");
     return {
+      ...(u32(value.mesos) ? { mesos: value.mesos } : {}),
       str: value.str,
       dex: value.dex,
       int: value.int,
@@ -148,7 +181,9 @@ export function installBrowserObservation() {
     if (
       !record(value) ||
       !number(value.slot) ||
-      !number(value.itemId) ||
+      !Number.isInteger(value.slot) ||
+      !u32(value.itemId) ||
+      (value.quantity !== undefined && (!u32(value.quantity) || value.quantity > 65535)) ||
       [value.quantity, value.cuc, value.ruc].some((v) => v !== undefined && !number(v))
     )
       throw new Error("Invalid inventory item observation");
@@ -255,7 +290,7 @@ export function installBrowserObservation() {
     });
     return { camera: { x: value.camera.x, y: value.camera.y }, mobs, arts };
   }
-  function packet(data: unknown): ProbePacket {
+  function packet(data: unknown): ProbePacketValue {
     if (typeof data !== "string") throw new Error("Expected a textual probe packet");
     const p: unknown = JSON.parse(data),
       at = performance.now();
@@ -283,7 +318,14 @@ export function installBrowserObservation() {
         };
       case "field":
         if (!number(p.mapId)) break;
-        return { t: p.t, at, mapId: p.mapId, self: self(p.self) };
+        if (record(p.self) && p.self.characterId !== undefined && !u32(p.self.characterId)) break;
+        return {
+          t: p.t,
+          at,
+          mapId: p.mapId,
+          self: self(p.self),
+          ...(record(p.self) && u32(p.self.characterId) ? { characterId: p.self.characterId } : {}),
+        };
       case "self":
         return { t: p.t, at, self: self(p.self) };
       case "inventory":
@@ -305,6 +347,61 @@ export function installBrowserObservation() {
             return { id: c.id, name: c.name, str: c.str, luk: c.luk };
           }),
         };
+      case "mob-enter":
+        if (!record(p.mob) || !u32(p.mob.mobId) || !u32(p.mob.templateId)) break;
+        return { t: p.t, at, mob: { mobId: p.mob.mobId, templateId: p.mob.templateId } };
+      case "hit":
+        if (!u32(p.mobId) || !u32(p.damage)) break;
+        return { t: p.t, at, mobId: p.mobId, damage: p.damage };
+      case "mob-die":
+        if (!u32(p.mobId)) break;
+        return { t: p.t, at, mobId: p.mobId };
+      case "drop-enter": {
+        const d = p.drop;
+        if (
+          !record(d) ||
+          !u32(d.dropId) ||
+          !u32(d.kind) ||
+          typeof d.money !== "boolean" ||
+          !u32(d.value) ||
+          (d.kind <= 1 && !u32(d.mobId))
+        )
+          break;
+        return {
+          t: p.t,
+          at,
+          drop: {
+            dropId: d.dropId,
+            money: d.money,
+            value: d.value,
+            ...(d.kind <= 1 && u32(d.mobId) ? { mobId: d.mobId } : {}),
+          },
+        };
+      }
+      case "drop-leave":
+        if (
+          !u32(p.dropId) ||
+          !["gone", "vanished", "taken"].includes(String(p.reason)) ||
+          (p.reason === "taken" && !u32(p.characterId))
+        )
+          break;
+        return {
+          t: p.t,
+          at,
+          dropId: p.dropId,
+          reason: p.reason === "taken" ? "taken" : p.reason === "gone" ? "gone" : "vanished",
+          ...(u32(p.characterId) ? { characterId: p.characterId } : {}),
+        };
+      case "loot": {
+        const n = p.notice;
+        if (!record(n)) break;
+        if (n.kind === "mesos" && u32(n.amount))
+          return { t: p.t, at, notice: { kind: n.kind, amount: n.amount } };
+        if (n.kind === "item" && u32(n.itemId) && u32(n.count) && n.count > 0)
+          return { t: p.t, at, notice: { kind: n.kind, itemId: n.itemId, count: n.count } };
+        if (n.kind === "rejected") return { t: p.t, at, notice: { kind: n.kind } };
+        break;
+      }
       case "mob-move":
         return { t: p.t, at, path: path(p.path) };
       case "user-look":
@@ -348,7 +445,9 @@ export function installBrowserObservation() {
   }
   function observe(list: ProbePacket[], data: unknown) {
     try {
-      append(list, packet(data));
+      const value = packet(data);
+      if (list === state.messages && list.length >= 5000) state.droppedMessages++;
+      append(list, { ...value, sequence: ++state.sequence });
     } catch (error) {
       append(state.invalid, error instanceof Error ? error.message : String(error), 100);
     }
@@ -406,15 +505,71 @@ export function installBrowserObservation() {
     state.activeBlobs.delete(url);
     revoke(url);
   };
+  let activeFrame = 0,
+    canvasSequence = 0;
+  const canvases = new WeakMap<HTMLCanvasElement | OffscreenCanvas, number>();
+  function canvasId(canvas: HTMLCanvasElement | OffscreenCanvas) {
+    let id = canvases.get(canvas);
+    if (id === undefined) {
+      id = ++canvasSequence;
+      canvases.set(canvas, id);
+    }
+    return id;
+  }
+  // A single buffer is reused for world and UI in one RAF. Canvas identity alone cannot prove
+  // that old draws survived clear/reset/resize; destructive passes begin a new generation.
+  const generations = new WeakMap<HTMLCanvasElement | OffscreenCanvas, number>();
+  function generation(canvas: HTMLCanvasElement | OffscreenCanvas) {
+    return generations.get(canvas) ?? 0;
+  }
+  function invalidate(canvas: HTMLCanvasElement | OffscreenCanvas) {
+    generations.set(canvas, generation(canvas) + 1);
+  }
+  const clear = CanvasRenderingContext2D.prototype.clearRect;
+  CanvasRenderingContext2D.prototype.clearRect = function (...args: Parameters<typeof clear>) {
+    clear.apply(this, args);
+    invalidate(this.canvas);
+  };
+  const reset = CanvasRenderingContext2D.prototype.reset;
+  CanvasRenderingContext2D.prototype.reset = function () {
+    reset.call(this);
+    invalidate(this.canvas);
+  };
+  for (const prototype of [HTMLCanvasElement.prototype, OffscreenCanvas.prototype])
+    for (const dimension of ["width", "height"]) {
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, dimension),
+        set = descriptor?.set;
+      if (!descriptor || !set) throw new Error("Missing native canvas dimension setter");
+      Object.defineProperty(prototype, dimension, {
+        ...descriptor,
+        set(this: HTMLCanvasElement | OffscreenCanvas, value: unknown) {
+          set.call(this, value);
+          invalidate(this);
+        },
+      });
+    }
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (callback) =>
     raf((now) => {
-      if (callback.name === "frame") {
-        state.draws.length = 0;
-        state.texts.length = 0;
+      if (callback.name !== "frame") {
+        callback(now);
+        return;
       }
-      callback(now);
+      activeFrame = ++state.frame;
+      state.draws.length = state.texts.length = 0;
+      try {
+        callback(now);
+      } finally {
+        activeFrame = 0;
+      }
     });
+  function decodedSource(src: string): string {
+    try {
+      return decodeURIComponent(src);
+    } catch {
+      return src;
+    }
+  }
   const draw = CanvasRenderingContext2D.prototype.drawImage;
   CanvasRenderingContext2D.prototype.drawImage = function (
     image: CanvasImageSource,
@@ -425,21 +580,36 @@ export function installBrowserObservation() {
   ) {
     const src =
       image instanceof HTMLImageElement
-        ? (state.blobSources[image.src] ?? decodeURIComponent(image.src))
+        ? (state.blobSources[image.src] ?? decodedSource(image.src))
         : "";
     const m = this.getTransform();
     const call: ProbeDraw = {
+      frame: activeFrame,
+      target: canvasId(this.canvas),
+      targetId: this.canvas instanceof HTMLCanvasElement ? this.canvas.id : "",
+      targetGeneration: generation(this.canvas),
+      ...(image instanceof HTMLCanvasElement || image instanceof OffscreenCanvas
+        ? { sourceCanvas: canvasId(image), sourceGeneration: generation(image) }
+        : {}),
+      sourceSize:
+        image instanceof HTMLImageElement
+          ? [image.naturalWidth, image.naturalHeight]
+          : image instanceof HTMLCanvasElement || image instanceof OffscreenCanvas
+            ? [image.width, image.height]
+            : [0, 0],
+      alpha: this.globalAlpha,
       src,
       args: [...args],
       canvas: [this.canvas.width, this.canvas.height],
-      matrix: { a: m.a, e: m.e, f: m.f },
+      matrix: { a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f },
     };
-    append(state.draws, call);
-    if (src.includes("/miniMap/canvas")) append(state.miniBlits, call, 500);
     const bound = draw.bind(this);
     if (args.length === 2) bound(image, ...args);
     else if (args.length === 4) bound(image, ...args);
     else bound(image, ...args);
+    // Record only successful real drawImage calls, never a thrown/undecodable pretend image.
+    append(state.draws, call);
+    if (src.includes("/miniMap/canvas")) append(state.miniBlits, call, 500);
   };
   const fill = CanvasRenderingContext2D.prototype.fillRect;
   CanvasRenderingContext2D.prototype.fillRect = function (...args: Parameters<typeof fill>) {

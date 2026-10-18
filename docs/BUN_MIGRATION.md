@@ -2,7 +2,14 @@
 
 2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：標題／登入／世界與選角 strict UI（ADR-086）
+## 最新增量：真實畫布／有界鍵盤工具（ADR-087）
+
+frame_probe／play_probe已改為strict TS實作與Bun runner；刪除2支舊MJS。共用明示fixture／序號與原PNG→buffer→view證據，拒絕fake DOM／直接攻擊與移動封包。
+工具鏈latest與exact pins相同；focused25/0、完整1064/44（1108tests／124files，267.35s），對本輪前基準failure multiset新增0／移除0，CI仍不綠。
+完整結果與安全邊界見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。
+主入口5356行及client_probe.mjs709行／44項舊失敗仍待處理，不冒稱全案完成。
+
+## 前輪增量：標題／登入／世界與選角 strict UI（ADR-086）
 
 實際抽出login-data／login-presentation／login-screen，連同清單unknown守衛、純選擇狀態、
 原WZ繪圖、DOM／鍵盤／modal／pending／storage／dispose與transport接線；main **5963→5356行**，client **89支TS**。
@@ -181,16 +188,14 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 ## 尚未完成的原目標
 
 1. client/main.js 的真正實作型別與合理分層，不能只 rename 或用 any 包住。
-2. 下列 **3 支 server/scripts .mjs 工具／fixture** 的 Bun runner、型別與呼叫鏈遷移；含手動 browser probes，不因本次 pure suite 轉綠而宣稱它們已完成。
+2. 剩餘 **1 支 server/scripts/client_probe.mjs** 的 Bun runner、型別與呼叫鏈遷移；其歷史場景不能因其他工具通過而宣稱已完成。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. 追查全部 **44 項失敗**，分清 fixture、Bun 相容差異與真實行為，按原證修正；不能只讓 CI 表面變綠。
 5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
 
-### 尚未遷移的工具（只剩這三支）
+### 尚未遷移的工具（現僅餘這一支）
 
-- server/scripts/client_probe.mjs
-- server/scripts/frame_probe.mjs
-- server/scripts/play_probe.mjs
+- server/scripts/client_probe.mjs（709行；歷史用途，勿按預設帳密／port執行）
 
 ### 尚未通過的 44 個案例（保留同檔重複標題）
 

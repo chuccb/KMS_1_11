@@ -5,6 +5,8 @@
 > 本頁保留7162765當輪的81支TS與995/44結果；後續掉落權威fh／呈現TS整理、83支TS及1023/44，
 > 見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。舊PID6097／LIVE是前沙箱歷史，不代表當前仍存活。
 
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+
 ## 本輪範圍
 
 - 7 支 browser probe 從 MJS 真正遷成嚴格 TS；刪除舊檔，不保留 JS 相容殼。

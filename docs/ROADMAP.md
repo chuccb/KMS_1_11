@@ -1,11 +1,11 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-18。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-19。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
-**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（1023/44，1067tests／117files），
+**有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [frame／play整理](STRICT_FRAME_PLAY_TOOLS.md)；
 既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。全案TS／ESNext／Bun整理也未完成，
-main.js／3支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
@@ -35,7 +35,8 @@ main.js／3支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](B
 
 ## 優先序 1：繼續真正的嚴格 TypeScript 遷移
 
-- 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。main.js與client_probe／frame_probe／play_probe仍需實作型別及合理拆分，不只改名。
+- 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。main.js與client_probe仍需實作型別及合理拆分，不只改名。
+- frame／play已strict TS實作遷移，真RAF／畫布來源與有界keyboard計畫見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；不對玩家執行手動工具。
 - 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。
 - 逐項追查44失敗及typed whisper歷史native admission情境；不能改skip、刪斷言或降低strict掩蓋問題。
 - HTTP／WebSocket其餘資料邊界仍須逐一審核；strict compile不等於所有payload已驗證。

@@ -2,7 +2,11 @@
 
 更新：2026-10-19。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-本輪三個login UI實作模組strict TS遷移：main5963→5356行、client89支TS，保留主入口／3MJS未完債務。
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+
+最新一輪strict／format／build通過、focused25/0；完整1064/44（1108tests／124files，267.35s），對當輪前基準失敗multiset新增0／移除0。35純imports／0 I/O，手動角色場景未代玩家執行。
+
+前輪三個login UI實作模組strict TS遷移：main5963→5356行、client89支TS，保留主入口／3MJS未完債務。
 六項registry latest重新查證與下表exact pins一致（UTC2026-10-18T16:09:10Z／台北2026-10-19）；不為升級而虛構版號。
 strict／format／build與focused45/0通過，21組舊／新完整邏輯畫布RGBA全0差異、30純imports／0 I/O。
 完整1054/44（1098tests／122files，285.07s），對1520ac9 failure multiset新增0／移除0，CI仍不綠。
@@ -56,7 +60,7 @@ bun run build
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
   client 的 61 個原有 leaf 已完成真正實作型別，現有 89 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
-  **`client/main.js` 及 server/scripts 剩餘 3 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
+  **`client/main.js` 及 server/scripts 剩餘 1 支 `client_probe.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
@@ -64,7 +68,7 @@ bun run build
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
 - 9 支純規則 probe 已移至 `server/test/presentation-*.test.ts`，連同新增 recovery／typed UI／WZ HTTP 測試納入根 suite。
-  7支手動 `browser_*_probe.ts` 已strict型別化但本輪未執行登入／角色場景；全案仍欠主入口與3支工具／fixture，不能以能 bundle 代替完成。
+  7支手動 `browser_*_probe.ts` 已strict型別化但本輪未執行登入／角色場景；另有frame／play兩支strict runner，完整界線見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)；全案仍欠主入口與client_probe.mjs，不能以能 bundle 代替完成。
 
 ## 工具遷移與原證
 
@@ -119,7 +123,7 @@ bun server/scripts/browser_display_probe.ts <明示web-port或http(s)://origin>
 bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 ```
 
-音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘3支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
+音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。僅餘client_probe.mjs仍未遷完；frame／play的現行安全入口見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)，不自動執行手動登入／移動 probe。
 
 `whisper_probe.ts` 也已嚴格型別化，採顯式帳號／目標／ack與共享TCP transport；歷史跨系統場景沒有重新驗收，
 不得以舊105項PASS宣稱當前服務認證。只讀 display/render 已跑真瀏覽器；field/login分支未跑，見

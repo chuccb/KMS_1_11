@@ -2,6 +2,8 @@
 
 2026-10-19（Asia/Taipei），ADR-086。這是實作遷移增量，**不是全專案已完成 TypeScript 遷移或 CI 全綠的聲明**。
 
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+
 ## 責任與實際接線
 
 | 位置 | 現行責任 |
@@ -77,7 +79,7 @@ bun run test
 
 ## 仍未完成
 
-`client/main.js` **5356行**、`server/scripts/client_probe.mjs`709行、`frame_probe.mjs`195行、`play_probe.mjs`72行仍是實際遷移債務。
+此輪結束時尚有main5356行與3支MJS；後續frame／play已真正遷移並刪除舊檔，現在僅餘 `client/main.js` **5356行** 與 `server/scripts/client_probe.mjs`709行。
 三個 MJS 沒有在這輪執行；後兩個含歷史 implicit account／自動角色操作，**不可對正在玩的 LIVE 執行**。
 舊 fake-DOM／VM `client-ui` 測試仍列在完整suite中，不以新 component 測試偷偷取代／刪掉它或宣稱其商店／背包情境都已驗收。
 全 `/ws` 深 schema、其餘整合入口與既有44個失敗仍須繼續實作；新圖形與鍵盤驗證不能替代玩家場地／商店／戰鬥的整體驗收。
