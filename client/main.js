@@ -1,9 +1,10 @@
+import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.mjs";
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.mjs";
 import {attackPredictions} from './attack-predictions.mjs';
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout,activeMagicActions,activeMagicSpeed} from './active-skills.mjs';
 import { combatAssets } from "./combat-assets.mjs";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
-import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackFrameStart, attackHitDelay } from "./attack-timing.mjs";
+import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackHitDelay } from "./attack-timing.mjs";
 import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.mjs";
 import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.mjs";
 import {tooltipPreview} from "./tooltip-preview.mjs";
@@ -388,10 +389,10 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
-    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();
+    skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();
     combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
     clearAttackAlert(playerBody);
-    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();buffs.clear();
+    skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -444,7 +445,7 @@ function handle(message) {
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
-    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();buffs.clear();
+    skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -665,7 +666,7 @@ function handle(message) {
       if (!Number.isInteger(damage) || damage < 0 || damage > 9999) return;
       const now = performance.now();
       contact.accept(damage);
-      damageMarks.push({
+      addDamageMark({
         x: pending.player.x,
         y: pending.player.y,
         avatar: pending.avatar,
@@ -692,7 +693,7 @@ function handle(message) {
       if(!prediction||prediction.field!==self||prediction.epoch!==combatEpoch||prediction.skillId!==message.skillId||
         prediction.skillLevel!==message.skillLevel||mobs.get(String(message.mobId))!==prediction.target.mob)return;
       const at=prediction.start+prediction.target.delayMs;
-      scheduleActiveHits(message.mobId,message.damages??[],message.skillId,message.skillLevel,at,prediction.target.point);return;
+      scheduleActiveHits(message.mobId,message.damages??[],message.skillId,message.skillLevel,at,prediction.target.presentation);return;
     }
     case 'party': {
       const r=message.result;
@@ -725,7 +726,7 @@ function handle(message) {
         if (playerBody && map?.id === self?.mapId)
           deathFx.observe(message.self.characterId, true, self, performance.now());
         selfSwing = undefined;
-        buffs.clear();skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();
+        buffs.clear();skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();
         clearAttackAlert(playerBody);
         combatEpoch++;
         keys.clear();
@@ -949,11 +950,12 @@ function handle(message) {
       // `0x30`: the monster is still on the field (its corpse is), and the 2003 client plays
       // `Mob/<id>.img/die1` before `0x31` takes it away. Nothing else changes here - the loot and
       // the exp are other packets, from the server.
-      const corpse = mobs.get(String(message.mobId));
+      const corpse = mobs.get(String(message.mobId)),field=self,epoch=combatEpoch,at=performance.now();
       if (corpse)
         void audio.effect(
           `Mob/${String(corpse.templateId).padStart(7, "0")}/Die`,
           spatialVolume(corpse.x, corpse.y, self),
+          {deadline:at+1000,valid:()=>self===field&&combatEpoch===epoch&&mobs.get(String(message.mobId))===corpse},
         );
       if (corpse) {
         sampleMotion(corpse, performance.now(), terrain);
@@ -1012,13 +1014,12 @@ function handle(message) {
     }
 
     case "hit": {
-      if (message.contactField !== undefined && message.contactField !== contactField) return;
-      lastAttackTrace = message.trace;
-      scheduleAttackHit(
-        message.mobId,
-        message.damage,
-        performance.now() + (message.delayMs ?? 0),
-      );
+      if(message.contactField!==contactField||!(selfView?.hp>0))return;
+      lastAttackTrace=message.trace;
+      const prediction=activePredictions.consume(message.attackToken,message.mobId);
+      if(!prediction||prediction.field!==self||prediction.epoch!==combatEpoch||prediction.skillId!==0||
+        mobs.get(String(message.mobId))!==prediction.target.mob)return;
+      scheduleActiveHits(message.mobId,[message.damage],0,0,prediction.start+prediction.target.delayMs,prediction.target.presentation);
       return;
     }
 
@@ -1799,6 +1800,7 @@ const mesoArt = new Map();
 let selfSwing;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
 const damageMarks = [];
+function addDamageMark(mark){mark.order??=layerOrder(mark,ATTACK_EFFECT_Z);damageMarks.push(mark);}
 const mobHits = new Map();
 const mobBodyAttack = new Map();
 const contact = contactClock();
@@ -1896,7 +1898,9 @@ let combatEpoch = 0, localActionEpoch = 0;
 const combatCatalog = combatAssets({
   onAttack(profile) {
     for (const action of [...profile.melee, ...profile.shoot, ...(profile.magic??[]), ...(profile.prone ? [profile.prone] : [])])
-      for (const frames of Object.values(action.effects ?? {})) for (const frame of frames) artImage(frame.path);
+      for (const frame of action.afterimage??[]) artImage(frame.path);
+    for(const frames of Object.values(profile.hitEffects??{}))for(const frame of frames)artImage(frame.path);
+    if(profile.sfx)void audio.preload(`Weapon/${profile.sfx}/Attack`);
   },
   onProjectile(frames) { for (const frame of frames) artImage(frame.path); },
 });
@@ -2686,23 +2690,14 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
     ctx.globalAlpha *= pose.alpha;
   }
   if (entity === selfView && selfView.hp > 0 && contact.tinted) ctx.filter = "brightness(0.5019607843137255)";
-  // 507A20/508700: body child z=0, afterimage z=1, front/face child z=2.
-  // Gr2D's overlay comparator walks parents first: these are NOT world z+1 / z+2.
-  drawAvatarBodyAt(entity, screenX, screenY, now, direction, () => {
-    if (!swing) return;
-    const index = attackFrame(swing, now), frames = swing.effects?.[String(attackCanvasFrame(swing, index))];
-    if (!frames?.length || index < 0) return;
-    const prior = attackFrameStart(swing, index);
-    ctx.save();
-    ctx.filter = "none"; // User contact tint affects avatar canvases, not the weapon's afterimage.
-    drawArchiveImage(loopFrame(frames, now - swing.start - prior), screenX, screenY, direction);
-    ctx.restore();
-  });
+  // 507A20: the independent weapon afterimage is user+380, overlay child5 (not +368 child1).
+  drawAvatarBodyAt(entity, screenX, screenY, now, direction);
   ctx.restore();
-  if(!dead)drawSkillLayer(entity,screenX,screenY,now,direction);
+  if(!dead)drawWeaponAfterimage(entity,screenX,screenY,now);
+
 }
 
-function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
+function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
   const look = lookOf(entity);
   const state = stanceOfEntity(entity, now);
   preloadAvatar(look, entity.bodyProfile?.weaponId === weaponIdOf(look) ? entity.bodyProfile : undefined);
@@ -2717,11 +2712,9 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
     const h = entry.planeHeight, w = entry.img.naturalWidth;
     if (h > 0 && entry.img.naturalHeight === h * 2) {
       ctx.drawImage(entry.img, 0, 0, w, h, x, y, w, h);
-      drawMiddle?.();
       ctx.drawImage(entry.img, 0, h, w, h, x, y, w, h);
     } else {
       ctx.drawImage(entry.img, x, y);
-      drawMiddle?.();
     }
   };
   if (frame.ready) { draw(frame); return; }
@@ -3108,7 +3101,16 @@ function frame() {
   for(const [id,speech] of npcBalloons.active(now)) {
     const npc=npcs.get(String(id));if(npc)scene.push({kind:'npc-speech',npc,id,z:250210,y:0,order:layerOrder(speech,250210)});
   }
-  scene.push({ kind: "damage", z: 250310, y: 0, order: 0 }); // 41E610/41F200 -1073471524
+  for(const entity of weaponEffects.keys())if(entity!==selfView&&users.get(String(entity.characterId))!==entity)weaponEffects.delete(entity);
+  for(let i=damageMarks.length-1;i>=0;i--)if(now-damageMarks[i].start>=1000)damageMarks.splice(i,1);
+  for(const mark of damageMarks)scene.push({kind:'damage',mark,z:ATTACK_EFFECT_Z,y:0,order:mark.order??layerOrder(mark,ATTACK_EFFECT_Z)});
+  for(let i=skillEffects.length-1;i>=0;i--){const effect=skillEffects[i];
+    const entity=effect.characterId===selfView?.characterId?selfView:users.get(String(effect.characterId));
+    if(now>=effect.end||!entity||(effect.entity&&entity!==effect.entity)||deathFx.get(effect.characterId)||JSON.stringify(lookOf(entity))!==effect.lookKey){skillEffects.splice(i,1);continue;}
+    if(now>=effect.start)scene.push({kind:'skill-effect',effect,position:entity===selfView?self:entity,z:ATTACK_EFFECT_Z,y:0,order:effect.order??(effect.order=layerOrder(effect,ATTACK_EFFECT_Z))});
+  }
+  for(let i=skillHitEffects.length-1;i>=0;i--)if(now>=skillHitEffects[i].end)skillHitEffects.splice(i,1);
+  for(const effect of skillHitEffects)if(now>=effect.start)scene.push({kind:'hit-effect',effect,z:ATTACK_EFFECT_Z,y:0,order:effect.order});
   for (const actor of mergeScene(mapScene, scene)) {
     if (actor.kind === "back") { drawBack(actor.back, cameraX, cameraY, now); continue; }
     if (actor.kind === "projectile") { drawProjectile(actor.shot, cameraX, cameraY, now); continue; }
@@ -3121,14 +3123,9 @@ function frame() {
         actor.entity.chatOriginY,(actor.entity.hp!==undefined?actor.entity.hp<=0:(actor.entity.action&~1)===18),now);
       continue;
     }
-    if (actor.kind === "damage") {
-      for (let i = damageMarks.length - 1; i >= 0; i--) {
-        const mark = damageMarks[i];
-        if (now - mark.start >= 1000) damageMarks.splice(i, 1);
-      }
-      for (const mark of damageMarks) damageArt.draw(ctx, mark, cameraX, cameraY, now);
-      continue;
-    }
+    if(actor.kind==='skill-effect'){drawSkillLayer(actor.effect,actor.position.x-cameraX,actor.position.y-cameraY,now);continue;}
+    if(actor.kind==='hit-effect'){const e=actor.effect;drawArchiveImage(oneShotFrame(e.frames,now-e.start),e.x-cameraX,e.y-cameraY,e.flip);continue;}
+    if(actor.kind==='damage'){damageArt.draw(ctx,actor.mark,cameraX,cameraY,now);continue;}
     if (actor.kind === "portals") {
       drawPortals(cameraX, cameraY, now - mapAnimationStart);
       continue;
@@ -3189,14 +3186,6 @@ function frame() {
     }
   }
 
-  for(let i=skillEffects.length-1;i>=0;i--){const effect=skillEffects[i];
-    if(now>=effect.end||(effect.entity&&users.get(String(effect.characterId))!==effect.entity)||deathFx.get(effect.characterId))skillEffects.splice(i,1);
-  }
-  for(let i=skillHitEffects.length-1;i>=0;i--){
-    const effect=skillHitEffects[i];
-    if(now>=effect.end || mobs.get(String(effect.mob.mobId))!==effect.mob){skillHitEffects.splice(i,1);continue;}
-    drawArchiveImage(oneShotFrame(effect.frames,now-effect.start),effect.mob.x-cameraX+effect.offset.x,effect.mob.y-cameraY+effect.offset.y,false);
-  }
   drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
@@ -3335,26 +3324,23 @@ function drawDrop(key, record, cameraX, cameraY, now) {
   ctx.globalAlpha = 1;
 }
 
-function playWeaponSound(entity, profile) {
-  const weapon = lookOf(entity).items.find(
-    (id) => id >= 1300000 && id < 2000000,
-  );
-  const sfx = profile?.sfx ?? itemInfo.get(weapon)?.sfx;
-  if (sfx)
-    void audio.effect(
-      `Weapon/${sfx}/Attack`,
-      spatialVolume(
-        entity === selfView ? self.x : entity.x,
-        entity === selfView ? self.y : entity.y,
-        self,
-      ),
-    );
+function playWeaponSound(entity,profile,motion,start){
+  if(!profile?.sfx)return;
+  const field=self,epoch=combatEpoch,lookKey=JSON.stringify(lookOf(entity)),local=entity===selfView;
+  const sound=`Weapon/${profile.sfx}/Attack`;void audio.preload(sound);
+  const due=start+shotRelease(motion),deadline=due+Math.max(200,(motion.afterimage??[]).reduce((n,f)=>n+f.delay,0));
+  const valid=()=>self===field&&combatEpoch===epoch&&(local?selfView===entity:users.get(String(entity.characterId))===entity)&&
+    !deathFx.get(entity.characterId)&&JSON.stringify(lookOf(entity))===lookKey;
+  const play=()=>{if(!valid())return;const p=local?self:entity;
+    void audio.effect(sound,spatialVolume(p.x,p.y,self),{deadline,valid});};
+  const wait=due-performance.now();if(wait>0)setTimeout(play,wait);else play();
 }
 
 /** Shared bounded metadata only. No promise captures an actor or resurrects a cleared cache. */
 function ensureAttackProfile(look) { return combatCatalog.attack(weaponIdOf(look)); }
 function ensureProjectileFrames(itemId) { return combatCatalog.projectile(itemId).then(frames => frames ?? []); }
 const skillEffects=[],skillHitEffects=[];
+const weaponEffects=new Map();
 const activePredictions=attackPredictions();
 function oneShotFrame(frames,elapsed) {
   if(elapsed<0)return;
@@ -3363,6 +3349,7 @@ function oneShotFrame(frames,elapsed) {
 }
 async function preloadSkillArt(data,level) {
   const art=data?.arts?.[level];if(!art)return;
+  if(art.useSound)void audio.preload(art.useSound);
   const pictures=[...art.effects,...(art.balls??[]),...(art.hitVariants?.flat()??art.hits)].map(f=>artImage(f.path));
   await Promise.all(pictures.map(p=>p.loading));
   return pictures.every(p=>p.ready)?art:undefined;
@@ -3370,7 +3357,7 @@ async function preloadSkillArt(data,level) {
 async function playSkillEffect(characterId,skillId,level,start,soundDeadline=Infinity) {
   const field=self,epoch=combatEpoch,entity=characterId===selfView?.characterId?selfView:users.get(String(characterId));
   if(!entity)return;
-  const lookKey=JSON.stringify(lookOf(entity));
+  const lookKey=JSON.stringify(lookOf(entity)),flip=facingFlip(entity.facing),order=layerOrder({},ATTACK_EFFECT_Z);
   let flash;
   if(skillId===1001003||skillId===2001003){
     const state=stanceOfEntity(entity,start);
@@ -3383,58 +3370,101 @@ async function playSkillEffect(characterId,skillId,level,start,soundDeadline=Inf
     (characterId!==selfView?.characterId&&current!==entity)||JSON.stringify(lookOf(current))!==lookKey)return;
   const duration=art.armorFlash?400:art.effects.reduce((n,f)=>n+f.delay,0);
   if(performance.now()-start>=Math.max(duration,200))return; // Sound-only casts also expire; never replay on a late load.
-  if(performance.now()<soundDeadline&&art.useSound)void audio.effect(art.useSound,spatialVolume(current.x??self.x,current.y??self.y,self));
-  if(duration>0){if(skillEffects.length>=128)skillEffects.shift();skillEffects.push({characterId,entity:characterId===selfView?.characterId?undefined:entity,lookKey,art,flash,start,end:start+duration});}
+  if(performance.now()<soundDeadline&&art.useSound)void audio.effect(art.useSound,spatialVolume(current===selfView?self.x:current.x,current===selfView?self.y:current.y,self),{deadline:Math.min(soundDeadline,start+Math.max(duration,200)),valid:()=>self===field&&combatEpoch===epoch&&!deathFx.get(characterId)&&(characterId===selfView?.characterId?current===selfView:users.get(String(characterId))===current)&&JSON.stringify(lookOf(current))===lookKey});
+  if(duration>0){if(skillEffects.length>=128)skillEffects.shift();skillEffects.push({characterId,entity:characterId===selfView?.characterId?undefined:entity,lookKey,art,flash,flip,order,start,end:start+duration});}
 }
-async function playSkillHit(mobId,skillId,level,start,point) {
-  const field=self,epoch=combatEpoch,mob=mobs.get(String(mobId));if(!mob)return;
-  const offset=point?{x:point.x-mob.x,y:point.y-mob.y}:{x:0,y:-20};
-  const data=await combatCatalog.skill(skillId),art=await preloadSkillArt(data,level);
-  if(self!==field||combatEpoch!==epoch||!art||mobs.get(String(mobId))!==mob)return;
-  const variants=art.hitVariants??[art.hits];
-  const frames=variants[Math.floor(Math.random()*variants.length)]??[]; // Native 50D9F0, visual RNG only.
-  const end=start+frames.reduce((n,f)=>n+f.delay,0);
-  if(end<=performance.now())return;
-  if(skillHitEffects.length>=128)skillHitEffects.shift();
-  skillHitEffects.push({mob,frames,start,end,offset});
+/** Queue native +380 afterimage independently of the body's forced-action lifetime. */
+function queueWeaponAfterimage(entity,motion,now){
+  if(!motion.afterimage?.length)return;
+  const record=weaponEffects.get(entity)??{};
+  record.pending={frames:motion.afterimage,start:now+shotRelease(motion),flip:!motion.facingLeft,
+    lookKey:JSON.stringify(lookOf(entity))};
+  if(weaponEffects.size>=128&&!weaponEffects.has(entity))weaponEffects.delete(weaponEffects.keys().next().value);
+  weaponEffects.set(entity,record);
 }
-function drawSkillLayer(entity,x,y,now,flip) {
-  for(const effect of skillEffects) {
-    if((effect.entity&&effect.entity!==entity)||effect.characterId!==entity.characterId||effect.lookKey!==JSON.stringify(lookOf(entity))||now<effect.start||now>=effect.end)continue;
-    if(effect.art.armorFlash){
-      // Native 50C460 generates a white, expanding armor silhouette, not an absent WZ effect.
-      const frame=effect.flash;
-      if(!frame?.ready)continue;
-      const t=(now-effect.start)/400,scale=1+2*t;
-      ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ctx.globalAlpha*=(212/255)*(1-t);
-      ctx.filter='brightness(0) invert(1)';ctx.drawImage(frame.img,frame.dx,frame.dy);ctx.restore();
-    }else drawArchiveImage(oneShotFrame(effect.art.effects,now-effect.start),x,y,flip);
+function drawWeaponAfterimage(entity,x,y,now){
+  const record=weaponEffects.get(entity);if(!record)return;
+  if((entity!==selfView&&users.get(String(entity.characterId))!==entity)||deathFx.get(entity.characterId)||
+    ['dead','ladder','rope'].includes(entity===selfView?locomotion(playerBody):remoteStance(entity))){weaponEffects.delete(entity);return;}
+  const lookKey=JSON.stringify(lookOf(entity));
+  if(record.pending?.lookKey!==lookKey)delete record.pending;
+  if(record.current?.lookKey!==lookKey)delete record.current;
+  if(record.pending&&now>=record.pending.start){record.current=record.pending;delete record.pending;}
+  const effect=record.current;
+  if(effect){
+    const frame=oneShotFrame(effect.frames,now-effect.start);
+    if(frame)drawArchiveImage(frame,x,y,effect.flip);else delete record.current;
   }
+  if(!record.pending&&!record.current)weaponEffects.delete(entity);
 }
-/** 4882F0 -> 4862C0 -> 487A30: per-hit deadline, per-hit visual RNG, no skill hit effect on MISS. */
-function scheduleActiveHits(mobId,damages,skillId,level,at,point){
+function drawSkillLayer(effect,x,y,now){
+  if(effect.art.armorFlash){
+    const frame=effect.flash;if(!frame?.ready)return;
+    const t=(now-effect.start)/400,scale=1+2*t;
+    ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ctx.globalAlpha*=(212/255)*(1-t);
+    ctx.filter='brightness(0) invert(1)';ctx.drawImage(frame.img,frame.dx,frame.dy);ctx.restore();
+  }else drawArchiveImage(oneShotFrame(effect.art.effects,now-effect.start),x,y,effect.flip);
+}
+/** The point is captured before any asynchronous work. 4882F0 stores a mob-relative offset. */
+function hitPresentation(mob,point,facingLeft,profile,action,magic=false){
+  return {offset:point?{x:point.x-mob.x,y:point.y-mob.y}:undefined,facingLeft,profile,action,magic};
+}
+function physicalHitPoint(source,mob,facingLeft,bounds,shoot=false,near=65,range=nativeShotRange){
+  const rect=mob.rect??mobRect(currentMobFrame(mob.mob??mob,performance.now()),mob,facingFlip((mob.mob??mob).facing));
+  return attackHitPoint(attackWorldRect(source,shoot?{left:-range,right:-near,top:-25,bottom:-24}:bounds,facingLeft),rect);
+}
+async function hitFrames(skillId,level,presentation){
+  if(skillId){
+    const data=await combatCatalog.skill(skillId),art=data?.arts?.[level];
+    if(!art)return []; // Unknown skill art is not permission to invent a weapon spark.
+    const variants=art.hitVariants??[];
+    if(variants.length){const frames=variants[Math.floor(Math.random()*variants.length)]??[];
+      await Promise.all(frames.map(f=>artImage(f.path).loading));return frames;}
+    if(art.hasHitPath)return []; // A declared but unreadable native skill path is not a weapon fallback.
+  }
+  if(presentation.magic)return []; // 514D30 uses 50D9F0, not physical 50D7F0 fallback.
+  const keys=weaponHitKeys(presentation.profile?.weaponId??0,presentation.action),key=keys[Math.floor(Math.random()*keys.length)];
+  const frames=presentation.profile?.hitEffects?.[key]??[];
+  await Promise.all(frames.map(f=>artImage(f.path).loading));return frames;
+}
+/** 4882F0 -> 4862C0 -> 487A30 -> 41F8A0: each impact clamps, then freezes a world-plane layer. */
+function scheduleActiveHits(mobId,damages,skillId,level,at,presentation={}){
+  const field=self,epoch=combatEpoch;
   damages.forEach((damage,ordinal)=>{
-    const start=at+attackHitDelay(ordinal);
-    scheduleAttackHit(mobId,damage,start,ordinal);
-    if(damage>0)void playSkillHit(mobId,skillId,level,start,point);
+    const start=at+attackHitDelay(ordinal),framesTask=damage>0?hitFrames(skillId,level,presentation):undefined;
+    scheduleAttackHit(mobId,damage,start,ordinal,(mob,rect)=>{
+      if(!framesTask)return;
+      const point=impactPosition(presentation.offset,mob,rect);if(!point)return;
+      const effect={...point,start,flip:!presentation.facingLeft};
+      effect.order=layerOrder(effect,ATTACK_EFFECT_Z); // Allocate after the number, at impact, not at HTTP completion.
+      void framesTask.then(frames=>{
+        if(self!==field||combatEpoch!==epoch||!frames.length||frames.some(f=>!artImage(f.path).ready))return;
+        const end=start+frames.reduce((n,f)=>n+f.delay,0);if(performance.now()>=end)return;
+        if(skillHitEffects.length>=128)skillHitEffects.shift();
+        skillHitEffects.push({...effect,frames,end}); // Already-created effects survive mob death/despawn.
+      });
+    });
   });
 }
-function scheduleAttackHit(mobId, damage, at, ordinal=0) {
+function scheduleAttackHit(mobId, damage, at, ordinal=0, onImpact) {
   const field = self,
     epoch = combatEpoch, originalMob=mobs.get(String(mobId));
   const show = () => {
     if (self !== field || combatEpoch !== epoch || mobs.get(String(mobId))!==originalMob) return;
     const mob = mobs.get(String(mobId));
     if (!mob) return;
-    const now = performance.now();
+    const now = performance.now();if(now-at>=1000)return;
     void audio.effect(
       `Mob/${String(mob.templateId).padStart(7, "0")}/Damage`,
       spatialVolume(mob.x, mob.y, self),
+      {deadline:at+1000,valid:()=>self===field&&combatEpoch===epoch&&mobs.get(String(mobId))===originalMob},
     );
     const frame=currentMobFrame(mob,now);
     if(damage>0) mobHits.set(String(mobId),now);
-    if(frame) damageMarks.push({x:mob.x,y:mob.y-Math.max(0,frame.oy??0)-ordinal*30,value:damage,start:now,
-      jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))});
+    if(frame){const mark={x:mob.x,y:mob.y-Math.max(0,frame.oy??0)-ordinal*30,value:damage,start:at,
+      jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))};
+      mark.order=layerOrder(mark,ATTACK_EFFECT_Z);addDamageMark(mark);}
+    onImpact?.(mob,mobRect(frame,mob,facingFlip(mob.facing)));
   };
   const delay = at - performance.now();
   if (delay > 0) setTimeout(show, delay);
@@ -3510,7 +3540,7 @@ async function receiveUserAttack(message, now) {
   const targets=new Map((message.targets??[]).flatMap(target=>{
     const mob=mobs.get(String(target.mobId));return mob?[[target.mobId,{mob,x:mob.x,y:mob.y,rect:mobRect(currentMobFrame(mob,now),mob,facingFlip(mob.facing))}]]:[];
   }));
-  const [profile,skillData]=await Promise.all([ensureAttackProfile(look),
+  const [baseProfile,skillData]=await Promise.all([ensureAttackProfile(look),
     message.skillId?combatCatalog.skill(message.skillId):undefined]);
   if (
     self !== field ||
@@ -3520,6 +3550,7 @@ async function receiveUserAttack(message, now) {
   )
     return;
   const skillId=message.skillId??0,magic=message.magic===true;
+  const profile=attackProfileAtTier(baseProfile,message.afterimage??0);
   if(magic&&activeSkill(skillId)?.kind!=='magic')return;
   const action = skillId?(magic?activeMagicActions(profile,skillId,skillData?.skillType):message.shoot?activeRangedActions(profile,skillId):activeMeleeActions(profile,skillId)).find(a=>a.action===message.action)
     :basicAttackAction(profile, message.action, message.shoot);
@@ -3536,9 +3567,12 @@ async function receiveUserAttack(message, now) {
   };
   const soundAllowed=performance.now()-now<attackDuration(motion);
   if(skillId)void playSkillEffect(message.characterId,skillId,message.skillLevel,now,now+attackDuration(motion));
-  if(soundAllowed&&!magic)playWeaponSound(user, profile);
+  queueWeaponAfterimage(user,motion,now);
+  if(soundAllowed&&!magic)playWeaponSound(user, profile,motion,now);
+  for(const snapshot of targets.values())snapshot.point=physicalHitPoint(source,snapshot,message.facingLeft,action.bounds,message.shoot,
+    shotNear(attackProfileAtTier(baseProfile,0)?.melee[0]),200);
   const target = targets.get(message.targets?.[0]?.mobId);
-  const near = shotNear(profile.melee[0]);
+  const near = shotNear(attackProfileAtTier(baseProfile,0)?.melee[0]);
   const magicBalls=magic?skillData?.arts?.[message.skillLevel]?.balls:undefined;
   if(magic&&!magicBalls)return;
   // Passing null prevents a remote empty cast from acquiring some unrelated new target.
@@ -3560,16 +3594,16 @@ async function receiveUserAttack(message, now) {
     const delay = magic?shotRelease(motion)+(magicBalls.length?magicPlan.leg.duration:0):message.shoot
       ? shotRelease(motion) +
         projectileLeg(source.x, source.y, message.facingLeft, snapshot, near).duration
-      : skillId?shotRelease(motion)+Math.min(targetIndex*70,280):0;
-    if(skillId){
-      scheduleActiveHits(target.mobId,target.damages??[],skillId,message.skillLevel,now+delay,magic?magicPlan.point:undefined);
-    }else scheduleAttackHit(target.mobId,(target.damages??[]).reduce((sum,value)=>sum+value,0),now+delay);
+      : shotRelease(motion)+(skillId?Math.min(targetIndex*70,280):0);
+    const point=magic?magicPlan.point:message.shoot?snapshot.point:physicalHitPoint(source,snapshot,message.facingLeft,activeMeleeBounds(action.bounds,skillData?.levels.find(row=>row.level===message.skillLevel)?.values.range??0,message.facingLeft,true),false,near);
+    scheduleActiveHits(target.mobId,target.damages??[],skillId,message.skillLevel,now+delay,
+      hitPresentation(snapshot,point,message.facingLeft,profile,motion.action,magic));
   }
   // Preserve the received attack clock / hit scheduling. A cold remote action is not exposed to
   // the renderer as an unready gray box, and isn't restarted late after it already finished.
   const frames = delays.map((_, frame) => avatarFrame(look, motion.stance, attackCanvasFrame(motion, frame),
     !message.facingLeft, undefined, true));
-  const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
+  const effects = (motion.afterimage??[]).map((frame) => artImage(frame.path));
   await Promise.all([...frames, ...effects].map((frame) => frame.loading));
   if (self !== field || combatEpoch !== epoch || users.get(String(message.characterId)) !== user
       || user.attackTicket !== ticket || JSON.stringify(lookOf(user)) !== lookKey
@@ -3645,7 +3679,8 @@ async function swing(skillId=0) {
     }
     // 512F90 -> 427F60: group outside 1..7 returns -1. No fake bare-hand sword cycle.
     if (!weaponIdOf(lookOf(entity))) return;
-    const profile = await ensureAttackProfile(lookOf(entity));
+    const baseProfile = await ensureAttackProfile(lookOf(entity));
+    let profile=baseProfile&&attackProfileAtTier(baseProfile,attackMasteryTier(baseProfile,id=>skillPanel.level(id)));
     entity = selfView;
     if (
       self !== field ||
@@ -3697,6 +3732,7 @@ async function swing(skillId=0) {
     const shoot=!forceMelee&&!!ammo&&!!profile.shoot.length&&!mob;
     const near=shotNear(action);
     if(shoot){
+      profile=attackProfileAtTier(baseProfile,attackMasteryTier(baseProfile,id=>skillPanel.level(id),true));
       action=pick(skillId?activeRangedActions(profile,skillId):profile.shoot);
       mob=mobInAttackRect({left:-nativeShotRange,right:-near,top:-25,bottom:-24},entity.facing===1);
     }
@@ -3706,7 +3742,7 @@ async function swing(skillId=0) {
     const look = lookOf(entity), facingLeft = entity.facing === 1;
     const frames = motion.delays.map((_, frame) => avatarFrame(
       look, motion.stance, attackCanvasFrame(motion, frame), facingFlip(entity.facing), undefined, true));
-    const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
+    const effects = (motion.afterimage??[]).map((frame) => artImage(frame.path));
     const bulletFrames=shoot?(skillId&&skillArt?.balls?.length?skillArt.balls:await ensureProjectileFrames(ammo.itemId)):[];
     const bullets=bulletFrames.map(frame=>artImage(frame.path));
     await Promise.all([...frames,...effects,...bullets].map(frame=>frame.loading));
@@ -3725,7 +3761,8 @@ async function swing(skillId=0) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
       return;
     }
-    if(!magic&&activeSkillSpeed(profile.baseSpeed??profile.speed,skillId,buffs.values(performance.now()).booster??0)!==speed)return;
+    if(!magic&&(activeSkillSpeed(profile.baseSpeed??profile.speed,skillId,buffs.values(performance.now()).booster??0)!==speed||
+      attackMasteryTier(baseProfile,id=>skillPanel.level(id),shoot)!==profile.afterimageTier))return;
     if (shoot) {
       const readyAmmo = basicAmmo(inventory, weaponIdOf(look),skillId?activeSkillAmmo(skillValues):1);
       if (!readyAmmo || readyAmmo.slot !== ammo.slot || readyAmmo.itemId !== ammo.itemId) return;
@@ -3742,7 +3779,7 @@ async function swing(skillId=0) {
         selected=magicPlan.mob?[magicPlan.mob]:[];
       }else if(shoot){
         // A target entered the near rectangle during cold loading: cancel, do not shoot through it.
-        if(mobInAttackRect(profile.melee[0]?.bounds,facingLeft,true))return;
+        if(mobInAttackRect(attackProfileAtTier(baseProfile,0)?.melee[0]?.bounds,facingLeft,true))return;
         selected=mob?[mob]:[];
       }else{
       const near=mobsInAttackRect(action.bounds,facingLeft);
@@ -3751,33 +3788,44 @@ async function swing(skillId=0) {
         .sort((a,b)=>(a.x-b.x)*(facingLeft?-1:1));
       }
     }
+    const source={x:Math.trunc(self.x),y:Math.trunc(self.y)};
+    const victims=skillId?selected:mob?[mob]:[];
+    const hitBounds=skillId&&!shoot&&!magic?activeMeleeBounds(action.bounds,skillValues.range??0,facingLeft,mobsInAttackRect(action.bounds,facingLeft).length>0):action.bounds;
+    const snapshots=new Map(victims.map(target=>[target.mobId,{mob:target,x:target.x,y:target.y,
+      point:magic?magicPlan.point:physicalHitPoint(source,target,facingLeft,hitBounds,shoot,near)}]));
+    const shotTarget=mob?snapshots.get(mob.mobId):undefined;
     const now = performance.now();
     // Flush actual posture BEFORE the attack; the 10Hz publisher may not yet have sent Down.
     // This ordering is a bridge policy, using existing movement packets, not a new native opcode.
     if (!publishPlayerMotion()) return;
     selfSwing = { ...motion, start: now, facingLeft };
+    queueWeaponAfterimage(entity,selfSwing,now);
     beginAttackAlert(playerBody, now);
     nextSwingAt = now + attackDuration(motion);
     if(skillId){
-      if(!magic)playWeaponSound(entity,profile);
+      if(!magic)playWeaponSound(entity,profile,motion,now);
       void playSkillEffect(entity.characterId,skillId,skillLevel,now);
       if(magic)launchMagicProjectile(entity,motion,magicPlan,skillArt.balls,now);
-      else if(shoot)launchActiveProjectiles(entity,ammo.itemId,motion,mob,now,near,skillValues,bulletFrames);
+      else if(shoot)launchActiveProjectiles(entity,ammo.itemId,motion,shotTarget,now,near,skillValues,bulletFrames);
       const attackToken=activePredictions.add({field:self,epoch:combatEpoch,start:now,skillId,skillLevel,
-        targets:new Map(selected.map((target,index)=>[target.mobId,{mob:target,point:magic?magicPlan.point:undefined,delayMs:shotRelease(motion)+
-          (magic?(skillArt.balls.length?magicPlan.leg.duration:0):shoot?projectileLeg(self.x,self.y,facingLeft,target,near,nativeShotRange).duration:Math.min(index*70,280))}]))});
+        targets:new Map(selected.map((target,index)=>[target.mobId,{mob:target,presentation:hitPresentation(target,snapshots.get(target.mobId)?.point,facingLeft,profile,motion.action,magic),delayMs:shotRelease(motion)+
+          (magic?(skillArt.balls.length?magicPlan.leg.duration:0):shoot?projectileLeg(source.x,source.y,facingLeft,snapshots.get(target.mobId),near,nativeShotRange).duration:Math.min(index*70,280))}]))});
       send({t:magic?'active-magic':shoot?'active-ranged':'active-melee',attackToken,skillId,action:motion.action,facingLeft,
-        targets:selected.map(mob=>({mobId:mob.mobId,x:magic?magicPlan.point.x:mob.x,y:magic?magicPlan.point.y:mob.y}))});return;
+        targets:selected.map(mob=>({mobId:mob.mobId,x:snapshots.get(mob.mobId)?.point?.x??mob.x,y:snapshots.get(mob.mobId)?.point?.y??mob.y}))});return;
     }
-    playWeaponSound(entity, profile);
-    if(shoot)launchProjectile(entity,ammo.itemId,selfSwing,mob,now,near,{frames:bulletFrames});
+    playWeaponSound(entity, profile,motion,now);
+    if(shoot)launchProjectile(entity,ammo.itemId,selfSwing,shotTarget,now,near,{frames:bulletFrames,source});
+    const point=shotTarget?.point;
+    const attackToken=activePredictions.add({field:self,epoch:combatEpoch,start:now,skillId:0,skillLevel:0,
+      targets:new Map(mob?[[mob.mobId,{mob,delayMs:shotRelease(motion)+(shoot?projectileLeg(source.x,source.y,facingLeft,shotTarget,near,nativeShotRange).duration:0),
+        presentation:hitPresentation(mob,point,facingLeft,profile,motion.action)}]]:[])});
     send({
-      t: "attack",
+      t: "attack",attackToken,
       mode: shoot ? "shoot" : "melee",
       action: motion.action,
       mobId: mob?.mobId ?? 0,
-      targetX: mob?.x,
-      targetY: mob?.y,
+      targetX: point?.x??mob?.x,
+      targetY: point?.y??mob?.y,
       facingLeft: entity.facing === 1,
     });
   } finally {
@@ -5888,18 +5936,19 @@ function drawAvatarPreview(now, controls) {
   if (attackPreview) {
     // Read-only deterministic loop: no gameplay RNG, sound, ammo, attack command or actor mutation.
     void ensureAttackProfile(look);
-    const profile = combatCatalog.peekAttack(selected);
+    const baseProfile = combatCatalog.peekAttack(selected);
+    const profile=baseProfile&&attackProfileAtTier(baseProfile,attackMasteryTier(baseProfile,id=>skillPanel.level(id),controls.action==='basicShoot'));
     if (!profile) return selected ? "攻擊metadata載入中／失敗後5秒重試。" : "原版此路徑不提供徒手假劍揮。";
     const action = controls.action === "proneStab" ? profile.prone
       : controls.action === "basicShoot" ? profile.shoot[0] : profile.melee[0];
     if (!action) return "此WZ武器沒有所選普通攻擊；不拿其他姿勢替代。";
-    const key = `${JSON.stringify(look)}|${direction}|${controls.action}`;
+    const key = `${JSON.stringify(look)}|${direction}|${controls.action}|${profile.afterimageTier}`;
     attack = avatarPreviewActor.previewAttack;
-    if (!attack || attack.key !== key || attackFrame(attack, now) < 0)
+    if (!attack || attack.key !== key || now-attack.start>=Math.max(attackDuration(attack),shotRelease(attack)+(attack.afterimage??[]).reduce((n,f)=>n+f.delay,0))+200)
       attack = avatarPreviewActor.previewAttack = {...action, key, start:now};
     delete avatarPreviewActor.animation;
     attackOrdinal = attackFrame(attack, now);
-    pose = {stance:attack.stance, frame:attackCanvasFrame(attack, attackOrdinal)};
+    pose = attackOrdinal>=0?{stance:attack.stance, frame:attackCanvasFrame(attack, attackOrdinal)}:{stance:avatarMotionCatalog.get(selected)?.data?.stand??"stand1",frame:0};
   } else {
     delete avatarPreviewActor.previewAttack;
     pose = sampleAvatarMotion(avatarPreviewActor,look,controls.action,now,avatarPreviewActor.y,direction);
@@ -5912,16 +5961,16 @@ function drawAvatarPreview(now, controls) {
     const planes=h>0 && image.img.naturalHeight===h*2;
     if (planes) painter.drawImage(image.img,0,0,w,h,x,y,w,h);
     else painter.drawImage(image.img,x,y);
-    const effect=attack && loopFrame(attack.effects?.[String(pose.frame)],now-attack.start-attackFrameStart(attack,attackOrdinal));
+    if(planes) painter.drawImage(image.img,0,h,w,h,x,y,w,h);
+    const effect=attack && oneShotFrame(attack.afterimage,now-attack.start-shotRelease(attack));
     const effectImage=effect && artImage(effect.path);
     if(effectImage?.ready) {
       painter.save();painter.translate(120,118);if(facingFlip(direction))painter.scale(-1,1);
       painter.globalAlpha=effect.alpha??1;painter.drawImage(effectImage.img,-effect.ox,-effect.oy);painter.restore();
     }
-    if(planes) painter.drawImage(image.img,0,h,w,h,x,y,w,h);
   }
   const metadata=avatarPreviewActor.bodyProfile?.weaponId === selected ? avatarPreviewActor.bodyProfile : avatarMotionCatalog.get(selected)?.data;
-  const timing=attack ? `；動作${attack.action}，原始縮放delay [${attack.delays.join(",")}]，身體倒數總長${attackDuration(attack)}ms` : "";
+  const timing=attack ? `；動作${attack.action}，原始縮放delay [${attack.delays.join(",")}]，身體倒數總長${attackDuration(attack)}ms；殘影從${shotRelease(attack)}ms起、獨立30ms／末格200ms淡出` : "";
   return `唯讀模板 ${selected || "無武器"}：${metadata ? `${metadata.walk}／${metadata.stand}` : "metadata載入中／失敗後5秒重試"}；`+
     `${pose.stance}/${pose.frame}；${image.ready ? "原PNG" : "PNG載入中"}${timing}。`;
 }

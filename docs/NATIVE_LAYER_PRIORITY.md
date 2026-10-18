@@ -1,3 +1,5 @@
+> **2026-10-18 原證更正／未測試**：[NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)／ADR-074。weapon afterimage 是 +380 child5，不是 +368 child1；通用 cast／hit 與 Armor flash 都是 root 250310。下方第4節已更正。
+
 # 原版圖層優先度、角色遮擋與子圖層
 
 2026-10-18。**已實作；依使用者指示，未執行 test/check/typecheck/browser/VM/probe。不是功能或逐像素 PASS。**
@@ -64,14 +66,14 @@
 **界線**：native avatar 還有 body-level blocked-slot 集合、cash／pet／技能附著與完整 template/action assembler；
 本輪接的是一般穿戴圖像的 islot/vslot/smap 衝突鏈，不宣稱整個 CAvatar／cash 遮擋樹已完成。
 
-## 4. 合成兩張原版角色 canvas，殘影夾在中間
+## 4. 合成兩張角色 canvas，weapon afterimage 在 front 後（ADR-074 更正）
 
 - **402490**：`part.z >= faceZ` 畫到 a3（front），否則 a2（back）；**508700** 把 a2 給 user+376、a3 給 user+372。
-- **507A20**：主 canvas child0，afterimage user+368 child1，front user+372 child2；後二 overlay 到主層。
-  **508700／509070** 殘影換格仍作用在 user+368，不是世界最後一層。
+- **更正先前誤判**：+368 child1 不是 weapon afterimage。**507A20／40EA70** 的真殘影是 +380／this[95]、child5，overlay +376；front 是 +372 child2。
+  不再拿 508700／509070 的 +368 操作證明武器殘影位置。
 - server 以相同 bounds／origin／mirror 合成兩面；HTTP `planes=1` 的單一 PNG 垂直存兩面，
-  header `x-frame-plane-height` 指每面的高度。API／cache key 加 planes；選角／工具預覽仍用普通單面合併 PNG。
-- field 一次下載／decode 兩面：back → 稀疏原 afterimage → front。死亡 alpha／body tint 保留；殘影不乘受傷 body tint。
+  header `x-frame-plane-height` 指每面的高度。API／cache key 加 planes；一般選角仍可用單面合併 PNG；攻擊工具預覽與 field 使用相同兩面後的獨立殘影。
+- field 一次下載／decode 兩面：back → front → 獨立 release-clock afterimage。死亡 alpha／body tint 保留；殘影不乘受傷 body tint。
   同時保持未 trim 的 `damageOriginY`，不讓裁切移動受傷數字錨點。
 - 普通單面輸出也先合成兩面後再 fold，避免 RGBA8 分組取整差異；兩面使用**共同** crop，不各自裁臉／頭髮導致漂移。
 - remote 基本攻擊也等待所選圖／effect ready 才暴露 swing；保留收到時的時鐘，若已結束就不遲到重播。

@@ -63,7 +63,7 @@ export function validatedActiveMagic(character:CharacterData,catalog:SkillCatalo
   return action?{learned,motion:{...action,delays:scaledAttackDelays(action.baseDelays,attack.speed)}}:undefined;
 }
 export interface ActiveArt {
-  skillId:number;balls:SpriteFrame[];effects:SpriteFrame[];hits:SpriteFrame[];hitVariants:SpriteFrame[][];
+  skillId:number;balls:SpriteFrame[];effects:SpriteFrame[];hits:SpriteFrame[];hitVariants:SpriteFrame[][];hasHitPath?:boolean;
   armorFlash:boolean;useSound?:string;
 }
 export function activeArt(reader:ArtReader,id:number,level:number):ActiveArt {
@@ -78,13 +78,14 @@ export function activeArt(reader:ArtReader,id:number,level:number):ActiveArt {
     ?`${root}/level/hit`:`${root}/hit`;
   // 4BA.../4BC590 creates one path per hit variant, 50D9F0 rand()%variantCount.
   // hit/0 and hit/1 are ANIMATIONS, not their first and second frames.
-  const hitVariants=Object.keys(nodeRecord(reader.node(hitRoot)))
-    .filter(key=>/^\d+$/.test(key)).sort((a,b)=>Number(a)-Number(b))
-    .map(key=>spriteFrames(reader,hitRoot,key,[],120)).filter(frames=>frames.length);
+  const hitPaths=Object.keys(nodeRecord(reader.node(hitRoot)))
+    .filter(key=>/^\d+$/.test(key)).sort((a,b)=>Number(a)-Number(b));
+  // Preserve empty declared variants: native selection must not silently choose a different path.
+  const hitVariants=hitPaths.map(key=>spriteFrames(reader,hitRoot,key,[],120));
   const ballRoot=levelProps.ball!==undefined?`${root}/level`:root;
   const balls=spriteFrames(reader,ballRoot,'ball',[],120); // 514BA0; only RANGED may fall back to ammo. Magic with no ball is instantaneous.
   const sound=`Skill/${String(id).padStart(7,'0')}/Use`;
-  return {skillId:id,balls,effects,hits:hitVariants[0]??[],hitVariants,
+  return {skillId:id,balls,effects,hits:hitVariants[0]??[],hitVariants,hasHitPath:hitPaths.length>0,
     armorFlash:id===1001003||id===2001003,
     ...(reader.node(`Sound/Skill.img/${String(id).padStart(7,'0')}/Use`)?{useSound:sound}:{})};
 }

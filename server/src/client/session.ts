@@ -430,6 +430,7 @@ export type ClientEvent =
       facingLeft: boolean;
       shoot: boolean;
       magic?:boolean;
+      afterimage?:number;
       action: number;
       speed: number;
       projectileItemId: number;
@@ -1892,6 +1893,7 @@ export class ClientSession {
             magic: opcode === FIELD_OPCODE.userMagicAttack,
             action: attack.action,
             speed: attack.speed,
+            afterimage:attack.afterimage,
             projectileItemId: attack.projectileItemId,
             targets: attack.targets.map((target) => ({
               mobId: target.mobId,

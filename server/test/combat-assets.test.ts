@@ -49,3 +49,8 @@ test("bad ids, invalid indices and missing projectile metadata never become fake
   assert.equal(await cache.attack(0),undefined);assert.equal(await cache.projectile(2000000),undefined);
   assert.equal(calls,0);assert.equal(await cache.attack(1302000),undefined);assert.equal(calls,1);
 });
+
+test("independent effect metadata rejects corrupt sprite clocks, not replaced by body frames",async()=>{
+  const cache=combatAssets({fetcher:async()=>({ok:true,json:async()=>({...profile(1302000),prone:{...action,afterimages:{0:[{path:'Character/Afterimage/swordOL.img/0/proneStab/0/0',delay:NaN}]}}})})});
+  assert.equal(await cache.attack(1302000),undefined);
+});

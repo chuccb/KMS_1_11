@@ -1,3 +1,4 @@
+import {nativeAfterimageFrames,weaponMasterySkills} from "../../../client/attack-presentation.mjs";
 import {activeSkillSpeed} from "../../../client/active-skills.mjs";
 /** Archive attack profiles. Native selectors: 427F60 / 427FE0 / 428040; ammo scan: 511630.
  * Skill admission remains separate; the 511630 ammo planner is shared with validated multi-shot.
@@ -76,11 +77,18 @@ export interface BasicAttackAction {
   frameIndices?: number[];
   /** Native left-facing Afterimage/0 hit rectangle, when the archive supplies it. */
   bounds?: { left: number; top: number; right: number; bottom: number };
-  /** Afterimage/0/<stance>/<body frame>/<effect frame>; never the inventory icon. */
+  /** Legacy response slot, kept empty. Use the release-clock afterimage sequence below. */
   effects: Record<string, SpriteFrame[]>;
+  /** Independent release-clock layer, NOT keyed to body frame; legacy effects is metadata only. */
+  afterimage?:SpriteFrame[];
+  afterimages?:Record<string,SpriteFrame[]>;
+  afterimageBounds?:Record<string,NonNullable<BasicAttackAction['bounds']>>;
 }
 export interface BasicAttackProfile {
   weaponId: number;
+  afterimageTier?:number;
+  masteryLevels?:Record<string,number[]>;
+  hitEffects?:Record<string,SpriteFrame[]>;
   group: number;
   speed: number;
   /** Unclamped WZ value: 4BE8B0 subtracts booster/Double Stab BEFORE the 0..6 clamp. */
@@ -168,14 +176,22 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
         const lt = vectorOf(boundsNode.lt),
           rb = vectorOf(boundsNode.rb);
         const effects: Record<string, SpriteFrame[]> = {};
-        if (effect !== undefined)
-          for (const frame of frames) {
-            const pictures = spriteFrames(reader, effect, frame, []);
-            if (pictures.length > 0) effects[frame] = pictures;
+        const afterimages:Record<string,SpriteFrame[]>={},afterimageBounds:Record<string,NonNullable<BasicAttackAction['bounds']>>={};
+        if(effect!==undefined){
+          const image=`Character/Afterimage/${info.afterImage}.img`;
+          for(const tier of frameNames(reader.node(image))){
+            const path=`${image}/${tier}/${stance}`,node=reader.node(path),props=nodeRecord(node);
+            const a=vectorOf(props.lt),b=vectorOf(props.rb);
+            if(a&&b)afterimageBounds[tier]={left:a[0],top:a[1],right:b[0],bottom:b[1]};
+            // 40A5E0 enumerates until the FIRST property child; its numeric canvases form ONE sequence.
+            const child=node?.kind==='props'?node.props.find(entry=>reader.node(`${path}/${entry.name}`)?.kind==='props'):undefined;
+            afterimages[tier]=child?nativeAfterimageFrames(spriteFrames(reader,path,child.name,[],30)):[];
           }
+        }
         return [
           {
             action,
+            ...(!magic?{afterimages,afterimageBounds,afterimage:afterimages[0]??[]}:{}),
             stance,
             frameIndices: frames.map(Number),
             baseDelays: delays,
@@ -200,6 +216,13 @@ export function basicAttackProvider(reader: ArtReader): BasicAttackProvider {
         : {
             weaponId,
             group,
+            masteryLevels:Object.fromEntries([...new Set([...weaponMasterySkills(weaponId),...weaponMasterySkills(weaponId,true)])].map(id=>{
+              const levels=`Skill/${Math.trunc(id/10000)}.img/skill/${id}/level`;
+              // Level keys start at1, unlike canvas sequences. Keep explicit zero (unlearned).
+              const rows=nodeRecord(reader.node(levels)),max=Math.max(0,...Object.keys(rows).filter(k=>/^\d+$/.test(k)).map(Number));
+              return [id,Array.from({length:max+1},(_,level)=>Number(nodeRecord(reader.node(`${levels}/${level}`)).mastery??0))];
+            })),
+            hitEffects:Object.fromEntries(['sword1','sword2','swordF','mace1','mace2','maceF'].map(key=>[key,spriteFrames(reader,'Character/Afterimage/hit.img',key,[],120)])),
             speed,
             baseSpeed:typeof info.attackSpeed==='number'?Math.trunc(info.attackSpeed):3,
             ...(typeof info.sfx === "string" ? { sfx: info.sfx } : {}),

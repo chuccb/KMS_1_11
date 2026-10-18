@@ -79,14 +79,20 @@ export function createAudio(deps = {}) {
       const token = ++generation;
       if (path) void startMusic(token);
     },
-    async effect(value, volume = 1) {
+    async preload(value){
+      const path=soundPath(value);if(!path||!unlocked||!context)return;
+      try{await buffer(path);}catch(e){error(path,e);}
+    },
+    async effect(value, volume = 1, options = {}) {
       if (!unlocked || !context || muted) return;
       const path = soundPath(value);
       if (!path) return;
+      const valid=()=> (options.deadline===undefined||performance.now()<options.deadline)&&(!options.valid||options.valid());
+      if(!valid())return;
       const token = effectGeneration;
       try {
         const decoded = await buffer(path);
-        if (muted || !unlocked || token !== effectGeneration) return;
+        if (muted || !unlocked || token !== effectGeneration || !valid()) return;
         // Limit overlapping one-shots, never restart/cut the BGM to play an effect.
         if (active.size >= 16) { const old = active.values().next().value; old.stop(); old.disconnect(); active.delete(old); }
         const source = context.createBufferSource(); source.buffer = decoded;

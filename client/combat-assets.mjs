@@ -6,10 +6,14 @@ export const COMBAT_ASSET_LIMIT = 64;
 export const COMBAT_ASSET_RETRY_MS = 5000;
 export function combatAssets({fetcher = globalThis.fetch, now = () => performance.now(), limit = COMBAT_ASSET_LIMIT, onAttack, onProjectile} = {}) {
   const attacks = new Map(), projectiles = new Map(), skills = new Map();
+  const validFrames=frames=>Array.isArray(frames)&&frames.every(f=>typeof f?.path==='string'&&Number.isFinite(f.delay)&&f.delay>0);
+  const validSequences=value=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.values(value).every(validFrames);
   const validAction = a => a && Number.isInteger(a.action) && typeof a.stance === 'string' &&
     a.delays?.length > 0 && a.delays.every(Number.isFinite) &&
     a.baseDelays?.length === a.delays.length && a.baseDelays.every(Number.isFinite) &&
-    a.frameIndices?.length === a.delays.length && a.frameIndices.every(Number.isInteger);
+    a.frameIndices?.length === a.delays.length && a.frameIndices.every(Number.isInteger) &&
+    (a.afterimage===undefined||validFrames(a.afterimage)) &&
+    (a.afterimages===undefined||validSequences(a.afterimages));
   function get(entries, id, family, valid, onLoad) {
     let entry = entries.get(id);
     if (entry?.data) return Promise.resolve(entry.data);
@@ -47,6 +51,7 @@ export function combatAssets({fetcher = globalThis.fetch, now = () => performanc
     attack(id) {
       if (!Number.isInteger(id) || id < 1300000 || id >= 1500000) return Promise.resolve(undefined);
       return get(attacks, id, 'attack', p => p?.weaponId === id && Number.isInteger(p.speed) && p.speed >= 0 && p.speed <= 6 && (p.baseSpeed===undefined||Number.isInteger(p.baseSpeed)) &&
+        (p.hitEffects===undefined||validSequences(p.hitEffects)) &&
         Array.isArray(p.melee) && Array.isArray(p.shoot) && [...p.melee, ...p.shoot].every(validAction) &&
         (p.magic===undefined || (Array.isArray(p.magic)&&p.magic.every(validAction))) &&
         (!p.prone || (validAction(p.prone) && p.prone.action === 32 && p.prone.stance === 'proneStab')), onAttack);

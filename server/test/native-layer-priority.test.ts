@@ -102,9 +102,9 @@ test("46BDA0 background index participates in root z; modern front is not a KMS 
 
 test("field wiring keeps avatar children atomic, damage fixed-plane and bullets at source depth", () => {
   const client=source("../../client/main.js"), web=source("../src/net/webclient.ts");
-  assert.match(client,/drawAvatarBodyAt\(entity, screenX, screenY, now, direction, \(\) =>/);
-  assert.match(client,/ctx\.drawImage\(entry\.img, 0, 0,[\s\S]*?drawMiddle\?\.\(\);[\s\S]*?ctx\.drawImage\(entry\.img, 0, h,/);
-  assert.match(client,/kind: "damage", z: 250310/);
+  assert.match(client,/drawAvatarBodyAt\(entity, screenX, screenY, now, direction\)/);
+  assert.match(client,/ctx\.drawImage\(entry\.img, 0, 0,[\s\S]*?ctx\.drawImage\(entry\.img, 0, h,/);
+  assert.match(client,/kind:'damage',mark,z:ATTACK_EFFECT_Z/);
   assert.match(client,/kind: "projectile", shot, z: shot\.z/);
   assert.match(client,/const z = actorDepth\(local \? \(playerBody \?\? at\)/);
   assert.doesNotMatch(client,/z: z - 1/);

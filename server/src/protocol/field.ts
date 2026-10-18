@@ -1494,10 +1494,10 @@ export interface UserAttackTarget {
  * the attacker handed its own `sub_508690` - the receiver hands it to the same function
  * (`sub_508700` turns it into frame delays, clamped to 0..6), so a relay copies it. 2/3 are a skill
  * and its level: the byte is clamped to the looked-up node's child count and `sub_50C460`
- * dereferences the node as `*node == 1001003`, an id of the WZ `Skill/` namespace - but no client has
- * been watched sending one, so a relay sends 0 (no skill node). 7 is the projectile: see the field's
- * own comment. 6 selects the swing's afterimage: `sub_4BE270` computes it client-side and is not
- * located, so a relay sends 0, which every `Character/Afterimage/*.img` carries as its first child.
+ * dereferences the node as `*node == 1001003`, an id of the WZ `Skill/` namespace. Ordinary attacks
+ * send zero; admitted active skills relay the learned/WZ-capped level and real skill ID. 7 is the projectile: see the field's
+ * own comment. 6 selects the swing's afterimage: `sub_4BE270` computes it from the learned weapon mastery passive
+ * (melee mode0 / shot mode1). ADR-074 derives and relays the real WZ tier, not a fixed zero.
  */
 export interface UserAttack {
   characterId: number;

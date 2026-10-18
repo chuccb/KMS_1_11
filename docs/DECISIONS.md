@@ -1041,6 +1041,8 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
   → **39 項**。
 - §6 第 16 項只剩 (a) 骰子；FINDINGS 新增 §4.11.3d（格號表＋四條證據）。
 
+> 後續更正：ADR-074 已定位 4BE270，afterimage 不再固定0；本節保留歷史決策背景。
+
 ## ADR-026：轉播別人的揮擊用 s2c `0x23` —— 只給其他人、只放收下的怪、沒有來源的欄位送中性值
 
 **決策**：玩家送出 c2s `0x0F`（普攻）時，伺服器除了把傷害記在怪物身上，還把這一刀轉播給**同場地的其他人**：
@@ -2285,6 +2287,8 @@ Shape2D10010C40旗標0x10000000是累加重複，不是來回；x ratio0、y rat
 沿用同save停服冷備份、重啟LIVE、[skip ci]非force推送；完整證據與尚未完成項見NATIVE_JUMP_ATTACK_BACKGROUNDS.md。
 
 
+> 後續更正：ADR-074 撤回 +368 child1 是 weapon afterimage 的判讀；真殘影 +380 child5。
+
 ## ADR-057：Gr2D parent-chain／序號排序，角色雙面與原slot遮擋，不以y或全域加z代替
 
 **日期**：2026-10-18 ｜ **狀態**：已實作，未執行驗證。
@@ -2303,7 +2307,7 @@ Gr2D 1000C8A0與listing確認vtable100275A8；+188=10013770，+260=10014510，�
 處理整張part的slot衝突（等值共存）；作用於一般穿戴，不冒稱body-level blocked-slot／cash完整。
 Hair按動作格原UOL選前／後頭髮，去掉每個正面多補backDefault的錯誤。
 
-402490以faceZ分兩面，508700→376/372；507A20設body0、afterimage1、front2的overlay子層。
+402490以faceZ分兩面，508700→376/372；先前把507A20的+368 child1誤認weapon afterimage；ADR-074更正為+380 child5，front仍+372 child2。
 以單張PNG垂直pack兩面與planeHeight header傳輸，field保持原子avatar子樹；普通選角／工具仍可取合併圖。
 共同bounds／crop／origin與damageOriginY，保留鏡像／死亡alpha；殘影不受body tint。
 remote等資源ready才暴露swing，事件時鐘不重起，過期略過且防舊look／death／attack ticket回補。
@@ -2714,3 +2718,20 @@ server以此逐段結算HP／獎勵是重建政策，資源／relay仍每次施�
 原CShape2D swept pool／同片ZList順序／全CVecCtrl／Gr2D像素與hit child z仍明列界線；
 JSON預測不是native ACK、TCP damage仍client-reported。來源、公式、常數、實際save冷備與工具詳
 [NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)。
+
+
+## ADR-074：獨立武器殘影、命中世界層與原熟練度 tier（2026-10-18）
+
+**狀態：已實裝來源；依使用者指示未測試／check／typecheck／語法檢查／browser／VM／probe。**
+
+1. 40A5E0 第一個 Property 子節點是一條殘影序列，非 body-frame 附件。40EA70 覆寫前幀30ms、末幀200ms淡出，5095A0 raw release 為獨立起點。
+2. 撤回 ADR-057 的 child1 判讀：507A20／40EA70 的 weapon afterimage 為 +380／child5、overlay +376，畫在 body front 後、名字前。
+3. 4BE270 取已學 capped WZ mastery tier，browser／bridge／TCP／damage formula 共用 mapping；原 s2c byte 傳真 tier，shot near 另用 tier0 矩形。
+4. 485B80 中點、4882F0 offset、487A30 impact clamp 串 local／remote／projectile；已建立命中圖不跟隨怪物。
+5. cast／hit／damage 各自 root z250310、按建立次序排；50C460 Armor flash 雖 createLayer(z0)，後續仍 put_z(-1073471524)。
+6. 50D7F0 技能路徑優先／原 sword、mace sparks；每目標每段選變體，魔法不補物理 spark／普通殘影。
+7. 普通 melee release 結算、普通 WS token 接既有 queue／ledger；不是新增 native ACK，server 結算／slop 為重建政策。
+8. 冷載入不改起點、不補過期圖／聲、不預暖所有 tier；cast 在 await 前保留排序號。預覽與 local／remote 共用 clocks／tier／順序。
+
+證據、常數、保存冷備、回歸來源與未完成邊界見 [NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)。
+舊文件的 body-frame afterimage、child1、fixed tier0、root−20 endpoint 以此更正；不稱全技能或逐像素完成。

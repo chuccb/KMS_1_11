@@ -1,3 +1,5 @@
+> **攻擊呈現續作／未測試**：[NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)／ADR-074 更正殘影 child／獨立時鐘，補真 tier、普通命中火花、impact point／world layer 與 release 聲音。本文舊呈現限制依此續作閱讀，仍不是全技能／逐像素完成。
+
 # 本機姿勢、蹲刺、強制攻擊雙時鐘、恢復與被動射程
 
 > **2026-10-18 後續（未測試）**：[ACTIVE_SKILLS](ACTIVE_SKILLS.md)／ADR-070已接七個主動技能、原七鍵、消耗、多段／範圍、增益與隊伍入口。下方保留當輪歷史範圍；不代表其他技能／魔法／完整幾何已完成。

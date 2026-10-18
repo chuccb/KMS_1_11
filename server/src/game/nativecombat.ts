@@ -1,3 +1,4 @@
+import {weaponMasterySkills} from "../../../client/attack-presentation.mjs";
 /** Basic physical attacks: sub_4C7960, skill=null, one damage/target.
  * Native weapon/action coefficients, hit check, level penalty, PD and seven pre-drawn RNG values.
  * Physical active percentage/hit loops share this path; NOT magic or CShape2D.
@@ -41,28 +42,10 @@ export function nativeUniform(word: number, a: number, b: number): number {
     Math.min(a, b) + (Math.abs(b - a) * ((word >>> 0) % 10000000)) / 9999999
   );
 }
-function mastery(
-  character: CharacterData,
-  skills: SkillCatalog | undefined,
-  weapon: number,
-  shot: boolean,
-): number {
-  const ids: Record<number, number[]> = shot
-    ? { 45: [3100000], 46: [3200000], 47: [4100000] }
-    : {
-        30: [1100000, 1200000],
-        40: [1100000, 1200000],
-        31: [1100001],
-        41: [1100001],
-        32: [1200001],
-        42: [1200001],
-        33: [4200000],
-        43: [1300000],
-        44: [1300001],
-      };
-  for (const id of ids[weapon] ?? []) {
-    const n = clamp(skillValues(character, skills, id).mastery ?? 0, 0, 15);
-    if (n) return n;
+/** 4BE270, shared by physical formula and the original afterimage tier. */
+export function nativeWeaponMastery(character:CharacterData,skills:SkillCatalog|undefined,weapon:number,shot=false):number {
+  for(const id of weaponMasterySkills(weapon,shot)){
+    const n=clamp(skillValues(character,skills,id).mastery??0,0,15);if(n)return n;
   }
   return 0;
 }
@@ -100,7 +83,7 @@ export function rollNativePhysical(
     criticalMultiplier: 1, beforeClamp: 0, damage: 0, reason: "miss",
   };
   if (hit < mobEva) { report?.(trace); return 0; }
-  const masteryLevel = mastery(character, skills, weapon, ammoId !== 0);
+  const masteryLevel = nativeWeaponMastery(character, skills, weapon, ammoId !== 0);
   trace.mastery = masteryLevel;
   const factor = (masteryLevel * 5 + 10) * 0.009000000000000001;
   const swing = action >= 5 && action <= 15;

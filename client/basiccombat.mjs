@@ -26,9 +26,9 @@ export function shotNear(motion) {
 export function projectileLeg(x, y, facingLeft, mob, near = 65, range = 200) {
   const x0 = x + (facingLeft ? -near : near),
     y0 = y - 25;
-  // Target centre is a browser policy until the CShape2D mob pool is ported.
-  const x1 = mob?.x ?? x + (facingLeft ? -range : range);
-  const y1 = mob ? mob.y - 20 : y0;
+  // Runtime callers supply 485B80's captured intersection point. Root-20 remains only for legacy API callers.
+  const x1 = mob?.point?.x ?? mob?.x ?? x + (facingLeft ? -range : range);
+  const y1 = mob?.point?.y ?? (mob ? mob.y - 20 : y0);
   return {
     x0,
     y0,

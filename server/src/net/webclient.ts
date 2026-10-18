@@ -1,3 +1,4 @@
+import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from "../../../client/active-skills.mjs";
 import {learnedActive,activeArt} from "../game/activeskills.ts";
 import {scaledAttackDelays} from "../../../client/attack-timing.mjs";
@@ -56,7 +57,7 @@ import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
 import { characterStatBasis, statTotals } from "../game/characterstats.ts";
 import { intersects, playerContactRect, mobContactRect, type ContactPoint } from "../../../client/contact.mjs";
-import { rollNativeMagic, rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
+import { nativeWeaponMastery, rollNativeMagic, rollNativePhysical, rollNativeTouch, type PhysicalAttackTrace } from "../game/nativecombat.ts";
 import type { MobTemplate } from "../game/mobs.ts";
 import { temporaryStats } from "../../../client/temporarystats.mjs";
 import type { AudioProvider } from "../game/audio.ts";
@@ -599,6 +600,7 @@ class BrowserSession {
             Number(message.action),
             Number(message.targetX),
             Number(message.targetY),
+            Number(message.attackToken),
           ));
         case "warp-map":
           return await this.require().warpTo(Number(message.mapId));
@@ -705,7 +707,8 @@ class BrowserSession {
     const magic=message.t==='active-magic',shoot=message.t==='active-ranged',field=this.contactField,attackToken=Number(message.attackToken);
     if(!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff)return;
     if(!character||!learned||learned.rule.kind!==(magic?'magic':shoot?'ranged':'melee')||!session.attackRandom||session.characterOperationPending)return;
-    const profile=this.options.art?.attackProfile?.(character.items?.worn.get(11)?.itemId??0);
+    const weaponId=character.items?.worn.get(11)?.itemId??0;
+    const profile=attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),nativeWeaponMastery(character,this.options.skills,weaponId,shoot));
     const actionId=Number(message.action),action=(magic?activeMagicActions(profile,id,learned.info.skillType):shoot?activeRangedActions(profile,id):activeMeleeActions(profile,id)).find(a=>a.action===actionId);
     if(!profile||!action||actionId===32||!basicAttackPostureAllows(actionId,shoot,session.selfMovement.action))return;
     const ammo=shoot?firstBasicAmmo(character.items,activeSkillAmmo(learned.values)):undefined;
@@ -755,12 +758,13 @@ class BrowserSession {
     actionId: number,
     targetX: number,
     targetY: number,
+    attackToken:number,
   ): Promise<void> {
     const session = this.require();
     const character = session.character;
-    if (!character || character.stats.hp <= 0 || session.characterOperationPending) return;
+    if (!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff||!character || character.stats.hp <= 0 || session.characterOperationPending) return;
     const weaponId = character.items?.worn.get(11)?.itemId ?? 0;
-    const profile = this.options.art?.attackProfile?.(weaponId);
+    const profile=attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),nativeWeaponMastery(character,this.options.skills,weaponId,shoot));
     const action = basicAttackAction(profile, actionId, shoot);
     // 512F90/427F60 rejects unsupported weapon groups/actions. Never translate a browser pose
     // silently to a different attack or a fabricated 480ms bare-hand sword swing.
@@ -816,9 +820,9 @@ class BrowserSession {
       },
     );
     if (mob !== undefined && attackField === this.contactField) {
-      const release = shoot ? shotRelease(motion) : 0;
+      const release = shotRelease(motion);
       // Browser-local predicted numbers, not an invented TCP acknowledgement.
-      const bounds = profile?.melee[0]?.bounds;
+      const bounds = attackProfileAtTier(this.options.art?.attackProfile?.(weaponId),0)?.melee[0]?.bounds;
       const near = bounds
         ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
         : 65;
@@ -828,11 +832,11 @@ class BrowserSession {
           ? Math.trunc(
               Math.hypot(
                 mob.x - (session.selfPosition.x + (facingLeft ? -near : near)),
-                mob.y - 20 - (session.selfPosition.y - 25),
+                (currentPoint?mob.y:mob.y-20) - (session.selfPosition.y - 25),
               ) * 1.5,
             )
           : 0);
-      this.send({ t: "hit", mobId, damage, delayMs, contactField: attackField, trace });
+      this.send({ t: "hit", attackToken, mobId, damage, delayMs, contactField: attackField, trace });
     }
   }
 

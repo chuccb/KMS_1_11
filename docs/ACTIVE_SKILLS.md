@@ -1,3 +1,5 @@
+> **攻擊呈現續作／未測試**：[NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)／ADR-074 更正殘影 child／獨立時鐘，補真 tier、普通命中火花、impact point／world layer 與 release 聲音。本文舊呈現限制依此續作閱讀，仍不是全技能／逐像素完成。
+
 # 主動技能第一批：施放、七鍵、消耗、近戰、多段、增益與隊伍鏈
 
 > **2026-10-18 最新續作（未測試）**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)／ADR-073：兩招獨立魔法、原動作與MD／元素、foothold／彈道、120ms多段時鐘更正、MAD藥水及EVA／PDD實際使用漏接修復。下文歷史範圍以該續作為準，不代表全技能或逐像素1:1。

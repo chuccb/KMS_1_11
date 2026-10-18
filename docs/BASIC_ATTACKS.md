@@ -1,3 +1,5 @@
+> **最新續作／未測試**：[NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)／ADR-074：撤回 body-frame 附件與 child1 判讀，補真熟練度 tier、獨立殘影／武器聲、普通 spark、impact offset／clamp、world effect 排序與普通近身 release／token。
+
 > 2026-10-18後續（未測試）：本機prone／32蹲刺、攻擊接受時起3000警戒、強制動作逐幀30ms與raw release拆分、
 
 > **2026-10-18 最新續作（未測試）**：[NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md)／ADR-073：兩招獨立魔法、原動作與MD／元素、foothold／彈道、120ms多段時鐘更正、MAD藥水及EVA／PDD實際使用漏接修復。下文歷史範圍以該續作為準，不代表全技能或逐像素1:1。
@@ -10,7 +12,7 @@
 > 恢復body ID、原被動射程與資源／封包生命週期見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)／ADR-069。
 > 下方是前輪紀錄，其「尚未實作」與raw攻擊時間敘述須按後續更正閱讀。
 
-> 2026-10-18 圖層後續（未測試）：原avatar雙面／afterimage child1中層、bullet發射來源root z、
+> 2026-10-18 圖層後續（未測試）：原avatar雙面（afterimage child1舊判讀已由ADR-074撤回）、bullet發射來源root z、
 > remote資源ready與過期guard見 [NATIVE_LAYER_PRIORITY.md](NATIVE_LAYER_PRIORITY.md)。不是完整CShape2D／技能實作。
 
 > 2026-10-18後續：攻擊arm身份／冷圖／無武器fallback與idle動畫修補見 [NATIVE_JUMP_ATTACK_BACKGROUNDS.md](NATIVE_JUMP_ATTACK_BACKGROUNDS.md)。
@@ -31,7 +33,7 @@
   場景／本地物理尚未載入、攀繩、死亡或互斥視窗／請求中不送新攻擊。
 - 使用原 **c2s 0x0F／0x10**，攜帶正確的攻擊action、speed，射擊另有USE格號。
   無目標也發送基本攻擊；**空射仍消耗1發**，旁觀者也收到動作／投射物。
-  WS另帶頁面取樣的當前怪物座標，寫入原target x/y，避免TCP移動記錄的未來終點被誤當射擊目標。
+  WS另帶頁面取樣的485B80式命中點，寫入原target x/y，避免TCP移動記錄的未來終點被誤當射擊目標。
   這是本專案WS資料，不是新增原版wire欄位；server仍按自己當前的怪物記錄判定。
 - 依消耗欄slot1起升序選第一個足量且相容的格，不按Map插入順序，不拿弓箭供弩用。
   弓2060xxx、弩2061xxx、拳套207xxxx；0發飛鏢跳過。瀏覽器與TCP橋均重新讀各自最新庫存。
@@ -43,7 +45,7 @@
 - 射擊在扣彈前保留itemId，送 **s2c 0x24** 給同圖其他玩家；因此最後一支箭清格後仍有正確投射物。
   ClientSession現在同時接0x23與0x24，保留action／speed／projectileItemId，頁面不再隨意輪播swingO1–3。
 - 正常武器近身／射擊使用WZ身體每一幀delay及原speed縮放，不再統一拉成480ms。
-  稀疏afterimage按WZ對應的身體幀顯示；弩shoot2五幀全部保留。
+  afterimage 原身體幀附件判讀已撤回：用首 Property 序列與獨立 release-clock；弩shoot2 body五幀全部保留。
 - 箭與飛鏢來自 **Item/Consume/.../<itemId>/bullet/<frame>**，讀原origin與delay；不是拿背包icon代替。
   顯示發射等待、飛行與方向旋轉；數字／怪物傷害音效等待命中時刻，不在拉弓時就顯示。
 - 服務端延後處理基本射擊的扣怪血／死亡／EXP／掉落；斷線、換場及已死亡再生的目標不被舊排程命中。
@@ -118,8 +120,8 @@ WZ2070000兩幀delay30ms、origin(9,9)/(8,8)；2060000／2061000有各自箭形�
    射擊用y−25的線穿canvas外框挑最近者。原CShape2D形狀／動畫逐幀碰撞、地形遮擋未完整移植。
    怪圖尚未載入時暫用舊20×30框；服務端只做前方265px／垂直100px的寬鬆目標中心界線。
    不能稱這些canvas／防護範圍與原形狀池1:1。
-3. 有目標的飛彈終點暫為怪物腳底(x,y−20)，不是已移植的485B80形狀交點；飛行為固定起終點，
-   未追蹤原pool的所有移動目標／特殊飛行分支。near的服務端／旁觀重建取第一個近身action的rectangle。
+3. ADR-074 已改有目標飛彈為捕捉的 RECT 交集點，不再固定怪根−20；飛行仍為固定起終點，
+   未追蹤原pool的所有移動目標／特殊飛行分支。near 的各端重建取原 tier0 第一個近身 action 的 rectangle。
 4. 命中排程使用原client可見的發射／飛行時間，於下一個world tick結算；
    這是本server的政策，不是發現了原server。換場／斷線取消待命中，但已扣的彈不退回；
    同場已接受的射擊可在攻擊者死亡後命中，目標已死亡／重生則不再套舊傷害。
@@ -127,9 +129,8 @@ WZ2070000兩幀delay30ms、origin(9,9)/(8,8)；2060000／2061000有各自箭形�
 5. `combat.ts`仍是已明示的近似傷害公式；本次只把相容彈藥WZ incPAD納入其watk。
    武器係數、熟練度、命中／迴避、防禦、技能、完整instance裝備／buff總值未還原。
    因此**不宣稱射手／盜賊傷害已1:1，也不宣稱完整職業玩法完成**。
-6. afterimage使用第0子節點與稀疏幀附件；缺少delay時沿用sprite reader的1000ms通用預設。
-   全部原effect z／混色／技能afterimage等級與音效時序尚未移植。後續ADR-056依512F90／427F60
-   移除無武器假480ms fallback；有武器卻無法取得原動作資料時拒絕假造其他武器動作，並顯示提示。
+6. ADR-074 已撤回 afterimage 第0／body-frame 附件與通用1000ms delay。現在按熟練度 tier，讀第一個 Property 子節點，
+   原30/200ms獨立時鐘、child5、真物理spark、world cast/hit/damage 與 release 武器聲；完整原引擎 phase／blend 仍未移植。
 7. Soul Arrow、技能多發／消耗、技能容量／射程／攻速buff、完整技能UI仍未實作。
    飛鏢購買／補充政策沿用`MESO_RECHARGE.md`；本輪沒有改商店stock或贈送／改寫角色裝備。
 

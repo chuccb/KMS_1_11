@@ -1,3 +1,5 @@
+> **攻擊呈現續作／未測試**：[NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md)／ADR-074 更正殘影 child／獨立時鐘，補真 tier、普通命中火花、impact point／world layer 與 release 聲音。本文舊呈現限制依此續作閱讀，仍不是全技能／逐像素完成。
+
 # 原初階攻擊魔法、命中時鐘與藥水完整鏈
 
 2026-10-18，ADR-073。**未執行 test／check／typecheck／語法檢查／browser／VM／probe。**

@@ -181,7 +181,7 @@ test("browser wiring shares field clock and action selection, awaits selected at
   const source=readFileSync(new URL("../../client/main.js",import.meta.url),"utf8");
   assert.ok(source.includes("drawBack(back, cameraX, cameraY, now)"));
   assert.ok(source.includes("mobLocomotion(mob, actions)"));
-  assert.ok(source.includes("await Promise.all([...frames, ...effects]"));
+  assert.ok(source.includes("await Promise.all([...frames,...effects,...bullets]"));
   assert.ok(!source.includes("SWING_COOLDOWN_MS"),"native group0 rejects instead of fabricated 480ms attack");
   const bridge=readFileSync(new URL("../src/net/webclient.ts",import.meta.url),"utf8");
   assert.ok(bridge.includes("if (!profile || !action) return;"));

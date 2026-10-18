@@ -1,3 +1,5 @@
+import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
+import {nativeWeaponMastery} from "../game/nativecombat.ts";
 import {magicLeg,clipMagicRay,MAGIC_RANGE,MAGIC_HEIGHT} from "../../../client/magiccombat.mjs";
 import {activeSkillAmmo} from "../../../client/active-skills.mjs";
 import {learnedSkillLevel} from "../game/skills.ts";
@@ -2449,8 +2451,8 @@ export class GameEntryServer {
     const now = Date.now();
     if (now + BASIC_ATTACK_TRANSPORT_GRACE_MS < (session.attackReadyAt ?? 0)) return; // Transport tolerance is server policy.
     const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
-    const profile = this.options.basicAttack?.(weaponId);
     const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
+    const profile=attackProfileAtTier(this.options.basicAttack?.(weaponId),nativeWeaponMastery(session.character,this.options.skills,weaponId,shoot));
     const booster=this.temporaryValues(session,now).booster??0;
     // Each active attack family has its OWN admission path; basic guards stay strict.
     if(opcode===CLIENT_FIELD_OPCODE.magicAttack){
@@ -2488,7 +2490,8 @@ export class GameEntryServer {
       const targets=attack.targets.filter(target=>{
         const mob=session.instance.mobs.mob(target.mobId),dx=mob?(mob.x-session.at!.x)*direction:-1;
         return mob?.alive&&dx>=0&&dx<=range+BASIC_SHOT_POSITION_SLOP_X&&
-          Math.abs(mob.y-session.at!.y)<=BASIC_SHOT_POSITION_SLOP_Y;
+          Math.abs(mob.y-session.at!.y)<=BASIC_SHOT_POSITION_SLOP_Y&&
+          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X&&Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y;
       });
       const spending=planBasicAmmo(session.character.items,ammo.slot,activeSkillAmmo(learned.values));
       if(!spending)return;
@@ -2504,9 +2507,9 @@ export class GameEntryServer {
       const accepted={...attack,targets,targetCount:targets.length};
       this.relayAttack(session,opcode,accepted,targets,spending.itemId);
       if(targets.length){
-        const mob=session.instance.mobs.mob(targets[0]!.mobId)!,bounds=profile?.melee[0]?.bounds;
+        const target=targets[0]!,bounds=attackProfileAtTier(this.options.basicAttack?.(weaponId),0)?.melee[0]?.bounds;
         const near=bounds?-Math.min(Math.max(bounds.left,-65),bounds.right-1):65;
-        const travel=Math.trunc(Math.hypot(mob.x-(session.at.x+direction*near),mob.y-20-(session.at.y-25))*1.5);
+        const travel=Math.trunc(Math.hypot(target.x-(session.at.x+direction*near),target.y-(session.at.y-25))*1.5);
         this.queueActiveHits(session,opcode,accepted,now+shotRelease(motion)+travel);
       }
       return;
@@ -2555,7 +2558,8 @@ export class GameEntryServer {
           mob?.alive &&
           dx >= 0 &&
           dx <= range + BASIC_SHOT_POSITION_SLOP_X &&
-          Math.abs(mob.y - session.at!.y) <= BASIC_SHOT_POSITION_SLOP_Y
+          Math.abs(mob.y - session.at!.y) <= BASIC_SHOT_POSITION_SLOP_Y &&
+          Math.abs(target.x-mob.x)<=BASIC_SHOT_POSITION_SLOP_X && Math.abs(target.y-mob.y)<=BASIC_SHOT_POSITION_SLOP_Y
         );
       });
       const items = session.character.items;
@@ -2580,15 +2584,14 @@ export class GameEntryServer {
         spent.itemId,
       );
       if (targets.length > 0) {
-        const mob = session.instance.mobs.mob(targets[0]!.mobId)!;
-        const bounds = profile?.melee[0]?.bounds;
+        const bounds = attackProfileAtTier(this.options.basicAttack?.(weaponId),0)?.melee[0]?.bounds;
         const near = bounds
           ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1)
           : 65;
         const travel = Math.trunc(
           Math.hypot(
-            mob.x - (session.at.x + direction * near),
-            mob.y - 20 - (session.at.y - 25),
+            targets[0]!.x - (session.at.x + direction * near),
+            targets[0]!.y - (session.at.y - 25),
           ) * 1.5,
         );
         this.pendingShots.push({
@@ -2601,8 +2604,11 @@ export class GameEntryServer {
       }
       return;
     }
-    if (basicMotion) session.attackReadyAt = now + attackDuration(basicMotion);
-    this.resolveAttackDamage(session, opcode, attack, now, true);
+    if (basicMotion) {
+      session.attackReadyAt=now+attackDuration(basicMotion);
+      this.relayAttack(session,opcode,attack,attack.targets);
+      this.queueActiveHits(session,opcode,attack,now+shotRelease(basicMotion));
+    } else this.resolveAttackDamage(session, opcode, attack, now, true);
   }
 
   /** Native presentation has 120ms per hit. Matching HP/reward settlement to that clock is
@@ -2674,14 +2680,12 @@ export class GameEntryServer {
    * packet is written; for a shot and a cast, `sub_41B630`/`sub_41B850`) - so the copy goes to the
    * others, exactly like `0x27` and `0x29`.
    *
-   * Three of the receiver's fields have no source on this side, and they are sent as the value that
-   * is not a guess:
+   * Receiver fields are derived from admitted WZ/character state (ADR-074 removes fixed tier0):
    *
    *   `skillLevel`/`skillId`  0 for ordinary attacks; admitted active attacks use the real
    *                           learned/WZ-capped level and skill ID (0x23/0x24).
-   *   `afterimage`            0 - the first child of `Character/Afterimage/<the weapon's
-   *                           info/afterImage>`, which every one of those images has. Which child the
-   *                           attacker used comes from `sub_4BE270` on its own client.
+   *   `afterimage`            native mastery tier of the weapon's Afterimage image. ADR-074 now derives the real
+   *                           4BE270 mastery tier from the learned WZ passive (mode0 melee / mode1 shot).
    *   the trailing `u32`      0 for `0x0F`/`0x11`. For a `0x10` it is what the `0x24` handler reads
    *                           it as - the projectile's item id, used to offset a throwing star's
    *                           effect (`bottom / 10000 == 207`). Basic shots now validate/consume the
@@ -2712,7 +2716,7 @@ export class GameEntryServer {
         facingLeft: attack.facingLeft,
         action: attack.action,
         speed: attack.speed,
-        afterimage: 0,
+        afterimage:nativeWeaponMastery(session.character,this.options.skills,session.character.items?.worn.get(11)?.itemId??0,opcode===CLIENT_FIELD_OPCODE.shootAttack),
         projectileItemId,
         targets,
       },
