@@ -32,6 +32,7 @@ export interface TestToolResult {
   enabled: boolean;
   message: string;
   equipmentRepairCount?: number;
+  rangedChoices?: {kind:string;weaponId:number;ammoId:number;name:string;requirements:{level:number;job:number;str:number;dex:number;int:number;luk:number}}[];
   checkpoint: boolean;
   canMap: boolean;
   restoreAvailable: boolean;
@@ -113,7 +114,7 @@ export function planTestTool(
       stats.ap = ap as number;
       stats.sp = sp as number;
       if (request.resetSkills) skills = [];
-      message = "已套用明示的體驗職業／AP／SP；沒有執行原版轉職或自然發點。";
+      message = "已套用明示的體驗職業／AP／SP；沒有執行原版轉職或自然發點，等級未變。若受原WZ裝備等級限制，回工具選遠距種類並明確補足最低等級。";
       break;
     }
     case "heal":

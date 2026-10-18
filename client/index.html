@@ -572,8 +572,11 @@
           <div class="qa-buttons"><button id="qa-heal" type="button" disabled>補滿 HP／MP</button><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button><button id="qa-near-death" type="button" disabled>HP設為1（碰怪看死亡演出）</button></div>
           <button id="qa-repair-starters" type="button" disabled>修復舊全零起始裝備（原WZ值）</button>
           <p>修復只針對原建角清單中、全部能力與升級次數皆為0的裝備；保留非全零／已升級實例。這是明示的舊版資料修復，不是原遊戲功能，且不由能力還原點回溯。</p>
-          <button id="qa-ranged-kit" type="button" disabled>領取弓／弩／拳套＋各200枚彈藥（會存檔）</button>
-          <p>需勾選確認；原WZ War Bow（Lv10）、석궁（Lv12）、Garnier（Lv10）與相容彈藥。僅放入背包，不自動穿戴／轉職／學技能／加點；需求照原WZ，還原能力不回收道具。I穿戴後，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊），雙擊或拖七鍵使用。</p>
+          <label>遠距體驗種類 <select id="qa-ranged-family" disabled></select></label>
+          <p id="qa-ranged-requirements">正在讀取原WZ裝備需求…</p>
+          <label><input id="qa-ranged-raise" type="checkbox" disabled /> 明確補足所選武器的最低等級（只升不降；HP／MP沿原成長，保留EXP餘額；舊等級還原點失效）</label>
+          <div class="qa-buttons"><button id="qa-ranged-level" type="button" disabled>已有武器：只補等級，不再次領取</button><button id="qa-ranged-kit" type="button" disabled>準備所選武器＋200枚相容彈藥</button></div>
+          <p>不是原版獎勵／轉職。請先套用弓手或盜賊配置；未勾補等級時，等級不足就整組不發。已有同款武器不重複送，不自動穿戴／改職業／加AP／SP／學技能。I穿戴後，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊）。等級與道具會存檔、不能用能力還原回溯。</p>
           <button id="qa-speed-potions" type="button" disabled>領取 3 瓶原 WZ 加速藥水（會存檔）</button>
           <button id="qa-evasion-potions" type="button" disabled>領取 3 瓶原 WZ 迴避藥水（會存檔）</button>
           <button id="qa-combat-potions" type="button" disabled>領取攻擊／命中藥水各 3 瓶（會存檔）</button>

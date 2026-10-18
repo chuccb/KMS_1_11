@@ -27,6 +27,7 @@
 
 | 主題 | 文件 |
 |---|---|
+| 穿戴原順序／server需求與原子換裝／明確最低級準備／主動時鐘與remote身份 | [NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md) |
 | 本機姿勢／蹲刺／警戒／攻擊雙時鐘／恢復編碼／射程與硬編碼分類 | [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md) |
 | 普通身體動作／武器walk/stand／繩梯停格／唯讀閱覽 | [NATIVE_AVATAR_MOTION](NATIVE_AVATAR_MOTION.md) |
 | 臉部獨立動畫／眨眼／F鍵／臉飾／遠端受傷 | [NATIVE_FACE_ANIMATION](NATIVE_FACE_ANIMATION.md) |

@@ -4444,3 +4444,13 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 55AA80換有效weapon時清86/87、4CC050圖示mask&=~0x400，故unknown400確證booster。0x200／0x800不猜。
 55BEB0 ack重stamp200ms門檻，更正前輪send-only說法。全鏈與未知server規則見[NATIVE_RANGED_SKILLS](../NATIVE_RANGED_SKILLS.md)。
 新增來源未執行，不宣稱測試PASS或全技能1:1。
+
+
+### 4.45 4636B0穿戴順序／0x17邊界與主動時鐘關聯（2026-10-18，未測試）
+
+4636B0（.c約107382）：4C5020先取完整有效集合→465B50/465C60衝突與空位檢查→刪部位→4C5420。
+不能排除舊武器後重跑4C5020，否則會提前刪依賴裝備、錯誤拒絕原允許的穿戴入口。
+GameEntry共用純規則亦驗反向swap；clone／預encode再commit，0x17尾隨垃圾／錯需求回空0x0B。
+工具所需level讀真WZ，明確raiseLevel才以原EXP／HPMP成長補足；不是新native opcode或原版任務獎勵。
+主動attackToken只加browser/bridge JSON，不改0x0F/10或0x23/24；回原動作clock，不造admission ACK。
+遠端固定receipt source/z/target identity。原證／重建政策詳[NATIVE_EQUIP_ADMISSION](../NATIVE_EQUIP_ADMISSION.md)。

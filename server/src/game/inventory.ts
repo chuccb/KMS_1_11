@@ -21,11 +21,10 @@
  *
  * Choices (the wire cannot say, and the 2003 server is gone):
  *
- * 1. **The server validates the part, the client validates the requirements.** `sub_4636B0` checks
- *    level/job/STR/... from the archive before sending, but it only checks for *itself*: a packet
- *    that names a weapon for the shoe slot, or a potion for a worn slot, is data-structural nonsense
- *    and is refused here. Nothing re-reads `reqLevel`/`reqJob` - that would be a second copy of the
- *    archive's rules with no wire to confirm it against.
+ * 1. **This structural helper validates parts; GameEntry ALSO checks native client requirements.**
+ *    The entry layer reuses shared 4636B0 admission at the server trust boundary (reconstruction
+ *    safety policy, not a recovered original-server rule), including reverse swaps. It clones,
+ *    pre-encodes and then commits. --data off cannot equip without an archive requirement.
  * 2. **Both slots holding an item means a swap**, in both directions (equip over an occupied part
  *    puts the old item in the slot the new one came from, which is what "wearing" means in this
  *    game). A swap is only accepted while the displaced item can sit where it is being put.

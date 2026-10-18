@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {resolve} from 'node:path';
 import {WzArchive} from '../src/wz/archive.ts';
 import {itemCatalogOf} from '../src/game/iteminfo.ts';
-import {planRangedPreviewKit} from '../src/game/rangedpreview.ts';
+import {planRangedPreparation} from '../src/game/rangedpreview.ts';
 import {artReaderOf} from '../src/game/wzart.ts';
 import {skillCatalogOf} from '../src/game/skills.ts';
 import {validatedActiveRanged,activeArt} from '../src/game/activeskills.ts';
@@ -122,23 +122,30 @@ test('0x400 is booster: real wire slot between unknown200/unknown800, not moveme
   assert.equal(activeSkillSpeed(3,4001334,2),0);
 });
 
-test('opt-in ranged kit: original templates, cloned all-or-nothing capacity, no auto-equip',()=>{
-  const wz=archive(),catalog=itemCatalogOf(wz),items=emptyCharacterItems();
-  for(const inventory of items.inventories)inventory.capacity=24;
-  const worn=[...items.worn],before=structuredClone(items),plan=planRangedPreviewKit(items,catalog);
-  assert.deepEqual(items,before);assert.deepEqual([...plan.items.worn],worn);assert.equal(plan.changes.length,6);
-  const equips=[...plan.items.inventories[0]!.items.values()];
-  for(const [id,pad] of [[1452002,25],[1462001,29],[1472000,10]]) {
-    const weapon=equips.find(item=>item.itemId===id);
-    assert.equal(weapon?.kind,'equip');if(weapon?.kind==='equip'){assert.equal(weapon.pad,pad);assert.equal(weapon.ruc,7);}
+test('opt-in preparation is per-family, requires explicit level consent and reuses original templates',()=>{
+  const catalog=itemCatalogOf(archive());
+  for(const [kind,job,id,pad,minimum,ammo] of [['bow',300,1452002,25,10,2060000],['crossbow',300,1462001,29,12,2061000],['claw',400,1472000,10,10,2070000]] as const){
+    const c=character(4001344,1472000,2070000);c.items!.worn.clear();c.items!.inventories[1]!.items.clear();
+    c.items!.inventories[0]!.capacity=24;Object.assign(c.stats,{job,level:1,exp:3,hp:50,maxHp:50,mp:50,maxMp:50});
+    const before=structuredClone(c);
+    assert.throws(()=>planRangedPreparation(c,catalog,kind,false,true),/需要 Lv/);assert.deepEqual(c,before);
+    const plan=planRangedPreparation(c,catalog,kind,true,true);
+    assert.equal(plan.stats.level,minimum);assert.equal(plan.stats.exp,3);assert.equal(plan.stats.job,job);
+    assert.equal(plan.stats.ap,c.stats.ap);assert.equal(plan.stats.sp,c.stats.sp);
+    assert.deepEqual(plan.items.map32,c.items!.map32);assert.equal(plan.items.worn.size,0);assert.deepEqual(c,before);
+    const weapon=[...plan.items.inventories[0]!.items.values()].find(item=>item.itemId===id)!;
+    assert.equal(weapon.kind,'equip');if(weapon.kind==='equip'){assert.equal(weapon.pad,pad);assert.equal(weapon.ruc,7);}
+    assert.equal(plan.stats.hp,plan.stats.maxHp);assert.equal(plan.stats.mp,plan.stats.maxMp);
+    assert.equal(plan.stats.maxHp>=50+(minimum-1)*20,true);
+    const charge=[...plan.items.inventories[1]!.items.values()][0]!;
+    assert.equal(charge.itemId,ammo);if(charge.kind==='nonequip')assert.equal(charge.quantity,200);
+    const owned={...c,stats:plan.stats,items:plan.items};
+    const again=planRangedPreparation(owned,catalog,kind,false,true);assert.equal(again.raised,0);
+    assert.equal(again.items.inventories[0]!.items.size,1,'do not repeatedly grant owned weapons');
+    const onlyLevel=planRangedPreparation(c,catalog,kind,true,false);
+    assert.equal(onlyLevel.changes.length,0);assert.deepEqual(onlyLevel.items,c.items);
+    c.items!.inventories[1]!.capacity=0;const blocked=structuredClone(c);
+    assert.throws(()=>planRangedPreparation(c,catalog,kind,true,true),/空間不足/);assert.deepEqual(c,blocked);
+    c.stats.job=100;assert.throws(()=>planRangedPreparation(c,catalog,kind,true,true),/弓手|盜賊/);
   }
-  const ammo=[...plan.items.inventories[1]!.items.values()];
-  assert.deepEqual(ammo.map(item=>item.itemId),[2060000,2061000,2070000]);
-  for(const item of ammo){assert.equal(item.kind,'nonequip');if(item.kind==='nonequip')assert.equal(item.quantity,200);}
-  items.inventories[0]!.capacity=2;const blocked=structuredClone(items);
-  assert.throws(()=>planRangedPreviewKit(items,catalog),/空間不足/);assert.deepEqual(items,blocked);
-  items.inventories[0]!.capacity=24;items.inventories[1]!.capacity=2;
-  const blockedAmmo=structuredClone(items);
-  assert.throws(()=>planRangedPreviewKit(items,catalog),/空間不足/);assert.deepEqual(items,blockedAmmo);
-  assert.throws(()=>planRangedPreviewKit(items,undefined),/目錄/);
 });

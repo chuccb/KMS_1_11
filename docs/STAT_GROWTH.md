@@ -1,5 +1,7 @@
 # 原版 HP／MP 成長、六種 AP 加點與隔離預覽
 
+> 本輪續作（未測試）：[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)／ADR-072。最低級方便入口、原穿戴順序與server正反swap、主動預測時鐘及remote身份鏈已有續作；本文下列前輪範圍／工具描述保留歷史背景。
+
 > **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新範圍與未完成碰撞／技能界線見 [NATIVE_STATS_COMBAT.md](NATIVE_STATS_COMBAT.md)。
 
 2026-10-17。**本輪未執行測試、typecheck、瀏覽器或 probe**；依使用者要求只做原版來源研究、實作與靜態審閱，最後啟動服務供使用者自行操作。新增／更新的測試檔只是回歸來源，不是 PASS 紀錄。

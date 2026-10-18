@@ -12,7 +12,8 @@ import { equipmentFromTemplate, planBlankStarterRepair } from "../game/equipment
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import { NATIVE_JOB_NAMES } from "../../../client/jobs.mjs";
 import { planTestTool, testToolKind, type TestCheckpoint, type TestToolResult } from "../game/testtools.ts";
-import {planRangedPreviewKit} from "../game/rangedpreview.ts";
+import {equipAdmission} from "../game/equipadmission.ts";
+import {planRangedPreparation,rangedPreviewKind,rangedPreviewChoices} from "../game/rangedpreview.ts";
 import { SKILL_REQUEST_OPCODE, readSkillRequest, encodeSkillUpdate, type SkillChange } from "../protocol/skills.ts";
 import { spendSkillPoint, type SkillCatalog } from "../game/skills.ts";
 import { planBasicAmmo, spendBasicAmmo, basicShotRange, validatedBasicAttack,
@@ -1270,14 +1271,27 @@ export class GameEntryServer {
         message = plan.changes.length
           ? `已明確修復 ${plan.changes.length} 件舊全零起始裝備為原WZ值（含攻擊／防禦／可升級次數）。未改物品ID、職業、AP/SP、EXP、金錢或地圖；還原點不回溯裝備。`
           : "沒有符合條件的全零起始裝備；未更動角色。非全零／已升級／非MakeCharInfo道具不會重設。";
-      } else if(kind==="ranged-kit") {
-        if((request as {confirmed?:unknown}).confirmed!==true)throw new Error("請勾選確認後再領取遠距體驗裝備。");
-        const plan=planRangedPreviewKit(session.character.items??emptyCharacterItems(),this.options.itemCatalog);
-        const packet=encodeInventoryChange(plan.changes);
-        session.character.items=plan.items;
+      } else if(kind==="ranged-kit"||kind==="ranged-level") {
+        const action=request as {confirmed?:unknown;family?:unknown;raiseLevel?:unknown};
+        if(action.confirmed!==true)throw new Error("請勾選確認後再準備遠距體驗。");
+        if(typeof action.raiseLevel!=='boolean')throw new Error("請明確選擇是否補足等級。");
+        if(kind==='ranged-level'&&!action.raiseLevel)throw new Error("只補等級也須勾選補足等級確認。");
+        const plan=planRangedPreparation(session.character,this.options.itemCatalog,rangedPreviewKind(action.family),
+          action.raiseLevel,kind==='ranged-kit',this.options.growthSkill);
+        const statPacket=encodeStatUpdate({ack:false,diff:diffStats(session.character.stats,plan.stats)});
+        const itemPacket=encodeInventoryChange(plan.changes,0);
+        const effect=plan.raised?encodeUserEffect({characterId, effect:USER_EFFECT_LEVEL_UP}):undefined;
+        // Whole stats/items/wire transaction prepared before any live write.
+        Object.assign(session.character.stats,plan.stats);session.character.items=plan.items;
         session.character.flags|=CHAR_FLAG_ITEMS|CHAR_FLAG_INVENTORY_2;
-        session.send(packet);this.persist();
-        message="已明確領取原WZ War Bow（Lv10）、석궁（Lv12）、Garnier（Lv10）各1件、兩種箭與수비 표창各200枚。這是非原版體驗發放，會存檔且能力還原點不回收道具。沒有自動穿戴／改職業／加點／學技能；裝備需求照原WZ。I背包穿戴相容武器，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊）後雙擊／拖七鍵；沒有彈藥或太近會退普通近戰。";
+        this.temporaryValues(session,Date.now());
+        session.send(statPacket);session.send(itemPacket);
+        if(effect)session.instance.broadcast(effect,characterId);
+        this.persist();
+        message=`已明確準備 ${plan.weaponId}（最低Lv${plan.minimumLevel}），目前Lv${plan.stats.level}。`+
+          (plan.raised?`依原HP／MP成長補足${plan.raised}級；不是原版轉職／練等，舊等級能力還原點已失效。`:"未改等級。")+
+          (kind==='ranged-kit'?"相容彈藥已入背包，已有同款武器不重複發放。":"只補足等級，沒有再次發裝備或彈藥。")+
+          "未改職業、AP／SP或技能，不自動穿戴；I穿戴、K學技能。EXP餘額保留；等級／道具不由能力還原回溯。";
       } else if(kind==="speed-potions" || kind==="combat-potions" || kind==="evasion-potions") {
         if((request as {confirmed?:unknown}).confirmed!==true) throw new Error("請勾選確認後再領取體驗道具。");
         const ids=kind==="speed-potions"?[2002001]:kind==="evasion-potions"?[2002000]:[2002004,2002005];
@@ -1324,7 +1338,7 @@ export class GameEntryServer {
     const repairable = enabled ? planBlankStarterRepair(session.character.items ?? emptyCharacterItems(),
       this.options.itemCatalog, this.options.starterEquipmentIds ?? new Set()).changes.length : 0;
     if (kind === "state" && repairable) message += ` 發現 ${repairable} 件疑似舊版生成的全零起始裝備；可勾選同意後使用修復按鈕，不會自動修復。`;
-    return {enabled,message,equipmentRepairCount:repairable,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
+    return {enabled,message,rangedChoices:enabled?rangedPreviewChoices(this.options.itemCatalog):[],equipmentRepairCount:repairable,checkpoint:!!checkpoint,restoreAvailable:!!checkpoint&&checkpoint.level===session.character.stats.level,
       canMap:enabled&&this.options.allowMapCommand?.(username)===true,
       jobs:enabled?[...NATIVE_JOB_NAMES].filter(([id])=>available(id)).map(([id,name])=>({id,name})):[]};
   }
@@ -1771,11 +1785,14 @@ export class GameEntryServer {
   private handleChangeSlot(session: FieldSession, plain: Uint8Array): void {
     let request: ClientChangeSlot;
     try {
-      request = readClientChangeSlot(new PacketReader(plain, 1));
+      const reader=new PacketReader(plain,1);
+      request = readClientChangeSlot(reader);
+      if(reader.remaining)throw new Error("trailing change-slot bytes");
     } catch (error) {
       this.options.log?.(
         `game: 0x17 change slot unreadable: ${(error as Error).message}`,
       );
+      session.send(encodeInventoryChange([]));
       return;
     }
     const label = `0x17 ${describeClientChangeSlot(request)}`;
@@ -1784,7 +1801,7 @@ export class GameEntryServer {
     // session would have nothing to move anyway.
     if (session.character.items === undefined)
       session.character.items = emptyCharacterItems();
-    if (session.character.stats.hp <= 0 || session.shop || session.talk) {
+    if (session.character.stats.hp <= 0 || session.shop || session.talk || this.trades.roomOf(session.characterId)) {
       session.send(encodeInventoryChange([]));
       return;
     }
@@ -1801,8 +1818,14 @@ export class GameEntryServer {
         return;
       }
     }
-    this.temporaryValues(session,Date.now());
-    const outcome = applyChangeSlot(session.character.items, request);
+    const denied=equipAdmission(session.character,request,this.options.itemCatalog);
+    if(denied){
+      session.send(encodeInventoryChange([]));
+      this.options.log?.(`game: ${label} refused (${denied})`);
+      return;
+    }
+    const nextItems=structuredClone(session.character.items);
+    const outcome = applyChangeSlot(nextItems, request);
     if (outcome.kind === "failed") {
       session.send(encodeInventoryChange([]));
       this.options.log?.(
@@ -1810,12 +1833,17 @@ export class GameEntryServer {
       );
       return;
     }
+    const inventoryPacket=encodeInventoryChange(outcome.changes);
+    const future={...session.character,items:nextItems,stats:{...session.character.stats}};
+    const vitalDiff=outcome.lookChanged?applyVitalReport(future.stats,{hpDelta:0,mpDelta:0},characterStatBasis(future,this.options.itemCatalog,this.options.skills).basic):{};
+    const vitalPacket=encodeStatUpdate({ack:false,diff:vitalDiff});
     this.temporaryValues(session,Date.now());
-    session.send(encodeInventoryChange(outcome.changes));
+    session.character.items=nextItems;Object.assign(session.character.stats,vitalDiff);
+    this.temporaryValues(session,Date.now());
+    session.send(inventoryPacket);
     if(outcome.lookChanged) {
       // Server policy: removing max-vital equipment cannot leave current vitals above the ceiling.
-      const diff=applyVitalReport(session.character.stats,{hpDelta:0,mpDelta:0},characterStatBasis(session.character,this.options.itemCatalog).basic);
-      if(Object.keys(diff).length) session.send(encodeStatUpdate({diff}));
+      if(Object.keys(vitalDiff).length) session.send(vitalPacket);
     }
     // A throw-away leaves the bag here and lands in the field: the ground half belongs to
     // `game/drops.ts`, exactly like a monster's loot (`FieldInstance.dropItem`), and the whole map -

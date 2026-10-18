@@ -1,5 +1,11 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
+## 2026-10-18 續作：原穿戴入口與非同步戰鬥（未測試）
+
+原4636B0順序更正，純規則共用server正反swap並原子換裝；工具明確補原武器最低等級，不改需求或自動升級。
+主動attackToken回原start clock，遠端固定receipt source／z／target與entity身份；完整見[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)／ADR-072。
+
+
 ## 2026-10-18：Arrow Blow／Double Shot／Lucky Seven、彈藥與攻速消費鏈（未測試）
 
 支援主動技能總數增至十招；原K／七鍵共用入口，依原519380近身／蹲下／彈藥不足退普通近戰。

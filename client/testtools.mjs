@@ -24,6 +24,7 @@ export function testTools({
     restoreAvailable = false,
     canMap = false,
     jobs = [],
+    rangedChoices = [],
     repairCount = 0,
     maps = [],
     lastRequest,
@@ -63,10 +64,18 @@ export function testTools({
       "qa-checkpoint",
       "qa-speed-potions",
       "qa-combat-potions",
-      "qa-ranged-kit",
       "qa-evasion-potions",
     ])
       el(id).disabled = !ready;
+    const rangedReady=ready&&rangedChoices.some(choice=>choice.kind===el('qa-ranged-family').value);
+    el('qa-ranged-family').disabled=!enabled||busy;
+    el('qa-ranged-raise').disabled=!enabled||busy;
+    el('qa-ranged-kit').disabled=!rangedReady;
+    el('qa-ranged-level').disabled=!rangedReady||!el('qa-ranged-raise').checked;
+    const choice=rangedChoices.find(choice=>choice.kind===el('qa-ranged-family').value),person=getSelf();
+    el('qa-ranged-requirements').textContent=choice
+      ? `${choice.name}（${choice.weaponId}）：原WZ Lv${choice.requirements.level}、${choice.kind==='claw'?'盜賊':'弓手'}；目前 Lv${person?.level??'—'}／job ${person?.job??'—'}。${(person?.level??0)<choice.requirements.level?'未補足等級不能穿戴。':'等級已足夠，仍檢查職業及能力。'}`
+      : '原WZ遠距模板不可用，不發放。';
     el("qa-repair-starters").disabled = !ready || repairCount === 0;
     el("qa-repair-starters").textContent = `修復舊全零起始裝備（${repairCount}件；原WZ值）`;
     el("qa-restore").disabled = !ready || !restoreAvailable;
@@ -88,6 +97,7 @@ export function testTools({
     opened = false;
     resetMotionPreview();
     el("qa-confirm").checked = false;
+    el("qa-ranged-raise").checked = false;
     sync();
     if (root.contains(document.activeElement)) toggle.focus();
   }
@@ -124,6 +134,7 @@ export function testTools({
     }
     busy = true;
     el("qa-confirm").checked = false;
+    el("qa-ranged-raise").checked = false;
     onOpen();
     status("正在詢問目前帳號的伺服器授權…");
     sync();
@@ -141,12 +152,15 @@ export function testTools({
   }
   function preset(job) {
     el("qa-job").value = String(job);
+    el("qa-ranged-raise").checked=false;
+    if(job===300||job===400)el("qa-ranged-family").value=job===400?"claw":"bow";
     el("qa-ap").value = "20";
     el("qa-sp").value = "40";
     el("qa-reset-skills").checked = true;
     status(
       "僅填入表單，尚未變更角色。確認後按「套用體驗配置」；會清除已學技能，原紀錄保留於還原點。",
     );
+    sync();
   }
   function warp(id) {
     if (
@@ -173,6 +187,11 @@ export function testTools({
     }
   });
   el("qa-motion").addEventListener("toggle", () => { if (!el("qa-motion").open) resetMotionPreview(); });
+  el('qa-ranged-family').addEventListener('change',()=>{el('qa-ranged-raise').checked=false;sync();});
+  el('qa-ranged-raise').addEventListener('change',sync);
+  for(const kind of ['ranged-kit','ranged-level'])el(`qa-${kind}`).addEventListener('click',()=>action(kind,{
+    family:el('qa-ranged-family').value,raiseLevel:el('qa-ranged-raise').checked,
+  }));
   el("qa-confirm").addEventListener("change", sync);
   el("qa-warrior").addEventListener("click", () => preset(100));
   el("qa-archer").addEventListener("click", () => preset(300));
@@ -199,7 +218,6 @@ export function testTools({
     "restore",
     "speed-potions",
     "combat-potions",
-    "ranged-kit",
     "evasion-potions",
   ])
     el(`qa-${kind}`).addEventListener("click", () => action(kind));
@@ -254,6 +272,13 @@ export function testTools({
         restoreAvailable = message.restoreAvailable;
         canMap = message.canMap;
         jobs = message.jobs;
+        rangedChoices=message.rangedChoices??[];
+        el("qa-ranged-raise").checked=false;
+        const family=el('qa-ranged-family'),previous=family.value;
+        family.replaceChildren();
+        for(const choice of rangedChoices){const option=document.createElement('option');option.value=choice.kind;
+          option.textContent=`${choice.kind==='bow'?'弓':choice.kind==='crossbow'?'弩':'拳套'} · ${choice.name} · Lv${choice.requirements.level}`;family.append(option);}
+        family.value=rangedChoices.some(c=>c.kind===previous)?previous:Math.trunc((getSelf()?.job??0)/100)===4?'claw':'bow';
         const select = el("qa-job"),
           old = select.value;
         select.replaceChildren();

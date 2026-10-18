@@ -701,7 +701,8 @@ class BrowserSession {
   private async activePhysical(message:Record<string,unknown>):Promise<void> {
     const session=this.require(),character=session.character,id=Number(message.skillId);
     const learned=character&&learnedActive(character,this.options.skills,id);
-    const shoot=message.t==='active-ranged',field=this.contactField;
+    const shoot=message.t==='active-ranged',field=this.contactField,attackToken=Number(message.attackToken);
+    if(!Number.isInteger(attackToken)||attackToken<1||attackToken>0x7fffffff)return;
     if(!character||!learned||learned.rule.kind!==(shoot?'ranged':'melee')||!session.attackRandom||session.characterOperationPending)return;
     const profile=this.options.art?.attackProfile?.(character.items?.worn.get(11)?.itemId??0);
     const actionId=Number(message.action),action=(shoot?activeRangedActions(profile,id):activeMeleeActions(profile,id)).find(a=>a.action===actionId);
@@ -735,15 +736,14 @@ class BrowserSession {
         this.options.skills,()=>session.attackRandom!.next(),undefined,{skillId:id,damagePercent:learned.values.damage??0,random}));
       records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages});
     }
-    const speed=activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0),motion={...action,delays:scaledAttackDelays(action.baseDelays,speed)};
+    const speed=activeSkillSpeed(profile.baseSpeed??profile.speed,id,temporary.booster??0);
     await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits,shoot,
       ...(ammo?{projectileSlot:ammo.slot}:{})});
     if(this.session!==session||this.contactField!==field)return;
-    const bounds=profile.melee[0]?.bounds,near=bounds?-Math.min(Math.max(bounds.left,-65),bounds.right-1):65;
-    records.forEach((record,index)=>this.send({t:'active-hit',skillId:id,skillLevel:learned.level,
-      mobId:record.mobId,damages:record.damages,delayMs:shotRelease(motion)+(shoot?Math.trunc(Math.hypot(
-        record.x-(session.selfPosition.x+(message.facingLeft===true?-near:near)),
-        record.y-20-(session.selfPosition.y-25))*1.5):Math.min(index*70,280)),contactField:field}));
+    // Correlate with the original browser action clock, not a second release after bridge I/O.
+    // This remains predicted damage, NOT an invented native admission ACK.
+    records.forEach(record=>this.send({t:'active-hit',attackToken,skillId:id,skillLevel:learned.level,
+      mobId:record.mobId,damages:record.damages,contactField:field}));
   }
 
   private async attack(

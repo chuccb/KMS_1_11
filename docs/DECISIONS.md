@@ -2673,3 +2673,23 @@ Magic Guard的WZ百分比存在，但client仍送完整HP傷害／MP0，server�
 **方便入口**：固定遠距裝備／彈藥allowlist須已授權帳號勾確認，clone計畫／預encode後整組發放；不自動穿戴／改能力，數量200明示為工具政策。
 
 **交付**：新增ranged-skills回歸來源但未執行；沿用使用者最新save，停服冷備，不重seed／回復舊快照或自動改角。
+
+
+## ADR-072：穿戴原順序、明確最低級準備與攻擊時鐘關聯（2026-10-18）
+
+**狀態**：實作／回歸來源已寫；未test／check／typecheck／語法／browser／VM／probe。啟服非PASS。
+
+**使用者回報**：上輪三把原武器仍受Lv10／12與job要求阻擋；不能稱只送裝備就已方便使用。
+只讀掃全部145／146／147確認不存在Lv1同類武器。不改原需求、不造低級模板；工具改分族與真需求展示，
+增加獨立且預設不勾的raiseLevel明確同意，原成長逐級補最低級；已有武器可只補級，不重領。
+保留EXP餘額、不改AP／SP／job／技能／物品實例，level變動使舊level還原點失效；clone＋全預encode後提交，
+失敗不升級、不送半套，不在啟服自動使用。
+
+**原碼更正**：4636B0是4C5020完整有效集合→刪替換／衝突部位→4C5420，非排除後重跑effectiveWorn。
+純equip-rules共用browser與server；GameEntry也檢查反向swap與需求，clone／預encode／vitals上限／換武器booster取消／
+0x28 look／persist全鏈；server強制這些client規則是重建安全政策，不是原server考證。
+
+**時鐘與生命周期**：主動attackToken只存在browser/bridge JSON，用原start+release/travel及原mob identity，
+不在bridge回覆後再加一次完整delay，也不改native opcode／冒充ACK。多目標消費一次、field／death清理與序列不重用；
+遠端receipt source/z/target snapshot，防冷載入漂移／新生同ID誤中，effect綁remote entity，不回放過期body聲。
+128筆／10秒是資源政策，非原cooldown。詳[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)。

@@ -1,5 +1,7 @@
 # 主動技能第一批：施放、七鍵、消耗、近戰、多段、增益與隊伍鏈
 
+> 本輪續作（未測試）：[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)／ADR-072。最低級方便入口、原穿戴順序與server正反swap、主動預測時鐘及remote身份鏈已有續作；本文下列前輪範圍／工具描述保留歷史背景。
+
 > **本輪續作（未測試）**：[NATIVE_RANGED_SKILLS](NATIVE_RANGED_SKILLS.md)／ADR-071新增三個遠距技能，合計十招；補多彈藥／Lucky Seven／真ball／攻速欄與武器失效／ACK時鐘。下文保留上一輪交付範圍，不把未開放的Booster／Magic Guard寫成已完成。
 
 2026-10-18，ADR-070。**這輪未執行 test／check／typecheck／語法檢查／browser／VM／probe。**

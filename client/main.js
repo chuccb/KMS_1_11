@@ -1,3 +1,4 @@
+import {attackPredictions} from './attack-predictions.mjs';
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout} from './active-skills.mjs';
 import { combatAssets } from "./combat-assets.mjs";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
@@ -386,10 +387,10 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
-    skillEffects.length=0;skillHitEffects.length=0;
+    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();
     combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
     clearAttackAlert(playerBody);
-    skillEffects.length=0;skillHitEffects.length=0;buffs.clear();
+    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -442,7 +443,7 @@ function handle(message) {
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
-    skillEffects.length=0;skillHitEffects.length=0;buffs.clear();
+    skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -686,7 +687,10 @@ function handle(message) {
       void playSkillEffect(message.characterId,message.skillId,message.skillLevel,performance.now());return;
     case 'active-hit': {
       if(message.contactField!==contactField||!(selfView?.hp>0))return;
-      const at=performance.now()+(message.delayMs??0);
+      const prediction=activePredictions.consume(message.attackToken,message.mobId);
+      if(!prediction||prediction.field!==self||prediction.epoch!==combatEpoch||prediction.skillId!==message.skillId||
+        prediction.skillLevel!==message.skillLevel||mobs.get(String(message.mobId))!==prediction.target.mob)return;
+      const at=prediction.start+prediction.target.delayMs;
       (message.damages??[]).forEach((damage,index)=>scheduleAttackHit(message.mobId,damage,at,index));
       void playSkillHit(message.mobId,message.skillId,message.skillLevel,at);return;
     }
@@ -721,7 +725,7 @@ function handle(message) {
         if (playerBody && map?.id === self?.mapId)
           deathFx.observe(message.self.characterId, true, self, performance.now());
         selfSwing = undefined;
-        buffs.clear();skillEffects.length=0;skillHitEffects.length=0;
+        buffs.clear();skillEffects.length=0;skillHitEffects.length=0;activePredictions.clear();
         clearAttackAlert(playerBody);
         combatEpoch++;
         keys.clear();
@@ -3185,7 +3189,9 @@ function frame() {
     }
   }
 
-  for(let i=skillEffects.length-1;i>=0;i--)if(now>=skillEffects[i].end)skillEffects.splice(i,1);
+  for(let i=skillEffects.length-1;i>=0;i--){const effect=skillEffects[i];
+    if(now>=effect.end||(effect.entity&&users.get(String(effect.characterId))!==effect.entity)||deathFx.get(effect.characterId))skillEffects.splice(i,1);
+  }
   for(let i=skillHitEffects.length-1;i>=0;i--){
     const effect=skillHitEffects[i];
     if(now>=effect.end || mobs.get(String(effect.mob.mobId))!==effect.mob){skillHitEffects.splice(i,1);continue;}
@@ -3349,6 +3355,7 @@ function playWeaponSound(entity, profile) {
 function ensureAttackProfile(look) { return combatCatalog.attack(weaponIdOf(look)); }
 function ensureProjectileFrames(itemId) { return combatCatalog.projectile(itemId).then(frames => frames ?? []); }
 const skillEffects=[],skillHitEffects=[];
+const activePredictions=attackPredictions();
 function oneShotFrame(frames,elapsed) {
   if(elapsed<0)return;
   if(!frames?.length||elapsed>=frames.reduce((n,f)=>n+f.delay,0))return;
@@ -3360,7 +3367,7 @@ async function preloadSkillArt(data,level) {
   await Promise.all(pictures.map(p=>p.loading));
   return pictures.every(p=>p.ready)?art:undefined;
 }
-async function playSkillEffect(characterId,skillId,level,start) {
+async function playSkillEffect(characterId,skillId,level,start,soundDeadline=Infinity) {
   const field=self,epoch=combatEpoch,entity=characterId===selfView?.characterId?selfView:users.get(String(characterId));
   if(!entity)return;
   const lookKey=JSON.stringify(lookOf(entity));
@@ -3376,8 +3383,8 @@ async function playSkillEffect(characterId,skillId,level,start) {
     (characterId!==selfView?.characterId&&current!==entity)||JSON.stringify(lookOf(current))!==lookKey)return;
   const duration=art.armorFlash?400:art.effects.reduce((n,f)=>n+f.delay,0);
   if(performance.now()-start>=Math.max(duration,200))return; // Sound-only casts also expire; never replay on a late load.
-  if(art.useSound)void audio.effect(art.useSound,spatialVolume(current.x??self.x,current.y??self.y,self));
-  if(duration>0){if(skillEffects.length>=128)skillEffects.shift();skillEffects.push({characterId,lookKey,art,flash,start,end:start+duration});}
+  if(performance.now()<soundDeadline&&art.useSound)void audio.effect(art.useSound,spatialVolume(current.x??self.x,current.y??self.y,self));
+  if(duration>0){if(skillEffects.length>=128)skillEffects.shift();skillEffects.push({characterId,entity:characterId===selfView?.characterId?undefined:entity,lookKey,art,flash,start,end:start+duration});}
 }
 async function playSkillHit(mobId,skillId,level,start) {
   const field=self,epoch=combatEpoch,mob=mobs.get(String(mobId));if(!mob)return;
@@ -3392,7 +3399,7 @@ async function playSkillHit(mobId,skillId,level,start) {
 }
 function drawSkillLayer(entity,x,y,now,flip) {
   for(const effect of skillEffects) {
-    if(effect.characterId!==entity.characterId||effect.lookKey!==JSON.stringify(lookOf(entity))||now<effect.start||now>=effect.end)continue;
+    if((effect.entity&&effect.entity!==entity)||effect.characterId!==entity.characterId||effect.lookKey!==JSON.stringify(lookOf(entity))||now<effect.start||now>=effect.end)continue;
     if(effect.art.armorFlash){
       // Native 50C460 generates a white, expanding armor silhouette, not an absent WZ effect.
       const frame=effect.flash;
@@ -3426,12 +3433,12 @@ function scheduleAttackHit(mobId, damage, at, ordinal=0) {
 }
 function launchProjectile(entity, itemId, motion, mob, now, near, options={}) {
   const local = entity === selfView;
-  const at = local ? self : entity;
+  const at = options.source??(local ? self : entity);
   if (!at) return;
   const leg = projectileLeg(at.x, at.y, motion.facingLeft, mob, near, local ? nativeShotRange : 200);
   // 513C80 passes 515C70(source avatar main layer) through 41B630 -> 41BF60.
   // A bullet keeps its launch root depth; moving the shooter later must not drag its z around.
-  const z = actorDepth(local ? (playerBody ?? at) : at, terrain, local ? "self" : "user");
+  const z = options.z??actorDepth(local ? (playerBody ?? at) : at, terrain, local ? "self" : "user");
   const record = {...leg,y1:leg.y1+(options.offsetY??0),
     releaseAt:now+shotRelease(motion)+(options.delayMs??0),frames:options.frames??[],z};
   projectiles.push(record);
@@ -3441,9 +3448,9 @@ function launchProjectile(entity, itemId, motion, mob, now, near, options={}) {
   });
 }
 /** 513C80: same source/root z and common travel time; only endpoints/launch clocks fan out. */
-function launchActiveProjectiles(entity,itemId,motion,mob,now,near,values,frames){
+function launchActiveProjectiles(entity,itemId,motion,mob,now,near,values,frames,options={}){
   for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(itemId/10000)===207))
-    launchProjectile(entity,itemId,motion,mob,now,near,{...layout,frames});
+    launchProjectile(entity,itemId,motion,mob,now,near,{...options,...layout,frames});
 }
 function drawProjectile(shot, cameraX, cameraY, now) {
   const elapsed = now - shot.releaseAt, t = elapsed / shot.duration;
@@ -3463,6 +3470,10 @@ async function receiveUserAttack(message, now) {
     epoch = combatEpoch;
   const ticket = user.attackTicket = (user.attackTicket ?? 0) + 1;
   const look = lookOf(user), lookKey = JSON.stringify(look);
+  const source={x:user.x,y:user.y},z=actorDepth(user,terrain,'user');
+  const targets=new Map((message.targets??[]).flatMap(target=>{
+    const mob=mobs.get(String(target.mobId));return mob?[[target.mobId,{mob,x:mob.x,y:mob.y}]]:[];
+  }));
   const [profile,skillData]=await Promise.all([ensureAttackProfile(look),
     message.skillId?combatCatalog.skill(message.skillId):undefined]);
   if (
@@ -3486,25 +3497,27 @@ async function receiveUserAttack(message, now) {
     start: now,
     facingLeft: message.facingLeft,
   };
-  if(skillId)void playSkillEffect(message.characterId,skillId,message.skillLevel,now);
-  playWeaponSound(user, profile);
-  const target = mobs.get(String(message.targets?.[0]?.mobId));
+  const soundAllowed=performance.now()-now<attackDuration(motion);
+  if(skillId)void playSkillEffect(message.characterId,skillId,message.skillLevel,now,now+attackDuration(motion));
+  if(soundAllowed)playWeaponSound(user, profile);
+  const target = targets.get(message.targets?.[0]?.mobId);
   const near = shotNear(profile.melee[0]);
   if(message.shoot&&message.projectileItemId){
     const values=skillData?.levels.find(row=>row.level===message.skillLevel)?.values;
     if(skillId&&values){
       const balls=skillData.arts?.[message.skillLevel]?.balls;
       // Keep the original start/root even if an ammo image arrives late.
-      if(balls?.length)launchActiveProjectiles(user,message.projectileItemId,motion,target,now,near,values,balls);
+      if(balls?.length)launchActiveProjectiles(user,message.projectileItemId,motion,target,now,near,values,balls,{source,z});
       else for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(message.projectileItemId/10000)===207))
-        launchProjectile(user,message.projectileItemId,motion,target,now,near,layout);
-    }else if(!skillId)launchProjectile(user,message.projectileItemId,motion,target,now,near);
+        launchProjectile(user,message.projectileItemId,motion,target,now,near,{...layout,source,z});
+    }else if(!skillId)launchProjectile(user,message.projectileItemId,motion,target,now,near,{source,z});
   }
   for (const [targetIndex,target] of (message.targets ?? []).entries()) {
-    const mob = mobs.get(String(target.mobId));
+    const snapshot=targets.get(target.mobId);
+    if(!snapshot||mobs.get(String(target.mobId))!==snapshot.mob)continue;
     const delay = message.shoot
       ? shotRelease(motion) +
-        projectileLeg(user.x, user.y, message.facingLeft, mob, near).duration
+        projectileLeg(source.x, source.y, message.facingLeft, snapshot, near).duration
       : skillId?shotRelease(motion)+Math.min(targetIndex*70,280):0;
     if(skillId){
       (target.damages??[]).forEach((damage,index)=>scheduleAttackHit(target.mobId,damage,now+delay,index));
@@ -3698,7 +3711,10 @@ async function swing(skillId=0) {
       playWeaponSound(entity,profile);
       void playSkillEffect(entity.characterId,skillId,skillLevel,now);
       if(shoot)launchActiveProjectiles(entity,ammo.itemId,motion,mob,now,near,skillValues,bulletFrames);
-      send({t:shoot?'active-ranged':'active-melee',skillId,action:motion.action,facingLeft,
+      const attackToken=activePredictions.add({field:self,epoch:combatEpoch,start:now,skillId,skillLevel,
+        targets:new Map(selected.map((target,index)=>[target.mobId,{mob:target,delayMs:shotRelease(motion)+
+          (shoot?projectileLeg(self.x,self.y,facingLeft,target,near,nativeShotRange).duration:Math.min(index*70,280))}]))});
+      send({t:shoot?'active-ranged':'active-melee',attackToken,skillId,action:motion.action,facingLeft,
         targets:selected.map(mob=>({mobId:mob.mobId,x:mob.x,y:mob.y}))});return;
     }
     playWeaponSound(entity, profile);

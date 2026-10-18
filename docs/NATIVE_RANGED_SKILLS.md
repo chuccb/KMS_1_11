@@ -1,5 +1,7 @@
 # 原版遠距技能、多彈藥、攻速增益欄與武器失效鏈
 
+> 本輪續作（未測試）：[NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md)／ADR-072。最低級方便入口、原穿戴順序與server正反swap、主動預測時鐘及remote身份鏈已有續作；本文下列前輪範圍／工具描述保留歷史背景。
+
 2026-10-18，ADR-071。**未執行 test／check／typecheck／語法檢查／browser／VM／probe**。
 這是繼[第一批七技](ACTIVE_SKILLS.md)後的原碼／listing／Data.wz交叉與實作；新增回歸來源不等於PASS。
 
@@ -16,7 +18,7 @@
 
 ### 方便入口，但不代替使用者改角色
 
-`/tools`新增弓手預填（僅填表），以及**勾選確認才可按**的「領取弓／弩／拳套＋各200枚彈藥」。
+**上一輪工具（本輪已由[分族與明確補級](NATIVE_EQUIP_ADMISSION.md)取代）**：`/tools`新增弓手預填（僅填表），以及**勾選確認才可按**的「領取弓／弩／拳套＋各200枚彈藥」。
 以`--test-tools`帳號授權、目前已進場的帳號／角色檢查、shop／talk／trade／pending-shot守衛保護，非新增native opcode。
 固定allowlist取本Data.wz：War Bow1452002（Lv10、PAD25）、석궁1462001（Lv12、PAD29）、
 Garnier1472000（Lv10、PAD10）、2060000／2061000／2070000；equipmentFromTemplate讀真能力／RUC，不填零武器。

@@ -9,6 +9,7 @@
 
 | 範圍 | 現況入口 |
 |---|---|
+| 穿戴需求／正反swap／原子換裝／最低級準備／攻擊關聯時鐘 | [原證與未測試界線](NATIVE_EQUIP_ADMISSION.md) |
 | 十個主動技能／七鍵／多彈藥／Lucky Seven／增益與隊伍 | [遠距與攻速界線](NATIVE_RANGED_SKILLS.md)、[第一批](ACTIVE_SKILLS.md)，非全技能完成 |
 | 原協定、登入／選角／建刪角、原版 WZ 畫面 | [server](../server/README.md)、[CLIENT](CLIENT.md)、[FINDINGS](protocol/FINDINGS.md) |
 | 地圖／背景／角色／怪物、左右朝向、繩梯與傳送、BGM／音效 | [地圖](MAP_MOVEMENT_VALIDATION.md)、[動作音訊](CLIMB_AUDIO_VALIDATION.md)、[門與登台](PORTAL_CLIMB_VALIDATION.md) |
