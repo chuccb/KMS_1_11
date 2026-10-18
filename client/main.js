@@ -1,3 +1,4 @@
+import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds} from './active-skills.mjs';
 import { combatAssets } from "./combat-assets.mjs";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.mjs";
 import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackFrameStart } from "./attack-timing.mjs";
@@ -17,7 +18,7 @@ import { whisperNameError } from "./whisper.mjs";
 import {chatBalloons} from "./chatballoons.mjs";
 import { chatHistory } from "./chatlog.mjs";
 import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
-import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile } from "./quickslots.mjs";
+import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.mjs";
 import { animationFrame } from "./animation.mjs";
 import { deathEffects, deathPose } from "./death.mjs";
 import { reviveWindow } from "./revive.mjs";
@@ -385,8 +386,10 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
+    skillEffects.length=0;skillHitEffects.length=0;
     combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
     clearAttackAlert(playerBody);
+    skillEffects.length=0;skillHitEffects.length=0;buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -439,6 +442,7 @@ function handle(message) {
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
+    skillEffects.length=0;skillHitEffects.length=0;buffs.clear();
     resetContact();
     resetFace(selfView);
     resetAvatarMotion(selfView);
@@ -674,6 +678,36 @@ function handle(message) {
       return;
     }
 
+    case 'active-skill-result':
+      if(!message.accepted)logLine('技能未施放：請確認已學等級、HP／MP、隊伍及前一項操作。');
+      return;
+    case 'skill-effect':
+      void playSkillEffect(message.characterId,message.skillId,message.skillLevel,performance.now());return;
+    case 'active-hit': {
+      if(message.contactField!==contactField)return;
+      const at=performance.now()+(message.delayMs??0);
+      (message.damages??[]).forEach((damage,index)=>scheduleAttackHit(message.mobId,damage,at,index));
+      void playSkillHit(message.mobId,message.skillId,message.skillLevel,at);return;
+    }
+    case 'party': {
+      const r=message.result;
+      if(r.kind==='invite') {
+        if(itemDialog.open||systemPanel.visible||talkingNpc!==undefined||portalPending) {
+          send({t:'party-response',accepted:false});return;
+        }
+        const field=self;
+        itemDialog.confirm({text:`'${r.inviterName}'님이 파티에 초대했습니다.\n파티에 가입하시겠습니까?`,
+          accept:()=>{if(self===field)send({t:'party-response',accepted:true});},
+          reject:()=>send({t:'party-response',accepted:false})});
+      }else {
+        const notices={created:'새로운 파티를 만들었습니다.',ended:'파티가 해체되었습니다.',
+          left:'파티원이 탈퇴했습니다.',joined:'파티에 가입했습니다.',alreadyInParty:'이미 가입한 파티가 있습니다.',
+          notInParty:'가입한 파티가 없습니다.',beginnerCannotCreate:'초보자는 파티를 만들 수 없습니다.',
+          full:'파티원이 가득 찼습니다.',unknown:'파티 요청을 처리하지 못했습니다.'};
+        if(notices[r.kind])chatLine('파티',notices[r.kind]);
+      }
+      return;
+    }
     case "temporary-stat":
       buffs.apply(message.update, performance.now());
       return;
@@ -686,6 +720,7 @@ function handle(message) {
         if (playerBody && map?.id === self?.mapId)
           deathFx.observe(message.self.characterId, true, self, performance.now());
         selfSwing = undefined;
+        buffs.clear();skillEffects.length=0;skillHitEffects.length=0;
         clearAttackAlert(playerBody);
         combatEpoch++;
         keys.clear();
@@ -2510,6 +2545,7 @@ function playAction(actions, action, now) {
 
 /** One image at `(x, y)` with the canvas' origin at that point. */
 function drawArchiveImage(frame, x, y, flip) {
+  if(!frame)return;
   const entry = artImage(frame.path);
   if (!entry.ready) return;
   const ox = frame.ox ?? 0;
@@ -2658,6 +2694,7 @@ function drawAvatarAt(entity, screenX, screenY, now, flip) {
     ctx.restore();
   });
   ctx.restore();
+  if(!dead)drawSkillLayer(entity,screenX,screenY,now,direction);
 }
 
 function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
@@ -2856,6 +2893,13 @@ function drawQuickItems() {
   quickProfile.values().forEach((id, index) => {
     if (!id) return;
     const {x,y} = QUICK_SLOTS[index];
+    if(quickSkillAllowed(id)) {
+      const data=combatCatalog.peekSkill(id.skillId);if(!data)void combatCatalog.skill(id.skillId);
+      const a=artImage(`Skill/${Math.trunc(id.skillId/10000)}.img/skill/${id.skillId}/icon`);
+      if(a.ready){ctx.save();if(!skillPanel.level(id.skillId))ctx.globalAlpha*=0.4;
+        ctx.drawImage(a.img,x-(data?.icon?.ox??0),y+32-(data?.icon?.oy??32));ctx.restore();}
+      return;
+    }
     // Native 4FC440: canvas left = x-originX, top = y-originY+32 (not centred).
     const facts = itemInfo.get(id);
     if (facts === undefined) void describeItem(id);
@@ -3140,6 +3184,12 @@ function frame() {
     }
   }
 
+  for(let i=skillEffects.length-1;i>=0;i--)if(now>=skillEffects[i].end)skillEffects.splice(i,1);
+  for(let i=skillHitEffects.length-1;i>=0;i--){
+    const effect=skillHitEffects[i];
+    if(now>=effect.end || mobs.get(String(effect.mob.mobId))!==effect.mob){skillHitEffects.splice(i,1);continue;}
+    drawArchiveImage(oneShotFrame(effect.frames,now-effect.start),effect.mob.x-cameraX,effect.mob.y-cameraY-20,false);
+  }
   drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
@@ -3158,8 +3208,10 @@ function frame() {
     const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
     const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
     if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open &&
-        !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y))
-      drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
+        !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y)) {
+      if(pointed?.skill){const at=tooltipAnchor('skill',pointerAt.x,pointerAt.y);nativeTips.skill(at.x,at.y,pointed.skill,pointed.level);}
+      else drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
+    }
     if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
@@ -3295,11 +3347,66 @@ function playWeaponSound(entity, profile) {
 /** Shared bounded metadata only. No promise captures an actor or resurrects a cleared cache. */
 function ensureAttackProfile(look) { return combatCatalog.attack(weaponIdOf(look)); }
 function ensureProjectileFrames(itemId) { return combatCatalog.projectile(itemId).then(frames => frames ?? []); }
-function scheduleAttackHit(mobId, damage, at) {
+const skillEffects=[],skillHitEffects=[];
+function oneShotFrame(frames,elapsed) {
+  if(elapsed<0)return;
+  if(!frames?.length||elapsed>=frames.reduce((n,f)=>n+f.delay,0))return;
+  return animationFrame(frames,elapsed,false);
+}
+async function preloadSkillArt(data,level) {
+  const art=data?.arts?.[level];if(!art)return;
+  const pictures=[...art.effects,...(art.hitVariants?.flat()??art.hits)].map(f=>artImage(f.path));
+  await Promise.all(pictures.map(p=>p.loading));
+  return pictures.every(p=>p.ready)?art:undefined;
+}
+async function playSkillEffect(characterId,skillId,level,start) {
+  const field=self,epoch=combatEpoch,entity=characterId===selfView?.characterId?selfView:users.get(String(characterId));
+  if(!entity)return;
+  const lookKey=JSON.stringify(lookOf(entity));
+  let flash;
+  if(skillId===1001003||skillId===2001003){
+    const state=stanceOfEntity(entity,start);
+    flash=avatarFrame(lookOf(entity),state.stance,state.frame,facingFlip(entity.facing));
+  }
+  const data=await combatCatalog.skill(skillId),art=await preloadSkillArt(data,level);
+  if(flash)await flash.loading;
+  const current=characterId===selfView?.characterId?selfView:users.get(String(characterId));
+  if(self!==field||combatEpoch!==epoch||!art||deathFx.get(characterId)||!current||
+    JSON.stringify(lookOf(current))!==lookKey)return;
+  const duration=art.armorFlash?400:art.effects.reduce((n,f)=>n+f.delay,0);
+  if(performance.now()-start>=Math.max(duration,200))return; // Sound-only casts also expire; never replay on a late load.
+  if(art.useSound)void audio.effect(art.useSound,spatialVolume(current.x??self.x,current.y??self.y,self));
+  if(duration>0){if(skillEffects.length>=128)skillEffects.shift();skillEffects.push({characterId,lookKey,art,flash,start,end:start+duration});}
+}
+async function playSkillHit(mobId,skillId,level,start) {
+  const field=self,epoch=combatEpoch,mob=mobs.get(String(mobId));if(!mob)return;
+  const data=await combatCatalog.skill(skillId),art=await preloadSkillArt(data,level);
+  if(self!==field||combatEpoch!==epoch||!art||mobs.get(String(mobId))!==mob)return;
+  const variants=art.hitVariants??[art.hits];
+  const frames=variants[Math.floor(Math.random()*variants.length)]??[]; // Native 50D9F0, visual RNG only.
+  const end=start+frames.reduce((n,f)=>n+f.delay,0);
+  if(end<=performance.now())return;
+  if(skillHitEffects.length>=128)skillHitEffects.shift();
+  skillHitEffects.push({mob,frames,start,end});
+}
+function drawSkillLayer(entity,x,y,now,flip) {
+  for(const effect of skillEffects) {
+    if(effect.characterId!==entity.characterId||effect.lookKey!==JSON.stringify(lookOf(entity))||now<effect.start||now>=effect.end)continue;
+    if(effect.art.armorFlash){
+      // Native 50C460 generates a white, expanding armor silhouette, not an absent WZ effect.
+      const frame=effect.flash;
+      if(!frame?.ready)continue;
+      const t=(now-effect.start)/400,scale=1+2*t;
+      ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ctx.globalAlpha*=(212/255)*(1-t);
+      ctx.filter='brightness(0) invert(1)';ctx.drawImage(frame.img,frame.dx,frame.dy);ctx.restore();
+    }else drawArchiveImage(oneShotFrame(effect.art.effects,now-effect.start),x,y,flip);
+  }
+}
+function scheduleAttackHit(mobId, damage, at, ordinal=0) {
   const field = self,
-    epoch = combatEpoch;
+    epoch = combatEpoch, originalMob=mobs.get(String(mobId));
   const show = () => {
-    if (self !== field || combatEpoch !== epoch) return;
+    if (self !== field || combatEpoch !== epoch || mobs.get(String(mobId))!==originalMob) return;
     const mob = mobs.get(String(mobId));
     if (!mob) return;
     const now = performance.now();
@@ -3309,7 +3416,7 @@ function scheduleAttackHit(mobId, damage, at) {
     );
     const frame=currentMobFrame(mob,now);
     if(damage>0) mobHits.set(String(mobId),now);
-    if(frame) damageMarks.push({x:mob.x,y:mob.y-Math.max(0,frame.oy??0),value:damage,start:now,
+    if(frame) damageMarks.push({x:mob.x,y:mob.y-Math.max(0,frame.oy??0)-ordinal*20,value:damage,start:now,
       jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))});
   };
   const delay = at - performance.now();
@@ -3357,7 +3464,9 @@ async function receiveUserAttack(message, now) {
     ["dead", "ladder", "rope"].includes(remoteStance(user)) || user.attackTicket !== ticket || JSON.stringify(lookOf(user)) !== lookKey
   )
     return;
-  const action = basicAttackAction(profile, message.action, message.shoot);
+  const skillId=message.skillId??0;
+  const action = skillId?activeMeleeActions(profile,skillId).find(a=>a.action===message.action)
+    :basicAttackAction(profile, message.action, message.shoot);
   if (!action) return; // Do not turn an unknown/skill action into a fabricated one-handed swing.
   const speed = Math.max(0, Math.min(6, message.speed));
   // The relay owns speed; scale original WZ delays, never an already rounded profile.
@@ -3369,6 +3478,7 @@ async function receiveUserAttack(message, now) {
     start: now,
     facingLeft: message.facingLeft,
   };
+  if(skillId)void playSkillEffect(message.characterId,skillId,message.skillLevel,now);
   playWeaponSound(user, profile);
   const target = mobs.get(String(message.targets?.[0]?.mobId));
   const near = shotNear(profile.melee[0]);
@@ -3381,17 +3491,16 @@ async function receiveUserAttack(message, now) {
       now,
       near,
     );
-  for (const target of message.targets ?? []) {
+  for (const [targetIndex,target] of (message.targets ?? []).entries()) {
     const mob = mobs.get(String(target.mobId));
     const delay = message.shoot
       ? shotRelease(motion) +
         projectileLeg(user.x, user.y, message.facingLeft, mob, near).duration
-      : 0;
-    scheduleAttackHit(
-      target.mobId,
-      (target.damages ?? []).reduce((sum, value) => sum + value, 0),
-      now + delay,
-    );
+      : skillId?shotRelease(motion)+Math.min(targetIndex*70,280):0;
+    if(skillId){
+      (target.damages??[]).forEach((damage,index)=>scheduleAttackHit(target.mobId,damage,now+delay,index));
+      void playSkillHit(target.mobId,skillId,message.skillLevel,now+delay);
+    }else scheduleAttackHit(target.mobId,(target.damages??[]).reduce((sum,value)=>sum+value,0),now+delay);
   }
   // Preserve the received attack clock / hit scheduling. A cold remote action is not exposed to
   // the renderer as an unready gray box, and isn't restarted late after it already finished.
@@ -3406,9 +3515,9 @@ async function receiveUserAttack(message, now) {
   user.swing = motion;
 }
 /** Candidate mob canvas rectangles, not a claim to have ported native CShape2D collision. */
-function mobInAttackRect(bounds, facingLeft, clampNear = false) {
-  let found,
-    best = Infinity;
+function mobsInAttackRect(bounds, facingLeft, clampNear = false) {
+  if(!bounds)return [];
+  const found=[];
   const left = clampNear ? Math.min(Math.max(bounds.left, -65), bounds.right - 1) : bounds.left;
   const right = bounds.right;
   const x0 = self.x + (facingLeft ? left : -right);
@@ -3418,16 +3527,15 @@ function mobInAttackRect(bounds, facingLeft, clampNear = false) {
     const frame = currentMobFrame(mob, performance.now());
     const target = mobRect(frame, mob, facingFlip(mob.facing));
     if (!intersects(target, { left: x0, right: x1, top: self.y + bounds.top, bottom: self.y + bounds.bottom })) continue;
-    const distance = Math.abs(mob.x - self.x);
-    if (distance < best) {
-      found = mob;
-      best = distance;
-    }
+    found.push(mob);
   }
-  return found;
+  return found.sort((a,b)=>Math.abs(a.x-self.x)-Math.abs(b.x-self.x));
 }
+function mobInAttackRect(bounds,facingLeft,clampNear=false){return mobsInAttackRect(bounds,facingLeft,clampNear)[0];}
 /** Ctrl: prone32; otherwise melee near/no ammo or a basic shot. Empty attacks still go on wire. */
-async function swing() {
+async function swing(skillId=0) {
+  const rule=skillId?activeSkill(skillId):undefined;
+  if(skillId&&!rule){logLine("此技能尚未完整實作，未消耗資源。");return;}
   if (
     !self ||
     !selfView ||
@@ -3436,7 +3544,7 @@ async function swing() {
     testToolsPanel.open || npcDialog.open || tooltipViewer.open ||
     document.activeElement instanceof HTMLInputElement ||
     map?.id !== self.mapId ||
-    playerBody?.ladder ||
+    (playerBody?.ladder && rule?.kind!=='buff') ||
     selfView.hp <= 0 ||
     portalPending ||
     shop ||
@@ -3455,6 +3563,23 @@ async function swing() {
   let entity = selfView;
   const lookKey = JSON.stringify(lookOf(entity));
   try {
+    let skillData,skillLevel,skillValues;
+    if(skillId){
+      skillLevel=skillPanel.level(skillId);skillData=await combatCatalog.skill(skillId);
+      skillValues=skillData?.levels.find(row=>row.level===skillLevel)?.values;
+      if(!skillValues||!activeSkillCost(entity,skillValues)){logLine('技能尚未學習或 HP／MP 不足。');return;}
+      const readyArt=await preloadSkillArt(skillData,skillLevel);
+      entity=selfView;
+      if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
+        selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible)||
+        testToolsPanel.open||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
+        socket?.readyState!==WebSocket.OPEN||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
+      if(rule.kind==='buff'){
+        if(!activeSkillCost(entity,skillValues)||!publishPlayerMotion())return;
+        nextSwingAt=performance.now()+200;
+        send({t:'use-active-skill',skillId});return;
+      }
+    }
     // 512F90 -> 427F60: group outside 1..7 returns -1. No fake bare-hand sword cycle.
     if (!weaponIdOf(lookOf(entity))) return;
     const profile = await ensureAttackProfile(lookOf(entity));
@@ -3478,6 +3603,7 @@ async function swing() {
     )
       return;
     const prone = locomotion(playerBody) === "prone";
+    if(skillId&&prone)return;
     if (!profile || (prone ? !profile.prone : !profile.melee.length)) {
       logLine("無法取得此武器的原始攻擊資料；暫不以其他武器動作替代。");
       return;
@@ -3485,9 +3611,9 @@ async function swing() {
     if (performance.now() < nextSwingAt) return;
     const pick = (actions) =>
       actions?.[Math.floor(Math.random() * actions.length)];
-    let action = prone ? profile?.prone : pick(profile?.melee);
+    let action = skillId?pick(activeMeleeActions(profile,skillId)):prone ? profile?.prone : pick(profile?.melee);
     // 511E20 skips the ammunition/shoot branch while prone; do not consume a star/arrow.
-    let ammo = prone ? undefined : basicAmmo(inventory, weaponIdOf(lookOf(entity)));
+    let ammo = (prone||skillId) ? undefined : basicAmmo(inventory, weaponIdOf(lookOf(entity)));
     let mob = action?.bounds
       ? mobInAttackRect(action.bounds, entity.facing === 1, !!ammo)
       : undefined;
@@ -3502,7 +3628,7 @@ async function swing() {
       );
     }
     if (!action) return;
-    const motion = action;
+    const motion = skillId?{...action,delays:scaledAttackDelays(action.baseDelays,activeSkillSpeed(profile.speed,skillId))}:action;
     const look = lookOf(entity), facingLeft = entity.facing === 1;
     const frames = motion.delays.map((_, frame) => avatarFrame(
       look, motion.stance, attackCanvasFrame(motion, frame), facingFlip(entity.facing), undefined, true));
@@ -3530,6 +3656,14 @@ async function swing() {
     // Loading may take time on a cold look: choose the target again from current sampled positions.
     mob = shoot ? mobInAttackRect({left:-nativeShotRange,right:-near,top:-25,bottom:-24}, facingLeft)
       : action?.bounds ? mobInAttackRect(action.bounds, facingLeft, !!ammo) : undefined;
+    let selected;
+    if(skillId){
+      if(skillPanel.level(skillId)!==skillLevel||!activeSkillCost(entity,skillValues))return;
+      const near=mobsInAttackRect(action.bounds,facingLeft);
+      const bounds=activeMeleeBounds(action.bounds,skillValues.range??0,facingLeft,near.length>0);
+      selected=mobsInAttackRect(bounds,facingLeft).slice(0,skillValues.range&&near.length?6:1)
+        .sort((a,b)=>(a.x-b.x)*(facingLeft?-1:1));
+    }
     const now = performance.now();
     // Flush actual posture BEFORE the attack; the 10Hz publisher may not yet have sent Down.
     // This ordering is a bridge policy, using existing movement packets, not a new native opcode.
@@ -3537,6 +3671,12 @@ async function swing() {
     selfSwing = { ...motion, start: now, facingLeft };
     beginAttackAlert(playerBody, now);
     nextSwingAt = now + attackDuration(motion);
+    if(skillId){
+      playWeaponSound(entity,profile);
+      void playSkillEffect(entity.characterId,skillId,skillLevel,now);
+      send({t:'active-melee',skillId,action:motion.action,facingLeft,
+        targets:selected.map(mob=>({mobId:mob.mobId,x:mob.x,y:mob.y}))});return;
+    }
     playWeaponSound(entity, profile);
     if (shoot) launchProjectile(entity, ammo.itemId, selfSwing, mob, now, near);
     send({
@@ -3678,8 +3818,19 @@ function quickHoverItem() {
       inventoryWindowAt(pointerAt.x,pointerAt.y) || equipPanel.hit(pointerAt.x,pointerAt.y)) return;
   const index=quickSlotAt(pointerAt.x,pointerAt.y), itemId=quickProfile?.values()[index];
   if (!itemId) return;
+  if(quickSkillAllowed(itemId)) {
+    const data=combatCatalog.peekSkill(itemId.skillId);if(!data)void combatCatalog.skill(itemId.skillId);
+    return data?{skill:data,level:skillPanel.level(itemId.skillId)}:undefined;
+  }
   if (itemInfo.get(itemId) === undefined) void describeItem(itemId);
   return {itemId,quantity:quickItemState(inventory,itemId).quantity};
+}
+function beginSkillDrag(skill,p) {
+  if(!quickProfile||!skillPanel.level(skill.id)||!activeSkill(skill.id)||itemDrag||quickDrag||
+    shop!==undefined||slotPending||mesoPending||shopPending)return;
+  localActionEpoch++;
+  quickDrag={fromSkill:true,index:-1,itemId:{kind:'skill',skillId:skill.id},owner:quickOwner,
+    profile:quickProfile,epoch:itemEpoch,start:p,point:p,moved:false};
 }
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
@@ -3687,7 +3838,7 @@ function beginQuickDrag(p) {
       portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
-  if (!quickItemState(inventory,itemId).item) return false;
+  if (quickSkillAllowed(itemId)?!skillPanel.level(itemId.skillId):!quickItemState(inventory,itemId).item) return false;
   localActionEpoch++;
   quickDrag={index,itemId,owner:quickOwner,profile:quickProfile,epoch:itemEpoch,start:p,point:p,moved:false};
   inventoryPick=undefined;
@@ -3707,22 +3858,23 @@ window.addEventListener("mouseup",e=>{
   inventorySuppressClick=e.target===canvas;
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
-      quickProfile.values()[d.index]!==d.itemId || loginStage!=="game" || !visualFieldActive ||
+      (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginStage!=="game" || !visualFieldActive ||
       selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open ||
-      shop!==undefined || talkingNpc!==undefined || !quickItemState(inventory,d.itemId).item)return;
+      shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
       statPanel.contains(p.x,p.y) || shopWindowAt(p.x,p.y))return;
   const to=quickSlotAt(p.x,p.y);
-  const changed=to>=0 ? quickProfile.move(d.index,to,d.itemId)
+  const changed=to>=0 ? (d.fromSkill?quickProfile.bind(to,d.itemId):quickProfile.move(d.index,to,d.itemId))
     : p.x>=0 && p.x<800 && p.y>=0 && p.y<STATUS_BAR.y && !miniMapPanel.contains(p.x,p.y)
-      ? quickProfile.clear(d.index,d.itemId) : false;
+      ? !d.fromSkill&&quickProfile.clear(d.index,d.itemId) : false;
   if(changed)void audio.effect("UI/DragEnd");
 });
 window.addEventListener("blur",()=>{quickDrag=undefined;});
 function drawQuickDrag(){
   if(!quickDrag?.moved)return;
-  const a=itemIcon(quickDrag.itemId);
+  const id=quickDrag.itemId;
+  const a=quickSkillAllowed(id)?artImage(`Skill/${Math.trunc(id.skillId/10000)}.img/skill/${id.skillId}/icon`):itemIcon(id);
   if(a.ready){ctx.save();ctx.globalAlpha=128/255;
     ctx.drawImage(a.img,quickDrag.point.x-16,quickDrag.point.y-16);ctx.restore();}
 }
@@ -5270,7 +5422,8 @@ window.addEventListener("keydown", (event) => {
   if (quickIndex >= 0) {
     event.preventDefault();
     const id = quickProfile?.values()[quickIndex];
-    if (id) useBagItem(quickItemState(inventory, id).item);
+    if(quickSkillAllowed(id))void swing(id.skillId);
+    else if (id) useBagItem(quickItemState(inventory, id).item);
     return;
   }
   if (event.key.toLowerCase() === "e") {
@@ -5534,6 +5687,7 @@ const statPanel = statWindow({
 
 const skillPanel = skillWindow({
   ctx,
+  onUse:id=>void swing(id),onBindDrag:beginSkillDrag,
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||

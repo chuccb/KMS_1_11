@@ -1,3 +1,7 @@
+import {learnedSkillLevel} from "../game/skills.ts";
+import {temporaryStats} from "../../../client/temporarystats.mjs";
+import {learnedActive,activeTemporary,validatedActiveMelee} from "../game/activeskills.ts";
+import {readClientSkillUse,CLIENT_SKILL_USE_OPCODE} from "../protocol/skilluse.ts";
 import { attackDuration, shotRelease } from "../../../client/attack-timing.mjs";
 import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
 import {encodeSystemNotice} from '../protocol/notice.ts';
@@ -1041,6 +1045,8 @@ interface FieldSession extends FieldMember {
    */
   talk?: NpcTalk;
   attackReadyAt?: number;
+  skillReadyAt?: number;
+  temporary?: ReturnType<typeof temporaryStats>;
 }
 
 export class GameEntryServer {
@@ -1059,6 +1065,7 @@ export class GameEntryServer {
     instance: FieldInstance<FieldSession>;
     attack: ClientAttack;
     dueAt: number;
+    opcode?:number;
     deaths: Map<number, number>;
   }[] = [];
   /**
@@ -1201,7 +1208,7 @@ export class GameEntryServer {
       if (
         this.sessionsByCharacter.get(shot.session.characterId) !==
           shot.session ||
-        shot.session.instance !== shot.instance
+        shot.session.instance !== shot.instance || (shot.opcode!==undefined && shot.session.character.stats.hp<=0)
       )
         continue;
       if (now < shot.dueAt) {
@@ -1215,7 +1222,7 @@ export class GameEntryServer {
       );
       this.resolveAttackDamage(
         shot.session,
-        CLIENT_FIELD_OPCODE.shootAttack,
+        shot.opcode??CLIENT_FIELD_OPCODE.shootAttack,
         { ...shot.attack, targets, targetCount: targets.length },
         now,
         false,
@@ -1426,6 +1433,11 @@ export class GameEntryServer {
     session.shop = undefined;
     session.talk = undefined;
     session.send(encodeSetField(this.setFieldOf(session.character)));
+    // Full field records have no temporary-stat tail. Re-apply only the remaining live duration.
+    for(const entry of session.temporary?.icons(Date.now())??[]) {
+      const durationMs=Math.ceil(entry.expiresAt-Date.now());
+      if(durationMs>0)session.send(encodeStatUpdate({ack:false,diff:{},temporary:{...entry,durationMs}}));
+    }
     this.logSetField(session);
     target.join(session);
     return true;
@@ -1703,6 +1715,7 @@ export class GameEntryServer {
       const report = readClientStatReport(new PacketReader(plain, 1));
       const stats = session.character.stats;
       const diff = applyVitalReport(stats, report, characterStatBasis(session.character,this.options.itemCatalog).basic);
+      if(stats.hp<=0){session.temporary?.clear();session.skillReadyAt=undefined;}
       if (Object.keys(diff).length > 0) {
         session.send(encodeStatUpdate({ diff }));
         this.persist(); // Legitimate native vital changes must survive a restart, not just logout.
@@ -1845,6 +1858,49 @@ export class GameEntryServer {
    * result or `0x0D` ack), so silence would leave the player unable to use anything at all - and
    * since the client's inventory only changes on `0x0B`, an empty one *is* the refusal.
    */
+  /** 55D320 / 519270 / 519950. All facts validated before cost, recipient or effect mutation. */
+  private handleActiveSkill(session:FieldSession,plain:Uint8Array):void {
+    const refuse=()=>session.send(encodeStatUpdate({ack:true,diff:{}}));
+    let request;
+    try {request=readClientSkillUse(new PacketReader(plain,1));}catch{refuse();return;}
+    const now=Date.now(),learned=learnedActive(session.character,this.options.skills,request.skillId);
+    if(!learned || learned.rule.kind!=='buff' || request.level!==learned.level ||
+      now<(session.skillReadyAt??0) || now<(session.attackReadyAt??0) ||
+      session.shop || session.talk || this.trades.roomOf(session.characterId) || !session.at ||
+      (session.at.action & ~1)===18) {refuse();return;}
+    const temporary=activeTemporary(request.skillId,learned.values);
+    if(!temporary){refuse();return;}
+    const recipients:FieldSession[]=[session];
+    if(learned.rule.party) {
+      const party=this.parties.partyOf(session.characterId);
+      if(!party || new Set(request.targets).size!==request.targets.length){refuse();return;}
+      for(const id of request.targets) {
+        const target=this.sessionsByCharacter.get(id);
+        if(id===session.characterId || !party.members.some(member=>member.characterId===id) ||
+          !target || target.instance!==session.instance || !target.at || target.character.stats.hp<=0 ||
+          target.at.x<session.at.x-50 || target.at.x>=session.at.x+50 ||
+          target.at.y<session.at.y-50 || target.at.y>=session.at.y+50) {refuse();return;}
+        recipients.push(target);
+      }
+    }else if(request.targets.length){refuse();return;}
+    // Pre-encode the whole transaction; malformed archive values cannot spend resources.
+    let own:Uint8Array,other:Uint8Array,effect:Uint8Array;
+    try {
+      own=encodeStatUpdate({ack:true,diff:learned.cost,temporary});
+      other=encodeStatUpdate({ack:false,diff:{},temporary});
+      effect=encodeUserEffect({characterId:session.characterId,effect:1,skillId:request.skillId,skillLevel:learned.level});
+    }catch{refuse();return;}
+    Object.assign(session.character.stats,learned.cost);
+    session.skillReadyAt=now+200; // 55D320 native request interval, not an invented cast animation.
+    for(const target of recipients) {
+      (target.temporary??=temporaryStats()).apply(temporary,now);
+      target.send(target===session?own:other);
+    }
+    // Native self effect is local after admission; the packet is also safe for the browser self.
+    session.instance.broadcast(effect);
+    this.persist();
+  }
+
   private handleUseItem(
     session: FieldSession,
     plain: Uint8Array,
@@ -1923,6 +1979,7 @@ export class GameEntryServer {
     stats.mp = probe.mp;
     session.send(encodeInventoryChange([taken.change]));
     session.send(statPacket);
+    if(temporary)(session.temporary??=temporaryStats()).apply(temporary,Date.now());
     this.persist();
     this.options.log?.(
       `game: ${label} slot ${request.slot} item ${request.itemId} by "${session.name}" -> ` +
@@ -2340,8 +2397,36 @@ export class GameEntryServer {
     const weaponId = session.character.items?.worn.get(11)?.itemId ?? 0;
     const profile = this.options.basicAttack?.(weaponId);
     const shoot = opcode === CLIENT_FIELD_OPCODE.shootAttack;
-    // LIVE only implements ordinary physical attacks. Unknown motion/skill/magic must not bypass
-    // cooldown and cause free damage. Metadata-free protocol fixtures retain their legacy path.
+    // Active physical skills have their OWN admission path; basic guards stay strict.
+    // Unknown/magic skills must never bypass cooldown, resources or motion validation.
+    if(attack.skillId!==0) {
+      const validated=opcode===CLIENT_FIELD_OPCODE.attack
+        ? validatedActiveMelee(session.character,this.options.skills,profile,attack,session.at?.action??4):undefined;
+      if(!validated || !session.at || now<(session.skillReadyAt??0))return;
+      const {motion,learned}=validated,base=motion.bounds;
+      if(!base)return;
+      // Safety envelope is reconstruction policy (native mob CShape2D is not ported).
+      const within=(id:number,far:number)=>{
+        const mob=session.instance.mobs.mob(id);if(!mob?.alive)return false;
+        const dx=(mob.x-session.at!.x)*(attack.facingLeft?-1:1);
+        return dx>=-base.right-BASIC_SHOT_POSITION_SLOP_X && dx<=far+BASIC_SHOT_POSITION_SLOP_X &&
+          mob.y>=session.at!.y+base.top-BASIC_SHOT_POSITION_SLOP_Y &&
+          mob.y<=session.at!.y+base.bottom+BASIC_SHOT_POSITION_SLOP_Y;
+      };
+      const extended=!!learned.values.range && attack.targets.some(t=>within(t.mobId,-base.left));
+      const far=extended?Math.max(-base.left,learned.values.range!):-base.left;
+      if(attack.targets.some(t=>!within(t.mobId,far)))return;
+      const costPacket=encodeStatUpdate({ack:false,diff:learned.cost});
+      Object.assign(session.character.stats,learned.cost);
+      session.attackReadyAt=now+attackDuration(motion);
+      session.send(costPacket);this.persist();
+      this.relayAttack(session,opcode,attack,attack.targets);
+      attack.targets.forEach((target,index)=>this.pendingShots.push({session,instance:session.instance,
+        opcode,attack:{...attack,targets:[target],targetCount:1},
+        dueAt:now+shotRelease(motion)+Math.min(index*70,280), // 512F90 -> 515CA0
+        deaths:new Map([[target.mobId,session.instance.mobs.mob(target.mobId)!.deaths]])}));
+      return;
+    }
     const basicMotion = validatedBasicAttack(profile, attack, shoot, session.at?.action ?? 4);
     if (this.options.basicAttack && ((opcode !== CLIENT_FIELD_OPCODE.attack && !shoot) || !basicMotion)) return;
     if (shoot) {
@@ -2501,8 +2586,8 @@ export class GameEntryServer {
       {
         characterId: session.characterId,
         hits: attack.hits,
-        skillLevel: 0,
-        skillId: 0,
+        skillLevel: attack.skillId ? Math.min(this.options.skills?.info(attack.skillId)?.maxLevel??0,learnedSkillLevel(session.character.items?.map32,attack.skillId)):0,
+        skillId: attack.skillId,
         facingLeft: attack.facingLeft,
         action: attack.action,
         speed: attack.speed,
@@ -2682,6 +2767,9 @@ export class GameEntryServer {
           continue;
         }
         const opcode = event.plain[0] ?? -1;
+        if(session!==undefined && opcode===CLIENT_SKILL_USE_OPCODE){
+          this.handleActiveSkill(session,event.plain);continue;
+        }
         // A walk is the server's only source of where a player is: the field keeps it (a pickup needs
         // it) and relays it to the rest of the map as 0x22.
         if(session!==undefined&&opcode===CLIENT_NPC_IDLE_OPCODE) {

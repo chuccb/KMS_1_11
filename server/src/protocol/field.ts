@@ -264,9 +264,9 @@ export const FIELD_OPCODE = {
    *   0  `Effect/BasicEff.img/LevelUp` + the "LevelUp" sound, built with `sub_50D6D0(user)` so it
    *      plays **over that user**: the level-up effect for everybody who is not the one who levelled
    *      (their own client plays it from the `0x0D` diff, `sub_55BEB0`'s tail - FINDINGS 4.21)
-   *   1  reads one more `u32`; what it plays is not located
+   *   1  u32 skillId + u8 level -> 4BAC80 -> 50C460 (native skill effect)
    *
-   * Only 0 has evidence, so only 0 has a codec (`UserEffect` below).
+   * Both native level-up and skill-effect tails are decoded (`UserEffect` below).
    */
   userEffect: 0x29,
   /**
@@ -1965,18 +1965,20 @@ export const USER_EFFECT_LEVEL_UP = 0;
  * `0x29` as it goes out: which user the effect happens to, and which effect.
  *
  * The id comes first because the range dispatcher reads it (and drops the packet when the pool does
- * not know it), and the effect is one byte. `effect` is a number rather than a union because only
- * `USER_EFFECT_LEVEL_UP` has evidence - the `1` branch reads a `u32` whose meaning is not located.
+ * not know it). Type0 is level-up; 522300 type1 reads u32 skillId and u8 learned level.
+ * Unknown effect types are refused, never interpreted as a level-up.
  */
 export interface UserEffect {
   characterId: number;
-  /** `USER_EFFECT_LEVEL_UP`; other values are not located and `readUserEffect` refuses them. */
   effect: number;
+  skillId?: number;
+  skillLevel?: number;
 }
 
 export function readUserEffect(reader: PacketReader): UserEffect {
   const characterId = reader.readU32();
   const effect = reader.readByte();
+  if (effect === 1) return {characterId,effect,skillId:reader.readU32(),skillLevel:reader.readByte()};
   if (effect !== USER_EFFECT_LEVEL_UP) {
     throw new RangeError(
       `0x29 effect ${effect} is not the located one (${USER_EFFECT_LEVEL_UP} = level-up)`,
@@ -1989,13 +1991,16 @@ export function encodeUserEffect(effect: UserEffect): Uint8Array {
   const writer = new PacketWriter(8);
   writer.writeByte(FIELD_OPCODE.userEffect);
   writer.writeU32(effect.characterId >>> 0);
+  if(effect.effect!==0 && (effect.effect!==1 || !Number.isInteger(effect.skillId) || !Number.isInteger(effect.skillLevel) || (effect.skillLevel??0)<1 || (effect.skillLevel??0)>255 || (effect.skillId??0)<=0 || (effect.skillId??0)>0xffffffff))throw new RangeError("invalid native user effect");
   writer.writeByte(effect.effect);
+  if(effect.effect===1){writer.writeU32(effect.skillId!);writer.writeByte(effect.skillLevel!);}
   return writer.toBytes();
 }
 
 export function describeUserEffect(effect: UserEffect): string {
   return effect.effect === USER_EFFECT_LEVEL_UP
     ? `level-up effect for characterId=${effect.characterId}`
+    : effect.effect===1?`skill ${effect.skillId}/${effect.skillLevel} effect for characterId=${effect.characterId}`
     : `effect ${effect.effect} for characterId=${effect.characterId}`;
 }
 

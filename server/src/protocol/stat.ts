@@ -141,8 +141,7 @@ export function statDiffFlags(diff: StatDiff): number {
  * The whole `0x0D` body.
  *
  * `ack` is the leading byte (see the header): non-zero clears the client's pending-request gate.
- * Nothing this server sends is an answer to a client request, so it stays `false`; it is a field and
- * not a constant because that is what the client reads.
+ * Request replies (AP, mesos, active buffs) use true; unsolicited changes and field replay use false.
  */
 export interface StatUpdate {
   ack?: boolean;

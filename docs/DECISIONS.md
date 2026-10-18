@@ -2624,3 +2624,27 @@ remote無別人學技表，空射視覺保留基本200不猜被動。原server�
 新增posture/timing與cache回歸來源，擴充WZ／弱STR傷害／wire32／range／晚加入姿勢／forced梯頂guard；
 只維護歷史VM import shim，未認證／執行。沿用已有遊玩進度的preview-faces檔，停服冷備後同檔重啟web8515。
 提交[skip ci]，只非force推目前Arena分支。詳 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)。
+
+
+## ADR-070：主動技能逐鏈開放，保留普通攻擊guard與原版未知（2026-10-18）
+
+**狀態**：實作已寫入，未測試／typecheck／語法／browser／VM／probe；啟服非PASS。
+
+**決策**：由518BF0／4BDDC0／519270／5192B0／519950／55D320／522300與WZ交叉，
+本批只開七招：Iron Body、Magic Armor、Focus、Rage、Power Strike、Slash Blast、Double Stab。
+另立active admission；不以放寬普通skill0 guard冒充全技能。補0x1E技能使用與0x29 type1的level尾，
+0x1D仍只學習；55D5F0的0x1F追到販售數量，不接為取消。消耗、秒數、damage%、range、attackCount由真level值讀。
+VariantChangeType接受BSTR，修Focus20 acc="20"；hs有MP文字矛盾，算術不從文字倒推。
+
+七個原快捷格加typed skill binding，保留舊numeric potion設定（ID區間可能相撞）；原skill窗雙擊／圖示拖曳。
+Double Stab限定dagger33／stab16或17／speed−1，multi-hit共用每目標預取七亂數；damage%在PD後。
+Slash Blast普通近戰先找到目標才延伸遠邊至WZrange／最多六隻；raw release＋min(targetIndex×70,280)排程。
+增益逐欄替換，真期限與技能來源icon；server存runtime ledger，跨圖只重播剩餘duration。
+原版party0x26/0x10補browser名冊／邀請／接受／拒絕／離隊／踢人，Rage需party且原±50半開框。
+音訊Use與武器揮動不互代；armor特效為程序式白輪廓，普通effect／hit讀WZ，缺delay原預設120。
+
+**政策／限制**：原server未知；安全驗證／原子扣款、死亡清buff與取消未結算近戰、時鐘與位置容差、
+canvas碰撞／hit overlay與多段數字間隔、白色mask合成並非已驗證1:1。魔法／箭鏢技能／booster／Magic Guard／
+Dark Sight／mob debuff／手動解除仍缺，禁止白耗資源的半實作。完整交叉表／常數意義／回歸來源見[ACTIVE_SKILLS](ACTIVE_SKILLS.md)。
+
+**交付**：不執行測試，新增active-skills回歸來源；同save停服冷備再重開LIVE，不重seed或自動配職業／技能。

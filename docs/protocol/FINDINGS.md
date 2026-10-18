@@ -4421,3 +4421,14 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
   並非選名字就送封包。receiver既有0x1A仍無悄悄話分類，不依文字推測。
 
 以上是browser還原接線，不是新wire格式／原server規則。新增來源回歸未執行；詳細差異／操作見NATIVE_SYSTEM_UI.md。
+
+
+### 4.43 後續：主動技能0x1E與user effect type1（2026-10-18，未測試）
+
+原55D320送30 decimal：u32 skillId、u8 level、u8 count、u32 characterId[count]。
+519270自身buff使用count0；519950以party六格／±50半開RECT找同圖其他隊友。
+522300的0x29 type1不只u32，還有**u8 level**；4BAC80→50C460證明是技能特效。
+新codec/schema在skilluse.ts／field.ts；SP的0x1D保持獨立。
+55D5F0的0x1F由販售數量dialog呼叫，不是技能取消，未硬接。
+七招範圍、原VariantChangeType／Focus BSTR、傷害順序、常數與政策詳[ACTIVE_SKILLS](../ACTIVE_SKILLS.md)。
+未執行測試／typecheck／語法／browser／VM／probe，沒有PASS或全技能宣稱。

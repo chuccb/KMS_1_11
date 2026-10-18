@@ -1,3 +1,6 @@
+import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits} from "../../../client/active-skills.mjs";
+import {learnedActive,activeArt} from "../game/activeskills.ts";
+import {scaledAttackDelays} from "../../../client/attack-timing.mjs";
 import { shotRelease } from "../../../client/attack-timing.mjs";
 import type { AvatarMotionProfile } from "../game/avatarmotion.ts";
 import { FACE_EMOTIONS, type FaceAnimation } from "../game/face.ts";
@@ -618,6 +621,17 @@ class BrowserSession {
             ...(message.hpDelta===undefined?{}:{hpDelta:Number(message.hpDelta)}),
             ...(message.mpDelta===undefined?{}:{mpDelta:Number(message.mpDelta)}),flag:Number(message.flag),
           });
+        case "use-active-skill":
+          return await this.serialMotion(async()=>{
+            const session=this.require(),character=session.character;
+            const id=Number(message.skillId),learned=character&&learnedActive(character,this.options.skills,id);
+            if(!learned||learned.rule.kind!=='buff')throw new Error('未學習、資源不足或尚未完整實作的技能');
+            await session.useActiveSkill(id,learned.level,!!learned.rule.party);
+          });
+        case "active-melee":
+          return await this.serialMotion(()=>this.activeMelee(message));
+        case "party-response":
+          return await this.require().partyCommand(message.accepted===true?'accept':'decline');
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {
@@ -682,6 +696,43 @@ class BrowserSession {
    * number back so it can draw the damage it just dealt (`{t:"hit"}`) - the wire has no such
    * packet: the attacker's own client drew the number while it built the packet.
    */
+  /** The browser supplies selection snapshots, NEVER damage, level, hit count or resource cost. */
+  private async activeMelee(message:Record<string,unknown>):Promise<void> {
+    const session=this.require(),character=session.character,id=Number(message.skillId);
+    const learned=character&&learnedActive(character,this.options.skills,id);
+    if(!character||!learned||learned.rule.kind!=='melee'||!session.attackRandom||session.characterOperationPending)return;
+    const profile=this.options.art?.attackProfile?.(character.items?.worn.get(11)?.itemId??0);
+    const actionId=Number(message.action),action=activeMeleeActions(profile,id).find(a=>a.action===actionId);
+    if(!profile||!action||actionId===32||!basicAttackPostureAllows(actionId,false,session.selfMovement.action))return;
+    if(!Array.isArray(message.targets)||message.targets.length>(learned.values.range?6:1))return;
+    const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills),temporary=this.buffs.values(performance.now());
+    const totals=statTotals(basis,temporary);totals.pad=basis.secondary.pad!+(temporary.pad??0);
+    const hits=activeSkillHits(learned.values),records:{mobId:number;x:number;y:number;damage:number;damages:number[]}[]=[];
+    const seen=new Set<number>();
+    // Resolve/validate all snapshots BEFORE drawing RNG or sending any packet.
+    const selected: {mob:ReturnType<ClientSession['mob']>;x:number;y:number}[]=[];
+    for(const value of message.targets) {
+      if(!value||typeof value!=='object')return;
+      const target=value as Record<string,unknown>,mobId=Number(target.mobId),x=Number(target.x),y=Number(target.y);
+      const mob=session.mob(mobId);
+      if(!mob||seen.has(mobId)||![x,y].every(n=>Number.isFinite(n)&&n>=-32768&&n<=32767)||
+        !this.options.mobTemplate?.(mob.templateId)||this.dyingMobs.has(mobId))return;
+      seen.add(mobId);selected.push({mob,x:Math.trunc(x),y:Math.trunc(y)});
+    }
+    for(const target of selected) {
+      const mob=target.mob!,template=this.options.mobTemplate!(mob.templateId)!;
+      // 4C7960 draws seven values ONCE per target; every hit continues the same cyclic cursor.
+      const random={values:Array.from({length:7},()=>session.attackRandom!.next()),cursor:0};
+      const damages=Array.from({length:hits},()=>rollNativePhysical(character,basis,totals,template,actionId,
+        0,0,this.options.skills,()=>session.attackRandom!.next(),undefined,{damagePercent:learned.values.damage??0,random}));
+      records.push({mobId:mob.mobId,x:target.x,y:target.y,damage:damages[0]!,damages});
+    }
+    const speed=activeSkillSpeed(profile.speed,id),motion={...action,delays:scaledAttackDelays(action.baseDelays,speed)};
+    await session.attack(records,message.facingLeft===true,{action:actionId,speed,skillId:id,hits});
+    records.forEach((record,index)=>this.send({t:'active-hit',skillId:id,skillLevel:learned.level,
+      mobId:record.mobId,damages:record.damages,delayMs:shotRelease(motion)+Math.min(index*70,280),contactField:this.contactField}));
+  }
+
   private async attack(
     mobId: number,
     facingLeft: boolean,
@@ -913,7 +964,7 @@ class BrowserSession {
       if (event.kind === "mob-leave") this.dyingMobs.delete(event.mobId);
       if (event.kind === "mob-enter") this.dyingMobs.delete(event.mob.mobId);
       if(event.kind==="temporary-stat") this.buffs.apply(event.update,performance.now());
-      if(event.kind==="disconnect") this.buffs.clear();
+      if(event.kind==="disconnect" || event.kind==="field" || (event.kind==="self" && event.self.hp<=0)) this.buffs.clear();
       this.send(this.eventJson(event));
       if(["field","self","inventory","skills"].includes(event.kind) && session.character) {
         const character=session.character;
@@ -1081,6 +1132,10 @@ class BrowserSession {
   }
 
   private async say(text: string): Promise<void> {
+    const command=/^\/(?:party|파티)\s+(create|leave|invite|kick|accept|decline)(?:\s+(.+))?$/.exec(text.trim());
+    const native=/^\/(파티만들기|파티탈퇴|파티초대|파티강퇴)(?:\s+(.+))?$/.exec(text.trim());
+    if(command)return await this.require().partyCommand(command[1]!,command[2]??'');
+    if(native)return await this.require().partyCommand(({파티만들기:'create',파티탈퇴:'leave',파티초대:'invite',파티강퇴:'kick'} as Record<string,string>)[native[1]!]!,native[2]??'');
     await this.require().say(encodeCp949(text));
   }
 
@@ -1559,6 +1614,12 @@ export function startWebClient(
         actions: mob.actions,
       });
       return;
+    }
+    if(url.pathname.startsWith('/api/active-skill/')) {
+      const raw=url.pathname.slice('/api/active-skill/'.length),id=/^\d{7}$/.test(raw)?Number(raw):NaN;
+      const info=activeSkill(id)?options.skills?.info(id):undefined,reader=options.art?.reader;
+      if(!info||!reader){sendJson(response,404,{error:'active skill is not implemented'});return;}
+      sendJson(response,200,{...info,arts:Object.fromEntries(info.levels.map(row=>[row.level,activeArt(reader,id,row.level)]))});return;
     }
     // Inline #s: skill name + normal icon (4BAC80/5338A0), independent of learned SP state.
     if (url.pathname.startsWith("/api/skill/")) {

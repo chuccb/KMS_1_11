@@ -1,5 +1,7 @@
 # 暫時能力封包、原加速藥水與裝備移動能力
 
+> **2026-10-18 後續（未測試）**：[ACTIVE_SKILLS](ACTIVE_SKILLS.md)／ADR-070已接七個主動技能、原七鍵、消耗、多段／範圍、增益與隊伍入口。下方保留當輪歷史範圍；不代表其他技能／魔法／完整幾何已完成。
+
 > **2026-10-18 後續更新（未測試）**：有效裝備／Detail／4C7960普通物理與PAD/ACC藥水已接，裝備HP/MP與成長INT亦共用有效集合。下方保留當時交付紀錄；最新碰撞／EVA消費者與尚未完成的完整物理／技能界線見 [NATIVE_CONTACT_REVIVE.md](NATIVE_CONTACT_REVIVE.md)。
 
 2026-10-17。**本輪未跑 test／check／typecheck／browser／VM／probe**；新增的回歸來源不是 PASS。

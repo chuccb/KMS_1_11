@@ -1,3 +1,4 @@
+import * as skilluse from "./skilluse.ts";
 import * as notice from './notice.ts';
 import * as skills from "./skills.ts";
 /**
@@ -737,7 +738,9 @@ export const PACKETS: readonly PacketSchema[] = [
     codecs: ["readUserEffect", "encodeUserEffect", "describeUserEffect"],
     fields: [
       { name: "characterId", type: "u32", note: "resolved in the pool; an unknown id drops the packet" },
-      { name: "effect", type: "u8", note: "0 = level-up; 1 reads another u32 and is not located" },
+      { name: "effect", type: "u8", note: "0 = level-up; 1 = skill effect (522300 -> 4BAC80 -> 50C460)" },
+      {name:"skillId",type:"u32",note:"only effect1"},
+      {name:"skillLevel",type:"u8",note:"only effect1; native looks up this learned level"},
     ],
   },
   {
@@ -983,6 +986,14 @@ export const PACKETS: readonly PacketSchema[] = [
     opcode: skills.SKILL_REQUEST_OPCODE, direction: "c2s", stage: "field", name: "skillUp",
     status: "byte-exact", evidence: "sub_4EE1B0 -> sub_55ABE0 -> sub_55D140; docs/SKILLS.md",
     codecs: ["encodeSkillRequest", "readSkillRequest", "describeSkillRequest"], fields: [{ name: "skillId", type: "u32" }],
+  },
+  {
+    opcode:skilluse.CLIENT_SKILL_USE_OPCODE,direction:'c2s',stage:'field',name:'activeSkillUse',
+    status:'byte-exact',evidence:'PE 55D320 / 519270 / 519950; docs/ACTIVE_SKILLS.md',
+    codecs:['readClientSkillUse','encodeClientSkillUse'],fields:[
+      {name:'skillId',type:'u32'},{name:'level',type:'u8'},{name:'count',type:'u8'},
+      {name:'targets',type:'u32[count]',note:'party character IDs, NOT mob IDs; zero for self buffs'},
+    ],
   },
   {
     opcode: skills.SKILL_UPDATE_OPCODE, direction: "s2c", stage: "field", name: "skillUpdate",
@@ -1428,6 +1439,7 @@ const CODEC_MODULES: readonly Record<string, unknown>[] = [
   mesodrop,
   ability,
   skills,
+  skilluse,
   chardata,
   drop,
   field,

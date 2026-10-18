@@ -1,3 +1,4 @@
+import {activeSkill} from './active-skills.mjs';
 import {releaseOnInterrupt} from "./pointer.mjs";
 import {tooltipAnchor} from "./tooltip.mjs";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
@@ -31,6 +32,7 @@ export function skillWindow({
   isInGame,
   log,
   isModal,
+  onUse = () => {}, onBindDrag = () => {},
 }) {
   const root = document.getElementById("skill-window"),
     el = (id) => document.getElementById(id);
@@ -225,6 +227,9 @@ export function skillWindow({
       );
       offset = 0;
       sync();
+    } else if(p.x>=11 && p.x<46 && p.y>=119 && p.y<279) {
+      const index=skillRowAt(p.x,p.y,rows().length,offset),skill=rows()[index];
+      if(skill && (learned.get(skill.id)??0)>0 && activeSkill(skill.id))onBindDrag(skill,point(e));
     } else if (p.x >= 161 && p.x < 173 && p.y >= 116 && p.y < 278 && max()) {
       const y = p.y - 116,
         thumb = 12 + (126 * offset) / max();
@@ -234,6 +239,13 @@ export function skillWindow({
       else scroll(offset + (y < thumb ? -4 : 4));
       e.preventDefault();
     }
+  });
+  root.addEventListener('dblclick',e=>{
+    if(e.button!==0||isModal()||e.target?.closest?.('button'))return;
+    const p=local(e),index=skillRowAt(p.x,p.y,rows().length,offset),skill=rows()[index];
+    if(!skill || !(learned.get(skill.id)>0))return;
+    if(!activeSkill(skill.id)){log('此技能的完整效果尚未接通，未消耗 HP／MP。');return;}
+    onUse(skill.id);e.preventDefault();
   });
   root.addEventListener(
     "wheel",
@@ -345,6 +357,7 @@ export function skillWindow({
   }
   sync();
   return {
+    level(id) {return learned.get(id)??0;},
     get open() {
       return opened;
     },

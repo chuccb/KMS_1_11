@@ -1,6 +1,6 @@
 /** Basic physical attacks: sub_4C7960, skill=null, one damage/target.
  * Native weapon/action coefficients, hit check, level penalty, PD and seven pre-drawn RNG values.
- * NOT magic, active skills, mob temporary stats or CShape2D target selection.
+ * Physical active percentage/hit loops share this path; NOT magic or CShape2D.
  */
 import type { CharacterData } from "../protocol/chardata.ts";
 import type { StatBasis } from "../../../client/characterstats.mjs";
@@ -77,11 +77,11 @@ export function rollNativePhysical(
   skills: SkillCatalog | undefined,
   next: () => number,
   report?: (trace: PhysicalAttackTrace) => void,
+  active?: {damagePercent:number;random?:{values:number[];cursor:number}},
 ): number {
-  const random = Array.from({ length: 7 }, () => next());
-  let cursor = 0;
+  const stream=active?.random ?? {values:Array.from({length:7},()=>next()),cursor:0};
   const uniform = (a: number, b: number) =>
-    nativeUniform(random[cursor++ % 7]!, a, b);
+    nativeUniform(stream.values[stream.cursor++ % 7]!, a, b);
   const b = basis.basic,
     branch = Math.trunc(b.job / 100),
     weapon = Math.trunc(basis.weaponId / 10000) % 100;
@@ -158,6 +158,8 @@ export function rollNativePhysical(
   const defense = uniform(pd * 0.5, pd * 0.6);
   trace.defense = defense;
   let damage = raw - defense;
+  // 4C7960 LABEL_177: skill percentage AFTER PD subtraction, BEFORE critical and final clamp.
+  if(active && active.damagePercent>0)damage*=active.damagePercent*0.01;
   const critId =
     ammoId !== 0
       ? [45, 46].includes(weapon)

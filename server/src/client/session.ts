@@ -1,3 +1,5 @@
+import {encodeClientSkillUse} from "../protocol/skilluse.ts";
+import {PARTY_OPCODE,readPartyResult,encodeClientPartyRequest,type PartyResult,type PartyMember,type ClientPartyRequest} from "../protocol/party.ts";
 import {questReplyFor, type QuestReplyDetail} from "./questreply.ts";
 import {SYSTEM_NOTICE_OPCODE,readSystemNotice} from '../protocol/notice.ts';
 import { ClientRandom } from "../protocol/random.ts";
@@ -370,6 +372,9 @@ export type ClientEvent =
     }
   | { kind: "self"; self: SelfView }
   | { kind: "temporary-stat"; update: TemporaryStatUpdate }
+  | { kind: "active-skill-result"; skillId:number; accepted:boolean }
+  | { kind: "skill-effect"; characterId:number; skillId:number; skillLevel:number }
+  | { kind: "party"; result:PartyResult }
   | { kind: "user-enter"; user: UserView }
   | {
       kind: "user-look";
@@ -420,6 +425,8 @@ export type ClientEvent =
   | {
       kind: "user-attack";
       characterId: number;
+      skillId:number;
+      skillLevel:number;
       facingLeft: boolean;
       shoot: boolean;
       action: number;
@@ -687,6 +694,11 @@ export class ClientSession {
   private attackSequence = 0;
   private abilityPending = false;
   private skillPending = false;
+  private activeSkillPending:number|undefined;
+  private nextActiveAt=0;
+  private partyId=0;
+  private partyMembers:readonly PartyMember[]=[];
+  private partyInvite:number|undefined;
   private nextSkillAt = 0;
   private mesoPending = false;
   private nextMesoAt = 0;
@@ -935,12 +947,47 @@ export class ClientSession {
    * per target, the damage the caller already rolled (the field takes it on trust - see
    * `game/nativecombat.ts`). `sequence` is the client's per-swing counter, so it is kept here and bumps.
    */
+  get characterOperationPending():boolean {
+    return this.skillPending||this.slotPending||this.shopPending||this.mesoPending||this.abilityPending;
+  }
+  async useActiveSkill(skillId:number,level:number,party=false):Promise<void> {
+    if(!this.gameLink || !this.self || this.self.hp<=0 || this.skillPending || this.slotPending ||
+      this.shopPending || this.mesoPending || this.abilityPending || performance.now()<Math.max(this.nextActiveAt,this.nextSkillAt))
+      throw new Error('技能等待前一項操作完成');
+    if(party&&!this.partyId)throw new Error('此版本的憤怒入口需要先建立或加入隊伍');
+    const targets=party?this.partyMembers.filter(member=>{
+      const user=this.users.get(member.characterId);
+      return user && user.x>=this.lastPosition.x-50 && user.x<this.lastPosition.x+50 &&
+        user.y>=this.lastPosition.y-50 && user.y<this.lastPosition.y+50;
+    }).map(member=>member.characterId):[];
+    const packet=encodeClientSkillUse({skillId,level,targets});
+    this.activeSkillPending=skillId;this.skillPending=true;this.nextActiveAt=performance.now()+200;
+    try{await this.gameLink.send(packet);}catch(error){this.activeSkillPending=undefined;this.skillPending=false;throw error;}
+  }
+  async partyCommand(command:string,name=''):Promise<void> {
+    if(!this.gameLink||!this.self||this.self.hp<=0)throw new Error('party needs a living field session');
+    let request:ClientPartyRequest;
+    if(command==='create')request={kind:'create'};
+    else if(command==='leave')request={kind:'leave',unknown:0};
+    else if(command==='accept') {
+      if(this.partyInvite===undefined)throw new Error('no current party invitation');
+      request={kind:'accept',inviterId:this.partyInvite};this.partyInvite=undefined;
+    }else if(command==='decline'){this.partyInvite=undefined;return;}
+    else if(command==='invite'||command==='kick') {
+      const target=command==='invite'?[...this.users.values()].find(u=>u.name===name):this.partyMembers.find(u=>u.name===name);
+      if(!target)throw new Error('找不到可邀請／移除的隊員');
+      request=command==='invite'?{kind:'invite',targetId:target.characterId}:{kind:'kick',targetId:target.characterId};
+    }else throw new Error('party: create | invite <name> | accept | decline | leave | kick <name>');
+    await this.gameLink.send(encodeClientPartyRequest(request));
+  }
+
   async attack(
     targets: {
       mobId: number;
       x: number;
       y: number;
       damage: number;
+      damages?:number[];
       hitAnimation?: number;
     }[],
     facingLeft = false,
@@ -949,6 +996,8 @@ export class ClientSession {
       action?: number;
       speed?: number;
       projectileSlot?: number;
+      skillId?:number;
+      hits?:number;
     } = {},
   ): Promise<void> {
     const link = this.gameLink;
@@ -975,12 +1024,12 @@ export class ClientSession {
       x: target.x,
       y: target.y,
       sequence: this.attackSequence,
-      damages: [target.damage],
+      damages: target.damages??[target.damage],
     }));
     const attack: ClientAttack = {
-      hits: 1,
+      hits: options.hits??1,
       targetCount: records.length,
-      skillId: 0,
+      skillId: options.skillId??0,
       facingLeft,
       action: options.action ?? 5,
       speed: options.speed ?? 1,
@@ -1449,6 +1498,8 @@ export class ClientSession {
     this.activeQuest = undefined;this.questGeneration++;
     this.link = undefined;
     this.skillPending = false;
+    this.activeSkillPending=undefined;this.nextActiveAt=0;
+    this.partyId=0;this.partyMembers=[];this.partyInvite=undefined;
     this.nextSkillAt = 0;
     this.userRequestUntil = 0;
     this.slotPending =
@@ -1463,12 +1514,24 @@ export class ClientSession {
     const opcode = plain[0]!;
     try {
       switch (opcode) {
+        case PARTY_OPCODE.result: {
+          const result=readPartyResult(new PacketReader(plain,1));
+          if(result.kind==='invite')this.partyInvite=result.inviterId;
+          else if(result.kind==='created'){
+            this.partyId=result.partyId;this.partyMembers=this.self?[{characterId:this.self.characterId,name:this.self.name}]:[];
+          }else if(result.kind==='sync'||result.kind==='joined'||result.kind==='left'){
+            this.partyMembers=result.members.filter(m=>m.characterId!==0);
+            this.partyId=this.partyMembers.some(m=>m.characterId===this.self?.characterId)?result.partyId:0;
+          }else if(result.kind==='ended'){this.partyId=0;this.partyMembers=[];}
+          this.emit({kind:'party',result});return;
+        }
         case SYSTEM_NOTICE_OPCODE: {
           const notice=readSystemNotice(new PacketReader(plain,1));
           this.emit({kind:'system-notice',text:decodeChatText(notice.text)});return;
         }
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
+          this.activeSkillPending=undefined;this.nextActiveAt=0;
           this.nextReviveAt = 0;
           this.userRequestUntil = 0;
           this.abilityPending = false;
@@ -1691,7 +1754,9 @@ export class ClientSession {
         }
         case FIELD_OPCODE.userEffect: {
           const effect = readUserEffect(new PacketReader(plain, 1));
-          this.emit({ kind: "level-up", characterId: effect.characterId });
+          if(effect.effect===1)this.emit({kind:"skill-effect",characterId:effect.characterId,skillId:effect.skillId!,skillLevel:effect.skillLevel!});
+          else if(effect.effect===0)this.emit({ kind: "level-up", characterId: effect.characterId });
+          else this.emit({kind:"unknown",opcode,bytes:plain.length});
           return;
         }
         case FIELD_OPCODE.userBalloon: {
@@ -1744,6 +1809,10 @@ export class ClientSession {
         case STAT_OPCODE: {
           const update = readStatUpdate(new PacketReader(plain, 1));
           this.applyStats(update.diff);
+          if(update.ack && this.activeSkillPending!==undefined){
+            const skillId=this.activeSkillPending;this.activeSkillPending=undefined;this.skillPending=false;
+            this.emit({kind:'active-skill-result',skillId,accepted:!!update.temporary});
+          }
           if (update.temporary) this.emit({ kind: "temporary-stat", update: update.temporary });
           if (update.ack && this.mesoPending) {
             this.mesoPending = false;
@@ -1812,6 +1881,7 @@ export class ClientSession {
           this.emit({
             kind: "user-attack",
             characterId: attack.characterId,
+            skillId:attack.skillId,skillLevel:attack.skillLevel,
             facingLeft: attack.facingLeft,
             shoot: opcode === FIELD_OPCODE.userShootAttack,
             action: attack.action,
@@ -1968,6 +2038,9 @@ export const CLIENT_EVENT_KINDS = [
   "request-release",
   "self",
   "temporary-stat",
+  "active-skill-result",
+  "skill-effect",
+  "party",
   "ability-result",
   "skill-result",
   "skills",

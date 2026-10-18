@@ -1,3 +1,4 @@
+import {activeSkill} from './active-skills.mjs';
 /** Seven original slots: PE 5BCEC0 / 4FC960 / 4FC9F0 and 511E20's VK dispatch table.
  * Ctrl attacks and Alt jumps; neither is one of these seven configurable slots.
  */
@@ -16,22 +17,25 @@ export function quickSlotAt(x, y) {
 export function quickItemAllowed(id) {
   return Number.isInteger(id) && [200, 201, 202].includes(Math.floor(id / 10000));
 }
+export const quickSkillAllowed = binding => binding?.kind==='skill' && !!activeSkill(binding.skillId);
+const allowed = binding => quickItemAllowed(binding) || quickSkillAllowed(binding);
+const same = (a,b) => a===b || (quickSkillAllowed(a) && quickSkillAllowed(b) && a.skillId===b.skillId);
 /** 463DF0: binding by template ID, remove duplicates, no inventory move/consumption packet. */
 export function bindQuickItem(bindings, index, itemId) {
-  if (!Number.isInteger(index) || index < 0 || index >= 7 || !quickItemAllowed(itemId)) return undefined;
-  return Array.from({length: 7}, (_, i) => i === index ? itemId : bindings[i] === itemId ? null : bindings[i] ?? null);
+  if (!Number.isInteger(index) || index < 0 || index >= 7 || !allowed(itemId)) return undefined;
+  return Array.from({length: 7}, (_, i) => i === index ? itemId : same(bindings[i], itemId) ? null : bindings[i] ?? null);
 }
 /** Native status->status rebind replaces the destination; it does NOT swap bindings. */
 export function moveQuickItem(bindings, from, to, expected = bindings[from]) {
-  if (!Number.isInteger(from) || from < 0 || from >= 7 || !quickItemAllowed(expected)
-      || bindings[from] !== expected) return undefined;
+  if (!Number.isInteger(from) || from < 0 || from >= 7 || !allowed(expected)
+      || !same(bindings[from], expected)) return undefined;
   return bindQuickItem(bindings, to, expected);
 }
 /** 463F10: clear the template binding, never move/throw away its bag stack. */
 export function clearQuickItem(bindings, index, expected = bindings[index]) {
-  if (!Number.isInteger(index) || index < 0 || index >= 7 || !quickItemAllowed(expected)
-      || bindings[index] !== expected) return undefined;
-  return Array.from({length:7}, (_,i) => bindings[i] === expected ? null : bindings[i] ?? null);
+  if (!Number.isInteger(index) || index < 0 || index >= 7 || !allowed(expected)
+      || !same(bindings[index], expected)) return undefined;
+  return Array.from({length:7}, (_,i) => same(bindings[i],expected) ? null : bindings[i] ?? null);
 }
 /** 4FC180 sums ALL matching USE stacks; 512570 uses the first positive bag slot. */
 export function quickItemState(inventory, itemId) {
@@ -52,7 +56,7 @@ export function quickItemProfile(storage, owner) {
   try {
     const saved = JSON.parse(storage?.getItem(key) ?? 'null');
     if (Array.isArray(saved)) for (let i=0; i<7; i++) {
-      if (quickItemAllowed(saved[i]) && !bindings.includes(saved[i])) bindings[i] = saved[i];
+      if (allowed(saved[i]) && !bindings.some(b=>same(b,saved[i]))) bindings[i] = saved[i];
     }
   } catch {} // A blocked or corrupt profile must never prevent entering the field.
   const save = (next) => {

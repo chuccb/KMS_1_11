@@ -5,7 +5,7 @@
 export const COMBAT_ASSET_LIMIT = 64;
 export const COMBAT_ASSET_RETRY_MS = 5000;
 export function combatAssets({fetcher = globalThis.fetch, now = () => performance.now(), limit = COMBAT_ASSET_LIMIT, onAttack, onProjectile} = {}) {
-  const attacks = new Map(), projectiles = new Map();
+  const attacks = new Map(), projectiles = new Map(), skills = new Map();
   const validAction = a => a && Number.isInteger(a.action) && typeof a.stance === 'string' &&
     a.delays?.length > 0 && a.delays.every(Number.isFinite) &&
     a.baseDelays?.length === a.delays.length && a.baseDelays.every(Number.isFinite) &&
@@ -38,6 +38,11 @@ export function combatAssets({fetcher = globalThis.fetch, now = () => performanc
     return owner.promise;
   }
   return {
+    peekSkill(id) {return skills.get(id)?.data;},
+    skill(id) {
+      if(!Number.isInteger(id)||id<1000000||id>4999999)return Promise.resolve(undefined);
+      return get(skills,id,'active-skill',p=>p?.id===id && Array.isArray(p.levels) && p.arts && typeof p.arts==='object');
+    },
     peekAttack(id) { return attacks.get(id)?.data; },
     attack(id) {
       if (!Number.isInteger(id) || id < 1300000 || id >= 1500000) return Promise.resolve(undefined);
@@ -51,7 +56,7 @@ export function combatAssets({fetcher = globalThis.fetch, now = () => performanc
         frames.every(f => typeof f.path === 'string' && Number.isFinite(f.delay)), onProjectile);
     },
     clear() {
-      for (const entries of [attacks, projectiles]) {
+      for (const entries of [attacks, projectiles, skills]) {
         for (const entry of entries.values()) entry.controller?.abort();
         entries.clear();
       }

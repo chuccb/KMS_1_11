@@ -117,7 +117,8 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 | Alt／空白 | 跳躍 |
 | ↑／↓ | 繩梯；地面靠門 ↑ 使用，type3 自動門靠近觸發 |
 | F1–F7／上方表情按鈕 | hit／smile／troubled／cry／angry／bewildered／stunned，長按不重送 |
-| Ctrl | 已接的一般攻擊路徑，不代表主動技能已完成 |
+| Ctrl | 普通近戰／蹲刺／基本射擊 |
+| K技能列雙擊／圖示拖到七鍵 | 本批七個主動技能；原七快捷鍵與藥水共用格，見[技能範圍](docs/ACTIVE_SKILLS.md) |
 | I／E／S／K／M | 背包／裝備／能力／技能／小地圖 |
 | 背包雙擊／拖放 | 支援的消耗品、穿脫、換位；拖到真正場景可能丟棄 |
 | 背包金幣鈕／商店충전 | 楓幣丟棄／飛鏢補充，確認後由服務端落帳 |
@@ -129,6 +130,8 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 工具不暫停世界。參見 [操作與保護](docs/RECOVERY_TEST_TOOLS.md)。
 
 ## 最近功能與限制
+
+- 七個主動技能的消耗／動作／多段／範圍／buff、原七鍵綁定、隊伍邀請與Rage：[證據與界線](docs/ACTIVE_SKILLS.md)／ADR-070，**未測試**。
 
 - 原道具／裝備／技能 tooltip：normal icon 2×、需求圖字、真正 instance stats、當前／下一級 hs。
   [交付與原版證據](docs/NATIVE_RICH_TOOLTIPS.md)／ADR-064，**未測試**。

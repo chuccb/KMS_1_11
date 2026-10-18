@@ -44,6 +44,7 @@
 | 裝備能力／傷害鏈修補 | [NATIVE_EQUIPMENT_DAMAGE_FIX](NATIVE_EQUIPMENT_DAMAGE_FIX.md) |
 | 有效能力／Detail／普通物理 | [NATIVE_STATS_COMBAT](NATIVE_STATS_COMBAT.md) |
 | HP／MP成長與AP | [STAT_GROWTH](STAT_GROWTH.md) |
+| 七個主動技能／七鍵綁定／消耗／多段／buff／隊伍鏈 | [ACTIVE_SKILLS](ACTIVE_SKILLS.md) |
 | 技能書／SP／前置與滿級 | [SKILLS](SKILLS.md) |
 | 暫時能力／消耗品 | [TEMPORARY_STATS](TEMPORARY_STATS.md) |
 | 受擊／擊退／復活 | [NATIVE_CONTACT_REVIVE](NATIVE_CONTACT_REVIVE.md) |

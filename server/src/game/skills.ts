@@ -5,7 +5,17 @@ import { emptyCharacterItems } from "../protocol/chardata.ts";
 import type { SkillChange } from "../protocol/skills.ts";
 import type { ItemSource, ItemIcon } from "./iteminfo.ts";
 import { artReaderOf } from "./wzart.ts";
-import { asNumber, asText, entriesOf, propertyOf } from "../wz/props.ts";
+import { asText, entriesOf, propertyOf } from "../wz/props.ts";
+/** Native VariantChangeType(VT_I4), including decimal BSTRs actually present in Data.wz.
+ * Focus level20 acc is STRING "20". Never recover arithmetic by parsing the hs tooltip.
+ */
+export function skillNumericValue(value:unknown):number|undefined {
+  if(typeof value==='number'&&Number.isFinite(value))return value;
+  if(typeof value==='string'&&/^[+-]?\d+$/.test(value.trim())){
+    const n=Number(value);if(Number.isInteger(n)&&n>=-2147483648&&n<=2147483647)return n;
+  }
+  return undefined;
+}
 export interface SkillLevel {
   level: number;
   hs: string;
@@ -59,9 +69,10 @@ export function skillCatalogOf(
         const level = Number(levelName);
         if (!Number.isInteger(level) || level <= 0) continue;
         const values: Record<string, number> = {};
-        for (const prop of entriesOf(row))
-          if (typeof prop.value === "number" && Number.isFinite(prop.value))
-            values[prop.name] = prop.value;
+        for (const prop of entriesOf(row)) {
+          const number=skillNumericValue(prop.value);
+          if(number!==undefined)values[prop.name]=number;
+        }
         levels.push({ level, hs: asText(propertyOf(row, "hs")), values });
       }
       levels.sort((a, b) => a.level - b.level);
@@ -70,7 +81,7 @@ export function skillCatalogOf(
         propertyOf(value, "req"),
       ).map(({ name, value }) => ({
         skillId: Number(name),
-        level: asNumber(value, NaN),
+        level: skillNumericValue(value)??NaN,
       }));
       // Refuse malformed prerequisites rather than making a broken node freely learnable.
       if (

@@ -23,7 +23,8 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
     const a = image(path);
     if (a.ready) ctx.drawImage(a.img, x, y);
   };
-  function close(restoreFocus = true) {
+  function close(restoreFocus = true, cancelled = true) {
+    const previous=current;
     current = undefined;
     hover = pressed = undefined;
     root.classList.add("hidden");
@@ -34,6 +35,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
     else if (root.contains(document.activeElement))
       document.activeElement.blur();
     previousFocus = undefined;
+    if(cancelled)previous?.reject?.();
   }
   function linesOf(text, width) {
     ctx.save();
@@ -142,7 +144,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
         return;
       }
     }
-    close();
+    close(true,false);
     c.accept(value);
   }
   ok.addEventListener("click", accept);
