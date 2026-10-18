@@ -1,5 +1,8 @@
 # 怪物 KB 控制鏈、NPC 氣泡／名牌與方向（2026-10-18）
 
+後續補完：[ADR-076／怪物主動攻擊](NATIVE_MOB_ATTACKS.md) 已接 attack10..12 的 body/facing保護與真KB並存，
+並以明示browser-only sideband續晚進場body相位；下文「尚未模型化」是ADR-075當時界線。完整owner狀態機仍未還原。
+
 **狀態：已編輯實作與回歸來源；依使用者指示，未執行 test／check／typecheck／語法檢查／browser／VM／HTTP／登入 probe。啟服不代表 PASS。**
 
 回報：怪物 KB 中仍繼續動、NPC 自言自語時名牌消失、部分 NPC 方向疑似顛倒。本輪讀本 repo EXE C、listing、WZ metadata，不借後版行為或假圖補素材。

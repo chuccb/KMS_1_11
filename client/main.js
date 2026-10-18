@@ -1,4 +1,7 @@
-import {nativeMobActions,mobHitPose,mobHitName} from "./mob-reaction.mjs";
+import {mobAttackPreview} from "./mob-attack-preview.mjs";
+import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.mjs";
+import {mobAttackEffects} from "./mob-attack-effects.mjs";
+import {nativeMobActions} from "./mob-reaction.mjs";
 import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.mjs";
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.mjs";
 import {attackPredictions} from './attack-predictions.mjs';
@@ -390,6 +393,7 @@ function connect() {
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
+    mobAttackFx.clear();mobWorldEffects.length=0;mobPreview.reset();
     skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();
     combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
     clearAttackAlert(playerBody);
@@ -614,7 +618,7 @@ function handle(message) {
       nextSwingAt = 0;
       projectiles.length = 0;
       damageMarks.length = 0;
-      mobHits.clear();
+      mobForces.clear();mobAttackFx.clear();mobWorldEffects.length=0;mobPreview.reset();
       mobs.clear();
       npcs.clear();
       drops.clear();
@@ -925,27 +929,44 @@ function handle(message) {
 
     case "mob-enter":
       dying.delete(String(message.mob.mobId));
-      mobHits.delete(String(message.mob.mobId));
+      mobForces.delete(String(message.mob.mobId));mobAttackFx.remove(String(message.mob.mobId));
       previousContactMobs.delete(String(message.mob.mobId));
       mobs.set(String(message.mob.mobId), message.mob);
+      if(message.presentation){
+        const phase=message.presentation,now=performance.now(),key=String(message.mob.mobId);
+        message.mob.mp=phase.mp;message.mob.reactionUntil=now+phase.reactionRemaining;
+        if(phase.forced)mobForces.set(key,{action:phase.forced.action,facing:phase.forced.facing,since:now-phase.forced.age,duration:phase.forced.duration});
+        if(phase.dyingAge!==undefined)dying.set(key,now-phase.dyingAge);
+      }
       return;
+
+    case "mob-stat": {
+      const mob=mobs.get(String(message.mobId));if(mob)mob.mp=message.mp;return;
+    }
 
     case "mob-move": {
       const mob = mobs.get(String(message.mobId));
       if (mob) {
         // 488BC0: the signed header controls forced sprite action; path actions control locomotion.
         const now=performance.now();
+        if(message.presentation){mob.mp=message.presentation.mp;mob.reactionUntil=now+message.presentation.reactionRemaining;}
         sampleMotion(mob,now,terrain);
         const action=message.actionByte===undefined?-1:message.actionByte>>1;
-        if(message.actionByte>=0&&action>=7&&action<=9){
-          mobHits.set(String(message.mobId),{action,since:now,facing:message.actionByte&1});
+        if(message.actionByte>=0&&action>=7&&action<=12){
+          const current=mobForces.get(String(message.mobId));
+          const active=mobForcedActive(mobArts.get(mob.templateId),current,now);
+          if(!active||replaceMobForced(current.action,action))mobForces.set(String(message.mobId),{action,since:now,facing:message.actionByte&1,duration:message.forcedDuration});
           // A replacement controller path begins at its authoritative origin, never the old patrol endpoint.
           if(Number.isFinite(message.path?.originX)&&Number.isFinite(message.path?.originY)){
             mob.x=message.path.originX;mob.y=message.path.originY;
           }
+          if(mobAttackName(action)){
+            ensureEntityArt('mob',mob.templateId);
+            mobAttackFx.put(String(message.mobId),mob.templateId,action,message.actionByte&1,message.value??0,mob,now);
+          }
         }
         else if(message.actionByte>=0){
-          mobHits.delete(String(message.mobId));mob.actionSince=now;
+          mobForces.delete(String(message.mobId));mob.actionSince=now;
         }
         mob.facing =
           (message.actionByte<0?mob.facing:message.facing) ??
@@ -961,7 +982,7 @@ function handle(message) {
 
     case "mob-die": {
       // `0x30`: the monster is still on the field (its corpse is), and the 2003 client plays
-      // `Mob/<id>.img/die1` before `0x31` takes it away. Nothing else changes here - the loot and
+      // `Mob/<id>.img/die1|die2|dieF` before `0x31` takes it away. Nothing else changes here - the loot and
       // the exp are other packets, from the server.
       const corpse = mobs.get(String(message.mobId)),field=self,epoch=combatEpoch,at=performance.now();
       if (corpse)
@@ -974,13 +995,15 @@ function handle(message) {
         sampleMotion(corpse, performance.now(), terrain);
         corpse.motion = undefined;corpse.vx=corpse.vy=0;
       }
-      mobHits.delete(String(message.mobId));
+      mobForces.delete(String(message.mobId));
+      if(corpse)corpse.dieAction=mobDieAction(mobArts.get(corpse.templateId));
       dying.set(String(message.mobId), performance.now());
       return;
     }
 
     case "mob-leave":
-      mobHits.delete(String(message.mobId));
+      mobAttackFx.remove(String(message.mobId));
+      mobForces.delete(String(message.mobId));
       previousContactMobs.delete(String(message.mobId));
       mobs.delete(String(message.mobId));
       dying.delete(String(message.mobId));
@@ -1095,6 +1118,7 @@ function handle(message) {
     }
 
     case "disconnect":
+      mobAttackFx.clear();mobWorldEffects.length=0;mobPreview.reset();
       closeDialogue(false);
       portalPending = false;
       setLoginPending(false);
@@ -1167,7 +1191,7 @@ async function loadMap(mapId, generation) {
     layerOrder = sceneOrdering();
     npcArts.clear();
     npcMetadata.clear();
-    mobArts.clear();
+    mobArts.clear();mobMetadata.clear();mobBodyAttack.clear();mobPushThreshold.clear();
     artMissing.clear();
     if (cameraMapId !== mapId) {
       cameraMapId = mapId;
@@ -1815,9 +1839,17 @@ let selfSwing;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
 const damageMarks = [];
 function addDamageMark(mark){mark.order??=layerOrder(mark,ATTACK_EFFECT_Z);damageMarks.push(mark);}
-const mobHits = new Map();
+const mobForces = new Map();
 const mobBodyAttack = new Map();
 const mobPushThreshold=new Map();
+const mobMetadata=new Map(),mobWorldEffects=[];
+const mobAttackFx=mobAttackEffects({metadata:id=>mobMetadata.get(id),emit(effect){
+  const end=effect.start+effect.frames.reduce((n,f)=>n+f.delay,0);
+  if(performance.now()>=end)return; // Cold metadata never restarts or replays an expired layer.
+  for(const f of effect.frames)artImage(f.path);
+  if(mobWorldEffects.length>=512)mobWorldEffects.shift();
+  mobWorldEffects.push({...effect,end,order:layerOrder({},ATTACK_EFFECT_Z)});
+}});
 const contact = contactClock();
 let contactField, contactPending, previousContactPlayer;
 let contactSerial = 0,
@@ -1897,7 +1929,7 @@ function updateContact(now) {
       contactField,
       mobId: mob.mobId,
       frame: frame.path,
-      facing: mob.facing & 1,
+      facing: mobRenderFacing(mob) & 1,
       player,
       previousPlayer,
       mob: current,
@@ -2533,7 +2565,9 @@ function ensureEntityArt(kind, templateId) {
     .then((data) => {
       if(generation!==mapGeneration)return;
       table.set(templateId, kind==="mob"?nativeMobActions(data.actions??{}):data.actions??{});
-      if (kind === "mob") {mobBodyAttack.set(templateId,data.bodyAttack===true);mobPushThreshold.set(templateId,data.pushed??1);}
+      if (kind === "mob") {mobBodyAttack.set(templateId,data.bodyAttack===true);mobPushThreshold.set(templateId,data.pushed??1);mobMetadata.set(templateId,{attacks:data.attacks??[],maxMP:data.maxMP??0});
+        for(const a of data.attacks??[])for(const frames of [a.effect,a.hit,a.ball])for(const f of frames??[])artImage(f.path);
+      }
       else {
         npcMetadata.set(templateId, {name:data.name,clickBounds:data.clickBounds,behavior:data.behavior});
         npcVisuals.load(templateId,data.actions??{},data.behavior,performance.now());
@@ -2743,21 +2777,24 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip) {
 }
 
 function mobRenderFacing(mob){
-  return mobHitPose(mobArts.get(mob.templateId),mobHits.get(String(mob.mobId)),performance.now())?.facing??mob.facing;
+  return mobForcedPose(mobArts.get(mob.templateId),mobForces.get(String(mob.mobId)),performance.now())?.facing??mob.facing;
 }
-/** Actual WZ frame. Corpse wins; forced hit1/hit2/hitF plays once on the 30ms sprite clock. */
+/** Corpse wins; hit and attack forced layers run once on the separate 30ms sprite clock. */
 function currentMobFrame(mob, now) {
   const id = String(mob.mobId),
     actions = mobArts.get(mob.templateId);
   if (!actions) return undefined;
   const once = (frames, elapsed) => animationFrame(frames, elapsed, false);
   const corpseSince = dying.get(id);
-  if (corpseSince !== undefined) return once(actions.die1, now - corpseSince);
-  const hit=mobHits.get(id),pose=mobHitPose(actions,hit,now);
+  if (corpseSince !== undefined) {
+    mob.dieAction??=mobDieAction(actions);
+    return once(actions[mob.dieAction],now-corpseSince);
+  }
+  const hit=mobForces.get(id),pose=mobForcedPose(actions,hit,now);
   if(pose)return once(pose.frames,pose.elapsed);
   if(hit){
-    mob.actionSince=hit.since+(actions[mobHitName(hit.action)]??[]).reduce((n,f)=>n+f.delay,0);
-    mobHits.delete(id);
+    mob.actionSince=hit.since+(actions[mobForcedName(hit.action)]??[]).reduce((n,f)=>n+f.delay,0);
+    mobForces.delete(id);
   }
   return playAction(
     actions,
@@ -3126,7 +3163,29 @@ function frame() {
   }
   for(let i=skillHitEffects.length-1;i>=0;i--)if(now>=skillHitEffects[i].end)skillHitEffects.splice(i,1);
   for(const effect of skillHitEffects)if(now>=effect.start)scene.push({kind:'hit-effect',effect,z:ATTACK_EFFECT_Z,y:0,order:effect.order});
+  const mobActors=[...(self&&selfView?[{id:selfView.characterId,x:self.x,y:self.y,facing:selfView.facing,previous:previousContactPlayer}]:[]),
+    ...[...users.values()].map(u=>({id:u.characterId,x:u.x,y:u.y,facing:u.facing??(u.action&1)}))];
+  for(const ball of mobAttackFx.step(now,mobs,mobActors)){
+    const owner=mobs.get(ball.owner),z=actorDepth(owner,terrain,'mob');
+    scene.push({kind:'mob-ball',ball,z,y:0,order:layerOrder(ball,z)});
+  }
+  for(let i=mobWorldEffects.length-1;i>=0;i--){
+    const e=mobWorldEffects[i];if(now>=e.end){mobWorldEffects.splice(i,1);continue;}
+    if(e.kind==='effect'){
+      const owner=mobs.get(e.owner);if(owner){e.x=owner.x;e.y=owner.y;}
+    }else{
+      const actor=mobActors.find(a=>a.id===e.actorId);if(!actor){mobWorldEffects.splice(i,1);continue;}
+      e.x=actor.x;e.y=actor.y-30;
+    }
+    scene.push({kind:'mob-world-effect',effect:e,z:ATTACK_EFFECT_Z,y:0,order:e.order});
+  }
   for (const actor of mergeScene(mapScene, scene)) {
+    if(actor.kind==='mob-ball'){
+      const b=actor.ball;drawArchiveImage(animationFrame(b.frames,now-b.start),b.x-cameraX,b.y-cameraY,false);continue;
+    }
+    if(actor.kind==='mob-world-effect'){
+      const e=actor.effect;drawArchiveImage(oneShotFrame(e.frames,now-e.start),e.x-cameraX,e.y-cameraY,e.flip);continue;
+    }
     if (actor.kind === "back") { drawBack(actor.back, cameraX, cameraY, now); continue; }
     if (actor.kind === "projectile") { drawProjectile(actor.shot, cameraX, cameraY, now); continue; }
     if(actor.kind==='npc-speech') {
@@ -5990,7 +6049,9 @@ function drawAvatarPreview(now, controls) {
     `${pose.stance}/${pose.frame}；${image.ready ? "原PNG" : "PNG載入中"}${timing}。`;
 }
 
+const mobPreview=mobAttackPreview({canvas:document.getElementById('qa-mob-canvas'),image:artImage});
 const testToolsPanel = testTools({
+  drawMobPreview:(now,controls)=>mobPreview.draw(now,controls),resetMobPreview:()=>mobPreview.reset(),
   drawMotionPreview: drawAvatarPreview,
   resetMotionPreview: resetAvatarPreview,
   getNpcStatus() {
@@ -6030,10 +6091,11 @@ const testToolsPanel = testTools({
     }
     const now=performance.now(),near=[...mobs.values()].filter(m=>!dying.has(String(m.mobId)))
       .sort((a,b)=>Math.abs(a.x-(self?.x??0))-Math.abs(b.x-(self?.x??0))).slice(0,3);
-    if(near.length)text+=' 附近怪物KB（唯讀）：'+near.map(m=>{
-      const hit=mobHits.get(String(m.mobId)),frames=hit&&(mobArts.get(m.templateId)?.[mobHitName(hit.action)]??[]);
-      const remaining=hit?Math.max(0,hit.since+frames.reduce((n,f)=>n+(f.rawDelay??f.delay),0)-now):0;
-      return `#${m.mobId}/${m.templateId} pushed=${mobPushThreshold.get(m.templateId)??'載入中'}、${remaining>0?`${mobHitName(hit.action)} ${Math.ceil(remaining)}ms`:'未在KB視窗'}`;
+    if(near.length)text+=' 附近怪物動作（唯讀）：'+near.map(m=>{
+      const hit=mobForces.get(String(m.mobId)),frames=hit&&(mobArts.get(m.templateId)?.[mobForcedName(hit.action)]??[]);
+      const remaining=hit?Math.max(0,hit.since+(hit.duration??frames.reduce((n,f)=>n+f.delay,0))-now):0;
+      const reaction=Math.max(0,(m.reactionUntil??0)-now);
+      return `#${m.mobId}/${m.templateId} pushed=${mobPushThreshold.get(m.templateId)??'載入中'}、${remaining>0?`${mobForcedName(hit.action)} ${Math.ceil(remaining)}ms`:'無forced窗'}、raw受擊窗=${Math.ceil(reaction)}ms、MP=${m.mp??mobMetadata.get(m.templateId)?.maxMP??'載入中'}、可用招式=${mobMetadata.get(m.templateId)?.attacks.length??'載入中'}`;
     }).join('；')+'。';
     return text;
   },

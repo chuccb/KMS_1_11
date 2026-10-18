@@ -27,6 +27,9 @@
 
 | 主題 | 文件 |
 |---|---|
+| 怪物主動攻擊／MP／楔形射程／原hit回呼／攻擊中KB與唯讀閱覽 | [NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md) |
+| 怪物KB／NPC名牌與forced方向／冷氣泡readiness | [NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md) |
+| 原武器殘影／mastery tier／命中點與world FX | [NATIVE_ATTACK_EFFECTS](NATIVE_ATTACK_EFFECTS.md) |
 | 兩招獨立魔法／原動作、MD與元素／foothold與彈道／120ms多段更正／MAD與EVA/PDD消費鏈 | [NATIVE_MAGIC_SKILLS](NATIVE_MAGIC_SKILLS.md) |
 | 穿戴原順序／server需求與原子換裝／明確最低級準備／主動時鐘與remote身份 | [NATIVE_EQUIP_ADMISSION](NATIVE_EQUIP_ADMISSION.md) |
 | 本機姿勢／蹲刺／警戒／攻擊雙時鐘／恢復編碼／射程與硬編碼分類 | [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md) |

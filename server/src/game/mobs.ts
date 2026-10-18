@@ -1,6 +1,7 @@
 import {mobReaction,planMobReactionPath,mobHitName} from "../../../client/mob-reaction.mjs";
 import {artReaderOf} from "./wzart.ts";
-import {mobArtOf} from "./sprites.ts";
+import {mobArtOf,type MobAttackArt} from "./sprites.ts";
+import {chooseMobAttack,replaceMobForced} from "../../../client/mob-attacks.mjs";
 import {elementAttributes} from "./elements.ts";
 /**
  * The monsters of one field: where they are, and what the server tells the client about them.
@@ -28,7 +29,8 @@ import {elementAttributes} from "./elements.ts";
  * (rand()%2000+1000)/90 ticks. World fields use that idle/walk policy; deterministic patrol remains
  * available for fixtures. Base walking speed is CVecCtrl's 125 px/s, multiplied by info.speed.
  * Jump-capable roam adds 53DAA0's unprovoked 1/5 jump decision, with swept air paths.
- * Aggro, flying, water and custom field/shoe physics remain outside this controller.
+ * Active attacks now use a separately documented engaged-target policy (ADR-076); full aggro,
+ * flying, water and custom field/shoe physics remain outside this controller.
  *
  * ONE OBJECT PER FIELD (`game/world.ts`, ADR-012): the ids, the positions and the hit points belong
  * to the map, not to a connection, so two players in the same map hit the same monster and see the
@@ -58,7 +60,7 @@ import {elementAttributes} from "./elements.ts";
 import { footholdChain, footholdRange, footholdSegmentAt, footholdYAt } from "../wz/archive.ts";
 import type { FootholdSegment, FootholdSegments, WzArchive } from "../wz/archive.ts";
 import {
-  MOB_ACTION,
+  MOB_ACTION, MOB_ACTION_KEEP,
   encodeMobAppear,
   encodeMobEnterField,
   encodeMobLeaveDelayed,
@@ -107,13 +109,15 @@ export interface MobTemplate {
   /** 48D080 pushed defaults1, 487A30 compares each positive hit (not the attack sum). */
   pushed?:number;
   hitActions?:number[];
+  attacks?:MobAttackArt[];
   /** 486180 raw frame-delay sum, independent of the 30ms visual clock. */
   hitDurations?:Record<number,number>;
+  hitVisualDurations?:Record<number,number>;
   /** Root fly=3; jump+move=2; move=1; neither=0. Optional only for legacy fixtures. */
   moveAbility?: 0 | 1 | 2 | 3;
   /**
-   * How long the mob's death animation lasts, in ms: the sum of the frames of the longest of its
-   * `die1`/`die2`/`dieF` actions (`sub_486180` does the same sum on the client). `0` when the image
+   * How long the mob's death animation lasts, in ms: the 30ms sprite-clock sum of the longest of its
+   * `die1`/`die2`/`dieF` actions (4862C0, distinct from 486180 raw delays). `0` when the image
    * has no die action at all - then the client has nothing to play and the corpse can go at once.
    */
   dieMs: number;
@@ -133,63 +137,6 @@ export const MOB_RESPAWN_MS = 5000;
  * mob action frames and falls back to `lVal = 180` (19949 in `MapleStory.exe.c`).
  */
 export const MOB_FRAME_DELAY_MS = 180;
-
-/** The die actions a mob image may have, in the order the client's action table names them. */
-const MOB_DIE_ACTION_NAMES = ["die1", "die2", "dieF"] as const;
-
-/**
- * The property list of a canvas frame.
- *
- * A frame is a `WzNode` of kind `canvas` whose `value` is the canvas record, so its own properties
- * (the `origin` vector, a `delay`, `lt`/`rb`) sit one level below the entry - unlike every other
- * node, where `props` is the entry's own list.
- */
-function canvasEntriesOf(frame: unknown): { name: string; value: unknown }[] {
-  const record = (frame as { value?: unknown } | null | undefined)?.value;
-  return entriesOf(record);
-}
-
-/**
- * `true` for one frame of an action.
- *
- * A frame is a `canvas` entry, or a `uol` entry that points at one - `Mob/5130100.img/die1` ends with
- * a UOL instead of repeating the canvas, and the client resolves it into a real frame, so a frame
- * counter that only counted canvases would come up one short. Numbers (`zigzag`) and nested objects
- * are not frames.
- */
-function isFrame(frame: unknown): boolean {
-  const kind = (frame as { kind?: unknown } | null | undefined)?.kind;
-  return kind === "canvas" || kind === "uol";
-}
-
-/**
- * One frame's `delay` in ms, with the client's own fallback when the frame does not say.
- *
- * Only a canvas carries properties, so a UOL frame always takes the fallback - which is what the
- * client does for a frame whose `delay` lookup comes back empty (`sub_40B530`, 19949: `lVal = 180`).
- */
-function frameDelayMs(frame: unknown): number {
-  const delay = canvasEntriesOf(frame).find((entry) => entry.name === "delay")?.value;
-  return typeof delay === "number" ? delay : MOB_FRAME_DELAY_MS;
-}
-
-/**
- * How long the mob's death animation runs, from the image itself.
- *
- * The client picks the action at random (`13 + rand() % template+116`, `sub_485530`), so the length
- * to hold a corpse for is the longest of the die actions the image has.
- */
-function dieAnimationMs(root: unknown): number {
-  let longest = 0;
-  for (const name of MOB_DIE_ACTION_NAMES) {
-    const action = entriesOf(root).find((entry) => entry.name === name)?.value;
-    if (action === undefined) continue;
-    let total = 0;
-    for (const frame of entriesOf(action)) if (isFrame(frame.value)) total += frameDelayMs(frame.value);
-    longest = Math.max(longest, total);
-  }
-  return longest;
-}
 
 /** `Mob/<id>.img -> info`, or `undefined` when the archive has no such mob. */
 export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemplate | undefined {
@@ -225,9 +172,10 @@ export function loadMobTemplate(archive: WzArchive, templateId: number): MobTemp
     md:Math.max(0,Math.min(999,asNumber(props.MD))),
     elements,physicalAttribute:elements[0],
     pushed:asNumber(props.pushed,1),hitActions,hitDurations,
+    hitVisualDurations:Object.fromEntries(hitActions.map(action=>[action,art!.actions[mobHitName(action)!]!.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0)])),attacks:art?.attacks??[],
     speedPercent: Math.max(0, Math.min(130, 100 + speed)),
     moveAbility,
-    dieMs: dieAnimationMs(actionRoot),
+    dieMs: Math.max(0,...['die1','die2','dieF'].map(name=>(art?.actions[name]??[]).reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0))),
   };
 }
 
@@ -263,6 +211,10 @@ export interface FieldMob {
   motion?: { x: number; y: number; targetX: number; targetY: number; startedAt: number; endsAt: number; sampledAt: number; points: MobMotionPoint[] } | undefined;
   velocity?: { vx: number; vy: number };
   reactionUntil?:number;
+  forced?:{action:number;facing:number;since:number;duration:number};
+  attackUntil?:number;
+  aggroCharacterId?:number;
+  mp?:number;
   decisionAt?: number;
   intent?: -1 | 0 | 1;
   /** The x range this mob may walk in: its foothold chain clipped by the spawn's `rx0`/`rx1`. */
@@ -322,6 +274,11 @@ export interface MobDamage {
   /** ms until the mob is spawned again, from this hit; 0 when nothing died. */
   respawnMs: number;
   packets: Uint8Array[];
+}
+
+export interface MobPresentation {
+  mobId:number;mp:number;reactionRemaining:number;
+  forced?:{action:number;facing:number;age:number;duration:number};dyingAge?:number;
 }
 
 /** The monsters of one map, as this server knows them. */
@@ -385,7 +342,7 @@ export class MobField {
       alive: true,
       maxHp: template?.maxHP,
       hp: template?.maxHP,
-      maxMp: template?.maxMP,
+      maxMp: template?.maxMP,mp:template?.maxMP,
       removeAt: 0,
       respawnAt: 0,
       deaths: 0,
@@ -402,20 +359,22 @@ export class MobField {
    * not recompute it. The browser bridge uses the located native 4C7960 basic-attack formula;
    * the field retains the original packet trust contract rather than rolling a second time.
    */
-  applyDamage(mobId: number, damage: number, now: number,reaction?:{hitAnimation:number;facingLeft:boolean}): MobDamage | undefined {
+  applyDamage(mobId: number, damage: number, now: number,reaction?:{hitAnimation:number;facingLeft:boolean;characterId?:number}): MobDamage | undefined {
     const mob = this.mob(mobId);
     if (mob === undefined || !mob.alive || mob.hp === undefined || mob.maxHp === undefined) return undefined;
     this.samplePosition(mob, now);
     const maxMp = mob.maxMp ?? 0;
+    const mp=mob.mp??maxMp;
+    if(reaction?.characterId!==undefined)mob.aggroCharacterId=reaction.characterId;
     const dealt = Math.max(0, Math.round(damage));
     mob.hp = Math.max(0, mob.hp - dealt);
     const killed = mob.hp === 0;
     const dieMs = killed ? mob.template?.dieMs ?? 0 : 0;
-    const packets: Uint8Array[] = [encodeMobStat({ mobId, mp: maxMp })];
+    const packets: Uint8Array[] = [encodeMobStat({ mobId, mp })];
     if (killed) {
       mob.alive = false;
       mob.motion = undefined;
-      delete mob.reactionUntil;
+      delete mob.reactionUntil;delete mob.forced;delete mob.attackUntil;delete mob.aggroCharacterId;
       mob.velocity={vx:0,vy:0};
       mob.deaths += 1;
       mob.removeAt = now + dieMs;
@@ -431,7 +390,13 @@ export class MobField {
         const last=points.at(-1);
         if(last){
           // Cancel the old walking/jumping endpoint, not merely its sprite animation.
-          mob.reactionUntil=now+hit.duration;mob.legEndsAt=mob.reactionUntil;mob.facing=hit.facing;
+          mob.reactionUntil=now+hit.duration;mob.legEndsAt=mob.reactionUntil;
+          // Both native setters protect an active attack layer, NOT its KB path.
+          const active=mob.forced&&now<mob.forced.since+mob.forced.duration;
+          if(!active||replaceMobForced(mob.forced!.action,hit.action)){
+            mob.facing=hit.facing;
+            mob.forced={action:hit.action,facing:hit.facing,since:now,duration:mob.template?.hitVisualDurations?.[hit.action]??hit.duration};
+          }
           mob.motion={x:mob.x,y:mob.y,targetX:last.x,targetY:last.y,startedAt:now,endsAt:mob.reactionUntil,sampledAt:now,points};
           mob.velocity={vx:points[0]!.vx,vy:points[0]!.vy};
           packets.push(encodeMobMove(mobId,{actionByte:mobActionByte(hit.action,hit.facing),value:0,
@@ -445,13 +410,53 @@ export class MobField {
       damage: dealt,
       hp: mob.hp,
       maxHp: mob.maxHp,
-      mp: maxMp,
+      mp,
       maxMp,
       killed,
       dieMs,
       respawnMs: killed ? this.respawnMs : 0,
       packets,
     };
+  }
+
+  /** Browser-only relative phase snapshot; NEVER encode this as a made-up native opcode.
+   * Late join restores body phase/MP/corpse only, and never replays old releases or hit callbacks.
+   */
+  presentation(mobId:number,now:number):MobPresentation|undefined{
+    const mob=this.mobs.find(m=>m.mobId===mobId);if(!mob||(mob.alive===false&&mob.removeAt===0))return;
+    const f=mob.forced;
+    return {mobId,mp:mob.mp??mob.maxMp??0,reactionRemaining:Math.max(0,(mob.reactionUntil??0)-now),
+      ...(f&&now<f.since+f.duration?{forced:{action:f.action,facing:f.facing,age:Math.max(0,now-f.since),duration:f.duration}}:{}),
+      ...(!mob.alive&&mob.removeAt?{dyingAge:Math.max(0,now-(mob.removeAt-(mob.template?.dieMs??0)))}:{})};
+  }
+
+  /** Authoritative attack admission is server policy. Literal geometry/action/value are native.
+   * Only an engaged mob's still-present live attacker is considered; no global nearest-player aggro.
+   * Called BEFORE roam so an attack cancels the previous patrol path for every observer.
+   */
+  attackPackets(now:number,targets:readonly {characterId:number;x:number;y:number}[]):Uint8Array[]{
+    const packets:Uint8Array[]=[];
+    for(const mob of this.mobs){
+      if(!mob.alive||!mob.template?.attacks?.length)continue;
+      this.samplePosition(mob,now);
+      if(now<(mob.reactionUntil??0)||now<(mob.attackUntil??0)||now<((mob.forced?.since??0)+(mob.forced?.duration??0)))continue;
+      if(!mob.foothold&&mob.template.moveAbility!==3)continue; // 4862C0 grounded OR flyer.
+      const target=targets.find(p=>p.characterId===mob.aggroCharacterId);
+      if(!target){delete mob.aggroCharacterId;continue;}
+      const chosen=chooseMobAttack(mob.template.attacks,mob,target,mob.mp??mob.maxMp??0,this.options.random);
+      if(!chosen)continue;
+      const {attack,facing,value}=chosen;
+      mob.mp=Math.max(0,(mob.mp??mob.maxMp??0)-attack.conMP);
+      mob.forced={action:attack.action,facing,since:now,duration:attack.visualDuration};
+      mob.attackUntil=now+attack.visualDuration;mob.legEndsAt=mob.attackUntil;mob.facing=facing;
+      const action=mobActionByte(mob.foothold?MOB_ACTION.stand:MOB_ACTION.magic,facing);
+      const point={x:Math.trunc(mob.x),y:Math.trunc(mob.y),vx:0,vy:0,foothold:mob.foothold,action,duration:attack.visualDuration};
+      mob.motion={x:mob.x,y:mob.y,targetX:point.x,targetY:point.y,startedAt:now,endsAt:mob.attackUntil,sampledAt:now,points:[point]};
+      mob.velocity={vx:0,vy:0};
+      packets.push(encodeMobMove(mob.mobId,{actionByte:mobActionByte(attack.action,facing),value,
+        path:{originX:point.x,originY:point.y,elements:[{attr:0,...point}]}}),encodeMobStat({mobId:mob.mobId,mp:mob.mp}));
+    }
+    return packets;
   }
 
   /**
@@ -498,7 +503,8 @@ export class MobField {
     mob.motion = undefined;
     delete mob.velocity;
     mob.range = this.rangeOn(mob.spawn.foothold, mob.spawn);
-    delete mob.reactionUntil;
+    delete mob.reactionUntil;delete mob.forced;delete mob.attackUntil;delete mob.aggroCharacterId;
+    mob.mp=mob.maxMp;
     delete mob.decisionAt;
     delete mob.intent;
     mob.hp = mob.maxHp;
@@ -578,7 +584,7 @@ export class MobField {
     for (const mob of this.mobs) {
       if (!mob.alive) continue;
       this.samplePosition(mob, now);
-      if (now < mob.legEndsAt || now < (mob.reactionUntil??0)) continue;
+      if (now < mob.legEndsAt || now < (mob.reactionUntil??0) || now < (mob.attackUntil??0) || now < ((mob.forced?.since??0)+(mob.forced?.duration??0))) continue;
       const ability = mob.template?.moveAbility ?? 1;
       if (ability === 0 || ability === 3) continue;
       const speed = this.speedOf(mob);
@@ -705,7 +711,8 @@ export class MobField {
         trimming = false;
       }
       if (points.length) packets.push(encodeMobMove(mob.mobId, {
-        actionByte: points[0]!.action, value: 0,
+        actionByte: mob.forced&&motion.sampledAt<mob.forced.since+mob.forced.duration
+          ?MOB_ACTION_KEEP|(mob.facing&1):points[0]!.action, value: 0,
         path: { originX: Math.round(mob.x), originY: Math.round(mob.y), elements: points },
       }));
     }

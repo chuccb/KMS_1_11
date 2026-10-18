@@ -125,13 +125,14 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 | Enter／Escape | 聊天或目前 modal 的確認／取消／關閉 |
 
 上方「體驗工具（非原版）」／`/tools` 包含明示的唯讀 UI 範例：
-原 NPC 圖文、提示框普通道具／持有裝備快照／模板、技能 0／1／MAX，不需要先轉職或給 SP。
+原怪物動作／攻擊鏈（預填9999997，不生怪）、原 NPC 圖文、提示框普通道具／持有裝備快照／模板、技能 0／1／MAX，不需要先轉職或給 SP。
 涉及配置職業／AP／SP、領藥／遠距裝備／明確補足所選最低等級或地圖命令的操作，仍須明確帳號授權與確認；不是原版任務。
 工具不暫停世界。參見 [操作與保護](docs/RECOVERY_TEST_TOOLS.md)。
 
 ## 最近功能與限制
 
-- 最新續作：[怪物KB／NPC氣泡名牌與方向狀態](docs/NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：KB真正替換巡邏、門檻與多段互斥、原受傷動作／時鐘／KEEP、NPC強制表情翻面與冷氣泡名牌、唯讀入口；未執行測試。
+- 最新續作：[怪物主動攻擊完整鏈](docs/NATIVE_MOB_ATTACKS.md)／ADR-076：原選招／楔形範圍、MP／Value、拋物線與hit圖、攻擊中KB、冷載入／離場與晚進場body相位、唯讀怪物閱覽；此EXE主動hit不扣HP，身體碰撞另走傷害，未執行測試。
+- 前輪：[怪物KB／NPC氣泡名牌與方向狀態](docs/NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：KB真正替換巡邏、門檻與多段互斥、原受傷動作／時鐘／KEEP、NPC強制表情翻面與冷氣泡名牌、唯讀入口；未執行測試。
 - 前輪：[原版攻擊特效整鏈](docs/NATIVE_ATTACK_EFFECTS.md)／ADR-074：更正殘影 child5／獨立時鐘、真 mastery tier、普通命中火花、命中點與世界層排序、release 聲音及本機／旁觀／預覽生命週期；未執行測試。
 - 前輪：[兩招原版魔法與完整消費／生命週期](docs/NATIVE_MAGIC_SKILLS.md)／ADR-073。修正120ms多段時鐘與EVA/PDD入口漏接、新增MAD藥水；已列十二招，不宣稱全技能，未執行測試。
 - 前輪補原穿戴順序、server正反換裝驗需求與原子提交、主動攻擊原時鐘關聯／遠端冷載入身份守衛；[證據與政策](docs/NATIVE_EQUIP_ADMISSION.md)／ADR-072。遠距工具可分族、明確補最低級；已有武器可只補級，不改原需求。

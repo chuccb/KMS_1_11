@@ -1243,6 +1243,13 @@ export class GameEntryServer {
     }
   }
 
+  /** Authenticated browser phase bridge: relative ages only, never grant controller ownership. */
+  mobPresentation(username:string,characterId:number,mobId:number){
+    const session=this.sessionsByCharacter.get(characterId);
+    if(!session||session.username!==username)return;
+    return session.instance.mobs.presentation(mobId,Date.now());
+  }
+
   /** Out-of-band, authenticated development API; deliberately NOT a made-up native opcode. */
   testTools(username: string, characterId: number, request: unknown): TestToolResult {
     const session=this.sessionsByCharacter.get(characterId);
@@ -1408,6 +1415,7 @@ export class GameEntryServer {
       avatarItems: avatarItemsOf(character),
       instance,
       character,
+      get combatAlive():boolean{return this.character.stats.hp>0;},
       wallet: new MesoWallet(character.stats),
       send,
     };
@@ -2639,7 +2647,7 @@ export class GameEntryServer {
       // immediate path per-number: sub-threshold hits must never sum into a false KB.
       let hit:MobDamage|undefined;
       for(const value of target.damages){
-        const part=session.instance.mobs.applyDamage(target.mobId,value,now,{hitAnimation:target.hitAnimation,facingLeft:attack.facingLeft});
+        const part=session.instance.mobs.applyDamage(target.mobId,value,now,{hitAnimation:target.hitAnimation,facingLeft:attack.facingLeft,characterId:session.characterId});
         if(!part)break;
         hit=part;mobPackets.push(...part.packets);
         if(part.killed)break;

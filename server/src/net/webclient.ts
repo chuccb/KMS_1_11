@@ -1,3 +1,5 @@
+import type {MobPresentation} from "../game/mobs.ts";
+import {MOB_BODY_ACTIONS,mobForcedName} from "../../../client/mob-attacks.mjs";
 import {mobHitAction} from "../../../client/mob-reaction.mjs";
 import {attackProfileAtTier} from "../../../client/attack-presentation.mjs";
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillHits,activeSkillAmmo,activeRangedActions,activeMagicActions,activeMagicSpeed} from "../../../client/active-skills.mjs";
@@ -111,6 +113,7 @@ export interface WebClientOptions {
   itemCatalog?: ItemCatalog;
   skills?: SkillCatalog;
   mobTemplate?(id:number):MobTemplate|undefined;
+  mobPresentation?(username:string,characterId:number,mobId:number):MobPresentation|undefined;
   testTools?(username:string, characterId:number, request:unknown): TestToolResult;
   /**
    * The map's pictures (`game/mapart.ts`), the avatar compositor (`game/avatar.ts`) and the NPC/mob
@@ -609,9 +612,9 @@ class BrowserSession {
           return await this.usePortal(String(message.name ?? ""));
         case "test-tools": {
           const session=this.require();
-          if(!session.self || !this.username) throw new Error("請先進入地圖。");
+          if(!session.selfView || !this.username) throw new Error("請先進入地圖。");
           session.assertTestToolsReady();
-          const result=this.options.testTools?.(this.username,session.self.characterId,message.action)
+          const result=this.options.testTools?.(this.username,session.selfView.characterId,message.action)
             ?? {enabled:false,message:"此服務未開啟體驗工具。",checkpoint:false,restoreAvailable:false,canMap:false,jobs:[]};
           this.send({t:"test-tools",...result}); return;
         }
@@ -909,7 +912,8 @@ class BrowserSession {
       return reply(false);
     const near = (a: ContactPoint, b: ContactPoint, limit: number) =>
       Math.abs(a.x - b.x) <= limit && Math.abs(a.y - b.y) <= limit;
-    // Session movement is sampled at 100ms; mob records keep a future leg endpoint (<=3s).
+    // Session movement is sampled at 100ms; bridge mob records retain the latest wire endpoint.
+    // The bounded snapshot envelope is policy, not native owner prediction.
     if (
       !near(player, session.selfPosition, 256) ||
       !near(player, previousPlayer, 192) ||
@@ -918,7 +922,7 @@ class BrowserSession {
     )
       return reply(false);
     const actions = this.options.art?.mob(mob.templateId)?.actions;
-    const frame = ["stand", "move", "hit1"]
+    const frame = MOB_BODY_ACTIONS
       .flatMap((action) => actions?.[action] ?? [])
       .find((frame) => frame.path === message.frame);
     if (
@@ -988,7 +992,17 @@ class BrowserSession {
       if (event.kind === "mob-enter") this.dyingMobs.delete(event.mob.mobId);
       if(event.kind==="temporary-stat") this.buffs.apply(event.update,performance.now());
       if(event.kind==="disconnect" || event.kind==="field" || (event.kind==="self" && event.self.hp<=0)) this.buffs.clear();
-      this.send(this.eventJson(event));
+      const json=this.eventJson(event);
+      if((event.kind==='mob-enter'||event.kind==='mob-move')&&this.username&&session.selfView){
+        const id=event.kind==='mob-enter'?event.mob.mobId:event.mobId;
+        json.presentation=this.options.mobPresentation?.(this.username,session.selfView.characterId,id);
+      }
+      if(event.kind==='mob-move'&&event.actionByte!==undefined&&event.actionByte>=0){
+        const mob=session.mob(event.mobId),name=mobForcedName(event.actionByte>>1);
+        const frames=mob&&name&&this.options.art?.mob(mob.templateId)?.actions[name];
+        if(frames)json.forcedDuration=frames.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0);
+      }
+      this.send(json);
       if(["field","self","inventory","skills"].includes(event.kind) && session.character) {
         const character=session.character;
         const basis=characterStatBasis(character,this.options.itemCatalog,this.options.skills);
@@ -1313,7 +1327,7 @@ class BrowserSession {
     await this.require().useItem(slot, itemId);
   }
 
-  private eventJson(event: ClientEvent): unknown {
+  private eventJson(event: ClientEvent): Record<string,unknown> {
     const { kind, ...rest } = event;
     return { t: kind, ...rest, ...(kind === "field" ? { contactField: this.contactField } : {}) };
   }
@@ -1636,6 +1650,7 @@ export function startWebClient(
       sendJson(response, 200, {
         templateId: mob.templateId,
         bodyAttack: mob.bodyAttack === true,
+        pushed:mob.pushed??1,maxMP:mob.maxMP??0,attacks:mob.attacks??[],
         actions: mob.actions,
       });
       return;

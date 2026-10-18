@@ -91,6 +91,32 @@ export function spriteFrames(
   return [];
 }
 
+/** 48E360 attack<i>/info. Missing mandatory range vectors are NOT guessed from canvas size. */
+export interface MobAttackArt {
+  action:number;name:string;type:0|1|2;conMP:number;duration:number;visualDuration:number;
+  effectAfter:number;attackAfter:number;
+  range?:{left:number;top:number;right:number;bottom:number};sp?:{x:number;y:number};radius?:number;
+  effect:SpriteFrame[];hit:SpriteFrame[];ball:SpriteFrame[];
+}
+export function mobAttacksOf(reader:ArtReader,image:string,actions:Record<string,SpriteFrame[]>):MobAttackArt[]{
+  const out:MobAttackArt[]=[];
+  for(const [index,name] of ['attack1','attack2','attackF'].entries()){
+    const path=`${image}/${name}/info`,node=reader.node(path),body=actions[name];
+    if(!node||!body?.length)continue;
+    const info=nodeRecord(node),range=nodeRecord(reader.node(`${path}/range`));
+    const number=(key:string)=>typeof info[key]==='number'&&Number.isFinite(info[key])?Math.trunc(info[key] as number):0;
+    const type=number('type');if(type!==0&&type!==1&&type!==2)continue;
+    const lt=vectorOf(range.lt),rb=vectorOf(range.rb),sp=vectorOf(range.sp);
+    if(type===0?(!lt||!rb||lt[0]>=rb[0]||lt[1]>=rb[1]):(!sp||typeof range.r!=='number'||!Number.isFinite(range.r)||range.r<=0))continue;
+    out.push({action:index+10,name,type,conMP:Math.max(0,number('conMP')),
+      duration:body.reduce((n,f)=>n+f.delay,0),visualDuration:body.reduce((n,f)=>n+Math.max(30,Math.ceil(f.delay/30)*30),0),
+      effectAfter:number('effectAfter'),attackAfter:number('attackAfter'),
+      ...(type===0?{range:{left:lt![0],top:lt![1],right:rb![0],bottom:rb![1]}}:{sp:{x:sp![0],y:sp![1]},radius:Math.trunc(range.r as number)}),
+      effect:spriteFrames(reader,path,'effect',[],120),hit:spriteFrames(reader,path,'hit',[],120),ball:spriteFrames(reader,path,'ball',[],120)});
+  }
+  return out;
+}
+
 /** Every action of one image (`stand`, `move`, `hit1`, …) mapped to its frames. */
 export function spriteActions(reader: ArtReader, image: string): Record<string, SpriteFrame[]> {
   const node = reader.node(image);
@@ -201,6 +227,8 @@ export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefi
 export interface MobArt {
   templateId: number;
   bodyAttack?: boolean;
+  attacks?:MobAttackArt[];
+  maxMP?:number;
   /** Original own info.pushed (48D080 default1), not linked art info. */
   pushed?:number;
   actions: Record<string, SpriteFrame[]>;
@@ -228,7 +256,7 @@ export function mobArtOf(
   const bodyAttack = Number(info.bodyAttack ?? 0) !== 0;
   return Object.keys(actions).length === 0
     ? undefined
-    : { templateId, actions, bodyAttack,pushed:Number(info.pushed??1) };
+    : { templateId, actions, bodyAttack,pushed:Number(info.pushed??1),maxMP:Number(info.maxMP??0),attacks:mobAttacksOf(reader,image,actions) };
 }
 
 /** A cached `templateId -> art` reader for the web endpoint (`--data off` has none). */

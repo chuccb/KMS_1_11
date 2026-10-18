@@ -9,6 +9,7 @@
 
 | 範圍 | 現況入口 |
 |---|---|
+| 怪物主動攻擊／MP／effect-ball-hit／攻擊中KB／晚進場body | [原證與server政策](NATIVE_MOB_ATTACKS.md)，非完整owner AI；含唯讀原素材閱覽 |
 | 穿戴需求／正反swap／原子換裝／最低級準備／攻擊關聯時鐘 | [原證與未測試界線](NATIVE_EQUIP_ADMISSION.md) |
 | 十個主動技能／七鍵／多彈藥／Lucky Seven／增益與隊伍 | [遠距與攻速界線](NATIVE_RANGED_SKILLS.md)、[第一批](ACTIVE_SKILLS.md)，非全技能完成 |
 | 原協定、登入／選角／建刪角、原版 WZ 畫面 | [server](../server/README.md)、[CLIENT](CLIENT.md)、[FINDINGS](protocol/FINDINGS.md) |
@@ -35,7 +36,7 @@
 
 - 主動技能已接十招及七鍵／消耗／多段／多彈藥／buff／party，見[範圍與新證據](NATIVE_RANGED_SKILLS.md)；續補其他魔法／箭鏢／Magic Guard／booster施放幅度／mob debuff與手動解除，其餘被動逐條還原。
 - 自然 AP／SP、原轉職流程與加成；資料未定位不套慣見5／3或後期規則。
-- 卷軸、cash／pet、完整怪物攻擊 AI、飛行／仇恨等分支。
+- 卷軸、cash／pet、完整怪物owner攻擊 AI／狀態機、monster skill、飛行／仇恨等分支；基本active metadata與呈現已接，不代表全AI完成。
 - 原 quest／taxi／trunk scripts：原 server 腳本缺證據，不自創價格／路線／任務。
 - 組隊已接指令／名冊／原式邀請與Rage收件者，尚非完整party視窗；交易／Messenger等完整瀏覽器UI仍待接通。
 

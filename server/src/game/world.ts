@@ -88,6 +88,8 @@ export interface FieldMember {
    * already in the map as well as for a player who joins later.
    */
   avatarItems: number[];
+  /** Optional for fixtures; live sessions expose current HP>0 without the field owning character stats. */
+  readonly combatAlive?:boolean;
   /** Where the player is. The field fills it in at spawn and updates it on every `0x22` it sends. */
   at?: FieldPosition;
   /**
@@ -409,6 +411,8 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   tick(now: number): void {
     this.assignNpcControllers();
     if (this.members.size > 0) {
+      const targets=[...this.members.values()].flatMap(m=>m.combatAlive!==false&&m.at?[{characterId:m.characterId,x:m.at.x,y:m.at.y}]:[]);
+      for(const packet of this.mobs.attackPackets(now,targets))this.broadcast(packet);
       for (const packet of this.mobs.movePackets(now)) this.broadcast(packet);
     }
     for (const packet of this.mobs.lifecyclePackets(now)) this.broadcast(packet);

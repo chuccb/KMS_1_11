@@ -630,7 +630,7 @@ async function runServe(rest: string[]): Promise<number> {
         ...(itemCatalog !== undefined ? { itemCatalog } : {}),
         ...(skills !== undefined ? { skills } : {}),
         ...(mobTemplate !== undefined ? { mobTemplate } : {}),
-        ...(game ? {testTools:(username:string,id:number,request:unknown)=>game!.testTools(username,id,request)} : {}),
+        ...(game ? {mobPresentation:(username:string,id:number,mobId:number)=>game!.mobPresentation(username,id,mobId),testTools:(username:string,id:number,request:unknown)=>game!.testTools(username,id,request)} : {}),
         ...(art !== undefined ? { art } : {}),
         ...(audio !== undefined ? { audio } : {}),
         ...(log ? { log } : {}),

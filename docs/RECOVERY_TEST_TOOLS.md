@@ -172,3 +172,14 @@ LIVE入口是web8495，不是login8496／game8497。已有角色與其他最新�
 自然恢復主線也改傳正確body ID，繩梯36/37不是movement7/8。
 原碼證據、硬編碼意義、server政策與未完成範圍見 [NATIVE_POSTURE_ATTACK](NATIVE_POSTURE_ATTACK.md)。
 沿用已有遊玩進度的preview-faces存檔；本輪僅停服冷備，不重seed／重置等級或物品。全部回歸來源未執行。
+
+
+## 2026-10-18：唯讀怪物動作／主動攻擊鏈
+
+「體驗工具」→「唯讀 · 原怪物動作／主動攻擊鏈」，預填9999997，可輸入原mob ID、選左右、
+attack1／2／F、hit／die／普通動作，切換是否串原info→effect／ball／hit時序。
+不生怪、不給道具、不修改角色或MP、不送攻擊、不出聲；虛線玩家RECT明示為工具示意。
+9999999只有身體圖、無attack/info，不假造攻擊或傷害；9999997是本包唯一有效info例。
+沿用live純規則但獨立metadata request／canvas／clock／queue；關閉、收合、切圖／斷線清理。
+此EXE主動hit只有圖，HP傷害另走body contact；來源與未知見[NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md)。
+未執行browser或其他驗證，不將此入口的存在稱為驗收。

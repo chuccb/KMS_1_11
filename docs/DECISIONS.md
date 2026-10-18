@@ -2750,3 +2750,20 @@ JSON預測不是native ACK、TCP damage仍client-reported。來源、公式、�
 499900 flip=(bit==0)；4998D0 forced期間不重建flip，結束才接最新base方向。未憑印象反轉全部NPC／改life.f缺省。
 
 原證、固定常數意義、未完成邊界、唯讀入口與同save冷備見 [NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)。
+
+
+## ADR-076：怪物主動攻擊、art-only hit回呼與攻擊中KB（2026-10-18）
+
+**狀態：已實裝來源；未test／check／typecheck／語法／browser／VM／probe。**
+
+487D10、488220、488E30、4862C0、48E360與005875FC／0058767C的+8交叉：50DEC0只建立hit圖，
+不扣HP、不走玩家1500ms鎖；身體碰撞仍獨立，不加入後版攻擊傷害或偽Attack聲。
+接真attack/info、MP／Value封包事件、逐20px展寬範圍、type2的420140初速−40拋物線、原ball碰撞續存與world FX。
+type1不呼420140，不能猜直線MoveTo。圖而無info的9999999不生成可用招。
+
+forced10..12保護body/facing但不免KB；raw hit、attack視窗與物理路徑分離，冷metadata有明示duration，
+latejoin經已驗證session的browser sideband續body相位，不偽造native opcode、不重放舊release。
+補contact完整body動作、die linked／single-canvas共用reader與變體、MP唯讀狀態及獨立怪物畫布閱覽。
+
+server採engaged／同場live attacker／grounded／MP權威政策，不宣稱原state5／owner controller已完整還原。
+原證、常數分類、清理／過期、同save冷備與未執行fixtures見 [NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md)。

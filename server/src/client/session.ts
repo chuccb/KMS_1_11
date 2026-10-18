@@ -340,6 +340,7 @@ export interface UserView {
 }
 
 export interface MobView {
+  mp?:number;
   mobId: number;
   templateId: number;
   x: number;
@@ -415,15 +416,17 @@ export type ClientEvent =
   | {
       kind: "mob-move";
       actionByte?:number;
+      value?:number;
       mobId: number;
       x: number;
       y: number;
       path?: MovePath;
       facing?: number;
     }
-  /** `0x30`: the monster was hit; its `die1` frames are the corpse. */
+  /** `0x30`: the monster was hit; its selected die1/die2/dieF frames are the corpse. */
   | { kind: "mob-die"; mobId: number }
   | { kind: "mob-leave"; mobId: number }
+  | { kind: "mob-stat"; mobId:number;mp:number }
   /** `0x23`/`0x24`/`0x25`: another user's melee/shot, including action, speed and projectile id. */
   | {
       kind: "user-attack";
@@ -941,6 +944,9 @@ export class ClientSession {
   /** CWvsApp+652, seeded alongside +632 but advanced independently. */
   touchRandom: ClientRandom | undefined;
   private nextReviveAt = 0;
+
+  /** Read-only public projection; browser bridge must not reach into private session state. */
+  get selfView():Readonly<SelfView>|undefined{return this.self;}
 
   /** The last snapshot itself, for callers that want more than the view. */
   get character(): CharacterData | undefined {
@@ -1866,7 +1872,7 @@ export class ClientSession {
             y: last.y,
             path: move.body.path,
             ...(actionByte>=0?{facing:actionByte&1}:{}),
-            actionByte,
+            actionByte,value:move.body.value,
           });
           return;
         }
@@ -1943,10 +1949,9 @@ export class ClientSession {
           return;
         }
         case MOB_OPCODE.stat: {
-          // `0x34`: the mob's stat block. This build sends only its MP, and the page has no HP/MP
-          // bar over a monster - the flash it draws is the client's own `hit1`. Consume it quietly
-          // instead of reporting the opcode as unknown on every hit.
-          readMobStat(new PacketReader(plain, 1));
+          const stat=readMobStat(new PacketReader(plain,1));
+          const mob=this.mobs.get(stat.mobId);if(mob)mob.mp=stat.mp;
+          this.emit({kind:'mob-stat',...stat});
           return;
         }
         case NPC_OPCODE.enterField: {

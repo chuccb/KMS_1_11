@@ -578,3 +578,12 @@ found」之外的另一種空白。
 取消／重試／防重送與密碼清理，以及原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
 拖曳滑塊、背包減少後捲動與選取清理、視窗拖曳在畫布外放開、位置儲存，以及 WZ 說明的字面 `\n`
 換行。`server/test/client-ui.test.ts` 將它納入 `npm test`。這是互動回歸，不代替真 canvas 的像素檢查。
+
+
+## 2026-10-18：怪物主動攻擊鏈與唯讀入口（ADR-076，未測試）
+
+取代早期「怪物沒有主動攻擊」的現況描述：已串真attack/info、選招／MP／Value、effect／ball／hit、
+攻擊body期間KB路徑共存、完整body contact frame驗證、die素材解析與變體、晚進場body phase。
+此EXE的50DEC0只播放原hit圖，不是傷害／HP回報；body touch仍獨立。
+owner/controller、原狀態機、完整飛行／monster skill與歷史球latejoin仍有缺口，server採明示engaged政策。
+工具新增唯讀原怪物canvas（預填9999997）；不生怪、不改進度。詳[NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md)。

@@ -772,4 +772,4 @@ body {
 /* Explicit read-only developer inspector, not a native game window/skin. */
 #qa-motion { border:1px solid #59687b; padding:10px; margin:14px 0; }
 #qa-motion summary { cursor:pointer; }
-#qa-motion-canvas { display:block; max-width:100%; background:#e5edf5; image-rendering:pixelated; }
+#qa-motion-canvas, #qa-mob-canvas { display:block; max-width:100%; background:#e5edf5; image-rendering:pixelated; }

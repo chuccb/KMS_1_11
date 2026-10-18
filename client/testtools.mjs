@@ -7,6 +7,7 @@ export function testTools({
   getNpcStatus = () => "",
   drawMotionPreview = () => "",
   resetMotionPreview = () => {},
+  drawMobPreview=()=>"",resetMobPreview=()=>{},
   isInGame,
   onOpen,
   openSkills,
@@ -96,7 +97,7 @@ export function testTools({
   }
   function close() {
     opened = false;
-    resetMotionPreview();
+    resetMotionPreview();resetMobPreview();
     el("qa-confirm").checked = false;
     el("qa-ranged-raise").checked = false;
     sync();
@@ -187,6 +188,7 @@ export function testTools({
       close();
     }
   });
+  el("qa-mob").addEventListener("toggle",()=>{if(!el("qa-mob").open)resetMobPreview();});
   el("qa-motion").addEventListener("toggle", () => { if (!el("qa-motion").open) resetMotionPreview(); });
   el('qa-ranged-family').addEventListener('change',()=>{el('qa-ranged-raise').checked=false;sync();});
   el('qa-ranged-raise').addEventListener('change',sync);
@@ -251,6 +253,10 @@ export function testTools({
       return opened;
     },
     tick(now) {
+      if(opened&&el('qa-mob').open){
+        const text=drawMobPreview(now,{id:el('qa-mob-id').value.trim(),action:el('qa-mob-action').value,left:el('qa-mob-left').checked,chain:el('qa-mob-chain').checked});
+        if(el('qa-mob-status').textContent!==text)el('qa-mob-status').textContent=text;
+      }
       if (opened && el("qa-motion").open) {
         const text = drawMotionPreview(now, {
           weapon:el("qa-motion-weapon").value, action:el("qa-motion-action").value,
