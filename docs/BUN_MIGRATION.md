@@ -2,7 +2,17 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：掉落權威fh與真正typed呈現鏈
+## 最新增量：清晰尺寸與strict TS鏡頭／合成責任
+
+新增scene-surface／camera-lens／lens-controls，整理display／cursor／camera／drop視野與輸入整條鏈。
+五種清晰等比例尺寸（自動與1–4實體倍率）；小視窗捲動不降採樣。四種lens＋cut/fade/shutter，世界與原800×600 UI分開。
+原游標以整數實體bitmap＋image-set密度，DPR-only也更新，不先縮小CSS bitmap。client現86支TS，main.js與3MJS仍未遷完。
+六個latest與exact pins再核對一致；strict／format／build通過，focused58/0；完整1037/44（1081 tests／119 files，216.80s）。
+對2eaa5f2 failure multiset新增0／移除0，CI仍不綠。真Chromium七DPR×五尺寸35 screenshot與游標pixel blocks、原PNG×16lens/display組合通過。
+減少動態、保存／拒絕、輸入／dispose、RAF跳峰值均覆蓋；27純imports／0 I/O。LIVE同PID4942、84modules與唯讀120幀／0WS，不登入或動進度。
+細節與不保證的任意DPR／OS cursor plane界線見 [PIXEL_CAMERA](PIXEL_CAMERA.md)／ADR-084。
+
+## 前輪增量：掉落權威fh與真正typed呈現鏈
 
 新增純DropLandingIndex，怪物戰利品／玩家道具／金幣都沿真WZ有向地板選點，原0x43不增欄位；
 main抽出drop-presentation／drop-renderer，含unknown drop/remove守衛、hop與pickup連續性、實際PNG底部貼地及固定金幣幀。

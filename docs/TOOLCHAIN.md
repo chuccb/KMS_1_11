@@ -2,6 +2,10 @@
 
 更新：2026-10-18。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
+最新鏡頭增量：六個registry latest仍與下表exact pins一致；新增合成／lens／控制的strict TS責任，client現86支TS。
+strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s），對2eaa5f2失敗multiset新增0／移除0，CI仍不綠。
+七DPR×五尺寸／游標、16組原PNG分層與LIVE同PID唯讀驗證見 [PIXEL_CAMERA](PIXEL_CAMERA.md)；main／3MJS仍待實際遷移。
+
 ## 唯一版本與安裝入口
 
 | 工具 | 固定穩定版 | 鎖定來源 |
@@ -41,7 +45,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 83 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 86 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
   **`client/main.js` 及 server/scripts 剩餘 3 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。

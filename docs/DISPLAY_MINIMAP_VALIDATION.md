@@ -1,5 +1,8 @@
 # 清晰縮放與原版小地圖驗證（2026-10-17）
 
+> 現行尺寸／遠近／轉場與游標DPR政策已由ADR-084更新，見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+> 下文舊fit／native／降採樣、固定backing或CSS游標縮圖的敘述保留歷史時點，不是目前可用選項。
+
 > 後續ADR-082：7支browser工具已真正遷成TS；本頁舊node／MJS命令及PASS保留歷史時點，不是現行操作入口。
 > 現行安全命令、未執行的手動場景與最新型別整理見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
 

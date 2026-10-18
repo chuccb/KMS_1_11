@@ -36,7 +36,9 @@ export function cameraControls(
     select.title = CAMERA_MODES.find((definition) => definition.id === mode)?.detail ?? "";
   }
   sync();
-  select.addEventListener("change", () => {
+  let disposed = false;
+  function change() {
+    if (disposed) return;
     mode = cameraMode(select.value);
     sync();
     try {
@@ -44,11 +46,25 @@ export function cameraControls(
     } catch {
       // The preference still works for this page without persistent storage.
     }
-  });
-  recenter.addEventListener("click", onRecenter);
-  recenter.addEventListener("keydown", (event) => {
+  }
+  function center() {
+    if (!disposed) onRecenter();
+  }
+  function keydown(event: KeyboardEvent) {
     // Keyboard activation of this browser button must not also jump/attack in the field.
     if (event.key === " " || event.key === "Enter") event.stopPropagation();
-  });
-  return { mode: () => mode };
+  }
+  select.addEventListener("change", change);
+  recenter.addEventListener("click", center);
+  recenter.addEventListener("keydown", keydown);
+  return {
+    mode: () => mode,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      select.removeEventListener("change", change);
+      recenter.removeEventListener("click", center);
+      recenter.removeEventListener("keydown", keydown);
+    },
+  };
 }

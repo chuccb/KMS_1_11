@@ -33,11 +33,12 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 83個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 86個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
 | `client/drop-presentation.ts`／`drop-renderer.ts` | unknown drop/remove守衛、連續動畫、原PNG底部貼地與固定金幣幀；不代替server選fh |
 | `server/src/game/drop-landing.ts` | 所有掉落的有向真地板／下射線／虛空邊緣權威選點，原0x43格式不變 |
 | `client/entity-assets.ts`／`entity-resource-validation.ts`／`avatar-look.ts` | NPC/mob metadata驗證、field ownership／取消、native action量化與local/remote look規則 |
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
+| `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 整數世界像素／原UI兩段合成、四視野、時間轉場、偏好／減少動態；不改物理／協定 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
@@ -64,12 +65,12 @@ actor持有clock與已完成的immutable weapon profile；64座metadata cache去
 
 ## 呈現與資源
 
-- 800×600 邏輯畫面，Canvas 與 DOM 共用縮放／座標；原 WZ UI 畫在 Canvas，DOM 提供控制與可及性。
+- UI／DOM保持800×600邏輯座標；世界有獨立FOV，以整數實體倍率兩段合成。五種清晰尺寸，小視窗捲動不降採樣；見[PIXEL_CAMERA](PIXEL_CAMERA.md)。
 - `requestAnimationFrame` 驅動呈現；重建物理、時鐘、插值與動畫不等於完整原 CVecCtrl／CShape2D。
 - Web Audio 解碼／播放原資料所對應的音訊；不重寫 DirectSound／ACM 相容層。
 - `game/wzart.ts` 做 path／UOL／canvas reader 與快取；mapart／avatar／sprites 等供應渲染資料。
 - PNG、metadata、音訊由既有 `/api/...` 輸出，瀏覽器資源快取與取消／identity guard 管理生命週期。
-- `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；800×600 backing不變。
+- `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；只在實體倍率變化時重配800u×600u輸出backing。
 - archive1024 FIFO/UI優先（仍hard bound）、avatar256 LRU/實際blink預熱是browser policy，不是原EXE常數。
 - `assets/` 離線輸出仍可供分析，但不是 runtime 必經的「先全量轉檔」階段。
 - 原字型未隨專案重建；Gulim／本地合法 fallback 的 metrics 與 GDI 不保證像素相同。
@@ -93,8 +94,8 @@ ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checko
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
 main.js與3支MJS工具仍未完成型別化；已typed whisper還有未按當前admission重建的歷史情境。
-完整1023/44（1067tests／117files），既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
-本輪有真Chromium component DPR／PNG與LIVE唯讀標題120幀測試，0WS，不登入或操作玩家。
-舊沙箱程序／ignored save不在，已明示新建獨立測試入口；玩家開始遊玩後不再重啟或重置進度。
+完整1037/44（1081tests／119files），既有44個failure multiset未增減，CI仍不綠。strict／format／build通過不代表全遊戲驗收。
+本輪有真Chromium七DPR×五尺寸／游標與16組world/UI原PNG component；LIVE同PID4942、84modules與唯讀標題120幀，0WS，不登入或操作玩家。
+上一輪因舊沙箱程序／ignored save不在，已明示新建獨立入口；本輪保留其正在使用的同一程序與進度，不再重啟或重置。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
-詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

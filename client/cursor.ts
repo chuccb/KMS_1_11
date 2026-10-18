@@ -5,15 +5,30 @@ export interface CursorMetadata {
   oy: number;
 }
 function cursorMetadata(raw: unknown): CursorMetadata {
-  if (!raw || typeof raw !== "object") throw new Error("missing native cursor metadata");
-  const data = raw as Record<string, unknown>;
   if (
-    ![data.width, data.height, data.ox, data.oy].every(
-      (value) => typeof value === "number" && Number.isFinite(value),
-    )
+    !raw ||
+    typeof raw !== "object" ||
+    !("width" in raw) ||
+    !("height" in raw) ||
+    !("ox" in raw) ||
+    !("oy" in raw)
+  )
+    throw new Error("missing native cursor metadata");
+  const { width, height, ox, oy } = raw;
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    typeof ox !== "number" ||
+    typeof oy !== "number" ||
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    !Number.isFinite(ox) ||
+    !Number.isFinite(oy)
   )
     throw new Error("invalid native cursor metadata");
-  return data as unknown as CursorMetadata;
+  return { width, height, ox, oy };
 }
 /** CWvsApp 553320 -> UI/Basic.img/Cursor/arrow -> 556D60; Gr2D_DX8 10008430/10008120.
  * This archive has ONE arrow, not the later hand/pressed/animated cursor set. Keep it in the
@@ -21,25 +36,34 @@ function cursorMetadata(raw: unknown): CursorMetadata {
  */
 export const CURSOR_PATH = "UI/Basic.img/Cursor/arrow";
 
-/** CSS cursor bitmaps have implementation-specific limits (commonly 128x128). Scale with the
- * 800x600 surface, NOT again with DPR: the browser/OS already applies device scaling to cursors.
- * At extreme zoom cap the bitmap instead of silently losing the native cursor altogether.
+/** Rasterize only whole physical pixel blocks; image-set declares their actual density.
+ * Rounding a fractional CSS bitmap first would discard pixels at DPR 1.25/1.5. Keep native
+ * source pixels, cap by whole factors for the browser/OS 128px cursor budget, never downsample.
+ * Cursor hotspots are CSS integers; this archive's native arrow hotspot is exactly (0,0).
  */
-export function cursorLayout(meta: CursorMetadata, scale = 1) {
-  const { width, height, ox, oy } = meta;
-  if (![width, height, ox, oy].every(Number.isFinite) || width < 1 || height < 1)
-    throw new Error("invalid native cursor canvas metadata");
+export function cursorLayout(meta: CursorMetadata, deviceScale = 1, dpr = 1) {
+  const { width, height, ox, oy } = cursorMetadata(meta);
+  if (
+    !Number.isInteger(deviceScale) ||
+    deviceScale < 1 ||
+    deviceScale > 4 ||
+    !Number.isFinite(dpr) ||
+    dpr <= 0
+  )
+    throw new Error("invalid native cursor device scale/density");
   const factor = Math.min(
-    Number.isFinite(scale) && scale > 0 ? scale : 1,
-    128 / Math.max(width, height),
+    deviceScale,
+    Math.floor(128 / Math.max(width, height)),
+    Math.floor((128 * dpr) / Math.max(width, height)),
   );
-  const w = Math.max(1, Math.round(width * factor)),
-    h = Math.max(1, Math.round(height * factor));
+  if (factor < 1) throw new Error("native cursor cannot fit without losing source pixels");
+  const w = width * factor,
+    h = height * factor;
   return {
     width: w,
     height: h,
-    x: Math.max(0, Math.min(w - 1, Math.round((ox * w) / width))),
-    y: Math.max(0, Math.min(h - 1, Math.round((oy * h) / height))),
+    x: Math.max(0, Math.min(Math.floor((w - 1) / dpr), Math.round((ox * factor) / dpr))),
+    y: Math.max(0, Math.min(Math.floor((h - 1) / dpr), Math.round((oy * factor) / dpr))),
   };
 }
 
@@ -50,14 +74,15 @@ export function nativeCursor({
   surfaces: readonly HTMLElement[];
   onError?: (error: unknown) => void;
 }) {
-  let scale = 1;
+  let scale = 1,
+    density = 1;
   let meta: CursorMetadata | undefined,
     source: HTMLImageElement | undefined,
     lastSize: string | undefined;
   function paint() {
     if (!meta || !source) return;
-    const at = cursorLayout(meta, scale),
-      size = `${at.width}:${at.height}`;
+    const at = cursorLayout(meta, scale, density),
+      size = `${at.width}:${at.height}:${density}`;
     if (size === lastSize) return;
     const raster = document.createElement("canvas");
     raster.width = at.width;
@@ -66,7 +91,7 @@ export function nativeCursor({
     if (!ctx) throw new Error("native cursor raster unavailable");
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(source, 0, 0, at.width, at.height);
-    const value = `url("${raster.toDataURL("image/png")}") ${at.x} ${at.y}, url("/api/png/${encodeURIComponent(CURSOR_PATH)}") ${Math.max(0, Math.round(meta.ox))} ${Math.max(0, Math.round(meta.oy))}, default`;
+    const value = `image-set(url("${raster.toDataURL("image/png")}") ${density}x) ${at.x} ${at.y}, default`;
     for (const surface of surfaces) {
       surface.style.setProperty("--native-cursor", value);
       surface.classList.add("native-cursor-ready");
@@ -91,8 +116,9 @@ export function nativeCursor({
   })().catch(onError);
   return {
     ready,
-    resize(value: number) {
+    resize(value: number, dpr: number) {
       scale = value;
+      density = dpr;
       try {
         paint();
       } catch (error) {

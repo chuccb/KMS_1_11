@@ -12,34 +12,451 @@
       <p id="startup-error-message"></p>
       <a href="">重新載入頁面</a>
     </aside>
-    <canvas id="view" tabindex="-1" aria-label="遊戲畫面"></canvas>
+    <div id="game-viewport" aria-label="清晰遊戲畫面；視窗較小時可捲動">
+      <div id="game-stage">
+        <canvas id="view" tabindex="-1" aria-label="遊戲畫面"></canvas>
+        <!--
+      The game's own UI lives on the canvas; only the chat input has to be a real <input>. This layer
+      is placed and scaled exactly like `#view`, so its children can use the 2003 client's 800x600
+      coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
+    -->
+        <div id="game-ui">
+          <section
+            id="tooltip-preview"
+            class="hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="提示框唯讀閱覽；非原版工具"
+            tabindex="-1"
+          >
+            <div class="tooltip-preview-toolbar">
+              <strong>UI PREVIEW · 提示框唯讀閱覽（非原版工具）</strong>
+              <button id="tooltip-preview-close" type="button">關閉 · Esc</button>
+              <div id="tooltip-preview-choices" role="group" aria-label="原提示框範例"></div>
+              <p id="tooltip-preview-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <section
+            id="revive-dialog"
+            class="hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="revive-text"
+          >
+            <p id="revive-text" class="accessible-only">
+              확인을 누르시면 부활하게 됩니다. 부활을 하시면 안전한 마을로 이동됩니다.
+            </p>
+            <button
+              id="revive-ok"
+              class="sprite-hit"
+              type="button"
+              aria-label="부활 확인 / 確定復活；Enter"
+            >
+              OK
+            </button>
+          </section>
+          <section
+            id="dialogue"
+            class="hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dialogue-text"
+          >
+            <p id="dialogue-text" class="accessible-only"></p>
+            <input
+              id="dialogue-input"
+              class="hidden"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              aria-labelledby="dialogue-text"
+              aria-describedby="dialogue-error"
+            />
+            <p id="dialogue-error" class="accessible-only" role="status" aria-live="polite"></p>
+            <div id="dialogue-controls"></div>
+          </section>
+          <section
+            id="item-dialog"
+            class="hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="item-question"
+          >
+            <p id="item-question" class="accessible-only"></p>
+            <input
+              id="item-quantity"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="item-quantity-error"
+            />
+            <p
+              id="item-quantity-error"
+              class="accessible-only"
+              role="status"
+              aria-live="polite"
+            ></p>
+            <button id="item-dialog-ok" class="sprite-hit" type="button" aria-label="確定">
+              OK
+            </button>
+            <button id="item-dialog-cancel" class="sprite-hit" type="button" aria-label="取消">
+              Cancel
+            </button>
+          </section>
+          <section
+            id="equip-window"
+            class="hidden"
+            role="dialog"
+            aria-label="裝備視窗；E 開關，拖曳穿脫裝備"
+          >
+            <button id="equip-close" class="sprite-hit" type="button" aria-label="關閉裝備視窗">
+              Close
+            </button>
+          </section>
+          <section
+            id="skill-window"
+            class="hidden"
+            role="dialog"
+            aria-label="技能；K 開關"
+            aria-describedby="skill-values"
+          >
+            <div role="tablist" aria-label="原職業技能書">
+              <button id="skill-tab-0" class="sprite-hit" type="button" role="tab" hidden>I</button>
+              <button id="skill-tab-1" class="sprite-hit" type="button" role="tab" hidden>
+                II
+              </button>
+              <button id="skill-tab-2" class="sprite-hit" type="button" role="tab" hidden>
+                III
+              </button>
+              <button id="skill-tab-3" class="sprite-hit" type="button" role="tab" hidden>
+                IV
+              </button>
+            </div>
+            <button id="skill-close" class="sprite-hit" type="button" aria-label="關閉技能視窗">
+              Close
+            </button>
+            <button id="sp-up-0" class="sprite-hit" type="button" aria-label="提升技能" disabled>
+              SP
+            </button>
+            <button id="sp-up-1" class="sprite-hit" type="button" aria-label="提升技能" disabled>
+              SP
+            </button>
+            <button id="sp-up-2" class="sprite-hit" type="button" aria-label="提升技能" disabled>
+              SP
+            </button>
+            <button id="sp-up-3" class="sprite-hit" type="button" aria-label="提升技能" disabled>
+              SP
+            </button>
+            <p id="skill-values"></p>
+          </section>
+          <div
+            id="minimap-window"
+            class="hidden"
+            role="img"
+            aria-label="小地圖；拖曳移動，M 顯示或隱藏"
+          ></div>
+          <section
+            id="stat-window"
+            class="hidden"
+            role="dialog"
+            aria-label="角色能力"
+            aria-describedby="stat-values"
+          >
+            <button
+              id="stat-body"
+              class="sprite-hit"
+              type="button"
+              tabindex="-1"
+              aria-label="拖曳能力視窗標題列"
+            ></button>
+            <button id="stat-close" class="sprite-hit" type="button" aria-label="關閉能力視窗">
+              Close
+            </button>
+            <button
+              id="ap-maxHp"
+              class="sprite-hit"
+              type="button"
+              aria-label="增加最大 HP"
+              disabled
+            >
+              HP
+            </button>
+            <button
+              id="ap-maxMp"
+              class="sprite-hit"
+              type="button"
+              aria-label="增加最大 MP"
+              disabled
+            >
+              MP
+            </button>
+            <button id="ap-str" class="sprite-hit" type="button" aria-label="增加 STR">STR</button>
+            <button id="ap-dex" class="sprite-hit" type="button" aria-label="增加 DEX">DEX</button>
+            <button id="ap-int" class="sprite-hit" type="button" aria-label="增加 INT">INT</button>
+            <button id="ap-luk" class="sprite-hit" type="button" aria-label="增加 LUK">LUK</button>
+            <button
+              id="stat-detail"
+              class="sprite-hit"
+              type="button"
+              aria-label="開關詳細戰鬥能力"
+              aria-expanded="false"
+              disabled
+            >
+              Detail
+            </button>
+            <p id="stat-values"></p>
+          </section>
+          <div id="title-ui">
+            <nav id="title-menu" aria-label="主選單">
+              <button id="title-new" class="sprite-hit" type="button" aria-label="新帳號">
+                새로하기
+              </button>
+              <button id="title-continue" class="sprite-hit" type="button" aria-label="登入遊戲">
+                이어하기
+              </button>
+              <button id="title-homepage" class="sprite-hit" type="button" aria-label="官方網站">
+                홈페이지
+              </button>
+              <button id="title-quit" class="sprite-hit" type="button" aria-label="結束遊戲">
+                끝내기
+              </button>
+            </nav>
+            <section id="connect" class="hidden" role="dialog" aria-modal="true" aria-label="登入">
+              <input
+                id="user"
+                aria-label="帳號"
+                autocomplete="username"
+                maxlength="64"
+                spellcheck="false"
+              />
+              <input
+                id="pass"
+                aria-label="密碼"
+                type="password"
+                autocomplete="current-password"
+                maxlength="12"
+              />
+              <input
+                id="remember-user"
+                class="sprite-hit"
+                aria-label="記住帳號（不儲存密碼）"
+                type="checkbox"
+              />
+              <button id="login-lost" class="sprite-hit" type="button" aria-label="忘記帳號或密碼">
+                帳密查詢
+              </button>
+              <button id="login" class="sprite-hit" type="button" aria-label="登入">確定</button>
+              <button id="login-cancel" class="sprite-hit" type="button" aria-label="取消登入">
+                取消
+              </button>
+              <p id="status" class="status" role="status" aria-live="polite"></p>
+            </section>
+            <p id="title-notice" role="status" aria-live="polite"></p>
+          </div>
+
+          <section id="worlds" class="selection-overlay hidden" aria-label="選擇世界">
+            <div id="world-list" role="group" aria-label="世界列表"></div>
+            <button
+              id="world-connect"
+              class="sprite-hit"
+              type="button"
+              aria-label="連接世界"
+              disabled
+            >
+              連接世界
+            </button>
+          </section>
+          <section id="characters" class="selection-overlay hidden" aria-label="選擇角色">
+            <div id="character-list" role="group" aria-label="角色槽位"></div>
+            <button
+              id="character-enter"
+              class="sprite-hit"
+              type="button"
+              aria-label="進入遊戲"
+              disabled
+            >
+              進入遊戲
+            </button>
+            <button
+              id="character-delete"
+              class="sprite-hit"
+              type="button"
+              aria-label="刪除角色"
+              disabled
+            >
+              刪除角色
+            </button>
+            <button id="character-new" class="sprite-hit" type="button" aria-label="建立新角色">
+              建立新角色
+            </button>
+            <div
+              id="character-dialogs"
+              class="hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label="角色操作"
+            >
+              <div id="new-character" class="hidden">
+                <input
+                  id="new-name"
+                  aria-label="新角色名稱"
+                  maxlength="12"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+                <button id="check-name" class="sprite-hit" type="button" aria-label="檢查角色名稱">
+                  Check
+                </button>
+                <button id="create-combo-0" class="sprite-hit" type="button" aria-label="選擇臉型">
+                  臉型
+                </button>
+                <button id="create-combo-1" class="sprite-hit" type="button" aria-label="選擇髮型">
+                  髮型
+                </button>
+                <button id="create-combo-2" class="sprite-hit" type="button" aria-label="選擇上衣">
+                  上衣
+                </button>
+                <button id="create-combo-3" class="sprite-hit" type="button" aria-label="選擇下衣">
+                  下衣
+                </button>
+                <button id="create-combo-4" class="sprite-hit" type="button" aria-label="選擇鞋子">
+                  鞋子
+                </button>
+                <button id="create-combo-5" class="sprite-hit" type="button" aria-label="選擇武器">
+                  武器
+                </button>
+                <button
+                  id="roll-dice"
+                  class="sprite-hit"
+                  type="button"
+                  aria-label="重擲 STR DEX INT LUK"
+                >
+                  擲骰
+                </button>
+                <button id="create" class="sprite-hit" type="button" aria-label="確認建立角色">
+                  建立角色
+                </button>
+                <button
+                  id="create-cancel"
+                  class="sprite-hit"
+                  type="button"
+                  aria-label="取消建立角色"
+                >
+                  取消
+                </button>
+              </div>
+              <div id="creation-options"></div>
+              <div id="character-confirm" class="hidden">
+                <button id="native-yes" class="sprite-hit" type="button" aria-label="確認刪除角色">
+                  Yes
+                </button>
+                <button id="native-no" class="sprite-hit" type="button" aria-label="取消刪除角色">
+                  No
+                </button>
+                <button id="native-ok" class="sprite-hit" type="button" aria-label="確認訊息">
+                  OK
+                </button>
+              </div>
+            </div>
+            <p id="character-status" class="status" role="status" aria-live="polite"></p>
+          </section>
+
+          <div id="chatbox" class="hidden">
+            <div id="chat-history" role="log" aria-live="polite" aria-label="聊天記錄">
+              <ol id="chat-lines"></ol>
+            </div>
+            <div id="chat-scroll" class="disabled" aria-label="捲動聊天記錄">
+              <div data-chat-track></div>
+              <button type="button" data-chat-prev aria-label="上一行" disabled></button>
+              <button type="button" data-chat-thumb aria-label="拖曳聊天記錄" hidden></button>
+              <button type="button" data-chat-next aria-label="下一行" disabled></button>
+            </div>
+            <button
+              id="chat-whisper"
+              type="button"
+              title="選擇悄悄話收件人"
+              aria-label="悄悄話"
+              aria-pressed="false"
+            ></button>
+            <div id="emotes"></div>
+            <input
+              id="say"
+              placeholder=""
+              aria-label="聊天輸入"
+              title="Enter 開始輸入，再按 Enter 送出；/w 名字 訊息、/f 名字"
+              maxlength="70"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
 
     <header id="bar">
       <strong>KMS 1.11</strong>
       <span id="where">未連線</span>
-      <select id="view-scale" aria-label="畫面縮放模式">
-        <option value="pixel">清晰整數像素</option>
-        <option value="native">原尺寸 800×600</option>
-        <option value="fit">填滿視窗（非整數）</option>
-      </select>
+      <select id="view-scale" aria-label="清晰等比例畫面尺寸"></select>
       <select id="camera-mode" aria-label="鏡頭模式（瀏覽器自訂）"></select>
-      <button id="camera-recenter" type="button" title="將鏡頭重新對準角色；固定鏡頭模式也可使用">鏡頭回中</button>
+      <button id="camera-recenter" type="button" title="將鏡頭重新對準角色；固定鏡頭模式也可使用">
+        鏡頭回中
+      </button>
+      <details id="camera-lab">
+        <summary>鏡頭演出 · 非原版</summary>
+        <section class="camera-lab-panel" aria-label="清晰像素鏡頭與轉場">
+          <label
+            >遠近
+            <select id="camera-lens" aria-label="鏡頭遠近"></select
+          ></label>
+          <label
+            >切換效果
+            <select id="camera-transition" aria-label="鏡頭轉場"></select
+          ></label>
+          <div>
+            <button id="camera-wider" type="button">拉遠 −</button
+            ><button id="camera-closer" type="button">拉近 ＋</button>
+          </div>
+          <button id="camera-replay" type="button">播放淡出／淡入</button>
+          <button id="camera-reset" type="button">還原標準鏡頭／直接切換</button>
+          <p id="camera-status" role="status" aria-live="polite"></p>
+          <p>
+            世界與 UI 分開：背包、聊天與點擊座標不變。遠近只在清晰整數像素間切換；1×
+            實體像素已是最遠，不用縮小或模糊偷換更大視野。
+          </p>
+          <small>Esc 關閉；沒有自動搖晃、旋轉或閃光。轉場不暫停世界。</small>
+        </section>
+      </details>
       <details id="motion-lab">
         <summary>手感實驗 · 非原版</summary>
         <section class="motion-lab-panel" aria-label="本機物理與呈現實驗">
           <strong>本機角色更新；可隨時切換</strong>
-          <label>物理步長 <select id="physics-step" aria-label="本機角色物理步長（實驗）"></select></label>
-          <label>呈現方式 <select id="presentation-mode" aria-label="角色位置呈現"></select></label>
+          <label
+            >物理步長
+            <select id="physics-step" aria-label="本機角色物理步長（實驗）"></select
+          ></label>
+          <label
+            >呈現方式
+            <select id="presentation-mode" aria-label="角色位置呈現"></select
+          ></label>
           <p id="motion-status" role="status" aria-live="polite"></p>
-          <p>小步長增加 CPU 工作；會改變碰撞／軌跡，不保證比原版更好。走速、重力、攻擊動畫、怪物時鐘與網路批次不變。選單開啟時暫停角色輸入，不暫停世界。</p>
+          <p>
+            小步長增加 CPU
+            工作；會改變碰撞／軌跡，不保證比原版更好。走速、重力、攻擊動畫、怪物時鐘與網路批次不變。選單開啟時暫停角色輸入，不暫停世界。
+          </p>
           <button id="motion-reset" type="button">還原 30ms ＋ 平滑插值</button>
           <small>Esc 關閉並回到遊戲；鏡頭可在旁邊獨立選擇。</small>
         </section>
       </details>
-      <button id="sound-toggle" type="button" aria-pressed="false">
-        聲音：開
+      <button id="sound-toggle" type="button" aria-pressed="false">聲音：開</button>
+      <button
+        id="test-tools-toggle"
+        type="button"
+        aria-controls="test-tools-shell"
+        aria-expanded="false"
+        disabled
+      >
+        體驗工具（非原版）
       </button>
-      <button id="test-tools-toggle" type="button" aria-controls="test-tools-shell" aria-expanded="false" disabled>體驗工具（非原版）</button>
       <button id="log-toggle" type="button">日誌</button>
     </header>
 
@@ -48,482 +465,19 @@
       <ol id="log-lines"></ol>
     </aside>
 
-    <!--
-      The game's own UI lives on the canvas; only the chat input has to be a real <input>. This layer
-      is placed and scaled exactly like `#view`, so its children can use the 2003 client's 800x600
-      coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
-    -->
-    <div id="game-ui">
-      <section id="tooltip-preview" class="hidden" role="dialog" aria-modal="true" aria-label="提示框唯讀閱覽；非原版工具" tabindex="-1">
-        <div class="tooltip-preview-toolbar">
-          <strong>UI PREVIEW · 提示框唯讀閱覽（非原版工具）</strong>
-          <button id="tooltip-preview-close" type="button">關閉 · Esc</button>
-          <div id="tooltip-preview-choices" role="group" aria-label="原提示框範例"></div>
-          <p id="tooltip-preview-status" role="status" aria-live="polite"></p>
-        </div>
-      </section>
-      <section id="revive-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="revive-text">
-        <p id="revive-text" class="accessible-only">확인을 누르시면 부활하게 됩니다. 부활을 하시면 안전한 마을로 이동됩니다.</p>
-        <button id="revive-ok" class="sprite-hit" type="button" aria-label="부활 확인 / 確定復活；Enter">OK</button>
-      </section>
-      <section id="dialogue" class="hidden" role="dialog" aria-modal="true" aria-labelledby="dialogue-text">
-        <p id="dialogue-text" class="accessible-only"></p>
-        <input id="dialogue-input" class="hidden" type="text" autocomplete="off" spellcheck="false" aria-labelledby="dialogue-text" aria-describedby="dialogue-error" />
-        <p id="dialogue-error" class="accessible-only" role="status" aria-live="polite"></p>
-        <div id="dialogue-controls"></div>
-      </section>
-      <section
-        id="item-dialog"
-        class="hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="item-question"
-      >
-        <p id="item-question" class="accessible-only"></p>
-        <input
-          id="item-quantity"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          spellcheck="false"
-          aria-describedby="item-quantity-error"
-        />
-        <p
-          id="item-quantity-error"
-          class="accessible-only"
-          role="status"
-          aria-live="polite"
-        ></p>
-        <button
-          id="item-dialog-ok"
-          class="sprite-hit"
-          type="button"
-          aria-label="確定"
-        >
-          OK
-        </button>
-        <button
-          id="item-dialog-cancel"
-          class="sprite-hit"
-          type="button"
-          aria-label="取消"
-        >
-          Cancel
-        </button>
-      </section>
-      <section
-        id="equip-window"
-        class="hidden"
-        role="dialog"
-        aria-label="裝備視窗；E 開關，拖曳穿脫裝備"
-      >
-        <button
-          id="equip-close"
-          class="sprite-hit"
-          type="button"
-          aria-label="關閉裝備視窗"
-        >
-          Close
-        </button>
-      </section>
-      <section id="skill-window" class="hidden" role="dialog" aria-label="技能；K 開關" aria-describedby="skill-values">
-        <div role="tablist" aria-label="原職業技能書">
-          <button id="skill-tab-0" class="sprite-hit" type="button" role="tab" hidden>I</button>
-          <button id="skill-tab-1" class="sprite-hit" type="button" role="tab" hidden>II</button>
-          <button id="skill-tab-2" class="sprite-hit" type="button" role="tab" hidden>III</button>
-          <button id="skill-tab-3" class="sprite-hit" type="button" role="tab" hidden>IV</button>
-        </div>
-        <button id="skill-close" class="sprite-hit" type="button" aria-label="關閉技能視窗">Close</button>
-        <button id="sp-up-0" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
-        <button id="sp-up-1" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
-        <button id="sp-up-2" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
-        <button id="sp-up-3" class="sprite-hit" type="button" aria-label="提升技能" disabled>SP</button>
-        <p id="skill-values"></p>
-      </section>
-      <div
-        id="minimap-window"
-        class="hidden"
-        role="img"
-        aria-label="小地圖；拖曳移動，M 顯示或隱藏"
-      ></div>
-      <section
-        id="stat-window"
-        class="hidden"
-        role="dialog"
-        aria-label="角色能力"
-        aria-describedby="stat-values"
-      >
-        <button
-          id="stat-body"
-          class="sprite-hit"
-          type="button"
-          tabindex="-1"
-          aria-label="拖曳能力視窗標題列"
-        ></button>
-        <button
-          id="stat-close"
-          class="sprite-hit"
-          type="button"
-          aria-label="關閉能力視窗"
-        >
-          Close
-        </button>
-        <button
-          id="ap-maxHp"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加最大 HP"
-          disabled
-        >
-          HP
-        </button>
-        <button
-          id="ap-maxMp"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加最大 MP"
-          disabled
-        >
-          MP
-        </button>
-        <button
-          id="ap-str"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加 STR"
-        >
-          STR
-        </button>
-        <button
-          id="ap-dex"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加 DEX"
-        >
-          DEX
-        </button>
-        <button
-          id="ap-int"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加 INT"
-        >
-          INT
-        </button>
-        <button
-          id="ap-luk"
-          class="sprite-hit"
-          type="button"
-          aria-label="增加 LUK"
-        >
-          LUK
-        </button>
-        <button
-          id="stat-detail"
-          class="sprite-hit"
-          type="button"
-          aria-label="開關詳細戰鬥能力"
-          aria-expanded="false"
-          disabled
-        >
-          Detail
-        </button>
-        <p id="stat-values"></p>
-      </section>
-      <div id="title-ui">
-        <nav id="title-menu" aria-label="主選單">
-          <button
-            id="title-new"
-            class="sprite-hit"
-            type="button"
-            aria-label="新帳號"
-          >
-            새로하기
-          </button>
-          <button
-            id="title-continue"
-            class="sprite-hit"
-            type="button"
-            aria-label="登入遊戲"
-          >
-            이어하기
-          </button>
-          <button
-            id="title-homepage"
-            class="sprite-hit"
-            type="button"
-            aria-label="官方網站"
-          >
-            홈페이지
-          </button>
-          <button
-            id="title-quit"
-            class="sprite-hit"
-            type="button"
-            aria-label="結束遊戲"
-          >
-            끝내기
-          </button>
-        </nav>
-        <section
-          id="connect"
-          class="hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="登入"
-        >
-          <input
-            id="user"
-            aria-label="帳號"
-            autocomplete="username"
-            maxlength="64"
-            spellcheck="false"
-          />
-          <input
-            id="pass"
-            aria-label="密碼"
-            type="password"
-            autocomplete="current-password"
-            maxlength="12"
-          />
-          <input
-            id="remember-user"
-            class="sprite-hit"
-            aria-label="記住帳號（不儲存密碼）"
-            type="checkbox"
-          />
-          <button
-            id="login-lost"
-            class="sprite-hit"
-            type="button"
-            aria-label="忘記帳號或密碼"
-          >
-            帳密查詢
-          </button>
-          <button id="login" class="sprite-hit" type="button" aria-label="登入">
-            確定
-          </button>
-          <button
-            id="login-cancel"
-            class="sprite-hit"
-            type="button"
-            aria-label="取消登入"
-          >
-            取消
-          </button>
-          <p id="status" class="status" role="status" aria-live="polite"></p>
-        </section>
-        <p id="title-notice" role="status" aria-live="polite"></p>
-      </div>
-
-      <section
-        id="worlds"
-        class="selection-overlay hidden"
-        aria-label="選擇世界"
-      >
-        <div id="world-list" role="group" aria-label="世界列表"></div>
-        <button
-          id="world-connect"
-          class="sprite-hit"
-          type="button"
-          aria-label="連接世界"
-          disabled
-        >
-          連接世界
-        </button>
-      </section>
-      <section
-        id="characters"
-        class="selection-overlay hidden"
-        aria-label="選擇角色"
-      >
-        <div id="character-list" role="group" aria-label="角色槽位"></div>
-        <button
-          id="character-enter"
-          class="sprite-hit"
-          type="button"
-          aria-label="進入遊戲"
-          disabled
-        >
-          進入遊戲
-        </button>
-        <button
-          id="character-delete"
-          class="sprite-hit"
-          type="button"
-          aria-label="刪除角色"
-          disabled
-        >
-          刪除角色
-        </button>
-        <button
-          id="character-new"
-          class="sprite-hit"
-          type="button"
-          aria-label="建立新角色"
-        >
-          建立新角色
-        </button>
-        <div
-          id="character-dialogs"
-          class="hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="角色操作"
-        >
-          <div id="new-character" class="hidden">
-            <input
-              id="new-name"
-              aria-label="新角色名稱"
-              maxlength="12"
-              spellcheck="false"
-              autocomplete="off"
-            />
-            <button
-              id="check-name"
-              class="sprite-hit"
-              type="button"
-              aria-label="檢查角色名稱"
-            >
-              Check
-            </button>
-            <button
-              id="create-combo-0"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇臉型"
-            >
-              臉型
-            </button>
-            <button
-              id="create-combo-1"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇髮型"
-            >
-              髮型
-            </button>
-            <button
-              id="create-combo-2"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇上衣"
-            >
-              上衣
-            </button>
-            <button
-              id="create-combo-3"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇下衣"
-            >
-              下衣
-            </button>
-            <button
-              id="create-combo-4"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇鞋子"
-            >
-              鞋子
-            </button>
-            <button
-              id="create-combo-5"
-              class="sprite-hit"
-              type="button"
-              aria-label="選擇武器"
-            >
-              武器
-            </button>
-            <button
-              id="roll-dice"
-              class="sprite-hit"
-              type="button"
-              aria-label="重擲 STR DEX INT LUK"
-            >
-              擲骰
-            </button>
-            <button
-              id="create"
-              class="sprite-hit"
-              type="button"
-              aria-label="確認建立角色"
-            >
-              建立角色
-            </button>
-            <button
-              id="create-cancel"
-              class="sprite-hit"
-              type="button"
-              aria-label="取消建立角色"
-            >
-              取消
-            </button>
-          </div>
-          <div id="creation-options"></div>
-          <div id="character-confirm" class="hidden">
-            <button
-              id="native-yes"
-              class="sprite-hit"
-              type="button"
-              aria-label="確認刪除角色"
-            >
-              Yes
-            </button>
-            <button
-              id="native-no"
-              class="sprite-hit"
-              type="button"
-              aria-label="取消刪除角色"
-            >
-              No
-            </button>
-            <button
-              id="native-ok"
-              class="sprite-hit"
-              type="button"
-              aria-label="確認訊息"
-            >
-              OK
-            </button>
-          </div>
-        </div>
-        <p
-          id="character-status"
-          class="status"
-          role="status"
-          aria-live="polite"
-        ></p>
-      </section>
-
-      <div id="chatbox" class="hidden">
-        <div id="chat-history" role="log" aria-live="polite" aria-label="聊天記錄"><ol id="chat-lines"></ol></div>
-        <div id="chat-scroll" class="disabled" aria-label="捲動聊天記錄">
-          <div data-chat-track></div>
-          <button type="button" data-chat-prev aria-label="上一行" disabled></button>
-          <button type="button" data-chat-thumb aria-label="拖曳聊天記錄" hidden></button>
-          <button type="button" data-chat-next aria-label="下一行" disabled></button>
-        </div>
-        <button id="chat-whisper" type="button" title="選擇悄悄話收件人" aria-label="悄悄話" aria-pressed="false"></button>
-        <div id="emotes"></div>
-        <input
-          id="say"
-          placeholder=""
-          aria-label="聊天輸入"
-          title="Enter 開始輸入，再按 Enter 送出；/w 名字 訊息、/f 名字"
-          maxlength="70"
-          spellcheck="false"
-        />
-      </div>
-    </div>
-
     <div id="test-tools-shell" class="hidden">
       <aside id="test-tools-panel" role="dialog" aria-modal="true" aria-labelledby="qa-heading">
-        <div class="qa-heading"><h2 id="qa-heading">體驗工具 · 非原版功能</h2><button id="qa-close" type="button" aria-label="關閉體驗工具">關閉</button></div>
+        <div class="qa-heading">
+          <h2 id="qa-heading">體驗工具 · 非原版功能</h2>
+          <button id="qa-close" type="button" aria-label="關閉體驗工具">關閉</button>
+        </div>
         <p id="qa-character"></p>
         <fieldset>
           <legend>原提示框閱覽 · 非原版工具／唯讀</legend>
-          <p>使用遊戲各視窗的同一 renderer。可看需求圖字、實例裝備與技能 0／1／MAX；不轉職、不給物品、不學技能、不改存檔。場景不暫停。</p>
+          <p>
+            使用遊戲各視窗的同一 renderer。可看需求圖字、實例裝備與技能
+            0／1／MAX；不轉職、不給物品、不學技能、不改存檔。場景不暫停。
+          </p>
           <div class="qa-buttons">
             <button id="qa-tooltip-item" type="button">普通道具</button>
             <button id="qa-tooltip-equipment" type="button">商店裝備模板</button>
@@ -533,7 +487,10 @@
         </fieldset>
         <fieldset>
           <legend>對話窗範例 · 非原版工具／唯讀</legend>
-          <p>僅開啟本地 UI 範例，不執行任務、不發送 0x15、不變更角色或存檔。真 NPC 的任務腳本尚未還原；工具不暫停場景。</p>
+          <p>
+            僅開啟本地 UI 範例，不執行任務、不發送 0x15、不變更角色或存檔。真 NPC
+            的任務腳本尚未還原；工具不暫停場景。
+          </p>
           <div class="qa-buttons">
             <button id="qa-dialogue-say" type="button">翻頁／長文捲動</button>
             <button id="qa-dialogue-confirm" type="button">是／否</button>
@@ -546,76 +503,236 @@
         </fieldset>
         <details id="qa-motion">
           <summary>唯讀 · 原角色動作／武器姿勢閱覽（非原版工具）</summary>
-          <p>只讀WZ模板，不穿戴、不給道具、不修改角色或存檔。衣帽沿目前外觀；替代武器模板不帶盾牌。</p>
-          <label>武器 <select id="qa-motion-weapon">
-            <option value="self">目前穿戴外觀</option><option value="0">無武器</option>
-            <option value="1302000">1302000 · 單手劍</option><option value="1402000">1402000 · 雙手劍</option>
-            <option value="1412000">1412000 · 雙手斧</option>
-            <option value="1452000">1452000 · 弓</option><option value="1462000">1462000 · 弩</option>
-            <option value="1472000">1472000 · 拳套</option>
-          </select></label>
-          <label>身體動作 <select id="qa-motion-action">
-            <option value="stand1">站立（依武器stand）</option><option value="walk1">走路（依武器walk）</option>
-            <option value="alert">警戒姿勢</option><option value="jump">跳躍姿勢</option>
-            <option value="ladder">梯子</option><option value="rope">繩索</option>
-            <option value="basicMelee">普通近戰（首動作）</option><option value="proneStab">蹲刺（action32）</option>
-            <option value="basicShoot">普通射擊（首動作，無飛彈）</option>
-            <option value="prone">趴下姿勢</option><option value="fly">fly姿勢</option><option value="dead">dead身體姿勢</option>
-          </select></label>
+          <p>
+            只讀WZ模板，不穿戴、不給道具、不修改角色或存檔。衣帽沿目前外觀；替代武器模板不帶盾牌。
+          </p>
+          <label
+            >武器
+            <select id="qa-motion-weapon">
+              <option value="self">目前穿戴外觀</option>
+              <option value="0">無武器</option>
+              <option value="1302000">1302000 · 單手劍</option>
+              <option value="1402000">1402000 · 雙手劍</option>
+              <option value="1412000">1412000 · 雙手斧</option>
+              <option value="1452000">1452000 · 弓</option>
+              <option value="1462000">1462000 · 弩</option>
+              <option value="1472000">1472000 · 拳套</option>
+            </select></label
+          >
+          <label
+            >身體動作
+            <select id="qa-motion-action">
+              <option value="stand1">站立（依武器stand）</option>
+              <option value="walk1">走路（依武器walk）</option>
+              <option value="alert">警戒姿勢</option>
+              <option value="jump">跳躍姿勢</option>
+              <option value="ladder">梯子</option>
+              <option value="rope">繩索</option>
+              <option value="basicMelee">普通近戰（首動作）</option>
+              <option value="proneStab">蹲刺（action32）</option>
+              <option value="basicShoot">普通射擊（首動作，無飛彈）</option>
+              <option value="prone">趴下姿勢</option>
+              <option value="fly">fly姿勢</option>
+              <option value="dead">dead身體姿勢</option>
+            </select></label
+          >
           <label><input id="qa-motion-left" type="checkbox" /> 面向左</label>
-          <label><input id="qa-motion-climbing" type="checkbox" /> 閱覽器攀爬中（取消可看停格／恢復）</label>
-          <canvas id="qa-motion-canvas" width="240" height="140" aria-label="原角色PNG動作閱覽"></canvas>
+          <label
+            ><input id="qa-motion-climbing" type="checkbox" />
+            閱覽器攀爬中（取消可看停格／恢復）</label
+          >
+          <canvas
+            id="qa-motion-canvas"
+            width="240"
+            height="140"
+            aria-label="原角色PNG動作閱覽"
+          ></canvas>
           <p id="qa-motion-status" aria-live="off"></p>
-          <p>攀爬座標是閱覽器虛擬Y；不移動真角色。攻擊僅循環閱覽原PNG／分層特效，不選敵、不耗彈、不發攻擊封包、不出聲；也不假裝施放飛行技能或觸發死亡／Tomb。</p>
+          <p>
+            攀爬座標是閱覽器虛擬Y；不移動真角色。攻擊僅循環閱覽原PNG／分層特效，不選敵、不耗彈、不發攻擊封包、不出聲；也不假裝施放飛行技能或觸發死亡／Tomb。
+          </p>
         </details>
         <details id="qa-mob">
           <summary>唯讀 · 原怪物動作／主動攻擊鏈（非原版工具）</summary>
-          <p>獨立畫布與時鐘，不生怪、不改角色／MP或存檔、不送攻擊封包、不出聲。虛線只是閱覽器玩家判定框，不是原遊戲素材。</p>
-          <label>原WZ怪物ID <input id="qa-mob-id" type="text" inputmode="numeric" maxlength="7" value="9999997" /></label>
-          <label>動作 <select id="qa-mob-action"><option value="attack1">attack1</option><option value="attack2">attack2</option><option value="attackF">attackF</option><option value="stand">stand</option><option value="move">move</option><option value="jump">jump</option><option value="fly">fly</option><option value="hit1">hit1</option><option value="hit2">hit2</option><option value="hitF">hitF</option><option value="die1">die1</option><option value="die2">die2</option><option value="dieF">dieF</option></select></label>
-          <label><input id="qa-mob-left" type="checkbox" /> 面向左</label><label><input id="qa-mob-chain" type="checkbox" checked /> 接原info／effect／ball／hit時序</label>
-          <canvas id="qa-mob-canvas" width="460" height="240" aria-label="原怪物PNG與攻擊鏈唯讀閱覽"></canvas>
+          <p>
+            獨立畫布與時鐘，不生怪、不改角色／MP或存檔、不送攻擊封包、不出聲。虛線只是閱覽器玩家判定框，不是原遊戲素材。
+          </p>
+          <label
+            >原WZ怪物ID
+            <input id="qa-mob-id" type="text" inputmode="numeric" maxlength="7" value="9999997"
+          /></label>
+          <label
+            >動作
+            <select id="qa-mob-action">
+              <option value="attack1">attack1</option>
+              <option value="attack2">attack2</option>
+              <option value="attackF">attackF</option>
+              <option value="stand">stand</option>
+              <option value="move">move</option>
+              <option value="jump">jump</option>
+              <option value="fly">fly</option>
+              <option value="hit1">hit1</option>
+              <option value="hit2">hit2</option>
+              <option value="hitF">hitF</option>
+              <option value="die1">die1</option>
+              <option value="die2">die2</option>
+              <option value="dieF">dieF</option>
+            </select></label
+          >
+          <label><input id="qa-mob-left" type="checkbox" /> 面向左</label
+          ><label
+            ><input id="qa-mob-chain" type="checkbox" checked />
+            接原info／effect／ball／hit時序</label
+          >
+          <canvas
+            id="qa-mob-canvas"
+            width="460"
+            height="240"
+            aria-label="原怪物PNG與攻擊鏈唯讀閱覽"
+          ></canvas>
           <p id="qa-mob-status" aria-live="off"></p>
-          <p>9999997 是本包唯一帶有效 attack/info 的怪物；9999999 雖有攻擊身體圖，沒有info，不能據此造招。此EXE主動命中只放hit圖；身體碰撞傷害獨立。</p>
+          <p>
+            9999997 是本包唯一帶有效 attack/info 的怪物；9999999
+            雖有攻擊身體圖，沒有info，不能據此造招。此EXE主動命中只放hit圖；身體碰撞傷害獨立。
+          </p>
         </details>
-        <p class="qa-warning">下列寫入操作只操作目前登入角色。能力配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。</p>
+        <p class="qa-warning">
+          下列寫入操作只操作目前登入角色。能力配置都是明示的測試數值，不是原版轉職或自然發點；會寫入目前存檔。工具不暫停怪物，建議先去無怪城鎮。
+        </p>
         <p id="qa-checkpoint-note"></p>
         <p id="test-tools-status" role="status" aria-live="polite"></p>
-        <fieldset><legend>1 · 方便移動（沿用原地圖命令）</legend>
-          <div class="qa-buttons"><button id="qa-town" type="button" disabled>無怪城鎮 · 엘리니아</button><button id="qa-hunt" type="button" disabled>獵場／NPC Robin · 40000</button><button id="qa-layer-town" type="button" disabled>圖層／遮擋 · 103000000</button><button id="qa-jump-cloud" type="button" disabled>跳躍怪／雲層 · 104040000</button></div>
-          <p>圖層入口只傳送地圖，不改裝備或能力。可直接比較平台前後、攀繩、揮刀殘影、名字與掉落物；帽子／頭髮的遮擋依目前穿戴的原WZ裝備。</p>
+        <fieldset>
+          <legend>1 · 方便移動（沿用原地圖命令）</legend>
+          <div class="qa-buttons">
+            <button id="qa-town" type="button" disabled>無怪城鎮 · 엘리니아</button
+            ><button id="qa-hunt" type="button" disabled>獵場／NPC Robin · 40000</button
+            ><button id="qa-layer-town" type="button" disabled>圖層／遮擋 · 103000000</button
+            ><button id="qa-jump-cloud" type="button" disabled>跳躍怪／雲層 · 104040000</button>
+          </div>
+          <p>
+            圖層入口只傳送地圖，不改裝備或能力。可直接比較平台前後、攀繩、揮刀殘影、名字與掉落物；帽子／頭髮的遮擋依目前穿戴的原WZ裝備。
+          </p>
           <p id="qa-npc">NPC 唯讀狀態（非原版工具）</p>
-          <p>40000 的 Robin 位於 (69,275)。自言自語不需點擊，依原待機池與4–12秒抽選；深紅氣泡約5秒，期間隱藏名牌。工具不強制演出或修改NPC資料。額外動作的原送／收索引有差異，現採明示的透明轉送政策，不保證每次抽選都有表情。</p>
-          <label>找地圖 <input id="qa-map-filter" type="search" placeholder="ID／韓文名稱" /></label>
-          <label>原始地圖 <select id="qa-map"></select></label><button id="qa-map-go" type="button" disabled>前往選擇地圖</button>
+          <p>
+            40000 的 Robin 位於
+            (69,275)。自言自語不需點擊，依原待機池與4–12秒抽選；深紅氣泡約5秒，期間隱藏名牌。工具不強制演出或修改NPC資料。額外動作的原送／收索引有差異，現採明示的透明轉送政策，不保證每次抽選都有表情。
+          </p>
+          <label
+            >找地圖 <input id="qa-map-filter" type="search" placeholder="ID／韓文名稱"
+          /></label>
+          <label
+            >原始地圖
+            <select id="qa-map"></select></label
+          ><button id="qa-map-go" type="button" disabled>前往選擇地圖</button>
         </fieldset>
-        <fieldset><legend>2 · 明確同意後才修改</legend>
-          <label><input id="qa-confirm" type="checkbox" /> 我了解這不是原版規則，並同意修改目前角色及保存。</label>
-          <div class="qa-buttons"><button id="qa-warrior" type="button">填入戰士體驗配置</button><button id="qa-archer" type="button">填入弓手體驗配置</button><button id="qa-magician" type="button">填入法師體驗配置</button><button id="qa-thief" type="button">填入盜賊體驗配置</button></div>
-          <label>職業（有原技能書） <select id="qa-job"></select></label>
-          <div class="qa-numbers"><label>AP <input id="qa-ap" type="number" min="0" max="32767" step="1" value="20" /></label><label>SP <input id="qa-sp" type="number" min="0" max="32767" step="1" value="40" /></label></div>
-          <label><input id="qa-reset-skills" type="checkbox" /> 套用時清除已學技能（原紀錄保留於還原點）</label>
+        <fieldset>
+          <legend>2 · 明確同意後才修改</legend>
+          <label
+            ><input id="qa-confirm" type="checkbox" />
+            我了解這不是原版規則，並同意修改目前角色及保存。</label
+          >
+          <div class="qa-buttons">
+            <button id="qa-warrior" type="button">填入戰士體驗配置</button
+            ><button id="qa-archer" type="button">填入弓手體驗配置</button
+            ><button id="qa-magician" type="button">填入法師體驗配置</button
+            ><button id="qa-thief" type="button">填入盜賊體驗配置</button>
+          </div>
+          <label
+            >職業（有原技能書）
+            <select id="qa-job"></select
+          ></label>
+          <div class="qa-numbers">
+            <label
+              >AP <input id="qa-ap" type="number" min="0" max="32767" step="1" value="20" /></label
+            ><label
+              >SP <input id="qa-sp" type="number" min="0" max="32767" step="1" value="40"
+            /></label>
+          </div>
+          <label
+            ><input id="qa-reset-skills" type="checkbox" />
+            套用時清除已學技能（原紀錄保留於還原點）</label
+          >
           <label><input id="qa-open-skills" type="checkbox" checked /> 套用後開啟原技能視窗</label>
           <button id="qa-apply" type="button" disabled>套用體驗配置（不是原版轉職）</button>
-          <div class="qa-buttons"><button id="qa-heal" type="button" disabled>補滿 HP／MP</button><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button><button id="qa-near-death" type="button" disabled>HP設為1（碰怪看死亡演出）</button></div>
-          <button id="qa-repair-starters" type="button" disabled>修復舊全零起始裝備（原WZ值）</button>
-          <p>修復只針對原建角清單中、全部能力與升級次數皆為0的裝備；保留非全零／已升級實例。這是明示的舊版資料修復，不是原遊戲功能，且不由能力還原點回溯。</p>
-          <label>遠距體驗種類 <select id="qa-ranged-family" disabled></select></label>
+          <div class="qa-buttons">
+            <button id="qa-heal" type="button" disabled>補滿 HP／MP</button
+            ><button id="qa-drain" type="button" disabled>降至半血／半魔（不致死）</button
+            ><button id="qa-near-death" type="button" disabled>HP設為1（碰怪看死亡演出）</button>
+          </div>
+          <button id="qa-repair-starters" type="button" disabled>
+            修復舊全零起始裝備（原WZ值）
+          </button>
+          <p>
+            修復只針對原建角清單中、全部能力與升級次數皆為0的裝備；保留非全零／已升級實例。這是明示的舊版資料修復，不是原遊戲功能，且不由能力還原點回溯。
+          </p>
+          <label
+            >遠距體驗種類
+            <select id="qa-ranged-family" disabled></select
+          ></label>
           <p id="qa-ranged-requirements">正在讀取原WZ裝備需求…</p>
-          <label><input id="qa-ranged-raise" type="checkbox" disabled /> 明確補足所選武器的最低等級（只升不降；HP／MP沿原成長，保留EXP餘額；舊等級還原點失效）</label>
-          <div class="qa-buttons"><button id="qa-ranged-level" type="button" disabled>已有武器：只補等級，不再次領取</button><button id="qa-ranged-kit" type="button" disabled>準備所選武器＋200枚相容彈藥</button></div>
-          <p>不是原版獎勵／轉職。請先套用弓手或盜賊配置；未勾補等級時，等級不足就整組不發。已有同款武器不重複送，不自動穿戴／改職業／加AP／SP／學技能。I穿戴後，K學Arrow Blow／Double Shot（弓手）或Lucky Seven（盜賊）。等級與道具會存檔、不能用能力還原回溯。</p>
-          <button id="qa-speed-potions" type="button" disabled>領取 3 瓶原 WZ 加速藥水（會存檔）</button>
-          <button id="qa-evasion-potions" type="button" disabled>領取 3 瓶原 WZ 迴避藥水（會存檔）</button>
-          <button id="qa-magic-potions" type="button" disabled>領取原 WZ 魔力藥水兩款各 3 瓶（會存檔）</button>
-          <button id="qa-combat-potions" type="button" disabled>領取攻擊／命中藥水各 3 瓶（會存檔）</button>
-          <p>藥水發放是非原版工具，需勾選確認；能力還原不會回收道具。I 開背包 → 消耗欄 → 連點藥水。原效果：速度 +8／180秒；迴避 +5／180秒，重喝刷新、不疊加。低 EVA 加5仍可能不足以閃避；可明確配置盜賊後到 K 學 님블 바디，或用 S 分配 LUK 比較。此處不保證／強造 MISS。</p>
-          <div class="qa-buttons"><button id="qa-checkpoint" type="button" disabled>建立能力／技能還原點</button><button id="qa-restore" type="button" disabled>還原能力／技能</button></div>
+          <label
+            ><input id="qa-ranged-raise" type="checkbox" disabled />
+            明確補足所選武器的最低等級（只升不降；HP／MP沿原成長，保留EXP餘額；舊等級還原點失效）</label
+          >
+          <div class="qa-buttons">
+            <button id="qa-ranged-level" type="button" disabled>
+              已有武器：只補等級，不再次領取</button
+            ><button id="qa-ranged-kit" type="button" disabled>準備所選武器＋200枚相容彈藥</button>
+          </div>
+          <p>
+            不是原版獎勵／轉職。請先套用弓手或盜賊配置；未勾補等級時，等級不足就整組不發。已有同款武器不重複送，不自動穿戴／改職業／加AP／SP／學技能。I穿戴後，K學Arrow
+            Blow／Double Shot（弓手）或Lucky Seven（盜賊）。等級與道具會存檔、不能用能力還原回溯。
+          </p>
+          <button id="qa-speed-potions" type="button" disabled>
+            領取 3 瓶原 WZ 加速藥水（會存檔）
+          </button>
+          <button id="qa-evasion-potions" type="button" disabled>
+            領取 3 瓶原 WZ 迴避藥水（會存檔）
+          </button>
+          <button id="qa-magic-potions" type="button" disabled>
+            領取原 WZ 魔力藥水兩款各 3 瓶（會存檔）
+          </button>
+          <button id="qa-combat-potions" type="button" disabled>
+            領取攻擊／命中藥水各 3 瓶（會存檔）
+          </button>
+          <p>
+            藥水發放是非原版工具，需勾選確認；能力還原不會回收道具。I 開背包 → 消耗欄 →
+            連點藥水。原效果：速度 +8／180秒；迴避 +5／180秒，重喝刷新、不疊加。低 EVA
+            加5仍可能不足以閃避；可明確配置盜賊後到 K 學 님블 바디，或用 S 分配 LUK
+            比較。此處不保證／強造 MISS。
+          </p>
+          <div class="qa-buttons">
+            <button id="qa-checkpoint" type="button" disabled>建立能力／技能還原點</button
+            ><button id="qa-restore" type="button" disabled>還原能力／技能</button>
+          </div>
         </fieldset>
-        <fieldset><legend>3 · 操作提示</legend>
+        <fieldset>
+          <legend>3 · 操作提示</legend>
           <p id="qa-combat" aria-live="off">戰鬥資料讀取中…</p>
           <p id="qa-movement" aria-live="off">移動狀態讀取中…</p>
-          <ol><li>先去無怪城鎮，再套用戰士／法師配置；初心者原本沒有技能書。</li><li>用技能窗的 SP 按鈕學習；前置與最高等級仍由伺服器依原 WZ 檢查。</li><li>戰士 HP 회복력 향상：提高站立回血；學到前置後，인듀어 可在繩梯靜止回血。</li><li>法師 MP 회복력 향상：提高回魔。站立回血約10秒，回魔不要求站立；不是吃藥。</li><li>用「降至半血／半魔」觀察；S 配 AP、K 技能、I 背包、E 裝備、M 小地圖、↑ 進門、Ctrl 基本攻擊。</li><li>S→Detail 可看有效裝備能力、命中／迴避、速度；弓手 아마존의 축복、盜賊 님블 바디 已接能力合計。攻擊／命中藥水已接普通物理攻擊。怪物碰撞已接迴避／受傷、紫色數字與 MISS、擊退及 1.5 秒保護；迴避藥水 EVA+5／180秒。原傷害依此版 PA 欄位，不套後期 PADamage。死亡後約2.2秒出現原復活視窗，Enter／OK 返回原 returnMap。已支援十二招主動技能與技能快捷鍵，含 에너지 볼트／매직 클로；法師仍需用 S 配 INT／LUK、K 學前置，魔法可用原初心者單手劍或相容魔杖，不自動改能力／發裝。其他未列被動、Magic Guard、Teleport／Heal 與武器 Booster 施放仍未開放。消耗品可從 I 拖入右下七格，格與格之間可拖移，拖到空白場景可清除綁定（不丟棄道具）；Escape／Menu 可開原系統設定，音量設定只存本機。</li><li>還原只涵蓋能力／已學技能；角色升級後拒絕套回舊點。還原點不跨服務重啟。</li></ol>
+          <ol>
+            <li>先去無怪城鎮，再套用戰士／法師配置；初心者原本沒有技能書。</li>
+            <li>用技能窗的 SP 按鈕學習；前置與最高等級仍由伺服器依原 WZ 檢查。</li>
+            <li>戰士 HP 회복력 향상：提高站立回血；學到前置後，인듀어 可在繩梯靜止回血。</li>
+            <li>法師 MP 회복력 향상：提高回魔。站立回血約10秒，回魔不要求站立；不是吃藥。</li>
+            <li>
+              用「降至半血／半魔」觀察；S 配 AP、K 技能、I 背包、E 裝備、M 小地圖、↑ 進門、Ctrl
+              基本攻擊。
+            </li>
+            <li>
+              S→Detail 可看有效裝備能力、命中／迴避、速度；弓手 아마존의 축복、盜賊 님블 바디
+              已接能力合計。攻擊／命中藥水已接普通物理攻擊。怪物碰撞已接迴避／受傷、紫色數字與
+              MISS、擊退及 1.5 秒保護；迴避藥水 EVA+5／180秒。原傷害依此版 PA 欄位，不套後期
+              PADamage。死亡後約2.2秒出現原復活視窗，Enter／OK 返回原
+              returnMap。已支援十二招主動技能與技能快捷鍵，含 에너지 볼트／매직 클로；法師仍需用 S
+              配 INT／LUK、K
+              學前置，魔法可用原初心者單手劍或相容魔杖，不自動改能力／發裝。其他未列被動、Magic
+              Guard、Teleport／Heal 與武器 Booster 施放仍未開放。消耗品可從 I
+              拖入右下七格，格與格之間可拖移，拖到空白場景可清除綁定（不丟棄道具）；Escape／Menu
+              可開原系統設定，音量設定只存本機。
+            </li>
+            <li>還原只涵蓋能力／已學技能；角色升級後拒絕套回舊點。還原點不跨服務重啟。</li>
+          </ol>
           <button id="qa-skills" type="button">關閉工具並開啟技能窗</button>
         </fieldset>
       </aside>

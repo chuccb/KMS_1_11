@@ -1,10 +1,9 @@
-/** Browser presentation control; never changes simulation/hit-test coordinates or sends packets. */
-import { DISPLAY_MODES, viewLayout } from "./display.ts";
+/** Display lifecycle only. Main owns a separate logical render surface; UI/input remain 800×600. */
+import { DISPLAY_OPTIONS, displayMode, originGrid, viewLayout } from "./display.ts";
+import type { DisplayMode, ViewLayout } from "./display.ts";
+export { displayMode } from "./display.ts";
+export type { DisplayMode } from "./display.ts";
 export const DISPLAY_STORAGE_KEY = "kms111.displayMode";
-export type DisplayMode = (typeof DISPLAY_MODES)[number];
-export function displayMode(value: unknown): DisplayMode {
-  return DISPLAY_MODES.find((mode) => mode === value) ?? "pixel";
-}
 interface DisplayViewport extends Pick<EventTarget, "addEventListener" | "removeEventListener"> {
   readonly innerWidth: number;
   readonly innerHeight: number;
@@ -15,14 +14,18 @@ interface DisplayControlsOptions {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
   overlay: HTMLElement;
+  stage: HTMLElement;
+  scroll: HTMLElement;
   select: HTMLSelectElement;
-  onScale(scale: number): void;
+  onScale(layout: ViewLayout): void;
   viewport?: DisplayViewport;
 }
 export function displayControls({
   canvas,
   context,
   overlay,
+  stage,
+  scroll,
   select,
   onScale,
   viewport = window,
@@ -33,37 +36,73 @@ export function displayControls({
     storage = viewport.localStorage;
     mode = displayMode(storage.getItem(DISPLAY_STORAGE_KEY));
   } catch {
-    /* Preference storage may be denied independently of rendering. */
+    /* Preference denial cannot stop rendering. */
   }
-  let measuredWidth = Number.NaN,
-    measuredHeight = Number.NaN,
-    measuredDpr = Number.NaN;
-  let disposed = false;
+  select.replaceChildren(
+    ...DISPLAY_OPTIONS.map((definition) => {
+      const option = select.ownerDocument.createElement("option");
+      option.value = definition.id;
+      option.textContent = definition.label;
+      return option;
+    }),
+  );
   select.value = mode;
+  let measuredWidth = NaN,
+    measuredHeight = NaN,
+    measuredDpr = NaN,
+    disposed = false;
+  let layout = viewLayout(
+    viewport.innerWidth,
+    viewport.innerHeight,
+    viewport.devicePixelRatio,
+    mode,
+  );
+  const available = () => ({
+    width: scroll.clientWidth || viewport.innerWidth,
+    height: scroll.clientHeight || viewport.innerHeight,
+  });
   function resize() {
     if (disposed) return;
-    // Assigning backing dimensions clears the canvas, so do not do it on mode/window/DPR changes.
-    if (canvas.width !== 800) canvas.width = 800;
-    if (canvas.height !== 600) canvas.height = 600;
-    measuredWidth = viewport.innerWidth;
-    measuredHeight = viewport.innerHeight;
+    const size = available();
+    measuredWidth = size.width;
+    measuredHeight = size.height;
     measuredDpr = viewport.devicePixelRatio;
-    const layout = viewLayout(measuredWidth, measuredHeight, measuredDpr, mode);
+    layout = viewLayout(measuredWidth, measuredHeight, measuredDpr, mode);
+    // Only an actual device-scale change reallocates the output. The logical renderer is separate.
+    if (canvas.width !== layout.backingWidth) canvas.width = layout.backingWidth;
+    if (canvas.height !== layout.backingHeight) canvas.height = layout.backingHeight;
     Object.assign(canvas.style, {
       width: `${layout.width}px`,
       height: `${layout.height}px`,
       left: `${layout.left}px`,
       top: `${layout.top}px`,
     });
+    Object.assign(stage.style, {
+      width: `${layout.contentWidth}px`,
+      height: `${layout.contentHeight}px`,
+    });
     Object.assign(overlay.style, {
       left: `${layout.left}px`,
       top: `${layout.top}px`,
       transform: `scale(${layout.scale})`,
     });
-    onScale(layout.scale);
+    onScale(layout);
     context.imageSmoothingEnabled = false;
     canvas.dataset.displayMode = mode;
-    select.title = `800×600 → ${Math.round(layout.width)}×${Math.round(layout.height)} CSS px · DPR ${layout.dpr} · 每原像素 ${Number(layout.deviceScale.toFixed(3))} 實體像素${layout.downsampled ? "（視窗太小，正在縮小）" : ""}`;
+    canvas.dataset.deviceScale = String(layout.deviceScale);
+    select.title = `4:3 · ${layout.backingWidth}×${layout.backingHeight} 實體像素 · DPR ${layout.dpr} · 原像素 ${layout.deviceScale}×${layout.deviceScale}${layout.overflowing ? " · 視窗較小，請捲動；不縮小模糊" : ""}`;
+    alignScroll();
+  }
+  function alignScroll() {
+    if (disposed) return;
+    const grid = originGrid(layout.dpr);
+    for (const axis of ["scrollLeft", "scrollTop"] as const) {
+      const value = scroll[axis];
+      if (Number.isFinite(value)) {
+        const snapped = Math.round(value / grid) * grid;
+        if (Math.abs(snapped - value) > 1e-6) scroll[axis] = snapped;
+      }
+    }
   }
   function change() {
     mode = displayMode(select.value);
@@ -71,32 +110,33 @@ export function displayControls({
     try {
       storage?.setItem(DISPLAY_STORAGE_KEY, mode);
     } catch {
-      /* Session-only still works. */
+      /* Session preference remains usable. */
     }
     resize();
   }
   select.addEventListener("change", change);
   viewport.addEventListener("resize", resize);
+  scroll.addEventListener("scroll", alignScroll);
   resize();
   return {
     resize,
     mode: () => mode,
-    /** Called by the existing app frame, including title/selection. DPR-only changes do not
-     * reliably emit resize/matchMedia events (also reproduced in Chromium CDP). No new timer
-     * or RAF loop: compare three scalars and relayout only when a browser measurement changes.
-     */
+    layout: () => layout,
     refresh() {
+      const size = available();
       if (
-        viewport.innerWidth !== measuredWidth ||
-        viewport.innerHeight !== measuredHeight ||
+        size.width !== measuredWidth ||
+        size.height !== measuredHeight ||
         viewport.devicePixelRatio !== measuredDpr
       )
         resize();
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
       select.removeEventListener("change", change);
       viewport.removeEventListener("resize", resize);
+      scroll.removeEventListener("scroll", alignScroll);
     },
   };
 }

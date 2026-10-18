@@ -35,8 +35,15 @@ export interface DropRendererOptions {
   image(path: string): LoadedImage;
   item(itemId: number): unknown;
   describe(itemId: number): unknown;
+  viewport?(): { width: number; height: number };
 }
-export function dropRenderer({ ctx, image, item, describe }: DropRendererOptions) {
+export function dropRenderer({
+  ctx,
+  image,
+  item,
+  describe,
+  viewport = () => ctx.canvas,
+}: DropRendererOptions) {
   return {
     /** Start all native money frames together; never animate a partial, growing frame list. */
     preload(drop: DropAppear): void {
@@ -58,11 +65,12 @@ export function dropRenderer({ ctx, image, item, describe }: DropRendererOptions
       if (!loaded.ready || img.naturalWidth <= 0 || img.naturalHeight <= 0) return false;
       const x = Math.round(pose.x - camera.x) - Math.trunc(img.naturalWidth / 2);
       const y = Math.round(pose.y - camera.y) - img.naturalHeight;
+      const visible = viewport();
       if (
         x + img.naturalWidth < 0 ||
-        x > ctx.canvas.width ||
+        x > visible.width ||
         y + img.naturalHeight < 0 ||
-        y > ctx.canvas.height
+        y > visible.height
       )
         return false;
       const alpha = ctx.globalAlpha;

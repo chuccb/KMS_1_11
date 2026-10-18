@@ -1,5 +1,8 @@
 # 手感實驗：可選物理步長與十種鏡頭（2026-10-18，ADR-081）
 
+> 現行尺寸／遠近／轉場與游標DPR政策已由ADR-084更新，見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+> 下文舊fit／native／降採樣、固定backing或CSS游標縮圖的敘述保留歷史時點，不是目前可用選項。
+
 > 本頁保留當輪功能與驗證數字。後續ADR-082的7支browser工具遷移、素材責任、現行安全命令與最新型別範圍，
 > 見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)；歷史PASS不沿用為手動場景的新驗收。
 

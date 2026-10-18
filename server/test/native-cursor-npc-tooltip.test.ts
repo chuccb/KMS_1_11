@@ -24,9 +24,25 @@ test("553320 arrow hotspot and presentation scale; DPR must not be multiplied a 
   assert.equal(CURSOR_PATH, "UI/Basic.img/Cursor/arrow");
   assert.deepEqual(cursorLayout(arrow, 1), { width: 24, height: 23, x: 0, y: 0 });
   assert.deepEqual(cursorLayout(arrow, 2), { width: 48, height: 46, x: 0, y: 0 });
-  assert.deepEqual(cursorLayout(arrow, 0.5), { width: 12, height: 12, x: 0, y: 0 });
-  assert.equal(cursorLayout(arrow, 99).width, 128);
-  assert.deepEqual(cursorLayout(arrow, NaN), cursorLayout(arrow, 1));
+  for (const scale of [0.5, 99, NaN]) assert.throws(() => cursorLayout(arrow, scale));
+  assert.deepEqual(cursorLayout(arrow, 4), { width: 96, height: 92, x: 0, y: 0 });
+  for (const dpr of [1, 1.1, 1.25, 1.5, 1.75, 2, 3])
+    for (const scale of [1, 2, 3, 4]) {
+      assert.deepEqual(cursorLayout(arrow, scale, dpr), {
+        width: 24 * scale,
+        height: 23 * scale,
+        x: 0,
+        y: 0,
+      });
+    }
+  assert.deepEqual(cursorLayout({ ...arrow, ox: 5, oy: 10 }, 2, 1.25), {
+    width: 48,
+    height: 46,
+    x: 8,
+    y: 16,
+  });
+  assert.throws(() => cursorLayout(arrow, 1, 0));
+  assert.throws(() => cursorLayout({ ...arrow, width: 129 }));
   assert.throws(() => cursorLayout({ ...arrow, width: 0 }));
   assert.throws(() => cursorLayout({ ...arrow, oy: NaN }));
   assert.deepEqual(cursorLayout({ ...arrow, ox: 5, oy: 7 }, 2), {
@@ -162,8 +178,11 @@ test("integration source keeps the cursor in its own plane and cancels interrupt
     css = source("../../client/style.css");
   // Follow the extracted controller -> native cursor call chain, not the old inline layout.
   assert.match(main, /const displayController = displayControls\(/);
-  assert.match(main, /onScale:\s*scale\s*=>\s*gameCursor\.resize\(scale\)/);
-  assert.match(source("../../client/display-controls.ts"), /onScale\(layout\.scale\)/);
+  assert.match(
+    main,
+    /onScale:\s*layout\s*=>\s*gameCursor\.resize\(layout\.deviceScale, layout\.dpr\)/,
+  );
+  assert.match(source("../../client/display-controls.ts"), /onScale\(layout\)/);
   assert.match(main, /displayController\.refresh\(\)/);
   assert.match(css, /\.native-cursor-ready \*/);
   assert.doesNotMatch(main, /canvas\.style\.cursor\s*=/);

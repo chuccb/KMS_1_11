@@ -56,4 +56,9 @@ for (const run of probes) {
 await import("../../../client/entity-assets.ts");
 await import("../../../client/entity-resource-validation.ts");
 await import("../../../client/avatar-look.ts");
-console.log(JSON.stringify({ imported: 22, attempts }));
+await import("../../../client/scene-surface.ts");
+await import("../../../client/camera-lens.ts");
+await import("../../../client/lens-controls.ts");
+await import("../../../client/camera-controls.ts");
+await import("../../../client/cursor.ts");
+console.log(JSON.stringify({ imported: 27, attempts }));

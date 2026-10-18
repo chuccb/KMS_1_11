@@ -2910,3 +2910,20 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 新LIVE81modules／唯讀標題120幀、0errors／0WS；沒有agent登入或操作玩家。
 遊戲連線自行更新新save時不再用全檔hash不變作只讀觀測前提，也不重置進度或restart；初始診斷失敗log保留。
 完整原證、政策、重跑命令與限制見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+
+
+## ADR-084：只有清晰等比例多尺寸，世界／UI分層與離散像素鏡頭（2026-10-18）
+
+- 依使用者要求先整理typed責任，再加拉近／拉遠／淡出／淡入；不能以只留一個尺寸或CSS小數縮放迴避清晰度。
+- display保留自動與1/2/3/4實體倍率，小視窗捲動；fit/native舊偏好遷到清晰政策，原點及捲動尾端對齊共同格。
+- scene-surface持有穩定來源context，世界FOV與原800×600 UI兩段整數合成；bounded backing不因特寫膨脹到9600×7200。
+- 四種lens只切離散k，十種跟隨政策原樣組合；fade/shutter只遮世界，不旋轉／模糊UI，不動物理／封包／進度。
+- fade以absolute time計算，幾何峰值切換；RAF漏過峰值仍遮住實際切換畫格，長懸停不補播舊黑畫面；尊重減少動態。
+- 所有世界cull／背景／camera界限與pointer反轉共用真FOV；原drop PNG底部貼fh不變。游標改整數實體bitmap＋image-set密度，不先縮小CSS圖。
+- 新增3個strict TS模組、現86支TS；main.js、3legacyMJS與深schema仍未完成，不弱化strict或偽裝全案遷移。
+- 七DPR×五尺寸35真screenshot、cursor pixel blocks／density、16組原PNG分層、storage／鍵盤／dispose／減少動態、27純imports通過。
+- strict／format／build與focused58/0；完整1037/44（1081tests／119files），對2eaa5f2 failure multiset新增0／移除0，CI仍不綠。
+- LIVE同PID4942、84modules與唯讀120幀0WS；不自動登入、不操作角色或save、不重啟。
+- 1×已無法更遠而保留所有來源像素，介面明說；不宣稱任意DPR／OS指標plane或全部遊戲場景已pixel-perfect。
+
+政策公式、操作、真實驗證與仍未完成範圍見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。

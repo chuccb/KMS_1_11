@@ -1,3 +1,5 @@
+import { sceneSurface, screenToWorld } from "./scene-surface.ts";
+import { lensControls } from "./lens-controls.ts";
 import {
   createDropRecord,
   parseDropRemoval,
@@ -9,7 +11,7 @@ import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
-import { createCamera, updateCamera } from "./camera.ts";
+import { createCamera, updateCamera, reframeCamera } from "./camera.ts";
 import { cameraControls } from "./camera-controls.ts";
 import { motionControls } from "./motion-controls.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
@@ -146,7 +148,8 @@ soundToggle?.addEventListener("click", () => {
 });
 
 const { canvas, ui } = gameElements();
-const ctx = requireContext2d(canvas);
+const renderSurface = sceneSurface(canvas);
+const ctx = renderSurface.context;
 const nativeTips = nativeTooltipRenderer({ctx, image: artImage});
 
 const gameCursor = nativeCursor({
@@ -1210,6 +1213,7 @@ async function loadMapArt(mapId, generation) {
     const art = await response.json();
     if (map?.id !== mapId || generation !== mapGeneration) return;
     mapArt = art;
+    lensSettings.reveal(performance.now());
     miniMapPanel.setMap(art.miniMap, map.portals);
     mapScene = prepareMapScene(art.sprites);
     // The archive's back index has a native z of its own, not a boolean final overlay.
@@ -1274,8 +1278,7 @@ function viewPoint(event) {
  */
 function portalAt(clientX, clientY) {
   if (!map || !self) return undefined;
-  const x = clientX + camera.x;
-  const y = clientY + camera.y;
+  const { x, y } = screenToWorld({ x: clientX, y: clientY }, camera, renderSurface.viewport());
   let found;
   let best = Infinity;
   for (const portal of map.portals) {
@@ -1297,7 +1300,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
-    itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) || talkingNpc !== undefined ||
+    itemDialog.open || systemPanel.visible || browserLabOpen() || talkingNpc !== undefined ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -1318,7 +1321,7 @@ function requestPortal(portal, now) {
  */
 function npcAt(clientX, clientY) {
   if (!self) return undefined;
-  const x = clientX + camera.x, y = clientY + camera.y;
+  const { x, y } = screenToWorld({ x: clientX, y: clientY }, camera, renderSurface.viewport());
   for (const npc of npcs.values()) {
     ensureEntityArt("npc", npc.templateId);
     if (npcContains(npc, npcMetadata.get(npc.templateId)?.clickBounds, x, y)) return npc;
@@ -1329,7 +1332,7 @@ function npcAt(clientX, clientY) {
 let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
 function canvasButtonAt(p) {
   if (loginStage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
-      systemPanel.visible || (testToolsPanel.open || motionSettings.open) || itemDrag || quickDrag || shopDrag || inventoryDrag ||
+      systemPanel.visible || browserLabOpen() || itemDrag || quickDrag || shopDrag || inventoryDrag ||
       shopScrollDrag || inventoryScrollDrag || statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
   const shopHit = shopWindowAt(p.x,p.y);
   if (shopHit) {
@@ -1762,9 +1765,9 @@ canvas.addEventListener(
 
 // ---------------------------------------------------------------- rendering
 //
-// The view is the 2003 client's own 800x600, scaled to whatever the window is: every sprite in
-// `Data.wz` is drawn at its own pixel size, so a bigger canvas would zoom the art, not show more of
-// it. `image-rendering: pixelated` (style.css) keeps the scale crisp, like the original's D3D blit.
+// Native UI/input remain 800x600. scene-surface.ts composites the world at its lens FOV
+// and UI separately, each using bounded integer physical pixels. CSS/DPR layout and scroll
+// share the canvas/DOM origin; no fit/downsample or fractional bitmap zoom.
 //
 // The layers, back to front (`MapleStory.exe.c` `sub_469980`/`sub_46A1C0`/`sub_46A9F0`):
 //
@@ -1819,6 +1822,7 @@ const drops = new Map();
 const rewardPainter = dropRenderer({
   ctx,
   image: artImage,
+  viewport: () => renderSurface,
   item: (id) => itemInfo.get(id),
   describe: describeItem,
 });
@@ -1942,21 +1946,22 @@ const combatCatalog = combatAssets({
 });
 const attackLooks = new Set();
 const projectiles = [];
-/** The camera: world coordinate shown at the top-left of the 800x600 view. */
+/** World origin of the active lens; independent from the native 800x600 UI. */
 const camera = createCamera();
+function clearPresentationInput() {
+  keys.clear();
+  if (playerBody) {
+    playerBody.jumpQueued = false;
+    playerBody.jumpHeld = false;
+  }
+}
 const motionSettings = motionControls({
   panel: requireElement("motion-lab", "details"),
   step: requireElement("physics-step", "select"),
   presentation: requireElement("presentation-mode", "select"),
   reset: requireElement("motion-reset", "button"),
   status: requireElement("motion-status", "p"),
-  onInteract() {
-    keys.clear();
-    if (playerBody) {
-      playerBody.jumpQueued = false;
-      playerBody.jumpHeld = false;
-    }
-  },
+  onInteract: clearPresentationInput,
   onClose() { canvas.focus(); },
 });
 const cameraSettings = cameraControls(
@@ -1977,13 +1982,21 @@ function selfDisplayPosition() {
     : self;
 }
 
-/** Typed presentation owns mode/storage/DPR/listener lifecycle; backing stays native 800×600. */
+const lensSettings = lensControls({
+  panel: requireElement("camera-lab", "details"),
+  onInteract: clearPresentationInput,
+  onClose() { canvas.focus(); },
+});
+
+/** Device-pixel output is independent of logical world/UI drawing. */
 const displayController = displayControls({
   canvas,
-  context: ctx,
+  context: requireContext2d(canvas),
   overlay: ui.gameUi,
+  stage: requireElement("game-stage", "div"),
+  scroll: requireElement("game-viewport", "div"),
   select: requireElement("view-scale", "select"),
-  onScale: scale => gameCursor.resize(scale),
+  onScale: layout => gameCursor.resize(layout.deviceScale, layout.dpr),
 });
 
 /** One PNG of the archive; typed bounded cache retains shared UI preferentially. */
@@ -2434,7 +2447,7 @@ function drawArchiveImage(frame, x, y, flip) {
   const oy = frame.oy ?? 0;
   const w = entry.img.naturalWidth;
   const h = entry.img.naturalHeight;
-  if (!visibleSprite(x, y, w, h, ox, oy, flip, VIEW_W, VIEW_H)) return;
+  if (!visibleSprite(x, y, w, h, ox, oy, flip, renderSurface.width, renderSurface.height)) return;
   ctx.save();
   ctx.globalAlpha *= frame.alpha ?? 1;
   if (flip) {
@@ -2459,7 +2472,7 @@ function drawBack(back, cameraX, cameraY, now) {
   const h = entry.img.naturalHeight;
   if (w === 0 || h === 0) return;
   const { x, y, stepX, stepY, columns, rows } = backgroundLayout(
-    back, w, h, cameraX, cameraY, now - mapAnimationStart, VIEW_W, VIEW_H);
+    back, w, h, cameraX, cameraY, now - mapAnimationStart, renderSurface.width, renderSurface.height);
   // The sheet's own `origin` is the offset the 2003 client blits from (`TMapBack` takes it from the
   // canvas): a copy anchored at (x, y) has its top-left at (x - ox, y - oy).
   const ox = back.ox ?? 0;
@@ -2471,7 +2484,7 @@ function drawBack(back, cameraX, cameraY, now) {
       const anchorY = Math.round(y + row * stepY);
       const sx = anchorX - ox;
       const sy = anchorY - oy;
-      if (sx > VIEW_W || sy > VIEW_H || sx + w < 0 || sy + h < 0) continue;
+      if (sx > renderSurface.width || sy > renderSurface.height || sx + w < 0 || sy + h < 0) continue;
       // A flipped sheet mirrors in place: source column `u` lands on `anchorX + ox - u`, so the same
       // footprint needs the anchor moved by `w - 2*ox`.
       drawArchiveImage(
@@ -2753,7 +2766,7 @@ function loadQuickItems() {
 function useBagItem(item) {
   const now = performance.now();
   if (!item || loginStage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
-      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) || shop !== undefined ||
+      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || browserLabOpen() || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
   nextBagUseAt = now + 200;
@@ -2838,9 +2851,13 @@ function statusButtonClick(button) {
 
 /** Shared by keydown queueing and controller sampling, so a sub-frame jump cannot leak
  * from a focused input/modal/hidden document into the next gameplay update. */
+/** Browser-only experiment panels share one input gate; none pauses the simulation. */
+function browserLabOpen() {
+  return testToolsPanel.open || motionSettings.open || lensSettings.open;
+}
 function movementBlocked() {
   return document.hidden || !document.hasFocus() || portalPending || itemDialog.open ||
-    systemPanel.visible || (testToolsPanel.open || motionSettings.open) || selfView?.hp <= 0 || shop !== undefined ||
+    systemPanel.visible || browserLabOpen() || selfView?.hp <= 0 || shop !== undefined ||
     talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
 function frame() {
@@ -2851,8 +2868,10 @@ function frame() {
     for (const button of ui.emotes.children) button.disabled = !enabled;
   }
   if (loginStage !== "game") {
+    renderSurface.beginUi(true);
     if (loginStage === "title") drawTitleScreen();
     else drawSelectionScreen(performance.now());
+    renderSurface.presentUi();
     requestAnimationFrame(frame);
     return;
   }
@@ -2929,13 +2948,16 @@ function frame() {
   if (visualFieldActive && selfView && playerBody && self && map?.id === self.mapId)
     deathFx.observe(selfView.characterId, selfView.hp <= 0, displaySelf, now, selfDeathSettled);
   updateContact(now);
+  const lens = lensSettings.sample(now, displayController.layout().deviceScale);
+  reframeCamera(camera, renderSurface.viewport(), lens.viewport);
+  renderSurface.beginWorld(lens.viewport);
   updateCamera(
     camera,
     displaySelf ?? { x: 0, y: 0 },
     cameraSettings.mode(),
     elapsed,
-    VIEW_W,
-    VIEW_H,
+    lens.viewport.width,
+    lens.viewport.height,
     mapArt?.bounds,
     playerBody,
   );
@@ -2943,7 +2965,7 @@ function frame() {
   const cameraY = camera.y;
 
   ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillRect(0, 0, renderSurface.width, renderSurface.height);
 
   // Root layers use native z + sequence. Avatar children remain grouped with their parent.
   const actors = [];
@@ -3048,7 +3070,7 @@ function frame() {
             ? actor.npc.x - cameraX
             : actor.user.x - cameraX;
     const y = actor.y - cameraY;
-    if (x < -200 || x > VIEW_W + 200 || y < -300 || y > VIEW_H + 300) continue;
+    if (x < -200 || x > renderSurface.width + 200 || y < -300 || y > renderSurface.height + 300) continue;
     if (actor.kind === "npc") {
       drawEntitySprite(
         "npc",
@@ -3087,6 +3109,8 @@ function frame() {
     }
   }
 
+  renderSurface.presentWorld(lens.cover, lens.style);
+  renderSurface.beginUi();
   drawMapTitle(ctx, artImage, mapArt?.title);
   drawTemporaryStats(ctx, artImage, buffs.icons(now));
   miniMapPanel.draw(now);
@@ -3104,12 +3128,12 @@ function frame() {
     const bagHit = inventoryWindowAt(pointerAt.x, pointerAt.y);
     const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
     const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !(testToolsPanel.open || motionSettings.open) &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !browserLabOpen() &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y)) {
       if(pointed?.skill){const at=tooltipAnchor('skill',pointerAt.x,pointerAt.y);nativeTips.skill(at.x,at.y,pointed.skill,pointed.level);}
       else drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
     }
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !(testToolsPanel.open || motionSettings.open) && !pointed &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !browserLabOpen() && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
@@ -3125,6 +3149,7 @@ function frame() {
   npcDialog.draw();
   tooltipViewer.draw();
   revivePanel.draw(now);
+  renderSurface.presentUi();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -3457,7 +3482,7 @@ async function swing(skillId=0) {
     !selfView ||
     !playerBody ||
     !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN ||
-    (testToolsPanel.open || motionSettings.open) || npcDialog.open || tooltipViewer.open ||
+    browserLabOpen() || npcDialog.open || tooltipViewer.open ||
     isEditingControl(document.activeElement) ||
     map?.id !== self.mapId ||
     (playerBody?.ladder && rule?.kind!=='buff') ||
@@ -3488,7 +3513,7 @@ async function swing(skillId=0) {
       entity=selfView;
       if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
         selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible)||
-        (testToolsPanel.open || motionSettings.open)||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
+        browserLabOpen()||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
         socket?.readyState!==WebSocket.OPEN||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
       if(rule.kind==='buff'){
         if(!activeSkillCost(entity,skillValues)||!publishPlayerMotion())return;
@@ -3574,7 +3599,7 @@ async function swing(skillId=0) {
       || (magic&&!playerBody.grounded)
       || (locomotion(playerBody) === "prone") !== prone
       || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
-      || (testToolsPanel.open || motionSettings.open) || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
+      || browserLabOpen() || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
       || isEditingControl(document.activeElement)) return;
     if ((shoot&&!bulletFrames.length)||[...frames,...effects,...bullets].some(frame=>!frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
@@ -3688,7 +3713,7 @@ function drawPortals(cameraX, cameraY, now) {
     const x = portal.x - cameraX;
     const y = portal.y - cameraY;
     const width = 120;
-    if (x < -width || x > VIEW_W + width || y < -width || y > VIEW_H + width)
+    if (x < -width || x > renderSurface.width + width || y < -width || y > renderSurface.height + width)
       continue;
     drawArchiveImage(frame, x, y, false);
   }
@@ -3731,7 +3756,7 @@ function drawWhisperRecipient() {
   ctx.fillText(whisperRecipient || "모두에게",246,581);ctx.restore();
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) ||
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || browserLabOpen() ||
       loginStage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
   const owner=quickOwner, epoch=itemEpoch;
@@ -3794,7 +3819,7 @@ function beginSkillDrag(skill,p) {
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
   if (!itemId || loginStage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
-      portalPending || itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) || shop!==undefined ||
+      portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
   if (quickSkillAllowed(itemId)?!skillPanel.level(itemId.skillId):!quickItemState(inventory,itemId).item) return false;
@@ -3818,7 +3843,7 @@ window.addEventListener("mouseup",e=>{
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
       (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginStage!=="game" || !visualFieldActive ||
-      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || (testToolsPanel.open || motionSettings.open) ||
+      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() ||
       shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
@@ -3948,7 +3973,7 @@ window.addEventListener("mouseup", (e) => {
   const bag = inventoryWindowAt(p.x, p.y);
   const quickIndex = quickSlotAt(p.x, p.y);
   if (!bag && quickIndex >= 0 && e.target === canvas) {
-    if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !(testToolsPanel.open || motionSettings.open))
+    if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !browserLabOpen())
       quickProfile?.bind(quickIndex, d.item.itemId);
     return; // This is never a field drop, even for an unsupported item.
   }
@@ -5183,6 +5208,7 @@ function toggleInventory(force) {
 
 function showPanel(panel) {
   motionSettings.dismiss();
+  lensSettings.dismiss();
   loginStage =
     panel === ui.connect
       ? "title"
@@ -5204,6 +5230,7 @@ function showPanel(panel) {
 
 function hidePanels() {
   motionSettings.dismiss();
+  lensSettings.dismiss();
   loginStage = "game";
   titleUi.classList.add("hidden");
   pageBar.classList.remove("hidden");
@@ -5318,7 +5345,7 @@ function canSendEmotion() {
   return loginStage === "game" && visualFieldActive && selfView && !portalPending &&
     socket?.readyState === WebSocket.OPEN && !document.hidden &&
     !(selfSwing && performance.now() < selfSwing.start + attackDuration(selfSwing)) &&
-    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !(testToolsPanel.open || motionSettings.open) &&
+    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
     !npcDialog.open && !tooltipViewer.open && !talkingNpc && !shop;
 }
 function requestEmotion(value) {
@@ -5647,7 +5674,7 @@ const skillPanel = skillWindow({
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
-    (itemDialog.open || systemPanel.visible) || (testToolsPanel.open || motionSettings.open) || talkingNpc !== undefined,
+    (itemDialog.open || systemPanel.visible) || browserLabOpen() || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5919,7 +5946,7 @@ function openDialogueExample(kind, page = 0) {
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),
   canOpen:()=>loginStage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
-    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !(testToolsPanel.open || motionSettings.open) &&
+    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
   onOpen(){
     localActionEpoch++; keys.clear(); chatHistoryPanel.cancelDrag();itemDrag=quickDrag=undefined;

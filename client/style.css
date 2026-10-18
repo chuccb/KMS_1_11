@@ -35,10 +35,19 @@ body {
 /*
  * The game view is the 2003 client's 800x600 surface, scaled up by CSS and letterboxed inside the
  * window. display.ts aligns to the device-pixel grid (including OS/browser zoom).
- * Default pixel mode avoids non-uniform 1.25x/1.5625x source pixel widths; explicit fit is optional.
+ * All choices use equal integer device-pixel squares. Small windows scroll instead of downsampling.
  */
-#view {
+#game-viewport {
   position: fixed;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+#game-stage {
+  position: relative;
+}
+#view {
+  position: absolute;
   top: 0;
   left: 0;
   display: block;
@@ -201,7 +210,7 @@ body {
  * child at (243, 573) therefore lands on the chat bar that `UI/StatusBar.img/base/1` draws.
  */
 #game-ui {
-  position: fixed;
+  position: absolute;
   left: 0;
   top: 0;
   width: 800px;
@@ -232,7 +241,11 @@ body {
   height: 84px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.502);
-  font: 12px 'Gulim', '굴림', 'KMSCJK', sans-serif;
+  font:
+    12px "Gulim",
+    "굴림",
+    "KMSCJK",
+    sans-serif;
 }
 #chat-lines {
   list-style: none;
@@ -252,21 +265,35 @@ body {
   white-space: pre;
   text-shadow: none;
 }
-#chat-lines li .who { color: inherit; }
-#chat-lines li.system { color: #0f0; }
-#chat-lines li.whisper { color: #00ff00; }
-#chat-lines li.notice { color: #fff080; }
-#chat-lines li.error { color: #ffafaf; }
-#chat-lines li.find { color: #bbbbbb; }
+#chat-lines li .who {
+  color: inherit;
+}
+#chat-lines li.system {
+  color: #0f0;
+}
+#chat-lines li.whisper {
+  color: #00ff00;
+}
+#chat-lines li.notice {
+  color: #fff080;
+}
+#chat-lines li.error {
+  color: #ffafaf;
+}
+#chat-lines li.find {
+  color: #bbbbbb;
+}
 #chat-scroll {
   position: absolute;
   left: 434px;
   top: -83px;
   width: 12px;
   height: 82px;
-  background: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fbase') repeat-y;
+  background: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fbase") repeat-y;
 }
-#chat-scroll.disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fbase'); }
+#chat-scroll.disabled {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fbase");
+}
 #chat-scroll button {
   position: absolute;
   left: 0;
@@ -280,15 +307,39 @@ body {
   cursor: pointer;
   image-rendering: pixelated;
 }
-#chat-scroll [data-chat-prev] { top: 0; background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev0'); }
-#chat-scroll [data-chat-prev]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev1'); }
-#chat-scroll [data-chat-prev]:disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fprev'); }
-#chat-scroll [data-chat-next] { bottom: 0; background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext0'); }
-#chat-scroll [data-chat-next]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext1'); }
-#chat-scroll [data-chat-next]:disabled { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fnext'); }
-#chat-scroll [data-chat-thumb] { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb0'); }
-#chat-scroll [data-chat-thumb]:active { background-image: url('/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb1'); }
-#chat-scroll [data-chat-track] { position: absolute; left: 0; top: 12px; width: 12px; height: 58px; }
+#chat-scroll [data-chat-prev] {
+  top: 0;
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev0");
+}
+#chat-scroll [data-chat-prev]:active {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fprev1");
+}
+#chat-scroll [data-chat-prev]:disabled {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fprev");
+}
+#chat-scroll [data-chat-next] {
+  bottom: 0;
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext0");
+}
+#chat-scroll [data-chat-next]:active {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fnext1");
+}
+#chat-scroll [data-chat-next]:disabled {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fdisabled%2Fnext");
+}
+#chat-scroll [data-chat-thumb] {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb0");
+}
+#chat-scroll [data-chat-thumb]:active {
+  background-image: url("/api/png/UI%2FBasic.img%2FVScr%2Fenabled%2Fthumb1");
+}
+#chat-scroll [data-chat-track] {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 12px;
+  height: 58px;
+}
 #chat-whisper {
   position: absolute;
   left: 84px;
@@ -299,11 +350,15 @@ body {
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: transparent url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fnormal%2F0');
+  background: transparent url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fnormal%2F0");
   cursor: pointer;
 }
-#chat-whisper:hover { background-image: url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2FmouseOver%2F0'); }
-#chat-whisper:active { background-image: url('/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fpressed%2F0'); }
+#chat-whisper:hover {
+  background-image: url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2FmouseOver%2F0");
+}
+#chat-whisper:active {
+  background-image: url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fpressed%2F0");
+}
 
 /*
  * The seven faces are a browser stand-in for the 2003 client's F1..F7, which a browser cannot take.
@@ -353,7 +408,11 @@ body {
   border-radius: 0;
   background: transparent;
   color: #000;
-  font: 12px 'Gulim', '굴림', 'KMSCJK', sans-serif;
+  font:
+    12px "Gulim",
+    "굴림",
+    "KMSCJK",
+    sans-serif;
   opacity: 1;
 }
 
@@ -366,12 +425,37 @@ body {
 }
 
 /* Server CUtilDlgEx2 art is drawn on the same logical 800×600 surface as the field. */
-#dialogue { position:absolute; inset:0; z-index:51; pointer-events:auto; outline:none; }
-#dialogue-controls { position:absolute; inset:0; pointer-events:none; }
-#dialogue-controls button { position:absolute; pointer-events:auto; }
-#dialogue-input { position:absolute; padding:0; margin:0; border:0; outline:0;
-  background:transparent; color:#000; color-scheme:light;
-  font:12px "Gulim", "굴림", "KMSCJK", sans-serif; }
+#dialogue {
+  position: absolute;
+  inset: 0;
+  z-index: 51;
+  pointer-events: auto;
+  outline: none;
+}
+#dialogue-controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#dialogue-controls button {
+  position: absolute;
+  pointer-events: auto;
+}
+#dialogue-input {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font:
+    12px "Gulim",
+    "굴림",
+    "KMSCJK",
+    sans-serif;
+}
 
 #log {
   position: fixed;
@@ -665,7 +749,8 @@ body {
   clip-path: inset(50%);
 }
 
-#view-scale, #camera-mode {
+#view-scale,
+#camera-mode {
   pointer-events: auto;
   max-width: 175px;
   padding: 3px 6px;
@@ -724,36 +809,144 @@ body {
 }
 
 /* CUISkill owns its whole native rectangle, including blank space: no field/item click-through. */
-#skill-window { position: absolute; z-index: 5; pointer-events: auto; touch-action: none; }
-#skill-values { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+#skill-window {
+  position: absolute;
+  z-index: 5;
+  pointer-events: auto;
+  touch-action: none;
+}
+#skill-values {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
 /* Deliberately OUTSIDE the original 800x600 game UI; development tools are not native artwork. */
-#test-tools-shell { position:fixed; inset:0; z-index:70; background:#0005; display:flex; justify-content:flex-end; }
-#test-tools-panel { box-sizing:border-box; width:min(440px,100vw); height:100dvh; overflow:auto; padding:18px; background:#17202d; color:#eef3fa; box-shadow:-8px 0 28px #0006; font:14px/1.5 system-ui,sans-serif; }
-#test-tools-panel h2 { margin:0; font-size:19px; }
-#test-tools-panel .qa-heading, #test-tools-panel .qa-buttons, #test-tools-panel .qa-numbers { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
-#test-tools-panel .qa-heading { justify-content:space-between; }
-#test-tools-panel fieldset { border:1px solid #59687b; border-radius:6px; margin:14px 0; padding:12px; min-width:0; }
-#test-tools-panel label { display:block; margin:8px 0; }
-#test-tools-panel select, #test-tools-panel input:not([type=checkbox]) { box-sizing:border-box; max-width:100%; padding:6px; color:#f1f5fb; background:#263549; border:1px solid #7d90aa; border-radius:4px; }
-#test-tools-panel select { width:100%; }
-#test-tools-panel input[type=number] { width:100px; }
-#test-tools-panel button { padding:7px 10px; border:1px solid #8393a9; border-radius:4px; color:#f8fbff; background:#354b68; cursor:pointer; }
-#test-tools-panel button:disabled { opacity:.45; cursor:default; }
-#test-tools-panel .qa-warning { color:#ffcf8a; }
-#test-tools-status { min-height:2em; padding:8px; background:#0d1725; border-left:3px solid #7db8ff; }
-#test-tools-panel ol { padding-left:21px; }
+#test-tools-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: #0005;
+  display: flex;
+  justify-content: flex-end;
+}
+#test-tools-panel {
+  box-sizing: border-box;
+  width: min(440px, 100vw);
+  height: 100dvh;
+  overflow: auto;
+  padding: 18px;
+  background: #17202d;
+  color: #eef3fa;
+  box-shadow: -8px 0 28px #0006;
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+#test-tools-panel h2 {
+  margin: 0;
+  font-size: 19px;
+}
+#test-tools-panel .qa-heading,
+#test-tools-panel .qa-buttons,
+#test-tools-panel .qa-numbers {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+#test-tools-panel .qa-heading {
+  justify-content: space-between;
+}
+#test-tools-panel fieldset {
+  border: 1px solid #59687b;
+  border-radius: 6px;
+  margin: 14px 0;
+  padding: 12px;
+  min-width: 0;
+}
+#test-tools-panel label {
+  display: block;
+  margin: 8px 0;
+}
+#test-tools-panel select,
+#test-tools-panel input:not([type="checkbox"]) {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 6px;
+  color: #f1f5fb;
+  background: #263549;
+  border: 1px solid #7d90aa;
+  border-radius: 4px;
+}
+#test-tools-panel select {
+  width: 100%;
+}
+#test-tools-panel input[type="number"] {
+  width: 100px;
+}
+#test-tools-panel button {
+  padding: 7px 10px;
+  border: 1px solid #8393a9;
+  border-radius: 4px;
+  color: #f8fbff;
+  background: #354b68;
+  cursor: pointer;
+}
+#test-tools-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#test-tools-panel .qa-warning {
+  color: #ffcf8a;
+}
+#test-tools-status {
+  min-height: 2em;
+  padding: 8px;
+  background: #0d1725;
+  border-left: 3px solid #7db8ff;
+}
+#test-tools-panel ol {
+  padding-left: 21px;
+}
 
-@media (max-width: 800px) { #bar { flex-wrap:wrap; gap:6px; } }
+@media (max-width: 800px) {
+  #bar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
 
 /* Original CUIRevive coordinates; the modal hit shield shares the 800x600 canvas transform. */
-#revive-dialog { position: absolute; inset: 0; z-index: 60; pointer-events: auto; }
-#revive-ok { left: 368px; top: 196px; width: 65px; height: 24px; }
+#revive-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: auto;
+}
+#revive-ok {
+  left: 368px;
+  top: 196px;
+  width: 65px;
+  height: 24px;
+}
 
 /* Modal native GameMenu/SysOpt; actual pixels are painted on the same 800x600 canvas. */
-#system-menu { position:absolute; inset:0; z-index:49; pointer-events:auto; }
-#system-menu button { pointer-events:auto; }
-#item-quantity { font-family:"Gulim","굴림","KMSCJK",sans-serif; }
+#system-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 49;
+  pointer-events: auto;
+}
+#system-menu button {
+  pointer-events: auto;
+}
+#item-quantity {
+  font-family: "Gulim", "굴림", "KMSCJK", sans-serif;
+}
 
 /* The 1.11 arrow belongs to the cursor plane, not a canvas RAF overlay. Override inline/child
  * pointer/move/text hints ONLY inside game surfaces; leave the browser toolbar/QA shell alone.
@@ -764,17 +957,58 @@ body {
 }
 
 /* Deliberately labelled developer viewer. Only the canvas tooltip beneath is native artwork. */
-#tooltip-preview { position:absolute; inset:0; z-index:52; pointer-events:auto; outline:none; }
-#tooltip-preview .tooltip-preview-toolbar { position:absolute; left:20px; top:12px; width:740px;
-  padding:10px; color:#eef3fa; background:#17202df0; font:12px/1.5 system-ui,sans-serif; }
-#tooltip-preview button { margin:3px; padding:4px 7px; color:#fff; background:#354b68; border:1px solid #8393a9; border-radius:3px; }
-#tooltip-preview button[aria-pressed=true] { border-color:#ffcb66; background:#516988; }
-#tooltip-preview-status { margin:4px 0 0; min-height:3em; }
+#tooltip-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 52;
+  pointer-events: auto;
+  outline: none;
+}
+#tooltip-preview .tooltip-preview-toolbar {
+  position: absolute;
+  left: 20px;
+  top: 12px;
+  width: 740px;
+  padding: 10px;
+  color: #eef3fa;
+  background: #17202df0;
+  font:
+    12px/1.5 system-ui,
+    sans-serif;
+}
+#tooltip-preview button {
+  margin: 3px;
+  padding: 4px 7px;
+  color: #fff;
+  background: #354b68;
+  border: 1px solid #8393a9;
+  border-radius: 3px;
+}
+#tooltip-preview button[aria-pressed="true"] {
+  border-color: #ffcb66;
+  background: #516988;
+}
+#tooltip-preview-status {
+  margin: 4px 0 0;
+  min-height: 3em;
+}
 
 /* Explicit read-only developer inspector, not a native game window/skin. */
-#qa-motion { border:1px solid #59687b; padding:10px; margin:14px 0; }
-#qa-motion summary { cursor:pointer; }
-#qa-motion-canvas, #qa-mob-canvas { display:block; max-width:100%; background:#e5edf5; image-rendering:pixelated; }
+#qa-motion {
+  border: 1px solid #59687b;
+  padding: 10px;
+  margin: 14px 0;
+}
+#qa-motion summary {
+  cursor: pointer;
+}
+#qa-motion-canvas,
+#qa-mob-canvas {
+  display: block;
+  max-width: 100%;
+  background: #e5edf5;
+  image-rendering: pixelated;
+}
 
 /* Outside the scaled game surface: startup failures must never leave an inert login screen. */
 .startup-error:not([hidden]) {
@@ -846,4 +1080,40 @@ body {
 #motion-lab #motion-reset {
   margin-left: 0;
   padding: 5px 8px;
+}
+
+/* Lens controls are browser preferences; never part of the native world or hit-test plane. */
+#camera-lab {
+  position: relative;
+  pointer-events: auto;
+}
+#camera-lab summary {
+  cursor: pointer;
+}
+.camera-lab-panel {
+  position: fixed;
+  top: 52px;
+  right: 14px;
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100vh - 76px);
+  overflow: auto;
+  padding: 14px;
+  background: #171c28;
+  border: 1px solid #8d9ab5;
+  box-shadow: 0 8px 28px #0008;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.camera-lab-panel label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.camera-lab-panel button {
+  margin: 4px;
+}
+#camera-status {
+  font-variant-numeric: tabular-nums;
+  color: #f2da9c;
 }

@@ -104,25 +104,29 @@ test("typed read-only audio probe decodes all 150 original Sound leaves and alia
   }
 });
 
-test("typed display probe verifies five real DPRs, equal-width pixels, UI alignment, mode persistence and same-page DPR changes without login", async () => {
-  const archive = WzArchive.open(resolve(root, "Data.wz"));
-  const server = await startWebClient({
-    host: "127.0.0.1",
-    port: 0,
-    loginPort: 0,
-    art: artProviderOf(archive),
-  });
-  try {
-    const results = await probeDisplay(`http://127.0.0.1:${server.port}`);
-    assert.deepEqual(
-      results.map((result) => result.dpr),
-      [1, 1.25, 1.5, 2, 3],
-    );
-    assert.ok(results.every((result) => !result.errors.length));
-  } finally {
-    await server.close();
-  }
-});
+test(
+  "typed display probe verifies seven real DPRs, equal-width pixels, UI alignment, mode persistence and same-page DPR changes without login",
+  { timeout: 60000 },
+  async () => {
+    const archive = WzArchive.open(resolve(root, "Data.wz"));
+    const server = await startWebClient({
+      host: "127.0.0.1",
+      port: 0,
+      loginPort: 0,
+      art: artProviderOf(archive),
+    });
+    try {
+      const results = await probeDisplay(`http://127.0.0.1:${server.port}`);
+      assert.deepEqual(
+        results.map((result) => result.dpr),
+        [1, 1.1, 1.25, 1.5, 1.75, 2, 3],
+      );
+      assert.ok(results.every((result) => !result.errors.length));
+    } finally {
+      await server.close();
+    }
+  },
+);
 
 test("typed title profiler counts actual canvas blits over 120 real frames with all WebSockets blocked", async () => {
   const archive = WzArchive.open(resolve(root, "Data.wz"));

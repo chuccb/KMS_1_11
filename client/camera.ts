@@ -124,7 +124,7 @@ const finiteVelocity = (value: number | undefined) => (Number.isFinite(value) ? 
 const bounded = (value: number, max: number) => Math.max(-max, Math.min(max, value));
 
 /** All ten policies share ONE raster origin and the same VR limits. No zoom/rotation or second
- * pointer transform. Existing smooth (.18 at 60Hz) / center / zone / fixed retain their behavior.
+ * pointer transform HERE: scene-surface owns the separate pixel lens. Existing smooth (.18 at 60Hz) / center / zone / fixed retain their behavior.
  * Experiments consume velocity only for framing; they never change player/physics/network state.
  */
 export function updateCamera(
@@ -230,4 +230,17 @@ export function updateCamera(
   state.x = collisionRound(clamped.x);
   state.y = collisionRound(clamped.y);
   return state;
+}
+
+/** Lens/FOV changes preserve the current world centre, including fixed-camera framing.
+ * No player state changes. The regular update then clamps the new viewport to the same WZ VR.
+ */
+export function reframeCamera(
+  state: CameraState,
+  before: { width: number; height: number },
+  after: { width: number; height: number },
+): void {
+  if (!state.ready) return;
+  state.trackingX += (before.width - after.width) / 2;
+  state.trackingY += (before.height - after.height) / 2;
 }

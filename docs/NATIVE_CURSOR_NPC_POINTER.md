@@ -1,5 +1,8 @@
 # 原版游標、NPC 命中／名牌與滑鼠互動遺漏
 
+> 現行尺寸／遠近／轉場與游標DPR政策已由ADR-084更新，見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+> 下文舊fit／native／降採樣、固定backing或CSS游標縮圖的敘述保留歷史時點，不是目前可用選項。
+
 2026-10-18／ADR-060。**已編輯實作及回歸來源；未執行 test/check/typecheck/browser/VM/probe，沒有功能 PASS。**
 本輪只閱讀原 EXE／C／listing／DLL、直接 dump WZ 素材與閱讀 diff；不以啟服取代驗證。
 不 seed、不調整角色、能力、裝備、地圖或進度；沿用目前 save，停服後冷備份再重啟。

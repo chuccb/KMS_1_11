@@ -280,6 +280,16 @@ test("typed camera controls populate real HTML schema, persist independently and
     assert.equal(isEditingControl(document.createElement("input")), true);
     assert.equal(isEditingControl(button), false);
     assert.equal(isEditingControl(null), false);
+    const mode = controls.mode(),
+      saved = f.storage.getItem(CAMERA_STORAGE_KEY);
+    controls.dispose();
+    controls.dispose();
+    button.click();
+    select.value = "center";
+    select.dispatchEvent(fixtureEvent("change"));
+    assert.equal(recentered, 1);
+    assert.equal(controls.mode(), mode);
+    assert.equal(f.storage.getItem(CAMERA_STORAGE_KEY), saved);
   } finally {
     f.restore();
   }
