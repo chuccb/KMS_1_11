@@ -1,3 +1,4 @@
+import { nativeVolume, SOUND_DEFAULTS, soundSettings } from './systemsettings.mjs';
 /** Original WZ audio over same-origin HTTP. No synthetic tones or external recordings.
  * A user gesture resumes Web Audio; the desired BGM survives autoplay blocking. Map changes are
  * generation-guarded so a slow previous decode cannot start the wrong field's music.
@@ -16,7 +17,9 @@ export function createAudio(deps = {}) {
   const fetcher = deps.fetch ?? ((...args) => globalThis.fetch(...args));
   const onError = deps.onError ?? (() => {});
   let context, musicGain, effectGain, musicSource, desired, generation = 0, unlocked = false;
-  let muted = false, musicVolume = 1, effectVolume = 1; // original soBGMVol/soSEVol default 15/15
+  let muted = false, settings = {...SOUND_DEFAULTS};
+  let musicVolume = nativeVolume(settings.bgm), effectVolume = nativeVolume(settings.effects);
+  let effectGeneration = 0;
   const buffers = new Map(), pending = new Map(), active = new Set();
   const failed = new Set();
   function gains() {
@@ -80,9 +83,10 @@ export function createAudio(deps = {}) {
       if (!unlocked || !context || muted) return;
       const path = soundPath(value);
       if (!path) return;
+      const token = effectGeneration;
       try {
         const decoded = await buffer(path);
-        if (muted || !unlocked) return;
+        if (muted || !unlocked || token !== effectGeneration) return;
         // Limit overlapping one-shots, never restart/cut the BGM to play an effect.
         if (active.size >= 16) { const old = active.values().next().value; old.stop(); old.disconnect(); active.delete(old); }
         const source = context.createBufferSource(); source.buffer = decoded;
@@ -93,10 +97,17 @@ export function createAudio(deps = {}) {
       } catch (e) { error(path, e); }
     },
     setVolumes(bgm, effects) { musicVolume = Math.max(0, Math.min(1, bgm)); effectVolume = Math.max(0, Math.min(1, effects)); gains(); },
+    applySettings(value) {
+      settings = soundSettings(value);
+      musicVolume = nativeVolume(settings.bgm, settings.bgmMuted);
+      effectVolume = nativeVolume(settings.effects, settings.effectsMuted);
+      gains();
+    },
+    get settings() { return {...settings}; },
     setMuted(value) { muted = Boolean(value); gains(); },
     get muted() { return muted; },
     get bgm() { return desired; },
-    stop() { desired = undefined; generation++; stopMusic(); for (const source of active) { source.stop(); source.disconnect(); } active.clear(); },
+    stop() { desired = undefined; generation++; effectGeneration++; stopMusic(); for (const source of active) { source.stop(); source.disconnect(); } active.clear(); },
   };
 }
 

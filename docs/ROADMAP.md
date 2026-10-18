@@ -1,6 +1,12 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：交叉讀原Gr2D vtable／parent-chain，
+> 最新交付2026-10-18（**未跑test/check/typecheck/browser/VM/probe**）：原Menu／SysOpt、Escape順序、兩組20段音量／獨立mute，
+> 預設15=80%／第0段5%，preview／OK保存／Cancel還原；Menu退出同連線回title。未完成項明確disabled。
+> 消耗品快捷格互拖覆蓋／拖到場景只清設定／hover，原收件人輸入與持續悄悄話／everyone、CP949字節檢查／recipient格。
+> 補本機cold-action互動ticket／IME Enter／modal隔離；不宣稱完整UI focus、GameOpt／BtChat或技能施放。
+> 同save冷備份再啟LIVE；來源／範圍見 `NATIVE_SYSTEM_UI.md`／ADR-058，啟服非功能PASS。
+
+> 前輪交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：交叉讀原Gr2D vtable／parent-chain，
 > 補root序號／child原排序、local+2／空中層記憶、背景index／bullet來源深度／damage固定層；
 > zmap數值reset＋smap／islot／vslot一般裝備遮擋，雙面角色與殘影中層，Tomb child−1、名字回腳下黑底。
 > 遠端攻擊cold-art guard、103000000授權捷徑，沿用save冷備份重啟。全CAvatar／Gr2D排程／UI focus仍缺。

@@ -1,5 +1,7 @@
 import { backgroundLayout } from "./background.mjs";
 import { mobLocomotion } from "./mobmotion.mjs";
+import { systemMenu } from "./systemmenu.mjs";
+import { whisperNameError } from "./whisper.mjs";
 import { chatHistory } from "./chatlog.mjs";
 import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile } from "./quickslots.mjs";
@@ -227,7 +229,7 @@ try {
 }
 
 /** @type {WebSocket | undefined} */
-let socket;
+let socket, quitToTitle = false;
 /** @type {{ x: number, y: number, mapId: number } | undefined} */
 let self;
 /** @type {any} */
@@ -343,6 +345,7 @@ function setLoginPending(pending) {
 
 function connect() {
   if (loginPending) return;
+  quitToTitle=false;
   buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
   showPanel(ui.connect);
   setLoginPending(true);
@@ -372,7 +375,9 @@ function connect() {
   connection.addEventListener("close", () => {
     if (socket !== connection) return;
     setLoginPending(false);
+    systemPanel.close(false, false);
     itemDialog.close(false);
+    quickDrag = undefined;
     itemDrag = undefined;
     slotPending = shopPending = mesoPending = false;
     combatEpoch++;
@@ -389,6 +394,16 @@ function connect() {
     ui.status.classList.add("bad");
     buffs.clear(); nativeBasis=undefined; nativeAmmoPad=0; nativeWornFacts=[];
     logLine("websocket closed");
+    if (quitToTitle) {
+      quitToTitle = false;
+      self = selfView = playerBody = undefined;
+      users.clear(); mobs.clear(); npcs.clear(); drops.clear();
+      inventory = undefined; quickDrag = undefined; resetWhisper();
+      ui.chatbox.classList.add("hidden");
+      testToolsPanel.close(); skillPanel.toggle(false); statPanel.toggle(false); equipPanel.toggle(false);
+      toggleInventory(false); closeShop(false); closeDialogue(false);
+      audio.stop(); showPanel(ui.connect); closeTitleLogin();
+    }
   });
   connection.addEventListener("message", (event) => {
     if (socket !== connection) return;
@@ -418,6 +433,9 @@ function handle(message) {
     lastAttackTrace = undefined;
     miniMapPanel.setMap(undefined);
     itemEpoch++;
+    systemPanel.close(false, false);
+    quickDrag = undefined;
+    if (message.t !== "field") resetWhisper();
     itemDialog.close(false);
     inventoryScrollDrag = undefined;
     shopPending = false;
@@ -1175,6 +1193,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
+    itemDialog.open || systemPanel.visible || testToolsPanel.open ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -1229,7 +1248,7 @@ let pointerAt;
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
   pointerAt = point;
-  if (itemDialog.open || itemDrag) return;
+  if ((itemDialog.open || systemPanel.visible) || itemDrag || quickDrag) return;
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
   if (shopScrollDrag !== undefined) {
@@ -1326,12 +1345,13 @@ canvas.addEventListener("mousemove", (event) => {
   const button = statusButtonAt(point.x, point.y);
   statusHover = button?.action;
   hoveredPortal = button ? undefined : portalAt(point.x, point.y);
-  const npc = button ? undefined : npcAt(point.x, point.y);
-  canvas.style.cursor = button || hoveredPortal || npc ? "pointer" : "default";
+  const quick = quickHoverItem();
+  const npc = button || quick ? undefined : npcAt(point.x, point.y);
+  canvas.style.cursor = button || quick || hoveredPortal || npc ? "pointer" : "default";
 });
 
 canvas.addEventListener("mousedown", (event) => {
-  if (revivePanel.open || itemDialog.open || event.button > 0) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || event.button > 0) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1391,6 +1411,7 @@ canvas.addEventListener("mousedown", (event) => {
       moved: false,
     };
   }
+  if (!hit && beginQuickDrag(point)) { event.preventDefault(); return; }
   statusPressed = statusButtonAt(point.x, point.y)?.action;
 });
 
@@ -1437,7 +1458,7 @@ canvas.addEventListener("mouseleave", () => {
 let inventorySuppressClick = false;
 
 canvas.addEventListener("dblclick", (event) => {
-  if (itemDialog.open || shopPending || slotPending || mesoPending) return;
+  if ((itemDialog.open || systemPanel.visible) || shopPending || slotPending || mesoPending) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1466,7 +1487,7 @@ canvas.addEventListener("dblclick", (event) => {
 });
 
 canvas.addEventListener("click", (event) => {
-  if (revivePanel.open || itemDialog.open) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible)) return;
   // The status bar is drawn over the world, so its buttons win over anything behind them - and the
   // inventory window is above both.
   const point = viewPoint(event);
@@ -1557,6 +1578,7 @@ canvas.addEventListener("click", (event) => {
     statusButtonClick(button);
     return;
   }
+  if (quickSlotAt(point.x, point.y) >= 0) return; // StatusBar owns these pixels, not the field below.
   // An NPC first: its box stands on the ground where a door could also be, and the server can only
   // open one window at a time (`0x4A`/`0x47` while another is up is a disconnect in the client).
   const npc = npcAt(point.x, point.y);
@@ -1575,7 +1597,7 @@ canvas.addEventListener("click", (event) => {
 canvas.addEventListener(
   "wheel",
   (event) => {
-    if (itemDialog.open || itemDrag) return;
+    if ((itemDialog.open || systemPanel.visible) || itemDrag || quickDrag) return;
     const point = viewPoint(event);
     if (
       !shopWindowAt(point.x, point.y) &&
@@ -1757,7 +1779,7 @@ const SWING_REACH_UP = 72;
 const SWING_REACH_DOWN = 36;
 let nextSwingAt = 0;
 let swingLoading = false;
-let combatEpoch = 0;
+let combatEpoch = 0, localActionEpoch = 0;
 const attackProfiles = new Map();
 const projectileFrames = new Map();
 const attackLooks = new Set();
@@ -2707,6 +2729,8 @@ let quickProfile, quickOwner, nextBagUseAt = 0;
 function loadQuickItems() {
   const owner = JSON.stringify([ui.user.value, selfView.characterId, selfView.name]);
   if (owner === quickOwner) return;
+  resetWhisper();
+  quickDrag = undefined;
   quickOwner = owner;
   let storage;
   try { storage = localStorage; } catch {}
@@ -2715,7 +2739,7 @@ function loadQuickItems() {
 function useBagItem(item) {
   const now = performance.now();
   if (!item || loginStage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
-      portalPending || itemDrag || itemDialog.open || testToolsPanel.open || shop !== undefined ||
+      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
   nextBagUseAt = now + 200;
@@ -2762,6 +2786,7 @@ function drawStatusBar() {
   ctx.fillRect(214, STATUS_BAR.y + 190, 20, 12);
   statusText(`${expPercent(selfView.exp, selfView.expToNext ?? 0)}%`, 214, STATUS_BAR.y + 190);
   drawQuickItems();
+  drawWhisperRecipient();
   statusText(`Lv.${selfView.level}`, 54, STATUS_BAR.y + 116);
   statusText(jobNameOf(selfView.job), 136, STATUS_BAR.y + 116, "right");
   statusText(selfView.name, 153, STATUS_BAR.y + 111);
@@ -2786,6 +2811,7 @@ function statusButtonClick(button) {
     equipPanel.toggle();
     return;
   }
+  if (button.action === "menu") { systemPanel.open(); return; }
   logLine(`${button.name}：這個原版視窗還沒接上來。`);
 }
 
@@ -2804,7 +2830,7 @@ function frame() {
     playerBody.dead = selfView?.hp <= 0;
     const blocked =
       portalPending ||
-      itemDialog.open ||
+      (itemDialog.open || systemPanel.visible) ||
       testToolsPanel.open ||
       selfView?.hp <= 0 ||
       shop !== undefined ||
@@ -2989,11 +3015,11 @@ function frame() {
         ? shopHover.row
         : equipPanel.hit(pointerAt.x, pointerAt.y)
           ? equipHover
-          : (inventoryPick ?? inventoryHover?.item);
-    if (!itemDrag && !itemDialog.open && !testToolsPanel.open &&
+          : (inventoryPick ?? inventoryHover?.item ?? quickHoverItem());
+    if (!itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y))
       drawItemTooltip(pointerAt.x, pointerAt.y, pointed);
-    if (!itemDrag && !itemDialog.open && !testToolsPanel.open && !pointed &&
+    if (!itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !testToolsPanel.open && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
@@ -3003,6 +3029,8 @@ function frame() {
   }
 
   drawDraggedItem();
+  drawQuickDrag();
+  systemPanel.draw();
   itemDialog.draw();
   revivePanel.draw(now);
   requestAnimationFrame(frame);
@@ -3330,15 +3358,16 @@ async function swing() {
     shop ||
     shopPending ||
     talkingNpc ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     slotPending ||
     mesoPending ||
+    quickDrag || itemDrag ||
     swingLoading ||
     performance.now() < nextSwingAt
   )
     return;
   swingLoading = true;
-  const field = self, epoch = combatEpoch, characterId = selfView.characterId;
+  const field = self, epoch = combatEpoch, interaction = localActionEpoch, characterId = selfView.characterId;
   let entity = selfView;
   const lookKey = JSON.stringify(lookOf(entity));
   try {
@@ -3348,7 +3377,7 @@ async function swing() {
     entity = selfView;
     if (
       self !== field ||
-      combatEpoch !== epoch ||
+      combatEpoch !== epoch || localActionEpoch !== interaction ||
       entity?.characterId !== characterId ||
       JSON.stringify(lookOf(entity)) !== lookKey ||
       entity.hp <= 0 ||
@@ -3359,7 +3388,7 @@ async function swing() {
       shop ||
       shopPending ||
       talkingNpc ||
-      itemDialog.open ||
+      (itemDialog.open || systemPanel.visible) ||
       slotPending ||
       mesoPending
     )
@@ -3394,10 +3423,10 @@ async function swing() {
     const effects = Object.values(motion.effects ?? {}).flat().map((frame) => artImage(frame.path));
     await Promise.all([...frames, ...effects].map((frame) => frame.loading));
     entity = selfView;
-    if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch
+    if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch || localActionEpoch !== interaction
       || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
       || !playerBody || playerBody.ladder || map?.id !== self.mapId || portalPending
-      || shop || shopPending || talkingNpc || itemDialog.open || slotPending || mesoPending
+      || shop || shopPending || talkingNpc || (itemDialog.open || systemPanel.visible) || slotPending || mesoPending
       || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt) return;
     if ([...frames, ...effects].some((frame) => !frame.ready)) {
       logLine("攻擊圖像尚未載入，未以站立圖或其他武器姿勢代替。");
@@ -3478,12 +3507,38 @@ const chatHistoryPanel = chatHistory({
   root: document.getElementById('chat-history'), list: ui.chatLines,
   bar: document.getElementById('chat-scroll'),
 });
-// Native 4F8940 opens a recipient UI. Until that dialog is reconstructed, this explicit browser
-// shortcut uses the EXISTING /w parser; it does not silently set a recipient or send a message.
+// 4F8940/4FB160: active recipient toggles back to everyone; otherwise ask remembered name.
+let whisperRecipient = "", lastWhisperRecipient = "";
+function resetWhisper() {
+  pendingWhisper=undefined;
+  whisperRecipient = lastWhisperRecipient = "";
+  updateWhisperControl();
+}
+function updateWhisperControl() {
+  const button = document.getElementById("chat-whisper");
+  button.setAttribute("aria-pressed", String(!!whisperRecipient));
+  button.title = whisperRecipient ? `${whisperRecipient} · 點擊回到一般聊天` : "選擇悄悄話收件人";
+  ui.say.setAttribute("aria-label", whisperRecipient ? `悄悄話給 ${whisperRecipient}` : "聊天輸入");
+}
+function drawWhisperRecipient() {
+  // Original StatusBar local fill(245,186,79,17), text(246,189); bar origin y392.
+  ctx.save(); ctx.fillStyle="#315573"; ctx.fillRect(245,578,79,17);
+  ctx.beginPath();ctx.rect(245,578,79,17);ctx.clip();
+  ctx.font=HUD_FONT;ctx.fillStyle="#ffffff";ctx.textAlign="left";ctx.textBaseline="top";
+  ctx.fillText(whisperRecipient || "모두에게",246,581);ctx.restore();
+}
 document.getElementById('chat-whisper').addEventListener('click', () => {
-  if (revivePanel.open || itemDialog.open || testToolsPanel.open) return;
-  if (!ui.say.value) ui.say.value = '/w ';
-  ui.say.focus();
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open ||
+      loginStage !== "game" || !visualFieldActive || !selfView || portalPending) return;
+  if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
+  const owner=quickOwner, epoch=itemEpoch;
+  itemDialog.text({text:"귓속말 상대를 입력하세요.",initial:lastWhisperRecipient,maxLength:12,
+    validate:value=>whisperNameError(value,selfView?.name),
+    accept(name) {
+      if(owner!==quickOwner || epoch!==itemEpoch || loginStage!=="game")return;
+      whisperRecipient=lastWhisperRecipient=name; updateWhisperControl();ui.say.focus();
+    },
+  });
 });
 
 function chatLine(name, text) {
@@ -3525,6 +3580,61 @@ function escapeHtml(text) {
   );
 }
 
+// StatusBar bindings are configuration, not inventory items. A drag never owns a bag slot.
+let quickDrag;
+function quickHoverItem() {
+  if (!pointerAt || systemPanel.visible || itemDialog.open || shop !== undefined ||
+      inventoryWindowAt(pointerAt.x,pointerAt.y) || equipPanel.hit(pointerAt.x,pointerAt.y)) return;
+  const index=quickSlotAt(pointerAt.x,pointerAt.y), itemId=quickProfile?.values()[index];
+  if (!itemId) return;
+  if (itemInfo.get(itemId) === undefined) void describeItem(itemId);
+  return {itemId,quantity:quickItemState(inventory,itemId).quantity};
+}
+function beginQuickDrag(p) {
+  const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
+  if (!itemId || loginStage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
+      portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open || shop!==undefined ||
+      talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
+  // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
+  if (!quickItemState(inventory,itemId).item) return false;
+  localActionEpoch++;
+  quickDrag={index,itemId,owner:quickOwner,profile:quickProfile,epoch:itemEpoch,start:p,point:p,moved:false};
+  inventoryPick=undefined;
+  return true;
+}
+window.addEventListener("mousemove",e=>{
+  if(!quickDrag)return;
+  const p=viewPoint(e);quickDrag.point=p;pointerAt=p;
+  if(!quickDrag.moved && Math.abs(p.x-quickDrag.start.x)+Math.abs(p.y-quickDrag.start.y)>3){
+    quickDrag.moved=true;void audio.effect("UI/DragStart");
+  }
+});
+window.addEventListener("mouseup",e=>{
+  const d=quickDrag;quickDrag=undefined;
+  if(!d?.moved)return;
+  inventorySuppressClick=e.target===canvas;
+  if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
+      d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
+      quickProfile.values()[d.index]!==d.itemId || loginStage!=="game" || !visualFieldActive ||
+      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || testToolsPanel.open ||
+      shop!==undefined || talkingNpc!==undefined || !quickItemState(inventory,d.itemId).item)return;
+  const p=viewPoint(e);
+  if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
+      statPanel.contains(p.x,p.y) || shopWindowAt(p.x,p.y))return;
+  const to=quickSlotAt(p.x,p.y);
+  const changed=to>=0 ? quickProfile.move(d.index,to,d.itemId)
+    : p.x>=0 && p.x<800 && p.y>=0 && p.y<STATUS_BAR.y && !miniMapPanel.contains(p.x,p.y)
+      ? quickProfile.clear(d.index,d.itemId) : false;
+  if(changed)void audio.effect("UI/DragEnd");
+});
+window.addEventListener("blur",()=>{quickDrag=undefined;});
+function drawQuickDrag(){
+  if(!quickDrag?.moved)return;
+  const a=itemIcon(quickDrag.itemId);
+  if(a.ready){ctx.save();ctx.globalAlpha=128/255;
+    ctx.drawImage(a.img,quickDrag.point.x-16,quickDrag.point.y-16);ctx.restore();}
+}
+
 // A drag carries a source snapshot only. No item or look changes until native 0x0B arrives.
 let itemDrag,
   equipHover,
@@ -3539,7 +3649,7 @@ function beginItemDrag(source, p) {
     slotPending ||
     mesoPending ||
     shopPending ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     shop ||
     talkingNpc !== undefined ||
     !selfView ||
@@ -3674,7 +3784,7 @@ async function dropInventoryItem(d, at) {
     talkingNpc === undefined &&
     JSON.stringify(sourceItem(d.tab, d.slot)) === snapshot;
   const facts = await describeItem(d.item.itemId);
-  if (!valid() || itemDialog.open) return;
+  if (!valid() || (itemDialog.open || systemPanel.visible)) return;
   if (!facts || facts.cash || d.item.cash) {
     chatLine(
       "系統",
@@ -3796,7 +3906,7 @@ function setInventoryScroll(row) {
   inventoryPick = inventoryHover = undefined;
 }
 window.addEventListener("mousemove", (event) => {
-  if (!inventoryScrollDrag || itemDialog.open) return;
+  if (!inventoryScrollDrag || (itemDialog.open || systemPanel.visible)) return;
   const g = inventoryScrollbarGeometry();
   const p = viewPoint(event);
   setInventoryScroll(
@@ -4122,7 +4232,7 @@ function dropMesosDialog(at) {
     !mesoPending;
   if (
     !valid() ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     performance.now() < mesoNextAt ||
     selfView.mesos < 10
   )
@@ -4736,7 +4846,7 @@ function buyShopRow(index) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     selfView?.hp <= 0
   )
     return;
@@ -4809,7 +4919,7 @@ function rechargeShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     selfView?.hp <= 0
   )
     return;
@@ -4842,7 +4952,7 @@ function sellShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    itemDialog.open ||
+    (itemDialog.open || systemPanel.visible) ||
     selfView?.hp <= 0
   )
     return;
@@ -5092,7 +5202,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && titleDialogOpen) closeTitleLogin();
     return;
   }
-  if (revivePanel.open || itemDialog.open || testToolsPanel.open) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     document.activeElement instanceof HTMLInputElement &&
@@ -5109,24 +5219,15 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
-    if (itemDrag) {
-      itemDrag = undefined;
-      return;
-    }
-    if (skillPanel.open) {
-      skillPanel.toggle(false);
-      return;
-    }
-    if (statPanel.open) {
-      statPanel.toggle(false);
-      return;
-    }
-    if (equipPanel.open) {
-      equipPanel.toggle(false);
-      return;
-    }
-    if (shop !== undefined) closeShop();
-    if (talkingNpc !== undefined) closeDialogue();
+    event.preventDefault();
+    if (itemDrag || quickDrag) { itemDrag = quickDrag = undefined; return; }
+    if (inventoryOpen) { toggleInventory(false); return; }
+    if (equipPanel.open) { equipPanel.toggle(false); return; }
+    if (statPanel.open) { statPanel.toggle(false); return; }
+    if (skillPanel.open) { skillPanel.toggle(false); return; }
+    if (shop !== undefined) { closeShop(); return; }
+    if (talkingNpc !== undefined) { closeDialogue(); return; }
+    if (!event.repeat) systemPanel.open();
     return;
   }
   const quickIndex = QUICK_SLOTS.findIndex(s => s.key === event.key);
@@ -5333,12 +5434,17 @@ function runCommand(text, local) {
 }
 
 ui.say.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
+  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
   event.stopPropagation(); // Blurring before bubbling must not let the global Enter handler reopen chat.
   const text = ui.say.value.trim();
   ui.say.value = "";
-  if (text !== "" && !runCommand(text, chatLine)) send({ t: "say", text });
+  if (text !== "" && !runCommand(text, chatLine)) {
+    if (whisperRecipient) {
+      send({ t:"whisper", name:whisperRecipient, text });
+      pendingWhisper={name:whisperRecipient,text};
+    } else send({ t: "say", text });
+  }
   if (!event.shiftKey) ui.say.blur();
 });
 
@@ -5385,7 +5491,7 @@ const statPanel = statWindow({
 const skillPanel = skillWindow({
   ctx, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginStage === "game",
-  log: logLine, isModal: () => itemDialog.open || testToolsPanel.open,
+  log: logLine, isModal: () => (itemDialog.open || systemPanel.visible) || testToolsPanel.open,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5436,6 +5542,7 @@ const revivePanel = reviveWindow({
   isInGame: () =>
     loginStage === "game" && socket?.readyState === WebSocket.OPEN,
   onOpen() {
+    localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;
     itemDialog.close(false);
     testToolsPanel.close();
     keys.clear();
@@ -5490,7 +5597,7 @@ const testToolsPanel = testTools({
       secondsLeft:active ? Math.max(0,Math.ceil((active.expiresAt-now)/1000)) : undefined};
   },
   send,getSelf:()=>selfView,isInGame:()=>loginStage==="game",log:logLine,
-  onOpen(){itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
+  onOpen(){localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;itemDialog.close(false);keys.clear();itemDrag=undefined;inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;},openSkills(){skillPanel.toggle(true);},
 });
 document.addEventListener?.("visibilitychange",()=>{recovery.reset();previousContactPlayer=undefined;previousContactMobs.clear();});
 
@@ -5499,10 +5606,27 @@ const itemDialog = itemDialogs({
   image: artImage,
   audio,
   onOpen() {
+    localActionEpoch++;quickDrag=undefined;
     keys.clear();
     itemDrag = undefined;
     inventoryDrag = inventoryScrollDrag = undefined;
     shopDrag = shopScrollDrag = undefined;
     inventoryPick = inventoryHover = equipHover = undefined;
+  },
+});
+
+
+const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
+  canOpen:()=>loginStage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
+    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !testToolsPanel.open &&
+    shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
+  onOpen(){
+    localActionEpoch++; keys.clear(); itemDrag=quickDrag=undefined;
+    inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
+    inventoryPick=inventoryHover=equipHover=undefined; pointerAt=undefined;ui.say.blur();
+  },
+  onQuit(){
+    if(socket?.readyState!==WebSocket.OPEN)return;
+    quitToTitle=true;socket.close(1000,"return to title");
   },
 });

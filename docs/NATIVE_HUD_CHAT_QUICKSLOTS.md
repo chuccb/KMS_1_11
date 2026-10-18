@@ -1,5 +1,9 @@
 # 原版截圖交叉核對：HUD、地圖標題、聊天與消耗品快捷格
 
+> **後續ADR-058（2026-10-18，未測試）**：當時未接的消耗品快捷格互拖／拖出清除、原Menu／SysOpt、
+> 悄悄話收件人輸入／everyone模式已接，見 [NATIVE_SYSTEM_UI.md](NATIVE_SYSTEM_UI.md)。
+> 下方為本輪歷史紀錄；技能快捷施放／BtChat／GameOpt仍未完成，不以歷史紀錄冒充現在的驗證。
+
 2026-10-18。**已實作，未執行 test/check/typecheck/browser/VM/probe；來源回歸檔不是 PASS。**
 
 ## 依據與座標系

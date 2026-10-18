@@ -51,6 +51,11 @@ export function miniMapWindow({ctx,image,getSelf,getUsers,isInGame,point,isCover
     setMap(value,doors=[]){map=value;portals=doors;epoch=-1;clockAt=undefined;cache=undefined;sync();},
     toggle(){shown=!shown;save();sync();},
     get shown(){return shown;},
+    contains(x,y){
+      if(!shown||!map||!isInGame())return false;
+      const v=miniMapViewport(map,getSelf());
+      return x>=at.x&&y>=at.y&&x<at.x+v.width+6&&y<at.y+v.height+13;
+    },
     draw(now){
       sync();if(!map||!isInGame()||!getSelf()){clockAt=undefined;return;}
       // sub_553F40 calls the registered updates through sub_549660 at 30ms intervals.

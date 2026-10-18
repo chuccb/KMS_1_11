@@ -4515,3 +4515,17 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 - 513C80讀515C70(main layer z)→41B630 record[7]→41BF60 bullet create；damage41E610／41F200為-1073471524。
 - 46BDA0 back依1000*index-1073869824，未讀現代front旗標。原tile／obj公式未變，obj pointer arithmetic不是4*z。
 - HTTP僅新增MapBack.z與avatar planes=1/header；本輪沒有更改原版封包版型，也未宣稱NPC行走／全controller已完成。
+
+### 後續原版本機UI接線：Menu／SysOpt／StatusBar（2026-10-18，未測試，ADR-058）
+
+- 559E20 + PE vtable588098／588028確認52C8E0為GameMenu create、52D800為SysOpt create；55A090／55A440是刪除器。
+  原WZ176×240與347×225，461C50以(800-w)>>1／(600-h)>>1置中；六列1000+i取index，4開SysOpt、5走55D9F0離線回登入。
+- 43D360預設音量15、mute0；52D800與listing52DD59..52DD72設count20；43DEB0輸出`trunc(100*(step+1)/20)`，
+  非把15當100%、不是第0段就mute。52DE80 preview、52DF20保存或還原snapshot；均屬本機設定，不新增stat封包。
+- 463DF0重綁清同itemId、覆蓋目的；463F10只清配置。CDraggable只在status→field呼清除，status→其他窗不丟物。
+  快捷格拖曳從4F90F0先找實際USE堆；新增client純配置move／clear與tooltip，不新增0x17／drop請求。
+- 4F8940→535AC0(type3)／535CE0(4,12)，PE5BD308原提示；524A00(name,null,null)是CP9494..12 bytes與KS範圍、I/l限制，
+  null不套建角禁語。4FB160本機recipient格FF315573、font0白字；4F8CB0選定後非slash按recipient送既有0x23 kind6，
+  並非選名字就送封包。receiver既有0x1A仍無悄悄話分類，不依文字推測。
+
+以上是browser還原接線，不是新wire格式／原server規則。新增來源回歸未執行；詳細差異／操作見NATIVE_SYSTEM_UI.md。

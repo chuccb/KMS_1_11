@@ -2331,3 +2331,27 @@ remote等資源ready才暴露swing，事件時鐘不重起，過期略過且防�
 
 加103000000既有授權工具捷徑，不自動warp／改裝備或進度；同save停服冷備份再開LIVE、非force推送[skip ci]。
 新增回歸來源但不跑test/check/typecheck/browser/VM/probe。原始證據與全未完成界線見NATIVE_LAYER_PRIORITY.md。
+
+## ADR-058：原Menu／SysOpt與本機設定、StatusBar快捷拖曳／收件人模式一起接線
+
+**日期**：2026-10-18 ｜ **狀態**：已實作，未執行驗證。
+
+交叉PE 588098／588028及C，定位GameMenu 52C8E0／SysOpt 52D800，不誤用55A...刪除器；
+461C50按原WZ尺寸置中，使用原backgrnd／六列按鈕、Basic Slider／CheckBox／OK／Cancel，DOM只接命中／焦點。
+Menu未有完整功能的Quest／Party／Community／GameOpt保持disabled，不能把server已有協定冒充UI已完成。
+55D9F0的離線／回登入映射為關WS、待close清理後回title；不刪角色／重seed，也不企圖關掉使用者瀏覽器。
+
+43D360預設音量15、mute0；52D800+listing確認20段，43DEB0為100*(step+1)/20，所以80%而非100%。
+獨立BGM/SE mute，第0段5%；52DE80即時預覽、52DF20 OK保存／Cancel原snapshot還原。
+音量改既有GainNode，設定存origin本機profile；不是Windows registry格式，亦非證明WebAudio與DirectSound逐樣本一致。
+保留browser總靜音為額外殼層，不抹掉native兩組值；DirectX soVideo／截圖目的地disabled，不偷換成CSS縮放。
+
+463DF0／463F10與CDraggable路由確認status互拖是重綁覆蓋、拖到field只刪配置，沒有inventory/drop封包。
+補原tooltip與原有物品檢查、owner／profile／field epoch／id stale防護；Esc／blur／畫面外取消，不自動修角色。
+4F8940／4FB160／4F8CB0接原CUtil文字輸入、記憶recipient、everyone切換與原左格；524A00用CP949 bytes與KS Hangul範圍。
+文字收件人不發建角查名請求，普通文字依recipient送既有whisper，slash仍走command；IME組字Enter不送出。
+
+55A700的Escape依原Item→Equip→Stat→Skill→Menu；modal攔點擊／Tab／輸入並清移動鍵，不暫停世界。
+本機cold attack增加localActionEpoch，開關窗或起拖後不補送舊Ctrl；不取消遠端角色攻擊。
+新增回歸來源但不執行test/check/typecheck/browser/VM/probe。原hover timing／完整UI focus等界線詳NATIVE_SYSTEM_UI.md。
+同save停服冷備份、同權限重開LIVE、提交[skip ci]、非force推送目前Arena分支。

@@ -4,7 +4,18 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原版 root／child 圖層與裝備遮擋（2026-10-18，未測試）
+## 最新實作：原版 Menu／SysOpt、快捷格拖移／清除與收件人模式（2026-10-18，未測試）
+
+依PE vtable與原52C8E0／52D800接原視窗、CLOSE／六列按鈕與音量／mute控制項。
+兩組20段／預設15=80%／最低5%，獨立靜音；preview、OK本機保存、Cancel／Escape還原，不重播BGM。
+Escape按原Item→Equip→Stat→Skill→Menu；Menu Quit關目前連線回標題，不刪角色；未實作四列明確disabled。
+補消耗品快捷格互拖覆蓋與拖到空白場景清設定，不移格或丟棄道具；保留profile／field／庫存快照guard。
+接CUtilDlgEx recipient輸入、上次名字／everyone切換、CP949 4..12 bytes／字符／self檢查，與原左下recipient格。
+普通文字依recipient送悄悄話，slash command仍可用；IME組字Enter不誤送。補modal與本機cold-attack互動ticket。
+沒有test/check/typecheck/browser/VM/probe；原hover動畫timing／GDI字形、DirectX畫質／截圖、GameOpt／BtChat／技能快捷施放仍缺。
+見 [NATIVE_SYSTEM_UI.md](NATIVE_SYSTEM_UI.md)／ADR-058；沿用原save、停服冷備份後開LIVE。
+
+## 前輪實作：原版 root／child 圖層與裝備遮擋（2026-10-18，未測試）
 
 Gr2D 10013D40／100137B0 確認同z用序號而非y，overlay parent先比，不把角色兩面拆成global z±2。
 補本機controller+2、空中page/group記憶、背景index深度與HTTP欄、bullet來源z、傷害／MISS固定層。
@@ -32,7 +43,7 @@ PE 5B3A00 確認本輪來源字體為 **Gulim（굴림）**，不是舊註解的
 接 WZ街名／地圖名／mark → HTTP artJson → 右上兩行白字黑影與原徽章；不硬編截圖地圖。
 聊天改原434×84／六列與原 VScr捲軸，輸入位置修正；悄悄話按鈕先提供明示 browser `/w`捷徑，非原收件人窗。
 補七格消耗品拖入／itemId去重／數量合計／最低slot使用、原normal icon與ItemNo位圖；設定為本機帳號角色profile。
-只有200/201/202可綁，不把技能學習當施放；快捷格互拖／拖出、BtChat／Menu原視窗仍缺。
+只有200/201/202可綁，不把技能學習當施放；當時缺的消耗品互拖／拖出、Menu／收件人窗已在ADR-058接上（未測），BtChat仍缺。
 沿用原save／角色，不自動修裝備／建角。未跑test/check/typecheck/browser/VM/probe。
 見 [NATIVE_HUD_CHAT_QUICKSLOTS.md](NATIVE_HUD_CHAT_QUICKSLOTS.md)／ADR-055。
 

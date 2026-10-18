@@ -778,3 +778,8 @@ body {
 /* Original CUIRevive coordinates; the modal hit shield shares the 800x600 canvas transform. */
 #revive-dialog { position: absolute; inset: 0; z-index: 60; pointer-events: auto; }
 #revive-ok { left: 368px; top: 196px; width: 65px; height: 24px; }
+
+/* Modal native GameMenu/SysOpt; actual pixels are painted on the same 800x600 canvas. */
+#system-menu { position:absolute; inset:0; z-index:49; pointer-events:auto; }
+#system-menu button { pointer-events:auto; }
+#item-quantity { font-family:"Gulim","굴림","KMSCJK",sans-serif; }

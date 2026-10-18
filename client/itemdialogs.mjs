@@ -1,5 +1,5 @@
 /** CUtilDlgEx numeric input: 4643F0 / 4B7960 / 535EF0 / 532A80 / 531110.
- * Native art on canvas, DOM only for numeric editing, focus and hit targets.
+ * Native art on canvas, DOM only for text/numeric editing, focus and hit targets.
  * No inventory writes: callers revalidate their source snapshot before sending.
  */
 export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
@@ -35,7 +35,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
   }
   function linesOf(text, width) {
     ctx.save();
-    ctx.font = "12px 'Dotum', '돋움', 'KMSCJK', sans-serif";
+    ctx.font = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
     const lines = [];
     for (const paragraph of String(text).split("\n")) {
       let line = "";
@@ -53,10 +53,11 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
   }
   function open(options, mode) {
     if (current) return false;
-    const lines = linesOf(options.text, mode === "quantity" ? 230 : 236);
+    const editing = mode !== "confirm";
+    const lines = linesOf(options.text, editing ? 230 : 236);
     const textHeight = lines.length * 16;
-    const width = mode === "quantity" ? 252 : 264;
-    const height = mode === "quantity" ? textHeight + 99 : 132;
+    const width = editing ? 252 : 264;
+    const height = editing ? textHeight + 99 : 132;
     const x = Math.max(
       0,
       Math.min(800 - width, Math.round((options.at?.x ?? 400) - width / 2)),
@@ -69,38 +70,39 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
     current = { ...options, mode, lines, textHeight, x, y, width, height };
     label.textContent = options.text;
     error.textContent = "";
-    input.classList.toggle("hidden", mode !== "quantity");
-    if (mode === "quantity") {
+    input.classList.toggle("hidden", !editing);
+    if (editing) {
       input.value = String(options.initial);
-      input.maxLength = String(options.max).length;
+      input.maxLength = mode === "text" ? (options.maxLength ?? 12) : String(options.max).length;
+      input.inputMode = mode === "text" ? "text" : "numeric";
       input.setAttribute(
         "aria-label",
-        `${options.text} (${options.min ?? 1}–${options.max})`,
+        mode === "text" ? options.text : `${options.text} (${options.min ?? 1}–${options.max})`,
       );
       box(input, x + 16, y + textHeight + 38, width - 30, 14);
     }
-    const buttonY = mode === "quantity" ? y + height - 42 : y + height - 40;
+    const buttonY = editing ? y + height - 42 : y + height - 40;
     box(
       ok,
-      mode === "quantity" ? x + width - 119 : x + width / 2 - 50,
+      editing ? x + width - 119 : x + width / 2 - 50,
       buttonY,
       50,
       23,
     );
     box(
       cancel,
-      mode === "quantity" ? x + width - 65 : x + width / 2 + 4,
+      editing ? x + width - 65 : x + width / 2 + 4,
       buttonY,
       50,
       23,
     );
-    if (mode !== "quantity") {
+    if (!editing) {
       box(ok, x + 60, y + 92, 65, 24);
       box(cancel, x + 138, y + 92, 65, 24);
     }
     root.classList.remove("hidden");
     onOpen();
-    if (mode === "quantity") {
+    if (editing) {
       input.focus();
       input.select();
     } else cancel.focus(); // Destructive confirmations never default to Yes on a stray Enter.
@@ -124,6 +126,17 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
         input.setAttribute("aria-invalid", "true");
         input.focus();
         input.select();
+        return;
+      }
+    }
+    if (c.mode === "text") {
+      value = input.value.trim();
+      const reason = c.validate?.(value);
+      if (reason) {
+        error.textContent = reason;
+        input.setCustomValidity(reason);
+        input.setAttribute("aria-invalid", "true");
+        input.focus(); input.select();
         return;
       }
     }
@@ -165,6 +178,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
     "keydown",
     (event) => {
       if (!current) return;
+      if (current.mode === "text" && (event.isComposing || event.keyCode === 229)) return;
       event.stopImmediatePropagation();
       if (event.key === "Escape") {
         event.preventDefault();
@@ -176,7 +190,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
       } else if (event.key === "Tab") {
         event.preventDefault();
         const controls =
-          current.mode === "quantity" ? [input, ok, cancel] : [ok, cancel];
+          current.mode !== "confirm" ? [input, ok, cancel] : [ok, cancel];
         const index = controls.indexOf(document.activeElement);
         controls[
           (index + (event.shiftKey ? controls.length - 1 : 1)) % controls.length
@@ -223,6 +237,9 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
         return false;
       return open(options, "quantity");
     },
+    text(options) {
+      return open(options, "text");
+    },
     confirm(options) {
       return open(options, "confirm");
     },
@@ -232,7 +249,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
       if (!c) return;
       const { x, y, width: w, height: h } = c;
       ctx.save();
-      if (c.mode === "quantity") {
+      if (c.mode !== "confirm") {
         // 531110: white interior, Border/1+6 horizontal, /3+4 vertical, four native corners.
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(x, y + 13, w, h - 13);
@@ -261,7 +278,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
       } else {
         stamp("UI/Basic.img/YesNo/backgrnd", x, y);
       }
-      ctx.font = "12px 'Dotum', '돋움', 'KMSCJK', sans-serif";
+      ctx.font = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
       ctx.fillStyle = "#000000";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -269,7 +286,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
         ctx.fillText(
           line,
           x + 14,
-          y + (c.mode === "quantity" ? 36 : 24) + i * 16,
+          y + (c.mode !== "confirm" ? 36 : 24) + i * 16,
         ),
       );
       if (error.textContent) {
@@ -279,7 +296,7 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
       }
       for (const b of [ok, cancel]) {
         const name =
-          c.mode === "quantity"
+          c.mode !== "confirm"
             ? b === ok
               ? "OK"
               : "Cancel"
@@ -293,8 +310,8 @@ export function itemDialogs({ ctx, image, audio, onOpen = () => {} }) {
               ? "mouseOver"
               : "normal";
         const path =
-          c.mode === "quantity" ? "UI/UIWindow.img/UtilDlgEx" : "UI/Basic.img";
-        if (c.mode === "quantity")
+          c.mode !== "confirm" ? "UI/UIWindow.img/UtilDlgEx" : "UI/Basic.img";
+        if (c.mode !== "confirm")
           stamp(
             `${path}/Bt${name}/${state}/0`,
             parseFloat(b.style.left),

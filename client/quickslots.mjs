@@ -21,6 +21,18 @@ export function bindQuickItem(bindings, index, itemId) {
   if (!Number.isInteger(index) || index < 0 || index >= 7 || !quickItemAllowed(itemId)) return undefined;
   return Array.from({length: 7}, (_, i) => i === index ? itemId : bindings[i] === itemId ? null : bindings[i] ?? null);
 }
+/** Native status->status rebind replaces the destination; it does NOT swap bindings. */
+export function moveQuickItem(bindings, from, to, expected = bindings[from]) {
+  if (!Number.isInteger(from) || from < 0 || from >= 7 || !quickItemAllowed(expected)
+      || bindings[from] !== expected) return undefined;
+  return bindQuickItem(bindings, to, expected);
+}
+/** 463F10: clear the template binding, never move/throw away its bag stack. */
+export function clearQuickItem(bindings, index, expected = bindings[index]) {
+  if (!Number.isInteger(index) || index < 0 || index >= 7 || !quickItemAllowed(expected)
+      || bindings[index] !== expected) return undefined;
+  return Array.from({length:7}, (_,i) => bindings[i] === expected ? null : bindings[i] ?? null);
+}
 /** 4FC180 sums ALL matching USE stacks; 512570 uses the first positive bag slot. */
 export function quickItemState(inventory, itemId) {
   if (!quickItemAllowed(itemId)) return { quantity: 0, item: undefined };
@@ -43,14 +55,18 @@ export function quickItemProfile(storage, owner) {
       if (quickItemAllowed(saved[i]) && !bindings.includes(saved[i])) bindings[i] = saved[i];
     }
   } catch {} // A blocked or corrupt profile must never prevent entering the field.
+  const save = (next) => {
+    if (!next) return false;
+    bindings = next;
+    try { storage?.setItem(key, JSON.stringify(bindings)); } catch {}
+    return true;
+  };
   return {
     values: () => [...bindings],
+    move(from, to, expected = bindings[from]) { return save(moveQuickItem(bindings, from, to, expected)); },
+    clear(index, expected = bindings[index]) { return save(clearQuickItem(bindings, index, expected)); },
     bind(index, itemId) {
-      const next = bindQuickItem(bindings, index, itemId);
-      if (!next) return false;
-      bindings = next;
-      try { storage?.setItem(key, JSON.stringify(bindings)); } catch {}
-      return true;
+      return save(bindQuickItem(bindings, index, itemId));
     },
   };
 }

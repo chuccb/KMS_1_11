@@ -5,7 +5,16 @@
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：追到 Gr2D 原 vtable／parent-chain comparator，改正同z按腳底y排序；
+- **本輪（2026-10-18，未測試）**：接原 Menu／SysOpt 圖片與原座標、Escape關窗優先序、兩組20段音量／獨立靜音。
+  修原音量15段實際80%（不是100%）；即時預覽、OK本機保存、Cancel／Escape還原，音樂不重起。
+  補消耗品快捷格彼此拖移／覆蓋、拖到場景只清綁定、hover與stale guards；不發送丟棄道具請求。
+  接原悄悄話收件人輸入／記憶／切回everyone、CP949 byte驗證與左側名字格，不再只塞`/w `捷徑。
+  Menu可離線回標題；補modal隔離／冷攻擊ticket與IME Enter。未完成選單項目明確disabled，不冒稱技能施放或完整UI完成。
+  [原檔交叉來源、操作與界線](docs/NATIVE_SYSTEM_UI.md)／ADR-058。
+  沿用save冷備份重啟、非force推送；**未跑test/check/typecheck/browser/VM/probe**。
+
+
+- **前輪（2026-10-18，未測試）**：追到 Gr2D 原 vtable／parent-chain comparator，改正同z按腳底y排序；
   補本機角色深度+2、空中保留接觸層、背景index z、飛行道具來源z與傷害固定層。
   補 zmap明示數值／smap／islot／vslot的一般裝備遮擋；去除正面動作多貼後腦頭髮。
   角色兩面PNG與原殘影中間層接通；墓碑改正為avatar child−1（不是world z−1），名字回腳下黑底原式。
@@ -25,7 +34,7 @@
   確認本輪來源字體 **Gulim**；接右上動態街名／地圖名／原徽章、數值hover，原尺寸聊天記錄與可操作原圖捲軸。
   補七格200/201/202消耗品拖入、數量合計、原icon／ItemNo點陣字、按鍵使用與本機分角色設定。
   沿用現有save，不seed／不自動修裝備；**未跑test/check/typecheck/browser/VM/probe**。
-  [來源、操作與未完成界線](docs/NATIVE_HUD_CHAT_QUICKSLOTS.md)；技能施放／完整快捷格拖放／BtChat與Menu原窗仍未完成。
+  [來源、操作與未完成界線](docs/NATIVE_HUD_CHAT_QUICKSLOTS.md)；當時缺的消耗品互拖／拖出、Menu與收件人窗已在ADR-058補接（未測），技能施放／技能快捷格／BtChat仍缺。
 
 - **前輪（2026-10-18，未測試）**：修正「Detail29、打怪全是1」的根因：起始劍實例PAD被建為0，原WZ應為17／可升級7次。
   新建角、無既有實例的掉落與商店裝備共用15項能力／tuc工廠；既有卷過／骰過實例不被模板覆蓋。
