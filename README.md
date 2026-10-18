@@ -1,194 +1,110 @@
 # KMS 1.11 重建工作區
 
-最新還原（2026-10-18，未測試）：原CUtilDlgEx的 `#i` 道具／`#s` 技能圖示、不同高度圖文底對齊、
-圖文／純圖選項、archive名稱提示、完整字串量測折行與續行處理；補資源取消／焦點／回覆邊界。
-[原碼、listing、WZ尺寸與未完成界線](docs/NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；原quest腳本仍未恢復，啟服不是PASS。
+以倉庫內的 2003 年 KMS 1.11 原版 EXE／DLL、反編譯 C、IDA listing 與 `Data.wz` 為證據，
+重建 **瀏覽器客戶端＋TypeScript 伺服器＋原協定與資源工具**。
+瀏覽器客戶端是唯一實作主線，不再規劃另一套引擎移植。
 
-以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
-瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
+**尚非完整 MMO 成品，不宣稱全遊戲 1:1、正式營運安全或最新改動已驗證通過。**
 
-## 最新交付
+## 從這裡開始
 
-- **本輪（2026-10-18，未測試）**：補原NPC圖文內容整條接線：普通道具icon（不是iconRaw）、skill normal icon、
-  每行最大高度／行底對齊、圖文與純圖選項、實際高度命中／底線／捲動、原單行名稱tip。
-  `##` escape、整段文字量測／掛行／續行空白；現有body重新解析選項，避免escaped `##L`被raw regex接受。
-  metadata去重／有界並行與快取、PNG首輪等待、close／換圖取消與舊頁guard、字型到達保留輸入／焦點。
-  體驗工具加兩個唯讀入口，明示非任務、不給道具／學技能／改save；不套後期macro或虛構計程車規則。
-  [完整交付](docs/NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；未執行test/check/typecheck/語法檢查/browser/VM/probe，同save冷備再開LIVE。
+| 需求 | 文件 |
+|---|---|
+| 找功能與歷史紀錄 | [文件索引](docs/README.md) |
+| 理解實際目錄、資料流與技術債 | [現行架構](docs/ARCHITECTURE.md) |
+| 看下一步與已知缺口 | [路線圖](docs/ROADMAP.md) |
+| 查還原方法與證據規則 | [還原原則](docs/REBUILD_PRINCIPLES.md) |
+| 安裝工具、啟用版本與升級界線 | [工具鏈](docs/TOOLCHAIN.md) |
+| 查啟動參數與協定工具 | [server 說明](server/README.md) |
+| 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
 
-- **前輪（2026-10-18，未測試）**：NPC metadata區分own info／一跳linked行為根與動作art merge；
-  補單一controller與交接、signed2F/3D及move條件路徑、等待echo後演出、forced單次／30ms逐格。
-  原normal五秒深紅氣泡、canvas高度錨點／隱藏名牌／清理；40000 Robin捷徑加唯讀控制及回包狀態。
-  **sender+2與receiver raw索引差異未解**，保留原client兩端並明示透明relay／owner選擇是重建政策，不冒稱原server。
-  [完整來源與界線](docs/NATIVE_NPC_BEHAVIOR.md)／ADR-062；未執行test/check/typecheck/語法檢查/browser/VM/probe，同save冷備再開LIVE。
+## 現行技術
 
-- **前輪（2026-10-18，未測試）**：以反編譯／listing／WZ交叉補原CUtilDlgEx2對話框，修Prev=0／ESC=FF、長文scroll、五種body與實際sub-op回覆。
-  補CP949 bytes／number／menu驗證、modal焦點與IME／失焦保護，修NPC缺省frame180ms。
-  工具列「體驗工具」新增五種唯讀UI範例，明示非任務、不發0x15、不改角色；原quest腳本仍缺；該輪尚未補NPC idle，後續ADR-062已補同步。
-  [完整來源、入口及界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；未執行test/check/typecheck/browser/VM/probe，同save冷備份後重開LIVE。
+- **客戶端**：原生 ES Modules、Canvas 2D、DOM 透明命中／輸入層、Web Audio；800×600 邏輯畫面，無前端建置步驟。
+- **伺服器**：Node.js／TypeScript，原生 type stripping，執行時零 npm 套件依賴。
+- **通訊**：瀏覽器同 origin HTTP／WebSocket → Node ClientSession → 原版 TCP 協定與遊戲服務。
+- **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
+- **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-- **前輪（2026-10-18，未測試）**：依原 EXE／listing／Gr2D／WZ 補單張 arrow 游標，覆蓋登入／選角／遊戲及原生 DOM 控件，隨既有顯示縮放。
-  NPC 改讀原 dc 框與 name，補黃色名牌與 linked 動作圖；提示框改原 A0000040／切角／邊界，item／skill 完整排版仍未完成。
-  補 Canvas 按鈕 hover 音效／CLOSE states、logical-button 配對，修重複 mouseup 與拖窗誤點；失焦／取消／隱藏分頁取消拖曳。
-  [完整交叉來源與界線](docs/NATIVE_CURSOR_NPC_POINTER.md)／ADR-060；保留同 save，冷備份再開 LIVE，不 seed 或修角色。
+2026-10-18 工具鏈鎖定：**Node 26.12.0、npm 12.2.0、TypeScript 7.0.2、@types/node 26.6.5、Python 3.15.0**。
+這是此次查得的正式版，不使用 nightly／RC；不代表每個選擇都必須追逐最前沿。
+Node 26 此時仍在 LTS 前，選用原因、相容範圍與未執行驗證見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
 
-- **前輪（2026-10-18，未測試）**：原GameOpt小地圖／密語即時設定、OK／Cancel；公開聊天原0x1F＋normal/dead五秒氣泡。
-  接密語拒收與shared三秒gate、64換行record／五秒追尾，找人首回補地名、原色與13/type0公告。
-  [原檔交叉證據與完整界線](docs/NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；沿用save，冷備份後重啟LIVE，非force推送。
+## 目錄
 
-- **前輪（2026-10-18，未測試）**：接原 Menu／SysOpt 圖片與原座標、Escape關窗優先序、兩組20段音量／獨立靜音。
-  修原音量15段實際80%（不是100%）；即時預覽、OK本機保存、Cancel／Escape還原，音樂不重起。
-  補消耗品快捷格彼此拖移／覆蓋、拖到場景只清綁定、hover與stale guards；不發送丟棄道具請求。
-  接原悄悄話收件人輸入／記憶／切回everyone、CP949 byte驗證與左側名字格，不再只塞`/w `捷徑。
-  Menu可離線回標題；補modal隔離／冷攻擊ticket與IME Enter。未完成選單項目明確disabled，不冒稱技能施放或完整UI完成。
-  [原檔交叉來源、操作與界線](docs/NATIVE_SYSTEM_UI.md)／ADR-058。
-  沿用save冷備份重啟、非force推送；**未跑test/check/typecheck/browser/VM/probe**。
+```text
+client/                 瀏覽器畫面、輸入、音訊與目前共用的純規則 .mjs
+server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
+server/src/client/      Node 端 ClientSession 與事件模型
+server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
+server/src/game/        世界、物品、規則、資源呈現資料與保存
+server/src/wz/          產品 WZ 解碼與 PNG 輸出
+server/test/            回歸來源；有來源不等於已執行通過
+server/scripts/         歷史 probe 與輔助腳本，不自動執行
+tools/                 Python 靜態分析工具、工具鏈 bootstrap／環境腳本
+analysis/               已保存的 manifest、RTTI 與靜態分析結果
+docs/                   現行規劃、原版證據、ADR 與歷史驗證
+generated/             本機工具安裝、存檔、冷備份；忽略，不進 Git
+```
 
-
-- **前輪（2026-10-18，未測試）**：追到 Gr2D 原 vtable／parent-chain comparator，改正同z按腳底y排序；
-  補本機角色深度+2、空中保留接觸層、背景index z、飛行道具來源z與傷害固定層。
-  補 zmap明示數值／smap／islot／vslot的一般裝備遮擋；去除正面動作多貼後腦頭髮。
-  角色兩面PNG與原殘影中間層接通；墓碑改正為avatar child−1（不是world z−1），名字回腳下黑底原式。
-  遠端基本攻擊補資源ready／事件時鐘與過期guard；加103000000圖層入口，沿用存檔、不seed／自動改角色。
-  [完整原檔證據、實作／未完成界線與操作](docs/NATIVE_LAYER_PRIORITY.md)／ADR-057。
-  **未執行test/check/typecheck/browser/VM/probe**；不宣稱完整Gr2D／CVecCtrl／CAvatar／全遊戲1:1。
-
-- **前輪（2026-10-18，未測試）**：原48D080動作子樹能力分類、53DAA0無目標跳躍、重力／swept落地路徑，
-  連接0x33／browser jump動畫／中途進場／戰鬥位置／死亡重生；補info.link動作來源與靜止類分流。
-  修攻擊arm身份與hand錨點、冷圖跳站姿、未知／無武器假480ms攻擊，以及待機0→1→2→1。
-  508FC0另定位movement/body action混表，修jump6／ladder14／rope16的本機、遠端與繩梯深度接線。
-  依46BDA0＋Shape2D修type4雲層時間位移（非後期4～7通則）、重複origin；體驗工具可直接前往104040000。
-  [原始證據、完整界線與操作](docs/NATIVE_JUMP_ATTACK_BACKGROUNDS.md)／ADR-056。
-  沿用現有save，冷備份後重啟；**未跑test/check/typecheck/browser/VM/probe**，不聲稱完整aggro／飛行／CVecCtrl或全遊戲1:1。
-
-- **前輪（2026-10-18，未測試）**：用原版截圖與 C／PE／WZ 交叉核對，修 EXP條151px／整除／百分比、人物欄黑字，
-  確認本輪來源字體 **Gulim**；接右上動態街名／地圖名／原徽章、數值hover，原尺寸聊天記錄與可操作原圖捲軸。
-  補七格200/201/202消耗品拖入、數量合計、原icon／ItemNo點陣字、按鍵使用與本機分角色設定。
-  沿用現有save，不seed／不自動修裝備；**未跑test/check/typecheck/browser/VM/probe**。
-  [來源、操作與未完成界線](docs/NATIVE_HUD_CHAT_QUICKSLOTS.md)；當時缺的消耗品互拖／拖出、Menu與收件人窗已在ADR-058補接（未測），技能施放／技能快捷格／BtChat仍缺。
-
-- **前輪（2026-10-18，未測試）**：修正「Detail29、打怪全是1」的根因：起始劍實例PAD被建為0，原WZ應為17／可升級7次。
-  新建角、無既有實例的掉落與商店裝備共用15項能力／tuc工廠；既有卷過／骰過實例不被模板覆蓋。
-  補Character裝備價格、單件購買、tooltip模板／實例區分；新增明確確認的**舊全零起始裝備修復**及唯讀傷害分解。
-  原Detail仍不是傷害上下限，未硬調最低傷害。沿用已有獨立save／角色，停服冷備份後重開，不自動修復／重seed。
-  [原始證據、原因、操作與界線](docs/NATIVE_EQUIPMENT_DAMAGE_FIX.md)。未跑test/check/typecheck/browser/VM/probe。
-
-- **前輪（2026-10-18，未測試）**：補原 Tomb 落下／落地／持末格、死亡 avatar 2000ms 繞行與 2500ms 淡出、
-  遠端／已死進場生命週期、立即 spatial Tombstone 音效；補原 canvas `a0/a1` 插值及繼承、portal 缺省120ms、field動畫clock。
-  修正 **`bodyAttack` 未進HTTP而使網頁排除全部接觸怪物** 的前輪漏接；補 attr2 外力原 move relay、0ms record與反向位移 facing。
-  新增需確認的 **「HP設為1」** 入口；未自動建角或改進度。地圖請求亦加同圖重進 generation guard。
-  [原檔證據、實作界線與操作](docs/NATIVE_DEATH_ANIMATION.md)。LIVE使用**全新獨立存檔**，不冒稱恢復舊角色。
-  未跑test／check／typecheck／browser／VM／probe；不宣稱完整CVecCtrl／CShape2D、30ms同步或全遊戲1:1。
-
-- **前輪（2026-10-18，未測試）**：原目前格 lt/rb／swept與內縮碰撞、第二RNG的迴避／受傷、
-  原負HP報告、紫色數字／MISS、signed 1.5秒保護、外力擊退與hit表情；補EVA藥水及明示領藥。
-  同時修正漏傳表情與canvas delay，補dead姿勢及原2.2秒Notice復活窗、OK／Enter→原returnMap流程。
-  當輪未接墓碑動畫；後續見上項。本輪仍不宣稱完整CVecCtrl／CShape2D、技能或魔法已完成。
-  [證據、界線、方便操作](docs/NATIVE_CONTACT_REVIVE.md)。本沙箱沒有舊ignored進度，LIVE是**新的獨立存檔**，不冒稱恢復舊角色。
-  未跑test／check／typecheck／browser／VM／probe，啟服非PASS。
-
-- **前輪（2026-10-18，未測試）**：有效裝備篩選／實例能力總值、命中與迴避被動數值、原 **S→Detail** 九列；
-  裝備 HP/MP 上限接補藥／自然恢復／升級補滿。普通物理攻擊改用新定位的 **4C7960**，包含命中、武器動作、PD、mastery；
-  原 WZ 傷害數字與 MISS 取代白字。攻擊／命中藥水已接實際計算，工具可勾選後明確各領3瓶。
-  當輪迴避只合計／顯示；本輪已補怪物碰撞，**主動技能、魔法與完整 CShape2D 仍未接齊**；未跑測試／typecheck／browser。
-  [來源、界線與操作](docs/NATIVE_STATS_COMBAT.md)。當輪沿用原存檔；本輪環境已重建，未找到舊存檔，不自動重建／冒稱恢復角色。
-
-- **前輪（未測試）**：更正原暫時能力封包第一字為時間、第二字為mask；接同欄覆蓋／到期／原raw圖示，
-  原加速藥水速度+8、180秒實際改移動；穿戴裝備的速度／跳躍實例值也依原上下限接入。
-  `/tools` 勾選同意後可明確領3瓶；非原版工具內另顯示速度百分比與剩餘秒數，不自動改進度。
-  [原版證據、操作與未完成界線](docs/TEMPORARY_STATS.md)。本輪已擴充 PAD/ACC 藥水；其餘未實作效果仍不白耗，主動技能buff未完成。
-
-- **前輪（未測試）**：依558950／4BE790接上自然 HP／MP 恢復、回血／回魔與繩梯被動、地圖 recovery 倍率，
-  用原0x1C報告→0x0D回值，不在瀏覽器假加血。
-- **方便自行體驗**：登入後按上方「體驗工具（非原版）」或輸入 `/tools`，可選原職業書、明確給AP/SP、
-  補滿／半血半魔、查地圖並傳送、還原能力／技能。預設關閉，只有 `--test-tools` 授權帳號可用。
-  第一次修改自動建記憶體還原點；**不跨重啟，升級後拒絕回舊能力，不回溯EXP／道具／金錢**。
-  [原版來源、操作步驟與界線](docs/RECOVERY_TEST_TOOLS.md)。不重seed目前存檔，也不自動改角色。
-
-- **前輪（未測試）**：原 CUISkill 176×315 四列技能窗、原 WZ 書／前置／等級描述、SP 單點學習、
-  0x1D→0x0E、拒絕解鎖與即時保存；已學紀錄連到前輪 HP／MP 成長被動。更正為 PE 的本版職業名稱。
-  [來源與具體界線](docs/SKILLS.md)。K／HUD 開窗；**初心者原本無技能書**，不擅自轉職／加 SP。
-  主動施放、其他被動／buff、自然 AP/SP 與轉職仍未接。
-
-- **前輪（未測試）**：依原 PE 十行成長表接上自然 HP／MP、已學被動與穿戴 INT、HP／MP AP、
-  六種加點與殺怪立即保存；更正舊反編譯誤讀。自然 AP/SP 發放量仍未定位。
-  [來源、限制與已啟動的隔離預覽帳號](docs/STAT_GROWTH.md)。
-
-- **前輪（未測試）**：原武器基本動作表／逐幀速度、弓弩拳套選彈與空射扣彈、0發飛鏢／末箭清格、
-  0x10→0x24本人與旁觀投射物、延後命中／EXP掉落、stand2／walk2武器合成。
-  來源與碰撞／傷害等政策界線見 [BASIC_ATTACKS.md](docs/BASIC_ATTACKS.md)。
-
-- 原WZ登入／世界／選角、建刪角；原地圖、角色／怪物動作、繩梯、傳送、BGM與基本音效。
-- 原Stat與已有AP的六種能力配點（含HP／MP）、背包拖放／裝備窗與真穿脫／旁觀外觀／保存。
-- 原小地圖與DPR整數實體像素顯示。
-- 前輪新增：背包超過24格的捲動、道具地面丟棄與數量框、商店批量買入／部分出售、
-  原UtilDlgEx視窗與過期操作保護、交易立即保存。
-
-**本輪依使用者要求未執行測試**，亦未跑typecheck或瀏覽器驗證。前輪文件中的570項PASS只是歷史結果，
-不能當作最新修改已通過。提交附 `[skip ci]`，本次push不自動跑GitHub Actions測試。
+根目錄的原 EXE／DLL／`.c`／`.lst`／`Data.wz` 是證據，不是應刪除的舊引擎執行時；
+保留路徑以免破壞工具與位址引用。生成素材、node_modules 與玩家資料不納入 Git。
 
 ## 本機啟動
 
-需要 **Node.js 22.6+**。執行時零npm依賴；`npm ci`只用於開發工具，不是啟動必要條件。
+先按 [工具鏈文件](docs/TOOLCHAIN.md) 啟用版本。沙箱安裝完成後，每個新 shell 使用：
 
 ```sh
-cd server
-node src/cli.ts serve \
+source tools/env.sh
+```
+
+下例從 repository 根目錄啟動，**只供建立新的本機體驗檔，不是恢復舊進度的命令**：
+
+```sh
+node server/src/cli.ts serve \
   --host 0.0.0.0 --port 8496 --game-port 8497 --web-port 8495 \
-  --data ../Data.wz --save ../generated/local-save.json \
+  --data Data.wz --save generated/local-save.json \
   --account demo:demo --ping off
 ```
 
-開啟 `http://127.0.0.1:8495`，demo/demo登入。這是**新本機資料檔**的範例，不是正式帳號／存檔恢復命令。
-若已有進度，先備份，將 `--save`指向那份真正的存檔，不要用新fixture取代。
-login／game TCP與web HTTP是不同port；遠端瀏覽器使用web的網址，WebSocket與素材均走同origin。
-外網部署前需自行處理TLS、帳號安全、持久化與備份，不能把這個開發指令當正式營運設定。
+本機瀏覽器開 `http://127.0.0.1:8495`。遠端預覽使用 **web port** 的公開網址，
+瀏覽器不能呼叫沙箱的 localhost；素材與 `/ws` 均走同 origin。
+`--account` 只供新帳號種子，已有 save 時不能用它假設密碼／進度已重設。
 
-`generated/`、node_modules、生成素材與存檔不進Git。請勿將重要存檔放在 `/tmp`；該位置不保證跨工作環境保留。
-本工作區只曾使用明示的隔離QA存檔，沒有以QA進度覆蓋缺失的舊正式存檔。
+已有進度時，先確認真正存檔存在、停服冷備，再把 `--save` 指向同一檔案。
+**找不到存檔就停止恢復流程，不用新 fixture 假裝舊角色。** `/tmp`、ignored 目錄或沙箱程序不能當成永久備份；
+重要 save 請另行匯出保存，不能期待 Git push 會帶走它。
+恢復原檔可使用 `bash tools/serve-existing-save.sh <真實save路徑>`；檔案不存在／空白會拒絕啟動。
+這個保護入口不自行停服或冷備，必須先由操作者確認。
 
-## 操作
+## 操作與體驗工具
 
 | 操作 | 功能 |
 |---|---|
 | ←／→、A／D | 移動 |
 | Alt／空白 | 跳躍 |
-| ↑／↓ | 繩梯；地面靠門↑使用，自動門靠近觸發 |
-| Ctrl | 目前已接的一般攻擊路徑，傷害公式仍有重建政策 |
-| I／E／S／M | 背包／裝備／能力／小地圖 |
-| 背包道具雙擊 | 一般裝備穿戴或支援的消耗品使用 |
-| 拖放道具 | 背包換位、穿脫；拖到真正場景為丟棄，狀態列／瀏覽器外取消 |
-| 背包左下金幣按鈕 | 丟10–50,000楓幣，數量窗確認後由服務端落帳 |
-| 商店충전 | 對未滿的207飛鏢整組補充，確認後按WZ單價收費 |
-| 商店左列／右列 | 選擇後按買／賣，或雙擊開數量框 |
-| Enter | 聊天；對話框內確認 |
-| Escape | 取消拖曳／數量框，或關閉已接的視窗 |
+| ↑／↓ | 繩梯；地面靠門 ↑ 使用，type3 自動門靠近觸發 |
+| Ctrl | 已接的一般攻擊路徑，不代表主動技能已完成 |
+| I／E／S／K／M | 背包／裝備／能力／技能／小地圖 |
+| 背包雙擊／拖放 | 支援的消耗品、穿脫、換位；拖到真正場景可能丟棄 |
+| 背包金幣鈕／商店충전 | 楓幣丟棄／飛鏢補充，確認後由服務端落帳 |
+| Enter／Escape | 聊天或目前 modal 的確認／取消／關閉 |
 
-**丟棄前注意**：單件裝備拖到場景會直接丟1件；堆疊道具詢問數量。地面掉落物只在記憶體中，
-尚未拾回就停服會消失；請用非重要物品自行確認最新未測試功能。
-背包捲動遵守原capacity，不會自動擴包。最新已接原金幣按鈕／0x1F楓幣丟棄，以及207飛鏢整組購買、補充與空組處理（均未測試）；詳見[交付範圍與限制](docs/MESO_RECHARGE.md)。
+上方「體驗工具（非原版）」／`/tools` 包含明示的唯讀 UI 範例：
+原 NPC 圖文、提示框普通道具／持有裝備快照／模板、技能 0／1／MAX，不需要先轉職或給 SP。
+涉及配置職業／AP／SP、領藥或地圖命令的操作，仍須明確帳號授權與確認；不是原版任務。
+工具不暫停世界。參見 [操作與保護](docs/RECOVERY_TEST_TOOLS.md)。
 
-最新已依原 exe 的 HP／MP 表補上逐級成長、已學被動與 HP／MP AP 加點／保存；舊「成長表不在 client」判讀已更正。自然 AP/SP 發放量仍未定位，不套後期數字。見 [STAT_GROWTH](docs/STAT_GROWTH.md)（未測試）。
+## 最近功能與限制
 
-聊天 `/help`列出命令；`/map ID`需服務端明確開啟 `--map-command 帳號,...`，預設禁止。
-地圖ID、名稱、原圖、腳踏點來自Data.wz，不以人工平台或「缺素材」fallback掩蓋reader問題。
+- 原道具／裝備／技能 tooltip：normal icon 2×、需求圖字、真正 instance stats、當前／下一級 hs。
+  [交付與原版證據](docs/NATIVE_RICH_TOOLTIPS.md)／ADR-064，**未測試**。
+- NPC 圖文／選項與同步行為：[圖文](docs/NATIVE_DIALOGUE_RICHTEXT.md)、[controller 與未解矛盾](docs/NATIVE_NPC_BEHAVIOR.md)，**未測試**。
+- 地圖、角色／怪物、移動、音訊、背包、商店、數值與死亡等逐輪紀錄，由[文件索引](docs/README.md)查閱，不在此重複堆疊歷史「最新」。
 
-## 文件索引
+完整 CShape2D／CVecCtrl、原 GDI 字型、全部主動技能／buff、自然 AP／SP／轉職、卷軸、cash／pet、
+原 quest／taxi／trunk scripts、完整交易／組隊瀏覽器介面與正式營運防護仍有缺口。
+原 server 缺失的規則明示為重建政策；不以後期版本或「缺素材」猜測代替原證據。
 
-- [最新 HP／MP 原版成長、六種 AP 與隔離預覽（未測試）](docs/STAT_GROWTH.md)
-
-- [最新楓幣丟棄／飛鏢補充交付（未測試）](docs/MESO_RECHARGE.md)
-- [背包／丟棄／商店數量交付（未測試）](docs/INVENTORY_OPERATIONS.md)
-- [客戶端使用與限制](docs/CLIENT.md)
-- [背包／裝備前輪驗證紀錄](docs/EQUIPMENT_VALIDATION.md)
-- [傳送／繩頂／地圖命令](docs/PORTAL_CLIMB_VALIDATION.md)
-- [動作、繩梯與音訊](docs/CLIMB_AUDIO_VALIDATION.md)
-- [朝向與選角](docs/FACING_SELECTION_VALIDATION.md)
-- [流暢度與Stat/AP](docs/SMOOTH_STAT_VALIDATION.md)
-- [清晰縮放與小地圖](docs/DISPLAY_MINIMAP_VALIDATION.md)
-- [架構](docs/ARCHITECTURE.md) · [決策ADR](docs/DECISIONS.md) · [路線圖](docs/ROADMAP.md)
-- [協定與反編譯發現](docs/protocol/FINDINGS.md) · [WZ格式](docs/WZ1_FORMAT.md)
-- [伺服器](server/README.md) · [字型來源與授權](client/fonts/README.md)
-
-卷軸強化、完整技能／怪物攻擊與受擊、裝備／buff總值／Detail、自然升級AP/SP發放量、
-完整交易／組隊等瀏覽器UI、現金／寵物、技能遠距攻擊／原形狀碰撞與完整傷害公式仍有未完成範圍；既有server的etc/cash分頁映射與原UI標籤亦尚待存檔遷移。各文件區分原版證據、重建政策與歷史驗證。
+本輪不執行 test／check／typecheck／語法檢查／browser／VM／遊戲 HTTP 或登入 probe。
+套件安裝、版本顯示、工具編譯、靜態閱讀與啟服都不算功能 PASS。舊測試數字只對應當時提交。

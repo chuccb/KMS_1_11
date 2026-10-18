@@ -12,9 +12,10 @@
 詳 [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md)／ADR-064；新來源未執行，不以啟服當 PASS。
 
 
-> 這不是 2003 client 的替代品，也不是 Phase 3 的終點：它是一個**視窗**——能登入、能看到世界、
-> 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
-> 決策與理由在 `docs/DECISIONS.md` ADR-034。
+> `client/` 是目前唯一的客戶端實作主線：Canvas 2D 繪圖、DOM 輸入／命中層、Web Audio，
+> 由 `serve --web-port` 直接提供，不是等待另一套引擎客戶端取代的暫時視窗。
+> 完整還原仍在進行；本頁逐輪紀錄有歷史性，現行架構見 [ARCHITECTURE](ARCHITECTURE.md)，
+> 工作優先序見 [ROADMAP](ROADMAP.md)，技術方向見 ADR-065。舊 PASS 不代表後續改動已驗證。
 
 ## 最新實作：NPC圖文內容與選項（2026-10-18，未測試）
 

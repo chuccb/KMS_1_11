@@ -222,7 +222,7 @@ function expandNibble(value: number): number {
  *
  * The client's own 16-to-32bpp expander multiplies each nibble by 16 instead of repeating its top
  * bits (`Canvas.dll.c` 14548, `f -> f0`); bit replication is used here because it covers the whole
- * 0-255 range, which is what the exported PNGs and the Godot client want.
+ * 0-255 range, which is what the exported PNGs and the browser client need.
  */
 export function canvasToRgba(canvas: WzCanvas): RgbaImage | null {
   if (canvas.pixels === null) return null;

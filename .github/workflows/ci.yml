@@ -5,28 +5,44 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   tools:
     name: tools (python, stdlib only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.11"
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: ".python-version"
       - name: Unit tests
         run: python3 -m unittest discover -s tools/tests -v
       - name: WZ manifest smoke test
         run: python3 tools/wz1.py Data.wz
 
   server:
-    name: server (node 22, zero deps)
+    name: server (pinned node, zero runtime deps)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+          cache-dependency-path: "server/package-lock.json"
+      - name: Install pinned npm
+        run: |
+          package="$(node -p "require('./server/package.json').packageManager")"
+          npm install --global "$package" --ignore-scripts --no-audit --no-fund
+      - name: Install development tools
+        working-directory: server
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Tests
         working-directory: server
         run: node --test "**/*.test.ts"

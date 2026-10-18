@@ -1,6 +1,8 @@
 # 架構決策記錄（ADR）
 
-> 本檔記錄已定案的決策、理由與後果。**未經討論不要推翻**；要改就新增一則 ADR 並標明取代關係。
+> 本檔保留決策沿革，**不是所有歷史段落都代表現況**。撤回／取代會明確標註，不重編 ADR 編號。
+> 現行技術方向以 **ADR-065**、[ARCHITECTURE](ARCHITECTURE.md) 與 [ROADMAP](ROADMAP.md) 為準；
+> 原版證據優先序集中於 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。歷史測試結果不得沿用到新提交。
 
 ---
 
@@ -19,47 +21,25 @@ client 必須能與該 server 完整互動。
 
 ---
 
-## ADR-002：協定 schema-first + TypeScript 核心/server + Godot 4.x（GDScript）client
+## ADR-002：早期技術棧提案（已由 ADR-065 取代）
 
-**日期**：2026-10-16 ｜ **狀態**：已定案（使用者對技術棧表示「都行」，由本評估擇定）
+**原日期**：2026-10-16 ｜ **狀態**：2026-10-18 撤回舊引擎客戶端部分，現行見 ADR-065。
 
-**決策**：
-1. **協定以 schema 為單一來源**（`protocol/`）：由 schema 產生（或驗證）各語言的 codec。
-2. **核心與 server 用 TypeScript**（Node 22，零依賴：原生 type stripping + `node --test`）。
-3. **client 用 Godot 4.x + GDScript**（殼層：渲染 / 輸入 / UI / 音訊）。
-
-**理由**：
-| 考量 | 說明 |
-|---|---|
-| 完整 MMO 的關鍵是 **server + 協定** | 這兩者用同一套 TS 定義，單一語言即可覆蓋 80% 的邏輯面 |
-| **跨平台（使用者第 3 點）** | Godot 4.x 可輸出 Windows / macOS / Linux / Android / iOS / **Web**；但 **C# 專案目前無法輸出 Web**（官方文件：C# 專案仍不能 export 到 web，GDScript 可以）→ 若要保留瀏覽器版本，client 必須是 GDScript |
-| 可測試性 | TS 核心可在**不需要引擎**的情況下完整單元測試（本倉庫已可在沙箱內執行） |
-| 避免語言鎖死 | 因為協定由 schema 產生，**未來若放棄 Web 想改用 C# client，只要換 binding，不動核心** |
-| 簡單性 | 零依賴工具鏈（`node --test`、`python3 -m unittest`），無 build step、無框架 |
-
-**被否決的選項與原因**：
-- **C# 核心 + Godot C# client**：語言單一、型別最強，但 (a) C# 無法 export web，(b) 本沙箱無 .NET 可驗證，
-  (c) 手機版 C# 仍屬實驗性。→ 若日後明確放棄瀏覽器且團隊偏好 C#，可以只換 client binding（見上「避免語言鎖死」）。
-- **純 Unity**：授權與長期風險，且 2D MMORPG 用不到其優勢。
-- **純 GDScript（引擎內含全部邏輯）**：server 無法共用邏輯，協定會複製兩份。
-
-**後果**：
-- 必須維護 schema → 產生/驗證 codec 的工具鏈（Phase 1 起）。
-- client 端的「重邏輯」僅限於預測/插值/動畫；**數值與規則以 server 為準**。
+保留協定集中於 `server/src/protocol/`、TypeScript 伺服器、產品 WZ reader 共用的方向。
+舊引擎／語言選型、匯出限制與空專案規劃已移除，不再要求建立第二套客戶端。
+現有瀏覽器客戶端就是產品主線，不把未建立的根 `protocol/`／`core/` 目錄描述成已存在。
+本編號保留，避免既有 ADR 與功能文件失去追溯入口。
 
 ---
 
-## ADR-003：跨平台優先序
+## ADR-003：跨平台目標（實作路線由 ADR-065 更新）
 
-**日期**：2026-10-16 ｜ **狀態**：已定案（使用者：最好可以跨平台）
+**原日期**：2026-10-16 ｜ **狀態**：保留跨平台目標，撤回舊引擎匯出方案。
 
-**決策**：優先序為 **Windows / macOS / Linux 桌面 → Web（瀏覽器）→ Android / iOS**。
-以 Godot 4.x 匯出；不使用任何桌面平台專屬 API（Win32/COM/DirectX 一律不得出現在新程式碼中）。
-
-**後果**：
-- 不可使用 C#（因 Web 優先序高於「語言統一」）。
-- 輸入層必須支援鍵盤 + 手把（日後觸控）；不可假設韓文 IME 永遠存在（原 client 依賴 IMM32）。
-- 音訊/影像格式使用引擎原生格式（PNG/OGG），**不重寫 ijl15 / l3codeca.acm / DirectSound**。
+目前透過桌面瀏覽器提供同一份客戶端；不以 Win32／COM／DirectX 相容層執行原程式。
+原檔僅作行為與資料證據。輸入／音訊用瀏覽器 API，IME 不自行重寫 IMM32。
+不聲稱已有原生桌面安裝包、手機觸控／手把完整支援，或所有作業系統都已驗收。
+保留原版 800×600 邏輯座標與現有縮放策略，不因改技術方向改動遊戲規則。
 
 ---
 
@@ -91,7 +71,7 @@ client 必須能與該 server 完整互動。
 `tools/wz2assets.py` 取消。
 
 **理由**：
-1. 遊戲程式是 TypeScript（ADR-002）：伺服器要地圖／怪物資料，Godot 客戶端要 PNG／動畫。
+1. 遊戲程式是 TypeScript（ADR-002）：伺服器要地圖／怪物資料，瀏覽器客戶端要 PNG／動畫。
    若資產管線另寫一份 Python，同一份 WZ 語意就會有**兩份會各自漂移的實作**。
 2. 反編譯 dump 是 CP949 的 C，Python 在「快速試錯、和 binary 對照」上更順手，所以探索階段
    留在 `tools/`；一旦語意確定（`docs/WZ1_FORMAT.md` §4 全部 ✅）就只留一份產品實作。
@@ -120,7 +100,7 @@ client 必須能與該 server 完整互動。
 2. **重算需要兩塊我們還沒有的東西**：client 的傷害公式（散在 `sub_512F90` 一族與技能表裡，尚未 RE）
    與「哪一顆亂數」（`0x16` 的三個 `u32` 是 client 自訂 RNG 的種子，`src/protocol/random.ts`
    已是逐位元移植）。有了這兩塊，重算就是同一個 RNG 的第二次抽樣，而不需要新機制。
-3. **現在就驗證會把還沒解出的知識硬編碼成規則**，違反 `GODOT_MIGRATION_PROMPT.md` 的證據優先順序。
+3. **現在就驗證會把還沒解出的知識硬編碼成規則**，違反 [還原原則](REBUILD_PRINCIPLES.md) 的證據優先順序。
 
 **後果**：
 - 目前任何人都能送假的傷害值 —— 這是**已知且刻意**的缺口，不是疏漏；在 Phase 2 的
@@ -184,7 +164,7 @@ client 用 `0x2C` 回報的怪物動作（FINDINGS §4.20）。`0x0D` 解出之�
 1. **這是 binary 的分工，不是我們的偏好**：`sub_4862C0` 是 `CMob` 的 per-frame virtual，
    它在自己的程序裡挑攻擊、算傷害、把效果打在 `*(mob+108)` 這個使用者物件上，然後才送 `0x2C`。
    2003 年的伺服器看到的是「結果」，不是「決策」。把 AI 搬到伺服器等於**發明**一套協議，
-   與 `GODOT_MIGRATION_PROMPT.md` 的證據優先順序衝突。
+   與 [還原原則](REBUILD_PRINCIPLES.md) 的證據優先順序衝突。
 2. **與 ADR-006 一致**：傷害已經由攻擊方的 client 算（怪物→玩家是另一條同樣的迴路），
    伺服器的責任是記帳與權威狀態（誰在場、還剩多少 HP、什麼時候重生），不是重算。
 3. **重寫的 client 本來就要有這套程式**：`CMob::Update` 同等物屬於 Phase 3/4 的 client 工作
@@ -223,7 +203,7 @@ AP／SP 自然發放仍未定位，沒有因此套用其他版本數字。詳見
    不是伺服器決定的係數。
 3. **升級的成長量（`maxHp`／`maxMp`／`ap`／`sp` 加多少）先不送**：原伺服器的職業／等級成長表
    不在 client 裡（`sub_4C71C0` 這支「就地升級」routine 只扣經驗值、等級 +1、補血、重算傷害範圍，
-   沒有任何成長量）。**發明一組數字比留著缺口更糟**（`GODOT_MIGRATION_PROMPT.md` 禁止發明規則），
+   沒有任何成長量）。**發明一組數字比留著缺口更糟**（[還原原則](REBUILD_PRINCIPLES.md) 禁止發明規則），
    所以 `awardExp` 只送真的有變的欄位（`exp`／`level`／滿血的 `hp`／`mp`），角色的最大值維持不變，
    並在 FINDINGS §4.21.6 與 ROADMAP 標明這是**已知缺口**。
 4. **升級要補滿 HP／MP**：這是 client 自己那支 routine 的行為（`sub_4C71C0`：還活著才補），
@@ -1545,26 +1525,25 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
   `whisper_probe.mjs` 八項（105 個檢查）。
 - **沒有存檔變更**：房間與邀請都只活在記憶體。
 
-## ADR-034：Phase 3 的第一刀是**瀏覽器客戶端 ＋ WebSocket 橋**，不是 Godot 殼層
+## ADR-034：瀏覽器客戶端與 WebSocket 橋的起始切片（歷史）
 
 **日期**：2026-10-17 ｜ **狀態**：已定案（實作在 `client/`、`server/src/client/session.ts`、
 `server/src/net/websocket.ts`、`server/src/net/webclient.ts`）。
 
-**決策**：Phase 3 的第一步是「能登入、能看到世界、能說話、能走」的最小客戶端，技術上是**瀏覽器
-頁面 ＋ 伺服器端的一個 WebSocket 橋**，而**不是** Godot 專案。
+> 以下保留 2026-10-17 初始切片的技術與當時驗證紀錄，不代表目前只有三個檔案、
+> 沒有物理／戰鬥／背包。後續實作見各功能文件；客戶端主線地位已由 ADR-065 確認。
 
-**三個理由**（前兩個是環境事實，第三個是設計）：
+**決策**：從「能登入、能看到世界、能說話、能走」的最小瀏覽器客戶端開始，
+透過伺服器端 WebSocket 橋整合既有協定，不建立另一套引擎客戶端。
+
+**理由**：
 
 1. **瀏覽器開不了 TCP socket。** 2003 的協定是裸 TCP：`u16 header + u16 length + 加密 body`，
    連線一開始由伺服器送 211-byte 握手（`sub_43A410`）。瀏覽器只有 WebSocket，所以「在瀏覽器裡玩」
    一定需要一個**伺服器端的進程**替它持有那條 socket。這個橋就是 `net/webclient.ts`：每一條
    WebSocket 連線配一個 `ClientSession`（`src/client/session.ts`），後者用真正的
    `LoginServer`／`GameEntryServer`、真正的密碼表與真正的 cipher 跑完整條登入鏈。
-2. **這個環境拿不到 Godot 的 binary。** `github.com/.../Godot_v4.3-stable_linux.x86_64.zip` 回
-   302 指向 `objects.githubusercontent.com`，而沙箱只放行 `github.com`／`codeload`／`api`／npm／
-   PyPI 幾個主機，下載會停在 0 byte。沒有引擎就不能驗證 Godot 專案能開、能 export web——那正好是
-   Phase 3 的出口條件，所以先做一個**現在就能跑、現在就能驗**的殼。
-3. **協定知識留在被測試的那一側。** 橋的兩邊是「2003 封包 ↔ JSON」；JSON 是**我們的設計**，不是
+2. **協定知識留在被測試的那一側。** 橋的兩邊是「2003 封包 ↔ JSON」；JSON 是**我們的設計**，不是
    證據。把協定留在 TypeScript 的伺服器端，讓它可以被 `node --test` 直接驅動（
    `test/webclient.test.ts` 用 Node 內建的 `WebSocket` 當瀏覽器），而頁面只剩畫圖與輸入。
 
@@ -1601,7 +1580,6 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
   腳踏點與標籤，把「真實的圖」留給下一個切片。
 - **在頁面裡做怪物 AI／傷害**：那正是 ADR-008 說「在 client」的東西，但那是**2003 的 client**；
   這個殼不是它，硬做只會得到一份沒有證據的戰鬥模型。
-- **用 Godot 先建空專案**：拿不到引擎，無法 compile、無法 export、無法驗證，等於用猜的交付。
 
 **後果**：
 
@@ -1611,7 +1589,7 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
 - 測試：`websocket.test.ts` 8 則、`webclient.test.ts` 4 則（真 socket、真 WebSocket、真 cipher；
   **480 個測試**）。頁面的繪圖本身**沒有**自動測試，`docs/CLIENT.md` 說明怎麼用眼睛驗。
 - 瀏覽器端**不是** 2003 client 的替代品：沒有傷害、沒有怪物 AI、沒有背包／商店／交易介面；它是一個
-  **視窗**加一個聊天框。真正的客戶端仍然是 Phase 3 的 Godot 專案（或任何能吃這條協定的東西）。
+  **視窗**加一個聊天框。這是當時的切片限制；後續已擴充為現行瀏覽器客戶端，見 ADR-065。
 - **後續（同日）**：選角頁補了「建立角色」——一個空帳號原本根本進不去，現在它自己送 `0x06`＋`0x05`
   建第一個角色（JSON 多一種 `create`／`created`，`webclient.test.ts` 因此變 5 則、總數 **481**）。
   沒有另開後門：走的就是 2003 client 建立角色的那兩包。
@@ -2513,3 +2491,50 @@ CSS Gulim／fallback不是GDI像素等價；極端字串799×599clip屬browser�
 新增／更新native-rich-tooltip、native-tooltip-preview、skills、webclient、client_probe回歸**來源，全部未執行**。
 依使用者要求不test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
 詳NATIVE_RICH_TOOLTIPS.md。沿用同save，停服冷備再開LIVE，[skip ci]提交、只非force推目前Arena分支。
+
+
+## ADR-065：瀏覽器成為唯一客戶端主線，撤回舊引擎規劃並整理文件
+
+**日期**：2026-10-18 ｜ **狀態**：使用者明確決定；文件與註解已整理，未執行測試。
+
+**決策**：取消 Godot 路線。刪除根目錄舊引擎移植提示詞及過時重寫選型評估，
+不另建第二套引擎客戶端。保留 `client/` 的 Canvas 2D／DOM／Web Audio／ES Modules，
+沿用 TypeScript／Node server、原協定 codec、HTTP 資源服務與 WebSocket 橋。
+
+**取代關係**：取代 ADR-002 的客戶端選型、ADR-003 的舊匯出方案、ADR-034 中「瀏覽器只是暫時殼」的定位。
+ADR 編號與協定／功能歷史保留；不把早期 PASS、舊限制或估時列為最新功能狀態。
+
+**整理**：README 改為現行入口／操作／限制；新增文件索引與引擎無關的還原原則，
+重寫 ARCHITECTURE／ROADMAP 為實際目錄／資料流／工作清單；移除舊引擎忽略項與 WZ reader 過時註解。
+原 binary／C／LST／Data.wz、analysis與既有功能保留；清理不刪玩家存檔或備份，
+續接後未能取回的資料另見ADR-066。不為目錄好看移動證據檔或共用模組。
+
+**仍有技術債**：server 目前會 import `client/` 內純規則 `.mjs`；將來可移至真正共用目錄，
+但本輪不做路徑搬移；使用者隨後要求的工具鏈升級另見 ADR-066。JSON 存檔、自製 WebSocket 與大型 main 模組的改善仍需另輪規劃。
+不因改文件就宣稱正式營運能力、完整跨平台或全部原版功能已完成。
+
+**驗證界線**：本輪僅閱讀／編輯與文字引用盤點；未執行 test/check/typecheck/語法檢查/browser/VM/HTTP/登入 probe。
+未改遊戲邏輯或存檔格式，不為文件更新重設角色；續接後的環境／存檔缺失見 ADR-066。提交用 `[skip ci]`，只非 force 推目前 Arena 分支。
+
+
+## ADR-066：依要求升級最新正式工具鏈，與遊戲驗證及玩家資料分離
+
+**日期**：2026-10-18 ｜ **狀態**：已更新並安裝工具；未驗證應用相容性，版本與實際結果見 TOOLCHAIN。
+
+**選擇**：Node26.12.0、npm12.2.0、TypeScript7.0.2、@types/node26.6.5、Python3.15.0。
+官方release／tag與npm registry交叉；不選nightly／RC。Node26此時尚未LTS，明示取捨而非稱它比LTS保守。
+根版本檔、packageManager、精確devDependencies／lock與CI一致；Actions升最新正式tag並鎖其commit SHA。
+strict／noEmit／ES2023／nodenext／erasableSyntaxOnly保留，不為升級關掉型別防線。
+
+**環境**：不覆寫系統工具，安裝於ignored generated/toolchain，提供bootstrap與需source的env腳本。
+Python release asset下載受限，改由官方tag source建置，不跑PGO／make test／compileall；工具建置不是遊戲驗證。
+初次建置缺zlib／SSL，補上zlib1.3.2與OpenSSL4.0.3後重建成功，保留其他未提供的可選模組界線。
+執行時零npm依賴仍保留，工具與source build tree不進Git。
+
+**續接恢復**：目前工作區Git基線回到早期commit，但已推送的f4e0f57與原始碼仍可恢復。
+確認早期HEAD是遠端祖先後，只前進目前分支ref與索引到f4e0f57，沒有切分支、改寫遠端或覆蓋工作樹。
+未提交的整理／版本更新保留；先前背景程序與ignored生成資料沒有隨續接還原。
+找不到原preview-death存檔與冷備，不seed替代、不宣稱原進度已恢復；遊戲LIVE需先取得真正save。
+
+**界線**：本輪未執行test/check/typecheck/語法檢查/browser/VM/遊戲HTTP或登入probe。
+版本顯示與依賴安裝不等於相容性PASS；CI保留流程但提交[skip ci]不執行。只非force推目前Arena分支。

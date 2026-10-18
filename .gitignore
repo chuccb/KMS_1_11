@@ -6,11 +6,6 @@ __pycache__/
 bin/
 obj/
 
-# Godot
-.godot/
-*.import
-export_presets.cfg
-
 # Rebuilt game assets (regenerate from Data.wz with tools/ ; never commit)
 assets/
 generated/

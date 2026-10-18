@@ -2,7 +2,7 @@
  * PNG writer, so a decoded canvas can leave the program as a file.
  *
  * This exists because "the codec works" has to be checkable by eye: `wz png` writes every canvas of
- * an image into a folder and any viewer (or the Godot client later on) can open the result. A
+ * an image into a folder and any viewer (including the browser client) can open the result. A
  * hand-rolled writer with no dependencies is ~60 lines, which is cheaper to keep than a package
  * that does one thing; `zlib` and `zlib.crc32` are in Node's standard library.
  *

@@ -1,5 +1,11 @@
 # server/ — MMO 伺服器與協定工具（TypeScript，執行時零依賴）
 
+> 現行專案入口：[根 README](../README.md) · [文件索引](../docs/README.md) ·
+> [實際架構](../docs/ARCHITECTURE.md) · [還原原則](../docs/REBUILD_PRINCIPLES.md)。
+> 工具鏈版本／啟用方式見 [TOOLCHAIN](../docs/TOOLCHAIN.md)；先啟用新環境再執行本頁命令。
+> 本頁各功能表與舊測試數量保留開發歷史；不能作為最新提交的通過證明。
+> 目前客戶端為 `client/` 的瀏覽器 Canvas 2D／DOM／Web Audio，不需要另外安裝遊戲引擎。
+
 > 本輪新增（**未測試**）：基本射擊選彈／扣1發／原0x24投射物id轉播、WZ武器動作與時間、待命中排程，
 > 見[`docs/BASIC_ATTACKS.md`](../docs/BASIC_ATTACKS.md)。沒有改save schema或建立角色存檔；原傷害公式／形狀碰撞仍有缺口。
 
@@ -591,7 +597,7 @@ node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS
 | `framed` | 相同的 4-byte 標頭但**沒有握手**（已知種子、或第一個封包不是握手時用）|
 | `raw` | 每次 `recv()` 傾印一行，完全不解讀 |
 
-> **執行時**零依賴：Node 22 原生支援 TypeScript type stripping 與內建測試框架，
+> **執行時**零依賴：固定 Node 26.12.0 原生支援 TypeScript type stripping 與內建測試框架，
 > 因此跑伺服器與測試**沒有 build step、沒有 node_modules**。
 > 限制：strip-only 模式**不接受**需要程式碼生成的語法（parameter property、`enum`、`namespace`）——
 > `test/source-hygiene.test.ts` 會先擋下來，免得只在載入時才爆 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`。
@@ -599,12 +605,13 @@ node server/scripts/whisper_probe.mjs 8495 8496        # 應該印出 PROBE PASS
 > 型別檢查是另一件事：strip-only 只砍掉型別、**不做任何檢查**。`server/tsconfig.json` 把 `src/` 加 `test/`
 > 放進 `strict`（外加 `noImplicitOverride`、`noFallthroughCasesInSwitch`、`noUnusedLocals/Parameters`，
 > 以及 `erasableSyntaxOnly`：讓編譯器自己擋下 strip-only 吃不下的語法）；`typescript` 與 `@types/node`
-> 是唯二的 **devDependency**：`cd server && npm install && npm run typecheck`。新增檔案要讓它維持 0 錯誤。
+> 是唯二的直接 **devDependency**：平常可用 `cd server && npm ci && npm run typecheck`。
+> 本輪依要求未執行此命令；新TS版本的診斷仍未確認，不宣稱目前0錯誤。
 
 ## 規則
 
 1. 任何未經 `docs/protocol/FINDINGS.md` 證實的欄位，一律以 `HYPOTHESIS` 標註並有測試可改。
-2. 不得在 `server/` 出現 Godot 型別；不得把 Hex-Rays C 逐行翻譯。
+2. server 的共用規則不得依賴 DOM／Canvas／瀏覽器音訊等呈現 API；不得把 Hex-Rays C 逐行翻譯。
 3. 新增協定知識時，**同時**更新 `docs/protocol/FINDINGS.md` 與測試向量。
 4. 解密**必須**做標頭自檢（`magic ^ HIWORD(state)`）：用錯種子的「假成功」比當機更貴。
    這條規則已經實際抓到一個 bug（兩個方向用同一顆種子解碼）。
