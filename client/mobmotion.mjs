@@ -1,14 +1,14 @@
 /** Ordinary jumping-mob trajectory; the server owns this path, the browser only samples it.
  * 48D080: ability comes from root fly/jump/move subtrees, NOT an info.jump stat.
  * 5378D0: -555 with default shoe.jump=1/mass=100; 53D3F0: <=30ms subdivision.
- * Shared swept floor/wall geometry avoids a separate fake sine wave or renderer-only hop.
+ * Shared directed floor/wall/ceiling geometry avoids a separate fake sine wave or renderer-only hop.
  * No water/flying/aggro/skill or custom field/shoe physics is claimed here.
  */
-import { collisionWorld, createPlayer, advanceMob, PHYSICS } from "./motion.mjs";
+import { collisionWorld, createPlayer, advanceMob, stepMovementRecords, PHYSICS } from "./motion.mjs";
 
 export function planMobAirPath(start, footholds, options) {
-  const world = collisionWorld({ footholds, ladders: [] });
-  const body = createPlayer(start.x, start.y, world, start.foothold, options.launch);
+  const world = collisionWorld({ footholds, ladders: [], physicalBounds: options.physicalBounds });
+  const body = createPlayer(start.x, start.y, world, start.foothold, options.launch, false);
   body.vx = start.vx ?? 0;
   body.vy = start.vy ?? 0;
   if (options.launch && !body.grounded) return [];
@@ -16,19 +16,23 @@ export function planMobAirPath(start, footholds, options) {
   const facing = start.facing & 1;
   const groundAction = ((options.direction ? 0 : 1) << 1) | facing;
   const jumpAction = (2 << 1) | facing; // mob jump=2, NOT the user's movement action 6.
-  const horizon = Math.max(30, Math.min(3000, options.horizonMs ?? 900));
+  const horizon = Math.max(30, Math.min(3000, Math.trunc(Number.isFinite(options.horizonMs) ? options.horizonMs : 900)));
   for (let elapsed = 0; elapsed < horizon;) {
     const duration = Math.min(30, horizon - elapsed);
     advanceMob(body, { horizontal: options.direction, jump: options.launch && elapsed === 0,
       speedPercent: options.speedPxPerSecond * 100 / PHYSICS.walkSpeed }, world, duration);
     elapsed += duration;
-    points.push({ x: Math.trunc(body.x), y: Math.trunc(body.y), vx: Math.trunc(body.vx),
-      vy: Math.trunc(body.vy), foothold: 0, action: jumpAction, duration });
+    // Use the same integer TOI/contact nodes as player publication, not a synthetic landing
+    // postponed to the end of this 30ms interval. Ordinary mob action ids remain independent.
+    const records = stepMovementRecords(body, duration).map(point => ({
+      x: point.x, y: point.y, vx: point.vx, vy: point.vy, foothold: point.foothold,
+      action: point.foothold ? groundAction : jumpAction, duration: point.duration,
+    }));
+    // The native path count byte supports 255; reserve its terminal node before appending.
+    if (points.length + records.length + 1 > 255) break;
+    points.push(...records);
     if (body.grounded) {
-      // Land at the END of this interval. A positive foothold on the preceding segment would
-      // force sampleMotion to project the whole descending arc onto the floor prematurely.
-      points.push({ x: Math.trunc(body.x), y: Math.trunc(body.y), vx: Math.trunc(body.vx), vy: Math.trunc(body.vy),
-        foothold: body.foothold, action: groundAction, duration: 0 });
+      if (points.at(-1).duration) points.push({...points.at(-1), duration: 0});
       break;
     }
   }

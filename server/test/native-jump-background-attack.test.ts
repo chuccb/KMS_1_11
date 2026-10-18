@@ -51,7 +51,11 @@ test("ordinary jump uses a real gravity path and terminal zero-duration landing,
   assert.ok(points[0]!.vy < 0);
   assert.ok(points.some(point=>point.y<30));
   assert.ok(points.some(point=>point.vy>0));
-  assert.ok(points.slice(0,-1).every(point=>point.foothold===0 && point.duration<=30));
+  assert.ok(points.every(point=>point.duration>=0 && point.duration<=30));
+  const landing=points.findIndex(point=>point.foothold!==0);
+  assert.ok(landing>0);assert.equal(points[landing]!.duration,0);
+  assert.ok(points.slice(0,landing).every(point=>point.foothold===0));
+  assert.ok(points.slice(landing).every(point=>point.foothold===1));
   assert.deepEqual([points.at(-1)!.y,points.at(-1)!.foothold,points.at(-1)!.duration,points.at(-1)!.action], [100,1,0,2]);
   const moving = planMobAirPath({x:0,y:100,foothold:1,facing:1,vx:-125},[floor],
     {direction:-1,speedPxPerSecond:125,launch:true});

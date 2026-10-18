@@ -1,6 +1,6 @@
 # 普通移動力學、地形狀態、繩梯與有序移動路徑
 
-日期：2026-10-18；ADR-077。**已實裝來源；未執行 test／check／typecheck／語法檢查／browser／VM／HTTP或登入 probe。**
+日期：2026-10-18；ADR-077，幾何續作ADR-078見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)。**已實裝來源；未執行 test／check／typecheck／語法檢查／browser／VM／HTTP或登入 probe。**
 這是普通控制器相關鏈的續作，不是完整 CVecCtrl、CShape2D 或原 server 已還原的宣告。
 
 ## 1. 原證與本輪實作
@@ -41,7 +41,7 @@
 原 wire codec 與 `0x0E→0x22` 沒改版、不新增私有 native opcode。
 
 1. 每個30ms控制步保留座標、world vx/vy、動作／朝向、foothold、attr、duration。原 `_ftol` 匯出用trunc，不再對負座標／速度用round。
-2. `drainPlayerPath` 加零毫秒起點，依時間送出完整 records；落地／抓繩／離繩有零毫秒 terminal state，不讓整段下降提早變成grounded／ladder姿勢。
+2. `drainPlayerPath` 加零毫秒起點，依時間送出完整 records；ADR-078以碰撞前positive-duration／實際接觸時刻0ms transition／剩餘時間末端保序。抓繩／離繩也留transition，不讓整段下降提早變成grounded／ladder姿勢。
 3. **仍每100ms批次傳輸**，attack前照舊flush。這100ms是browser傳輸政策，不是物理步長或原版send判定。往返後終點恰好相同也不可丟棄中間運動；只有整條都沒有移動／姿勢／速度／attr變化才省略idle包。
 4. attr2留在真正消費外力的那一個有序fragment；drain才交出一次，不會因下一個控制步清掉、或重播在之後每包。遠端臉部沿用已接的30ms movementFace消費時序。
 5. `BrowserSession` 在入串列前驗證 `path`；`ClientSession.movePath` 用既有 codec送出；motionWrites原本的session／field失效守衛仍有效，換場不執行舊佇列。
@@ -63,16 +63,15 @@ path 的 originX/Y 語義仍未證明；browser的起點由**第一個零duratio
 | 100ms | browser transport batching，非原send條件／全域相位 |
 | 960ms／62+2 records | 本地未送journal上限；超量丟舊並換anchor，不跨舊資料接chord |
 | 64 records／1000ms、attr只0或2 | bridge JSON入界政策；native codec本身仍支持255 records／u16 duration。整數、signed XY／velocity、foothold／action範圍在寫socket前驗證，不做字串／NaN隱式轉型 |
-| 64 hops／EPS、spawn距離24px | malformed-map／浮點保護及既有portal settle政策，非原geometry門檻 |
+| EPS、spawn距離24px | 既有spawn／remote浮點保護與portal settle政策，非整數crossing門檻；ADR-078移除64-hop，ordinary最多兩pass |
 
 ## 4. 還沒等價的邊界
 
 本輪 ground force／ordinary air scalar 分支有直接port；但以下**不能冒充完成**：
 
-- 原整數交叉積的雙接觸、共線端點 tie、ceiling／wall group完整選擇與shape pool／R-tree遍歷；目前仍浮點first-sweep與獨立wall/floor判定。
-- `539B10/539C40` 的完整field bounds裁切及其剩餘時間、unstick／所有多碰撞特例。沒有用camera bounds或假地板補洞。
+- ADR-078已接有向整數crossing／endpoint pair／dual tangent／ceiling-wall group、ground reversal、539B10/539C40物理場界及integer contact time；原證與政策見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)。仍非native shape pool／R-tree遍歷與所有unstick callers。
 - 原 app 共同30ms時相、CMovePath原始append／send判斷、過期合成fragment／30與33ms播放校正、網路抖動下的完整重排／預測。
-- 現在journal是browser的endpoint interpolation表示，仍非逐bit重演native的velocity／acceleration playback；極短落地點在30ms區間內仍以interval末端的terminal node表示。
+- 現在journal是browser的endpoint interpolation表示，仍非逐bit重演native的velocity／acceleration playback；ADR-078已把接觸時刻放入interval內，不再把全部落地推遲到30ms末端。
 - water／fly／特殊鞋／技能位移、完整mob owner AI；不能只靠同一套scalar helper稱它們全做好。
 - x87暫存精度／JS double、現版動態手感、像素或原機比較皆未驗收。
 
@@ -90,3 +89,5 @@ landing half／反向歸零、抓繩順序與rising阻擋、uf／頂底／離繩
 - `generated/backups/preview-faces-cold-locomotion-20261018-072945.json`
 
 備份不進Git；不回滾、不另造帳號、不代替使用者修改現有角色。啟服／port listening不等於遊戲驗收。
+
+後續ADR-078的整數幾何、field bounds、普通mob與特別KB連動，以及新版同save保存方式，見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)；以上兩份locomotion備份是上一輪時間點，不作新版restore來源。

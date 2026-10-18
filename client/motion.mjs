@@ -1,3 +1,4 @@
+import { normalizeFootholds, physicalBounds, clipAir, clipGround, segmentPosition, terrainContact, contactTangent } from "./native-terrain.mjs";
 import { playerPosture } from './posture.mjs';
 import { mergeImpulse } from './contact.mjs';
 import { NATIVE_SHOE, NATIVE_FOOTHOLD, NATIVE_FLUID, NATIVE_STEP_MS,
@@ -24,14 +25,11 @@ export function groundY(f, x) {
  * 563010 creates default shared attributes, not per-foothold later-version WZ friction fields.
  */
 export function collisionWorld(map) {
-  const footholds = (map.footholds ?? []).map(f => {
-    const length = Math.hypot(f.x2 - f.x1, f.y2 - f.y1);
-    return { ...f, length, cos: length ? (f.x2 - f.x1) / length : 0,
-      sin: length ? (f.y2 - f.y1) / length : 0 };
-  });
+  const footholds = normalizeFootholds(map.footholds ?? []);
   return { footholds, byId: new Map(footholds.map(f => [f.id, f])),
     ladders: [...(map.ladders ?? [])].sort((a, b) => a.id - b.id),
-    groundAttr: NATIVE_FOOTHOLD, fieldAttr: NATIVE_FLUID };
+    groundAttr: NATIVE_FOOTHOLD, fieldAttr: NATIVE_FLUID,
+    bounds: map.physicalBounds ?? physicalBounds(footholds) };
 }
 export function floorBelow(world, x, y, maxDistance = Infinity, ignored = new Set()) {
   let result;
@@ -46,6 +44,7 @@ export function floorBelow(world, x, y, maxDistance = Infinity, ignored = new Se
 function alignGround(body, f, y, speed) {
   body.y = y;
   body.groundSpeed = speed;
+  body.groundPosition = segmentPosition(f, body.x, body.y);
   body.vx = f.cos * speed;
   body.vy = f.sin * speed;
   body.foothold = f.id;
@@ -61,10 +60,17 @@ function releaseGround(body, world) {
   body.grounded = false;
   body.foothold = 0;
   body.groundSpeed = 0;
+  body.groundPosition = 0;
 }
-export function createPlayer(x, y, world, foothold = 0, settle = true) {
-  const body = { x, y, vx: 0, vy: 0, groundSpeed: 0, foothold: 0, grounded: false, facing: 0,
-    layer: 7, group: 0, ladder: undefined, jumpHeld: false, jumpQueued: false, groundJumps: 0, accumulator: 0 };
+export function createPlayer(x, y, world, foothold = 0, settle = true, initialize = true) {
+  // 537260 clamps all FOUR sides only at initialization. Continuing mob paths must not
+  // repeatedly teleport a falling body back to bottom (ordinary movement has no bottom clamp).
+  if (initialize && world.bounds) {
+    x = clamp(x, world.bounds.left, world.bounds.right);
+    y = clamp(y, world.bounds.top, world.bounds.bottom);
+  }
+  const body = { x, y, vx: 0, vy: 0, groundSpeed: 0, groundPosition: 0, foothold: 0, grounded: false, facing: 0,
+    layer: 7, group: 0, ladder: undefined, jumpHeld: false, jumpQueued: false, groundJumps: 0, accumulator: 0, terrainTrace: [] };
   // Portal settling is a browser spawn policy, not a replacement for swept movement collision.
   const f = world.byId.get(foothold), at = groundY(f, x);
   const floor = at !== undefined && Math.abs(at - y) <= 24 ? { foothold: f, y: at } : floorBelow(world, x, y, 24);
@@ -82,99 +88,155 @@ function connectedFloors(world, id) {
   return seen;
 }
 
-/** 539450: transfer tangent speed across linked floors; interpolate it at an edge.
- * 5376C0 integrates force ONCE; unused milliseconds continue at collision velocity, without
- * a second gravity/acceleration application. The loop cap is malformed-map protection.
- */
-function walkGround(body, distance, world, seconds, startSpeed = body.groundSpeed) {
-  let f = world.byId.get(body.foothold), left = distance, time = seconds, initial = startSpeed;
-  for (let hop = 0; f && hop < 64; hop++) {
-    const speed = body.groundSpeed;
-    const direction = Math.sign(left);
-    if (!direction) { alignGround(body, f, groundY(f, body.x), speed); return; }
-    const targetX = body.x + left * f.cos, edgeX = direction > 0 ? f.x2 : f.x1;
-    if ((direction > 0 && targetX <= edgeX) || (direction < 0 && targetX >= edgeX)) {
-      body.x = targetX; alignGround(body, f, groundY(f, targetX), speed); return;
-    }
-    const edgeDistance = (edgeX - body.x) / f.cos;
-    const fraction = clamp(edgeDistance / left, 0, 1);
-    const collisionSpeed = initial + (speed - initial) * fraction;
-    // Native a2 is integer milliseconds; the geometry intersection here is still floating point.
-    time = Math.max(0, time - Math.trunc(time * 1000 * fraction) / 1000);
-    body.x = edgeX;
-    alignGround(body, f, groundY(f, edgeX), collisionSpeed);
-    const next = world.byId.get(direction > 0 ? f.next : f.prev);
-    if (next && !isFloor(next)) {
-      // 539450 distinguishes upward walls from downward lips by oriented tangent, not any wall.
-      const blocks = direction < 0 ? next.sin >= 0 : next.sin <= 0;
-      if (blocks) { alignGround(body, f, body.y, 0); return; }
-    }
-    const nextX = direction > 0 ? next?.x1 : next?.x2;
-    const nextY = direction > 0 ? next?.y1 : next?.y2;
-    if (!next || !isFloor(next) || Math.abs(nextX - edgeX) > EPS || Math.abs(nextY - body.y) > EPS) {
-      // Open edges do not use 539A30's explicit jump/force lift.
-      body.grounded = false; body.foothold = 0; body.groundSpeed = 0;
-      const oldX = body.x, oldY = body.y, oldVx = body.vx, oldVy = body.vy;
-      body.x += body.vx * time; body.y += body.vy * time;
-      sweepWalls(body, oldX, oldY, world);
-      sweepFloor(body, oldX, oldY, oldVx, oldVy, world, time);
-      return;
-    }
-    f = next;
-    alignGround(body, f, body.y, collisionSpeed);
-    initial = collisionSpeed;
-    left = collisionSpeed * time;
-  }
-  // A corrupt/cyclic zero-length chain must not leave a grounded body outside its segment.
-  if (f) { body.x = clamp(body.x, f.x1, f.x2); alignGround(body, f, groundY(f, body.x), 0); }
+/** Set the true foothold distance and export world coordinates/velocity (537260/539450). */
+function placeGround(body, f, position, speed) {
+  body.x = f.x1 + f.cos * position;
+  alignGround(body, f, f.y1 + f.sin * position, speed);
+  body.groundPosition = position;
 }
-
-/** First oriented foot/segment crossing. 5389B0 interpolates collision velocity, projects it
- * onto the tangent, halves it when input agrees, otherwise clears it; then consumes remainder.
- * Exact integer dual-contact/corner tie resolution remains a separate native-geometry gap.
- */
-function sweepFloor(body, oldX, oldY, oldVx, oldVy, world, seconds) {
-  let hit;
-  for (const f of world.footholds) {
-    if (!isFloor(f)) continue;
-    const slope = (f.y2 - f.y1) / (f.x2 - f.x1);
-    const before = oldY - f.y1 - slope * (oldX - f.x1);
-    const after = body.y - f.y1 - slope * (body.x - f.x1);
-    if (before > EPS || after < -EPS || after <= before + EPS) continue;
-    const t = clamp(-before / (after - before), 0, 1);
-    const x = oldX + (body.x - oldX) * t;
-    if (x < f.x1 - EPS || x > f.x2 + EPS || (hit && hit.t <= t)) continue;
-    hit = { f, t, x };
-  }
-  if (!hit) return;
-  const vx = oldVx + (body.vx - oldVx) * hit.t;
-  const vy = oldVy + (body.vy - oldVy) * hit.t;
-  let speed = hit.f.cos * vx + hit.f.sin * vy;
-  speed = (body.moveX ?? 0) * speed >= 0 ? speed * .5 : 0;
-  body.x = hit.x;
-  alignGround(body, hit.f, groundY(hit.f, hit.x), speed);
-  const remaining = Math.max(0, seconds - Math.trunc(seconds * 1000 * hit.t) / 1000);
-  walkGround(body, speed * remaining, world, remaining);
+function noteContact(body, incoming, at) {
+  const before = {...movementSnapshot(incoming), attr: 0}, after = movementSnapshot(body);
+  body.terrainTrace.push({at, before, after});
+  // An external-force marker is attached to its actual zero-time transition exactly once.
+  body.moveAttr = 0;
 }
-function sweepWalls(body, oldX, oldY, world) {
-  if (Math.abs(body.x - oldX) < EPS) return;
-  let earliest = 1, wall;
-  for (const f of world.footholds) {
-    if (f.x1 !== f.x2) continue;
-    const t = (f.x1 - oldX) / (body.x - oldX);
-    if (t < -EPS || t > earliest) continue;
-    const y = oldY + (body.y - oldY) * t;
-    if (y <= Math.min(f.y1, f.y2) + EPS || y > Math.max(f.y1, f.y2) + EPS) continue;
-    earliest = t; wall = f;
+/** One native ground collision pass (539C40 -> 539450). The caller, not this function,
+ * performs the single remaining-time continuation prescribed by 5376C0.
+ */
+function resolveGround(body, world, oldPosition, oldSpeed, position, speed, milliseconds, offset = 0) {
+  const f = world.byId.get(body.foothold);
+  if (!f || !isFloor(f)) return {hit: false, remaining: 0};
+  const intendedSpeed = speed, intendedPosition = position;
+  const clipped = clipGround(f, oldPosition, position, speed, milliseconds, world.bounds);
+  position = clipped.position; speed = clipped.speed;
+  let used = clipped.used;
+  // Endpoint reversal can change to prev.next / next.prev, which need not be this segment.
+  // WZ links are authoritative; do not invent reciprocal links or follow an arbitrary neighbor.
+  let replacement, atEnd = false;
+  if (oldPosition <= 0 && position > 0) replacement = world.byId.get(world.byId.get(f.prev)?.next);
+  else if (oldPosition >= f.length && position < f.length) {
+    replacement = world.byId.get(world.byId.get(f.next)?.prev); atEnd = true;
   }
-  if (wall) { body.x = wall.x1; body.vx = 0; }
+  if (replacement && replacement !== f) {
+    const before = {...body};
+    if (isFloor(replacement)) {
+      placeGround(body, replacement, atEnd ? replacement.length : 0, speed);
+      noteContact(body, before, offset);
+      // 539450 writes the 0ms transfer, then returns 0: no second-pass movement here.
+      return {hit: false, remaining: milliseconds};
+    }
+    position = atEnd ? f.length : 0; speed = 0;
+  }
+  if (position >= 0 && position <= f.length) {
+    placeGround(body, f, position, speed);
+    if (position !== intendedPosition) {
+      const fraction = milliseconds ? used / milliseconds : 0;
+      const incomingSpeed = oldSpeed + (intendedSpeed - oldSpeed) * fraction;
+      noteContact(body, {...body, vx: f.cos * incomingSpeed, vy: f.sin * incomingSpeed}, offset + used);
+    }
+    return {hit: false, remaining: milliseconds - used};
+  }
+  const left = position < 0;
+  const fraction = left ? oldPosition / (oldPosition - position) : (f.length - oldPosition) / (position - oldPosition);
+  used = Math.trunc(used * fraction);
+  const collisionSpeed = oldSpeed + (speed - oldSpeed) * fraction;
+  placeGround(body, f, left ? 0 : f.length, collisionSpeed);
+  const incoming = {...body}, next = world.byId.get(left ? f.prev : f.next);
+  if (!next || !isFloor(next)) {
+    const blocks = next && (left ? next.sin >= 0 : next.sin <= 0);
+    if (blocks) placeGround(body, f, left ? 0 : f.length, 0);
+    else { body.grounded = false; body.foothold = 0; body.groundSpeed = 0; body.groundPosition = 0; }
+  } else {
+    const transferred = left ? (collisionSpeed <= 0 ? collisionSpeed : 0) : (collisionSpeed >= 0 ? collisionSpeed : 0);
+    placeGround(body, next, left ? next.length : 0, transferred);
+  }
+  noteContact(body, incoming, offset + used);
+  return {hit: true, remaining: Math.max(0, milliseconds - used)};
+}
+/** Unified wall/floor/ceiling pass (5389B0), not independent sweeps in a fixed priority order. */
+function resolveAir(body, old, world, milliseconds, accelerated, offset = 0) {
+  const intended = {x: body.x, y: body.y, vx: body.vx, vy: body.vy};
+  const bounded = clipAir(body, old, milliseconds, world.bounds);
+  const hit = terrainContact(world, old, body, body.group ?? 0);
+  if (!hit) {
+    if (intended.x !== body.x || intended.y !== body.y) {
+      const fraction = milliseconds ? bounded / milliseconds : 0;
+      noteContact(body, {...body, vx: old.vx + (intended.vx - old.vx) * fraction,
+        vy: old.vy + (intended.vy - old.vy) * fraction}, offset + bounded);
+    }
+    return {hit: false, remaining: milliseconds - bounded};
+  }
+  const used = Math.trunc(bounded * hit.fraction), remaining = Math.max(0, milliseconds - used);
+  const vx = old.vx + (body.vx - old.vx) * hit.fraction;
+  const vy = old.vy + (body.vy - old.vy) * hit.fraction;
+  const selected = contactTangent(hit, vx, vy), f = selected.foothold;
+  const position = clamp(segmentPosition(f, hit.x, hit.y), 0, f.length);
+  const x = f.x1 + f.cos * position, y = f.y1 + f.sin * position;
+  const incoming = {...body, x, y, vx, vy};
+  if (isFloor(f)) {
+    const speed = body.moveX * selected.speed >= 0 ? selected.speed * .5 : 0;
+    placeGround(body, f, position, speed);
+    noteContact(body, incoming, offset + used);
+  } else {
+    // Native does NOT ground on a wall/ceiling or halve tangent velocity there.
+    // The accelerated pass projects its END velocity and predicts along the contact tangent
+    // for the remaining milliseconds; the second pass uses a4=0 and only snaps to contact.
+    const endSpeed = accelerated ? f.cos * body.vx + f.sin * body.vy : selected.speed;
+    body.x = x; body.y = y;
+    body.vx = f.cos * selected.speed; body.vy = f.sin * selected.speed;
+    noteContact(body, incoming, offset + used);
+    body.vx = f.cos * endSpeed; body.vy = f.sin * endSpeed;
+    if (accelerated) {
+      const distance = (selected.speed + endSpeed) * remaining * .0005;
+      body.x += f.cos * distance; body.y += f.sin * distance;
+    }
+  }
+  return {hit: true, remaining};
+}
+/** 5376C0 has TWO collision passes, not an unbounded edge loop or repeated force integration. */
+function moveOnTerrain(body, world, milliseconds, shoe) {
+  const old = {x: body.x, y: body.y, vx: body.vx, vy: body.vy};
+  let result;
+  if (body.grounded) {
+    const f = world.byId.get(body.foothold);
+    if (!f || !isFloor(f)) { releaseGround(body, world); return; }
+    const position = segmentPosition(f, body.x, body.y);
+    const speed = f.cos * body.vx + f.sin * body.vy;
+    const next = groundStep(speed, f.sin, body.moveX, milliseconds / 1000, shoe, world.groundAttr);
+    result = resolveGround(body, world, position, speed, position + next.distance, next.speed, milliseconds);
+    if (!result.hit || result.remaining <= 0) return;
+    const offset = milliseconds - result.remaining;
+    if (body.grounded) {
+      const nextF = world.byId.get(body.foothold), start = segmentPosition(nextF, body.x, body.y);
+      resolveGround(body, world, start, body.groundSpeed, start + body.groundSpeed * result.remaining / 1000,
+        body.groundSpeed, result.remaining, offset);
+    } else {
+      const start = {x: body.x, y: body.y, vx: body.vx, vy: body.vy};
+      body.x += body.vx * result.remaining / 1000; body.y += body.vy * result.remaining / 1000;
+      resolveAir(body, start, world, result.remaining, false, offset);
+    }
+  } else {
+    const next = airStep(old.vx, old.vy, body.moveX, milliseconds / 1000, shoe, world.fieldAttr);
+    body.vx = next.vx; body.vy = next.vy; body.x += next.dx; body.y += next.dy;
+    result = resolveAir(body, old, world, milliseconds, true);
+    if (!result.hit || result.remaining <= 0) return;
+    const offset = milliseconds - result.remaining;
+    if (body.grounded) {
+      const f = world.byId.get(body.foothold), start = segmentPosition(f, body.x, body.y);
+      resolveGround(body, world, start, body.groundSpeed, start + body.groundSpeed * result.remaining / 1000,
+        body.groundSpeed, result.remaining, offset);
+    } else {
+      // Deliberately reuse ORIGINAL pre-force dst, as 5376C0 does for the projected wall pass.
+      resolveAir(body, old, world, result.remaining, false, offset);
+    }
+  }
 }
 /** 564DF0 uses an expanded swept AABB (+/-10 X), then the first ladder by numeric id. */
 function ladderIn(world, x1, y1, x2, y2) {
   return world.ladders.find(l => l.x >= Math.min(x1, x2) - 10 && l.x <= Math.max(x1, x2) + 10
     && Math.min(y1, y2) <= l.y2 && l.y1 <= Math.max(y1, y2));
 }
-function grabLadder(body, input, world, oldX, oldY) {
+function grabLadder(body, input, world, oldX, oldY, milliseconds) {
   if (body.ladder || input.allowClimb === false) return;
   let ladder, y = body.y;
   if (body.moveY < 0) {
@@ -188,10 +250,12 @@ function grabLadder(body, input, world, oldX, oldY) {
     else ladder = undefined;
   }
   if (!ladder) return;
+  const incoming = {...body};
   body.ladder = ladder; body.x = ladder.x; body.y = y;
   body.layer = ladder.page ?? body.layer; body.group = 0;
-  body.grounded = false; body.foothold = 0; body.groundSpeed = 0;
+  body.grounded = false; body.foothold = 0; body.groundSpeed = 0; body.groundPosition = 0;
   body.vx = body.vy = 0;
+  noteContact(body, incoming, milliseconds);
 }
 /** Keydown can precede BOTH RAF samples and the 30ms controller update. */
 export function requestPlayerJump(body) {
@@ -203,6 +267,7 @@ function latchJump(body, input) {
   body.jumpHeld = Boolean(input.jump);
 }
 function step(body, input, world, dt, mob = false) {
+  body.terrainTrace = [];
   const horizontal = clamp(input.horizontal ?? 0, -1, 1), vertical = clamp(input.vertical ?? 0, -1, 1);
   body.moveX = horizontal; body.moveY = vertical;
   // 5426F0 death branch returns before ordinary gravity or ladder movement.
@@ -219,51 +284,45 @@ function step(body, input, world, dt, mob = false) {
   const wasLadder = Boolean(body.ladder);
   // 5376C0 processes jump BEFORE staged external force. A coincident hit must not erase a launch.
   if (jumping && body.ladder && horizontal) {
+    const incoming = {...body};
     body.ladder = undefined;
     body.vx = horizontal * shoe.walkSpeed * 162.5;
     body.vy = -555 * shoe.jump / world.fieldAttr.gravity * .5;
+    noteContact(body, incoming, 0);
   } else if (jumping && body.grounded) {
+    const incoming = {...body};
     const f = world.byId.get(body.foothold);
     releaseGround(body, world);
     const velocity = jumpVelocity(body.vx, f?.sin ?? 0, horizontal, shoe, world.groundAttr, world.fieldAttr);
     body.vx = velocity.vx; body.vy = velocity.vy;
     body.groundJumps++; // Native ground branch alone plays Game/Jump, not a ladder departure.
+    noteContact(body, incoming, 0);
   }
   const knocked = body.knockback !== undefined;
   if (knocked) {
+    const incoming = {...body};
     const impulse = body.knockback; body.knockback = undefined;
     releaseGround(body, world); body.ladder = undefined;
     body.vx = mergeImpulse(body.vx, impulse.x); body.vy = mergeImpulse(body.vy, impulse.y);
     body.moveAttr = (body.moveAttr ?? 0) | 2;
+    noteContact(body, incoming, 0);
   }
   if (body.ladder) {
     const ladder = body.ladder;
     // 542DF0 is exactly 3 pixels per 30ms controller update, independent of speed stat.
     body.vx = 0; body.vy = vertical * PHYSICS.climbSpeed;
     body.y += body.vy * dt;
+    const incoming = {...body};
     if (body.y < ladder.y1 && ladder.upperFoothold === false) { body.y = ladder.y1; body.vy = 0; }
     else if (body.y < ladder.y1) { body.y = ladder.y1 - 5; body.ladder = undefined; body.vy = 0; }
     else if (body.y > ladder.y2) { body.y = ladder.y2 + 1; body.ladder = undefined; body.vy = 0; }
+    if (incoming.y !== body.y || incoming.ladder !== body.ladder) noteContact(body, incoming, dt * 1000);
     return;
   }
-  const oldX = body.x, oldY = body.y, oldVx = body.vx, oldVy = body.vy;
-  if (body.grounded) {
-    const f = world.byId.get(body.foothold);
-    if (!f || !isFloor(f)) { releaseGround(body, world); return; }
-    // Projection also accommodates a caller initializing world velocity (ordinary jumping mobs).
-    const start = f.cos * body.vx + f.sin * body.vy;
-    const result = groundStep(start, f.sin, horizontal, dt, shoe, world.groundAttr);
-    body.groundSpeed = result.speed;
-    walkGround(body, result.distance, world, dt, start);
-  } else {
-    const result = airStep(oldVx, oldVy, horizontal, dt, shoe, world.fieldAttr);
-    body.vx = result.vx; body.vy = result.vy;
-    body.x += result.dx; body.y += result.dy;
-    sweepWalls(body, oldX, oldY, world);
-    sweepFloor(body, oldX, oldY, oldVx, oldVy, world, dt);
-  }
+  const oldX = body.x, oldY = body.y;
+  moveOnTerrain(body, world, Math.round(dt * 1000), shoe);
   // 5426F0 checks grabs AFTER physics. A rising jump cannot catch a rope; a falling sweep can.
-  if (!knocked && !wasLadder) grabLadder(body, input, world, oldX, oldY);
+  if (!knocked && !wasLadder) grabLadder(body, input, world, oldX, oldY, dt * 1000);
 }
 /** Native-sized 30ms local controller updates, NOT a claim of the EXE's shared global phase.
  * RAF latches a short jump press until the next update; UI/death clears pending requests.
@@ -273,10 +332,8 @@ export function advancePlayer(body, input, world, elapsedMs) {
   latchJump(body, input);
   body.accumulator += clamp(Number.isFinite(elapsedMs) ? elapsedMs : 0, 0, 250);
   while (body.accumulator + EPS >= PHYSICS.stepMs) {
-    const before = movementSnapshot(body);
-    const onLadder = Boolean(body.ladder);
     step(body, input, world, PHYSICS.stepMs / 1000);
-    recordMovementTick(body, before, onLadder, PHYSICS.stepMs);
+    recordMovementTick(body, PHYSICS.stepMs);
     body.accumulator -= PHYSICS.stepMs;
   }
   return body;
@@ -309,17 +366,27 @@ function sameMovement(a, b) {
   return a.x === b.x && a.y === b.y && a.vx === b.vx && a.vy === b.vy
     && a.action === b.action && a.foothold === b.foothold;
 }
-function recordMovementTick(body, before, wasLadder, duration) {
-  const after = movementSnapshot(body), frames = body.motionFrames;
-  const landing = before.foothold === 0 && body.grounded;
-  const ladderChange = wasLadder !== Boolean(body.ladder);
-  // The travel interval must not acquire its landing/ladder posture early. A zero-duration
-  // terminal node changes state at contact, as with the ordinary jumping-mob planner.
-  const interval = {...after, duration};
-  if (landing || ladderChange) { interval.foothold = before.foothold; interval.action = before.action; }
-  frames.push(interval);
-  if (landing || ladderChange) frames.push({...after, attr: 0, duration: 0});
-  body.moveAttr = 0; // attr2 now belongs to this ordered fragment, not an arbitrary later snapshot.
+/** Explicit contact records preserve the ACTUAL integer collision time inside a controller tick.
+ * Both player publication and server-owned ordinary mob trajectories use this representation.
+ */
+export function stepMovementRecords(body, duration) {
+  const frames = [];
+  let cursor = 0;
+  for (const contact of body.terrainTrace ?? []) {
+    const at = clamp(Math.trunc(contact.at), cursor, duration);
+    if (at > cursor) frames.push({...contact.before, duration: at - cursor});
+    frames.push({...contact.after, duration: 0});
+    cursor = at;
+  }
+  const after = movementSnapshot(body);
+  if (duration > cursor || !frames.length || !sameMovement(frames.at(-1), after) || after.attr)
+    frames.push({...after, duration: duration - cursor});
+  return frames;
+}
+function recordMovementTick(body, duration) {
+  const frames = body.motionFrames;
+  frames.push(...stepMovementRecords(body, duration));
+  body.moveAttr = 0;
   let total = frames.reduce((sum, f) => sum + f.duration, 0);
   // Bounded browser backlog policy, separate from the native count byte (255).
   while (frames.length > 62 || total > 960) {

@@ -217,7 +217,7 @@ export interface FieldMob {
   mp?:number;
   decisionAt?: number;
   intent?: -1 | 0 | 1;
-  /** The x range this mob may walk in: its foothold chain clipped by the spawn's `rx0`/`rx1`. */
+  /** Foothold chain clipped by spawn rx0/rx1 and the loaded map's physical X bounds. */
   range: { x0: number; x1: number } | undefined;
   /** `true` while it is up; a dying mob is still on the client (`alive` goes false on the kill). */
   alive: boolean;
@@ -313,16 +313,8 @@ export class MobField {
   private makeMob(mobId: number, index: number, spawn: LifeSpawn): FieldMob {
     const template = this.options.template?.(spawn.templateId);
     const chain = this.chainOf(spawn.foothold);
-    let range: { x0: number; x1: number } | undefined;
+    const range = this.rangeOn(spawn.foothold, spawn);
     let foothold = spawn.foothold;
-    const bounds = chain === undefined ? undefined : footholdRange(chain);
-    if (chain !== undefined && bounds !== undefined) {
-      // The spawn's own `rx0`/`rx1` are the range the map allows; the chain is the ground that
-      // exists. Walk only where both agree, and never outside the segment the mob spawns on.
-      const x0 = Math.max(bounds.x0, spawn.rx0);
-      const x1 = Math.min(bounds.x1, spawn.rx1);
-      if (x1 - x0 >= 2) range = { x0, x1 };
-    }
     const y = (chain === undefined ? undefined : footholdYAt(chain, spawn.x)) ?? spawn.y;
     const at = chain === undefined ? undefined : footholdSegmentAt(chain, spawn.x);
     if (at !== undefined) foothold = at.id;
@@ -386,7 +378,7 @@ export class MobField {
     if(!killed&&reaction){
       const hit=mobReaction(mob.template,dealt,reaction.hitAnimation,reaction.facingLeft,now,mob.reactionUntil);
       if(hit){
-        const points=planMobReactionPath(mob,[...(this.options.footholds?.values()??[])],hit,mob.template?.moveAbility??0);
+        const points=planMobReactionPath(mob,[...(this.options.footholds?.values()??[])],hit,mob.template?.moveAbility??0,this.options.map.physicalBounds);
         const last=points.at(-1);
         if(last){
           // Cancel the old walking/jumping endpoint, not merely its sprite animation.
@@ -536,7 +528,11 @@ export class MobField {
     const chain = this.chainOf(foothold);
     const bounds = chain && footholdRange(chain);
     if (!bounds) return undefined;
-    const x0 = Math.max(bounds.x0, spawn.rx0), x1 = Math.min(bounds.x1, spawn.rx1);
+    // Loaded maps supply 563010's physical rectangle; count-only fixture maps may not have geometry.
+    // Roam remains server policy, but its targets must not exceed the native controller's X limits.
+    const rect = this.options.map.physicalBounds;
+    const x0 = Math.max(bounds.x0, spawn.rx0, rect?.left ?? -Infinity);
+    const x1 = Math.min(bounds.x1, spawn.rx1, rect?.right ?? Infinity);
     return x1 - x0 >= 2 ? { x0, x1 } : undefined;
   }
 
@@ -658,7 +654,7 @@ export class MobField {
     const points = planMobAirPath({ x: mob.x, y: mob.y, facing: mob.facing, foothold: mob.foothold,
       vx: launch ? direction * speed : mob.velocity?.vx ?? 0,
       vy: launch ? 0 : mob.velocity?.vy ?? 0 }, [...this.options.footholds.values()], {
-      direction, speedPxPerSecond: speed, launch,
+      direction, speedPxPerSecond: speed, launch, physicalBounds: this.options.map.physicalBounds,
     });
     const last = points.at(-1);
     if (!last) return undefined;

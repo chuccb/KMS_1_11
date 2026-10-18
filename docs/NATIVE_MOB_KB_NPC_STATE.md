@@ -2,6 +2,7 @@
 
 後續補完：[ADR-076／怪物主動攻擊](NATIVE_MOB_ATTACKS.md) 已接 attack10..12 的 body/facing保護與真KB並存，
 並以明示browser-only sideband續晚進場body相位；下文「尚未模型化」是ADR-075當時界線。完整owner狀態機仍未還原。
+ADR-078再依53D3F0修正一鄰段ground KB與flyer的539B10物理場界；移除舊獨立wall sweep，見 [地形續作](NATIVE_TERRAIN.md)。下文flyer／多段連續地形說明以此續作為準。
 
 **狀態：已編輯實作與回歸來源；依使用者指示，未執行 test／check／typecheck／語法檢查／browser／VM／HTTP／登入 probe。啟服不代表 PASS。**
 

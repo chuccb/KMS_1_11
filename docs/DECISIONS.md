@@ -2785,3 +2785,23 @@ bridge逐欄位驗證、movePath既有codec、session／field末端權威、remo
 
 整數corner ties／shape pool／field bounds／unstick、全域相位、原append／send／velocity playback、水飛與完整mob AI仍缺。
 原證、常數分類、來源fixtures及同save備份見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。
+
+
+## ADR-078：有向整數地形、雙接觸、物理場界與接觸時刻（2026-10-18）
+
+**狀態：已實裝與回歸來源；未test／check／typecheck／語法／browser／VM／probe。**
+
+續ADR-077。交叉5389B0／539420與listing的signed32／64乘法、4AB460 inclusive AABB，
+563010 endpoint extrema、537260四邊初始化、539B10 air X/top／539C40 ground tangent clip，
+539450反向prev.next／next.prev及5376C0最多兩pass；不以浮點floor／wall分開sweep、64-hop或camera clamp代替。
+新增native-terrain共用模組與型別，保留endpoint pair／corner turn／group／dual tangent與integer TOI；
+map loader→JSON→world→player／普通mob caller使用同一physical rectangle，不造bottom floor。
+
+contact journal保留接觸前phase／0ms新phase／餘時；jump／KB marker只在實際transition一次。
+普通mob保留最後0ms ground terminal並限255 records；loaded-map ground roam range也與physical X相交。
+交叉53D3F0，特別ground KB只轉一鄰段並clamp、不套ordinary ground field clip／gravity；
+flyer KB共用539B10，移除該caller未呼的獨立shape wall sweep。既有forced／raw window／互斥與清理保留。
+
+stable WZ-array scan不是native R-tree遍歷；x87／global phase／原CMovePath recorder與完整water／fly／owner AI未完成。
+empty／narrow／malformed geometry及overflow sentinel空best有明示防護，非正常原版規則。
+原證、常數意義、相關鏈、來源fixtures與同save保存見 [NATIVE_TERRAIN](NATIVE_TERRAIN.md)。

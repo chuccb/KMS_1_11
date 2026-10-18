@@ -132,7 +132,9 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 
 ## 最近功能與限制
 
-- 最新續作：[怪物主動攻擊完整鏈](docs/NATIVE_MOB_ATTACKS.md)／ADR-076：原選招／楔形範圍、MP／Value、拋物線與hit圖、攻擊中KB、冷載入／離場與晚進場body相位、唯讀怪物閱覽；此EXE主動hit不扣HP，身體碰撞另走傷害，未執行測試。
+- 最新續作：[有向整數地形與物理場界](docs/NATIVE_TERRAIN.md)／ADR-078：floor／wall／ceiling共用crossing、endpoint pair、group、ground反向連結、兩pass餘時、真接觸時間到remote，map／player／mob與特別KB連動；尚非完整R-tree／全域相位，未執行測試。
+- 前輪：[普通移動力學與有序wire](docs/NATIVE_LOCOMOTION.md)／ADR-077：原地空力／切線速度、抓繩／繩梯／死亡停止、30ms本地controller、journal／bridge／末端權威，未執行測試。
+- 前輪：[怪物主動攻擊完整鏈](docs/NATIVE_MOB_ATTACKS.md)／ADR-076：原選招／楔形範圍、MP／Value、拋物線與hit圖、攻擊中KB、冷載入／離場與晚進場body相位、唯讀怪物閱覽；此EXE主動hit不扣HP，身體碰撞另走傷害，未執行測試。
 - 前輪：[怪物KB／NPC氣泡名牌與方向狀態](docs/NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：KB真正替換巡邏、門檻與多段互斥、原受傷動作／時鐘／KEEP、NPC強制表情翻面與冷氣泡名牌、唯讀入口；未執行測試。
 - 前輪：[原版攻擊特效整鏈](docs/NATIVE_ATTACK_EFFECTS.md)／ADR-074：更正殘影 child5／獨立時鐘、真 mastery tier、普通命中火花、命中點與世界層排序、release 聲音及本機／旁觀／預覽生命週期；未執行測試。
 - 前輪：[兩招原版魔法與完整消費／生命週期](docs/NATIVE_MAGIC_SKILLS.md)／ADR-073。修正120ms多段時鐘與EVA/PDD入口漏接、新增MAD藥水；已列十二招，不宣稱全技能，未執行測試。

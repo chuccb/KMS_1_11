@@ -1,3 +1,4 @@
+import { physicalBounds, type PhysicalBounds } from "../../../client/native-terrain.mjs";
 /**
  * What the server knows about a map.
  *
@@ -15,7 +16,7 @@
  *               as a 7-digit *string*), `x`, `y`, `fh` (foothold), `cy`, `rx0`/`rx1` (the region it
  *               may wander in), optionally `f` (facing)
  *   portal      `pn` (name), `pt` (type), `x`, `y`, `tm`/`tn` (target map id / target portal name)
- *   foothold    pages -> groups -> items; this module only counts them for now
+ *   foothold    pages -> groups -> oriented segments; geometry also determines physical bounds
  */
 import { asNumber, asText, entriesOf, propertyOf } from "../wz/props.ts";
 import { mapImagePath } from "../wz/paths.ts";
@@ -85,6 +86,8 @@ export interface MapData {
    * `mapDataFrom` gets the count from a `MapSummary`, which does not carry the segments.
    */
   footholdSegments?: FootholdSegments;
+  /** 563010: physical rectangle from ALL foothold endpoints; not map art/VR/camera bounds. */
+  physicalBounds?: PhysicalBounds;
   climbables?: MapLadder[];
 }
 
@@ -191,6 +194,7 @@ export function loadMapData(archive: WzArchive, mapId: number): MapData | undefi
   if (root === undefined) return undefined;
   const map = mapDataFrom(mapSummary(root), mapId);
   map.footholdSegments = footholdSegments(root);
+  map.physicalBounds = physicalBounds(map.footholdSegments.values());
   map.climbables = entriesOf(propertyOf(root, "ladderRope")).map((entry) => ({
     id: Number(entry.name),
     x: asNumber(propertyOf(entry.value, "x")),

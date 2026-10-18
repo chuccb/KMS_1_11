@@ -24,10 +24,10 @@ test("537CA0: flat 140000/100 force, 80000/100 drag; .9 is slip, not flat fricti
 test("5643D0 / 537D35: normalized tangent and literal orientation-dependent slope force",()=>{
   const world=collisionWorld({footholds:[{...floor,x1:0,y1:0,x2:80,y2:60}]});
   const f=world.byId.get(1);close(f.cos,.8);close(f.sin,.6);close(f.length,100);
-  const body=createPlayer(0,0,world,1);
+  const body=createPlayer(40,30,world,1);
   advancePlayer(body,{horizontal:1},world,30);
   close(body.groundSpeed,57.12);close(body.vx,45.696);close(body.vy,34.272);
-  close(body.x,.68544);close(body.y,.51408);assert.equal(body.layer,2);
+  close(body.x,40.68544);close(body.y,30.51408);assert.equal(body.layer,2);
   close(groundStep(0,-.6,1,.03).speed,26.88);
 });
 
@@ -81,7 +81,7 @@ test("Down+jump uses ordinary jump; no invented 300ms ignored-platform fall-thro
 });
 
 test("linked floor transition preserves tangent speed and changes world velocity; jump lifts before external force",()=>{
-  const world=collisionWorld({footholds:[{...floor,x1:0,x2:10,next:2},
+  const world=collisionWorld({footholds:[{...floor,x1:-1000,x2:10,next:2},
     {...floor,id:2,x1:10,y1:0,x2:90,y2:60,prev:1}]});
   const body=createPlayer(9,0,world,1);body.vx=125;
   advancePlayer(body,{horizontal:1},world,30);
@@ -142,8 +142,9 @@ test("ordered 30ms records/attr survive drain; bridge/native codec preserve them
   advancePlayer(body,{horizontal:1},world,90);
   queueKnockback(body,270,-270);advancePlayer(body,{},world,30);
   const path=readBrowserMovePath(drainPlayerPath(body));
-  assert.deepEqual(path.elements.map(e=>e.duration),[0,30,30,30,30]);
+  assert.deepEqual(path.elements.map(e=>e.duration),[0,30,30,30,0,30]);
   assert.equal(path.elements.filter(e=>e.attr===2).length,1);
+  assert.equal(path.elements.find(e=>e.attr===2)!.duration,0,"force belongs to its actual launch transition");
   const wire=readClientUserMove(new PacketReader(encodeClientUserMove({stageByte:0,path}),1));
   assert.deepEqual(wire.path,path);
   assert.equal(drainPlayerPath(body).elements.some((e:{attr:number})=>e.attr),false);

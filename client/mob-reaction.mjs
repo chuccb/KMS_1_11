@@ -1,6 +1,7 @@
+import {normalizeFootholds, physicalBounds, clipAir, segmentPosition} from "./native-terrain.mjs";
 /** 487A30 -> 4885D0 -> 53D3F0. Native reaction, separate from roaming/player knockback.
  * No gravity launch: ground velocity is tangent130, drag=40000/default mass100;
- * ground edges clamp, airborne ground mobs hold; flyers have only basic horizontal damping/walls.
+ * ground edges clamp, airborne ground mobs hold; flyers damp and clip field bounds (no shape sweep).
  * Field/controller authority and packet scheduling remain reconstruction policy. */
 export const MOB_PUSH_SPEED=130;
 export const MOB_PUSH_DRAG=400;
@@ -14,28 +15,27 @@ export function mobReaction(template,damage,hitAction,facingLeft,now,until=0){
   if(!(damage>0)||damage<(template?.pushed??1)||now<until||hitAction<7||hitAction>9||duration<=0)return;
   return {duration,action:hitAction,facing:facingLeft?0:1,velocity:facingLeft?-MOB_PUSH_SPEED:MOB_PUSH_SPEED};
 }
-const near=(a,b)=>Math.abs(a-b)<1e-6;
-/** Move in arc length across only contiguous positive footholds; never fall off a KB edge. */
-function groundStep(body,distance,byId){
-  let f=byId.get(body.foothold),left=distance;
-  for(let hops=0;f&&hops<64;hops++){
-    const dx=f.x2-f.x1,dy=f.y2-f.y1,length=Math.hypot(dx,dy);
-    if(dx<=0||!length){body.vx=body.vy=body.speed=0;return;}
-    const s=(body.x-f.x1)*length/dx,next=s+left;
-    if(next>=0&&next<=length){body.x=f.x1+next*dx/length;body.y=f.y1+next*dy/length;return;}
-    const right=left>0,edge=right?length:0;
-    body.x=right?f.x2:f.x1;body.y=right?f.y2:f.y1;
-    left-=edge-s;
-    const other=byId.get(right?f.next:f.prev);
-    if(!other||other.x2<=other.x1||!near(right?other.x1:other.x2,body.x)||!near(right?other.y1:other.y2,body.y)){
-      body.speed=body.vx=body.vy=0;return;
+/** 53D3F0 is NOT ordinary 5376C0: at most one linked-floor transfer per update,
+ * clamp to that neighbor's endpoint, never detach or manufacture reciprocal/contiguous links.
+ * It also deliberately bypasses ordinary ground-field clipping and gravity.
+ */
+function groundStep(body, distance, byId) {
+  let f = byId.get(body.foothold);
+  let position = segmentPosition(f, body.x, body.y) + distance;
+  if (position < 0 || position > f.length) {
+    const right = position > f.length, other = byId.get(right ? f.next : f.prev);
+    if (!other || other.cos <= 0) {
+      position = right ? f.length : 0; body.speed = 0;
+    } else {
+      position = right ? Math.min(position - f.length, other.length) : Math.max(position + other.length, 0);
+      f = other; body.foothold = f.id;
     }
-    f=other;body.foothold=f.id;
   }
-  if(f){body.speed=body.vx=body.vy=0;} // Corrupt cycle guard, not a native movement rule.
+  body.x = f.x1 + f.cos * position; body.y = f.y1 + f.sin * position;
+  body.vx = f.cos * body.speed; body.vy = f.sin * body.speed;
 }
-export function planMobReactionPath(start,footholds,reaction,ability=1){
-  const byId=new Map(footholds.map(f=>[f.id,f]));
+export function planMobReactionPath(start,footholds,reaction,ability=1,bounds=physicalBounds(footholds)){
+  const byId=new Map(normalizeFootholds(footholds).map(f=>[f.id,f]));
   const body={x:start.x,y:start.y,foothold:start.foothold,speed:reaction.duration>=90?reaction.velocity:0,vx:0,vy:0};
   const points=[],facing=reaction.facing&1;
   for(let elapsed=0;elapsed<reaction.duration;){
@@ -47,16 +47,12 @@ export function planMobReactionPath(start,footholds,reaction,ability=1){
       const ground=byId.get(body.foothold);
       if(ground&&ground.x2>ground.x1){
         groundStep(body,distance,byId);
-        const f=byId.get(body.foothold),len=f&&Math.hypot(f.x2-f.x1,f.y2-f.y1);
-        body.vx=len?(f.x2-f.x1)/len*body.speed:0;body.vy=len?(f.y2-f.y1)/len*body.speed:0;
       }else if(ability===3){
-        // 53D3F0 only integrates an off-ground vector for flying ability3, not a jumping ground mob.
-        const nextX=body.x+distance;let blocked=false;
-        for(const wall of footholds)if(wall.x1===wall.x2&&body.y>Math.min(wall.y1,wall.y2)&&body.y<=Math.max(wall.y1,wall.y2)&&
-          Math.min(body.x,nextX)<=wall.x1&&Math.max(body.x,nextX)>=wall.x1&&!near(body.x,nextX)){
-          body.x=wall.x1;body.speed=0;blocked=true;break;
-        }
-        if(!blocked)body.x=nextX;body.vx=body.speed;body.vy=0;
+        // 53D3F0 calls 539B10 with time=0; its clipped position/velocity matter, not the returned time.
+        // It does not call 5389B0: an arbitrary wall sweep here was not native flyer-KB behavior.
+        const old={x:body.x,y:body.y};
+        body.x+=distance;body.vx=body.speed;body.vy=0;
+        clipAir(body,old,0,bounds);body.speed=body.vx;
       }else {body.vx=body.speed;body.vy=0;}
     }
     elapsed+=duration;

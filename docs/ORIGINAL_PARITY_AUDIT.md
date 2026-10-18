@@ -1,7 +1,7 @@
 # 與原版的差異、部分完成與未實作總盤點
 
 盤點日期：2026-10-18。程式基準：`4f9ad1b`（ADR-076 怪物主動攻擊交付之後）。
-續作更新：ADR-077已補普通地空力學／抓繩、改本地30ms controller與有序path整鏈；A01/A04/A05如下更新，完整原證與仍缺的幾何／相位見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。其餘維持原盤點基準。
+續作更新：ADR-077補普通力學／抓繩／本地30ms有序path，ADR-078補有向整數crossing／雙接觸／physical bounds／碰撞時刻及特別KB連動；A01/A04/A05/B02如下更新。[普通力學](NATIVE_LOCOMOTION.md)、[地形原證與剩餘界線](NATIVE_TERRAIN.md)。其餘維持原盤點基準。
 
 這是**靜態現況盤點**，不是遊戲驗收、逐像素比較或新的原版實機測量。本輪閱讀現行程式、ADR、原證整理與路線圖，未執行測試／check／typecheck／語法檢查／browser／VM／HTTP或登入probe。
 
@@ -36,11 +36,11 @@
 
 | 編號／狀態 | 剩餘問題 | 已有與未有的分界／影響 | 程式與證據入口 |
 |---|---|---|---|
-| A01 差異／部分 | 玩家不是完整CVecCtrl | ADR-077已port普通地面力／坡滑、air超終速、jump／landing投影與half、繩梯sweep／死亡停止，改本地30ms controller。整數多接觸／ceiling／field bounds／unstick等仍非完整native geometry，不因scalar分支port就稱完整CVecCtrl | `client/motion.mjs` 的 PHYSICS／advancePlayer；[姿勢](NATIVE_POSTURE_ATTACK.md) |
+| A01 差異／部分 | 玩家不是完整CVecCtrl | ADR-077已port普通地面力／坡滑、air超終速、jump／landing投影與half、繩梯sweep／死亡停止，改本地30ms controller。ADR-078再補有向整數floor/wall/ceiling／endpoint pair／group／field bounds／two-pass；仍非native R-tree遍歷／shape pool／所有unstick callers，不稱完整CVecCtrl | `client/motion.mjs` 的 PHYSICS／advancePlayer；[姿勢](NATIVE_POSTURE_ATTACK.md) |
 | A02 未接／部分 | 水中、飛行、特殊鞋／地圖物理 | 現有motion明示只涵蓋ordinary ground／air／ladder；不能把fly身體圖或jump姿勢當作飛行／游泳控制器。完整場地／鞋參數與特殊碰撞分支未接全 | `motion.mjs`、`mobmotion.mjs`、`game/map.ts`／`mobs.ts` |
 | A03 差異／部分 | CShape2D與形狀池 | 已用當前WZ frame真lt/rb、swept RECT及碰撞內縮；仍非完整原shape pool、R-tree、ZList選敵順序與所有逐幀地形阻擋。多人／多怪同時重疊、邊界與高速狀況仍有差距 | `client/basiccombat.mjs`、`contact.mjs`、`magiccombat.mjs`；[魔法界線](NATIVE_MAGIC_SKILLS.md) |
 | A04 差異 | 沒有共同原全域30ms相位 | 普通body、攻擊、raw受擊窗與FX已分時鐘，但RAF、本地30ms controller、field tick仍不是同一個native app phase；server預設field tick為90ms，due hit可延到下一tick | `motion.mjs`、`avatar-motion.mjs`；`net/loginserver.ts` 的 DEFAULT_MOB_TICK_MS／tickFields |
-| A05 差異／部分 | 遠端插值、延遲與晚進場 | ADR-077玩家保存30ms ordered fragments／attr／landing terminal，100ms只作傳輸batch；server與cache用末端權威。已有怪物未走完path、trim elapsed、body相對age；仍非原CMovePath append／send／velocity playback、owner預測／完整延遲校正。已飛的舊怪物球與歷史屍體不為新進者重建，不能稱全場景phase同步完成 | `motion.mjs` 的 beginPath／sampleMotion；`game/mobs.ts` 的 resumePackets／presentation；[ADR-076](NATIVE_MOB_ATTACKS.md) |
+| A05 差異／部分 | 遠端插值、延遲與晚進場 | ADR-077保留ordered fragments，ADR-078記真integer contact time／phase與餘時；100ms僅傳輸batch，server與cache用末端權威。已有怪物未走完path、trim elapsed、body相對age；仍非原CMovePath append／send／velocity playback、owner預測／完整延遲校正。已飛的舊怪物球與歷史屍體不為新進者重建，不能稱全場景phase同步完成 | `motion.mjs` 的 beginPath／sampleMotion；`game/mobs.ts` 的 resumePackets／presentation；[ADR-076](NATIVE_MOB_ATTACKS.md) |
 | A06 差異 | 背景分頁／冷載入政策 | 長間隔不追播不可見的全部輸入與命中，過期效果不重新播放；這是browser安全／效能政策，不等於native持續更新的每個中間snapshot | `motion.mjs`、`avatar-motion.mjs`、`mob-attack-effects.mjs`、`combat-assets.mjs` |
 | A07 差異／未知 | 全域RNG呼叫序列與數值精度 | 傷害已有原ClientRandom與七值抽樣；動作選擇、火花、字位移仍有Math.random，成長／怪物選招另有server注入來源；未重放原全域種子與呼叫順序。JS double／x87暫存精度未逐輸入比對 | `main.js` 的動作與火花抽選；`net/webclient.ts` 的 attackRandom；`growth.ts`、`mob-attacks.mjs`；[數值](NATIVE_STATS_COMBAT.md) |
 
@@ -51,7 +51,7 @@
 | 編號／狀態 | 剩餘問題 | 現況與影響 | 入口 |
 |---|---|---|---|
 | B01 部分／差異／未知 | 怪物owner、aggro與狀態機 | 地面roam、普通跳怪、KB、attack metadata／MP／effect-ball-hit已有；原controller指定、state−2／1..5轉移、追擊／換目標等未完整移植。現行是被已接受攻擊後engaged、找同場活著的該玩家之server政策，並非完整原AI | `game/mobs.ts`、`world.ts`；[怪物攻擊 §6](NATIVE_MOB_ATTACKS.md) |
-| B02 未接／部分 | 飛行怪、水中怪與完整特殊KB | 顯示fly圖、基本向量阻尼／阻牆不等於完整539B10及flyer sweep；custom shoe、水中、追擊與所有碰撞分支仍缺 | `mob-reaction.mjs`、`mobmotion.mjs`；[KB界線](NATIVE_MOB_KB_NPC_STATE.md) |
+| B02 未接／部分 | 飛行怪、水中怪與完整特殊KB | ADR-078特別flyer KB已接539B10 field clip並移除該caller未呼的shape sweep；ground KB按一鄰段clamp。普通fly／water AI、custom shoe、追擊與其他controller分支仍缺 | `mob-reaction.mjs`、`mobmotion.mjs`；[KB界線](NATIVE_MOB_KB_NPC_STATE.md) |
 | B03 未接／未知 | Monster skill／完整能力異常 | 本輪active attack不是monster skill系統；不能據此宣稱怪物施法、debuff與所有特殊狀態已接 | `game/mobs.ts`、`mob-attacks.mjs`；[ADR-076界線](NATIVE_MOB_ATTACKS.md) |
 | B04 部分／差異／未知 | 重生、MP回復與屍體壽命規則 | 現行固定重生等待、重生回maxMP、以最長die動作保留屍體等是server政策；沒有原server完整spawn／regen規則。死亡變體與共用reader已補，不應再列為「永遠只die1」 | `game/mobs.ts` 的 MOB_RESPAWN_MS／lifecyclePackets／loadMobTemplate |
 | B05 未接 | NPC自主漫步控制器 | action／speech／flip／名牌規則、controller relay與path sampler已有；CVecCtrlNpc／5398B0自主生成步行路徑、smoothing未完成。`--npc-walk`不是強制補成原AI | `client/npcbehavior.mjs`、`npcmotion.mjs`、`game/npcs.ts`；[NPC未完成](NATIVE_NPC_BEHAVIOR.md) |

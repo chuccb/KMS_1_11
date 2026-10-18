@@ -260,6 +260,7 @@ function mapJson(map: MapData): unknown {
     streetName: map.streetName,
     bgm: map.bgm,
     recovery: map.recovery ?? 1,
+    physicalBounds: map.physicalBounds,
     portals: map.portals.map((portal) => ({
       name: portal.name,
       type: portal.type,

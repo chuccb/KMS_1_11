@@ -39,7 +39,7 @@ test('53D3F0:130px/s, drag400, <=30ms subdivisions, stop then hold until raw hit
   assert.equal(points.at(-1)!.x,121);assert.equal(points.at(-1)!.y,100);
   assert.ok(points.every(p=>p.foothold===1&&p.action===3),'movement action=stand-left, forced hit is a separate header');
 });
-test('KB clamps an open edge/wall, crosses only linked contiguous slopes; does not use spawn rx as collision',()=>{
+test('KB clamps an open edge/wall, follows directed floor links; does not use spawn rx as collision',()=>{
   const edge=planMobReactionPath({x:295,y:100,foothold:1},[floor],reaction,1);
   assert.equal(edge.at(-1)!.x,300);assert.equal(edge.at(-1)!.foothold,1);assert.equal(edge.at(-1)!.vx,0);
   const a={...floor,x2:110,next:2},b={...floor,id:2,x1:110,y1:100,x2:210,y2:200,prev:1};

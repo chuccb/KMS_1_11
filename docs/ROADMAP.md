@@ -5,13 +5,13 @@
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗證；近期改動與工具鏈升級未執行測試。**
 
-完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-077更新）。
+完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
 ## 已有實作，仍需按各文件界線看待
 
 | 範圍 | 現況入口 |
 |---|---|
-| 普通地空力學／地面切線／繩梯／死亡停止／30ms有序wire | [原證與浮點幾何／global phase界線](NATIVE_LOCOMOTION.md)，非完整CVecCtrl |
+| 普通地空力學／有向整數地形／物理場界／繩梯／30ms有序wire | [普通力學](NATIVE_LOCOMOTION.md)與[有向整數地形／物理場界](NATIVE_TERRAIN.md)，非完整CVecCtrl |
 | 怪物主動攻擊／MP／effect-ball-hit／攻擊中KB／晚進場body | [原證與server政策](NATIVE_MOB_ATTACKS.md)，非完整owner AI；含唯讀原素材閱覽 |
 | 穿戴需求／正反swap／原子換裝／最低級準備／攻擊關聯時鐘 | [原證與未測試界線](NATIVE_EQUIP_ADMISSION.md) |
 | 12個主動技能／七鍵／多彈藥／兩魔法／增益與隊伍 | [遠距與攻速界線](NATIVE_RANGED_SKILLS.md)、[魔法](NATIVE_MAGIC_SKILLS.md)、[第一批](ACTIVE_SKILLS.md)，非全技能完成 |
