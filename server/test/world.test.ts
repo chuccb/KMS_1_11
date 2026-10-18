@@ -13,6 +13,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { FIELD_OPCODE, readUserEnterField, readUserMove } from "../src/protocol/field.ts";
 import { MOB_OPCODE, readMobEnterField, readMobPresence } from "../src/protocol/mob.ts";
@@ -729,4 +730,31 @@ test("ordered multi-record move retains terminal position/posture for combat and
     .map((packet) => readUserEnterField(new PacketReader(packet, 1)))
     .find((user) => user.characterId === 1)!;
   assert.deepEqual([enter.x, enter.y, enter.foothold, enter.action], [310, 280, 0, 7]);
+});
+
+test("airborne player item/meso throws broadcast the same real FH landing to everyone and late joiners", () => {
+  const field = stubField();
+  const hero = new FakeMember(1, "Hero"),
+    witness = new FakeMember(2, "Witness");
+  field.join(hero);
+  field.join(witness);
+  hero.at = { x: 250, y: 100, foothold: 0 };
+  hero.clear();
+  witness.clear();
+  const slot = nonEquipSlot(4000019, 5);
+  const item = field.dropItem(hero, slot, 2, 10),
+    mesos = field.dropMesos(hero, 99, 10);
+  for (const entry of [item, mesos])
+    assert.deepEqual([entry.x, entry.y, entry.foothold], [250, 300, 32]);
+  assert.deepEqual(hero.of(DROP_OPCODE.appear), witness.of(DROP_OPCODE.appear));
+  const late = new FakeMember(3, "Late");
+  field.join(late);
+  assert.deepEqual(late.of(DROP_OPCODE.appear), hero.of(DROP_OPCODE.appear));
+  for (const packet of late.of(DROP_OPCODE.appear)) {
+    const drop = readDropAppear(new PacketReader(packet, 1));
+    assert.deepEqual([drop.x, drop.y, drop.kind, drop.mobId], [250, 300, 2, undefined]);
+  }
+  assert.equal(field.drops.reachable(250, 100, 11), undefined);
+  assert.equal(field.drops.reachable(250, 300, 11)?.dropId, item.dropId);
+  assert.equal(slot.quantity, 5, "field placement does not mutate caller inventory");
 });

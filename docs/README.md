@@ -14,6 +14,7 @@
 | [BUN_MIGRATION](BUN_MIGRATION.md) | 嚴格TS／ESNext／Bun已完成與未完成範圍、全套失敗multiset |
 | [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md) | 顯示／DPR、影像快取、唯讀診斷與歷史native工具限制 |
 | [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md) | 七支browser工具的strict TS／安全入口、NPC/mob資料邊界與剩餘範圍 |
+| [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md) | 怪物／玩家物品與金幣權威fh落點、貼地PNG、全100圖與真browser驗證；原版中心−16與新底部anchor的界線 |
 | [TOOLCHAIN](TOOLCHAIN.md) | 最新正式版鎖定、安裝／啟用、CI與未驗證風險 |
 | [DECISIONS](DECISIONS.md) | ADR沿革；現行技術主線見065、工具鏈見066、臉部／新隔離體驗見067、普通動作見068、蹲刺／時序／射程見069，舊編號不重編 |
 | [server README](../server/README.md) | CLI、模組、協定／保存細節與歷史結果 |

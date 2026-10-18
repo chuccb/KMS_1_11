@@ -2,11 +2,22 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：7支瀏覽器工具與實體素材責任
+## 最新增量：掉落權威fh與真正typed呈現鏈
+
+新增純DropLandingIndex，怪物戰利品／玩家道具／金幣都沿真WZ有向地板選點，原0x43不增欄位；
+main抽出drop-presentation／drop-renderer，含unknown drop/remove守衛、hop與pickup連續性、實際PNG底部貼地及固定金幣幀。
+client現83支TS；main.js、3支legacy MJS及完整WS深schema仍未遷完，不使用any／假的declaration／allowJs迴避。
+六個registry latest再查與exact pins相同，strict／format／build通過；focused73/0（7 files）、新增28案例。
+完整1023/44（1067tests／117files，187.28s），對7162765失敗multiset含重複0新增／0移除，CI仍不綠。
+全100張原WZ圖379422組與真PNG／DPR1／2 component通過；新LIVE81modules／唯讀120幀、0WS。
+舊沙箱／save不在，本輪明示新建獨立preview，不假稱恢復、不自動登入；玩家自行測試後不再重啟或重置。
+完整原證與新政策、命令及範圍見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)／ADR-083。
+
+## 前輪增量：7支瀏覽器工具與實體素材責任
 
 本輪完成7支browser MJS的真正TS實作／入口／呼叫鏈遷移，移除舊檔；共用安全admission與嚴格觀測，不在匯入時啟動任何服務。
 主入口另抽出entity-assets／entity-resource-validation／avatar-look，包含未知JSON守衛、template identity、取消與same-generation stale ownership。
-client目前 **81支TS**，只餘main.js與 **3支MJS**；沒有降低strict或用declaration包住原實作。
+當輪client **81支TS**，只餘main.js與 **3支MJS**；沒有降低strict或用declaration包住原實作。
 
 六個registry latest再次與exact pins一致。strict／format／build通過，focused **78/0，9 files**；最後工具路由／redirect與import另驗 **15/0**。
 完整 **995/44，1039 tests / 113 files**，相對29f3df6 failure multiset新增0／移除0（含重複），不skip／減少suite，CI仍不綠。

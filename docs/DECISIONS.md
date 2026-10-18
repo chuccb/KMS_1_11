@@ -2886,3 +2886,27 @@ native mob時序、WZ原frames、碰撞／能力／傷害／codec不改。缺met
 
 剩餘main.js、client_probe／frame_probe／play_probe三支MJS、44失敗與typed whisper歷史admission仍待實際完成。
 完整現行命令、數值意義與驗證界線見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+
+
+## ADR-083：掉落最終在真fh，權威與strict TS呈現完整鏈（2026-10-18）
+
+使用者要求繼續最新版嚴格TS／ESNext／Bun整理，並讓掉落最終落在fh。
+修正monster spread越出chain就退回死亡y，以及玩家物品／金幣直接用空中y的問題；
+共用純DropLandingIndex：有向地板、grounded連續平台、空中向下第一floor、虛空約束真平台邊緣。
+wall／ceiling／斷鏈不支撐掉落；先量化x再求坡y，native s16最多半像素。原server不可得，明示這是重建選點政策。
+0x43不增fh欄位；pickup／broadcast／晚加入同一權威點，物品實例／數量0飛鏢／mesos與持久化不改。
+
+main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛、placed立即定位、hop/rest連續、
+早撿取記錄顯示起點、缺taker到期消失、固定四幀money預熱、真PNG自然尺寸與alpha finally還原。
+原4A88A0是中心−16＋width/height各除−2，並非背包WZ origin；依新要求改reward底部貼地，明示不是原版等價。
+420/28、260/30、140都是沿用browser時序政策，不冒稱原證；不改physics／camera／原圖與inventory origins。
+
+新增28案例；strict／format／build通過，focused73/0（7 files）。原WZ全100圖、21079 floors／11810 slopes、
+379422組驗native codec／browser endpoint／draw layer；真PNG的4物品＋16金幣幀在DPR1／2驗可見底邊等。
+最後完整1023/44（1067tests／117files，187.28s，5315expects），對重跑7162765 baseline failure multiset含重複0新增／0移除；CI仍不綠。
+六個npm latest與pins一致；client83TS，但main／三支MJS與全域深schema仍未完成。
+
+舊sandbox程序／ignored save未保留，已明示新獨立preview；只對preview／observer開手動test-tools／map-command。
+新LIVE81modules／唯讀標題120幀、0errors／0WS；沒有agent登入或操作玩家。
+遊戲連線自行更新新save時不再用全檔hash不變作只讀觀測前提，也不重置進度或restart；初始診斷失敗log保留。
+完整原證、政策、重跑命令與限制見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。

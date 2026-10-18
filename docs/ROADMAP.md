@@ -3,13 +3,16 @@
 更新：2026-10-18。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
-**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（995/44），
+**有程式與回歸來源不代表已驗收。** 本輪已執行strict／format／build、focused與完整suite（1023/44，1067tests／117files），
 既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。全案TS／ESNext／Bun整理也未完成，
 main.js／3支MJS與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
 ## 已有實作，仍需按各文件界線看待
+
+新增：怪物／玩家物品／金幣使用真fh權威落點，移除動畫16px跳位，真PNG底部貼地。
+全100張原圖379422組與DPR1／2 component通過，非官方server選點算法的聲稱；見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
 
 | 範圍 | 現況入口 |
 |---|---|

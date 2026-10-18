@@ -41,7 +41,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 81 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 83 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
   **`client/main.js` 及 server/scripts 剩餘 3 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
@@ -97,6 +97,7 @@ source／bundle 的真瀏覽器啟動與假傳輸 UI 測試納入 bun run test�
 現行 typed 工具（有副作用的分支須依限制手動操作）：
 
 ```sh
+bun tools/audit-drop-landing.ts  # 原WZ全圖，只讀、無登入／save
 bun server/scripts/art_perf_probe.ts
 bun server/scripts/browser_audio_probe.ts <明示web-port或http(s)://origin>
 bun server/scripts/equipment_fixture.ts generated/validation/<全新名稱>.json
@@ -115,10 +116,18 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 
 ## 實際驗證狀態
 
-最新工具／實體素材增量：strict／format／build通過；focused78/0（9 files）、最後工具15/0。
+最新掉落／fh增量：strict／format／build通過，focused73/0（7 files），新增28案例。
+完整1023/44（1067 tests / 117 files，187.28s），相對7162765 failure multiset含重複新增0／移除0，CI仍不綠。
+全100張原WZ地圖379422組、真PNG／DPR1／2 component及新LIVE的81modules／唯讀標題120幀通過、0WS。
+新獨立測試入口不是舊進度恢復；玩家自行操作後不重啟或重置，不能以save hash不變當作並行觀測前提。
+六個registry latest與pins仍一致；日誌在ignored generated/drop-landing/，完整界線見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+
+### 前輪工具／實體素材（7162765）
+
+工具／實體素材增量：strict／format／build通過；focused78/0（9 files）、最後工具15/0。
 完整995/44（1039 tests / 113 files），對29f3df6 failure multiset新增0／移除0；新增19案例，未skip。
 22個工具／元件import與七個runner的錯誤入口皆0 I/O attempts；真Chromium觀測／redirect防護與原WZ HTTP metadata通過。
-LIVE仍同PID6097，79modules與首幀通過、0WS，沒有登入／操作角色／save／restart。
+當輪LIVE同PID6097，79modules與首幀通過、0WS，沒有登入／操作角色／save／restart。
 六個registry latest再次與pins一致；本輪日誌在ignored generated/strict-cleanup/。
 
 ### 前輪手感實驗（29f3df6）
@@ -134,7 +143,7 @@ LIVE同PID6097，76 modules與唯讀首幀通過、0WS；不登入／角色／sa
 顯示／快取／工具增量：strict／format／build 通過，最終focused63/0（8 files）；完整
 **958 pass / 44 fail，1002 tests / 109 files**，相對c8b52d7失敗multiset新增0／移除0。
 真Chromium五DPR、同頁DPR-only切換、title120畫格、真WZ avatar decode/revoke後像素通過。
-LIVE仍同PID6097、74 modules與首幀通過、0WS，不登入／操作角色／save／restart。
+當輪LIVE同PID6097、74 modules與首幀通過、0WS，不登入／操作角色／save／restart。
 六個npm latest與exact pins逐個相符；沒有升到不存在的新版本。
 
 ### 前輪走跳／鏡頭增量（c8b52d7）

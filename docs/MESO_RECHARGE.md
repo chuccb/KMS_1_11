@@ -1,5 +1,8 @@
 # 楓幣丟棄與飛鏢整組操作（2026-10-17，未測試）
 
+> 2026-10-18 ADR-083續作：玩家丟物／丟金幣的權威落點已接真fh，focused73/0、原100圖與真browser component已跑。
+> 只認證掉落落點／呈現鏈，不把本頁原UI／扣帳歷史場景全部改列PASS；見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+
 > 後續狀態更正：本文件的驗證／未完成清單為當輪歷史。HP／MP自然成長與配點已由原表接上（**新改動未測試**），舊「成長表不在client」判讀已更正；自然AP/SP發放、完整Detail／buff仍缺。見 [STAT_GROWTH.md](STAT_GROWTH.md)／ADR-047。
 
 > 依使用者指示：**沒有執行 unit／socket／VM／browser／typecheck，也沒有登入角色或修改存檔。**

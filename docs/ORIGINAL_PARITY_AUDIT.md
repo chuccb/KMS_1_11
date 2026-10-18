@@ -95,7 +95,7 @@
 | 編號／狀態 | 剩餘問題 | 現況與影響 | 入口 |
 |---|---|---|---|
 | D01 未接／未知 | 原任務全流程 | 對話codec／五類dialog／富文字已有；任務狀態、接受／完成條件、殺怪／交物計數、獎勵及持久化不是完整產品鏈 | `game/dialogue.ts`、`protocol/quest.ts`；`client/npcdialogue.ts`、`systemmenu.ts` |
-| D02 差異／未知 | 原掉落表／機率／金錢 | 現行defaultDropPolicy是金錢、對應雜物、按級藥水三種roll；60%／30%／5%、level×3金錢跨度等是本repo政策，不是原掉落表。原RNG演算法不會把自訂掉落機率變成官方機率 | `game/drops.ts` 的 constants／defaultDropPolicy |
+| D02 差異／未知 | 原掉落表／機率／金錢 | ADR-083已修權威真fh落點及原PNG底部貼地（新呈現政策），全100圖379422組與component通過；不等於恢復原server選點／機率。見[掉落與fh](DROP_FOOTHOLD_LANDING.md)。現行defaultDropPolicy是金錢、對應雜物、按級藥水三種roll；60%／30%／5%、level×3金錢跨度等是本repo政策，不是原掉落表。原RNG演算法不會把自訂掉落機率變成官方機率 | `game/drops.ts` 的 constants／defaultDropPolicy |
 | D03 差異／未知 | 原商店庫存與回收價 | item price有WZ來源，但何NPC賣何物、庫存、數量上限、sell ratio=0.5及部分取整屬重建政策；買賣／飛鏢補充可用不等於原商店經濟完成 | `game/shops.ts`；[商店與補充](MESO_RECHARGE.md) |
 | D04 部分／未接／未知 | 組隊經驗、貢獻與掉落歸屬 | party名冊／邀請／指令與Rage收件者已有；awardKillExp仍對kill session發template.exp，沒有完整隊伍經驗分配與貢獻公式。完整掉落歸屬／分配規則亦未證明 | `net/loginserver.ts` 的 awardKillExp；`game/parties.ts`、`drops.ts` |
 | D05 部分／未知 | 人氣規則與配額持久化 | 有server與protocol；Lv15門檻、UTC日月與順序是policy，ledger不入save，重啟即重置。不能把它當已恢復原server日／月配額 | `game/fame.ts`；browser完整人物資訊／給人氣UI也未接全 |

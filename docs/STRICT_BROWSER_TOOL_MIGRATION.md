@@ -2,6 +2,9 @@
 
 2026-10-18，ADR-082。這是全案 TypeScript／ESNext／Bun 遷移的實作增量，**不是全案已完成**。
 
+> 本頁保留7162765當輪的81支TS與995/44結果；後續掉落權威fh／呈現TS整理、83支TS及1023/44，
+> 見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。舊PID6097／LIVE是前沙箱歷史，不代表當前仍存活。
+
 ## 本輪範圍
 
 - 7 支 browser probe 從 MJS 真正遷成嚴格 TS；刪除舊檔，不保留 JS 相容殼。

@@ -24,8 +24,9 @@
  *
  * ICONS
  * -----
- * `info/iconRaw` is what `sub_47CE40` hands to the drawer, and it is 27x27 rather than `icon`'s
- * 27x30 with an origin below the baseline; both are exported as PNG through `wz/png.ts`, the same
+ * `info/iconRaw` is what `sub_47CE40` hands to the drawer. Dimensions/origins vary by item
+ * (shell 25x25, red potion 27x27, basic sword 31x29); do not impose a 27px box. `icon` often
+ * includes additional decoration. Both are exported as PNG through `wz/png.ts`, the same
  * encoder `wz png` uses. A missing canvas is `undefined`, never a placeholder: a caller that draws a
  * placeholder is making a choice this module cannot make for it.
  */

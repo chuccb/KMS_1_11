@@ -1,3 +1,10 @@
+import {
+  createDropRecord,
+  parseDropRemoval,
+  beginDropPickup,
+  dropPosition,
+} from "./drop-presentation.ts";
+import { dropRenderer } from "./drop-renderer.ts";
 import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
@@ -1046,33 +1053,29 @@ function handle(message) {
     case "drop-enter": {
       // The drop flies out of the monster that left it: the packet carries the monster and where the
       // item came to rest, and the two are a hop apart.
-      const mob =
-        message.drop.mobId === undefined
-          ? undefined
-          : mobs.get(String(message.drop.mobId));
-      const fromX = mob?.x ?? message.drop.mobX ?? message.drop.x;
-      const fromY = mob?.y ?? message.drop.mobY ?? message.drop.y;
-      drops.set(String(message.drop.dropId), {
-        drop: message.drop,
-        born: performance.now(),
-        fromX,
-        fromY,
-      });
+      const record = createDropRecord(message.drop, performance.now(), (id) =>
+        mobs.get(String(id)),
+      );
+      if (record) {
+        drops.set(String(record.drop.dropId), record);
+        rewardPainter.preload(record.drop);
+      }
       return;
     }
 
     case "drop-leave": {
-      const key = String(message.dropId);
+      const removal = parseDropRemoval(message);
+      if (!removal) return;
+      const key = String(removal.dropId);
       const record = drops.get(key);
       if (record === undefined) return;
       // `taken` is the only kind the original turns into an animation: the icon flies to the
       // character in `characterId` (0x44's own field) and disappears when it gets there.
-      if (message.reason !== "taken" || message.characterId === undefined) {
+      if (removal.reason !== "taken") {
         drops.delete(key);
         return;
       }
-      record.takenAt = performance.now();
-      record.takenBy = message.characterId;
+      beginDropPickup(record, performance.now(), removal.characterId);
       return;
     }
 
@@ -1812,8 +1815,13 @@ const dying = new Map();
  * page animates (the icon flies to that character).
  */
 const drops = new Map();
-/** Meso piles, one entry per tier: `[{path,ox,oy}]`, the four `iconRaw` frames of `0900.img`. */
-const mesoArt = new Map();
+/** Reward-only image anchors; inventory/shop WZ origins remain unchanged. */
+const rewardPainter = dropRenderer({
+  ctx,
+  image: artImage,
+  item: (id) => itemInfo.get(id),
+  describe: describeItem,
+});
 /** The local forced attack: real WZ action, scaled delays, indices and acceptance time. */
 let selfSwing;
 /** `{x, y, value, start}` per damage number on screen, and `mobId -> when it was last hit`. */
@@ -3121,100 +3129,18 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-/** How long a drop's flight out of the monster takes, and the pickup's flight to its taker. */
-const DROP_HOP_MS = 420;
-const DROP_PICKUP_MS = 260;
-/** The 2003 client draws a drop's icon 16 px above the ground line the packet names. */
-const DROP_LIFT_PX = 16;
-
-/** The four meso piles of `Item/Special/0900.img`, by amount (`sub_4A9C10`). */
-function mesoTier(amount) {
-  if (amount < 50) return 0;
-  if (amount < 100) return 1;
-  if (amount < 1000) return 2;
-  return 3;
-}
-
-/** The four `iconRaw` frames of one meso pile, asked for once; a partial list is used as it lands. */
-function mesoFrames(tier) {
-  let entry = mesoArt.get(tier);
-  if (entry !== undefined) return entry;
-  entry = { frames: [] };
-  mesoArt.set(tier, entry);
-  void (async () => {
-    for (let frame = 0; frame < 4; frame++) {
-      const path = `Item/Special/0900.img/0900000${tier}/iconRaw/${frame}`;
-      try {
-        const response = await fetch(`/api/canvas/${encodeURIComponent(path)}`);
-        if (!response.ok) return;
-        const meta = await response.json();
-        artImage(path);
-        entry.frames.push({ path, ox: meta.ox, oy: meta.oy });
-      } catch {
-        return;
-      }
-    }
-  })();
-  return entry;
-}
-
-/** The picture of one drop: an animated meso pile, or the item's own `iconRaw`. */
-function dropFrameOf(drop, now) {
-  if (drop.money) {
-    const frames = mesoFrames(mesoTier(drop.value)).frames;
-    if (frames.length === 0) return undefined;
-    return frames[Math.floor(now / 140) % frames.length];
-  }
-  // The item's icon and its origin come from the catalogue the shop and the inventory already use.
-  describeItem(drop.value);
-  const icon = itemInfo.get(drop.value)?.iconRaw;
-  return icon === undefined
-    ? undefined
-    : { path: icon.path, ox: icon.ox, oy: icon.oy };
-}
-
-/** Where a drop is right now: it hops out of the monster, then lies still (or flies to its taker). */
-function dropPosition(record, now) {
-  const drop = record.drop;
-  if (record.takenAt !== undefined) {
-    const t = Math.min(1, (now - record.takenAt) / DROP_PICKUP_MS);
-    const taker =
-      record.takenBy === selfView?.characterId
-        ? selfDisplayPosition()
-        : (users.get(String(record.takenBy)) ?? undefined);
-    if (taker === undefined)
-      return t >= 1 ? undefined : { x: drop.x, y: drop.y - DROP_LIFT_PX, t };
-    return {
-      x: drop.x + (taker.x - drop.x) * t,
-      y: drop.y - DROP_LIFT_PX + (taker.y - 30 - (drop.y - DROP_LIFT_PX)) * t,
-      t,
-    };
-  }
-  const t = Math.min(1, (now - record.born) / DROP_HOP_MS);
-  if (t >= 1) return { x: drop.x, y: drop.y - DROP_LIFT_PX, t: 1 };
-  // A small parabola between where the monster stood and where the item lands.
-  return {
-    x: record.fromX + (drop.x - record.fromX) * t,
-    y: record.fromY + (drop.y - record.fromY) * t - 28 * Math.sin(Math.PI * t),
-    t,
-  };
-}
-
 /** One reward-pool entry, in the same z-space as the map and characters. */
 function drawDrop(key, record, cameraX, cameraY, now) {
-  const at = dropPosition(record, now);
-  if (at === undefined || (record.takenAt !== undefined && at.t >= 1)) {
+  const taker =
+    record.takenBy === selfView?.characterId
+      ? selfDisplayPosition()
+      : users.get(String(record.takenBy));
+  const at = dropPosition(record, now, taker);
+  if (at === undefined) {
     drops.delete(key);
     return;
   }
-  const x = at.x - cameraX;
-  const y = at.y - cameraY;
-  if (x < -80 || x > VIEW_W + 80 || y < -120 || y > VIEW_H + 120) return;
-  const frame = dropFrameOf(record.drop, now);
-  if (frame === undefined) return;
-  ctx.globalAlpha = record.takenAt === undefined ? 1 : 1 - at.t * 0.75;
-  drawArchiveImage(frame, x, y, false);
-  ctx.globalAlpha = 1;
+  rewardPainter.draw(record.drop, at, { x: cameraX, y: cameraY }, now);
 }
 
 function playWeaponSound(entity,profile,motion,start){

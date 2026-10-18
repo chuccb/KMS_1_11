@@ -1,13 +1,23 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
-## 2026-10-18：實體素材與瀏覽器工具的嚴格TS整理
+## 2026-10-18：掉落最終在fh，權威與呈現一起整理
+
+怪物戰利品、玩家道具與金幣丟棄共用真WZ有向地板選點，處理空中／斜坡／上下平台／平台邊緣／虛空。
+原0x43傳真正落地x/y，玩家kind2立即放置；browser不再到420ms突然上移16px。
+抽出strict drop-presentation／drop-renderer，unknown drop/remove守衛、提前拾取連續性、原PNG尺寸底部貼地、固定四幀金幣。
+原版是canvas中心−16而非背包origin；本次按要求底部貼地是明示新呈現政策，不冒稱原版相同。
+focused73/0、全100圖379422組及真browser DPR1／2通過；完整1023/44，既有failure multiset未增減。
+client現83支TS，main與3支legacy MJS仍未完成；新LIVE為明示獨立進度，僅唯讀載入驗證，不替玩家操作。
+詳 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+
+## 前輪2026-10-18：實體素材與瀏覽器工具的嚴格TS整理
 
 NPC／mob的metadata載入已抽出typed entity-assets／entity-resource-validation，驗證未知JSON及template identity，
 換場／關閉／取消與同generation重入不再讓舊回覆寫入新owner；保留native body時序，不更動可選步長或戰鬥權威。
 local／remote lookOf也獨立typed，不把remote hair當裝備、不修改來源角色。
 7支browser工具遷成strict TS、刪MJS；新增共用明示admission與有界觀測，import無登入／連線。
 本輪78項focused通過、完整995/44與前輪失敗multiset相同，LIVE只唯讀首幀，沒有操作玩家。
-client現81支TS，main與3個legacy MJS尚未完成；現行命令與詳細界線見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
+當輪client81支TS，main與3個legacy MJS尚未完成；現行命令與詳細界線見 [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。
 
 ## 2026-10-18：可選物理步長、十種鏡頭與移除重複背包入口
 
@@ -368,7 +378,7 @@ node src/cli.ts serve \
 `kms111.shopAt`）。對話框的「確定」是主要按鈕（下一句），「關閉」是次要按鈕（結束）——跟 2003
 client 的兩個按鈕一樣。
 
-按 **`I`**（或右上「背包」）打開的背包是**畫在畫布上的原版視窗**，不是 HTML 面板：
+按 **`I`**（或原遊戲「ITEM」按鈕）打開的背包是**畫在畫布上的原版視窗**，不是 HTML 面板：
 `UI/UIWindow.img/Item/backgrnd`（162×315）預設貼在CConfig type0的(24,24)；
 `sub_506440(this,0,114,9,1)`的114,9是Close按鈕局部座標，不是視窗位置。格子
 （4×6、32 px、間距 35）、捲軸與下面 meso 欄都是圖上原本的；分頁標籤是 `sub_4DA440` 加到
@@ -417,7 +427,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | 圖塊與物件（Tile／Obj） | 同上 `sprites[]` | 每一筆都有 `layer`（0–7）、`z`、`flip` 與動畫 `frames[]`；角色依foothold page/group排序；local比remote/mob多2。子圖層依父層分組，不是固定`CHARACTER_LAYER` |
 | 傳送門 | `MapHelper.img/portal/game/pv` 的動畫 | 只畫 `pt == 2` 的可見傳送門（`pt == 0` 是出生點、`pt == 1` 是隱藏通道，原版都不畫） |
 | 選角畫面 | `/api/avatar.png?face&hair&items&stance=stand1&frame=0` | 每個角色列都放上他自己的站立幀（`0x02` 的角色清單已帶 face／hair／worn ids），不是文字佔位 |
-| 一張圖的尺寸與原點 | `/api/canvas/<archive path>` | 沒有 frame 表的圖（掉落的金幣堆 `Item/Special/0900.img/0900000X/iconRaw/N`）需要 `width/height/ox/oy`，PNG 本身帶不了 |
+| 一張圖的尺寸與原點 | `/api/canvas/<archive path>` | 一般WZ origin查詢；PNG本身已有尺寸、不帶WZ origin。本次掉落金幣直接讀真PNG自然尺寸，不再請求這份origin metadata |
 | 自己與其他玩家 | `/api/avatar.png?face&hair&items&stance&frame&flip` | 伺服器用 `Character/*` 的 canvas 依**身體的錨點**（`navel`／`neck`／`hand`／`brow`）組出一張 PNG，回傳的 `x-frame-dx`／`x-frame-dy` 是它相對腳底的位置 |
 | 怪物 | `/api/mob/<id>` ＋ `/api/png/<path>` | `move`／`stand`／`hit` 動作表，延遲是 WZ 的 `delay`；朝向來自 `0x2F`／`0x30`（`facing` 0＝右、1＝左） |
 | NPC | `/api/npc/<id>` ＋ `/api/png/<path>` | 站著不動（`0x3B` 的走動沒有畫）；朝向是地圖 `life/f` |

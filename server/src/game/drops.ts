@@ -32,12 +32,8 @@
 import { ClientRandom } from "../protocol/random.ts";
 import { DROP_KIND, encodeDropAppear, type DropAppear } from "../protocol/drop.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
-import {
-  footholdChain,
-  footholdYAt,
-  type FootholdSegment,
-  type FootholdSegments,
-} from "../wz/archive.ts";
+import type { FootholdSegments } from "../wz/archive.ts";
+import { DropLandingIndex, type DropOrigin } from "./drop-landing.ts";
 
 /** Chance (out of 1000) that a killed monster leaves mesos. */
 export const MESO_DROP_CHANCE_PER_MILLE = 600;
@@ -137,19 +133,16 @@ export interface DropSource {
   /** Where it died; the drop lands near here. */
   x: number;
   y: number;
-  /** The foothold it died on, so the drop lands on the same ground and not beside it. */
+  /** Last support hint; airborne origins still select the first actual floor below. */
   foothold: number;
 }
 
 /** What a player threw away: the item, how many of it, and where they stood. */
-export interface DropThrow {
+export interface DropThrow extends DropOrigin {
   /** The item that leaves the inventory, exactly as it was (`Item/*.img` or `Character/<type>/`). */
   slot: ItemSlot;
-  /** How many left the slot; at least 1, and never more than the stack had. */
+  /** How many left the slot; zero is a real depleted 207 set, never more than the stack had. */
   count: number;
-  /** Where the thrower stood: the drop's own landing spot. */
-  x: number;
-  y: number;
 }
 
 /** One thing a monster leaves behind. `money` and `itemId` are alternatives, as in `0x43`. */
@@ -211,9 +204,11 @@ export interface DropEntry {
   itemId: number;
   /** Stack size of the item; 1 for mesos. */
   count: number;
-  /** Where it lies. The client draws the icon 16 px above this y, so this is the ground line. */
+  /** Authoritative ground point; never an icon origin or a death animation height. */
   x: number;
   y: number;
+  /** Real supporting floor; 0 only when the map has no usable ground. Not sent in 0x43. */
+  foothold: number;
   /** The monster it fell out of: the `0x43` block, and the start of the client's flight animation. */
   mobId: number;
   mobX: number;
@@ -223,7 +218,7 @@ export interface DropEntry {
 }
 
 export interface DropFieldOptions {
-  /** The map's footholds, so a drop lands on the ground under the monster and not beside it. */
+  /** Real ground for all rewards: monster loot, player items and mesos. */
   footholds?: FootholdSegments;
   /** The field's generator; a seeded `ClientRandom` makes a session reproducible in a test. */
   random?: RandomSource;
@@ -252,11 +247,12 @@ export class DropField {
   private readonly random: RandomSource;
   private readonly policy: DropPolicy;
   private readonly lifetimeMs: number;
-  private readonly chains = new Map<number, FootholdSegment[]>();
+  private readonly landing: DropLandingIndex;
   private nextDropId = 1;
 
   constructor(options: DropFieldOptions = {}) {
     this.options = options;
+    this.landing = new DropLandingIndex(options.footholds);
     this.random = options.random ?? new ClientRandom(0x5a17, 0x1d0f, 0x2b3c);
     this.policy = options.policy ?? defaultDropPolicy;
     this.lifetimeMs = options.lifetimeMs ?? DROP_LIFETIME_MS;
@@ -272,17 +268,16 @@ export class DropField {
    *
    * The drop's x is spread by `spreadPx` (several drops from one kill should not sit on one pixel,
    * and the client animates each of them separately anyway), and its y is the foothold under that x -
-   * falling back to the monster's own y when the map has no footholds. The *monster's* position is
-   * kept too: that is what `0x43` kind 0 sends, and what makes the client animate the drop out of the
-   * monster instead of popping it into existence where it lands.
+   * projecting to a real floor edge over a void. Only a floorless map retains an unresolved y.
+   * The *monster's* position is kept too: that is what `0x43` kind 0 sends, and what makes the client
+   * animate the drop out of the monster instead of popping it into existence where it lands.
    */
   spawnFromDeath(source: DropSource, now: number): DropEntry[] {
     const spawned: DropEntry[] = [];
     const spread = this.options.spreadPx ?? DROP_SPREAD_PX;
     for (const roll of this.policy(source, this.random)) {
       const x = source.x + (spread > 0 ? this.random.range(-spread, 2 * spread + 1) : 0);
-      const chain = this.chainOf(source.foothold);
-      const ground = chain === undefined ? undefined : footholdYAt(chain, x);
+      const ground = this.landing.resolve(source, x);
       const entry: DropEntry = {
         dropId: this.nextDropId++,
         kind: DROP_KIND.fromMob,
@@ -290,8 +285,7 @@ export class DropField {
         amount: roll.money ?? 0,
         itemId: roll.itemId ?? 0,
         count: roll.money !== undefined ? 1 : Math.max(1, roll.count ?? 1),
-        x,
-        y: ground ?? source.y,
+        ...ground,
         mobId: source.mobId,
         mobX: source.x,
         mobY: source.y,
@@ -320,8 +314,7 @@ export class DropField {
       itemId: source.slot.itemId,
       count: source.count, // zero is a real depleted 207 set, not one free charge
       slot: { ...source.slot },
-      x: source.x,
-      y: source.y,
+      ...this.landing.resolve(source),
       // No monster block is written for this kind, so the three fields are only here to keep the
       // record's shape the same for every drop.
       mobId: 0,
@@ -334,7 +327,7 @@ export class DropField {
   }
 
   /** Player money is a placed reward too, not a fake item or a character-specific visual. */
-  dropMesosFromPlayer(source: { amount: number; x: number; y: number }, now: number): DropEntry {
+  dropMesosFromPlayer(source: DropOrigin & { amount: number }, now: number): DropEntry {
     const entry: DropEntry = {
       dropId: this.nextDropId++,
       kind: DROP_KIND.placed,
@@ -342,8 +335,7 @@ export class DropField {
       amount: source.amount,
       itemId: 0,
       count: 1,
-      x: source.x,
-      y: source.y,
+      ...this.landing.resolve(source),
       mobId: 0,
       mobX: source.x,
       mobY: source.y,
@@ -420,13 +412,5 @@ export class DropField {
     const gone = this.drops.filter((drop) => now - drop.bornAt >= this.lifetimeMs);
     for (const drop of gone) this.take(drop);
     return gone;
-  }
-
-  private chainOf(id: number): FootholdSegment[] | undefined {
-    const footholds = this.options.footholds;
-    if (footholds === undefined) return undefined;
-    if (!this.chains.has(id)) this.chains.set(id, footholdChain(footholds, id));
-    const chain = this.chains.get(id);
-    return chain === undefined || chain.length === 0 ? undefined : chain;
   }
 }

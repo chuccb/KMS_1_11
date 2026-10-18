@@ -395,7 +395,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
    */
   dropItem(member: M, slot: ItemSlot, count: number, now: number): DropEntry {
     const at = member.at ?? this.spawnAt();
-    const entry = this.drops.dropFromPlayer({ slot, count, x: at.x, y: at.y }, now);
+    const entry = this.drops.dropFromPlayer({ slot, count, ...at }, now);
     for (const other of this.members.values()) other.send(this.drops.appearPacket(entry));
     this.log?.(
       `world: "${member.name}" dropped item ${slot.itemId} x${count} in map ${this.mapId} ` +
@@ -407,7 +407,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   /** c2s0x1F: debit/persistence belong to the caller, appearance belongs to this shared field. */
   dropMesos(member: M, amount: number, now: number): DropEntry {
     const at = member.at ?? this.spawnAt();
-    const entry = this.drops.dropMesosFromPlayer({ amount, x: at.x, y: at.y }, now);
+    const entry = this.drops.dropMesosFromPlayer({ amount, ...at }, now);
     this.broadcast(this.drops.appearPacket(entry));
     this.log?.(
       `world: "${member.name}" dropped ${amount} mesos in map ${this.mapId} (drop ${entry.dropId})`,
