@@ -1,3 +1,4 @@
+import {npcPresentation} from "./npcmotion.mjs";
 import {dialogueExample} from "./dialogue-examples.mjs";
 import {npcDialogue} from "./npcdialogue.mjs";
 import {nativeCursor} from "./cursor.mjs";
@@ -386,6 +387,7 @@ function connect() {
     resetContact();
     deathFx.reset();
     speechBalloons.clear();
+    npcVisuals.clear();
     resetWhisper();
     chatHistoryPanel.cancelDrag();
     visualFieldActive = false;
@@ -435,6 +437,7 @@ function handle(message) {
     resetContact();
     deathFx.reset();
     speechBalloons.clear();
+    npcVisuals.clear();
     pendingWhisper=undefined;userRequestUntil=0;
     chatHistoryPanel.cancelDrag();
     ++mapGeneration;
@@ -607,7 +610,9 @@ function handle(message) {
         users.set(String(user.characterId), user);
       }
       for (const mob of message.mobs) mobs.set(String(mob.mobId), mob);
-      for (const npc of message.npcs) npcs.set(String(npc.npcId), npc);
+      for (const npc of message.npcs) {
+        npcs.set(String(npc.npcId), npc);npcVisuals.add(npc,performance.now());
+      }
       hidePanels();
       // The server drops the windows with the map (the shop and the dialog belong to its NPCs), so
       // this side must not tell it to close something it already forgot.
@@ -1009,11 +1014,22 @@ function handle(message) {
 
     case "npc-enter":
       npcs.set(String(message.npc.npcId), message.npc);
+      npcVisuals.add(message.npc,performance.now());
       return;
 
     case "npc-leave":
-      npcs.delete(String(message.npcId));
+      npcs.delete(String(message.npcId));npcVisuals.remove(message.npcId);
       return;
+
+    case "npc-controller": {
+      const npc=npcs.get(String(message.npcId));if(npc)npc.controlled=message.on;
+      npcVisuals.controller(message.npcId,message.on,performance.now());return;
+    }
+    case "npc-idle": {
+      const now=performance.now(),npc=npcs.get(String(message.npcId));
+      if(npc&&message.path){sampleMotion(npc,now,terrain);beginPath(npc,message.path,now);}
+      npcVisuals.receive(message,now);return;
+    }
 
     case "disconnect":
       closeDialogue(false);
@@ -2433,6 +2449,7 @@ function ensureEntityArt(kind, templateId) {
   const table = kind === "npc" ? npcArts : mobArts;
   if (table.has(templateId) || artMissing.has(`${kind}:${templateId}`)) return;
   table.set(templateId, undefined);
+  const generation=mapGeneration;
   fetch(`/api/${kind}/${templateId}`)
     .then((response) =>
       response.ok
@@ -2440,14 +2457,19 @@ function ensureEntityArt(kind, templateId) {
         : Promise.reject(new Error(String(response.status))),
     )
     .then((data) => {
+      if(generation!==mapGeneration)return;
       table.set(templateId, data.actions ?? {});
       if (kind === "mob") mobBodyAttack.set(templateId, data.bodyAttack === true);
-      else npcMetadata.set(templateId, {name: data.name, clickBounds: data.clickBounds});
+      else {
+        npcMetadata.set(templateId, {name:data.name,clickBounds:data.clickBounds,behavior:data.behavior});
+        npcVisuals.load(templateId,data.actions??{},data.behavior,performance.now());
+      }
       for (const frames of Object.values(data.actions ?? {})) {
         for (const frame of frames) artImage(frame.path);
       }
     })
     .catch(() => {
+      if(generation!==mapGeneration)return;
       table.delete(templateId);
       artMissing.add(`${kind}:${templateId}`);
     });
@@ -2683,15 +2705,13 @@ function drawEntitySprite(
   actionSince = 0,
 ) {
   ensureEntityArt(kind, templateId);
-  const actions = (kind === "npc" ? npcArts : mobArts).get(templateId);
-  const action = kind === "npc" ? "stand" : moving ? "move" : "stand";
   if (kind === "mob") {
     const mob = mobs.get(entityKey);
     const frame = mob && currentMobFrame(mob, now);
     if (frame) drawArchiveImage(frame, x, y, facingFlip(facing));
     return;
   }
-  const frame = playAction(actions, action, now - actionSince);
+  const frame = npcVisuals.frame(Number(entityKey),now);
   if (frame === undefined) return;
   drawArchiveImage(frame, x, y, facingFlip(facing));
 }
@@ -2884,6 +2904,7 @@ function frame() {
   }
   const now = performance.now();
   testToolsPanel.tick(now);
+  npcVisuals.tick(now);
   const elapsed = Math.max(0, Math.min(250, now - (lastPhysicsAt ?? now)));
   lastPhysicsAt = now;
   if (playerBody && self && map?.id === self.mapId) {
@@ -2941,6 +2962,9 @@ function frame() {
     mob.locomotion = action;
     mob.walking = action === "move";
   }
+  for(const npc of npcs.values()) {
+    sampleMotion(npc,now,terrain);npcVisuals.locomotion(npc.npcId,npc.action??npc.facing,now);
+  }
   for (const user of users.values()) {
     sampleMotion(user, now, terrain);
     const dead = remoteStance(user) === "dead";
@@ -2997,10 +3021,17 @@ function frame() {
     const position=id===selfView?.characterId?self:entity;
     if(entity&&position)scene.push({kind:'speech',entity,position,id,z:250210,y:0,order:layerOrder(speech,250210)});
   }
+  for(const [id,speech] of npcBalloons.active(now)) {
+    const npc=npcs.get(String(id));if(npc)scene.push({kind:'npc-speech',npc,id,z:250210,y:0,order:layerOrder(speech,250210)});
+  }
   scene.push({ kind: "damage", z: 250310, y: 0, order: 0 }); // 41E610/41F200 -1073471524
   for (const actor of mergeScene(mapScene, scene)) {
     if (actor.kind === "back") { drawBack(actor.back, cameraX, cameraY, now); continue; }
     if (actor.kind === "projectile") { drawProjectile(actor.shot, cameraX, cameraY, now); continue; }
+    if(actor.kind==='npc-speech') {
+      npcBalloons.draw(ctx,actor.id,actor.npc.x-cameraX,actor.npc.y-cameraY,npcVisuals.originY(actor.id),false,now);
+      continue;
+    }
     if(actor.kind==='speech'){
       speechBalloons.draw(ctx,actor.id,actor.position.x-cameraX,actor.position.y-cameraY,
         actor.entity.chatOriginY,(actor.entity.hp!==undefined?actor.entity.hp<=0:(actor.entity.action&~1)===18),now);
@@ -3045,11 +3076,13 @@ function frame() {
         actor.npc.facing ?? 0,
         false,
         now,
-        undefined,
+        String(actor.npc.npcId),
         mapAnimationStart,
       );
       // 498CF0 passes font index 3 to CLife::47D110; 527720(3) = Gulim 12, FFFFFF20.
-      drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
+      // 499D60 sets name layer color 00FFFFFF while its CChatBalloon exists (alpha zero).
+      if(!npcVisuals.speaking(actor.npc.npcId,now))
+        drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
       drawEntitySprite(
@@ -5593,6 +5626,13 @@ const deathFx = deathEffects({
   sound: point => void audio.effect("Game/Tombstone", spatialVolume(point.x, point.y, self)),
 });
 const speechBalloons=chatBalloons({image:artImage});
+const npcBalloons=chatBalloons({image:artImage});
+const npcVisuals=npcPresentation({balloons:npcBalloons,seed:globalThis.crypto?.getRandomValues(new Uint32Array(1))[0]??(Date.now()>>>0),
+  send:value=>{
+    if(!visualFieldActive||!self||socket?.readyState!==WebSocket.OPEN)return false;
+    send({t:'npc-idle',mapId:self.mapId,...value});return true;
+  },
+});
 const damageArt = damageNumbers({image:artImage,log:logLine});
 void damageArt.preload();
 const buffs = temporaryStats();
@@ -5627,6 +5667,17 @@ const recovery = naturalRecovery({
   isInGame:()=>loginStage==="game"&&!document.hidden,send,log:logLine,
 });
 const testToolsPanel = testTools({
+  getNpcStatus() {
+    const now=performance.now(),lines=[];
+    for(const npc of [...npcs.values()].slice(0,8)) {
+      const state=npcVisuals.snapshot(npc.npcId,now);if(!state)continue;
+      const title=npcMetadata.get(npc.templateId)?.name||npc.templateId;
+      lines.push(`${title}：${state.controlled?'本頁控制':'接收端'}／${state.action}`+
+        `${state.metadata?'':'／資料讀取中'}${state.waiting?'／等待回包':''}${state.speaking?'／氣泡中':''}`+
+        `${state.reply?`／收 ${state.reply.action},${state.reply.speech}`:''}`);
+    }
+    return `NPC 唯讀（非原版工具，不強制演出）：${lines.join('；')||'此圖沒有NPC。'}${npcs.size>8?`；另${npcs.size-8}位`:''}`;
+  },
   getCombat() {
     if (!nativeBasis) return "尚未取得有效能力。";
     const temporary = buffs.values(performance.now());

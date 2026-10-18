@@ -61,6 +61,8 @@ test('40C020 linked action tables retain own info and own-only actions; cycles a
   assert.equal(art.actions.stand![0]!.path,`${images[1]}/stand/0`);
   assert.equal(art.actions.smile![0]!.path,`${images[0]}/smile/0`);
   assert.equal(art.actions.blink![0]!.path,`${images[1]}/blink/0`);
+  assert.deepEqual(art.behavior.extraActions,[{name:'blink',speak:[]}],
+    '49CBF0 behavior root substitution differs from 40C020 own-only art merge');
   nodes.set(`${images[1]}/info`,props(['link','1']));
   assert.equal(npcArtOf(1,reader),undefined);
 });

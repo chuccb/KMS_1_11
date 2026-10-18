@@ -5,6 +5,8 @@
 依使用者要求，沒有執行 test/check/typecheck、語法檢查、瀏覽器、VM、HTTP／登入 probe。
 原 EXE／listing／WZ 的讀取不是功能測試；服務啟動也不是 PASS。
 
+> 後續 ADR-062已接NPC idle／speech／controller鏈，索引差異與原server政策仍未解；見 [NATIVE_NPC_BEHAVIOR](NATIVE_NPC_BEHAVIOR.md)。
+
 ## 本輪交付
 
 1. NPC 缺省 frame delay 從 1000ms 修成原 `40C730` 的 **180ms**。保留 canvas 明示 delay、Mob 的既有規則及 Map 的缺省值。
@@ -78,7 +80,7 @@
 
 ## 明確未完成／browser 替代界線
 
-- NPC 隨機表情、自言自語定時播放、controller分配／完整 `0x2F`／`0x3D`／CVecCtrl 尚未實作。
+- 後續ADR-062補idle／speech／controller及條件路徑codec；原server索引重寫、完整CVecCtrlNpc與自主走路仍未恢復。
   已交叉出 `49A0C0` 為4–12秒抽選、`499C00` 氣泡5000ms，但不直接把它寫成任務翻頁或本地各自亂播的AI。
   `.lst 0049A2C2..0049A310` 明確對signed action與extra表count比較；sender `49A3C0` 是extraIndex+2，
   此邊界與action表語意仍待釐清。不能用猜測的wire索引宣稱已同步。

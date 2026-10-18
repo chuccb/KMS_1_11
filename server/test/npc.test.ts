@@ -91,7 +91,7 @@ test("the field dispatcher describes the NPC packet instead of calling it undeco
   assert.match(refresh ?? "", /npcId=4 \(known id: refresh only, or a truncated body\)/);
   assert.match(describeFieldPacket(new Uint8Array([NPC_OPCODE.enterField, 1])) ?? "", /truncated/);
   assert.match(describeFieldPacket(encodeNpcLeaveField(2)) ?? "", /npcId=2 leave/);
-  assert.match(describeFieldPacket(encodeNpcState(2, false)) ?? "", /npcId=2 walk=off/);
+  assert.match(describeFieldPacket(encodeNpcState(2, false)) ?? "", /npcId=2 controller=off/);
 });
 
 test("spawning a map's life list gives one 0x39 per NPC, with ids from 1", () => {
@@ -152,7 +152,7 @@ test("removing and toggling follow the client's own rules", () => {
 });
 
 test("--npc-walk is a policy: nobody, everybody, or a list of template ids", () => {
-  assert.equal(npcWalkPolicy(undefined)(1012000), false, "absent means nobody walks");
+  assert.equal(npcWalkPolicy(undefined)(1012000), false, "absent means no legacy requests");
   assert.equal(npcWalkPolicy("none")(1012000), false);
   assert.equal(npcWalkPolicy(" ALL ")(1012000), true, "case and spaces are not a policy");
   const some = npcWalkPolicy("2003, 1012000");
@@ -163,35 +163,13 @@ test("--npc-walk is a policy: nobody, everybody, or a list of template ids", () 
   assert.throws(() => npcWalkPolicy("2003,-1"), /neither none, all, nor a template id/);
 });
 
-test("an NPC the policy names walks from the moment the client hears about it", () => {
-  const field = new NpcField({
-    spawns: [heena, { ...heena, templateId: 1010100, x: 100, y: 200 }],
-    walk: npcWalkPolicy("1012000"),
-  });
-  const packets = field.spawnPackets();
-  // The flag is a bit on a pool entry, so the walk packet follows the create that fills it in - and
-  // the NPC the policy does not name gets no packet at all.
-  assert.deepEqual(
-    packets.map((packet) => packet[0]),
-    [NPC_OPCODE.enterField, NPC_OPCODE.stateToggle, NPC_OPCODE.enterField],
-  );
-  assert.deepEqual(
-    readNpcState(new PacketReader(packets[1]!, 1)),
-    { npcId: 1, on: true },
-    "the pool id the field handed out, not the template id the policy was written with",
-  );
-  assert.equal(field.walking, 1);
-  assert.equal(field.npcs[0]!.walking, true);
-  assert.equal(field.npcs[1]!.walking, false);
-
-  // A player who joins later is told the same thing: the state is part of the field's snapshot, so
-  // the server keeps no walking NPC in its own timer.
-  assert.deepEqual(
-    field.enterPackets().map((packet) => packet[0]),
-    [NPC_OPCODE.enterField, NPC_OPCODE.stateToggle, NPC_OPCODE.enterField],
-  );
-  field.remove(1);
-  assert.equal(field.walking, 0, "a removed NPC is not walking");
+test("legacy NPC policy is a request, not a controller flag broadcast to every joiner", () => {
+  const field=new NpcField({spawns:[heena,{...heena,templateId:1010100,x:100,y:200}],walk:npcWalkPolicy("1012000")});
+  assert.deepEqual(field.spawnPackets().map(packet=>packet[0]),[NPC_OPCODE.enterField,NPC_OPCODE.enterField]);
+  assert.equal(field.walking,1);assert.equal(field.npcs[0]!.walking,true);assert.equal(field.npcs[1]!.walking,false);
+  assert.deepEqual(field.enterPackets().map(packet=>packet[0]),[NPC_OPCODE.enterField,NPC_OPCODE.enterField]);
+  field.spawnAll();assert.equal(field.npcs.length,2,"spawns are idempotent");
+  field.remove(1);assert.equal(field.walking,0);
 });
 
 test("the NPC image path is the client's own format, padded to seven digits", () => {

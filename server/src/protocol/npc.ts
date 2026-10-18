@@ -5,7 +5,7 @@
  * (`protocol/mob.ts`): an object pool with a ZMap keyed by the object id, and the enter packet
  * carrying the template id *only for an id the pool does not have yet*, followed by the body that
  * places the NPC. All of it is **server -> client**: an NPC exists because the server said so.
- * What the client can say about one is a *click* (`0x33`, `sub_55AF20`; the same packet the shop
+ * The client can report idle action/speech with 0x2F (49A3C0), or send a *click* (`0x33`, `sub_55AF20`; the same packet the shop
  * opens on, FINDINGS 4.22) - the click carries the pool id this file hands out, and the server then
  * answers with a shop (`0x4A`) or a dialog (`0x47`, FINDINGS 4.23).
  *
@@ -55,22 +55,18 @@
  *                `sub_499760(..., 1)`.
  *   flag == 0 -> `sub_49F380` (168119-168228): bit 1 cleared + `sub_499760(vecctrl, 0)`.
  *
- * So the flag is a bit of the NPC's **state byte** - bit 1 next to `0x39`'s bit 0 - and for an id the
- * pool already has, `sub_499760` is what it *does*: `true` starts the NPC walking and `false` stops it
- * (FINDINGS 4.28). `sub_499760` (161997-162034) calls the vecctrl's vtable slot 184 with
- * `(1, x1, y1, x2, y2, facing, foothold)` - four `s16` the client already has, then the foothold the
- * last one names resolved with `sub_485400` (calling the four a rectangle is shape, not evidence: no
- * located WZ tag fills them, see §4.28) - and then arms a `rand() % 8000 + 4000` ms timer, i.e. the
- * **client** walks the NPC inside those bounds and re-picks a destination 4..12 s at a time. The
- * `false` side passes seven zeros (stop). Setting the bit again when it is already set does nothing,
- * so repeating the packet is harmless; the client's pool never needs the server to keep a timer.
+ * The flag enables/disables this client's CVecCtrl/controller (499760), NOT a movement command.
+ * It arms rand()%8000+4000 and resets in-flight state. Stationary NPCs use it for idle speech/actions
+ * too (499D60 -> 49A0C0 -> 49A3C0). Only templates with move append CMovePath to 0x2F/0x3D.
+ * 49A0C0 / 49A280 disagree about extra-action indices; see docs/NATIVE_NPC_BEHAVIOR.md.
  *
  * Wire: **6 bytes** for an id the pool already has; for an unknown id the `flag != 0` branch reads the
- * *same* tail `0x39` does (templateId + the six fields), so that form is 20 bytes too. This server
+ * *same* tail `0x39` does (templateId + the six fields), so that form is 21 bytes including its additional flag byte. This server
  * always creates with `0x39` and only toggles known ids, which is why `encodeNpcState` has no "create"
  * form - inventing one without a caller would be dead code with a guessed field meaning.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
+import {readMovePath,writeMovePath,type MovePath} from "./movepath.ts";
 
 /** The `CNpcPool` opcodes with a located handler (`sub_49F560`). */
 export const NPC_OPCODE = {
@@ -167,7 +163,7 @@ export function readNpcId(reader: PacketReader): number {
 }
 
 /**
- * Encode one `0x3B`, opcode byte included. `on` = "you walk this NPC" (FINDINGS 4.28); the flag
+ * Encode one `0x3B`, opcode byte included. `on` = "you control this NPC" (NATIVE_NPC_BEHAVIOR); the flag
  * comes before the id, and the id has to be in the client's pool already (`0x39` first).
  *
  * The known-id form only: the client's create branch is the same tail `0x39` carries, and a server
@@ -186,4 +182,21 @@ export function encodeNpcState(npcId: number, on: boolean): Uint8Array {
 export function readNpcState(reader: PacketReader): { npcId: number; on: boolean } {
   const on = reader.readByte() !== 0;
   return { npcId: reader.readU32(), on };
+}
+
+
+/** 49A3C0: u8 opcode2F, u32 npcId, signed action, signed speech, then CMovePath ONLY if the template has move. */
+export const CLIENT_NPC_IDLE_OPCODE=0x2f;
+export interface NpcIdle {npcId:number;action:number;speech:number;path?:MovePath}
+function writeNpcIdle(opcode:number,value:NpcIdle): Uint8Array {
+  const out=new PacketWriter(7);out.writeByte(opcode);out.writeU32(value.npcId>>>0);
+  out.writeByte(value.action&255);out.writeByte(value.speech&255);
+  if(value.path)writeMovePath(out,value.path);return out.toBytes();
+}
+export const encodeClientNpcIdle=(value:NpcIdle):Uint8Array=>writeNpcIdle(CLIENT_NPC_IDLE_OPCODE,value);
+export const encodeNpcIdle=(value:NpcIdle):Uint8Array=>writeNpcIdle(NPC_OPCODE.update,value);
+/** 49A280 explicitly sign-extends both bytes. 0xFF is -1, NOT action 255. */
+export function readNpcIdle(reader:PacketReader, movable=false): NpcIdle {
+  const value:NpcIdle={npcId:reader.readU32(),action:(reader.readByte()<<24)>>24,speech:(reader.readByte()<<24)>>24};
+  if(movable)value.path=readMovePath(reader);return value;
 }

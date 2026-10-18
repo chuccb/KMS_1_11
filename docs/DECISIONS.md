@@ -2438,3 +2438,29 @@ NPC4–12秒idle抽選／五秒speech已定位，但0x2F/0x3D索引與controller
 
 新增native-npc-dialogue回歸來源並更新quest／serve／webclient舊fixture，**均未執行**；亦未執行test/check/typecheck/browser/VM/probe。
 詳NATIVE_NPC_DIALOGUE.md；同save停服冷備份再開LIVE，啟服非PASS，[skip ci]提交並非force推送Arena當前分支。
+
+
+## ADR-062：原NPC idle／speech／controller鏈，保留索引矛盾、公開server政策
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作與回歸來源，未執行驗證。
+
+交叉49CBF0／40C020／40C730及listing，區分own info、一跳linked行為根、合併的動作art。
+extra順序與dense speech slots不得排序／filter；metadata不解碼PNG。
+499760開的是controller非「開始走路」；499D60靜止NPC也送idle，timer4–12秒、30ms格、inflight gate。
+49A3C0 c2s2F及49A280 s2c3D兩signed byte，move存在才有CMovePath；補codec／session／JSON／browser及路由。
+
+listing確有sender extra+2、receiver raw<extraCount及extra[raw].speak、art extra[raw−2]的矛盾。
+沒有原server/capture佐證，不改offset、不假稱已解；現選透明relay明示為重建政策。
+controller按NPC由最早在場者擔任／離場交接，靜止預設、movable legacy opt-in；原挑選規則未知。
+只允許owner、sender槽與模板path／長度驗證才含sender廣播；250ms反洪水及web mapId guard是重建防護。
+所有頁等echo才演出，不獨立本地亂播。forced單次結束回base、原30ms丟棄overshoot。
+
+499C00不是「動畫」而是4373A0 normal五秒氣泡；listing證font mode1 FF800000，玩家保持黑字。
+433F50取layer canvas0、132取height、4386E0定位；499D60 bubble期間name layer色00FFFFFF。
+補NPC獨立氣泡／深紅字／height錨點／隱藏名牌、field/leave/disconnect清理、stale art及冷metadata age guards。
+補被動CMovePath sampler及NPC499B70 stance表；不做未考證的自主CVecCtrlNpc走路。
+工具列40000 Robin捷徑及純讀狀態，不強制演出、不補血換裝、不seed或自動修角色。
+
+新增native-npc-behavior與修舊npc/world/field/webclient/cursor回歸來源，**全部未執行**。
+亦未執行test/check/typecheck/語法檢查/browser/VM/HTTP/登入probe；啟服非PASS。
+詳NATIVE_NPC_BEHAVIOR.md。同save停服冷備再開LIVE，[skip ci]提交、非force推送目前Arena分支。

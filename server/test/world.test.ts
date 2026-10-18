@@ -127,7 +127,7 @@ test("the first player is sent the world: every mob, every NPC, and nobody's 0x1
   );
 });
 
-test("0x3B: the client walks the NPCs the policy names, and a later player is told the same", () => {
+test("0x3B: one designated controller, not every player who joins", () => {
   const field = new FieldInstance<FakeMember>({
     map: stubMap(),
     mobTemplate: () => STUB_TEMPLATE,
@@ -144,15 +144,14 @@ test("0x3B: the client walks the NPCs the policy names, and a later player is to
   assert.deepEqual(readNpcState(new PacketReader(hero.packets[3]!, 1)), { npcId: 1, on: true });
   assert.equal(field.npcs.walking, 1);
 
-  // The second player gets the same four packets: the walk is field state, not a one-off at spawn.
-  const alt = new FakeMember(2, "Alt");
-  field.join(alt);
-  assert.deepEqual(alt.packets.slice(0, 4).map((packet) => packet[0]!), [
-    MOB_OPCODE.enterField,
-    MOB_OPCODE.enterField,
-    NPC_OPCODE.enterField,
-    NPC_OPCODE.stateToggle,
+  // Visibility reaches both players, but only the first controls the NPC.
+  const alt = new FakeMember(2, "Alt");field.join(alt);
+  assert.deepEqual(alt.packets.slice(0,3).map(packet=>packet[0]!),[
+    MOB_OPCODE.enterField,MOB_OPCODE.enterField,NPC_OPCODE.enterField,
   ]);
+  assert.equal(alt.of(NPC_OPCODE.stateToggle).length,0);
+  field.leave(hero.characterId);
+  assert.deepEqual(readNpcState(new PacketReader(alt.of(NPC_OPCODE.stateToggle)[0]!,1)),{npcId:1,on:true});
 });
 
 test("a second player and the first learn about each other with one 0x1C each - and never their own", () => {

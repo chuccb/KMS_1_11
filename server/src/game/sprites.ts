@@ -119,6 +119,7 @@ export interface NpcArt {
   name: string;
   clickBounds: { left: number; top: number; right: number; bottom: number };
   actions: Record<string, SpriteFrame[]>;
+  behavior: NpcBehavior;
 }
 
 /** 49CBF0 defaults, not a guessed canvas-sized interaction target. */
@@ -131,27 +132,69 @@ export function npcClickBounds(info: Record<string, unknown>): NpcArt["clickBoun
     right: number("dcRight", 22), bottom: number("dcBottom", 0)};
 }
 
-export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefined {
-  let image = npcImagePath(templateId);
-  const info = nodeRecord(reader.node(`${image}/info`));
-  const actions: Record<string, SpriteFrame[]> = {};
-  const seen = new Set<string>();
-  // 40C020 copies linked non-info children into the NPC namespace, retaining own-only actions.
-  // Never rewrite the archive/cache namespace: merge frame tables, and bound broken link cycles.
-  for (;;) {
-    if (seen.has(image) || seen.size >= 16 || reader.node(image) === undefined) return undefined;
+export interface NpcBehavior {
+  /** Root move property exists after one-hop link substitution (49CBF0), not the controller flag. */
+  movable: boolean;
+  /** Dense 0..propertyCount-1 lookup, including empty/missing slots, as 49CBF0 does. */
+  speak: string[];
+  extraActions: {name:string;speak:string[]}[];
+}
+
+/** Resolve linked properties WITHOUT decoding canvas pixels. Own info never comes from the link. */
+export function npcNodesOf(templateId: number, reader: ArtReader): {
+  info:Record<string,unknown>; actions:Map<string,string>;
+} | undefined {
+  let image=npcImagePath(templateId);
+  const info=nodeRecord(reader.node(`${image}/info`)), actions=new Map<string,string>(), seen=new Set<string>();
+  for(;;) {
+    const root=reader.node(image);
+    if(seen.has(image)||seen.size>=16||!root||root.kind!=="props")return undefined;
     seen.add(image);
-    Object.assign(actions, spriteActions(reader, image));
-    const link = nodeRecord(reader.node(`${image}/info`)).link;
-    if (typeof link !== "string") break;
-    const id = Number.parseInt(link, 10);
-    if (!Number.isSafeInteger(id) || id < 0) return undefined;
-    image = npcImagePath(id);
+    for(const entry of root.props)if(entry.name.toLowerCase()!=="info")actions.set(entry.name,`${image}/${entry.name}`);
+    const link=nodeRecord(reader.node(`${image}/info`)).link;
+    if(typeof link!=="string")break;
+    const id=Number.parseInt(link,10);
+    if(!Number.isSafeInteger(id)||id<0)return undefined;
+    image=npcImagePath(id);
   }
-  return Object.keys(actions).length === 0 ? undefined : {
-    templateId, name: typeof info.name === "string" ? info.name : "",
-    clickBounds: npcClickBounds(info), actions,
-  };
+  return {info,actions};
+}
+function npcSpeechOf(value: unknown): string[] {
+  const entries=entriesOf(value);
+  return Array.from({length:entries.length},(_,i)=>{
+    const value=entries.find(entry=>entry.name===String(i))?.value;
+    return typeof value==="string"?value:"";
+  });
+}
+export function npcBehaviorOf(templateId:number,reader:ArtReader): NpcBehavior | undefined {
+  // 49CBF0 is NOT 40C020's action-art merge: it replaces the enumerated root with ONE linked
+  // image, while retaining this NPC's original info. Own-only art is NOT another idle slot.
+  let image=npcImagePath(templateId);
+  const own=reader.node(image);if(!own||own.kind!=="props")return undefined;
+  const info=nodeRecord(reader.node(`${image}/info`)),link=info.link;
+  if(typeof link==="string") {
+    const id=Number.parseInt(link,10);if(!Number.isSafeInteger(id)||id<0)return undefined;
+    image=npcImagePath(id);
+  }
+  const root=reader.node(image);if(!root||root.kind!=="props")return undefined;
+  const extraActions: NpcBehavior["extraActions"]=[];
+  for(const entry of root.props) {
+    if(["info","stand","move"].includes(entry.name.toLowerCase()))continue;
+    extraActions.push({name:entry.name,speak:npcSpeechOf(nodeRecord(reader.node(`${image}/${entry.name}`)).speak)});
+  }
+  return {movable:root.props.some(entry=>entry.name==="move"),speak:npcSpeechOf(info.speak),extraActions};
+}
+export function npcArtOf(templateId: number, reader: ArtReader): NpcArt | undefined {
+  const nodes=npcNodesOf(templateId,reader);if(!nodes)return undefined;
+  const actions: Record<string,SpriteFrame[]>={};
+  for(const [name,path] of nodes.actions) {
+    const split=path.lastIndexOf("/");
+    const frames=spriteFrames(reader,path.slice(0,split),path.slice(split+1),[]);
+    if(frames.length)actions[name]=frames;
+  }
+  const behavior=npcBehaviorOf(templateId,reader)!;
+  return Object.keys(actions).length===0?undefined:{templateId,
+    name:typeof nodes.info.name==="string"?nodes.info.name:"",clickBounds:npcClickBounds(nodes.info),actions,behavior};
 }
 
 /** What the page needs to draw one mob: its id and its frames by action. */

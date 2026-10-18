@@ -1,6 +1,11 @@
 # 路線圖（完整 MMO + 跨平台）
 
-> 最新交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：原NPC缺省frame180ms、CUtilDlgEx2素材／尺寸／字框，
+> 最新交付2026-10-18（**未執行test/check/typecheck/語法檢查/browser/VM/probe**）：NPC原metadata池、單一controller／交接、
+> signed2F→3D及move條件路徑、等待echo演出、forced單次／30ms逐格、五秒深紅氣泡／隱藏名牌、唯讀NPC狀態。
+> sender+2／receiver raw索引差異仍未解；透明relay／controller挑選明示重建政策，自主NPC走路／原quest腳本仍缺。
+> [NATIVE_NPC_BEHAVIOR](NATIVE_NPC_BEHAVIOR.md)／ADR-062；同save停服冷備再開LIVE，不seed或重設角色，啟服非PASS。
+
+> 前輪交付2026-10-18（**未執行test/check/typecheck/browser/VM/probe**）：原NPC缺省frame180ms、CUtilDlgEx2素材／尺寸／字框，
 > Prev／Next／OK與ESC正確回覆、五種body保留、CP949／number／menu驗證、modal隔離及唯讀UI範例入口。
 > 原quest腳本、NPC idle/speak controller同步仍缺；[NATIVE_NPC_DIALOGUE](NATIVE_NPC_DIALOGUE.md)／ADR-061。
 > 沿用同save停服冷備份後開LIVE；不seed或自動修角色，啟服不是PASS。

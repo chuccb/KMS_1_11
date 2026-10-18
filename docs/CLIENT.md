@@ -4,12 +4,21 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：NPC原動畫時間、CUtilDlgEx2與對話回覆（2026-10-18，未測試）
+## 最新實作：NPC idle／speech／controller（2026-10-18，未測試）
+
+靜止NPC依原池與4–12秒抽選，由單一控制者送2F、全體含sender等3D才演出；controller離圖交接。
+forced單次播放、30ms逐格、原normal五秒深紅氣泡／height錨點／隱藏名牌；場地／斷線／冷art清理。
+動作圖link merge與行為metadata一跳link替換分開；signed索引不排序、不丟空槽。
+**原sender+2／receiver raw guard/speech不一致仍未解**；透明relay與owner選擇明示為重建政策。
+不宣稱全額外表情／原server／自主NPC走路完成。體驗工具→40000 Robin（69,275）＋唯讀NPC控制／回包資料。
+[NATIVE_NPC_BEHAVIOR](NATIVE_NPC_BEHAVIOR.md)／ADR-062；未執行test/check/typecheck/語法檢查/browser/VM/probe。
+
+## 前輪實作：NPC原動畫時間、CUtilDlgEx2與對話回覆（2026-10-18，未測試）
 
 NPC缺省frame180ms；原Ex2八片邊框／七筆FillRect／Close2／按鈕／普通300及輸入230文字區。
 保留say兩旗標，Prev回0、Next或OK回1、ESC／Close回FF。五種body完整到JSON，實際kind回0x15，
 補CP949 byte-length、-1無上限、number／menu驗證、長文scroll、焦點／IME／modal隔離。
-點擊info.speak逐頁是本地政策，不是原quest腳本；原NPC待機自言自語／controller同步仍缺。
+點擊info.speak逐頁是本地政策，不是原quest腳本；後續ADR-062已接NPC待機／controller，原server索引轉換與CVecCtrl仍缺。
 體驗工具→「對話窗範例」可直接開五類唯讀UI；標示非原版，不發0x15或角色寫入。
 來源、browser替代與完整未完成界線見 [NATIVE_NPC_DIALOGUE](NATIVE_NPC_DIALOGUE.md)／ADR-061。
 **未執行測試／check／typecheck／browser／VM／probe；啟服不是PASS。**

@@ -1,27 +1,9 @@
-/**
- * The NPCs of one field: the ones the map's `life` list asks for, and the packets that put them
- * there.
- *
- * An NPC is **not** server-driven the way a mob is (`game/mobs.ts`): it has no hit points, no patrol
- * and no state the server has to keep in step, because the client owns everything an NPC does -
- * standing still and animating. What the server owns is *which* NPCs exist in the field, which is
- * exactly what `0x39` says (FINDINGS 4.19): `life` entries of type `n` become one packet each, and
- * the client does the rest. So this module is small on purpose.
- *
- * The one thing that *can* be said about an NPC after it exists is `0x3B` (FINDINGS 4.28): `flag = 1`
- * tells the client to **walk that NPC itself** (`sub_499760(vecctrl, 1)` moves it inside bounds the
- * client already has and re-picks a destination every 4-12 s of its own), `flag = 0` stops it. There
- * is no timer on this side and nothing to keep in step - which is why the walk here is a *policy*
- * (`walk`, turned on and off with `setWalking`) instead of a simulation. Which NPCs the 2003 server
- * walked is not located, so the default is nobody: the mechanism is the client's, the choice is ours.
- *
- * The template check is the one thing worth doing carefully: `Npc/<7-digit id>.img` has to exist,
- * because the client builds the NPC from it (`sub_49CB30` -> `sub_498A20`). A `life` entry whose id
- * has no image is skipped and reported, instead of being sent as a packet that would make the client
- * look up a file that is not there - the same rule `game/mobs.ts` applies to mobs.
- *
- * ONE OBJECT PER FIELD (`game/world.ts`): the ids are the field's own, handed out once, and every
- * player in the map is sent the same packets - `enterPackets` is the snapshot a joining player gets.
+import {npcBehaviorOf, type NpcBehavior} from "./sprites.ts";
+import {artReaderOf, type ArtReader} from "./wzart.ts";
+/** NPC visibility and template metadata. FieldInstance owns controller designation and relay.
+ * 0x3B is NOT a walk command: stationary NPCs need it for idle speech/actions too.
+ * --npc-walk / walking / setWalking are retained LEGACY API names for explicit controller requests;
+ * they do not prove movement. See NATIVE_NPC_BEHAVIOR.md / ADR-062 (corrects FINDINGS 4.28).
  */
 import type { WzArchive } from "../wz/archive.ts";
 import { asText, infoOf } from "../wz/props.ts";
@@ -39,6 +21,8 @@ export interface NpcTemplate {
   templateId: number;
   /** `info.name` (the Korean name the client shows, e.g. 헤네시스). */
   name: string;
+  /** Archive-backed idle data; omitted by legacy/data-off fixtures, not fabricated. */
+  behavior?: NpcBehavior;
 }
 
 /** One NPC standing in the field. */
@@ -54,10 +38,8 @@ export interface NpcEntry {
   facing: number;
   /** `true` while the NPC is in the client's pool (i.e. between `0x39` and `0x3A`). */
   present: boolean;
-  /**
-   * The `0x3B` flag as the client reads it: `true` means "you walk this one" (FINDINGS 4.28). The
-   * wire field is a bit of the NPC's state byte, so what this field is *named* is the meaning.
-   */
+  behavior?: NpcBehavior;
+  /** Legacy --npc-walk opt-in controller request, NOT observed motion or actual ownership. */
   walking: boolean;
 }
 
@@ -67,32 +49,27 @@ export interface NpcEntry {
  * A map's `life` list is *the map's* promise that the file is there, so a miss is a data problem
  * worth reporting - the caller decides what to do about it, this function only reads.
  */
-export function npcTemplateFrom(archive: WzArchive, templateId: number): NpcTemplate | undefined {
+export function npcTemplateFrom(archive: WzArchive, templateId: number, reader?: ArtReader): NpcTemplate | undefined {
   const path = npcImagePath(templateId);
   if (!archive.has(path)) return undefined;
   const root = archive.objects(path)[0];
   const info = infoOf(root);
-  return { templateId, name: asText(info.name) };
+  const art=reader??artReaderOf(archive);
+  const behavior=art?npcBehaviorOf(templateId,art):undefined;
+  return { templateId, name: asText(info.name),...(behavior?{behavior}:{}) };
 }
 
 /** Caches `npcTemplateFrom` per id, the way `mobTemplateProvider` does for mobs. */
 export function npcTemplateProvider(archive: WzArchive): (templateId: number) => NpcTemplate | undefined {
   const cache = new Map<number, NpcTemplate | undefined>();
+  const reader=artReaderOf(archive);
   return (templateId: number) => {
-    if (!cache.has(templateId)) cache.set(templateId, npcTemplateFrom(archive, templateId));
+    if (!cache.has(templateId)) cache.set(templateId, npcTemplateFrom(archive, templateId,reader));
     return cache.get(templateId);
   };
 }
 
-/**
- * `--npc-walk` -> the `walk` predicate of one field: `none` (the default, and what an absent
- * argument means) walks nobody, `all` walks every NPC of every map, and anything else is a
- * comma-separated list of `Npc/<id>.img` template ids (`1012000,2003`).
- *
- * A word that is neither is a `RangeError`, not a silent "nobody walks": a typo in a policy should be
- * seen while the server is starting, the way a bad `--mob-speed` is. This is a server choice either
- * way (§4.28): the client only implements "walk" and "stop".
- */
+/** Legacy --npc-walk: explicit controller requests for templates, NOT a force-walk command. */
 export function npcWalkPolicy(spec: string | undefined): (templateId: number) => boolean {
   const text = (spec ?? "none").trim().toLowerCase();
   if (text === "" || text === "none") return () => false;
@@ -113,14 +90,7 @@ export interface NpcFieldOptions {
   spawns: readonly LifeSpawn[];
   /** Template lookup; a miss drops that spawn (the client has no image for it). */
   template?: (templateId: number) => NpcTemplate | undefined;
-  /**
-   * Which of the map's NPCs the **client** should walk (`0x3B` flag 1; FINDINGS 4.28). Called once
-   * per NPC, at spawn.
-   *
-   * The predicate takes the `life` template id, not the pool id, because that is what a map or a
-   * command line names (`Npc/<id>.img`); the pool ids this field hands out are internal.
-   * `npcWalkPolicy` builds it from `--npc-walk`. Absent means nobody walks.
-   */
+  /** Legacy opt-in controller predicate; FieldInstance separately enables stationary idle behavior. */
   walk?: (templateId: number) => boolean;
   /** One line per event; defaults to nothing. */
   log?(line: string): void;
@@ -130,14 +100,15 @@ export interface NpcFieldOptions {
  * The NPCs of one field.
  *
  * Nothing here *simulates* an NPC: it stands where the map put it, and once `0x3B` said so the
- * client walks it. The three packets are the whole vocabulary the client has (`0x39` create/refresh,
- * `0x3A` remove, `0x3B` walk on/off), so the API is those three plus the bookkeeping that keeps
+ * client presents it. 0x39/0x3A manage visibility; FieldInstance controls 0x3B ownership and 0x3D
+ * action/speech relay. This class retains visibility bookkeeping and legacy request helpers, keeping
  * `npcs` in step with what the client was told.
  */
 export class NpcField {
   /** Every spawned NPC, in the order the map's `life` list gives them. */
   readonly npcs: NpcEntry[] = [];
   private nextNpcId = 1;
+  private spawned=false;
   private readonly options: NpcFieldOptions;
 
   // A plain field, not a parameter property: `erasableSyntaxOnly` (i.e. Node's type stripping) does
@@ -163,16 +134,15 @@ export class NpcField {
    * Puts the map's `life` list into this field, with no packets at all.
    *
    * A field spawns its NPCs once, when it comes up (`FieldInstance`'s constructor) and never again:
-   * calling this twice would hand the *same* map entry a second id, and the client would end up with
-   * two NPCs standing on each other.
+   * repeated calls are ignored, rather than handing the same spawn a second pool id.
    */
   spawnAll(): void {
+    if(this.spawned)return;this.spawned=true;
     for (const spawn of this.options.spawns) this.spawn(spawn);
   }
 
   /**
-   * How many NPCs the client has been told to walk (`0x3B` flag 1). One line for the field log, the
-   * same shape `MobField.walking` has.
+   * How many NPCs have a LEGACY explicit controller request; NOT actual moving NPCs.
    */
   get walking(): number {
     return this.npcs.filter((entry) => entry.present && entry.walking).length;
@@ -191,11 +161,6 @@ export class NpcField {
     for (const entry of this.npcs) {
       if (!entry.present) continue;
       packets.push(this.enterPacket(entry));
-      // The walk state rides behind the create, in that order: the flag is a bit on a pool entry, so
-      // the client has to have the id first (`sub_49F260` would *create* an unknown one in that
-      // state, which is not what a spawn means). Repeating it is harmless - the client leaves an id
-      // that is already walking alone.
-      if (entry.walking) packets.push(encodeNpcState(entry.npcId, true));
     }
     return packets;
   }
@@ -213,6 +178,7 @@ export class NpcField {
       npcId: this.nextNpcId++,
       templateId: spawn.templateId,
       name: template?.name ?? "",
+      ...(template?.behavior?{behavior:template.behavior}:{}),
       x: spawn.x,
       y: spawn.y,
       facing: spawn.facing & 1,
@@ -259,7 +225,7 @@ export class NpcField {
   }
 
   /**
-   * Tells the client to walk this NPC, or to stop walking it (`0x3B`), and returns the packet - or
+   * Legacy controller request helper, not a walking command (`0x3B`), and returns the packet - or
    * `undefined` when the id is unknown or already in that state (the client does nothing either
    * time, so a packet would only be noise), or when the NPC is not in the field.
    *
@@ -267,6 +233,8 @@ export class NpcField {
    * offered here: an NPC is created by `0x39`, which is the packet that carries its template and
    * position.
    */
+  // Legacy isolated codec helper. Do NOT broadcast its returned flag to all FieldInstance members:
+  // real field ownership is assigned/reconciled by FieldInstance, separately from this request bit.
   setWalking(npcId: number, on: boolean): Uint8Array | undefined {
     const entry = this.byId(npcId);
     if (entry === undefined || !entry.present) return undefined;

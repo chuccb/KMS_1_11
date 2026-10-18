@@ -620,6 +620,8 @@ class BrowserSession {
             Number(message.slot ?? 0),
             Number(message.itemId ?? 0),
           );
+        case "npc-idle":
+          return await this.require().npcIdle(Number(message.npcId),Number(message.action),Number(message.speech),Number(message.mapId));
         case "click":
           return await this.clickObject(Number(message.objectId ?? 0));
         case "shop":
@@ -1498,6 +1500,7 @@ export function startWebClient(
         templateId: npc.templateId,
         name: npc.name,
         clickBounds: npc.clickBounds,
+        behavior:npc.behavior,
         actions: npc.actions,
       });
       return;

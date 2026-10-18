@@ -248,7 +248,7 @@ test("every opcode range of the CField router maps to its subsystem", () => {
   assert.equal(describeFieldOpcode(0x38), "0x38 CNpcPool(no handler)");
   assert.equal(describeFieldOpcode(0x39), "0x39 CNpcPool(npc appear)");
   assert.equal(describeFieldOpcode(0x3a), "0x3a CNpcPool(npc leave)");
-  assert.equal(describeFieldOpcode(0x3b), "0x3b CNpcPool(npc walk)");
+  assert.equal(describeFieldOpcode(0x3b), "0x3b CNpcPool(npc controller)");
   assert.equal(describeFieldOpcode(0x3c), "0x3c CNpcPool(id only)");
   assert.equal(describeFieldOpcode(0x3d), "0x3d CNpcPool(action + move path)");
   assert.equal(describeFieldOpcode(0x3e), "0x3e CNpcPool(id only)");

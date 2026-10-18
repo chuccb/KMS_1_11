@@ -6,7 +6,8 @@ export function chatBalloons({image}) {
   for(const style of ['normal','dead'])for(const name of names)image(`UI/ChatBalloon.img/${style}/${name}`);
   document.fonts?.addEventListener('loadingdone',()=>{for(const r of records.values()){delete r.normalLayout;delete r.deadLayout;}});
   return {
-    put(id,text,now){records.set(id,{text:String(text).trim(),until:now+5000});},
+    put(id,text,now,options={}){records.set(id,{text:options.preserveWhitespace?String(text):String(text).trim(),
+      color:options.color??'#000000',until:now+5000});},
     clear(){records.clear();},remove(id){records.delete(id);},
     active(now){for(const [id,r] of records)if(now>=r.until)records.delete(id);return records.entries();},
     draw(ctx,id,x,y,originY,dead,now){
@@ -27,7 +28,7 @@ export function chatBalloons({image}) {
       }
       for(let row=0;row<at.lines.length;row++){
         stamp('w',0,6+row*14);stamp('e',at.width-6,6+row*14);
-        ctx.fillStyle='#000000';const text=at.lines[row];
+        ctx.fillStyle=record.color;const text=at.lines[row];
         ctx.fillText(text,left+6+Math.trunc((at.columns*12-ctx.measureText(text).width)/2),top+6+row*14);
       }
       ctx.restore();

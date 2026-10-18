@@ -4,6 +4,7 @@ export function testTools({
   getSelf,
   getMovement = () => undefined,
   getCombat = () => "",
+  getNpcStatus = () => "",
   isInGame,
   onOpen,
   openSkills,
@@ -29,6 +30,7 @@ export function testTools({
   };
   function movementStatus() {
     el("qa-combat").textContent = getCombat();
+    el("qa-npc").textContent=getNpcStatus();
     const state = getMovement();
     el("qa-movement").textContent = state
       ? `唯讀快照（非原版工具）：速度 ${state.speedPercent}%／跳躍 ${state.jumpPercent}%／EVA ${state.eva ?? "—"}／PDD ${state.pdd ?? "—"}` +

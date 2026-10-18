@@ -133,7 +133,7 @@ import {
   readMobStat,
   type MobLeaveDelayed,
 } from "../protocol/mob.ts";
-import { NPC_OPCODE, readNpcEnterField, readNpcId } from "../protocol/npc.ts";
+import { NPC_OPCODE, readNpcEnterField, readNpcId, readNpcState, readNpcIdle, encodeClientNpcIdle } from "../protocol/npc.ts";
 import {
   STAT_OPCODE,
   readStatUpdate,
@@ -351,6 +351,8 @@ export interface NpcView {
   x: number;
   y: number;
   facing: number;
+  present?: boolean;
+  controlled?: boolean;
 }
 
 /**
@@ -438,6 +440,8 @@ export type ClientEvent =
   | { kind: "loot"; notice: LootNotice }
   | { kind: "npc-enter"; npc: NpcView }
   | { kind: "npc-leave"; npcId: number }
+  | { kind: "npc-controller"; npcId:number;on:boolean }
+  | { kind: "npc-idle";npcId:number;action:number;speech:number;path?:MovePath }
   | { kind: "unknown"; opcode: number; bytes: number }
   | { kind: "disconnect"; reason: string };
 
@@ -1272,6 +1276,14 @@ export class ClientSession {
     }
   }
 
+  /** Browser CNpc sender. Map identity is a web-bridge safety guard, not original wire data. */
+  async npcIdle(npcId:number,action:number,speech:number,mapId:number): Promise<void> {
+    const npc=this.npcs.get(npcId),link=this.gameLink;
+    if(!link||mapId!==this.mapId||!npc?.controlled)return;
+    if(!Number.isInteger(action)||!Number.isInteger(speech)||action<-128||action>127||speech<-128||speech>127)return;
+    await link.send(encodeClientNpcIdle({npcId,action,speech}));
+  }
+
   /** One validated answer to the currently open 0x47; preserve its sub-op, not always say. */
   async talk(answer: number, detail: QuestReplyDetail = {}): Promise<void> {
     const link = this.gameLink, body = this.activeQuest;
@@ -1856,13 +1868,16 @@ export class ClientSession {
             new PacketReader(plain, 1),
             this.npcs.has(npcId),
           );
-          if (npc.templateId === undefined) return; // a refresh of one the view already has
+          if (npc.templateId === undefined) {
+            const existing=this.npcs.get(npcId);if(existing)existing.present=true;return;
+          } // known-id refresh
           const view: NpcView = {
             npcId: npc.npcId,
             templateId: npc.templateId,
             x: npc.x,
             y: npc.y,
             facing: npc.facing,
+            present:true,controlled:false,
           };
           this.npcs.set(view.npcId, view);
           this.emit({ kind: "npc-enter", npc: view });
@@ -1870,8 +1885,33 @@ export class ClientSession {
         }
         case NPC_OPCODE.leaveField: {
           const npcId = readNpcId(new PacketReader(plain, 1));
-          this.npcs.delete(npcId);
-          this.emit({ kind: "npc-leave", npcId });
+          const npc=this.npcs.get(npcId);
+          if(npc)npc.present=false;
+          if(!npc?.controlled) {
+            this.npcs.delete(npcId);
+            this.emit({ kind: "npc-leave", npcId });
+          }
+          return;
+        }
+        case NPC_OPCODE.stateToggle: {
+          const state=readNpcState(new PacketReader(plain,1));
+          let npc=this.npcs.get(state.npcId);
+          if(!npc&&state.on) {
+            // 49F260: unknown controlled id has the full enter tail, one byte after opcode.
+            const body=readNpcEnterField(new PacketReader(plain,2),false);
+            npc={npcId:body.npcId,templateId:body.templateId!,x:body.x,y:body.y,facing:body.facing,
+              present:false,controlled:true};
+            this.npcs.set(npc.npcId,npc);this.emit({kind:"npc-enter",npc});
+          }
+          if(!npc)return;
+          npc.controlled=state.on;
+          this.emit({kind:"npc-controller",...state});
+          if(!npc.present&&!npc.controlled){this.npcs.delete(npc.npcId);this.emit({kind:"npc-leave",npcId:npc.npcId});}
+          return;
+        }
+        case NPC_OPCODE.update: {
+          const value=readNpcIdle(new PacketReader(plain,1),plain.length>7);
+          if(this.npcs.has(value.npcId))this.emit({kind:"npc-idle",...value});
           return;
         }
         default:
@@ -1945,6 +1985,8 @@ export const CLIENT_EVENT_KINDS = [
   "mob-leave",
   "npc-enter",
   "npc-leave",
+  "npc-controller",
+  "npc-idle",
   "unknown",
   "disconnect",
 ] as const satisfies readonly ClientEvent["kind"][];

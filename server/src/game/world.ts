@@ -1,3 +1,5 @@
+import {validNpcRequest} from "../../../client/npcbehavior.mjs";
+import {encodeNpcState,encodeNpcIdle,type NpcIdle} from "../protocol/npc.ts";
 /**
  * The world: the maps the server is simulating, and the players standing in them.
  *
@@ -102,10 +104,8 @@ export interface FieldInstanceOptions {
   mobTemplate?: (templateId: number) => MobTemplate | undefined;
   /** `Npc/<id>.img`; without it every NPC of the map is spawned unnamed. */
   npcTemplate?: (templateId: number) => NpcTemplate | undefined;
-  /**
-   * Which NPCs the **client** walks (`0x3B` flag 1, FINDINGS 4.28). Absent means nobody, which is the
-   * honest default: which NPCs the 2003 server walked is not located. `npcWalkPolicy` builds this from
-   * `--npc-walk`.
+  /** Legacy --npc-walk opt-in for movable/data-off NPC controllers. Stationary archive-backed
+   * NPCs are controlled independently for idle speech/actions. This does not force walking.
    */
   npcWalk?: (templateId: number) => boolean;
   /** Mob walking speed at 100%, in px/s. Defaults to `PATROL_SPEED_PX_PER_SEC`. */
@@ -144,6 +144,9 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   readonly mapId: number;
   readonly mobs: MobField;
   readonly npcs: NpcField;
+  /** Reconstruction policy: first available member controls each NPC, not every viewer. */
+  private readonly npcControllers=new Map<number,number>();
+  private readonly npcReportAt=new Map<number,number>();
   readonly drops: DropField;
   private readonly members = new Map<number, M>();
   private readonly spawnPoint: FieldPosition;
@@ -182,7 +185,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       `world: map ${options.map.id} (${options.map.name || options.map.imagePath}) is up - ` +
         `spawned ${this.mobs.mobs.length} mobs ` +
         `(${this.mobs.walking} walking), ${this.npcs.present} NPCs ` +
-        `(${this.npcs.walking} walking)`,
+        `(${this.npcs.walking} legacy controller requests)`,
     );
   }
 
@@ -254,6 +257,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       other.send(this.enterPacket(member));
     }
     this.members.set(member.characterId, member);
+    this.assignNpcControllers();
     this.log?.(
       `world: "${member.name}" (${member.characterId}) entered map ${this.mapId} at ` +
         `(${member.at.x},${member.at.y}) - ${this.members.size} player(s), ${this.mobs.mobs.length} mobs, ` +
@@ -266,12 +270,52 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
     const member = this.members.get(characterId);
     if (member === undefined) return;
     this.members.delete(characterId);
+    this.assignNpcControllers();
     const packet = encodeUserLeaveField(characterId);
     for (const other of this.members.values()) other.send(packet);
     this.log?.(
       `world: "${member.name}" (${characterId}) left map ${this.mapId} - ` +
         `${this.members.size} player(s) left`,
     );
+  }
+
+  private assignNpcControllers(): void {
+    for(const entry of this.npcs.npcs) {
+      const oldId=this.npcControllers.get(entry.npcId);
+      const owner=entry.present&&((entry.behavior!==undefined&&!entry.behavior.movable)||entry.walking)
+        ? (oldId!==undefined&&this.members.has(oldId)?this.members.get(oldId):this.members.values().next().value)
+        : undefined;
+      if(oldId===owner?.characterId)continue;
+      if(oldId!==undefined)this.members.get(oldId)?.send(encodeNpcState(entry.npcId,false));
+      this.npcControllers.delete(entry.npcId);this.npcReportAt.delete(entry.npcId);
+      if(owner) {
+        this.npcControllers.set(entry.npcId,owner.characterId);
+        owner.send(encodeNpcState(entry.npcId,true));
+      }
+    }
+  }
+
+  /** Revoke control before visibility removal so the native two-bit pool cannot retain a ghost. */
+  removeNpc(npcId:number): boolean {
+    const packet=this.npcs.remove(npcId);if(!packet)return false;
+    this.assignNpcControllers();this.broadcast(packet);return true;
+  }
+
+  /** Transparent byte relay is an explicit server policy; original 2003 server rewriting is unknown.
+   * Validate in SENDER index space, acknowledge sender too, and never manufacture a corrected +2.
+   */
+  reportNpcIdle(characterId:number,value:NpcIdle,now=Date.now()): boolean {
+    const npc=this.npcs.npcs.find(npc=>npc.npcId===value.npcId&&npc.present);
+    if(!this.members.has(characterId)||this.npcControllers.get(value.npcId)!==characterId||!npc?.behavior
+      || (npc.behavior.movable!==Boolean(value.path))
+      || !(validNpcRequest(npc.behavior,value.action,value.speech)
+        || (value.path&&value.action===-1&&value.speech===-1)))return false;
+    // Reconstruction anti-flood bound; natural client decisions are at least 4 seconds apart.
+    if(now-(this.npcReportAt.get(value.npcId)??-Infinity)<250)return false;
+    this.npcReportAt.set(value.npcId,now);
+    const first=value.path?.elements[0];
+    if(first){npc.x=first.x;npc.y=first.y;npc.facing=first.action&1;}
+    this.broadcast(encodeNpcIdle(value));return true;
   }
 
   /**
@@ -360,6 +404,7 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
    * belongs to the connection, so the session runs that itself and only the `0x44` is the field's.
    */
   tick(now: number): void {
+    this.assignNpcControllers();
     if (this.members.size > 0) {
       for (const packet of this.mobs.movePackets(now)) this.broadcast(packet);
     }

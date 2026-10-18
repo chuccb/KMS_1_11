@@ -1812,15 +1812,15 @@ NPC 是 `0x2F` 的**簡化版**：同樣是「池中已有這個 id 就只改變
 才解除鏈結（也就是 `0x3B` 打開的第二狀態會讓離場「記著」）。
 查不到這個 id → 安安靜靜地什麼都不做。
 
-#### 4.19.4 `0x3B`：NPC 走動（**6 bytes**；語意見 §4.28）
+#### 4.19.4 `0x3B`：NPC 控制指定（已知id **6 bytes**；語意見 §4.28）
 
 `sub_49F970`（168598-168631）：**`u8 flag` 先讀，`u32 npcId` 後讀，兩個都無條件讀**
 （這點和怪物 `0x31` 的「`u8 flag` + `u32 mobId`」同型，也和 §4.12 的舊猜測相反）。
 
 | flag | 分支 | 動作 |
 |---|---|---|
-| `!= 0` | `sub_49F260`（168057-168116）| 設 `+24` 的 bit 1，再 `sub_499760(vecctrl, 1)`＝**開始走**（§4.28.1）—— **已知 id** 就到此為止；**未知 id** 會再讀完整個 `0x39` 尾段並用 `sub_49F260` 直接建一個「已經在走」的 NPC |
-| `== 0` | `sub_49F380`（168119-168228）| 清 bit 1，再 `sub_499760(vecctrl, 0)`＝**停**（§4.28.1）|
+| `!= 0` | `sub_49F260`（168057-168116）| 設 `+24` 的 bit 1，再 `sub_499760(vecctrl, 1)`＝**啟用控制**（§4.28.1）—— **已知 id** 就到此為止；**未知 id** 會再讀完整個 `0x39` 尾段並用 `sub_49F260` 直接建一個「控制bit已設」的 NPC |
+| `== 0` | `sub_49F380`（168119-168228）| 清 bit 1，再 `sub_499760(vecctrl, 0)`＝**關閉控制**（§4.28.1）|
 
 ⚠️ **一則更正**：`sub_49F260`／`sub_49F380` 交給 `sub_499760` 的是 `*(npc + 16)` —— byte 定址，也就是
 **byte 16** 那個 DWORD（一個指標）；而 4.19.2 第 6 欄（`pointX`）在 `sub_498CF0` 裡是 DWORD 索引的
@@ -1889,19 +1889,19 @@ s8 second     // 上面那個模板裡有兩組陣列（npc+19 的 +32／+36）
 
 #### 4.19.9 還不能宣稱的部分
 
+> ADR-062已更正下列歷史第2／5點：499C00是氣泡、template+8是move屬性存在、3B是controller。
+> signed codecs與透明relay已接；server索引重寫與原挑controller政策仍未知，不能宣稱原NPC全還原。詳§4.28及NATIVE_NPC_BEHAVIOR。
+
 1. **第 5–7 欄的語意**（`lookupKey`／`pointX`／`pointY`）：只知道 `sub_489800` 的查表與
    `sub_540400` 的 vecctrl 建立，**沒有名字**。目前送 0。
-2. **`0x3D` 的兩組索引**：`sub_49A280` 的兩個 `s8` 是**動畫索引**（一維／二維兩組，§4.28.2，
-   `sub_499C00` 是「播一個動畫」），但值是哪個動作沒有名字表；尾巴的 `CMovePath` **只在
-   `template+8 != 0` 時才讀**，而那個旗標來自哪個 WZ 標籤未定位 —— 所以這個封包（目前）不能送，
-   送錯長度會讓 client 把後面的位元組當路徑解。
+2. **`0x3D` 的索引差異**：ADR-062已定位info.speak、extra有序表、forced action與move旗標，並補codec／relay。
+   但sender+2與receiver raw guard／speech仍不一致，原server是否重寫未知；透明轉送不是原server證據，詳§4.28。
 3. **`0x38` 與 `0x41` 沒有 case**：`0x38` 夾在 `0x37`（CMobPool 最後一個）與 `0x39` 之間，
    很可能是某個已停用的 NPC 封包；`0x41` 同理。沒有字串或呼叫點能定位。
 4. **NPC 的生成是伺服器決定的**：`life` 裡有 2 個 NPC 的地圖就會有 2 個，沒有「NPC 重生」這種事
    （`0x2F`／`0x30` 那一套不存在）。這一點符合 `sub_49F260` 的設計，但沒有實機驗證。
-5. ~~**第二狀態在做什麼**~~ → **已解**（§4.28）：對一個池裡已有的 id，`0x3B` 的 flag 就是
-   「**你自己走這個 NPC**」（`sub_499760(vecctrl, 1)`）／「停下來」（`0`），而且 client 會自己在
-   4–12 秒後重挑目標 —— 伺服器不必記 timer。**哪些** NPC 該走仍然沒有證據（那是政策，不是機制）。
+5. **第二狀態是controller**（ADR-062更正「走路開關」）：499760啟用控制與timer，靜止NPC也需它進行idle／speech。
+   原server如何挑選controller仍未知；目前一NPC一控制者、離場交接是明示重建政策。
 6. **沒有實機驗證**：`0x39` 之後 client 畫出來的 NPC 站在哪、面向哪，全部只由反編譯碼推導；
    需要 ADR-004 的 oracle run。
 
@@ -2581,7 +2581,7 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
 | 拾取 | `0x44` kind 2 | 全場 | 見 4.24.6 |
 | 升級 | `0x0D` 差異包 ＋ `0x29`（`u32 characterId`＋`u8 0`）| 差異包**只有升級的人**；`0x29` 給**其他人**（自己的 client 已經從 `0x0D` 播了，見 §4.27）|
 | 離線 | `0x1D` | 其他人 | `sub_51D280` |
-| NPC 走動 | `0x3B` flag 1（`u8`＋`u32`）| 全場（新進場的人也拿到，見 §4.28.4）| 機制是 client 的（client 自己走、自己重挑目標）；⚠️ **哪些** NPC 該走沒有證據，所以預設沒人走（`--npc-walk`）|
+| NPC controller／idle | `0x3B` flag1（u8＋u32）及3D | 3B僅指定者；3D本圖全體含sender | 靜止NPC idle；movable opt-in；controller選擇／透明索引relay是重建政策，§4.28／ADR-062 |
 
 #### 4.24.5 世界的時鐘：一個 interval，不是每個連線一個
 
@@ -2816,53 +2816,32 @@ Alt 收到 `[0x34, 0x30, 0x29]`、Hero 收到 `{level: 2, hp: 50, mp: 50, exp: 5
 4. **沒有實機驗證**（ADR-004）：沒看過真的 client 播這個特效。
 5. **`0x29` 沒有其他用途的證據**：`0x23`–`0x25` 是技能／效果家族，`0x29` 只有 effect 0 解出來。
 
-### 4.28 ✅ NPC 的走動：`0x3B` 就是「你自己走」（`sub_499760`）
+### 4.28 🟡 NPC controller、待機動作與自言自語（2026-10-18更正／ADR-062）
 
-§4.19.9 第 5 項把 `0x3B` 的旗標留成「走動或表情，兩種都說得通」。這一節把它結掉：對一個**池裡已經
-有的 id**，`sub_49F970` 的 flag 只有一個下場 —— `sub_499760(vecctrl, flag)` —— 而那個函式是
-**開始／停止走動**。
+**重要更正**：原節把 `499760` 稱為「走路開關」、`499C00` 稱為「播動畫」、四個s16稱活動範圍，
+均不成立。對照 `499D60/49A0C0/49A280/49A3C0/49CBF0` 及 listing 後，這是 controller／idle／speech 鏈。
+先前的PASS或原wire形狀不證明舊語意。此次未執行測試／typecheck／browser／VM／probe。
+完整證據、實作及server policy見 [NATIVE_NPC_BEHAVIOR](../NATIVE_NPC_BEHAVIOR.md)。
 
-#### 4.28.1 `sub_499760`（161997-162034）：走，或停
+#### 4.28.1 `499760`／`499D60`／`49A0C0`：控制者與待機選擇
 
-```c
-if ( a2 == 0 )  return slot184(v3, 0,0,0,0,0,0,0);            // 停：七個 0
-v5 = (int)*(this + 13);
-v6 = sub_485400(this_7, *(__int16 *)(v5 + 260));              // s16 → foothold 查表（§4.16 的同一個）
-slot184(v3, 1, *(s16 *)(v5+250), +252, +254, +256, *(u8 *)(v5+258), v6);
-*(this + 15) = 0;
-*(this + 25) = rand() % 8000 + 4000;                         // 4000..12000 ms
-```
+`499760(...,1)`開vecctrl controller、清inflight、設 `rand()%8000+4000`；0關controller。
+`+250..260` 是CMovePath目前元素 x/y/vx/vy/action/foothold，**不是WZ活動矩形**（見§4.11）。
+499D60每tick30ms只讓控制者倒數，無inflight才可能送。靜止NPC也會49A0C0抽選，故3B不能等同走動。
+有氣泡、forced action或timer>0不另抽；先重設timer，再於extraActions.length+info.speak.length等權抽槽。
+extra i傳i+2及其speak隨機索引；info.speak傳action=-1及池索引。499C00建立normal五秒深紅文字氣泡，非播放動畫。
+forced action單次播完回base；每格倒數減30、換格直接重設delay，丟棄overshoot。
 
-- `sub_49F260` 傳進來的是 `*(npc + 16)` —— byte 16 的那個指標（§4.19.4 的更正；指向什麼沒有命名，
-  最合理的讀法是 NPC 的 vecctrl）。`v3 = *(this+14)` 是那個 vtable 第 184 槽的物件。`+250`／`+252`／`+254`／`+256` 是四個 `s16`，`+258` 一個 `u8`（方向），
-  `+260` 一個 `s16`（當 foothold id 交給 `sub_485400`）。**形狀**就是這樣；「四個 `s16` 是活動範圍」
-  是最合理的讀法，但**沒有**定位到填這幾個欄位的 WZ 標籤（§6）。
-- `rand() % 8000 + 4000` 是**重挑目標的間隔**：client 自己走、時間到自己在範圍裡再挑一個點。
-  ⇒ 伺服器**不需要**記任何 timer：一個 `0x3B` flag 1 就是一張長期有效（直到 flag 0、`0x3A` 或離場）
-  的「你自己走」。
-- `sub_49F260`（168057-168116）只在 `(npc+24) & 2` **還沒設**時才呼叫 `sub_499760`，所以重送是冪等的；
-  `sub_49F380`（168119-168228）清掉那個 bit、`sub_499760(vecctrl, 0)`、然後在整個 `+24` 變成 0 時才解鏈。
-- 同一個「走／停」機制在**怪物**那一側是 `sub_485330`（§4.28.3），兩者的 vtable 呼叫形狀一樣。
+#### 4.28.2 `0x2F`／`0x3D`：signed索引與條件路徑
 
-#### 4.28.2 `0x3D`（`sub_49A280`，162629-162717）：索引解出來了，長度仍不確定
-
-`0x3D` 是 `0x3C`–`0x40` 裡唯一讀超過 id 的一個（§4.19.1）。它讀 `s8 first`、`s8 second`：
-
-| `first` | 做什麼 |
-|---|---|
-| `-1`（`0xFF`）| `second >= 0` 且在範圍內 → 取 `*(npc+19)+32` 那個**一維**陣列的第 `second` 項 → `sub_499C00(npc, 該項)` |
-| `>= 0` | 在 `*(npc+19)+36` 的**二維**陣列（外層 stride 8，`+4` 是內層）範圍內 → `npc+84 = first`、`sub_499900(npc)`；`second >= 0` 時再取 `[first][second]` → `sub_499C00` |
-| 其他負值 | 兩者都不做（只走到尾巴）|
-
-- `sub_499C00`（162256-）＝**播一個動畫**：`sub_4373A0(this+5, …, 5000, 0, 1)`（`n5000 = 5000` 是長度
-  參數）。所以兩個 `s8` 是**動畫索引**：`first` 選「組」、`second` 選組內的第幾格。
-- `sub_498A90`（NPC 建構子，161334-）用 `*(template+36)` 的長度 `+ 2` 建 NPC 自己的每組狀態陣列，
-  可見模板的 `+36` 就是「組」的清單；`template+8` 是一個旗標。
-- 尾巴：`if ( (*(npc+19))[2] != 0 ) sub_4967C0(*(npc+13)+216, packet)` —— **只有 `template+8 != 0` 才讀
-  `CMovePath`**。所以 `0x3D` 的長度是 7 bytes 或 7＋路徑，取決於**每個模板固定的資料**，而那個資料
-  來自哪個 WZ 標籤我們沒有定位。⇒ 現在**不送**：長度猜錯等於讓 client 把接下來的位元組當路徑解。
-- 沒解完的：兩個索引的實際值對到哪個動作（沒有名字表）、`sub_499900` 做什麼、`template+8` 的來源。
-  列在 §6，等 oracle run。
+49A3C0寫c2s2F：u32 npcId、s8 action、s8 speech；只有template+8!=0追加CMovePath。
+49CBF0已定位template+8來自有效root **move屬性存在**；own info.speak及一跳linked root extra順序有明確來源。
+s2c3D由49F5B0先讀id，再49A280讀兩signed byte：action=-1取info.speak[speech]；
+action>=0且 **raw<extraCount** 才forced=raw；speech從 **extra[raw].speak**，art40C730卻用 **extra[raw-2]**。
+listing保留了movsx、sender+2、receiver raw guard／stride8，**原server是否重寫仍未知**，不能自行補正。
+路徑與索引是否有效無關：只要move旗標存在就讀；最後清inflight。
+不動模板7bytes；移動模板7+5+14×count。現codec兩種均有，server依本圖metadata決定是否解path。
+server目前透明轉送、只允許單一controller報告，**這是明示重建政策，不是已恢復2003 server**。
 
 #### 4.28.3 怪物那一側是同一個機制（順手定位，也是我們的偏離所在）
 
@@ -2880,21 +2859,13 @@ slot184(v3, 1, *(s16 *)(v5+250), +252, +254, +256, *(u8 *)(v5+258), v6);
 我們的伺服器是**伺服器決定**（每條腿一個 `0x33`，§4.16／ADR-008 的例外）：多人同步需要一個權威
 （§4.24）。⚠️ 原 client 自己的走動會不會與我們的 `0x33` 打架，**沒有實機證據**（§6 第 14 項）。
 
-#### 4.28.4 伺服器這一側
+#### 4.28.4 伺服器這一側（ADR-062取代舊「所有進圖者都走」政策）
 
-| 位置 | 內容 |
-|---|---|
-| `protocol/npc.ts` | `encodeNpcState(npcId, on)`（`u8 flag` 在 id **前面**）／`readNpcState`；沒有「建立」形式 —— 建立是 `0x39` 的事 |
-| `game/npcs.ts` | `NpcFieldOptions.walk?: (templateId) => boolean`、`NpcEntry.walking`、`setWalking(npcId, on)`（同一個狀態不發封包，和 client 一樣）、`NpcField.walking`（log 用）、`npcWalkPolicy(spec)`（`none`／`all`／`id,id,...`，解析不了就 `RangeError`）|
-| `game/world.ts` | `npcWalk` 一路傳到 `NpcField`；`enterPackets()` 在每個要走 NPC 的 `0x39` **之後**接一個 `0x3B`（所以新進場的人自動拿到同樣的狀態，伺服器不必再送一次）；場地 log 是 `N NPCs (M walking)` |
-| `net/loginserver.ts`／`cli.ts` | `--npc-walk <none|all|id,id,...>`（裸的 `--npc-walk` ＝ `all`），**預設 `none`** |
-| `test/npc.test.ts` | 政策的三種寫法與錯誤輸入、`setWalking` 的冪等、快照的封包順序（`0x39` → `0x3B`）|
-| `test/world.test.ts`／`serve.test.ts` | 真成員／真 socket：`0x16` → `0x2F`×2 → `0x39` → `0x3B{on:true}`，第二個玩家也一樣 |
-
-**為什麼預設是「沒人走」**：機制（client 自己走）有證據，**政策**（哪些 NPC 該走）沒有。所以
-`--npc-walk` 是伺服器的選擇，寫成 policy 而不是寫死在資料裡 —— 與 ADR-015 同一條規矩：不知道的不猜。
-⚠️ 真 `Data.wz` 上跑過的是機制那一半（地圖 1010000 4 個 NPC：政策點名的那一個拿到 `0x3B`、
-其他人沒有、第二個玩家看到同一份），**畫面**上 NPC 有沒有動起來仍然要 oracle run。
+`NpcField.enterPackets()`只送visibility；`FieldInstance`按NPC挑最早在場成員單獨送3B on，保留現有owner，
+離場交接，despawn先off再3A，2F通過控制權／sender槽／模板path／長度驗證才含sender廣播3D。
+靜止archive-backed NPC預設可控；movable仍需legacy `--npc-walk` opt-in，browser不產生NPC自主走路路徑。
+`NpcEntry.walking`／`setWalking`只保留legacy API名，不代表真的在移動。250ms反洪水是重建防護。
+新回歸來源 `native-npc-behavior.test.ts` 及npc/world/field/webclient fixture **均未執行**；啟服不是PASS。
 
 ### 4.29 ✅ 存檔不是封包：client 只**收**角色紀錄，從不回送
 
@@ -4148,9 +4119,8 @@ localStorage是browser設定替代，不冒稱原per-character設定或絕對閃
 14. **NPC／怪物的「client 自己走」與我們的權威之間的關係**（§4.28.3）：`0x31` flag 1 會讓原 client
    自己走那隻怪（`sub_485330`），而我們是伺服器每條腿送 `0x33` —— 兩者會不會互相打斷，只有 oracle run
    能回答。`--npc-walk` 的**預設值**（目前 `none`）也等這個答案：原伺服器走了哪些 NPC 完全未知。
-   同一個 oracle run 可以順手回答另外兩題：`sub_499760` 讀的那組 `s16`＋方向＋foothold id
-   （`+250..+260`）**來自哪個資料**（§4.28.1），以及 `0x3D` 尾巴的 `CMovePath` 在實機上會不會出現
-   （那個模板旗標的來源，§4.28.2）。
+   ADR-062已確認+250..260是當前CMovePath元素，template+8是move存在；不是未知WZ矩形或未知路徑旗標。
+   仍未知原server對sender+2／receiver raw索引的處理，及原controller挑選／距離政策；見§4.28。
 
 15. ~~**「已在線上」的處理**~~ → **已完成**：`OnlineAccounts`（`account → 活著的 session`）＋
    `SeatKeeper`＋`Heartbeat`，見 **§4.30** 與 ADR-018；`0x01` 對已在線上的帳號回 `7`，

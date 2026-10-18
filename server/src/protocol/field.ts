@@ -111,6 +111,7 @@ import {
   readNpcEnterField,
   readNpcId,
   readNpcState,
+  readNpcIdle,
 } from "./npc.ts";
 import {
   MOB_OPCODE,
@@ -831,10 +832,15 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   if (opcode === NPC_OPCODE.stateToggle) {
     try {
       const { npcId, on } = readNpcState(new PacketReader(plain, 1));
-      return `${name}: npcId=${npcId} walk=${on ? "on" : "off"}`;
+      return `${name}: npcId=${npcId} controller=${on ? "on" : "off"}`;
     } catch (error) {
       return `${name}: (truncated: ${(error as Error).message})`;
     }
+  }
+  if(opcode===NPC_OPCODE.update) {
+    try {const value=readNpcIdle(new PacketReader(plain,1),plain.length>7);
+      return `${name}: npcId=${value.npcId} action=${value.action} speech=${value.speech}${value.path?` path=${value.path.elements.length}`:""}`;
+    } catch(error){return `${name}: (truncated: ${(error as Error).message})`;}
   }
   if (opcode === MOB_OPCODE.enterField) {
     // No length guard: the reader throws `PacketUnderflowError` and the catch reports it, which is
@@ -867,11 +873,11 @@ export function describeFieldOpcode(opcode: number): string {
   if (opcode >= 0x2e && opcode <= 0x37) return `0x${opcode.toString(16)} CMobPool`;
   if (opcode === NPC_OPCODE.enterField) return "0x39 CNpcPool(npc appear)";
   if (opcode === NPC_OPCODE.leaveField) return "0x3a CNpcPool(npc leave)";
-  if (opcode === NPC_OPCODE.stateToggle) return "0x3b CNpcPool(npc walk)";
+  if (opcode === NPC_OPCODE.stateToggle) return "0x3b CNpcPool(npc controller)";
   if (opcode === 0x38 || opcode === 0x41) return `0x${opcode.toString(16)} CNpcPool(no handler)`;
   if (opcode >= 0x3c && opcode <= 0x40) {
     // 0x3C..0x40 all read a u32 id and stop, except 0x3D, which reads more (`sub_49A280`).
-    return `0x${opcode.toString(16)} CNpcPool(${opcode === NPC_OPCODE.update ? "action + move path" : "id only"})`;
+    return `0x${opcode.toString(16)} CNpcPool(${opcode === NPC_OPCODE.update ? "signed action/speech + optional move path" : "id only"})`;
   }
   if (opcode === DROP_OPCODE.appear) return "0x43 CRewardPool(drop appear)";
   if (opcode === DROP_OPCODE.remove) return "0x44 CRewardPool(drop gone)";

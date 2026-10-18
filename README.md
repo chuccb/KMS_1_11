@@ -1,15 +1,21 @@
 # KMS 1.11 重建工作區
 
-最新還原（2026-10-18，未測試）：原 NPC frame 缺省180ms、CUtilDlgEx2 原素材／尺寸與色框、
-Prev／Next／OK、ESC正確回覆、五種對話body與CP949輸入／選項驗證、modal隔離及唯讀範例入口。
-[原檔交叉證據、操作入口與未完成界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；原NPC任務腳本及待機自言自語同步仍未恢復，啟服不是PASS。
+最新還原（2026-10-18，未測試）：NPC原待機池、單一controller／交接、signed 0x2F→0x3D、
+30ms逐格／單次動作、原五秒深紅氣泡及氣泡期間隱藏名牌，補唯讀NPC狀態。
+[交叉證據、索引差異與未完成界線](docs/NATIVE_NPC_BEHAVIOR.md)／ADR-062；原server索引重寫及自主NPC走路仍缺，啟服不是PASS。
 
 以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
 瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：以反編譯／listing／WZ交叉補原CUtilDlgEx2對話框，修Prev=0／ESC=FF、長文scroll、五種body與實際sub-op回覆。
+- **本輪（2026-10-18，未測試）**：NPC metadata區分own info／一跳linked行為根與動作art merge；
+  補單一controller與交接、signed2F/3D及move條件路徑、等待echo後演出、forced單次／30ms逐格。
+  原normal五秒深紅氣泡、canvas高度錨點／隱藏名牌／清理；40000 Robin捷徑加唯讀控制及回包狀態。
+  **sender+2與receiver raw索引差異未解**，保留原client兩端並明示透明relay／owner選擇是重建政策，不冒稱原server。
+  [完整來源與界線](docs/NATIVE_NPC_BEHAVIOR.md)／ADR-062；未執行test/check/typecheck/語法檢查/browser/VM/probe，同save冷備再開LIVE。
+
+- **前輪（2026-10-18，未測試）**：以反編譯／listing／WZ交叉補原CUtilDlgEx2對話框，修Prev=0／ESC=FF、長文scroll、五種body與實際sub-op回覆。
   補CP949 bytes／number／menu驗證、modal焦點與IME／失焦保護，修NPC缺省frame180ms。
   工具列「體驗工具」新增五種唯讀UI範例，明示非任務、不發0x15、不改角色；原quest腳本和NPC idle同步仍缺。
   [完整來源、入口及界線](docs/NATIVE_NPC_DIALOGUE.md)／ADR-061；未執行test/check/typecheck/browser/VM/probe，同save冷備份後重開LIVE。

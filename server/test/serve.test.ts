@@ -972,7 +972,7 @@ test("the game server spawns the map's monsters and NPCs right after 0x16", { ti
   assert.equal(client.headersOk, true, "the movement packets survive the cipher too");
 });
 
-test("--npc-walk puts one 0x3B after the NPC's 0x39, and the server keeps no timer", { timeout: 20000 }, async (t) => {
+test("legacy --npc-walk requests one controller after visibility; idle timers live on the client", { timeout: 20000 }, async (t) => {
   const log: string[] = [];
   const handoffs = new HandoffRegistry();
   const game = new GameEntryServer({
@@ -994,7 +994,7 @@ test("--npc-walk puts one 0x3B after the NPC's 0x39, and the server keeps no tim
   const packets = await client.take(5);
   client.close();
 
-  // 0x16, the two mobs, the NPC's 0x39, and then the walk state - the flag belongs to a pool entry,
+  // 0x16, the two mobs, NPC visibility and its controller designation - the flag belongs to a pool entry,
   // so it cannot come before the packet that makes one.
   assert.deepEqual(packets.map((packet) => packet[0]), [
     FIELD_OPCODE.setField,
@@ -1008,7 +1008,7 @@ test("--npc-walk puts one 0x3B after the NPC's 0x39, and the server keeps no tim
     { npcId: 1, on: true },
     "the pool id the 0x39 handed out, not the template id the policy named",
   );
-  assert.ok(log.some((line) => line.includes("1 NPCs (1 walking)")), log.join("\n"));
+  assert.ok(log.some((line) => line.includes("1 NPCs (1 legacy controller requests)")), log.join("\n"));
   assert.equal(client.headersOk, true);
 });
 

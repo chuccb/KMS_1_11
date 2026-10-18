@@ -115,12 +115,12 @@ notes:
   --mob-respawn sets the respawn delay (default 5000 ms); the die animation's length is read from
   Mob/<id>.img (the sum of its die frames' delay, the client's own sub_486180).
 
-  --npc-walk names the NPCs the *client* should walk (FINDINGS 4.28): 0x3B flag 1 makes the client's
-  own vecctrl move that NPC inside bounds it already has, so the server sends one packet per NPC and
-  keeps no timer (0x3B flag 0, or setWalking, stops one again). "none" - the default, and what an
-  absent --npc-walk means - walks nobody; "all" walks every NPC; anything else is a comma-separated
-  list of Npc/<id>.img template ids. Which NPCs the 2003 server walked is not located, which is why
-  the default is the quiet one. A bare --npc-walk means "all".
+  Stationary archive-backed NPCs now have one designated controller for idle actions/speech.
+  --npc-walk is a LEGACY name for explicit extra controller requests (none|all|template ids),
+  notably movable NPCs. It is NOT a walk command: 0x3B designates a controller, 0x2F requests and
+  0x3D acknowledges. The browser does not yet generate CVecCtrlNpc walking paths. Server ownership
+  and transparent index relay are reconstruction policies; see docs/NATIVE_NPC_BEHAVIOR.md.
+  A bare --npc-walk means "all"; absent/none leaves movable NPCs unassigned.
 
   --test-tools explicitly enables the DEVELOPMENT-ONLY browser panel for all or an account list.
   Default off; separate from --map-command. No native opcode is invented. Changes are explicit and
@@ -653,7 +653,7 @@ async function runServe(rest: string[]): Promise<number> {
         : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
-      `  npc walk:  ${npcWalk === undefined ? "nobody (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
+      `  npc control: ${npcWalk === undefined ? "stationary idle; movable off (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
       `  test tools: ${testPolicy} (--test-tools; development only, default off)\n` +
       `  map commands: ${mapCommandPolicy} (--map-command; default off)\n` +

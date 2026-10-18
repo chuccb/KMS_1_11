@@ -1403,8 +1403,9 @@ test("HTTP NPC keeps its own name and native dc rectangle; cursor uses existing 
   const world=await startWorld(t);
   const response=await fetch(`http://127.0.0.1:${world.webPort}/api/npc/2003`);
   assert.equal(response.status,200);
-  const npc=await response.json() as {name:string;clickBounds:unknown;actions:Record<string,unknown[]>};
+  const npc=await response.json() as {name:string;clickBounds:unknown;actions:Record<string,unknown[]>;behavior:{movable:boolean;speak:string[];extraActions:unknown[]}};
   assert.equal(npc.name,"로빈");
+  assert.equal(npc.behavior.movable,false);assert.ok(npc.behavior.speak.length>0);assert.ok(Array.isArray(npc.behavior.extraActions));
   assert.deepEqual(npc.clickBounds,{left:-22,top:-65,right:22,bottom:0});
   assert.ok(npc.actions.stand!.length>0);
   const path=encodeURIComponent("UI/Basic.img/Cursor/arrow");

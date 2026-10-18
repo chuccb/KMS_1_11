@@ -1,3 +1,4 @@
+import {CLIENT_NPC_IDLE_OPCODE,readNpcIdle} from "../protocol/npc.ts";
 import {encodeSystemNotice} from '../protocol/notice.ts';
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { characterStatBasis } from "../game/characterstats.ts";
@@ -2691,6 +2692,18 @@ export class GameEntryServer {
         const opcode = event.plain[0] ?? -1;
         // A walk is the server's only source of where a player is: the field keeps it (a pickup needs
         // it) and relays it to the rest of the map as 0x22.
+        if(session!==undefined&&opcode===CLIENT_NPC_IDLE_OPCODE) {
+          // Decode the optional path from the CURRENT field's template, never a claimed browser flag.
+          try {
+            const id=new PacketReader(event.plain,1).readU32();
+            const npc=session.instance.npcs.byId(id);
+            if(npc?.behavior) {
+              const reader=new PacketReader(event.plain,1),value=readNpcIdle(reader,npc.behavior.movable);
+              if(reader.remaining===0)session.instance.reportNpcIdle(session.characterId,value);
+            }
+          } catch { /* Malformed/truncated controller reports are ignored, never broadcast. */ }
+          continue;
+        }
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.userMove) {
           this.handleUserMove(session, event.plain);
           continue;
