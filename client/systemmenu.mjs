@@ -1,22 +1,26 @@
+import {gameProfile, gameSettings} from './gameoptions.mjs';
 import { soundProfile, soundSettings, nativeVolume, sliderCenter, sliderStep } from './systemsettings.mjs';
 
 /** CUIGameMenu 52C8E0 and CUISysOpt 52D800. Native art, transparent DOM hit targets.
- * Unsupported Quest/Party/Community/GameOpt and DirectX/video/screenshot controls stay disabled.
+ * Unsupported Quest/Party/Community and DirectX/video/screenshot controls stay disabled.
  * No fake packet or modern settings skin stands in for their missing implementations.
  */
-export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) {
+export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit, onGameSettings=()=>{}}) {
   const root = document.createElement('section');
   root.id = 'system-menu'; root.className = 'hidden'; root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   document.getElementById('game-ui').append(root);
   let storage;
   try { storage = localStorage; } catch {}
-  const profile = soundProfile(storage);
+  const profile = soundProfile(storage), game=gameProfile(storage);
+  let currentGame=game.values();
+  const applyGame=value=>{currentGame=gameSettings(value);onGameSettings({...currentGame});};
+  applyGame(currentGame);
   audio.applySettings(profile.values());
   // Warm the small native menu set. Opening must not depend on an unrelated inventory icon load.
-  for(const kind of ['GameMenu','SysOpt'])image(`UI/UIWindow.img/${kind}/backgrnd`);
-  for(const name of ['Quest','Party','Community','GameOpt'])image(`UI/UIWindow.img/GameMenu/Bt${name}/disabled/0`);
-  for(const base of ['UI/UIWindow.img/GameMenu/BtSysOpt','UI/UIWindow.img/GameMenu/BtQuit',
+  for(const kind of ['GameMenu','SysOpt','GameOpt'])image(`UI/UIWindow.img/${kind}/backgrnd`);
+  for(const name of ['Quest','Party','Community'])image(`UI/UIWindow.img/GameMenu/Bt${name}/disabled/0`);
+  for(const base of ['UI/UIWindow.img/GameMenu/BtGameOpt','UI/UIWindow.img/UtilDlgEx/BtOK','UI/UIWindow.img/UtilDlgEx/BtCancel','UI/UIWindow.img/GameMenu/BtSysOpt','UI/UIWindow.img/GameMenu/BtQuit',
     'UI/UIWindow.img/BtUIClose','UI/Basic.img/BtOK','UI/Basic.img/BtCancel']) {
     for(const state of ['normal','pressed','mouseOver'])image(`${base}/${state}/0`);
   }
@@ -47,6 +51,10 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) 
       if(accept) profile.save(draft);
       audio.applySettings(accept ? draft : original);
     }
+    if(mode==='game') {
+      if(accept)game.save(draft);
+      applyGame(accept?draft:original);
+    }
     // Blur while the active control is still attached; contains() is false after replaceChildren().
     if(root.contains(document.activeElement))document.activeElement.blur();
     mode=undefined; sliding=hover=pressed=undefined; controls=[];
@@ -56,8 +64,8 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) 
   }
   function mount(next) {
     root.replaceChildren(); controls=[]; hover=pressed=sliding=undefined;
-    mode=next; at=next==='menu'?{x:312,y:180}:{x:226,y:187};
-    root.setAttribute('aria-label',next==='menu'?'게임 메뉴 / 遊戲選單':'시스템 옵션 / 系統設定');
+    mode=next; at=next==='menu'?{x:312,y:180}:next==='game'?{x:317,y:177}:{x:226,y:187};
+    root.setAttribute('aria-label',next==='menu'?'게임 메뉴 / 遊戲選單':next==='game'?'게임 옵션 / 遊戲設定':'시스템 옵션 / 系統設定');
     root.classList.remove('hidden');
   }
   function updateSound() {
@@ -81,6 +89,21 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) 
     });
     return c;
   }
+  function openGame() {
+    mount('game');original={...currentGame};draft={...original};
+    const ids=['minimap','whisper','messenger','exchange','party','game'];
+    const labels=['顯示小地圖','接受悄悄話','接受Messenger邀請（尚未接瀏覽器介面）',
+      '接受交易邀請（尚未接瀏覽器介面）','接受組隊邀請（尚未接瀏覽器介面）','小遊戲（原版亦停用）'];
+    ids.forEach((id,i)=>{
+      const c=control(id,labels[i],undefined,134,50+26*i,12,12,()=>{
+        draft[id]=!draft[id];applyGame(draft);c.el.setAttribute('aria-checked',String(draft[id]));
+      },i>=2);
+      c.check=true;c.el.setAttribute('role','checkbox');c.el.setAttribute('aria-checked',String(draft[id]));
+    });
+    control('ok','確定並保存','UI/UIWindow.img/UtilDlgEx/BtOK',54,203,50,23,()=>close(true));
+    control('cancel','取消並還原','UI/UIWindow.img/UtilDlgEx/BtCancel',107,203,50,23,()=>close());
+    controls[0].el.focus();
+  }
   function openSound() {
     mount('sound'); original=audio.settings; draft={...original};
     const video=control('video','DirectX 畫質控制尚未移植',undefined,116,50,180,16,undefined,true);
@@ -101,9 +124,9 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) 
     previousFocus=document.activeElement;onOpen();mount('menu');
     control('close','關閉選單','UI/UIWindow.img/BtUIClose',128,9,32,15,()=>close());
     const names=['Quest','Party','Community','GameOpt','SysOpt','Quit'];
-    const labels=['任務（尚未實作）','組隊視窗（尚未實作）','社群視窗（尚未實作）','遊戲設定（尚未實作）','系統設定','離開目前連線並回到登入畫面'];
+    const labels=['任務（尚未實作）','組隊視窗（尚未實作）','社群視窗（尚未實作）','遊戲設定（小地圖／悄悄話）','系統設定','離開目前連線並回到登入畫面'];
     names.forEach((name,i)=>control(name,labels[i],`UI/UIWindow.img/GameMenu/Bt${name}`,20,63+27*i,136,23,
-      ()=>{if(i===4)openSound();else if(i===5){close(false,false);onQuit();}},i<4));
+      ()=>{if(i===3)openGame();else if(i===4)openSound();else if(i===5){close(false,false);onQuit();}},i<3));
     controls.find(c=>c.id==='SysOpt').el.focus();void audio.effect('UI/DlgNotice');return true;
   }
   window.addEventListener('mousemove',e=>{
@@ -142,10 +165,12 @@ export function systemMenu({ctx, image, audio, point, canOpen, onOpen, onQuit}) 
   }
   root.addEventListener('contextmenu',e=>e.preventDefault());
   root.addEventListener('wheel',e=>{e.preventDefault();e.stopPropagation();},{passive:false});
-  return {open,close,get visible(){return !!mode;},draw(){
+  return {open,close,get gameSettings(){return {...currentGame};},
+    setMiniMap(shown){game.save({...currentGame,minimap:shown});applyGame(game.values());},
+    get visible(){return !!mode;},draw(){
     if(!mode)return;
     ctx.save();
-    stamp(`UI/UIWindow.img/${mode==='menu'?'GameMenu':'SysOpt'}/backgrnd`,at.x,at.y);
+    stamp(`UI/UIWindow.img/${mode==='menu'?'GameMenu':mode==='game'?'GameOpt':'SysOpt'}/backgrnd`,at.x,at.y);
     for(const c of controls) {
       const x=at.x+c.x,y=at.y+c.y;
       const state=c.disabled?'disabled':pressed===c.id?'pressed':hover===c.id?'mouseOver':'normal';

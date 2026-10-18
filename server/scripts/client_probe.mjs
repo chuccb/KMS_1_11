@@ -1,3 +1,6 @@
+// Historical VM/DOM shim: NOT executed or certified against the current full client.
+// ADR-059 only updates the field-chat fixture/row text below; current feature regression sources
+// live in server/test/native-chat-gameoptions.test.ts.
 import assert from "node:assert/strict";
 // Offline DOM/canvas shim: does client/main.js run, and do its handlers survive real event shapes?
 class El {
@@ -220,7 +223,7 @@ const messages = [
   { t: "user-move", characterId: 21, x: 30, y: 40, action: 0, foothold: 0 },
   { t: "user-emotion", characterId: 22, emotion: 3 },
   { t: "level-up", characterId: 22 },
-  { t: "chat", name: "Alt", text: "hello" },
+  { t: "chat", channel: "field", characterId: 22, name: "Alt", text: "hello" },
   { t: "mob-enter", mob: { mobId: 1, templateId: 1210100, x: 5, y: 6, facing: 0 } },
   { t: "mob-move", mobId: 1, x: 7, y: 8 },
   { t: "mob-leave", mobId: 1 },
@@ -270,16 +273,16 @@ elements.get("say").fire("keydown", { key: "Enter", shiftKey: false });
 await new Promise((r) => setTimeout(r, 10));
 await new Promise((r) => setTimeout(r, 10));
 console.log("after input:", JSON.stringify(sent));
-const chatHtml = elements.get("chat-lines").children.map((li) => li.children.map((c) => c.textContent).join(""));
+const chatHtml = elements.get("chat-lines").children.map((li) => li.textContent);
 console.log("chat lines:", JSON.stringify(chatHtml));
 // `field` already fetched map 1000000, so a find answer for it carries the name...
 elements.get("say").value = "/f Hero";
 elements.get("say").fire("keydown", { key: "Enter", shiftKey: false });
 ws.push({ t: "find-answer", name: "Hero", mapId: 1000000 });
-// ...while one for a map this page has never fetched does not (and is a bare id).
+// ADR-059: an uncached map starts with an explicit id, then asynchronously loads street:map.
 ws.push({ t: "find-answer", name: "Hero", mapId: 2000000 });
 await new Promise((r) => setTimeout(r, 10));
-const later = elements.get("chat-lines").children.map((li) => li.children.map((c) => c.textContent).join(""));
+const later = elements.get("chat-lines").children.map((li) => li.textContent);
 console.log("find lines:", JSON.stringify(later.slice(-2)));
 
 // The portal hit test, with the camera where main.js puts it: self at the centre of 800x600, then

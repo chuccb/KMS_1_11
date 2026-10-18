@@ -45,6 +45,8 @@ import {
   USER_REQUEST_KIND,
   readSetField,
   readUserChat,
+  readUserBalloon,
+  readUserWhisperRefused,
   readUserLook,
   readUserFindAnswer,
   readUserWhisperAnswer,
@@ -639,7 +641,7 @@ test("a character that is already in a field is not entered twice", { timeout: 2
   await first.drain();
   first.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.chat, body: encodeClientChat({ text: encodeCp949("still here") }).slice(1) });
   const chat = (await first.take(1))[0]!;
-  assert.equal(chat[0], FIELD_OPCODE.userMessage, `the first session still gets its chat back; log:\n${log.join("\n")}`);
+  assert.equal(chat[0], FIELD_OPCODE.userBalloon, `the first session still gets its chat back; log:\n${log.join("\n")}`);
 });
 
 /**
@@ -2570,9 +2572,8 @@ test("a monster's damage lands because the client reports it: c2s 0x1C in, 0x0D 
  * The two things worth a test are the two that a "reasonable" implementation gets wrong:
  *
  *  - **the speaker is included**. `sub_470C70` only builds and sends the packet - there is no local
- *    echo anywhere in the chat input path - and the `"%s>> %s"` renderer lives on the receiving side
- *    (`sub_472910` case 0x12). Skipping the sender would leave players unable to read their own words.
- *  - **it does not leave the map**. Chat is the field's (`CField`'s own opcode 0x1A), so a player in
+ *    echo anywhere in the chat input path - and 50B320 appends the log on receipt of the 0x1F balloon packet. Skipping the sender would leave players unable to read their own words.
+ *  - **it does not leave the map**. Chat is field-scoped (`CUserPool` opcode0x1F), so a player in
  *    another map is not a listener, and the text is passed through as bytes - the server never has to
  *    decode what it is relaying.
  */
@@ -2631,16 +2632,16 @@ test("chat reaches everyone in the map, the speaker included, and stays in it", 
     opcode: CLIENT_FIELD_OPCODE.chat,
     body: encodeClientChat({ text: encodeCp949("안녕") }).slice(1),
   });
-  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userMessage);
-  const heard = readUserChat(new PacketReader(altSaw[altSaw.length - 1]!, 1));
+  const altSaw = await alt.takeOpcode(FIELD_OPCODE.userBalloon);
+  const heard = readUserBalloon(new PacketReader(altSaw[altSaw.length - 1]!, 1));
   assert.deepEqual(
-    [heard.name, toHex(heard.text)],
-    ["Hero", "bec8b3e7"],
+    [heard.characterId, toHex(heard.text)],
+    [7, "bec8b3e7"],
     "the other player hears the speaker's name and the bytes they typed",
   );
-  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
   assert.deepEqual(
-    readUserChat(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
+    readUserBalloon(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)),
     heard,
     "and so does the speaker - the client only ever renders what it receives",
   );
@@ -2651,19 +2652,19 @@ test("chat reaches everyone in the map, the speaker included, and stays in it", 
     opcode: CLIENT_FIELD_OPCODE.chat,
     body: encodeClientChat({ text: Uint8Array.from([0x68, 0x69]) }).slice(1),
   });
-  const heroSawAlt = await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  const heroSawAlt = await hero.takeOpcode(FIELD_OPCODE.userBalloon);
   assert.deepEqual(
     [
-      readUserChat(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).name,
-      toHex(readUserChat(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).text),
+      readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).characterId,
+      toHex(readUserBalloon(new PacketReader(heroSawAlt[heroSawAlt.length - 1]!, 1)).text),
     ],
-    ["Alt", "6869"],
+    [8, "6869"],
     "the same opcode, the other speaker",
   );
 
   // The map 2000000 player: a field of their own, so the line is not theirs to hear.
   assert.equal(
-    (await guest.drainOpcodes()).includes(FIELD_OPCODE.userMessage),
+    (await guest.drainOpcodes()).includes(FIELD_OPCODE.userBalloon),
     false,
     "chat does not leave the map it was said in",
   );
@@ -3171,23 +3172,19 @@ test("whisper and find reach a player by name, across maps, and answer the asker
     mapId: -1,
   });
 
-  // The client's balloon request (`0x20 | 2`) is read and logged, and answered with nothing: which
-  // packet draws a balloon is not located (FINDINGS 4.31, §6).
-  hero.send({
-    kind: "unknown",
-    opcode: CLIENT_FIELD_OPCODE.userRequest,
-    body: encodeClientUserRequest({
-      kind: USER_REQUEST_KIND.balloon,
-      name: "Hero",
-      text: Uint8Array.from([0x68, 0x69]),
-    }).slice(1),
-  });
-  await eventually(() => log.some((line) => line.includes('0x23 balloon "Hero": hi')));
-  assert.equal(
-    (await hero.drainOpcodes()).filter((opcode) => opcode === FIELD_OPCODE.userMessage).length,
-    0,
-    "a balloon request is not answered",
-  );
+  // SOURCE UPDATED for ADR-059: refresh the real delivery immediately before the 3s refusal window.
+  hero.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
+    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.whisper,name:"Guest",text:encodeCp949("again")}).slice(1)});
+  await guest.takeOpcode(FIELD_OPCODE.userMessage);await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  guest.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
+    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name:"Hero",text:encodeCp949("Guest")}).slice(1)});
+  const refused=await hero.takeOpcode(FIELD_OPCODE.userMessage);
+  assert.deepEqual(readUserWhisperRefused(new PacketReader(refused.at(-1)!,1)),{name:"Guest"});
+  // A forged own-name or unsolicited refusal must not notify anybody.
+  hero.send({kind:"unknown",opcode:CLIENT_FIELD_OPCODE.userRequest,
+    body:encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name:"Alt",text:encodeCp949("Guest")}).slice(1)});
+  await new Promise(resolve=>setTimeout(resolve,40));
+  assert.equal((await alt.drainOpcodes()).includes(FIELD_OPCODE.userMessage),false);
 
   assert.equal(hero.headersOk && alt.headersOk && guest.headersOk, true, "every packet survives the cipher/header check");
   assert.ok(log.some((line) => line.includes('whisper "Hero" -> "Guest": 안녕')), log.join("\n"));
@@ -4214,5 +4211,5 @@ test("raw native 0x0D map-zero jump, tn index, remote coordinates and map-zero r
  const about=readUserEnterField(new PacketReader(burst.at(-1)!,1));assert.deepEqual([about.x,about.y,about.foothold],[600,290,32]);
  interact(hero,1000000);await hero.takeOpcode(FIELD_OPCODE.setField);
  interact(hero,0);const zero=await hero.takeOpcode(FIELD_OPCODE.setField);assert.deepEqual([readSetField(new PacketReader(zero.at(-1)!,1)).character.stats.mapId,readSetField(new PacketReader(zero.at(-1)!,1)).character.stats.unknown101],[0,0],"authorized alive kind=0 is the original GM map-zero command, not revive");
- interact(guest,1000000);const denied=await guest.takeOpcode(FIELD_OPCODE.userMessage);assert.ok(denied.some(p=>p[0]===FIELD_OPCODE.requestRelease));assert.ok(!denied.some(p=>p[0]===FIELD_OPCODE.setField),"forged native packets cannot bypass the account policy");
+ interact(guest,1000000);const denied=await guest.takeOpcode(0x13);assert.ok(denied.some(p=>p[0]===FIELD_OPCODE.requestRelease));assert.ok(!denied.some(p=>p[0]===FIELD_OPCODE.setField),"forged native packets cannot bypass the account policy");
 });

@@ -602,6 +602,8 @@ class BrowserSession {
             String(message.name ?? ""),
             String(message.text ?? ""),
           );
+        case "refuse-whisper":
+          return await this.require().refuseWhisper(String.fromCharCode(...encodeCp949(String(message.name??""))));
         case "find":
           return await this.find(String(message.name ?? ""));
         case "drop-mesos":
@@ -1090,8 +1092,8 @@ class BrowserSession {
   }
 
   /**
-   * A whisper to one player: `0x23` kind 0x06. The receiver sees a normal `chat` (`0x1A` 0x12 - the
-   * same packet chat uses, so the two are indistinguishable on the wire) and the sender gets
+   * A whisper to one player: `0x23` kind0x06. Receiver gets 0x1A/0x12 (channel=whisper),
+   * distinct from field speech (0x1F, channel=field), and the sender gets
    * `whisper-answer`. The text is CP949 on the wire, like every string a human reads.
    */
   private async whisper(name: string, text: string): Promise<void> {

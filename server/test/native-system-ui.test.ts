@@ -83,7 +83,7 @@ test('renderer/input wiring: original paths, preview/cancel, local stale-action 
   const quick=main.slice(main.indexOf('function beginQuickDrag'),main.indexOf('// A drag carries a source snapshot'));
   assert.match(quick,/quickProfile\.move/);assert.match(quick,/quickProfile\.clear/);
   assert.match(quick,/d\.epoch!==itemEpoch/);assert.doesNotMatch(quick,/send\(/);
-  assert.match(main,/drawWhisperRecipient\(\)/);assert.match(main,/pendingWhisper=\{name:whisperRecipient,text\}/);
+  assert.match(main,/drawWhisperRecipient\(\)/);assert.match(main,/beginUserRequest\(whisperRecipient,text\)/);
   assert.match(main,/quitToTitle=true;socket.close\(1000/);
   assert.match(dialogs,/c\.mode === "text"/);assert.match(dialogs,/event.isComposing/);
 });

@@ -1,3 +1,4 @@
+import {SYSTEM_NOTICE_OPCODE,readSystemNotice} from '../protocol/notice.ts';
 import { ClientRandom } from "../protocol/random.ts";
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
@@ -102,6 +103,9 @@ import {
   INTERACT_KIND_REVIVE,
   readSetField,
   readUserChat,
+  readUserBalloon,
+  readUserWhisperRefused,
+  USER_MESSAGE_WHISPER_REFUSED,
   readUserEffect,
   readUserEmotion,
   readUserAttack,
@@ -117,7 +121,7 @@ import {
   USER_MESSAGE_WHISPER_ANSWER,
   USER_REQUEST_KIND,
 } from "../protocol/field.ts";
-import { decodeCp949 } from "../protocol/cp949.ts";
+import { decodeCp949, encodeCp949 } from "../protocol/cp949.ts";
 import {
   MOB_OPCODE,
   readMobEnterField,
@@ -386,7 +390,9 @@ export type ClientEvent =
   | { kind: "skill-result"; changed: boolean }
   | { kind: "ability-result"; changed: boolean }
   | { kind: "meso-drop-result"; changed: boolean }
-  | { kind: "chat"; name: string; text: string }
+  | { kind: "chat"; name: string; text: string; channel: "field" | "whisper"; characterId?: number }
+  | { kind: "whisper-refused"; name: string }
+  | { kind: "system-notice"; text: string }
   | { kind: "inventory"; inventory: InventoryView; ack?: boolean }
   | { kind: "shop-open"; shop: ShopView }
   | { kind: "shop-result"; code: number; message: string }
@@ -678,6 +684,7 @@ export class ClientSession {
   private slotPending = false;
   private shopPending = false;
   private nextSlotAt = 0;
+  private userRequestUntil = 0;
 
   constructor(options: ClientSessionOptions) {
     this.options = options;
@@ -994,8 +1001,7 @@ export class ClientSession {
    * and the server looks the session up by name.
    *
    * Nothing about the result comes back on this call: a delivered whisper produces `0x1A` sub-op
-   * `0x12` **at the receiver** (the same packet as chat, which is why the receiver cannot tell them
-   * apart) and sub-op `0x0A` at the sender - the `whisper-answer` event, whose name is the resolved
+   * `0x12` **at the receiver**, distinct from field speech (0x1F), and sub-op `0x0A` at the sender - the `whisper-answer` event, whose name is the resolved
    * character and whose flag says delivered or not found.
    */
   async whisper(name: string, text: Uint8Array): Promise<void> {
@@ -1003,23 +1009,32 @@ export class ClientSession {
     if (link === undefined)
       throw new Error("whisper() needs a session in a field");
     if (name === "") throw new Error("whisper() needs a target name");
-    await link.send(
-      encodeClientUserRequest({ kind: USER_REQUEST_KIND.whisper, name, text }),
-    );
+    this.reserveUserRequest();
+    try {await link.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.whisper,name,text}));}
+    catch(error){this.userRequestUntil=0;throw error;}
   }
 
-  /**
-   * `/헉추적 <name>`: where is that player. `0x23` kind `0x05`, answered by `0x1A` sub-op `0x09`
-   * (`find-answer`), whose `mapId` is `-1` when nobody by that name is online.
-   */
+  /** 4717D0 / 4728D0: shared find/whisper gate, expires after 3000ms. */
+  private reserveUserRequest(): void {
+    if(performance.now()<this.userRequestUntil)throw new Error("다른 요청을 처리 중입니다");
+    this.userRequestUntil=performance.now()+3000;
+  }
+  async refuseWhisper(name:string): Promise<void> {
+    if(!this.gameLink || !this.self)throw new Error('refusal needs a session in a field');
+    // The second string is our own character name, NOT the refused message text.
+    await this.gameLink.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.refuseWhisper,name,
+      text:encodeCp949(this.self.name)}));
+  }
+
+  /** 0x23 kind0x05 -> 0x1A sub-op0x09; mapId -1 means not found. */
   async find(name: string): Promise<void> {
     const link = this.gameLink;
     if (link === undefined)
       throw new Error("find() needs a session in a field");
     if (name === "") throw new Error("find() needs a name");
-    await link.send(
-      encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name }),
-    );
+    this.reserveUserRequest();
+    try {await link.send(encodeClientUserRequest({kind:USER_REQUEST_KIND.find,name}));}
+    catch(error){this.userRequestUntil=0;throw error;}
   }
 
   /**
@@ -1411,6 +1426,7 @@ export class ClientSession {
     this.link = undefined;
     this.skillPending = false;
     this.nextSkillAt = 0;
+    this.userRequestUntil = 0;
     this.slotPending =
       this.shopPending =
       this.mesoPending =
@@ -1423,9 +1439,14 @@ export class ClientSession {
     const opcode = plain[0]!;
     try {
       switch (opcode) {
+        case SYSTEM_NOTICE_OPCODE: {
+          const notice=readSystemNotice(new PacketReader(plain,1));
+          this.emit({kind:'system-notice',text:decodeChatText(notice.text)});return;
+        }
         case FIELD_OPCODE.setField: {
           const field = readSetField(new PacketReader(plain, 1));
           this.nextReviveAt = 0;
+          this.userRequestUntil = 0;
           this.abilityPending = false;
           this.skillPending = false;
           this.nextSkillAt = 0;
@@ -1653,15 +1674,25 @@ export class ClientSession {
           this.emit({ kind: "level-up", characterId: effect.characterId });
           return;
         }
+        case FIELD_OPCODE.userBalloon: {
+          const chat=readUserBalloon(new PacketReader(plain,1));
+          const user=chat.characterId===this.self?.characterId?this.self:this.users.get(chat.characterId);
+          if(user)this.emit({kind:"chat",channel:"field",characterId:chat.characterId,
+            name:user.name,text:decodeChatText(chat.text)});
+          return;
+        }
         case FIELD_OPCODE.userMessage: {
-          // One opcode, four shapes, told apart by the first body byte (FINDINGS 4.31). Only three
-          // of them have a codec; 0x22 (the whisper refusal) has a known shape and no client input
-          // that produces it, so it stays `unknown` like any other packet this build does not read.
+          // Four shapes; 0x12 is a received whisper, 0x22 its later refusal notification (ADR-059).
           const subOp = plain[1];
+          if(subOp===USER_MESSAGE_WHISPER_REFUSED){
+            const value=readUserWhisperRefused(new PacketReader(plain,1));
+            this.emit({kind:"whisper-refused",name:decodeByteName(value.name)});return;
+          }
           if (subOp === USER_MESSAGE_CHAT) {
             const chat = readUserChat(new PacketReader(plain, 1));
             this.emit({
               kind: "chat",
+              channel: "whisper",
               name: decodeByteName(chat.name),
               text: decodeChatText(chat.text),
             });
@@ -1669,6 +1700,7 @@ export class ClientSession {
           }
           if (subOp === USER_MESSAGE_WHISPER_ANSWER) {
             const answer = readUserWhisperAnswer(new PacketReader(plain, 1));
+            this.userRequestUntil=0;
             this.emit({
               kind: "whisper-answer",
               name: decodeByteName(answer.name),
@@ -1678,6 +1710,7 @@ export class ClientSession {
           }
           if (subOp === USER_MESSAGE_FIND_ANSWER) {
             const answer = readUserFindAnswer(new PacketReader(plain, 1));
+            this.userRequestUntil=0;
             this.emit({
               kind: "find-answer",
               name: decodeByteName(answer.name),
@@ -1901,6 +1934,8 @@ export const CLIENT_EVENT_KINDS = [
   "shop-result",
   "npc-say",
   "whisper-answer",
+  "whisper-refused",
+  "system-notice",
   "find-answer",
   "level-up",
   "mob-enter",

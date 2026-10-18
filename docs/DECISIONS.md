@@ -651,6 +651,9 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
 
 ## ADR-019：密語與找人用「名字」定位玩家，而且只有線上的算數
 
+> **ADR-059（2026-10-18，未測試）已更正本節舊氣泡假說**：23/22是goWhisper拒收，公開聊天另走1F。
+> 本節保留歷史決策，現行證據／實作以ADR-059與NATIVE_GAME_OPTIONS_CHAT.md為準。
+
 **日期**：2026-10-16 ｜ **狀態**：已定案（形狀全部有證據；「線上才算」與大小寫規則是我們的選擇）
 
 **背景**：`0x23`（`sub_4717D0`）是 client 對**一個名字**的請求，`0x1A` 的 `0x09`／`0x0A`／`0x22` 是它的
@@ -2355,3 +2358,30 @@ Menu未有完整功能的Quest／Party／Community／GameOpt保持disabled，不
 本機cold attack增加localActionEpoch，開關窗或起拖後不補送舊Ctrl；不取消遠端角色攻擊。
 新增回歸來源但不執行test/check/typecheck/browser/VM/probe。原hover timing／完整UI focus等界線詳NATIVE_SYSTEM_UI.md。
 同save停服冷備份、同權限重開LIVE、提交[skip ci]、非force推送目前Arena分支。
+
+## ADR-059：原GameOpt、0x1F公開聊天與五秒氣泡、goWhisper拒收、StatusBar記錄一起接線
+
+**日期**：2026-10-18 ｜ **狀態**：已編輯實作／回歸來源，未執行功能驗證。
+
+交叉52D0B0／52D7B0／43DE80、WZ GameOpt與43D360／43D630；原166×246視窗(317,177)，六個checkbox。
+本機六boolean預設1；只啟用有真行為的miniMap／whisper，其餘disabled（小遊戲原版即disabled）。
+變更即預覽、OK存origin profile、Cancel／Esc／field／owner reset回snapshot。M同步設定；draft不污染舊minimap profile。
+
+**更正ADR-019的舊假說**：472910的004729DC是CConfig+24 **goWhisper**，不是聊天窗開關。
+c2s23/22是拒收 `[sender][ownName]`，不是氣泡請求。原server未知；本server要求真delivery對應sender-session的
+3秒receipt＋own-name校驗、consume後回1A/22，拒絕憑任意名字偽造。兩條收件路都記recipient，普通聊天不改recipient。
+1A/12收密語font1綠，1A/0A發件echo；find與whisper共用三秒gate，22不清gate、不經gate發拒收。
+缺request ID時晚回包無法完美關聯，不能聲稱完整還原。
+
+**公開聊天另走1F**：51D530／51CD10／50B320先查self或remote，u32 id＋CP949文字。
+同圖broadcast包含自己；白字log＋完整`name : text` normal/dead五秒WZ氣泡，12px cells／84px wrap／14px行距、alpha224。
+使用當前avatar origin與root250210，speech獨立序號key，不與avatar共用WeakMap stamp導致每幀換序。
+保留drop／portal／damage原排序；不是已完成全Gr2D/CShape2D。
+
+4FB670按432px量測、五空白續行、64 **換行record**、六行／13px、reader五秒後有新訊息才追尾。
+metadata／字型重排不復活pruned或舊owner記錄；不每RAF重排。Esc清空退出、空edit左右鍵退出、IME保留，focus取消cold-action。
+55CDE0的公告走13/type0，font5淡黃；不偽裝System密語而被拒收／改recipient。type1中央公告仍缺。
+原find成功font3灰／失敗font6粉、whisper成功綠／失敗粉；首個find主動載street:map，不必重查。
+
+未執行test/check/typecheck/browser/VM/probe。原碼／PE／WZ閱讀及git空白檢查不是功能PASS。
+完整來源、操作與缺口見NATIVE_GAME_OPTIONS_CHAT.md；沿用同save停服冷備份再開LIVE、[skip ci]非force推送。

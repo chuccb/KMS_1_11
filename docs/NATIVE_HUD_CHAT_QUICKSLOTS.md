@@ -2,7 +2,8 @@
 
 > **後續ADR-058（2026-10-18，未測試）**：當時未接的消耗品快捷格互拖／拖出清除、原Menu／SysOpt、
 > 悄悄話收件人輸入／everyone模式已接，見 [NATIVE_SYSTEM_UI.md](NATIVE_SYSTEM_UI.md)。
-> 下方為本輪歷史紀錄；技能快捷施放／BtChat／GameOpt仍未完成，不以歷史紀錄冒充現在的驗證。
+> ADR-059已補GameOpt部分功能與聊天／拒收，見 [新證據](NATIVE_GAME_OPTIONS_CHAT.md)；技能快捷施放／BtChat仍缺。
+> 下方為歷史紀錄，不以歷史紀錄冒充現在的驗證。
 
 2026-10-18。**已實作，未執行 test/check/typecheck/browser/VM/probe；來源回歸檔不是 PASS。**
 

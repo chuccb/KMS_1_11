@@ -4,7 +4,16 @@
 > 能說話、能走——用來在沒有 Windows、沒有 Godot binary 的環境裡，把伺服器端的東西**看得見**。
 > 決策與理由在 `docs/DECISIONS.md` ADR-034。
 
-## 最新實作：原版 Menu／SysOpt、快捷格拖移／清除與收件人模式（2026-10-18，未測試）
+## 最新實作：原GameOpt、公開聊天氣泡與密語拒收（2026-10-18，未測試）
+
+Menu→게임 옵션接原166×246視窗與六項位置；miniMap／whisper可操作，即時套用、OK本機存／Cancel還原。
+公開聊天用原0x1F id+text，含自己且限同圖，白字log＋normal/dead五秒WZ氣泡；密語另為0x1A/0x12綠字。
+關閉whisper時依原23/22拒收，仍記回覆對象；server限定真delivery的receipt，不能用任意名字偽造通知。
+三秒shared find／whisper gate、64換行record／reader五秒追尾、輸入Esc／空字串左右鍵退出、IME與cold-action guard。
+原13/type0系統公告淡黃，不再假裝System寄密語。沒有執行測試／typecheck／browser／VM／probe。
+完整證據／方便入口／未完成範圍見 [NATIVE_GAME_OPTIONS_CHAT](NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059。
+
+## 前輪實作：原版 Menu／SysOpt、快捷格拖移／清除與收件人模式（2026-10-18，未測試）
 
 依PE vtable與原52C8E0／52D800接原視窗、CLOSE／六列按鈕與音量／mute控制項。
 兩組20段／預設15=80%／最低5%，獨立靜音；preview、OK本機保存、Cancel／Escape還原，不重播BGM。

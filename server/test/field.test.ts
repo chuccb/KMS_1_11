@@ -534,7 +534,7 @@ test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-befor
   assert.equal(CLIENT_FIELD_OPCODE.userRequest, 0x23);
   assert.equal(USER_REQUEST_KIND.find, 0x05);
   assert.equal(USER_REQUEST_KIND.whisper, 0x06);
-  assert.equal(USER_REQUEST_KIND.balloon, 0x22);
+  assert.equal(USER_REQUEST_KIND.refuseWhisper, 0x22);
 
   const find = encodeClientUserRequest({ kind: USER_REQUEST_KIND.find, name: "Alt" });
   assert.equal(toHex(find), "23" + "05" + "0300" + "416c74");
@@ -561,17 +561,16 @@ test("0x23: the kind byte picks find (0x05) from whisper (0x06), then name-befor
     '0x23 whisper "Alt": 안녕',
   );
 
-  // The client's own balloon request is the third kind (`0x20 | 2`), and it is read like a whisper -
-  // only the server's answer differs, and there is none yet (FINDINGS 4.31).
-  const balloon = encodeClientUserRequest({
-    kind: USER_REQUEST_KIND.balloon,
+  // 0x22 is refusal of a received whisper; second string is the receiver's own name (ADR-059).
+  const refusal = encodeClientUserRequest({
+    kind: USER_REQUEST_KIND.refuseWhisper,
     name: "Hero",
-    text: Uint8Array.from([0x68, 0x69]),
+    text: Uint8Array.from([0x41, 0x6c, 0x74]),
   });
-  assert.equal(toHex(balloon), "23" + "22" + "0400" + "4865726f" + "0200" + "6869");
+  assert.equal(toHex(refusal), "23" + "22" + "0400" + "4865726f" + "0300" + "416c74");
   assert.equal(
-    describeClientUserRequest(readClientUserRequest(new PacketReader(balloon, 1))),
-    '0x23 balloon "Hero": hi',
+    describeClientUserRequest(readClientUserRequest(new PacketReader(refusal, 1))),
+    '0x23 refuse whisper "Hero": Alt',
   );
 
   // A kind nobody has a body for is refused, not half-read: 0x04 alone is the whisper family with

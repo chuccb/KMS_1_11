@@ -1,3 +1,4 @@
+import * as notice from './notice.ts';
 import * as skills from "./skills.ts";
 /**
  * The protocol catalogue: **one machine-readable list of every packet this repo can actually
@@ -424,7 +425,7 @@ export const PACKETS: readonly PacketSchema[] = [
       {
         name: "kind",
         type: "u8",
-        note: "0x05 find / 0x06 whisper / 0x22 the client's own balloon request (0x20 | 2)",
+        note: "0x05 find / 0x06 whisper / 0x22 refuse received whisper (sender name + own name; ADR-059)",
       },
       { name: "name", type: STRING, note: "the target by name - the packet carries no character id" },
       { name: "text", type: STRING, note: "only the kinds with a body carry it" },
@@ -624,6 +625,17 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode:field.FIELD_OPCODE.userBalloon,direction:"s2c",stage:"field",name:"userBalloon",status:"byte-exact",
+    evidence:"51D530 -> 50B320: u32 id + CP949 string, log and 5000ms native balloon (ADR-059)",
+    codecs:["readUserBalloon","encodeUserBalloon","describeUserBalloon"],
+    fields:[{name:"characterId",type:"u32"},{name:"text",type:STRING}],
+  },
+  {
+    opcode:notice.SYSTEM_NOTICE_OPCODE,direction:"s2c",stage:"field",name:"systemNotice",status:"partial",
+    evidence:"55CDE0: type0 + string -> [공지사항] text in StatusBar font5; type1 center notice not implemented",
+    codecs:["readSystemNotice","encodeSystemNotice"],fields:[{name:"type",type:"u8",note:"only 0 implemented"},{name:"text",type:STRING}],
+  },
+  {
     opcode: field.FIELD_OPCODE.userEmotion,
     direction: "s2c",
     stage: "field",
@@ -746,14 +758,15 @@ export const PACKETS: readonly PacketSchema[] = [
       "readUserWhisperAnswer",
       "encodeUserWhisperAnswer",
       "describeUserWhisperAnswer",
+      "readUserWhisperRefused",
+      "encodeUserWhisperRefused",
     ],
     fields: [
       {
         name: "subOp",
         type: "u8",
         note:
-          "0x12 chat (also the delivered whisper's line) / 0x09 find answer / 0x0A whisper answer / " +
-          "0x22 whisper refusal (shape known, no client input sets it - no codec)",
+          "0x12 incoming whisper / 0x09 find answer / 0x0A whisper answer / 0x22 whisper refusal (ADR-059)",
       },
       { name: "name", type: STRING, note: "the speaker - there is no character id in this packet" },
       {
@@ -1403,6 +1416,7 @@ export const PACKETS: readonly PacketSchema[] = [
 
 /** Every codec module, so `resolveCodec` can prove a catalogue name still exists. */
 const CODEC_MODULES: readonly Record<string, unknown>[] = [
+  notice,
   mesodrop,
   ability,
   skills,

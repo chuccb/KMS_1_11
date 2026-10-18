@@ -246,13 +246,16 @@ body {
   padding: 0;
   line-height: 13px;
   color: #fff;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  overflow: hidden;
+  white-space: pre;
   text-shadow: none;
 }
 #chat-lines li .who { color: inherit; }
-#chat-lines li:has(.who.system) { color: #0f0; }
-#chat-lines li:has(.who.whisper) { color: #00f; }
+#chat-lines li.system { color: #0f0; }
+#chat-lines li.whisper { color: #00ff00; }
+#chat-lines li.notice { color: #fff080; }
+#chat-lines li.error { color: #ffafaf; }
+#chat-lines li.find { color: #bbbbbb; }
 #chat-scroll {
   position: absolute;
   left: 434px;

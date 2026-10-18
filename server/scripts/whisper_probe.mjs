@@ -458,7 +458,7 @@ expect(noReader.readByte() === 0x09, "an unknown name is the same answer");
 expect(noReader.readAsciiString() === "Nobody", "with the typed name");
 expect(noReader.readU32() === 0xffffffff, "and 0xffffffff for the map");
 
-// --- a whisper to nobody, and the client's balloon request ---------------------------------------
+// --- a whisper to nobody, and an unsolicited refusal (ADR-059) ---------------------------------------
 const lost = new PacketWriter(64);
 lost.writeByte(0x23).writeByte(0x06).writeAsciiString("Nobody").writeStringBytes(encodeCp949("hi"));
 hero.game.send(lost.toBytes());
@@ -467,16 +467,16 @@ expect(lostReader.readByte() === 0x0a, "a whisper to nobody is the 0x0a answer")
 expect(lostReader.readAsciiString() === "Nobody", "naming the typed name");
 expect(lostReader.readByte() === 0, "with flag 0 = not found");
 
-const balloon = new PacketWriter(64);
-balloon.writeByte(0x23).writeByte(0x22).writeAsciiString("Hero").writeStringBytes(encodeCp949("hi"));
-hero.game.send(balloon.toBytes());
+const refusal = new PacketWriter(64);
+refusal.writeByte(0x23).writeByte(0x22).writeAsciiString("Hero").writeStringBytes(encodeCp949("hi"));
+hero.game.send(refusal.toBytes());
 const quiet = [];
 const deadline = Date.now() + 700;
 while (Date.now() < deadline) {
   if (hero.game.queue.length > 0) quiet.push(hero.game.queue.shift()[0]);
   await new Promise((r) => setTimeout(r, 20));
 }
-expect(quiet.filter((opcode) => opcode === 0x1a).length === 0, "a balloon request is not answered");
+expect(quiet.filter((opcode) => opcode === 0x1a).length === 0, "an unsolicited refusal with a false own-name is ignored");
 
 // --- a monster's hit: the client reports it (0x1C), the server answers with the diff (0x0D) -------
 // The damage itself never travels: the 2003 client runs the monster AI and rolls what it takes

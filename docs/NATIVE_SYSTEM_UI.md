@@ -1,5 +1,9 @@
 # 原版 Menu／SysOpt、消耗品快捷格拖曳與悄悄話模式
 
+> **後續ADR-059**：原GameOpt的miniMap／whisper、原0x1F聊天氣泡、密語拒收、64換行record已接（未測試）。
+> 「密語與一般聊天wire無分類」舊判讀錯誤，已更正。見 [新證據與界線](NATIVE_GAME_OPTIONS_CHAT.md)。
+> 下方保留ADR-058交付歷史，不代表最新缺口。
+
 2026-10-18。**已編輯實作與回歸來源；未執行 test/check/typecheck/browser/VM/probe，也沒有功能 PASS。**
 本輪不改存檔資料、裝備、AP/SP、技能或怪物規則；不是以開新角色替代既有進度。
 
@@ -68,7 +72,7 @@ PE的部分寬字串在反編譯註解只顯示「UI」，本輪直接按section
   localStorage亦不是Windows registry相容格式；browser總靜音是額外殼層功能。
 - CUtilDlgEx文本使用原Border與尺寸公式，但browser量測、行高與fallback字形不是原IWzFont/GDI。
   無效收件人留在輸入窗內顯錯並讓人修正；原4F8940是關窗後向chat寫錯誤，這點未完全複製。
-  接收端原封包無悄悄話分類，仍不靠猜字串冒充來源。聊天記錄仍64訊息而非原64換行record。
+  ADR-059更正：接收端0x1F公開聊天與0x1A/0x12密語**有分類**；新記錄上限已改64換行record，字形量測仍非原GDI。
 - 技能快捷格／施放／buff、完整鍵位設定、BtChat原窗、CShape2D／CVecCtrl、aggro／飛行、AP/SP自然發放／轉職、卷軸等既有缺口不因本輪完成。
 
 ## 5. 交付紀律

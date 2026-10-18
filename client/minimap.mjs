@@ -28,7 +28,7 @@ export function miniMapMarks(map, viewport, self, users=[], portals=[], tick=0) 
   if(self)add(self,'#ffff00dd','self');
   return out;
 }
-export function miniMapWindow({ctx,image,getSelf,getUsers,isInGame,point,isCovered}) {
+export function miniMapWindow({ctx,image,getSelf,getUsers,isInGame,point,isCovered,onVisibilityChange}) {
   const root=document.getElementById('minimap-window');
   let map,portals=[],shown=true,at={x:8,y:8},drag,pointer,cache,cacheCtx,epoch=-1,clockAt,tick=0;
   try {const saved=JSON.parse(localStorage.getItem('kms111.minimap')??'null');
@@ -49,7 +49,9 @@ export function miniMapWindow({ctx,image,getSelf,getUsers,isInGame,point,isCover
     if(w===undefined)cacheCtx.drawImage(a.img,x,y);else cacheCtx.drawImage(a.img,x,y,w,h);return true;};
   return {
     setMap(value,doors=[]){map=value;portals=doors;epoch=-1;clockAt=undefined;cache=undefined;sync();},
-    toggle(){shown=!shown;save();sync();},
+    toggle(){shown=!shown;save();sync();onVisibilityChange?.(shown);},
+    // GameOpt preview/cancel must not persist its draft into the older position profile.
+    setShown(value){shown=!!value;sync();},
     get shown(){return shown;},
     contains(x,y){
       if(!shown||!map||!isInGame())return false;

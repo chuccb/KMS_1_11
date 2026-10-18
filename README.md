@@ -1,11 +1,19 @@
 # KMS 1.11 重建工作區
 
+最新還原（2026-10-18，未測試）：原GameOpt的miniMap／密語開關、0x1F公開聊天與五秒原WZ氣泡、
+密語拒收／三秒請求閘門、64換行記錄與原系統公告。
+[原檔交叉證據、操作入口與未完成範圍](docs/NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；啟服不代表功能PASS。
+
 以本倉庫的2003年KMS 1.11反編譯程式、PE與原始 `Data.wz` 為依據，實作TypeScript協定／伺服器、
 瀏覽器客戶端與WZ工具。**不是完整MMO成品，也不宣稱全遊戲已1:1還原。**
 
 ## 最新交付
 
-- **本輪（2026-10-18，未測試）**：接原 Menu／SysOpt 圖片與原座標、Escape關窗優先序、兩組20段音量／獨立靜音。
+- **本輪（2026-10-18，未測試）**：原GameOpt小地圖／密語即時設定、OK／Cancel；公開聊天原0x1F＋normal/dead五秒氣泡。
+  接密語拒收與shared三秒gate、64換行record／五秒追尾，找人首回補地名、原色與13/type0公告。
+  [原檔交叉證據與完整界線](docs/NATIVE_GAME_OPTIONS_CHAT.md)／ADR-059；沿用save，冷備份後重啟LIVE，非force推送。
+
+- **前輪（2026-10-18，未測試）**：接原 Menu／SysOpt 圖片與原座標、Escape關窗優先序、兩組20段音量／獨立靜音。
   修原音量15段實際80%（不是100%）；即時預覽、OK本機保存、Cancel／Escape還原，音樂不重起。
   補消耗品快捷格彼此拖移／覆蓋、拖到場景只清綁定、hover與stale guards；不發送丟棄道具請求。
   接原悄悄話收件人輸入／記憶／切回everyone、CP949 byte驗證與左側名字格，不再只塞`/w `捷徑。

@@ -1,3 +1,4 @@
+import {encodeSystemNotice} from '../protocol/notice.ts';
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
 import { characterStatBasis } from "../game/characterstats.ts";
 import { equipmentFromTemplate, planBlankStarterRepair } from "../game/equipment.ts";
@@ -76,6 +77,8 @@ import {
   describeClientUserRequest,
   describeUserChat,
   encodeUserChat,
+  encodeUserBalloon,
+  encodeUserWhisperRefused,
   encodeUserFindAnswer,
   encodeUserWhisperAnswer,
   INTERACT_KIND_CURSOR,
@@ -109,7 +112,7 @@ import {
   type ClientUserRequest,
   type SetField,
 } from "../protocol/field.ts";
-import { decodeCp949 } from "../protocol/cp949.ts";
+import { decodeCp949, encodeCp949 } from "../protocol/cp949.ts";
 import {
   PARTY_OPCODE,
   describeClientPartyRequest,
@@ -1495,10 +1498,7 @@ export class GameEntryServer {
     if (request.kind >= 0) {
       const refuse = (message: string) =>
         session.send(
-          encodeUserChat({
-            name: "System",
-            text: new TextEncoder().encode(message),
-          }),
+          encodeSystemNotice(encodeCp949(message)),
         );
       if (!this.options.allowMapCommand?.(session.username)) {
         refuse("Map command is disabled for this account.");
@@ -1592,6 +1592,9 @@ export class GameEntryServer {
     if (this.enterMap(session, here)) this.persist();
   }
 
+  // Authenticated recent deliveries: a client may refuse only a whisper it actually received.
+  // 3s lifetime follows the native request timeout; server validation is reconstruction policy.
+  private readonly whisperReceipts = new WeakMap<FieldSession, Map<FieldSession, number>>();
   private readonly abilityTimes = new WeakMap<FieldSession, number>();
   private readonly mesoDropAt = new WeakMap<FieldSession, number>();
   /** Native input bounds + a server-owned rate limit. A nonzero 0x0D ack releases the request
@@ -2836,19 +2839,9 @@ export class GameEntryServer {
     }
   }
 
-  /**
-   * A line of chat (`0x12`, one string - `sub_470C70`), relayed to the map as `0x1A` + sub-op `0x12`
-   * + the speaker's name + the same bytes.
-   *
-   * **The speaker gets it too**, and that is not a convenience: the client's chat input only *sends*
-   * (`sub_470C70` builds the packet and returns - no local echo), and the `"%s>> %s"` renderer lives
-   * on the receiving side (`sub_472910` case 0x12). A server that skipped the sender would make
-   * players unable to see what they just said.
-   *
-   * The text is passed through as **bytes**: the server relays it and never reads it, so there is no
-   * reason to risk a decode/encode round trip. The name is the server's own fact about the session,
-   * because the packet has nowhere to put a character id (the receiving client only needs a name to
-   * look the speaker up by).
+  /** 0x12 field speech -> 0x1F [id][text], log + balloon via 50B320, including the sender.
+   * Field fan-out/limits are reconstruction policy, not a recovered official-server binary.
+   * 0x1A/0x12 is reserved for whispers; its goWhisper gate must not suppress public chat.
    */
   private handleChat(session: FieldSession, plain: Uint8Array): void {
     let text: Uint8Array;
@@ -2863,7 +2856,7 @@ export class GameEntryServer {
     this.options.log?.(
       `game: ${describeUserChat({ name: session.name, text })} in map ${session.instance.mapId}`,
     );
-    session.instance.broadcast(encodeUserChat({ name: session.name, text }));
+    session.instance.broadcast(encodeUserBalloon({ characterId: session.characterId, text }));
   }
 
   /**
@@ -2905,7 +2898,7 @@ export class GameEntryServer {
 
   /**
    * A request about one user by name - `0x23` (`sub_4717D0`): a whisper (`0x06`), a find
-   * (`0x05`), or the client's own balloon request (`0x22`, which nothing here answers).
+   * (`0x05`), or a received-whisper refusal (`0x22`, sender + own name).
    *
    * This is the **first** packet in this server that reaches a player who is not in the sender's
    * map, so it is also the first one whose target is looked up by name: the client has no character
@@ -2950,14 +2943,13 @@ export class GameEntryServer {
       );
       return;
     }
-    if (request.kind === USER_REQUEST_KIND.balloon) {
-      // `USER_REQUEST_KIND.balloon`: the client could not print a line it received and asked the
-      // server to show it as a balloon. Which packet draws one is not located, so this is logged, not
-      // guessed - and the sender is told nothing, because a client that gets no answer here is
-      // exactly where it was before it asked (FINDINGS 4.31).
-      this.options.log?.(
-        `game: ${describeClientUserRequest(request)} - balloon requests are not implemented yet`,
-      );
+    if (request.kind === USER_REQUEST_KIND.refuseWhisper) {
+      const source=this.sessionNamed(request.name), receipts=this.whisperReceipts.get(session);
+      if(!source || !receipts || (receipts.get(source)??0)<performance.now() ||
+          String.fromCharCode(...(request.text??new Uint8Array()))!==session.name)return;
+      receipts.delete(source);
+      source.send(encodeUserWhisperRefused({name:session.name}));
+      this.options.log?.(`game: "${session.name}" refuses whisper from "${source.name}"`);
       return;
     }
     const text = request.text ?? new Uint8Array(0);
@@ -2974,9 +2966,13 @@ export class GameEntryServer {
     this.options.log?.(
       `game: whisper "${session.name}" -> "${target.name}": ${decodeCp949(text)}`,
     );
-    // The receiver's client renders the same `%s>> %s` line as chat - the packet *is* the chat one -
-    // so a delivered whisper arrives with the sender's name in front of it. The sender's own echo
+    // 472910 renders `%s>> %s` in font1, or refuses it if goWhisper=0. The sender's own echo
     // (`0x0A`) carries no text: their client kept what it sent and prints "name<< text" from it.
+    let receipts=this.whisperReceipts.get(target);
+    if(!receipts){receipts=new Map();this.whisperReceipts.set(target,receipts);}
+    const now=performance.now();
+    for(const [id,until] of receipts)if(until<now)receipts.delete(id);
+    receipts.set(session,now+3000);
     target.send(encodeUserChat({ name: session.name, text }));
     session.send(
       encodeUserWhisperAnswer({ name: target.name, delivered: true }),

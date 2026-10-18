@@ -2,6 +2,7 @@ import { backgroundLayout } from "./background.mjs";
 import { mobLocomotion } from "./mobmotion.mjs";
 import { systemMenu } from "./systemmenu.mjs";
 import { whisperNameError } from "./whisper.mjs";
+import {chatBalloons} from "./chatballoons.mjs";
 import { chatHistory } from "./chatlog.mjs";
 import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.mjs";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile } from "./quickslots.mjs";
@@ -383,6 +384,9 @@ function connect() {
     combatEpoch++;
     resetContact();
     deathFx.reset();
+    speechBalloons.clear();
+    resetWhisper();
+    chatHistoryPanel.cancelDrag();
     visualFieldActive = false;
     lastAttackTrace = undefined;
     ++mapGeneration;
@@ -428,6 +432,9 @@ function handle(message) {
   if (["field", "disconnect", "login"].includes(message.t)) {
     resetContact();
     deathFx.reset();
+    speechBalloons.clear();
+    pendingWhisper=undefined;userRequestUntil=0;
+    chatHistoryPanel.cancelDrag();
     ++mapGeneration;
     visualFieldActive = false;
     lastAttackTrace = undefined;
@@ -435,7 +442,7 @@ function handle(message) {
     itemEpoch++;
     systemPanel.close(false, false);
     quickDrag = undefined;
-    if (message.t !== "field") resetWhisper();
+    if (message.t !== "field") {resetWhisper();chatHistoryPanel.clear();}
     itemDialog.close(false);
     inventoryScrollDrag = undefined;
     shopPending = false;
@@ -745,6 +752,7 @@ function handle(message) {
     case "user-leave":
       deathFx.remove(message.characterId);
       users.delete(String(message.characterId));
+      speechBalloons.remove(message.characterId);
       return;
 
     case "user-move": {
@@ -800,11 +808,24 @@ function handle(message) {
       return;
     }
 
-    case "chat":
-      // A delivered whisper arrives here too: the server relays it as `0x1A` sub-op 0x12, the same
-      // packet as field chat, so the receiving client cannot tell the two apart (FINDINGS 4.31).
-      chatLine(message.name, message.text);
+    case "chat": {
+      if(message.channel==='field') {
+        chatLine(message.name,message.text);
+        if(message.characterId!==undefined)speechBalloons.put(message.characterId,`${message.name} : ${message.text}`,performance.now());
+      } else {
+        // 472910 checks CConfig+24 (goWhisper). It never tests whether the chat window is open.
+        if(systemPanel.gameSettings.whisper)chatLine(`${message.name}>>`,message.text);
+        else send({t:'refuse-whisper',name:message.name});
+        // 4732D0 remembers the incoming sender even when this client refused the line.
+        whisperRecipient=lastWhisperRecipient=message.name;updateWhisperControl();
+      }
       return;
+    }
+    case "whisper-refused":
+      chatHistoryPanel.append(`'${message.name}'님은 현재 귓속말이 거부되어 있습니다.`, 'whisper');
+      return;
+    case "system-notice":
+      chatHistoryPanel.append(`[공지사항] ${message.text}`, 'notice');return;
 
     case "whisper-answer": {
       // The text is not on the wire: the 2003 client prints its own kept line as "name<< text".
@@ -815,11 +836,12 @@ function handle(message) {
         pendingWhisper.name.toLowerCase() === message.name.toLowerCase()
           ? pendingWhisper.text
           : undefined;
-      pendingWhisper = undefined;
+      pendingWhisper = undefined; userRequestUntil=0;
       if (message.delivered) {
-        chatLine(`${message.name}<<`, text ?? "");
+        if(text)chatLine(`${message.name}<<`,text);
+        else chatHistoryPanel.append(`'${message.name}'님께 귓속말을 전달했습니다.`,'whisper');
       } else {
-        chatLine("系統", `找不到「${message.name}」。`);
+        chatHistoryPanel.append(`'${message.name}'님을 찾지 못했습니다`,'error');
       }
       logLine(
         `whisper ${message.delivered ? "delivered" : "not found"}: ${message.name}`,
@@ -828,18 +850,17 @@ function handle(message) {
     }
 
     case "find-answer": {
-      // No map name on the wire (FINDINGS 4.31): the answer is a map id or "not found". The name is
-      // this page's own extra, looked up from the endpoint it already uses to draw the ground, and
-      // only when a previous fetch happened to know it.
+      userRequestUntil=0;
+      // 472910 reads map/street metadata locally. A first /find must not require a second /find.
       if (message.mapId === -1) {
-        chatLine("系統", `找不到「${message.name}」。`);
+        chatHistoryPanel.append(`'${message.name}'님을 찾지 못했습니다`,'error');
       } else {
-        const where = mapNames.get(message.mapId);
-        chatLine(
-          "系統",
-          `${message.name} 在地圖 ${message.mapId}${where ? `（${where}）` : ""}。`,
-        );
-        if (where === undefined) void rememberMapName(message.mapId);
+        const where=mapNames.get(message.mapId);
+        const format=place=>`'${message.name}'님의 현재 위치는 '${place}'입니다`;
+        const line=chatHistoryPanel.append(format(where||String(message.mapId)),where?'find':'error');
+        if(!where)void rememberMapName(message.mapId).then(place=>{
+          if(place)line.update(format(place),'find'); // Pruned/owner-cleared records cannot reappear.
+        });
       }
       logLine(`find ${message.name}: ${message.mapId}`);
       return;
@@ -928,8 +949,7 @@ function handle(message) {
           }
           const facts = itemInfo.get(itemId);
           if (typeof facts?.name === "string") {
-            const text = line.lastChild;
-            if (text) text.textContent = sentence(facts.name);
+            line.update(sentence(facts.name));
           }
         })();
       }
@@ -1033,15 +1053,16 @@ function handle(message) {
   }
 }
 
-/** Fetches one map's name for the next `find-answer`; a failure is not worth a chat line. */
+/** 4694F0/472910: lookup of street:map is client-side; it is not a movement or portal request. */
 async function rememberMapName(mapId) {
   try {
     const response = await fetch(`/api/map/${mapId}`);
     if (!response.ok) return;
     const data = await response.json();
-    mapNames.set(data.id, data.name);
+    const name=[data.streetName,data.name].filter(Boolean).join(':');
+    mapNames.set(data.id,name);return name;
   } catch {
-    // The id is already on screen; the name is a bonus.
+    // Leave the explicit id fallback if metadata could not be loaded.
   }
 }
 
@@ -1055,7 +1076,7 @@ async function loadMap(mapId, generation) {
     mapAnimationStart = performance.now();
     audio.setBgm(map.bgm);
     terrain = collisionWorld(map);
-    mapNames.set(map.id, map.name);
+    mapNames.set(map.id,[map.streetName,map.name].filter(Boolean).join(':'));
     hoveredPortal = undefined;
     // The map reset: the art of the previous map must not be drawn under the new one.
     mapArt = undefined;
@@ -2569,6 +2590,7 @@ function drawAvatarBodyAt(entity, screenX, screenY, now, flip, drawMiddle) {
   const attackPose = /^(swing|stab|shoot)/.test(state.stance);
   if (!frame.ready && attackPose) frame = avatarFrame(look, state.stance, state.frame, flip, undefined, true);
   const draw = (entry) => {
+    entity.chatOriginY=entry.damageOriginY;
     const x = Math.round(screenX + entry.dx), y = Math.round(screenY + entry.dy);
     const h = entry.planeHeight, w = entry.img.naturalWidth;
     if (h > 0 && entry.img.naturalHeight === h * 2) {
@@ -2932,10 +2954,20 @@ function frame() {
     if (now - projectiles[i].releaseAt >= projectiles[i].duration) projectiles.splice(i, 1);
   for (const shot of projectiles)
     if (now >= shot.releaseAt) scene.push({ kind: "projectile", shot, z: shot.z, y: 0, order: layerOrder(shot, shot.z) });
+  for(const [id,speech] of speechBalloons.active(now)) {
+    const entity=id===selfView?.characterId?selfView:users.get(String(id));
+    const position=id===selfView?.characterId?self:entity;
+    if(entity&&position)scene.push({kind:'speech',entity,position,id,z:250210,y:0,order:layerOrder(speech,250210)});
+  }
   scene.push({ kind: "damage", z: 250310, y: 0, order: 0 }); // 41E610/41F200 -1073471524
   for (const actor of mergeScene(mapScene, scene)) {
     if (actor.kind === "back") { drawBack(actor.back, cameraX, cameraY, now); continue; }
     if (actor.kind === "projectile") { drawProjectile(actor.shot, cameraX, cameraY, now); continue; }
+    if(actor.kind==='speech'){
+      speechBalloons.draw(ctx,actor.id,actor.position.x-cameraX,actor.position.y-cameraY,
+        actor.entity.chatOriginY,(actor.entity.hp!==undefined?actor.entity.hp<=0:(actor.entity.action&~1)===18),now);
+      continue;
+    }
     if (actor.kind === "damage") {
       for (let i = damageMarks.length - 1; i >= 0; i--) {
         const mark = damageMarks[i];
@@ -3508,9 +3540,19 @@ const chatHistoryPanel = chatHistory({
   bar: document.getElementById('chat-scroll'),
 });
 // 4F8940/4FB160: active recipient toggles back to everyone; otherwise ask remembered name.
-let whisperRecipient = "", lastWhisperRecipient = "";
+let whisperRecipient = "", lastWhisperRecipient = "", userRequestUntil=0;
+function beginUserRequest(name,text) {
+  const now=performance.now();
+  if(now<userRequestUntil){chatHistoryPanel.append('다른 요청을 처리 중입니다','error');return false;}
+  if(socket?.readyState!==WebSocket.OPEN)return false;
+  const reason=whisperNameError(name,selfView?.name);
+  if(reason && text!==undefined){chatHistoryPanel.append(reason,'error');return false;}
+  userRequestUntil=now+3000;
+  pendingWhisper=text===undefined?undefined:{name,text};
+  send(text===undefined?{t:'find',name}:{t:'whisper',name,text});return true;
+}
 function resetWhisper() {
-  pendingWhisper=undefined;
+  pendingWhisper=undefined;userRequestUntil=0;
   whisperRecipient = lastWhisperRecipient = "";
   updateWhisperControl();
 }
@@ -3541,24 +3583,11 @@ document.getElementById('chat-whisper').addEventListener('click', () => {
   });
 });
 
-function chatLine(name, text) {
-  const line = document.createElement("li");
-  const who = document.createElement("span");
-  who.className = "who";
-  if (name === "系統") {
-    who.classList.add("system");
-    who.textContent = `${name}：`;
-  } else if (name.endsWith("<<")) {
-    // The 2003 client's own whisper echo: "name<< text" (`CField+28`).
-    who.classList.add("whisper");
-    who.textContent = `${name} `;
-  } else {
-    who.textContent = `${name} : `;
-  }
-  line.append(who, document.createTextNode(text));
-  ui.chatLines.append(line);
-  chatHistoryPanel.changed();
-  return line;
+function chatLine(name,text) {
+  const system=name==='系統', whisper=name.endsWith('<<')||name.endsWith('>>');
+  const prefix=system?'':whisper?`${name} `:`${name} : `;
+  const handle=chatHistoryPanel.append(prefix+text,system?'system':whisper?'whisper':'normal');
+  return {update:value=>handle.update(prefix+value)};
 }
 
 function logLine(text) {
@@ -5421,28 +5450,33 @@ function runCommand(text, local) {
       local("系統", "用法：/f 名字");
       return true;
     }
-    send({ t: "find", name });
+    beginUserRequest(name);
     return true;
   }
   if (rest === undefined || rest === "") {
     local("系統", "用法：/w 名字 訊息");
     return true;
   }
-  send({ t: "whisper", name, text: rest });
-  pendingWhisper = { name, text: rest };
+  beginUserRequest(name,rest);
   return true;
 }
 
+// Chat focus is an interaction boundary too: do not let a cold Ctrl arrive while editing.
+ui.say.addEventListener('focus',()=>{keys.clear();localActionEpoch++;quickDrag=undefined;});
 ui.say.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+  if(event.isComposing||event.keyCode===229)return;
+  // 4F8CB0: Esc clears the edit; left/right on an empty edit return focus to the field.
+  if(event.key==='Escape'||(['ArrowLeft','ArrowRight'].includes(event.key)&&!ui.say.value)){
+    event.preventDefault();event.stopPropagation();ui.say.value='';ui.say.blur();return;
+  }
+  if (event.key !== "Enter") return;
   event.preventDefault();
   event.stopPropagation(); // Blurring before bubbling must not let the global Enter handler reopen chat.
   const text = ui.say.value.trim();
   ui.say.value = "";
   if (text !== "" && !runCommand(text, chatLine)) {
     if (whisperRecipient) {
-      send({ t:"whisper", name:whisperRecipient, text });
-      pendingWhisper={name:whisperRecipient,text};
+      beginUserRequest(whisperRecipient,text);
     } else send({ t: "say", text });
   }
   if (!event.shiftKey) ui.say.blur();
@@ -5501,6 +5535,7 @@ const miniMapPanel = miniMapWindow({
   getUsers: () => [...users.values()],
   isInGame: () => loginStage === "game",
   point: viewPoint,
+  onVisibilityChange:shown=>systemPanel.setMiniMap(shown),
   isCovered: (p) =>
     skillPanel.contains(p.x, p.y) ||
     inventoryWindowAt(p.x, p.y) !== undefined ||
@@ -5531,6 +5566,7 @@ const deathFx = deathEffects({
   image: artImage, log: logLine,
   sound: point => void audio.effect("Game/Tombstone", spatialVolume(point.x, point.y, self)),
 });
+const speechBalloons=chatBalloons({image:artImage});
 const damageArt = damageNumbers({image:artImage,log:logLine});
 void damageArt.preload();
 const buffs = temporaryStats();
@@ -5617,11 +5653,12 @@ const itemDialog = itemDialogs({
 
 
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
+  onGameSettings:value=>miniMapPanel.setShown(value.minimap),
   canOpen:()=>loginStage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
     socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !testToolsPanel.open &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
   onOpen(){
-    localActionEpoch++; keys.clear(); itemDrag=quickDrag=undefined;
+    localActionEpoch++; keys.clear(); chatHistoryPanel.cancelDrag();itemDrag=quickDrag=undefined;
     inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
     inventoryPick=inventoryHover=equipHover=undefined; pointerAt=undefined;ui.say.blur();
   },
