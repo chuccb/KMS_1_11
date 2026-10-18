@@ -1413,7 +1413,7 @@ export class ClientSession {
   }
 
   /**
-   * Walks to `(x, y)`. One `CMovePath` element: the server trusts the first element's position
+   * Walks to `(x, y)`. One `CMovePath` element: the field retains the endpoint position
    * (`FieldInstance.reportMove`). Preserve the browser controller's velocity, foothold and stance.
    * Action 0 is walk1/right (sub_43FC80), not stand; defaults keep older callers compatible.
    */
@@ -1427,31 +1427,25 @@ export class ClientSession {
     vy = 0,
     attr = 0,
   ): Promise<void> {
+    return this.movePath({originX: x, originY: y,
+      elements: [{attr, x, y, vx, vy, action, foothold, duration}]});
+  }
+
+  /** Ordered controller records, not a synthetic single 100ms endpoint. The bridge validates
+   * its untrusted JSON before this protocol-level API; callers retain the full native codec.
+   */
+  async movePath(path: MovePath): Promise<void> {
     const link = this.gameLink;
-    if (link === undefined)
-      throw new Error("moveTo() needs a session in a field");
-    const path: MovePath = {
-      originX: x,
-      originY: y,
-      elements: [{ attr, x, y, vx, vy, action, foothold, duration }],
-    };
-    await link.send(encodeClientUserMove({ stageByte: 0, path }));
-    this.lastPosition = { x, y };
-    this.lastMovement = { action, foothold };
+    if (link === undefined) throw new Error("movePath() needs a session in a field");
+    const end = path.elements.at(-1);
+    if (!end) throw new Error("movePath() needs at least one record");
+    const {x, y, action, foothold} = end;
+    await link.send(encodeClientUserMove({stageByte: 0, path}));
+    this.lastPosition = {x, y};
+    this.lastMovement = {action, foothold};
     const self = this.self;
-    if (self !== undefined) {
-      // The server does not echo a move back to the mover, so the local view moves itself - the same
-      // thing the 2003 client does before it sends (`CVecCtrlUser::OnMove` applied it locally).
-      this.emit({
-        kind: "user-move",
-        characterId: self.characterId,
-        x,
-        y,
-        action,
-        foothold,
-        local: true,
-      });
-    }
+    if (self !== undefined) this.emit({kind: "user-move", characterId: self.characterId,
+      x, y, action, foothold, local: true});
   }
 
   /**
@@ -1735,23 +1729,23 @@ export class ClientSession {
         }
         case FIELD_OPCODE.userMove: {
           const move = readUserMove(new PacketReader(plain, 1));
-          const first = move.path.elements[0];
-          if (first === undefined) return;
+          const last = move.path.elements.at(-1);
+          if (last === undefined) return;
           const user = this.users.get(move.characterId);
           if (user !== undefined)
             Object.assign(user, {
-              x: first.x,
-              y: first.y,
-              action: first.action,
-              foothold: first.foothold,
+              x: last.x,
+              y: last.y,
+              action: last.action,
+              foothold: last.foothold,
             });
           this.emit({
             kind: "user-move",
             characterId: move.characterId,
-            x: first.x,
-            y: first.y,
-            action: first.action,
-            foothold: first.foothold,
+            x: last.x,
+            y: last.y,
+            action: last.action,
+            foothold: last.foothold,
             path: move.path,
           });
           return;

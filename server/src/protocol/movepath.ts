@@ -64,7 +64,7 @@
  * playback chain is now traced: 495F70 ORs attr into its out-param BEFORE consuming each
  * fragment, 539900 returns it via 5398B0, and 520950 bit2 applies hit/1500 locally to that remote
  * user. This is presentation of the existing move, NOT a new HP/damage/emotion broadcast.
- * The browser retains bit2 until its existing 100ms snapshot is published (not native 30ms batching).
+ * The browser retains bit2 on its ordered 30ms controller fragment inside 100ms transport batches.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 
@@ -99,8 +99,9 @@ export interface MovePath {
   /**
    * The two u16s in front of the element count. `CVecCtrlUser::OnMove` saves the CMovePath fields
    * at +4/+6 and restores them right after the decoder returns, so these are not the user's live
-   * position; what they are for is not proven. The first element's x/y is the position the server
-   * should trust (it is what the vecctrl is moved to).
+   * position; what they are for is not proven. Our field retains the final chronological record
+   * for authority/late-join, while playback keeps ALL records. This is server reconstruction policy,
+   * not evidence of the absent original server's movement validation.
    */
   originX: number;
   originY: number;

@@ -1,3 +1,4 @@
+import { readBrowserMovePath } from "./browsermove.ts";
 import type {MobPresentation} from "../game/mobs.ts";
 import {MOB_BODY_ACTIONS,mobForcedName} from "../../../client/mob-attacks.mjs";
 import {mobHitAction} from "../../../client/mob-reaction.mjs";
@@ -587,6 +588,10 @@ class BrowserSession {
         case "say":
           return await this.say(String(message.text ?? ""));
         case "move":
+          if (message.path !== undefined) {
+            const path = readBrowserMovePath(message.path);
+            return await this.serialMotion(() => this.require().movePath(path));
+          }
           return await this.serialMotion(() => this.move(
             Number(message.x ?? 0),
             Number(message.y ?? 0),

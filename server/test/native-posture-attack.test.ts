@@ -119,7 +119,7 @@ test("542AF5: forced prone Down cannot accidentally grab a rope at a platform's 
   const world=collisionWorld({footholds:[{id:1,x1:-50,y1:0,x2:50,y2:0,prev:0,next:0}],
     ladders:[{id:7,x:0,y1:0,y2:100,ladder:false}]});
   const body=createPlayer(0,0,world,1);
-  advancePlayer(body,forcedAttackInput(32),world,8);
+  advancePlayer(body,forcedAttackInput(32),world,30);
   assert.equal(body.ladder,undefined);assert.equal(playerPosture(body),"prone");
-  advancePlayer(body,{vertical:1},world,8);assert.equal(body.ladder?.id,7);
+  advancePlayer(body,{vertical:1},world,30);assert.equal(body.ladder?.id,7);
 });

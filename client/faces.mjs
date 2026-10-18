@@ -95,7 +95,7 @@ export function faceProfiles({fetcher = globalThis.fetch, now = () => performanc
 /** 495F70 ORs attr BEFORE consuming each fragment; 539900 returns it through 5398B0;
  * 520950 bit2 calls SetFace(hit,1500). Consume on a 30ms presentation clock, including short/zero
  * fragments crossed in one step. No new damage packet, no HP change, no trigger on path arrival.
- * This does not replace the existing browser's geometric interpolation / 100ms publication.
+ * 30ms controller fragments are now preserved inside the browser's 100ms transport batches.
  */
 export function movementFace(actor, now) {
   const motion = actor?.motion ?? actor?.faceMotion;

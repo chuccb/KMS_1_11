@@ -1,35 +1,37 @@
 import { playerPosture } from './posture.mjs';
-/**
- * Browser locomotion, in world pixels and seconds (not pixels per timer callback).
- * Baseline constants from CVecCtrl: sub_5378D0 (-555 jump), sub_537CA0
- * (140000 force, 125 walk speed, 80000 drag / CAttrShoe mass=100), and
- * sub_5382F0 (2000 gravity, 670 terminal fall speed). Default shoe friction is .9.
- * This implements ordinary ground/air/ladder movement, not water, flight or skill-specific physics. Contact impulse staging follows 5114A0/537B00.
- */
-import { mergeImpulse } from "./contact.mjs";
+import { mergeImpulse } from './contact.mjs';
+import { NATIVE_SHOE, NATIVE_FOOTHOLD, NATIVE_FLUID, NATIVE_STEP_MS,
+  groundStep, airStep, jumpVelocity } from './native-locomotion.mjs';
 
-/** Stage external force; do not overwrite walk velocity or apply a second impulse on receipt. */
+/** Ordinary CVecCtrl ground/air/ladder. See docs/NATIVE_LOCOMOTION.md for evidence and limits.
+ * All public vx/vy are WORLD velocity. Signed tangent speed is kept separately while grounded.
+ */
 export function queueKnockback(body, x, y) {
   const pending = body.knockback ?? { x: 0, y: 0 };
   body.knockback = { x: mergeImpulse(pending.x, x), y: mergeImpulse(pending.y, y) };
 }
-
-export const PHYSICS = Object.freeze({ stepMs: 8, walkSpeed: 125, acceleration: 1400,
-  friction: 720, airAcceleration: 200, airDrag: 100, airControlSpeed: 10000 * 0.0008928571428571428,
+export const PHYSICS = Object.freeze({ stepMs: NATIVE_STEP_MS, walkSpeed: 125, acceleration: 1400,
+  friction: 800, airAcceleration: 200, airDrag: 100, airControlSpeed: 10000 * .0008928571428571428,
   gravity: 2000, terminalSpeed: 670, jumpSpeed: 555, climbSpeed: 100 });
 const EPS = 1e-6;
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-const approach = (n, target, delta) => n < target ? Math.min(n + delta, target) : Math.max(n - delta, target);
 export const isFloor = (f) => f.x2 > f.x1;
 export function groundY(f, x) {
   if (!f || !isFloor(f) || x < f.x1 - EPS || x > f.x2 + EPS) return undefined;
   return f.y1 + (f.y2 - f.y1) * (x - f.x1) / (f.x2 - f.x1);
 }
-
-/** Index once when a map loads, not once per render. Keep WZ page/group depth metadata. */
+/** 5643D0: normalize once, retaining WZ ids, orientation, links, page and group.
+ * 563010 creates default shared attributes, not per-foothold later-version WZ friction fields.
+ */
 export function collisionWorld(map) {
-  const footholds = map.footholds ?? [];
-  return { footholds, byId: new Map(footholds.map((f) => [f.id, f])), ladders: map.ladders ?? [] };
+  const footholds = (map.footholds ?? []).map(f => {
+    const length = Math.hypot(f.x2 - f.x1, f.y2 - f.y1);
+    return { ...f, length, cos: length ? (f.x2 - f.x1) / length : 0,
+      sin: length ? (f.y2 - f.y1) / length : 0 };
+  });
+  return { footholds, byId: new Map(footholds.map(f => [f.id, f])),
+    ladders: [...(map.ladders ?? [])].sort((a, b) => a.id - b.id),
+    groundAttr: NATIVE_FOOTHOLD, fieldAttr: NATIVE_FLUID };
 }
 export function floorBelow(world, x, y, maxDistance = Infinity, ignored = new Set()) {
   let result;
@@ -41,81 +43,100 @@ export function floorBelow(world, x, y, maxDistance = Infinity, ignored = new Se
   }
   return result;
 }
-function land(body, f, y) {
+function alignGround(body, f, y, speed) {
   body.y = y;
-  body.vy = 0;
+  body.groundSpeed = speed;
+  body.vx = f.cos * speed;
+  body.vy = f.sin * speed;
   body.foothold = f.id;
   body.layer = f.layer ?? 7;
   body.group = f.group ?? 0;
   body.grounded = true;
   body.ladder = undefined;
 }
+/** 539A30 exports tangent velocity, lifts feet by one integer pixel, then detaches. */
+function releaseGround(body, world) {
+  const f = world.byId.get(body.foothold);
+  if (body.grounded && f) body.y = Math.floor(body.y - 1);
+  body.grounded = false;
+  body.foothold = 0;
+  body.groundSpeed = 0;
+}
 export function createPlayer(x, y, world, foothold = 0, settle = true) {
-  const body = { x, y, vx: 0, vy: 0, foothold: 0, grounded: false, facing: 0,
-    layer: 7, group: 0, ladder: undefined, jumpHeld: false, accumulator: 0, ignored: new Set(), ignoreMs: 0 };
-  // Portals are often a few pixels above the floor, not arbitrary points to snap through platforms.
-  const f = world.byId.get(foothold);
-  const at = groundY(f, x);
+  const body = { x, y, vx: 0, vy: 0, groundSpeed: 0, foothold: 0, grounded: false, facing: 0,
+    layer: 7, group: 0, ladder: undefined, jumpHeld: false, jumpQueued: false, groundJumps: 0, accumulator: 0 };
+  // Portal settling is a browser spawn policy, not a replacement for swept movement collision.
+  const f = world.byId.get(foothold), at = groundY(f, x);
   const floor = at !== undefined && Math.abs(at - y) <= 24 ? { foothold: f, y: at } : floorBelow(world, x, y, 24);
-  if (settle && floor) land(body, floor.foothold, floor.y);
+  if (settle && floor) alignGround(body, floor.foothold, floor.y, 0);
+  body.motionOrigin = movementSnapshot(body); body.motionFrames = [];
   return body;
 }
 function connectedFloors(world, id) {
-  const seen = new Set();
-  const pending = [id];
+  const seen = new Set(), pending = [id];
   while (pending.length) {
     const f = world.byId.get(pending.pop());
     if (!f || !isFloor(f) || seen.has(f.id)) continue;
-    seen.add(f.id);
-    pending.push(f.prev, f.next);
+    seen.add(f.id); pending.push(f.prev, f.next);
   }
   return seen;
 }
 
-/** Follow linked slopes, blocking upward walls but falling off open/downward edges. */
-function walkGround(body, distance, world) {
-  let f = world.byId.get(body.foothold);
-  let left = distance;
+/** 539450: transfer tangent speed across linked floors; interpolate it at an edge.
+ * 5376C0 integrates force ONCE; unused milliseconds continue at collision velocity, without
+ * a second gravity/acceleration application. The loop cap is malformed-map protection.
+ */
+function walkGround(body, distance, world, seconds, startSpeed = body.groundSpeed) {
+  let f = world.byId.get(body.foothold), left = distance, time = seconds, initial = startSpeed;
   for (let hop = 0; f && hop < 64; hop++) {
+    const speed = body.groundSpeed;
     const direction = Math.sign(left);
-    const slope = (f.y2 - f.y1) / (f.x2 - f.x1);
-    const scale = Math.hypot(1, slope);
-    const targetX = body.x + left / scale;
-    const edgeX = direction > 0 ? f.x2 : f.x1;
-    if ((direction >= 0 && targetX <= edgeX) || (direction <= 0 && targetX >= edgeX)) {
-      body.x = targetX;
-      land(body, f, groundY(f, targetX));
-      return;
+    if (!direction) { alignGround(body, f, groundY(f, body.x), speed); return; }
+    const targetX = body.x + left * f.cos, edgeX = direction > 0 ? f.x2 : f.x1;
+    if ((direction > 0 && targetX <= edgeX) || (direction < 0 && targetX >= edgeX)) {
+      body.x = targetX; alignGround(body, f, groundY(f, targetX), speed); return;
     }
-    left -= (edgeX - body.x) * scale;
+    const edgeDistance = (edgeX - body.x) / f.cos;
+    const fraction = clamp(edgeDistance / left, 0, 1);
+    const collisionSpeed = initial + (speed - initial) * fraction;
+    // Native a2 is integer milliseconds; the geometry intersection here is still floating point.
+    time = Math.max(0, time - Math.trunc(time * 1000 * fraction) / 1000);
     body.x = edgeX;
-    body.y = groundY(f, edgeX);
+    alignGround(body, f, groundY(f, edgeX), collisionSpeed);
     const next = world.byId.get(direction > 0 ? f.next : f.prev);
-    const nextY = direction > 0 ? next?.y1 : next?.y2;
-    const nextX = direction > 0 ? next?.x1 : next?.x2;
-    if (next && next.x1 === next.x2 && body.y > Math.min(next.y1, next.y2) + EPS) {
-      body.vx = 0;
-      return;
+    if (next && !isFloor(next)) {
+      // 539450 distinguishes upward walls from downward lips by oriented tangent, not any wall.
+      const blocks = direction < 0 ? next.sin >= 0 : next.sin <= 0;
+      if (blocks) { alignGround(body, f, body.y, 0); return; }
     }
+    const nextX = direction > 0 ? next?.x1 : next?.x2;
+    const nextY = direction > 0 ? next?.y1 : next?.y2;
     if (!next || !isFloor(next) || Math.abs(nextX - edgeX) > EPS || Math.abs(nextY - body.y) > EPS) {
-      body.grounded = false;
-      body.foothold = 0;
-      // Keep velocity tangent to the slope when leaving an edge.
-      body.vy = body.vx * slope / scale;
-      body.vx /= scale;
-      body.x += left / scale;
+      // Open edges do not use 539A30's explicit jump/force lift.
+      body.grounded = false; body.foothold = 0; body.groundSpeed = 0;
+      const oldX = body.x, oldY = body.y, oldVx = body.vx, oldVy = body.vy;
+      body.x += body.vx * time; body.y += body.vy * time;
+      sweepWalls(body, oldX, oldY, world);
+      sweepFloor(body, oldX, oldY, oldVx, oldVy, world, time);
       return;
     }
     f = next;
-    body.foothold = f.id;
+    alignGround(body, f, body.y, collisionSpeed);
+    initial = collisionSpeed;
+    left = collisionSpeed * time;
   }
+  // A corrupt/cyclic zero-length chain must not leave a grounded body outside its segment.
+  if (f) { body.x = clamp(body.x, f.x1, f.x2); alignGround(body, f, groundY(f, body.x), 0); }
 }
 
-/** Swept foot/segment crossing: land on the FIRST surface, never tunnel to a lower platform. */
-function sweepFloor(body, oldX, oldY, world) {
+/** First oriented foot/segment crossing. 5389B0 interpolates collision velocity, projects it
+ * onto the tangent, halves it when input agrees, otherwise clears it; then consumes remainder.
+ * Exact integer dual-contact/corner tie resolution remains a separate native-geometry gap.
+ */
+function sweepFloor(body, oldX, oldY, oldVx, oldVy, world, seconds) {
   let hit;
   for (const f of world.footholds) {
-    if (!isFloor(f) || body.ignored.has(f.id)) continue;
+    if (!isFloor(f)) continue;
     const slope = (f.y2 - f.y1) / (f.x2 - f.x1);
     const before = oldY - f.y1 - slope * (oldX - f.x1);
     const after = body.y - f.y1 - slope * (body.x - f.x1);
@@ -125,151 +146,146 @@ function sweepFloor(body, oldX, oldY, world) {
     if (x < f.x1 - EPS || x > f.x2 + EPS || (hit && hit.t <= t)) continue;
     hit = { f, t, x };
   }
-  if (hit) {
-    const remainingX = body.x - hit.x;
-    body.x = hit.x;
-    land(body, hit.f, groundY(hit.f, hit.x));
-    const slope = (hit.f.y2 - hit.f.y1) / (hit.f.x2 - hit.f.x1);
-    walkGround(body, remainingX * Math.hypot(1, slope), world);
-  }
+  if (!hit) return;
+  const vx = oldVx + (body.vx - oldVx) * hit.t;
+  const vy = oldVy + (body.vy - oldVy) * hit.t;
+  let speed = hit.f.cos * vx + hit.f.sin * vy;
+  speed = (body.moveX ?? 0) * speed >= 0 ? speed * .5 : 0;
+  body.x = hit.x;
+  alignGround(body, hit.f, groundY(hit.f, hit.x), speed);
+  const remaining = Math.max(0, seconds - Math.trunc(seconds * 1000 * hit.t) / 1000);
+  walkGround(body, speed * remaining, world, remaining);
 }
 function sweepWalls(body, oldX, oldY, world) {
   if (Math.abs(body.x - oldX) < EPS) return;
-  let earliest = 1;
-  let wall;
+  let earliest = 1, wall;
   for (const f of world.footholds) {
     if (f.x1 !== f.x2) continue;
     const t = (f.x1 - oldX) / (body.x - oldX);
     if (t < -EPS || t > earliest) continue;
     const y = oldY + (body.y - oldY) * t;
-    // An edge falling down from this wall's top is NOT an upward wall to collide with.
     if (y <= Math.min(f.y1, f.y2) + EPS || y > Math.max(f.y1, f.y2) + EPS) continue;
-    earliest = t;
-    wall = f;
+    earliest = t; wall = f;
   }
-  if (wall) { body.x = wall.x1 - Math.sign(body.x - oldX) * 0.001; body.vx = 0; }
+  if (wall) { body.x = wall.x1; body.vx = 0; }
+}
+/** 564DF0 uses an expanded swept AABB (+/-10 X), then the first ladder by numeric id. */
+function ladderIn(world, x1, y1, x2, y2) {
+  return world.ladders.find(l => l.x >= Math.min(x1, x2) - 10 && l.x <= Math.max(x1, x2) + 10
+    && Math.min(y1, y2) <= l.y2 && l.y1 <= Math.max(y1, y2));
+}
+function grabLadder(body, input, world, oldX, oldY) {
+  if (body.ladder || input.allowClimb === false) return;
+  let ladder, y = body.y;
+  if (body.moveY < 0) {
+    if (body.grounded) {
+      ladder = ladderIn(world, body.x, body.y - 20, body.x, body.y);
+      if (ladder) y = Math.min(body.y, ladder.y2);
+    } else if (body.vy > 0) ladder = ladderIn(world, oldX, oldY, body.x, body.y);
+  } else if (body.moveY > 0 && body.grounded) {
+    ladder = ladderIn(world, body.x, body.y, body.x, body.y + 10);
+    if (ladder && ladder.y1 >= body.y && ladder.y1 <= body.y + 10) y = ladder.y1;
+    else ladder = undefined;
+  }
+  if (!ladder) return;
+  body.ladder = ladder; body.x = ladder.x; body.y = y;
+  body.layer = ladder.page ?? body.layer; body.group = 0;
+  body.grounded = false; body.foothold = 0; body.groundSpeed = 0;
+  body.vx = body.vy = 0;
+}
+/** Keydown can precede BOTH RAF samples and the 30ms controller update. */
+export function requestPlayerJump(body) {
+  if (body && !body.dead) body.jumpQueued = true;
+}
+function latchJump(body, input) {
+  if (input.disabled || body.dead) body.jumpQueued = false;
+  else if (input.jump && !body.jumpHeld) body.jumpQueued = true;
+  body.jumpHeld = Boolean(input.jump);
 }
 function step(body, input, world, dt, mob = false) {
+  const horizontal = clamp(input.horizontal ?? 0, -1, 1), vertical = clamp(input.vertical ?? 0, -1, 1);
+  body.moveX = horizontal; body.moveY = vertical;
+  // 5426F0 death branch returns before ordinary gravity or ladder movement.
+  if (body.dead) {
+    body.moveX = body.moveY = body.vx = body.vy = body.groundSpeed = 0;
+    body.knockback = undefined; body.jumpQueued = false; return;
+  }
+  if (horizontal) body.facing = horizontal < 0 ? 1 : 0;
+  const shoe = { ...NATIVE_SHOE,
+    walkSpeed: clamp(input.speedPercent ?? 100, mob ? 0 : 80, 130) / 100,
+    jump: clamp(input.jumpPercent ?? 100, 80, 123) / 100 };
+  const jumping = body.jumpQueued;
+  body.jumpQueued = false;
+  const wasLadder = Boolean(body.ladder);
+  // 5376C0 processes jump BEFORE staged external force. A coincident hit must not erase a launch.
+  if (jumping && body.ladder && horizontal) {
+    body.ladder = undefined;
+    body.vx = horizontal * shoe.walkSpeed * 162.5;
+    body.vy = -555 * shoe.jump / world.fieldAttr.gravity * .5;
+  } else if (jumping && body.grounded) {
+    const f = world.byId.get(body.foothold);
+    releaseGround(body, world);
+    const velocity = jumpVelocity(body.vx, f?.sin ?? 0, horizontal, shoe, world.groundAttr, world.fieldAttr);
+    body.vx = velocity.vx; body.vy = velocity.vy;
+    body.groundJumps++; // Native ground branch alone plays Game/Jump, not a ladder departure.
+  }
   const knocked = body.knockback !== undefined;
   if (knocked) {
-    // 537B00 first releases ground/ladder, then combines each pending component with velocity.
-    const impulse = body.knockback;
-    body.knockback = undefined;
-    body.grounded = false;
-    body.foothold = 0;
-    body.ladder = undefined;
-    body.vx = mergeImpulse(body.vx, impulse.x);
-    body.vy = mergeImpulse(body.vy, impulse.y);
-    body.moveAttr = (body.moveAttr ?? 0) | 2; // 537B00 -> 495D60 attr2, retained until publication.
-  }
-  // CUserLocal 512400 updates CAttrShoe walkSpeed (+32) and jump (+56), not gravity.
-  // Mob CAttrShoe uses template speed 0..130, NOT CUserLocal's 80% minimum.
-  const speedScale = clamp(input.speedPercent ?? 100, mob ? 0 : 80, 130) / 100;
-  const jumpScale = clamp(input.jumpPercent ?? 100, 80, 123) / 100;
-  const walkSpeed = PHYSICS.walkSpeed * speedScale;
-  const jumpSpeed = PHYSICS.jumpSpeed * jumpScale;
-  const horizontal = clamp(input.horizontal ?? 0, -1, 1);
-  const vertical = clamp(input.vertical ?? 0, -1, 1);
-  // Keep the controller input distinct from residual velocity (50D700).
-  body.moveX = horizontal;
-  body.moveY = vertical;
-  const jumping = Boolean(input.jump) && !body.jumpHeld;
-  body.jumpHeld = Boolean(input.jump);
-  if (horizontal) body.facing = horizontal < 0 ? 1 : 0;
-  body.ignoreMs -= dt * 1000;
-  if (body.ignoreMs <= 0) body.ignored.clear();
-  // 5426F0 / listing542AF5: forced32's Down is posture only, not a ladder-grab request.
-  if (!knocked && input.allowClimb !== false && !body.ladder && vertical && !input.jump) {
-    const ladder = world.ladders.find((l) => Math.abs(body.x - l.x) <= 8
-      && body.y >= l.y1 - (body.grounded && vertical > 0 ? 5 : 0) && body.y <= l.y2 + (body.grounded && vertical < 0 ? 5 : 0)
-      && !(body.grounded && vertical > 0 && body.y >= l.y2 - 1));
-    if (ladder) {
-      body.ladder = ladder;
-      body.x = ladder.x;
-      body.y = clamp(body.y, ladder.y1, ladder.y2);
-      body.layer = ladder.page ?? body.layer; body.group = 0;
-      body.grounded = false;
-      body.foothold = 0;
-      body.vx = body.vy = 0;
-    }
+    const impulse = body.knockback; body.knockback = undefined;
+    releaseGround(body, world); body.ladder = undefined;
+    body.vx = mergeImpulse(body.vx, impulse.x); body.vy = mergeImpulse(body.vy, impulse.y);
+    body.moveAttr = (body.moveAttr ?? 0) | 2;
   }
   if (body.ladder) {
     const ladder = body.ladder;
-    if (jumping && horizontal) {
-      body.ladder = undefined;
-      body.vx = horizontal * 162.5 * speedScale;
-      body.vy = -jumpSpeed * 0.5; // sub_5378D0: jumping away from a ladder
-    } else {
-      body.vx = 0;
-      body.vy = vertical * PHYSICS.climbSpeed;
-      body.y += body.vy * dt;
-      if (body.y < ladder.y1 && ladder.upperFoothold === false) {
-        body.y = ladder.y1; body.vy = 0;
-      } else if (body.y < ladder.y1) {
-        // CVecCtrlUser::sub_542DF0 lifts the feet FIVE pixels above y1 before detaching.
-        body.y = ladder.y1 - 5;
-        body.ladder = undefined;
-        body.vy = 0;
-        // Resume swept gravity next step; the real platform may be y1-2, above y1-1.
-      } else if (body.y > ladder.y2) {
-        body.y = ladder.y2 + 1;
-        body.ladder = undefined;
-        body.vy = 0;
-      }
-      return;
-    }
-  } else if (jumping && body.grounded) {
-    const ignored = connectedFloors(world, body.foothold);
-    if (vertical > 0 && floorBelow(world, body.x, body.y + 1, 1000, ignored)) {
-      body.ignored = ignored;
-      body.ignoreMs = 300;
-      body.y += 1;
-      body.vy = 0;
-    } else {
-      body.vy = -jumpSpeed;
-      // sub_5378D0: a standing jump halves drift; a walking jump starts at least at 80% walk speed.
-      if (horizontal) {
-        if (horizontal * body.vx < walkSpeed * .8) body.vx += horizontal * walkSpeed * .8;
-        body.vx = horizontal * Math.min(walkSpeed, horizontal * body.vx);
-      } else body.vx *= .5;
-    }
-    body.grounded = false;
-    body.foothold = 0;
+    // 542DF0 is exactly 3 pixels per 30ms controller update, independent of speed stat.
+    body.vx = 0; body.vy = vertical * PHYSICS.climbSpeed;
+    body.y += body.vy * dt;
+    if (body.y < ladder.y1 && ladder.upperFoothold === false) { body.y = ladder.y1; body.vy = 0; }
+    else if (body.y < ladder.y1) { body.y = ladder.y1 - 5; body.ladder = undefined; body.vy = 0; }
+    else if (body.y > ladder.y2) { body.y = ladder.y2 + 1; body.ladder = undefined; body.vy = 0; }
+    return;
   }
-  const oldX = body.x, oldY = body.y;
-  const oldVx = body.vx, oldVy = body.vy;
+  const oldX = body.x, oldY = body.y, oldVx = body.vx, oldVy = body.vy;
   if (body.grounded) {
-    body.vx = approach(body.vx, horizontal * walkSpeed, (horizontal ? PHYSICS.acceleration : PHYSICS.friction) * dt);
-    walkGround(body, (oldVx + body.vx) * .5 * dt, world);
+    const f = world.byId.get(body.foothold);
+    if (!f || !isFloor(f)) { releaseGround(body, world); return; }
+    // Projection also accommodates a caller initializing world velocity (ordinary jumping mobs).
+    const start = f.cos * body.vx + f.sin * body.vy;
+    const result = groundStep(start, f.sin, horizontal, dt, shoe, world.groundAttr);
+    body.groundSpeed = result.speed;
+    walkGround(body, result.distance, world, dt, start);
   } else {
-    // In air input accelerates only towards the control limit; a walking jump retains its speed.
-    if (horizontal && horizontal * body.vx < PHYSICS.airControlSpeed) {
-      body.vx = approach(body.vx, horizontal * PHYSICS.airControlSpeed, PHYSICS.airAcceleration * dt);
-    } else if (!horizontal) body.vx = approach(body.vx, 0, PHYSICS.airDrag * dt);
-    body.vy = Math.min(PHYSICS.terminalSpeed, body.vy + PHYSICS.gravity * dt);
-    body.x += (oldVx + body.vx) * .5 * dt;
-    body.y += (oldVy + body.vy) * .5 * dt;
+    const result = airStep(oldVx, oldVy, horizontal, dt, shoe, world.fieldAttr);
+    body.vx = result.vx; body.vy = result.vy;
+    body.x += result.dx; body.y += result.dy;
     sweepWalls(body, oldX, oldY, world);
-    sweepFloor(body, oldX, oldY, world);
+    sweepFloor(body, oldX, oldY, oldVx, oldVy, world, dt);
   }
+  // 5426F0 checks grabs AFTER physics. A rising jump cannot catch a rope; a falling sweep can.
+  if (!knocked && !wasLadder) grabLadder(body, input, world, oldX, oldY);
 }
-/** Fixed 8ms physics regardless of 30/60/144Hz rendering. Discard long background-tab catch-up. */
+/** Native-sized 30ms local controller updates, NOT a claim of the EXE's shared global phase.
+ * RAF latches a short jump press until the next update; UI/death clears pending requests.
+ * 250ms background-tab cap is explicit browser catch-up policy, not an original constant.
+ */
 export function advancePlayer(body, input, world, elapsedMs) {
+  latchJump(body, input);
   body.accumulator += clamp(Number.isFinite(elapsedMs) ? elapsedMs : 0, 0, 250);
   while (body.accumulator + EPS >= PHYSICS.stepMs) {
+    const before = movementSnapshot(body);
+    const onLadder = Boolean(body.ladder);
     step(body, input, world, PHYSICS.stepMs / 1000);
+    recordMovementTick(body, before, onLadder, PHYSICS.stepMs);
     body.accumulator -= PHYSICS.stepMs;
   }
   return body;
 }
-/** Mob trajectory planning uses the native <=30ms subdivision (53D3F0), not RAF/player catch-up.
- * Reuses ordinary ground/air sweeps only; not the entire CVecCtrlMob controller or field physics.
- */
+/** Native <=30ms mob planning subdivision; not the whole CVecCtrlMob owner/AI controller. */
 export function advanceMob(body, input, world, elapsedMs) {
-  for (let left = Math.max(0, elapsedMs); left > 0;) {
-    const ms = Math.min(30, left);
-    step(body, input, world, ms / 1000, true);
-    left -= ms;
+  latchJump(body, input);
+  for (let left = Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0); left > 0;) {
+    const ms = Math.min(30, left); step(body, input, world, ms / 1000, true); left -= ms;
   }
   return body;
 }
@@ -283,6 +299,48 @@ export function actionOf(body) {
   return ({ walk1: 2, stand1: 4, alert: 8, prone: 10, dead: 18, jump: 6, ladder: 14, rope: 16 }[locomotion(body)]) | body.facing;
 }
 
+/** Native scalar exports use _ftol (truncate), not Math.round at negative coordinates. */
+export function movementSnapshot(body) {
+  return {attr: body.moveAttr ?? 0, x: Math.trunc(body.x), y: Math.trunc(body.y),
+    vx: Math.trunc(body.vx), vy: Math.trunc(body.vy), action: actionOf(body),
+    foothold: body.ladder ? -body.ladder.id : body.foothold};
+}
+function sameMovement(a, b) {
+  return a.x === b.x && a.y === b.y && a.vx === b.vx && a.vy === b.vy
+    && a.action === b.action && a.foothold === b.foothold;
+}
+function recordMovementTick(body, before, wasLadder, duration) {
+  const after = movementSnapshot(body), frames = body.motionFrames;
+  const landing = before.foothold === 0 && body.grounded;
+  const ladderChange = wasLadder !== Boolean(body.ladder);
+  // The travel interval must not acquire its landing/ladder posture early. A zero-duration
+  // terminal node changes state at contact, as with the ordinary jumping-mob planner.
+  const interval = {...after, duration};
+  if (landing || ladderChange) { interval.foothold = before.foothold; interval.action = before.action; }
+  frames.push(interval);
+  if (landing || ladderChange) frames.push({...after, attr: 0, duration: 0});
+  body.moveAttr = 0; // attr2 now belongs to this ordered fragment, not an arbitrary later snapshot.
+  let total = frames.reduce((sum, f) => sum + f.duration, 0);
+  // Bounded browser backlog policy, separate from the native count byte (255).
+  while (frames.length > 62 || total > 960) {
+    const dropped = frames.shift(); total -= dropped.duration;
+    body.motionOrigin = {...dropped, attr: 0};
+  }
+}
+/** Drain the REAL ordered controller history, retaining 100ms network batching as browser policy.
+ * The initial zero node anchors the path; it is not 100ms of fabricated interpolation.
+ * A zero terminal node also flushes a posture/alert change accepted between controller updates.
+ */
+export function drainPlayerPath(body) {
+  const current = movementSnapshot(body), origin = body.motionOrigin ?? current;
+  const frames = body.motionFrames.splice(0);
+  if (!frames.length || !sameMovement(frames.at(-1), current) || current.attr)
+    frames.push({...current, duration: 0});
+  body.motionOrigin = {...current, attr: 0}; body.moveAttr = 0;
+  return {originX: origin.x, originY: origin.y,
+    elements: [{...origin, attr: 0, duration: 0}, ...frames]};
+}
+
 /** CVecCtrl retains page/group from each contacted foothold even if a later fragment is airborne. */
 function rememberFootholdDepth(entity, world, foothold) {
   const floor = world.byId.get(foothold);
@@ -293,16 +351,16 @@ function rememberFootholdDepth(entity, world, foothold) {
 export function beginPath(entity, path, now, fallbackDuration = 100) {
   const elements = path?.elements?.length ? path.elements : [];
   if (!elements.length) return;
-  entity.motion = { start: now, x: entity.x, y: entity.y, elements: elements.map((e) => ({ ...e, duration: Number.isFinite(e.duration) ? Math.max(0, e.duration) : fallbackDuration })) };
+  entity.motion = { start: now, x: entity.x, y: entity.y, foothold: entity.foothold, elements: elements.map((e) => ({ ...e, duration: Number.isFinite(e.duration) ? Math.max(0, e.duration) : fallbackDuration })) };
 }
 export function sampleMotion(entity, now, world) {
   const motion = entity.motion;
   if (!motion) return false;
   let remaining = Math.max(0, now - motion.start);
-  let x = motion.x, y = motion.y;
+  let x = motion.x, y = motion.y, foothold = motion.foothold;
   for (const e of motion.elements) {
     if (remaining >= e.duration) {
-      remaining -= e.duration; x = e.x; y = e.y;
+      remaining -= e.duration; x = e.x; y = e.y; foothold = e.foothold;
       entity.action = e.action ?? entity.action; entity.facing = entity.action & 1;
       entity.foothold = e.foothold; entity.vx = e.vx ?? 0; entity.vy = e.vy ?? 0;
       rememberFootholdDepth(entity, world, e.foothold);
@@ -316,8 +374,10 @@ export function sampleMotion(entity, now, world) {
     entity.facing = entity.action & 1; // The wire facing bit wins, not the position delta (knockback reverses it).
     entity.vx = e.vx ?? 0; entity.vy = e.vy ?? 0;
     // A walking monster follows its foothold polyline, not a chord through slopes or through sky.
-    if (e.foothold) {
+    if (e.foothold && isFloor(world.byId.get(e.foothold) ?? {})) {
       const chain = connectedFloors(world, e.foothold);
+      // Never project an air-to-floor interval or an unrelated platform chord onto the floor.
+      if (foothold !== undefined && !chain.has(foothold)) return true;
       let closest;
       for (const id of chain) {
         const f = world.byId.get(id);

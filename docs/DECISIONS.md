@@ -2767,3 +2767,21 @@ latejoin經已驗證session的browser sideband續body相位，不偽造native op
 
 server採engaged／同場live attacker／grounded／MP權威政策，不宣稱原state5／owner controller已完整還原。
 原證、常數分類、清理／過期、同save冷備與未執行fixtures見 [NATIVE_MOB_ATTACKS](NATIVE_MOB_ATTACKS.md)。
+
+
+## ADR-077：普通力學、地形速度、繩梯與有序movement整鏈（2026-10-18）
+
+**狀態：已實裝來源；未test／check／typecheck／語法／browser／VM／probe。**
+
+交叉537520／5376C0／5378D0／537CA0／5382F0／5389B0／539450／539A30、
+5426F0／542DF0與562BB0／563010／5643D0／564CE0／564DF0；listing補537F77未定義比較與537D35坡向非對稱。
+正規化地形單位切線，分開tangent speed與world velocity，port ordinary forces／slope slip／overspeed、
+jump／landing、edge餘時與swept grab；死亡不再套gravity。shoe .9是slip閾值，不是平地drag，720改800。
+查證本版共享default foothold attr，不套後版WZ欄位；移除無本版原證的Down+jump穿台300ms。
+
+玩家改本地30ms controller並保留逐步journal，100ms僅為browser傳輸batch；attr2／land或ladder terminal保序，
+bridge逐欄位驗證、movePath既有codec、session／field末端權威、remote interpolation及原face消費整鏈接通。
+保留舊moveTo／snapshot工具API；換場serialMotion守衛、journal建立／失效、背景上限與JSON admission都是明示policy。
+
+整數corner ties／shape pool／field bounds／unstick、全域相位、原append／send／velocity playback、水飛與完整mob AI仍缺。
+原證、常數分類、來源fixtures及同save備份見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。

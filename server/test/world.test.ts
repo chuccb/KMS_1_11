@@ -535,3 +535,22 @@ test("late join retains the mover's prone/rope movement byte, facing and reporte
   const remote=third.of(FIELD_OPCODE.userEnterField).map(p=>readUserEnterField(new PacketReader(p,1))).find(u=>u.characterId===1)!;
   assert.equal(remote.action,17);assert.equal(remote.foothold,65529);
 });
+
+
+/** Source-only regression added for ADR-077; not executed in this turn. */
+test("ordered multi-record move retains terminal position/posture for combat and late join, relays all records",()=>{
+  const field=stubField(),hero=new FakeMember(1,"Hero"),alt=new FakeMember(2,"Alt");
+  field.join(hero);field.join(alt);hero.clear();alt.clear();
+  const path=stubMove(100,300);
+  path.elements[0]!.duration=0;
+  path.elements.push({...path.elements[0]!,x:300,y:290,vx:125,action:3,foothold:0,duration:30});
+  path.elements.push({...path.elements[0]!,x:310,y:280,vx:125,vy:-270,action:7,foothold:0,duration:30,attr:2});
+  field.reportMove(1,path);
+  assert.deepEqual([field.member(1)?.at?.x,field.member(1)?.at?.y,field.member(1)?.at?.action],[310,280,7]);
+  const relayed=readUserMove(new PacketReader(alt.of(FIELD_OPCODE.userMove)[0]!,1));
+  assert.deepEqual(relayed.path,path);assert.equal(hero.of(FIELD_OPCODE.userMove).length,0);
+  const late=new FakeMember(3,"Late");field.join(late);
+  const enter=late.of(FIELD_OPCODE.userEnterField).map(packet=>readUserEnterField(new PacketReader(packet,1)))
+    .find(user=>user.characterId===1)!;
+  assert.deepEqual([enter.x,enter.y,enter.foothold,enter.action],[310,280,0,7]);
+});

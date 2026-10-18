@@ -1,6 +1,6 @@
 /** Ordinary jumping-mob trajectory; the server owns this path, the browser only samples it.
  * 48D080: ability comes from root fly/jump/move subtrees, NOT an info.jump stat.
- * 5378D0: -555 with default shoe.jump=1/mass=1; 53D3F0: <=30ms subdivision.
+ * 5378D0: -555 with default shoe.jump=1/mass=100; 53D3F0: <=30ms subdivision.
  * Shared swept floor/wall geometry avoids a separate fake sine wave or renderer-only hop.
  * No water/flying/aggro/skill or custom field/shoe physics is claimed here.
  */
@@ -22,12 +22,12 @@ export function planMobAirPath(start, footholds, options) {
     advanceMob(body, { horizontal: options.direction, jump: options.launch && elapsed === 0,
       speedPercent: options.speedPxPerSecond * 100 / PHYSICS.walkSpeed }, world, duration);
     elapsed += duration;
-    points.push({ x: Math.round(body.x), y: Math.round(body.y), vx: Math.round(body.vx),
-      vy: Math.round(body.vy), foothold: 0, action: jumpAction, duration });
+    points.push({ x: Math.trunc(body.x), y: Math.trunc(body.y), vx: Math.trunc(body.vx),
+      vy: Math.trunc(body.vy), foothold: 0, action: jumpAction, duration });
     if (body.grounded) {
       // Land at the END of this interval. A positive foothold on the preceding segment would
       // force sampleMotion to project the whole descending arc onto the floor prematurely.
-      points.push({ x: Math.round(body.x), y: Math.round(body.y), vx: Math.round(body.vx), vy: 0,
+      points.push({ x: Math.trunc(body.x), y: Math.trunc(body.y), vx: Math.trunc(body.vx), vy: Math.trunc(body.vy),
         foothold: body.foothold, action: groundAction, duration: 0 });
       break;
     }

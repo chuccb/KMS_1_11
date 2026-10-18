@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { animationFrame, animationDuration } from "../../client/animation.mjs";
 import { deathState, deathPose, tombPose, deathEffects } from "../../client/death.mjs";
 // @ts-expect-error Existing browser-only physics module has no TS declaration; source-only regression.
-import { beginPath, sampleMotion, collisionWorld, createPlayer, advancePlayer, queueKnockback } from "../../client/motion.mjs";
+import { beginPath, sampleMotion, collisionWorld, createPlayer, advancePlayer, queueKnockback, drainPlayerPath } from "../../client/motion.mjs";
 import { WzArchive } from "../src/wz/archive.ts";
 import { WzNode } from "../src/wz/img.ts";
 import { artReaderOf, frameDelay, frameProperty } from "../src/game/wzart.ts";
@@ -83,9 +83,11 @@ test("zero-duration path records are instantaneous; native action facing survive
   sampleMotion(user,50,world);assert.equal(user.x,15);assert.equal(user.facing,1);
   sampleMotion(user,100,world);assert.equal(user.x,20);assert.equal(user.action,7);
   const body=createPlayer(0,0,world,0,false);
-  queueKnockback(body,270,-270);advancePlayer(body,{},world,8);
-  assert.equal(body.moveAttr,2,"retain native force marker until publisher clears it");
-  advancePlayer(body,{},world,8);assert.equal(body.moveAttr,2);
+  queueKnockback(body,270,-270);advancePlayer(body,{},world,30);
+  advancePlayer(body,{},world,30);
+  const recorded=drainPlayerPath(body).elements;
+  assert.equal(recorded.filter(e=>e.attr&2).length,1,"retain force on its ordered fragment until publication");
+  assert.equal(drainPlayerPath(body).elements.some(e=>e.attr&2),false);
 });
 
 const path=fileURLToPath(new URL("../../Data.wz",import.meta.url));

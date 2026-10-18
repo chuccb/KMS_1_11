@@ -124,3 +124,10 @@ look副本、不試穿、不給物品、不消耗、不選敵、不發attack／m
 - 沿用 `generated/preview-faces-20261018.json` 的實際遊玩進度；沒有重seed／改級別／重填裝備。
   停服冷備：`generated/backups/preview-faces-before-posture-attack-20261018-040933-833420367.json`。
   存檔與冷備都在ignored generated，不進Git；完成後同檔開LIVE web8515／login8516／game8517。
+
+
+## ADR-077續作更正（2026-10-18）
+
+上表的8ms／平地720屬本文件當時狀態；現已改本地30ms controller及原walkDrag=1的800，
+補ground／air scalar、slope tangent、landing／grab／death與有序movement整鏈。
+仍不等於原global app phase、完整shape／field bounds／water／fly；見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。

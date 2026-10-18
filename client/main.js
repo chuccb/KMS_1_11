@@ -73,6 +73,9 @@ import {
   collisionWorld,
   createPlayer,
   advancePlayer,
+  requestPlayerJump,
+  movementSnapshot,
+  drainPlayerPath,
   queueKnockback,
   locomotion,
   actionOf,
@@ -3013,6 +3016,13 @@ function statusButtonClick(button) {
   logLine(`${button.name}：這個原版視窗還沒接上來。`);
 }
 
+/** Shared by keydown queueing and controller sampling, so a sub-frame jump cannot leak
+ * from a focused input/modal/hidden document into the next gameplay update. */
+function movementBlocked() {
+  return document.hidden || !document.hasFocus() || portalPending || itemDialog.open ||
+    systemPanel.visible || testToolsPanel.open || selfView?.hp <= 0 || shop !== undefined ||
+    talkingNpc !== undefined || document.activeElement instanceof HTMLInputElement;
+}
 function frame() {
   const enabled = !!canSendEmotion();
   if (enabled !== emoteAvailable) {
@@ -3034,21 +3044,14 @@ function frame() {
     playerBody.dead = selfView?.hp <= 0;
     if (playerBody.dead) clearAttackAlert(playerBody);
     else advanceAttackAlert(playerBody, now);
-    const blocked =
-      portalPending ||
-      (itemDialog.open || systemPanel.visible) ||
-      testToolsPanel.open ||
-      selfView?.hp <= 0 ||
-      shop !== undefined ||
-      talkingNpc !== undefined ||
-      document.activeElement instanceof HTMLInputElement;
+    const blocked = movementBlocked();
     const attackLocked =
       selfSwing && attackFrame(selfSwing, now) >= 0;
-    const wasGrounded = playerBody.grounded;
-    const wasKnocked = playerBody.knockback !== undefined;
+    const groundJumps = playerBody.groundJumps;
     advancePlayer(
       playerBody,
       {
+        disabled: blocked,
         horizontal:
           blocked || attackLocked
             ? 0
@@ -3066,7 +3069,7 @@ function frame() {
       terrain,
       elapsed,
     );
-    if (!wasKnocked && wasGrounded && !playerBody.grounded && playerBody.vy < 0)
+    if (playerBody.groundJumps !== groundJumps)
       void audio.effect("Game/Jump");
     self.x = playerBody.x;
     self.y = playerBody.y;
@@ -5694,13 +5697,15 @@ window.addEventListener("keydown", (event) => {
   ) {
     event.preventDefault();
     keys.add(key);
+    if ((key === "alt" || key === " ") && !event.repeat && !movementBlocked() &&
+        !(selfSwing && attackFrame(selfSwing, performance.now()) >= 0)) requestPlayerJump(playerBody);
   }
 });
 window.addEventListener("keyup", (event) =>
   keys.delete(event.key.toLowerCase()),
 );
 
-// Physics runs in RAF. Publish at 10Hz and flush ordered posture before an attack.
+// 30ms controller records are batched at 10Hz; flush their ordered path before an attack.
 function publishPlayerMotion() {
   if (
     !self ||
@@ -5710,21 +5715,14 @@ function publishPlayerMotion() {
     map?.id !== self.mapId || socket?.readyState !== WebSocket.OPEN
   )
     return false;
-  const packet = {
-    t: "move",
-    x: Math.round(self.x),
-    y: Math.round(self.y),
-    foothold: playerBody.ladder ? -playerBody.ladder.id : playerBody.foothold,
-    action: actionOf(playerBody),
-    attr: playerBody.moveAttr ?? 0,
-    vx: Math.round(playerBody.vx),
-    vy: Math.round(playerBody.vy),
-  };
-  const state = JSON.stringify(packet);
-  if (state === lastSentMotion && !packet.attr) return true;
+  const snapshot = movementSnapshot(playerBody);
+  const path = drainPlayerPath(playerBody);
+  const state = JSON.stringify({...snapshot, attr: 0});
+  const stationary = path.elements.every(element => !element.attr &&
+    ["x", "y", "vx", "vy", "action", "foothold"].every(key => element[key] === snapshot[key]));
+  if (state === lastSentMotion && stationary) return true;
   lastSentMotion = state;
-  send(packet);
-  playerBody.moveAttr = 0;
+  send({t: "move", path});
   return true;
 }
 setInterval(publishPlayerMotion, MOVE_TICK_MS);

@@ -81,7 +81,8 @@ bottom = max(r.bottom-10, cy+1)
 不是拿 mob/self 中心左右硬選方向。pending force與既有速度都用原 bounded merge：
 如向右125遇-270，變-145；向左-125遇-270，限至-270；已經-400則不減速；下落500遇-270仍可是230。
 
-瀏覽器下一個8ms普通物理步消費外力，原始程式則用自己的CVecCtrl tick；未宣稱物理逐bit一致。
+ADR-077已改下一個本地30ms控制步消費外力，並按5376C0先jump後force；attr2留在該有序fragment。
+原始程式使用共同app phase與原整數幾何；仍未宣稱逐bit一致，見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。
 擊退不偽播放 Jump 音效，也不憑空新增未定位的玩家受傷音效。
 
 ## 表情、字圖與生命週期修補

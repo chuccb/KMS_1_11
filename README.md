@@ -147,6 +147,9 @@ node server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-p
 - NPC 圖文／選項與同步行為：[圖文](docs/NATIVE_DIALOGUE_RICHTEXT.md)、[controller 與未解矛盾](docs/NATIVE_NPC_BEHAVIOR.md)，**未測試**。
 - 地圖、角色／怪物、移動、音訊、背包、商店、數值與死亡等逐輪紀錄，由[文件索引](docs/README.md)查閱，不在此重複堆疊歷史「最新」。
 
+近期普通移動續作：地面力／坡滑、空中超終速、落地速度投影、抓繩與死亡停止，
+並將30ms控制器路徑經bridge／原codec完整傳送；見[原證與未完成幾何界線](docs/NATIVE_LOCOMOTION.md)。
+
 完整 CShape2D／CVecCtrl、原 GDI 字型、全部主動技能／buff、自然 AP／SP／轉職、卷軸、cash／pet、
 原 quest／taxi／trunk scripts、完整交易／組隊瀏覽器介面與正式營運防護仍有缺口。
 原 server 缺失的規則明示為重建政策；不以後期版本或「缺素材」猜測代替原證據。

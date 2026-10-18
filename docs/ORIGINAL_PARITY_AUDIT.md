@@ -1,6 +1,8 @@
 # 與原版的差異、部分完成與未實作總盤點
 
 盤點日期：2026-10-18。程式基準：`4f9ad1b`（ADR-076 怪物主動攻擊交付之後）。
+續作更新：ADR-077已補普通地空力學／抓繩、改本地30ms controller與有序path整鏈；A01/A04/A05如下更新，完整原證與仍缺的幾何／相位見 [NATIVE_LOCOMOTION](NATIVE_LOCOMOTION.md)。其餘維持原盤點基準。
+
 這是**靜態現況盤點**，不是遊戲驗收、逐像素比較或新的原版實機測量。本輪閱讀現行程式、ADR、原證整理與路線圖，未執行測試／check／typecheck／語法檢查／browser／VM／HTTP或登入probe。
 
 ## 先講結論
@@ -34,11 +36,11 @@
 
 | 編號／狀態 | 剩餘問題 | 已有與未有的分界／影響 | 程式與證據入口 |
 |---|---|---|---|
-| A01 差異／部分 | 玩家不是完整CVecCtrl | 普通地面、空中、斜坡、繩梯、登台與受擊外力已有；`motion.mjs`仍採固定8ms步進，不是原引擎整個主迴圈／控制器的等價移植。參數正確不保證接地、轉向、摩擦、離平台等所有邊界一致 | `client/motion.mjs` 的 PHYSICS／advancePlayer；[姿勢](NATIVE_POSTURE_ATTACK.md) |
+| A01 差異／部分 | 玩家不是完整CVecCtrl | ADR-077已port普通地面力／坡滑、air超終速、jump／landing投影與half、繩梯sweep／死亡停止，改本地30ms controller。整數多接觸／ceiling／field bounds／unstick等仍非完整native geometry，不因scalar分支port就稱完整CVecCtrl | `client/motion.mjs` 的 PHYSICS／advancePlayer；[姿勢](NATIVE_POSTURE_ATTACK.md) |
 | A02 未接／部分 | 水中、飛行、特殊鞋／地圖物理 | 現有motion明示只涵蓋ordinary ground／air／ladder；不能把fly身體圖或jump姿勢當作飛行／游泳控制器。完整場地／鞋參數與特殊碰撞分支未接全 | `motion.mjs`、`mobmotion.mjs`、`game/map.ts`／`mobs.ts` |
 | A03 差異／部分 | CShape2D與形狀池 | 已用當前WZ frame真lt/rb、swept RECT及碰撞內縮；仍非完整原shape pool、R-tree、ZList選敵順序與所有逐幀地形阻擋。多人／多怪同時重疊、邊界與高速狀況仍有差距 | `client/basiccombat.mjs`、`contact.mjs`、`magiccombat.mjs`；[魔法界線](NATIVE_MAGIC_SKILLS.md) |
-| A04 差異 | 沒有共同原全域30ms相位 | 普通body、攻擊、raw受擊窗與FX已分時鐘，但RAF、8ms物理、field tick仍不是同一個native app phase；server預設field tick為90ms，due hit可延到下一tick | `motion.mjs`、`avatar-motion.mjs`；`net/loginserver.ts` 的 DEFAULT_MOB_TICK_MS／tickFields |
-| A05 差異／部分 | 遠端插值、延遲與晚進場 | 已送未走完path、trim elapsed，怪物body可續相對age；仍非原owner預測／完整延遲校正。已飛的舊怪物球與歷史屍體不為新進者重建，不能稱全場景phase同步完成 | `motion.mjs` 的 beginPath／sampleMotion；`game/mobs.ts` 的 resumePackets／presentation；[ADR-076](NATIVE_MOB_ATTACKS.md) |
+| A04 差異 | 沒有共同原全域30ms相位 | 普通body、攻擊、raw受擊窗與FX已分時鐘，但RAF、本地30ms controller、field tick仍不是同一個native app phase；server預設field tick為90ms，due hit可延到下一tick | `motion.mjs`、`avatar-motion.mjs`；`net/loginserver.ts` 的 DEFAULT_MOB_TICK_MS／tickFields |
+| A05 差異／部分 | 遠端插值、延遲與晚進場 | ADR-077玩家保存30ms ordered fragments／attr／landing terminal，100ms只作傳輸batch；server與cache用末端權威。已有怪物未走完path、trim elapsed、body相對age；仍非原CMovePath append／send／velocity playback、owner預測／完整延遲校正。已飛的舊怪物球與歷史屍體不為新進者重建，不能稱全場景phase同步完成 | `motion.mjs` 的 beginPath／sampleMotion；`game/mobs.ts` 的 resumePackets／presentation；[ADR-076](NATIVE_MOB_ATTACKS.md) |
 | A06 差異 | 背景分頁／冷載入政策 | 長間隔不追播不可見的全部輸入與命中，過期效果不重新播放；這是browser安全／效能政策，不等於native持續更新的每個中間snapshot | `motion.mjs`、`avatar-motion.mjs`、`mob-attack-effects.mjs`、`combat-assets.mjs` |
 | A07 差異／未知 | 全域RNG呼叫序列與數值精度 | 傷害已有原ClientRandom與七值抽樣；動作選擇、火花、字位移仍有Math.random，成長／怪物選招另有server注入來源；未重放原全域種子與呼叫順序。JS double／x87暫存精度未逐輸入比對 | `main.js` 的動作與火花抽選；`net/webclient.ts` 的 attackRandom；`growth.ts`、`mob-attacks.mjs`；[數值](NATIVE_STATS_COMBAT.md) |
 

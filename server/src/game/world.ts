@@ -332,9 +332,11 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
   reportMove(characterId: number, path: MovePath): void {
     const member = this.members.get(characterId);
     if (member === undefined) return;
-    const first = path.elements[0];
-    if (first !== undefined) member.at = { ...member.at, x: first.x, y: first.y,
-      foothold: first.foothold, action: first.action };
+    // Records are chronological. Current authority/late-join/combat must use the endpoint,
+    // not the initial zero-duration anchor (single-element tooling calls remain unchanged).
+    const last = path.elements.at(-1);
+    if (last !== undefined) member.at = { ...member.at, x: last.x, y: last.y,
+      foothold: last.foothold, action: last.action };
     // The same clock the tick uses: a pickup compares this against a drop's `bornAt`.
     member.lastMoveAt = Date.now();
     const packet = encodeUserMove({ characterId, path });
