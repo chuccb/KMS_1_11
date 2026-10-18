@@ -101,9 +101,10 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 ```
 
 - 瀏覽器使用 **web port 8515** 的 LIVE 入口，8516/8517 是原生 TCP，不能當網頁開啟。
-- `preview / preview`、`observer / observer` 是**全新空帳號**；角色由使用者自行建立，不是已恢復的 Preview/Observer。
+- `preview / preview`、`observer / observer` 是這個隔離世界啟動時建立的帳號；角色由使用者自行建立，不代表現在仍沒有角色，也不是還原舊帳號。
 - `--save off` **重啟會失去全部新進度**，不寫任何現有玩家存檔；重要進度請改在自行指定的新 save 上玩並另行匯出備份。
 - 101000000 城鎮是明示開發體驗安排，不是原版建角起點；不自動轉職／加技能／給錢。
+- 網頁更新後請重新整理；這不是重啟 server。若初始化中斷，會顯示錯誤／重新整理面板，登入按鈕與 Enter 都不會啟動半完成的用戶端。
 - 程序是否在線以本次實際 LIVE 程序為準，這裡不保證沙箱跨重啟存活。
 - 型別／格式／建置與回歸狀態見 [Bun 遷移記錄](docs/BUN_MIGRATION.md)；提供入口不是宣稱全案驗收通過。
 

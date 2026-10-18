@@ -10,6 +10,8 @@
 | TypeScript | 7.0.2 | 根 `package.json` 與 `bun.lock` |
 | Bun 型別 | 1.4.3 | 同上；與 runtime 同版 |
 | Prettier | 3.9.10 | 同上與 `.prettierrc.json` |
+| Playwright Core | 1.64.1 | 根 devDependencies / bun.lock，Bun 直接執行 |
+| Chromium tooling | 153.0.0 | 同上；只作隔離 browser 驗證 |
 | checkout Action | v7.0.1 | CI 固定完整 commit SHA |
 | setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
@@ -39,8 +41,8 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 68 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
-  **`client/main.js` 及 server/scripts 剩餘 16 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 71 支 `.ts`（含共用型別／守衛），無 `.mjs`／重複 declaration。
+  **`client/main.js` 及 server/scripts 剩餘 13 支 `.mjs` 仍未獲嚴格型別驗證**，必須繼續實際遷移。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
@@ -48,7 +50,7 @@ bun run build
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。
 - 9 支純規則 probe 已移至 `server/test/presentation-*.test.ts`，連同新增 recovery／typed UI／WZ HTTP 測試納入根 suite。
-  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 16 支工具／fixture，不能以能 bundle 代替完成。
+  手動 `browser_*_probe.mjs` 未執行；全案仍欠主入口與 13 支工具／fixture，不能以能 bundle 代替完成。
 
 ## 工具遷移與原證
 
@@ -86,13 +88,27 @@ bun tools/serve-existing-save.ts generated/<真正存在的存檔>.json
 
 本次允許型別、格式、單元回歸及建置；**不自動登入、不操作角色、不寫玩家進度、不自動跑手動 probe**。
 
+## 瀏覽器工具與安全邊界
+
+Playwright Core／Chromium 皆固定本日 registry latest，安裝生命週期腳本仍禁止。Bun 直接載入 tooling，沒有呼叫 Node runtime；browser binary、NSS/NSPR 由 dev package 提供，不提交產物、不需 apt 或外部 Playwright module。內建 binary 用於 Linux x64；其他平台請明示 CHROMIUM_EXECUTABLE 指向可用的本機 Chromium。Linux 的額外 shared-library path 只傳給子 browser，不改遊戲 server 環境。保留一般瀏覽器 origin/security 檢查，不開 disable-web-security。
+
+source／bundle 的真瀏覽器啟動與假傳輸 UI 測試納入 bun run test。只用 ephemeral HTTP port，沒有遊戲 server／玩家帳號／save；WebSocket 在 Playwright 內攔截，永不 connectToServer。故障注入會故意製造錯誤，確認啟動警示與 ready gate，不是在 LIVE 注入。
+
+三支現行 typed 工具：
+
+```sh
+bun server/scripts/art_perf_probe.ts
+bun server/scripts/browser_audio_probe.ts <明示web-port或http(s)://origin>
+bun server/scripts/equipment_fixture.ts generated/validation/<全新名稱>.json
+```
+
+音訊只讀、無登入且拒絕隱含預設目標；裝備 fixture 是明示建立獨立新檔，非恢復／修改進度，不能自動拿來替代玩家存檔。其餘13支 .mjs 工具仍未遷完，不自動執行手動登入／移動 probe。
+
 ## 實際驗證狀態
 
-來源凍結後，frozen lockfile 安裝、全部 TS 的嚴格型別、格式與 browser build 均通過。
-完整回歸為 **902 pass / 44 fail，946 tests / 102 files**；上一凍結點為 828/45，d311622 同版 Bun 參照為 823/45。
-逐一比對檔名／標題／重複次數：原 browser-motion wrapper 轉綠，**其餘 44 項完全相同，新增失敗 0**。
-9 支 pure presentation tests 與 wrapper 為 63/0；另增 recovery 4 項、typed UI 5 項、真 WZ HTTP／非法 metadata 2 項均通過，完整 suite 也全部包含。
-原 manifest 全 image checksum、獨立 HTTP import graph 均通過；既有 LIVE 僅作 static GET 檢查，index 200、66 個模組 HTTP／MIME／JS parser 通過，沒有登入／操作角色或重啟。
-**44 個失敗仍阻擋驗收，這不是全專案完成；不能從 Bun 參照推論原 Node 一樣失敗。**
-詳細 fixture 原證、剩餘來源與完整失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。
-CI 使用同一組 Bun 命令，不靠 continue-on-error、篩掉案例或縮小型別設定讓結果變綠。
+frozen lockfile（47 packages 無漂移）、根 strict typecheck、格式與 browser build 均通過。
+完整回歸 **916 pass / 44 fail，960 tests / 105 files**；上一凍結點 ff0e735 是902/44。44項檔名／標題／重複次數完全相同，新增／移除均0。**不能以無新增失敗推論沒有執行期問題**：本輪真 Chromium 找出並修正前輪漏掉的 stat-body tag 錯誤，已補正式啟動／假傳輸／故障注入案例。
+
+focused 20/0；真 Chromium 的來源版與建置版、PNG實際壓縮／快取、150筆原音訊解碼、fixture獨占寫入與防越界皆通過。原 WZ manifest checksum 及其他既有測試保留。現有 LIVE 首頁200、兩個entry與69個模組 HTTP／MIME／JS parser 通過；只載入頁面的 Chromium 實測 ready／首幀通過、page errors=0、WebSocket attempts=0。沒有登入 LIVE、操作現有角色或重啟 server。
+
+**44個失敗仍阻擋驗收；main.js 與13支工具仍未遷完，這不是全專案完成。** 詳細範圍、原證與失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。CI 不使用 continue-on-error、skip、縮小範圍或關閉 strict。

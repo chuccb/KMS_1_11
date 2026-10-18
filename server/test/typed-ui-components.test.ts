@@ -7,7 +7,9 @@ import { reviveWindow, REVIVE_DELAY_MS } from "../../client/revive.ts";
 import { characterDialogs } from "../../client/creation.ts";
 import { soundSettings, SOUND_DEFAULTS } from "../../client/systemsettings.ts";
 import type { QuestReply } from "../src/protocol/quest.ts";
-import { uiFixture } from "./helpers/ui-fixture.ts";
+import { uiFixture, fixtureEvent } from "./helpers/ui-fixture.ts";
+import { statWindow } from "../../client/statwindow.ts";
+import { gameElements } from "../../client/game-dom.ts";
 const audio = { effect() {} };
 
 test("typed settings controls keep sound/game drafts separate, preview immediately, cancel and persist explicitly", () => {
@@ -263,6 +265,49 @@ test("creation checks the real catalogue shape and captures the confirmed charac
     selected = { id: 2, name: "second" };
     f.get("native-yes").click();
     assert.deepEqual(sent[1], { t: "delete-character", id: 1, confirmed: true });
+  } finally {
+    f.restore();
+  }
+});
+
+test("stat window uses the actual HTML button as its drag surface without aborting application startup", () => {
+  const f = uiFixture();
+  try {
+    assert.equal(f.get("stat-body").localName, "button");
+    const panel = statWindow({
+      ctx: f.ctx,
+      image: f.image,
+      audio,
+      send() {},
+      getSelf: () => undefined,
+      isInGame: () => false,
+      point: (event) => ({ x: event.clientX, y: event.clientY }),
+      jobName: () => "",
+      log() {},
+    });
+    panel.toggle(true);
+    f.get("stat-body").dispatchEvent(fixtureEvent("mousedown", { clientX: 80, clientY: 80 }));
+    f.window.dispatchEvent(fixtureEvent("mousemove", { clientX: 100, clientY: 110 }));
+    f.window.dispatchEvent(fixtureEvent("mouseup"));
+    assert.deepEqual(JSON.parse(f.storage.getItem("kms111.statAt")!), { x: 92, y: 102 });
+    panel.toggle(false);
+  } finally {
+    f.restore();
+  }
+});
+
+test("shared game DOM schema resolves actual HTML tags without unchecked main-entry casts", () => {
+  const f = uiFixture();
+  try {
+    const { canvas, ui } = gameElements();
+    assert.equal(canvas.id, "view");
+    assert.equal(ui.connect.localName, "section");
+    assert.equal(ui.characters.localName, "section");
+    assert.equal(ui.chatLines.localName, "ol");
+    assert.equal(ui.log.localName, "aside");
+    assert.equal(ui.login.localName, "button");
+    assert.equal(ui.user.localName, "input");
+    assert.equal(Object.keys(ui).length, 22);
   } finally {
     f.restore();
   }

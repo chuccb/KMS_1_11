@@ -7,6 +7,11 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <aside id="startup-error" class="startup-error" role="alert" hidden>
+      <strong>用戶端啟動未完成</strong>
+      <p id="startup-error-message"></p>
+      <a href="">重新載入頁面</a>
+    </aside>
     <canvas id="view"></canvas>
 
     <header id="bar">
@@ -603,6 +608,7 @@
       </aside>
     </div>
 
+    <script type="module" src="./startup.ts"></script>
     <script type="module" src="./main.js"></script>
   </body>
 </html>

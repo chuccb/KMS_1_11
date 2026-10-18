@@ -2,39 +2,53 @@
 
 2026-10-18。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
+## 本輪修復：登入按鈕沒有反應
+
+上一輪把 statwindow 的 #stat-body 誤判成 div，實際 index.html 是 button。真 Chromium 重現了 requireElement 拋錯，使整頁初始化中斷；前輪 HTTP／MIME／JS 語法檢查無法偵測這種執行期錯誤。**失敗 multiset 沒增加，不代表頁面功能一定正確。**
+
+- 已改回實際 button 契約，保留原生按鈕、拖曳行為及嚴格 tag 驗證，不把守衛改成無條件 cast。
+- 把主入口的 canvas／UI 查找收斂到 typed game-dom schema，移除該區 unchecked JSDoc casts。
+- 獨立 startup.ts 先安裝錯誤／rejection／15秒逾時 watchdog；main 所有 UI constructor 完成才發 ready。失敗時顯示可重新整理的文字面板，不再留無回應畫面；登入按鈕及 Enter 都必須通過 ready guard。15秒是啟動介面政策，不是原版遊戲時間常數。
+- 真 Chromium 分別驗證實際 HTML 的來源版、建置版與首幀 rendering；攔截的假 WebSocket 驗證登入按鈕／Enter／拒絕／重試。另故障注入原 tag 錯誤與 main 404，確認錯誤可見且不能啟動登入。
+- HTTP fixture 沒有 LoginServer／GameEntryServer／帳號／玩家存檔；假 WebSocket 不呼叫 connectToServer。**沒有登入 LIVE 或操作現有角色。** 原 LIVE 只作 GET 與不點擊的瀏覽器載入檢查，程序保持同一 PID。
+
+本輪另外將 art_perf_probe、equipment_fixture、browser_audio_probe 真正遷成 TS。PNG 計數改用 Bun 原生 module interception（舊 Node default-export monkey patch 在 Bun 會錯讀為0）；實測 metadata 0次壓縮、3個 avatar PNG 3次、重讀同一 PNG 共用快取。裝備 fixture 改為純建構函式及明示 CLI，限制新 generated/validation/*.json、wx 獨占建立、防越界 symlink，不覆寫既有 fixture。音訊工具只在同 origin 的空白驗證頁解碼，不啟動遊戲繪圖／音訊迴圈；隔離服務的原150筆音訊／alias 全部真 decodeAudioData 通過，silent=0、errors=[]，所有 WebSocket 都攔截阻止。
+
 ## 已落實
 
 - Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI。
-- 本輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 現有 **68 支 .ts**（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
+- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 現有 **71 支 .ts**（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
-- 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。本輪真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
-- 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的整個 import graph 均做過狀態、MIME、JavaScript parser 檢查，沒有執行網頁或登入遊戲。
-- 9 支純規則 probe 已真正搬進嚴格 TS / Bun suite，沒有保留 JS 兼容殼；另補自然恢復四項、typed UI 五項、真 WZ HTTP／非法 metadata 兩項。完整 suite 比上一凍結點多 **73 個直接案例**；不是宣稱新增 73 項遊戲功能。
+- 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
+- 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的兩個 entry／完整 import graph 均驗過狀態、MIME、JS parser；本輪另以真正 Chromium 執行初始化及 rendering，不登入 LIVE。
+- 9 支純規則 probe 已真正搬進嚴格 TS / Bun suite，沒有保留 JS 兼容殼；另補自然恢復四項、typed UI 七項、真 WZ HTTP／非法 metadata 兩項。前輪納入73個直接案例，本輪再補14項；不是宣稱新增相同數量的遊戲功能。
 - Python 分析工具與 Bash 啟動工具改為 Bun TS；WZ 共用產品 reader，對照不重生的獨立舊 manifest，逐一驗證 1,056 個 image 的 offset/size/source 與原 bytes checksum。
 - 分析 CLI 保留原證 CP949 bytes、forward declaration、列函式、具名函式、calls/globals；存檔保護只接受現有非空 regular file，錯誤不建立替代進度。
-- 原版 EXE/DLL/ACM、C/listing、Data.wz、analysis 與歷史 ADR 均保留。沒有自動登入、操作玩家角色、修改玩家存檔或重啟既有 LIVE。
+- 原版 EXE/DLL/ACM、C/listing、Data.wz、analysis 與歷史 ADR 均保留。沒有登入 LIVE、操作現有角色、修改玩家存檔或重啟既有 LIVE；unit 使用隔離 fixture 與假傳輸。
 
 ## 凍結來源後驗證
 
 | 檢查 | 本輪實際結果 |
 | --- | --- |
-| frozen lockfile / ignore scripts 安裝 | 通過，28 packages 無變更，無 lockfile 漂移 |
+| frozen lockfile / ignore scripts 安裝 | 通過，47 packages 無變更，無 lockfile 漂移 |
 | 根 strict typecheck（全部 TS，不含剩餘 JS） | 通過 |
 | 格式檢查（TS / config 範圍） | 通過；不是宣稱剩餘 JS 已完成整理 |
 | Bun browser build | 通過 |
-| 完整 Bun suite | **902 pass / 44 fail，946 tests / 102 files** |
+| 完整 Bun suite | **916 pass / 44 fail，960 tests / 105 files，165.10 秒** |
 | 9 支 presentation tests 與 Bun wrapper | **63 pass / 0 fail**；完整 suite 也有包含 |
-| 另增 recovery / typed UI / WZ HTTP | **4 + 5 + 2 項全通過**；完整 suite 也有包含 |
-| 現有 LIVE 唯讀檢查 | index 200、**66 個 browser modules 的 HTTP / MIME / JS parser 全通過**；僅 static GET，未開遊戲連線 |
+| 另增 recovery / typed UI / WZ HTTP | **4 + 7 + 2 項全通過**；完整 suite 也有包含 |
+| 本輪 startup / browser / tool / UI / static focused | **20 pass / 0 fail，5 files**；完整 suite 也全部包含 |
+| 現有 LIVE 唯讀檢查 | index 200、兩個 entry／**69 個 modules** 的 HTTP / MIME / JS parser 通過；Chromium 153 實際啟動及 rendering 通過、login enabled、page errors=0、WebSocket attempts=0 |
+| 上一凍結點 ff0e735 | 902 pass / 44 fail，946 tests / 102 files |
 | 上一凍結點 80316d4 | 828 pass / 45 fail，873 tests / 90 files，131.17 秒 |
 | d311622 隔離原始碼，同版 Bun / 同 suite 參數 | 823 pass / 45 fail，868 tests / 86 files，131.82 秒 |
-| 失敗 multiset 交叉 | **原有 browser-motion wrapper 轉綠；其餘 44 項檔名、標題、重複次數完全相同；新增失敗 0** |
+| 失敗 multiset 交叉 | **與 ff0e735 的44項檔名、標題、重複次數完全相同；新增／移除均0**。前輪原 browser-motion wrapper 已轉綠 |
 
 完整回歸沒有過濾、skip、continue-on-error 或降低型別設定。CI **仍會失敗**；參照也是 Bun，不能據此推論原 Node 同樣失敗，更不能把餘下 44 項當可忽略或宣稱完成驗收。
 
-本輪格式化／typed 變數命名使數個 source assertions 過時；已保留原語義檢查，改成容許空白、等價引號及明確的 sound/game draft 名稱，而不是刪除 assertion。
+前輪格式化／typed 變數命名使數個 source assertions 過時；已保留原語義檢查，改成容許空白、等價引號及明確的 sound/game draft 名稱，而不是刪除 assertion。
 
-原始日誌在 ignored generated/migration/round2/：install-final.log、typecheck-final.log、format-check-final.log、build-final.log、full-suite-confirmed.log、failure-comparison.json、cross-check.log；上一輪在 generated/migration/{full-suite-checkpoint,reference-suite}.log。日誌不隨 Git 推送。
+本輪日誌在 ignored generated/migration/round3/：install.log、typecheck.log、format-check.log、build.log、full-suite.log、comparison.json、cross-check.log；focused 為 generated/browser-runtime/focused-final.log。前輪 round2 與原 reference 日誌保留；不隨 Git 推送。
 
 ## 純 probe 的真正遷移與原證修正
 
@@ -71,15 +85,13 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 ## 尚未完成的原目標
 
 1. client/main.js 的真正實作型別與合理分層，不能只 rename 或用 any 包住。
-2. 下列 **16 支 server/scripts .mjs 工具／fixture** 的 Bun runner、型別與呼叫鏈遷移；含手動 browser probes，不因本次 pure suite 轉綠而宣稱它們已完成。
+2. 下列 **13 支 server/scripts .mjs 工具／fixture** 的 Bun runner、型別與呼叫鏈遷移；含手動 browser probes，不因本次 pure suite 轉綠而宣稱它們已完成。
 3. 繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. 追查全部 **44 項失敗**，分清 fixture、Bun 相容差異與真實行為，按原證修正；不能只讓 CI 表面變綠。
 5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
 
 ### 尚未遷移的工具
 
-- server/scripts/art_perf_probe.mjs
-- server/scripts/browser_audio_probe.mjs
 - server/scripts/browser_creation_probe.mjs
 - server/scripts/browser_display_probe.mjs
 - server/scripts/browser_equipment_probe.mjs
@@ -90,7 +102,6 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 - server/scripts/browser_selection_probe.mjs
 - server/scripts/browser_stat_probe.mjs
 - server/scripts/client_probe.mjs
-- server/scripts/equipment_fixture.mjs
 - server/scripts/frame_probe.mjs
 - server/scripts/play_probe.mjs
 - server/scripts/whisper_probe.mjs

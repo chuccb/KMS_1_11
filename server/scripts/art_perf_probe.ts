@@ -1,21 +1,24 @@
 /** Cold provider work, and actual PNG compressions (not just HTTP cache hits). No Data.wz writes. */
 import assert from "node:assert/strict";
-import zlib from "node:zlib";
-import { syncBuiltinESMExports } from "node:module";
+import * as zlib from "node:zlib";
+import { mock } from "bun:test";
 import { fileURLToPath } from "node:url";
 let compressions = 0;
 const original = zlib.deflateSync;
-zlib.deflateSync = function (...args) {
-  compressions++;
-  return original.apply(this, args);
-};
-syncBuiltinESMExports();
+const codec = { ...zlib };
+// Bun-native interception: mutating the Node default export does not update Bun named imports.
+mock.module("node:zlib", () => ({
+  ...codec,
+  deflateSync: (...args: Parameters<typeof original>) => {
+    compressions++;
+    return original(...args);
+  },
+}));
 try {
   const { WzArchive } = await import("../src/wz/archive.ts");
   const { artProviderOf } = await import("../src/game/art.ts");
   const archive = WzArchive.open(
-      process.argv[2] ??
-        fileURLToPath(new URL("../../Data.wz", import.meta.url)),
+      process.argv[2] ?? fileURLToPath(new URL("../../Data.wz", import.meta.url)),
     ),
     provider = artProviderOf(archive);
   let start = performance.now();
@@ -41,16 +44,13 @@ try {
     3,
     "only the final three avatar PNGs, not all their unused body-part PNGs",
   );
+  assert.ok(provider.reader, "the original-WZ art provider must expose its reader");
   const canvas = provider.reader.at(map.sprites[0].frames[0].path);
   assert.ok(canvas);
   const png = canvas.png;
   assert.equal(compressions, 4);
   assert.equal(canvas.png, png);
-  assert.equal(
-    compressions,
-    4,
-    "repeated PNG read shares the cached compressed buffer",
-  );
+  assert.equal(compressions, 4, "repeated PNG read shares the cached compressed buffer");
   console.log(
     JSON.stringify(
       {
@@ -66,6 +66,5 @@ try {
     ),
   );
 } finally {
-  zlib.deflateSync = original;
-  syncBuiltinESMExports();
+  mock.module("node:zlib", () => codec);
 }

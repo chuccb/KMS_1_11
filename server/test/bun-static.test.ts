@@ -7,7 +7,11 @@ test("Bun serves the complete browser module graph as JavaScript without opening
   const origin = `http://127.0.0.1:${server.port}`;
   const parser = new Bun.Transpiler({ loader: "js" });
   try {
-    const queue = [new URL("/main.js", origin)];
+    const html = await (await fetch(origin)).text();
+    const queue = [...html.matchAll(/<script\b[^>]*type="module"[^>]*src="([^"]+)"/g)].map(
+      (match) => new URL(match[1], origin),
+    );
+    assert.equal(queue.length, 2, "startup guard and application must both be included");
     const visited = new Set<string>();
     while (queue.length) {
       const url = queue.shift()!;

@@ -125,7 +125,7 @@ export function statWindow({
       el("stat-close").focus();
     } else requireElement("view", "canvas").focus();
   }
-  box(requireElement("stat-body", "div"), 0, 0, 176, 315);
+  box(requireElement("stat-body", "button"), 0, 0, 176, 315);
   box(el("stat-close"), 128, 9, 32, 15);
   box(el("stat-detail"), 122, 280, 47, 18);
   for (const b of AP_BUTTONS) {
@@ -164,7 +164,7 @@ export function statWindow({
     audio.effect("UI/BtMouseClick");
   });
   el("stat-close").addEventListener("click", () => toggle(false));
-  requireElement("stat-body", "div").addEventListener("mousedown", (e) => {
+  requireElement("stat-body", "button").addEventListener("mousedown", (e) => {
     if (!opened) return;
     const p = point(e);
     if (p.y - at.y >= 0 && p.y - at.y < 35) {

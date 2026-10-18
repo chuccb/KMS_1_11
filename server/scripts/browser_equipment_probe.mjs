@@ -1,4 +1,4 @@
-/** Real Chromium on equipment_fixture.mjs ONLY. Never accepts the production port. */
+/** Real Chromium on equipment_fixture.ts ONLY. Never accepts the production port. */
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";

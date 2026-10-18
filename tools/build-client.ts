@@ -7,7 +7,7 @@ const outdir = resolve(root, "dist/client");
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 const build = await Bun.build({
-  entrypoints: [resolve(root, "client/main.js")],
+  entrypoints: [resolve(root, "client/startup.ts"), resolve(root, "client/main.js")],
   outdir,
   target: "browser",
   format: "esm",
@@ -21,4 +21,6 @@ for (const name of ["index.html", "style.css", "fonts"]) {
     await cp(source, resolve(outdir, name), { recursive: true });
   }
 }
+const html = Bun.file(resolve(outdir, "index.html"));
+await Bun.write(html, (await html.text()).replace('src="./startup.ts"', 'src="./startup.js"'));
 console.log(`Browser assets built in ${outdir}`);

@@ -1,3 +1,6 @@
+import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
+import { gameElements } from "./game-dom.ts";
+import { requireContext2d } from "./dom.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
@@ -129,46 +132,9 @@ soundToggle?.addEventListener("click", () => {
   soundToggle.setAttribute?.("aria-pressed", String(audio.muted));
 });
 
-const canvas = /** @type {HTMLCanvasElement} */ (
-  document.getElementById("view")
-);
-const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+const { canvas, ui } = gameElements();
+const ctx = requireContext2d(canvas);
 const nativeTips = nativeTooltipRenderer({ctx, image: artImage});
-
-const ui = {
-  where: /** @type {HTMLElement} */ (document.getElementById("where")),
-  connect: /** @type {HTMLElement} */ (document.getElementById("connect")),
-  user: /** @type {HTMLInputElement} */ (document.getElementById("user")),
-  pass: /** @type {HTMLInputElement} */ (document.getElementById("pass")),
-  login: /** @type {HTMLButtonElement} */ (document.getElementById("login")),
-  status: /** @type {HTMLElement} */ (document.getElementById("status")),
-  worlds: /** @type {HTMLElement} */ (document.getElementById("worlds")),
-  worldList: /** @type {HTMLElement} */ (document.getElementById("world-list")),
-  characters: /** @type {HTMLElement} */ (
-    document.getElementById("characters")
-  ),
-  characterList: /** @type {HTMLElement} */ (
-    document.getElementById("character-list")
-  ),
-  characterStatus: /** @type {HTMLElement} */ (
-    document.getElementById("character-status")
-  ),
-  newName: /** @type {HTMLInputElement} */ (
-    document.getElementById("new-name")
-  ),
-  create: /** @type {HTMLButtonElement} */ (document.getElementById("create")),
-  gameUi: /** @type {HTMLElement} */ (document.getElementById("game-ui")),
-  chatbox: /** @type {HTMLElement} */ (document.getElementById("chatbox")),
-  chatLines: /** @type {HTMLElement} */ (document.getElementById("chat-lines")),
-  say: /** @type {HTMLInputElement} */ (document.getElementById("say")),
-  emotes: /** @type {HTMLElement} */ (document.getElementById("emotes")),
-  log: /** @type {HTMLElement} */ (document.getElementById("log")),
-  logLines: /** @type {HTMLElement} */ (document.getElementById("log-lines")),
-  logToggle: /** @type {HTMLButtonElement} */ (
-    document.getElementById("log-toggle")
-  ),
-  dialogue: /** @type {HTMLElement} */ (document.getElementById("dialogue")),
-};
 
 const gameCursor = nativeCursor({
   surfaces: [canvas, ui.gameUi, ui.dialogue],
@@ -359,7 +325,7 @@ function setLoginPending(pending) {
 }
 
 function connect() {
-  if (loginPending) return;
+  if (!clientStartupReady(document.documentElement) || loginPending) return;
   quitToTitle=false;
   buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
   showPanel(ui.connect);
@@ -6187,3 +6153,6 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
     quitToTitle=true;socket.close(1000,"return to title");
   },
 });
+
+// Signal readiness only after every UI constructor and handler has initialized.
+window.dispatchEvent(new Event(CLIENT_READY_EVENT));
