@@ -59,11 +59,13 @@
 | 對方 mesos | 右齊 x=84, y=277（`this[68]`）| |
 | avatar | 我 (330,103) 鏡向中間；對方 (36,103) | `sub_4D33A0`／`sub_4D3730` |
 | 格子 | 我 x=292/327、對方 x=11/46；列 y=129/164/199/234；32×32、pitch 35 | `sub_4D63C0` + backgrnd 像素 |
-| 數量字 | 格內下緣（anchor y-12）| `sub_4D5440` |
+| 數量字 | 左齊錨點 (35c+291, 35r+148)＝格左上 (-1,+19)；逐位數、x 依位寬＋間距前進；裝備（`id/1000000==1`）不畫 | `sub_4D5440`＋`sub_525AE0` |
 | lock wash | 我 (286,124,76,144)；對方 (4,124,76,144)，`0x80FFFFFF`（50% 白）| `this+63`／`this+64` |
+| log 文字 | `for (y=26; y<234; y+=13)` 於 x=94、font=`this+61`、首列＝scrollbar 位置 `*(this[58]+48)` → 恰 **16 列** | `sub_4D5730` |
 
 顏色格式為 **ARGB**（對照 `0xffeaeff2` → `#eaeff2`，見 `client/utildialog.ts`）。
 `sub_4D5900`（type 5）把文字以 4 個空格前綴、166 px 寬換行塞進 log（`asc_5BC328` = `"    "`）。
+瀏覽器的 log 沒有 scrollbar 拖拉，釘底顯示最後 16 列（🟡；原生新訊息到達時 scrollbar 也在底）。
 
 ## 4. 玩家動作與原廠閘門
 
@@ -92,9 +94,11 @@
 | +9 (0x24) | `goParty` | 1 | party s2c case 3（邀請）閘門 |
 | +10 (0x28) | `goGame` | 1 | **零引用** |
 
-瀏覽器以 `client/gameoptions.ts` 保存同一族（`kms111.gameSettings`）；本輪讓 `exchange`
-成為真實消費者（邀請到達時檢查），`whisper` 既有消費者不變。GM 位元（`(*(n3000+9)&1)`）
-瀏覽器沒有對應物（2003 login 未解出 admin byte），故該閘門在瀏覽器不可達、字串保留。
+瀏覽器以 `client/gameoptions.ts` 保存同一族（`kms111.gameSettings`）；`exchange`（ADR-091）與
+`party`（ADR-092：case 3 邀請**整包靜默忽略**、不回包，與原生同語意）都是真實消費者，
+`whisper` 既有消費者不變。選項 UI 因此只停用 `messenger`（瀏覽器無 messenger 視窗）與
+`game`（原版亦零引用）兩格。GM 位元（`(*(n3000+9)&1)`）瀏覽器沒有對應物（2003 login 未解出
+admin byte），故該閘門在瀏覽器不可達、字串保留。
 
 ## 6. 瀏覽器／伺服器的對應決策（🟡 = 有原證但取捨處）
 
@@ -109,3 +113,7 @@
 5. 能力旗標：bridge 的 field projection 帶 `trade: true`；舊 bridge 沒有 → 選單列與指令停用（fail-closed）。
    附接 LIVE 的舊原生 server 起於 2026-10-19 00:18，晚於交易路由（`f5d7924`, 10-17），故**可用**。
 6. type 5 的 log、type 8 的三種.box、type 2 的兩種.box 都照原文；`ready`(7) 讀出但 no-op。
+7. **type ≥6（🟡 不可達）**：`sub_4815E0` 把 ≥6 交給 `sub_481EB0`——那個位元組是**房間槽索引**：
+   槽非空 → `AVCDisconnect(0x21000003)`；槽空 → 釋放舊指標、清槽、`sub_482340(idx, reader)`＋
+   vtable+0x38（「開另一種房間」的入口，本版本的交易以外的房間）。本伺服器從不送 type 6，
+   瀏覽器 codec 對未知 type 丟 `RangeError`——行為差異不可達。

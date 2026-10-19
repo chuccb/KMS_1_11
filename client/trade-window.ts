@@ -18,7 +18,9 @@ import {
  * sheet, and only the three control rectangles act.
  *
  *   - backgrnd 367x295 centred by `sub_461C50`'s rule, so (216,152);
- *   - message log filled (92,21,182,217) at 50 % black, lines wrapped at 166 px like `sub_4D5900`;
+ *   - message log filled (92,21,182,217) at 50 % black, lines wrapped at 166 px like `sub_4D5900`,
+ *     text rows from (94,26) at a 13 px pitch up to y<234 like `sub_4D5730` (16 visible lines);
+ *   - item counts left-anchored at (35c+291, 35r+148) like `sub_4D5440`'s `sub_525AE0` digits;
  *   - names centred on 44/327 at y=110, mesos right-aligned at 84/366 at y=277 (`sub_4D4960`);
  *   - avatars at (36,103) and (330,103), mine mirrored towards the middle (`sub_4D33A0`);
  *   - 8+8 cells of 32 px at a 35 px pitch, rows from y=129, columns 11/46 and 292/327;
@@ -116,10 +118,15 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
         }
         rows.push(line);
       }
-    const capacity = Math.max(1, Math.floor((log.height - 4) / 14));
+    // sub_4D5730: `for (y = 26; y < 234; y += 13)` at x=94, first row = the scrollbar position.
+    // The browser log has no scrollbar drag yet, so it shows the tail (scroll pinned to bottom).
+    const line = log.line;
+    const capacity = Math.max(1, Math.floor((line.lastY - line.firstY) / line.pitch));
     rows
       .slice(Math.max(0, rows.length - capacity))
-      .forEach((row, index) => ctx.fillText(row, at.x + log.x + 2, at.y + log.y + 2 + index * 14));
+      .forEach((row, index) =>
+        ctx.fillText(row, at.x + line.x, at.y + line.firstY + index * line.pitch),
+      );
     ctx.restore();
   }
 
@@ -132,11 +139,16 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
       const art = icon(offer.item.itemId);
       if (art.ready) ctx.drawImage(art.img, at.x + rect.x, at.y + rect.y);
       if (offer.count > 1) {
+        // sub_4D5440: `sub_525AE0` anchors the digit glyphs left/top at (35c+291, 35r+148).
         ctx.font = HUD_FONT;
-        ctx.textAlign = "right";
+        ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(String(offer.count), at.x + rect.x + 31, at.y + rect.y + 19);
+        ctx.fillText(
+          String(offer.count),
+          at.x + rect.x + TRADE_WINDOW.count.dx,
+          at.y + rect.y + TRADE_WINDOW.count.dy,
+        );
       }
     }
     if (state.confirmed) {

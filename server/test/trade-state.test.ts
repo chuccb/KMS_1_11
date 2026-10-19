@@ -52,6 +52,16 @@ test("trade sheet geometry is sub_4D63C0's grid and sub_461C50's centring", () =
   assert.deepEqual(TRADE_WINDOW.mesos, { left: 84, right: 366, y: 277 });
   assert.deepEqual(TRADE_WINDOW.lock.mine, { x: 286, y: 124, width: 76, height: 144 });
   assert.deepEqual(TRADE_WINDOW.lock.theirs, { x: 4, y: 124, width: 76, height: 144 });
+  // sub_4D5730 walks `for (y = 26; y < 234; y += 13)` at x=94 -> exactly 16 log rows.
+  assert.deepEqual(TRADE_WINDOW.log.line, { x: 94, firstY: 26, pitch: 13, lastY: 234 });
+  assert.equal(
+    Math.floor(
+      (TRADE_WINDOW.log.line.lastY - TRADE_WINDOW.log.line.firstY) / TRADE_WINDOW.log.line.pitch,
+    ),
+    16,
+  );
+  // sub_4D5440 anchors the count digits at (35c+291, 35r+148): one left, 19 below the cell.
+  assert.deepEqual(TRADE_WINDOW.count, { dx: -1, dy: 19 });
 });
 
 test("the client-owned strings keep their original wording and line breaks", () => {

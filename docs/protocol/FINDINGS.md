@@ -4083,6 +4083,17 @@ x=44/327@y110、mesos 右齊 84/366@y277、lock wash (286|4,124,76,144)@`0x80FFF
 chat 閘門；`sub_481910` 的 `CConfig+0x20`(goExchange)＋GM 閘門；CConfig 六 go\* 的登錄名／預設／
 消費者（goWhisper=0 → `0x23 [1][34][sender][me]` 自動回絕、goGame 零引用）。
 
+**補記（2026-10-19，ADR-092）**：①log 文字畫家 `sub_4D5730`：`for (y=26; y<234; y+=13)` 於 x=94、
+font=`this+61`、首列＝scrollbar 位置 `*(this[58]+48)` → **恰 16 列**（瀏覽器無 scroll 拖拉，釘底顯示
+最後 16 列）。②數量字 `sub_4D5440`＋`sub_525AE0`（逐位數畫家：left/top 錨點、x 依「位數寬＋間距」
+前進）：非裝備（`id/1000000!=1`）畫於 **(35c+291, 35r+148)**＝格左上 (-1,+19)；裝備不畫。
+③`0x50` type≥6 的 `sub_481EB0` 已讀完：位元組＝**房間槽索引**，槽非空→`AVCDisconnect(0x21000003)`；
+槽空→釋放舊指標、清槽、`sub_482340(idx,reader)`＋vtable+0x38（即「開另一種房間」之路徑；本伺服器
+從不送 type 6，瀏覽器對未知 type 丟 RangeError＝🟡不可達）。④goParty=0 時 party s2c case 3
+（MapleStory.exe.c:353029）**整包靜默忽略**——不顯示「'%s'님이 파티에 초대했습니다.\r\n파티에
+가입하시겠습니까?」（PE 0x5C0304 原文，與瀏覽器逐字相同）、**不回任何包**；瀏覽器已同語意接上，
+選項 UI 的 exchange／party 兩格因此啟用（messenger＝無瀏覽器消費者、game＝原版零引用，仍停用）。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。

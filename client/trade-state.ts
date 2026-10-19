@@ -20,6 +20,11 @@ export const TRADE_SLOTS = 8;
  *     44 at y=110, mesos right-aligned at 366 and 84 at y=277, the message log filled at
  *     (92,21,182,217) with its CCtrlScrollBar (id 1003) at (262,21) and `+44 = 166` wrapping, and a
  *     50 % white wash over (286,124,76,144) or (4,124,76,144) once a side locks.
+ *   - log text is `sub_4D5730`: `for (y = 26; y < 234; y += 13)` at x=94 with the font at `this+61`
+ *     and the first visible line = the scrollbar position `*(this[58] + 48)` -> 16 rows.
+ *   - an offered item's count is `sub_4D5440` + `sub_525AE0` (a per-digit painter: left/top anchor,
+ *     x advances by digit width + spacing): non-equipment draws its count from (35c+291, 35r+148),
+ *     i.e. one pixel left of the cell at 19 below its top; equipment (id / 1000000 == 1) draws none.
  *   - avatars are `sub_4D33A0`/`sub_4D3730`: self at (330,103) mirrored towards the middle, the
  *     other player at (36,103).
  *   - controls are `sub_4D3EF0`: BtTrade id1001 at (222,267), BtCoin id1002 at (285,275), the
@@ -34,7 +39,17 @@ export const TRADE_WINDOW = {
   trade: { x: 222, y: 267, width: 50, height: 23 },
   coin: { x: 285, y: 275, width: 14, height: 14 },
   edit: { x: 96, y: 248, width: 176, height: 12 },
-  log: { x: 92, y: 21, width: 182, height: 217, wrap: 166 },
+  log: {
+    x: 92,
+    y: 21,
+    width: 182,
+    height: 217,
+    wrap: 166,
+    /** `sub_4D5730`: rows run `for (y = 26; y < 234; y += 13)` at x = 94 -> 16 visible lines. */
+    line: { x: 94, firstY: 26, pitch: 13, lastY: 234 },
+  },
+  /** `sub_4D5440`: the count glyph anchor relative to the slot cell (`sub_525AE0` = left/top). */
+  count: { dx: -1, dy: 19 },
   scrollbar: { x: 262, y: 21, width: 12, height: 216 },
   slots: { size: 32, pitch: 35, columns: 2, rows: 4, top: 129, left: 11, right: 292 },
   names: { left: 44, right: 327, y: 110 },

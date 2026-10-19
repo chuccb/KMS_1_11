@@ -21,7 +21,7 @@ FINDINGS§4.26／4.31／4.35.5／§6第17項已同步更正；ADR-019與舊交�
 |---|---|---|
 | 52D0B0、UI/UIWindow.img/GameOpt/backgrnd | 166×246、800×600置中317,177；checkbox134,50+26i；OK54,203、Cancel107,203 | 原圖與透明DOM命中，不畫現代設定頁 |
 | 43D360／43D630 | goMiniMap／Whisper／Messenger／Exchange／Party／Game在+20／24／28／32／36／40，預設全1 | `kms111.gameSettings`本機profile；舊minimap shown只用於第一次migration |
-| 52D7B0／52D6E0／52D740／43DE80 | checkbox取值、變更即apply；OK存、Cancel回舊值；goGame原disable | miniMap／whisper可用；其他尚未有完整瀏覽器UI的功能disabled，不注入假封包 |
+| 52D7B0／52D6E0／52D740／43DE80 | checkbox取值、變更即apply；OK存、Cancel回舊值；goGame原disable | miniMap／whisper／exchange／party四格可用（各有真實消費者，ADR-091／ADR-092）；messenger（無瀏覽器視窗）與game（原版零引用）disabled，不注入假封包 |
 | 4717D0／4728D0 | shared find／whisper gate、3000ms、`다른 요청을 처리 중입니다` font6 | browser與ClientSession雙層；成功decode09／0A才清，22不清 |
 | 472910／4732D0 | goWhisper=1顯`%s>> %s` font1，=0送23/22；兩路都記recipient | 拒收不顯私訊正文、不生成氣泡；仍記回覆對象 |
 | 472910的22與EXE raw file offset1B6142附近字串 | `'%s'님은 현재 귓속말이 거부되어 있습니다.` | `read/encodeUserWhisperRefused`與sender綠字提示 |
@@ -41,7 +41,10 @@ FINDINGS§4.26／4.31／4.35.5／§6第17項已同步更正；ADR-019與舊交�
 
 - GameOpt有snapshot／draft：即時影響miniMap與收密語；OK只存本機設定，Cancel／Esc還原。
   傳圖、換owner、斷線或其他modal關窗也還原未確認draft。M同步同一設定；預覽不寫舊minimap位置profile。
-- Messenger／交換／Party的server協定雖存在，這輪沒有完整邀請／視窗，所以不開假checkbox；原goGame也停用。
+- 交換（ADR-091）與Party邀請（ADR-092）現在都有完整瀏覽器鏈，checkbox因此啟用：goExchange=0時交易
+  邀請.box不顯示並以`trade-response false`釋放ticket（`sub_481910`語意）；goParty=0時party s2c case 3
+  **整包靜默忽略**、不回任何包（MapleStory.exe.c:353029）。Messenger仍無瀏覽器視窗、原goGame零引用，
+  這兩格維持停用，不注入假封包。
 - 收件者關閉whisper時，client發拒收；server只接受**曾真送達給該receiver的同sender-session**、有效3秒receipt，
   raw own-name必須相等，處理後consume，才通知sender。過期／偽造／換session／重複拒收不成立。
   **這是本專案防偽政策**，不是從原server流量證實的實作，也不是離線訊息系統。
@@ -54,8 +57,8 @@ FINDINGS§4.26／4.31／4.35.5／§6第17項已同步更正；ADR-019與舊交�
 
 ## 4. 方便操作入口
 
-- 登入既有角色，左下 **Menu → 게임 옵션**：第一項小地圖，第二項接受密語；OK保存，Cancel／Esc還原。
-  M同樣切小地圖。四項停用原因可由透明hit target的title／aria得知。
+- 登入既有角色，左下 **Menu → 게임 옵션**：第一項小地圖，第二項接受密語，第四項交易邀請、第五項組隊邀請；
+  OK保存，Cancel／Esc還原。M同樣切小地圖。兩項停用（Messenger、小遊戲）原因可由透明hit target的title／aria得知。
 - 切「모두에게」後直接輸入公開文字；同圖的自己／他人會走原0x1F log＋五秒氣泡。
 - 原聊天箭頭可設定recipient，或用 `/w 名字 訊息`；另一個線上角色關whisper後，回sender原拒收提示。
   `/f 名字`依原find封包找位置，地名由client自己的map metadata補上；不自動warp。

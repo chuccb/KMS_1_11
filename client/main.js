@@ -655,7 +655,11 @@ function handle(message) {
       const r=message.result;
       partyMenuState.receive(r,selfView?.characterId??0);
       playerContext.close(false);
-      if(r.kind==='invite') partyPrompt.offer(r.inviterId,r.inviterName);
+      if(r.kind==='invite'){
+        // Native party s2c case 3 (MapleStory.exe.c:353029) only pops the invite box when
+        // CConfig goParty (+9) is on; when it is off the packet is silently ignored - no reply.
+        if(systemPanel.gameSettings.party) partyPrompt.offer(r.inviterId,r.inviterName);
+      }
       else {
         partyPrompt.membershipChanged(partyMenuState.id!==0);
         const text=partyMessage(r,selfView?.characterId??0,selfView?.name??'');
