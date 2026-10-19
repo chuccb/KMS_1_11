@@ -29,6 +29,7 @@ export function playerMenuRows(
   name: string,
   leader: boolean,
   inviteVerified = true,
+  tradeVerified = false,
 ): PlayerMenuRow[] {
   return [
     { text: name, enabled: false },
@@ -37,7 +38,12 @@ export function playerMenuRows(
     { text: "인기도 +", action: "fameUp", enabled: true },
     { text: "인기도 -", action: "fameDown", enabled: true },
     { text: "귓속말", action: "whisper", enabled: true },
-    { text: "교환신청", action: "trade", enabled: false, reason: "交易房的封包與介面尚未完成" },
+    {
+      text: "교환신청",
+      action: "trade",
+      enabled: tradeVerified,
+      ...(!tradeVerified ? { reason: "此入口尚未載入交易房（需新版橋接）" } : {}),
+    },
     ...(leader
       ? [
           {

@@ -1,5 +1,13 @@
 import { partyState, partyInfo, type PartyCommandFeedback } from "../../../client/party-state.ts";
+import { tradeState, type TradeCommandFeedback } from "../../../client/trade-state.ts";
 import { FameRequestClock, type FameFeedback } from "./fame.ts";
+import {
+  MINIROOM_KIND,
+  MINIROOM_OPCODE,
+  encodeClientMiniRoomRequest,
+  readMiniRoomResult,
+  type MiniRoomEvent,
+} from "../protocol/miniroom.ts";
 import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../protocol/fame.ts";
 import { encodeClientSkillUse } from "../protocol/skilluse.ts";
 import {
@@ -392,6 +400,8 @@ export type ClientEvent =
   | { kind: "skill-effect"; characterId: number; skillId: number; skillLevel: number }
   | { kind: "party"; result: PartyResult }
   | { kind: "party-command"; feedback: PartyCommandFeedback }
+  | { kind: "trade"; event: MiniRoomEvent }
+  | { kind: "trade-command"; feedback: TradeCommandFeedback }
   | { kind: "fame"; result: FameFeedback }
   | { kind: "user-enter"; user: UserView }
   | {
@@ -722,6 +732,8 @@ export class ClientSession {
   private readonly fameClock = new FameRequestClock();
   private readonly party = partyState();
   private partyInvite: number | undefined;
+  /** The 1:1 exchange room this session is inside, if any (`CTradingRoomDlg`'s fields). */
+  private readonly trade = tradeState();
   private nextSkillAt = 0;
   private mesoPending = false;
   private nextMesoAt = 0;
@@ -1097,6 +1109,76 @@ export class ClientSession {
       );
     // Never optimistically change roster or partyId: only native0x10 changes membership.
     await this.gameLink.send(encodeClientPartyRequest(request));
+  }
+
+  /**
+   * 1:1 exchange (`/교환`, the context menu's 교환신청, and the trade window's own buttons).
+   *
+   * The 2003 client guards these sends itself, and so does this session, because the browser asks
+   * for them over JSON: `sub_471A40` refuses while any modeless room dialog is up, `sub_4D5C80`
+   * and `sub_4D5F50` refuse while my side is locked, while I am alone in the room, and inside
+   * their 500 ms throttle. Every refusal there is silent; only `/교환` prints (the two strings
+   * below), which is what `trade-command` carries to the view.
+   */
+  async tradeInvite(name: string): Promise<void> {
+    const target = [...this.users.values()].find((u) => samePlayerName(u.name, name));
+    if (target === undefined) {
+      this.emit({ kind: "trade-command", feedback: { kind: "notFound" } });
+      return;
+    }
+    await this.tradeInviteId(target.characterId);
+  }
+
+  async tradeInviteId(characterId: number): Promise<void> {
+    if (!this.gameLink || !this.self) throw new Error("trade needs a field session");
+    if (this.trade.open) {
+      this.emit({ kind: "trade-command", feedback: { kind: "windowOpen" } });
+      return;
+    }
+    await this.gameLink.send(
+      encodeClientMiniRoomRequest({
+        kind: "invite",
+        roomKind: MINIROOM_KIND.trade,
+        targetId: characterId,
+      }),
+    );
+  }
+
+  /** The invitation modal's answer: yes sends `type 3`, no sends nothing (`sub_481910`). */
+  async tradeReply(inviterId: number, accepted: boolean): Promise<void> {
+    if (!this.trade.answerInvite(inviterId)) return;
+    if (!accepted || !this.gameLink) return;
+    await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "accept", inviterId }));
+  }
+
+  async tradeOfferItem(request: {
+    tab: number;
+    slot: number;
+    count: number | null;
+    roomSlot: number;
+  }): Promise<void> {
+    if (!this.gameLink || !this.trade.canOffer(Date.now())) return;
+    this.trade.markOffer(Date.now());
+    await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "offerItem", ...request }));
+  }
+
+  async tradeOfferMesos(amount: number): Promise<void> {
+    if (!this.gameLink || !this.trade.canOffer(Date.now())) return;
+    this.trade.markOffer(Date.now());
+    await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "offerMesos", amount }));
+  }
+
+  /** BtTrade's yes: lock my side locally (`this+63`) and send `type 13`. */
+  async tradeConfirm(): Promise<void> {
+    if (!this.gameLink || !this.trade.confirmLocally()) return;
+    await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "confirm" }));
+  }
+
+  /** Closing the window or 취소: `type 7`; the peer's cancel notice is the server's business. */
+  async tradeLeave(): Promise<void> {
+    if (!this.gameLink || !this.trade.open) return;
+    this.trade.clear();
+    await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "leave" }));
   }
 
   async attack(
@@ -1664,6 +1746,7 @@ export class ClientSession {
     this.fameClock.reset();
     this.party.clear();
     this.partyInvite = undefined;
+    this.trade.clear();
     this.nextSkillAt = 0;
     this.userRequestUntil = 0;
     this.slotPending = this.shopPending = this.mesoPending = this.abilityPending = false;
@@ -1711,6 +1794,14 @@ export class ClientSession {
             if (this.party.id) this.partyInvite = undefined;
           }
           this.emit({ kind: "party", result });
+          return;
+        }
+        case MINIROOM_OPCODE.result: {
+          // `sub_4815E0`: with no dialog up only types 1/2/4 are legal; the codec throws on the
+          // rest exactly like the native's AVCDisconnectException path, and the log keeps it.
+          const event = decodeMiniRoomEvent(readMiniRoomResult(new PacketReader(plain, 1)));
+          this.trade.receive(event);
+          this.emit({ kind: "trade", event });
           return;
         }
         case SYSTEM_NOTICE_OPCODE: {
@@ -2268,6 +2359,30 @@ function samePlayerName(a: string, b: string): boolean {
  */
 function decodeByteName(name: string): string {
   return decodeCp949(Uint8Array.from(name, (c) => c.charCodeAt(0)));
+}
+
+/** `0x50` carries its names and its log text as raw CP949 bytes, like party and fame do. */
+function decodeMiniRoomEvent(event: MiniRoomEvent): MiniRoomEvent {
+  switch (event.kind) {
+    case "invite":
+      return { ...event, inviterName: decodeByteName(event.inviterName) };
+    case "refused":
+      return event.name === undefined ? event : { ...event, name: decodeByteName(event.name) };
+    case "participant":
+      return {
+        ...event,
+        participant: { ...event.participant, name: decodeByteName(event.participant.name) },
+      };
+    case "enter":
+      return {
+        ...event,
+        participants: event.participants.map((p) => ({ ...p, name: decodeByteName(p.name) })),
+      };
+    case "message":
+      return { ...event, text: decodeByteName(event.text) };
+    default:
+      return event;
+  }
 }
 
 function decodeChatText(bytes: Uint8Array): string {

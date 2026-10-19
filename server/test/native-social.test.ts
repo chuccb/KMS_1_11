@@ -49,6 +49,9 @@ test("malformed/unsupported/unknown slash lines and rejected whispers NEVER call
     find: async () => {
       calls.push("find");
     },
+    trade: async () => {
+      calls.push("trade");
+    },
     say: async (text: string) => {
       calls.push(text);
     },
@@ -62,7 +65,7 @@ test("malformed/unsupported/unknown slash lines and rejected whispers NEVER call
     "/파티탈퇴 extra",
     "/party invite",
     "/party create OtherUser",
-    "/교환 OtherUser",
+    "/교환\nnext",
     "/unknown private",
     "/w OtherUser secret\nnext",
   ])
@@ -79,6 +82,7 @@ test("shared router applies original524A00 whisper admission before any private 
       sent.push(name);
     },
     find: async () => {},
+    trade: async () => {},
     say: async () => {
       sent.push("public");
     },
@@ -99,6 +103,7 @@ test("synchronous browser consumption never waits for or falls back from private
   const actions = {
     party: (command: string, name: string) => calls.push([command, name]),
     request: (name: string, text?: string) => calls.push([name, text]),
+    trade: (name: string) => calls.push(["trade", name]),
     error: (message: string) => calls.push(message),
   };
   assert.equal(runSocialCommand("/파티정보", actions), true);
@@ -109,6 +114,7 @@ test("synchronous browser consumption never waits for or falls back from private
     ["info", ""],
     ["상대이름", "secret"],
   ]);
+  assert.deepEqual(calls[2], ["trade", "상대이름"], "/교환 routes to the trade action");
   assert.equal(calls.length, 3);
 });
 test("six-slot decoder retains empty leading/interior slots; state never promotes compressed leader", () => {

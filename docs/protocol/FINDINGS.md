@@ -4071,6 +4071,18 @@ canvasW>=280改內容W210，canvasH>=150改H112。`sub_4E5C70`以unit=1<<mag、�
 精確矩形、crop與框座標、原函式表和限制見 [`../DISPLAY_MINIMAP_VALIDATION.md`](../DISPLAY_MINIMAP_VALIDATION.md)。
 localStorage是browser設定替代，不冒稱原per-character設定或絕對閃爍相位已同步。
 
+### 4.42 ✅ 交易視窗／幾何／CConfig go\* 閘門（ADR-091）
+
+`0x25`／`0x50` 的欄位見 §4.39／§4.40；本節補**視窗與閘門**層，完整表在
+[NATIVE_TRADE](../NATIVE_TRADE.md)：`sub_4815E0` 無視窗時只認 1/2/4（其餘斷線）、type 7 是
+`nullsub_58`；`sub_481790`→`sub_481570(1)`→`sub_481D00`（count/myIndex/成員循環）；
+`sub_4D2DB0`+`sub_461C50` 置中 (216,152)；`sub_4D3EF0` 控制項 1001/1002/2/1003/1004（1004 與
+BtLock/BtReset 同為「存在但無消費者」）；`sub_4D4960` 的 log(92,21,182,217)@50%黑、名字
+x=44/327@y110、mesos 右齊 84/366@y277、lock wash (286|4,124,76,144)@`0x80FFFFFF`（ARGB 已證）；
+`sub_4D63C0` 8+8 格；`sub_4D5C80`/`sub_4D5F50` 的 500ms throttle 與 `n3000[6]`；`sub_471A40` 的三句
+chat 閘門；`sub_481910` 的 `CConfig+0x20`(goExchange)＋GM 閘門；CConfig 六 go\* 的登錄名／預設／
+消費者（goWhisper=0 → `0x23 [1][34][sender][me]` 自動回絕、goGame 零引用）。
+
 ## 5. 字元編碼
 
 - 遊戲內字串（WZ）用 **ASCII / UTF-16LE + 位置遮罩**（見 `docs/WZ1_FORMAT.md` §3）。

@@ -13,7 +13,7 @@
 main5394→5370行，client101支TS；`main.js`／`client_probe.mjs` 仍未完成迁移。
 这版 GameMenu 的 Quest／Party／Community 停用是**原况**（PE `00559EF5` 只有 index3/4/5 分支、
 `UI/UIWindow.img` 无 `Party` 子树），不补后期样式 party 窗。原证、界线与验证见
-[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。附接 LIVE 的邀请／接受仍停用（旧原生进程无身份闸門）。
+[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。附接 LIVE 的邀请／接受仍停用（旧原生进程无身份闸門）；交易房（교환）瀏覽器鏈與 goExchange 閘門見 [NATIVE_TRADE](NATIVE_TRADE.md)。
 
 ## 前輪2026-10-19：frame／play手動工具strict TS整理
 

@@ -712,6 +712,43 @@ class BrowserSession {
             Number(message.inviterId),
             message.accepted,
           );
+        case "trade-invite": {
+          const byName = typeof message.name === "string" && message.name.length > 0,
+            byId = Number.isInteger(message.characterId) && Number(message.characterId) > 0;
+          if (byName === byId)
+            throw new Error("trade-invite requires exactly one of name or characterId");
+          return byName
+            ? await this.require().tradeInvite(String(message.name))
+            : await this.require().tradeInviteId(Number(message.characterId));
+        }
+        case "trade-response":
+          if (
+            !Number.isInteger(message.inviterId) ||
+            Number(message.inviterId) <= 0 ||
+            typeof message.accepted !== "boolean"
+          )
+            throw new Error("trade-response requires an inviter id and a boolean answer");
+          return await this.require().tradeReply(Number(message.inviterId), message.accepted);
+        case "trade-offer-item": {
+          const tab = Number(message.tab),
+            slot = Number(message.slot),
+            roomSlot = Number(message.roomSlot);
+          if (!Number.isInteger(tab) || !Number.isInteger(slot) || !Number.isInteger(roomSlot))
+            throw new Error("trade-offer-item requires integer tab, slot and roomSlot");
+          const count =
+            message.count === null || message.count === undefined ? null : Number(message.count);
+          if (count !== null && (!Number.isInteger(count) || count < 1))
+            throw new Error("trade-offer-item count must be a positive integer or null");
+          return await this.require().tradeOfferItem({ tab, slot, count, roomSlot });
+        }
+        case "trade-offer-mesos":
+          if (!Number.isInteger(message.amount) || Number(message.amount) < 0)
+            throw new Error("trade-offer-mesos requires a non-negative integer amount");
+          return await this.require().tradeOfferMesos(Number(message.amount));
+        case "trade-confirm":
+          return await this.require().tradeConfirm();
+        case "trade-leave":
+          return await this.require().tradeLeave();
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {
@@ -1417,6 +1454,7 @@ class BrowserSession {
       whisper: (name, message) => this.whisper(name, message),
       selfName: () => this.session?.selfView?.name ?? "",
       find: (name) => this.find(name),
+      trade: (name) => this.require().tradeInvite(name),
       say: (message) => this.require().say(encodeCp949(message)),
     });
   }

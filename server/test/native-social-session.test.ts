@@ -141,6 +141,7 @@ test("actual shared bridge chat router → synthetic encrypted0x23 CP949 private
     party: (c: string, n: string) => p.session.partyCommand(c, n),
     whisper: (n: string, text: string) => p.session.whisper(byteName(n), encodeCp949(text)),
     find: (n: string) => p.session.find(byteName(n)),
+    trade: (n: string) => p.session.tradeInvite(n),
     say: (text: string) => p.session.say(encodeCp949(text)),
     selfName: () => p.session.selfView?.name ?? "",
   };
@@ -155,7 +156,10 @@ test("actual shared bridge chat router → synthetic encrypted0x23 CP949 private
   assert.equal(decodeCp949(request.text), "비밀내용");
   const before = p.packets.length;
   await assert.rejects(routeChatInput("/w OtherUser private", actions), /다른 요청/);
-  await assert.rejects(routeChatInput("/교환 OtherUser", actions));
+  // /교환 now routes: the session resolves the name in its own field pool, and a miss is the
+  // original "캐릭터를 찾을 수 없습니다" feedback - never a packet, never public speech.
+  const tradeBefore = p.packets.filter((q) => q[0] === 0x25).length;
+  await routeChatInput("/교환 OtherUser", actions);
   await assert.rejects(routeChatInput("/unknown secret", actions));
   await p.barrier();
   assert.ok(
@@ -167,6 +171,11 @@ test("actual shared bridge chat router → synthetic encrypted0x23 CP949 private
     p.packets
       .filter((p) => p[0] === 0x12)
       .every((p) => new PacketReader(p, 1).readAsciiString() === ""),
+  );
+  assert.equal(
+    p.packets.filter((q) => q[0] === 0x25).length,
+    tradeBefore,
+    "an unfindable /교환 target sends no miniroom request",
   );
   p.send(encodeUserWhisperAnswer({ name: byteName("상대이름"), delivered: true }));
   await p.barrier();

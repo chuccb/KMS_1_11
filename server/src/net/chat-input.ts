@@ -4,6 +4,8 @@ export interface ChatInputActions {
   party(command: PartyCommand, name: string): Promise<void>;
   whisper(name: string, text: string): Promise<void>;
   find(name: string): Promise<void>;
+  /** sub_471A40: `/교환 <name>`; the session resolves the name in its own field user pool. */
+  trade(name: string): Promise<void>;
   say(text: string): Promise<void>;
   /** 524A00 compares against the local character, so the router needs the current self name. */
   selfName(): string;
@@ -28,6 +30,7 @@ export async function routeChatInput(text: string, actions: ChatInputActions): P
     return await actions.whisper(command.name, command.text);
   }
   if (command?.kind === "find") return await actions.find(command.name);
+  if (command?.kind === "trade") return await actions.trade(command.name);
   if (text.trimStart().startsWith("/"))
     throw new Error("未知指令，沒有送到公開聊天；輸入 /help 查看瀏覽器指令。");
   await actions.say(text);

@@ -12,7 +12,7 @@ export function clientEventJson(
     t: kind,
     ...rest,
     ...(kind === "field"
-      ? { contactField, playerMenu: true, socialCommands: true, partyInviteIdentity }
+      ? { contactField, playerMenu: true, socialCommands: true, partyInviteIdentity, trade: true }
       : {}),
   };
 }

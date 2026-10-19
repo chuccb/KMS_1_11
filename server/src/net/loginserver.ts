@@ -3837,6 +3837,10 @@ export class GameEntryServer {
     if (side === undefined) return;
     side.confirmed = true;
     const other = this.trades.otherSide(room, session.characterId);
+    // `sub_4D3BB0`: every confirmation tells THE PEER "the other side locked" (`type 13`),
+    // including the second one - the peer still needs its wash before settlement closes the room.
+    if (other !== undefined)
+      this.sessionsByCharacter.get(other.characterId)?.send(encodeMiniRoomLock());
     if (other === undefined || !other.confirmed) {
       this.options.log?.(
         `game: trade: ${room.id} "${session.name}" confirmed, waiting for the other side`,
@@ -3850,8 +3854,7 @@ export class GameEntryServer {
       this.trades.close(room);
       return;
     }
-    left.send(encodeMiniRoomLock());
-    right.send(encodeMiniRoomLock());
+    // Both sides already received their one `type 13` from the peer's confirm above.
     const before = [{ ...left.character.stats }, { ...right.character.stats }];
     const settlement = settleTrade(
       {

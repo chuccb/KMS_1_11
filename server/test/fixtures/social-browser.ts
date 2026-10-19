@@ -21,6 +21,7 @@ export function installSocialFixture() {
         runSocialCommand(text, {
           party: (command, name) => calls.push({ party: command, name }),
           request: (name, text) => calls.push({ private: name, text }),
+          trade: (name) => calls.push({ trade: name }),
           error: (message) => calls.push({ error: message }),
         })
       )

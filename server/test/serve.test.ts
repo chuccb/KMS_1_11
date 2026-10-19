@@ -4944,20 +4944,21 @@ test(
     await hero.takeOpcode(MINIROOM_OPCODE.result);
     await alt.takeOpcode(MINIROOM_OPCODE.result);
 
-    // 5. Both confirm: the lock (`13`), then `0x0B`/`0x0D`, then the finish (`8` code 3).
+    // 5. Both confirm: every confirmation immediately sends `13` to THE PEER (the "the other
+    //    side locked" wash of `sub_4D3BB0`), then settlement prints `0x0B`/`0x0D` and `8` code 3.
     request(hero, { kind: "confirm" });
     assert.deepEqual(
       await hero.drainOpcodes(80),
       [],
-      "one confirmation changes nothing on the wire",
+      "my own confirmation sends nothing back to me",
     );
+    const altLock = await alt.takeOpcode(MINIROOM_OPCODE.result);
+    assert.deepEqual(readMiniRoomResult(new PacketReader(altLock[altLock.length - 1]!, 1)), {
+      kind: "lock",
+    });
     request(alt, { kind: "confirm" });
     const heroLock = await hero.takeOpcode(MINIROOM_OPCODE.result);
     assert.deepEqual(readMiniRoomResult(new PacketReader(heroLock[heroLock.length - 1]!, 1)), {
-      kind: "lock",
-    });
-    const altLock = await alt.takeOpcode(MINIROOM_OPCODE.result);
-    assert.deepEqual(readMiniRoomResult(new PacketReader(altLock[altLock.length - 1]!, 1)), {
       kind: "lock",
     });
 

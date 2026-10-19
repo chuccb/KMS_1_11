@@ -62,8 +62,10 @@ export const MINIROOM_OPCODE = {
 /** s2c `type 4` 的第一個 byte，也是 c2s `type 0` 的第二個 byte：唯一的值是 `1`（交易）。 */
 export const MINIROOM_KIND = { trade: 1 } as const;
 
-/** 交易格數：`sub_4D2DB0` 為每一邊配了 8 格（`0x84` bytes / 16 bytes）。 */
-export const TRADE_SLOTS = 8;
+/** 交易格數：`sub_4D2DB0` 為每一邊配了 8 格（`0x84` bytes / 16 bytes）。定義在純 client
+ * 模組（瀏覽器不得拉伺服器 runtime import），此處再匯出供伺服器與測試使用。 */
+export { TRADE_SLOTS } from "../../../client/trade-state.ts";
+import { TRADE_SLOTS } from "../../../client/trade-state.ts";
 
 /** `0x25` 的 type。 */
 export const MINIROOM_REQUEST_TYPE = {
@@ -345,12 +347,16 @@ export type MiniRoomEvent =
   | { kind: "finish"; code: number }
   | { kind: "item"; index: number; roomSlot: number; item: ItemSlot }
   | { kind: "mesos"; index: number; amount: number }
-  | { kind: "lock" };
+  | { kind: "lock" }
+  /** `type 7`：`sub_4815E0` 的 vtable+16 是 `nullsub_58`——一個不帶內容、什麼都不做的 type。 */
+  | { kind: "ready" };
 
-/** 讀一個 `0x50`（不含 opcode）。`7`（no-op）不在這裡——它什麼都不帶，也沒有東西可讀。 */
+/** 讀一個 `0x50`（不含 opcode）。`7` 讀得出來但沒有內容：native 對它甚麼都不做。 */
 export function readMiniRoomResult(reader: PacketReader): MiniRoomEvent {
   const type = reader.readByte();
   switch (type) {
+    case MINIROOM_RESULT_TYPE.ready:
+      return { kind: "ready" };
     case MINIROOM_RESULT_TYPE.invite: {
       const inviterName = reader.readAsciiString();
       return { kind: "invite", inviterName, inviterId: reader.readU32() };
@@ -425,5 +431,7 @@ export function describeMiniRoomResult(event: MiniRoomEvent): string {
       return `0x50 miniroom: side ${event.index} ${event.amount} mesos`;
     case "lock":
       return "0x50 miniroom: lock";
+    case "ready":
+      return "0x50 miniroom: ready (no-op)";
   }
 }

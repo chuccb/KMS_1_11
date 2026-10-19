@@ -19,6 +19,7 @@ export type SocialCommand =
   | { kind: "party"; command: PartyCommand; name: string }
   | { kind: "whisper"; name: string; text: string }
   | { kind: "find"; name: string }
+  | { kind: "trade"; name: string }
   | { kind: "error"; message: string };
 const invalid = (usage: string): SocialCommand => ({ kind: "error", message: `用法：${usage}` });
 const nativeParty = [
@@ -75,16 +76,15 @@ export function parseSocialCommand(input: string): SocialCommand | undefined {
         ? { kind: "whisper", name, text: rest }
         : invalid("/w 이름 내용");
   }
+  // sub_471A40: the rest of the line is the target name; an empty one fails the pool lookup.
   if (text === "/교환" || text.startsWith("/교환 "))
-    return {
-      kind: "error",
-      message: "此版有原交易請求，但瀏覽器交易房尚未完成；沒有送假邀請或公開聊天。",
-    };
+    return { kind: "trade", name: text.slice("/교환 ".length) };
   return undefined;
 }
 export interface SocialCommandActions {
   party(command: PartyCommand, name: string): void;
   request(name: string, text?: string): void;
+  trade(name: string): void;
   error(message: string): void;
 }
 /** Synchronous consumption result lets the edit clear/blur normally without async public fallback. */
@@ -93,6 +93,7 @@ export function runSocialCommand(text: string, actions: SocialCommandActions): b
   if (!command) return false;
   if (command.kind === "party") actions.party(command.command, command.name);
   else if (command.kind === "error") actions.error(command.message);
+  else if (command.kind === "trade") actions.trade(command.name);
   else actions.request(command.name, command.kind === "whisper" ? command.text : undefined);
   return true;
 }

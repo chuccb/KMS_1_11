@@ -70,12 +70,14 @@ export function playerMenu({
   onAction,
   onError = () => {},
   canInvite = () => true,
+  canTrade = () => false,
 }: {
   ctx: CanvasRenderingContext2D;
   image: ImageLookup;
   point(event: MouseEvent): UiPoint;
   canOpen(): boolean;
   canInvite?(): boolean;
+  canTrade?(): boolean;
   valid(target: PlayerMenuTarget): boolean;
   onOpen(): void;
   onAction(action: PlayerMenuAction, target: PlayerMenuTarget): void;
@@ -277,7 +279,7 @@ export function playerMenu({
       if (generation !== epoch) return false;
       pending = false;
       if (!ready || !canOpen() || !valid(target)) return false;
-      const rows = playerMenuRows(target.name, leader, canInvite()),
+      const rows = playerMenuRows(target.name, leader, canInvite(), canTrade()),
         layout = playerMenuLayout(at, rows.length);
       previousFocus = focusTarget(document.activeElement);
       current = { target: { ...target }, rows, layout, selected: undefined };

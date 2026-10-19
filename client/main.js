@@ -2,6 +2,14 @@ import { chatEntry } from "./chat-entry.ts";
 import { partyInvitation } from "./party-invitation.ts";
 import { runSocialCommand } from "./social-commands.ts";
 import { partyCommandLines } from "./party-state.ts";
+import {
+  TRADE_TEXT,
+  TRADE_WINDOW,
+  tradeCommandLines,
+  tradeFinishText,
+  tradeState,
+} from "./trade-state.ts";
+import { tradeRenderer, tradeWindowAt } from "./trade-window.ts";
 import { partyMessage } from "./party.ts";
 import { playerMenu } from "./player-menu.ts";
 import { playerContains, playerMenuParty } from "./player-menu-data.ts";
@@ -364,6 +372,7 @@ function connect() {
       ui.chatbox.classList.add("hidden");
       testToolsPanel.close(); skillPanel.toggle(false); statPanel.toggle(false); equipPanel.toggle(false);
       toggleInventory(false); closeShop(false); closeDialogue(false);
+      tradeOpen = false; tradeModel.clear(); tradeHover = tradeHoverOffer = undefined;
       audio.stop(); loginScreens.showPanel(ui.connect); loginScreens.closeTitleLogin();
     }
   });
@@ -486,6 +495,7 @@ function handle(message) {
       playerMenuEnabled = message.playerMenu === true;
       partyInviteIdentity = message.partyInviteIdentity === true;
       socialCommandsEnabled = message.socialCommands === true;
+      tradeEnabled = message.trade === true;
       contactField = message.contactField;
       void damageArt.preload();
       void deathFx.preload();
@@ -603,6 +613,44 @@ function handle(message) {
     case 'party-command':
       for(const text of partyCommandLines(message.feedback))chatHistoryPanel.append(text,'fame');
       return;
+    case 'trade-command':
+      for(const text of tradeCommandLines(message.feedback))chatHistoryPanel.append(text,'fame');
+      return;
+    case 'trade': {
+      const event = message.event;
+      for (const t of tradeModel.receive(event)) {
+        if (t.kind === 'invite') {
+          // sub_481910: CConfig goExchange plus one modal at a time; a blocked offer is a no.
+          const canAsk = tradeEnabled && systemPanel.gameSettings.exchange &&
+            loginScreens.stage==='game' && visualFieldActive && selfView?.hp>0 && !portalPending &&
+            !itemDialog.open && !systemPanel.visible && !playerContext.open &&
+            talkingNpc===undefined && !browserLabOpen() && !tradeOpen;
+          if (!canAsk) { send({t:'trade-response', inviterId:event.inviterId, accepted:false}); continue; }
+          const answered = itemDialog.confirm({
+            text: TRADE_TEXT.invite(event.inviterName),
+            accept(){ send({t:'trade-response', inviterId:event.inviterId, accepted:true}); },
+            reject(){ send({t:'trade-response', inviterId:event.inviterId, accepted:false}); },
+          });
+          if (!answered) send({t:'trade-response', inviterId:event.inviterId, accepted:false});
+        } else if (t.kind === 'opened') {
+          tradeOpen = true;
+          tradeAt = { ...TRADE_WINDOW.home };
+          tradeHover = tradeHoverOffer = undefined;
+          playerContext.close(false);
+        } else if (t.kind === 'closed') {
+          tradeOpen = false;
+          tradeHover = tradeHoverOffer = undefined;
+          const text = tradeFinishText(event.code);
+          if (text !== undefined) itemDialog.notice({ text, accept(){} });
+        }
+      }
+      if (event.kind === 'refused' && event.code !== 0)
+        itemDialog.notice({
+          text: event.code === 2 ? TRADE_TEXT.busy(event.name ?? '') : TRADE_TEXT.notFound,
+          accept(){},
+        });
+      return;
+    }
     case 'party': {
       const r=message.result;
       partyMenuState.receive(r,selfView?.characterId??0);
@@ -1202,7 +1250,16 @@ let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
 function canvasButtonAt(p) {
   if (loginScreens.stage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
       systemPanel.visible || browserLabOpen() || itemDrag || quickDrag || shopDrag || inventoryDrag ||
-      shopScrollDrag || inventoryScrollDrag || statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
+      shopScrollDrag || inventoryScrollDrag || tradeDrag ||
+      statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
+  if (tradeOpen) {
+    const tradeHit = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room);
+    if (tradeHit !== undefined) {
+      if (tradeHit.kind === "close" || tradeHit.kind === "trade" || tradeHit.kind === "coin")
+        return `trade:${tradeHit.kind}`;
+      return; // sheet body and slot cells are not CCtrlButton sprite controls
+    }
+  }
   const shopHit = shopWindowAt(p.x,p.y);
   if (shopHit) {
     if (shopHit.kind === "close") return "shop:close";
@@ -1313,6 +1370,30 @@ canvas.addEventListener("mousemove", (event) => {
       return;
     }
   }
+  if (tradeDrag) {
+    if (
+      !tradeDrag.moved &&
+      Math.abs(point.x - tradeDrag.startX) + Math.abs(point.y - tradeDrag.startY) > 3
+    )
+      tradeDrag.moved = true;
+    if (tradeDrag.moved)
+      tradeAt = {
+        x: Math.max(0, Math.min(800 - TRADE_WINDOW.width, Math.round(point.x - tradeDrag.dx))),
+        y: Math.max(0, Math.min(600 - TRADE_WINDOW.height, Math.round(point.y - tradeDrag.dy))),
+      };
+    return;
+  }
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  if (tradeHit !== undefined) {
+    tradeHover = tradeHit.kind;
+    tradeHoverOffer = tradeHit.kind === "slot" && tradeHit.occupied ? tradeHit : undefined;
+    shopHover = undefined;
+    inventoryHover = undefined;
+    statusHover = undefined;
+    hoveredPortal = undefined;
+    return;
+  }
+  tradeHover = tradeHoverOffer = undefined;
   const shopHit = shopWindowAt(point.x, point.y);
   if (shopHit !== undefined) {
     shopHover = shopHit;
@@ -1364,8 +1445,19 @@ canvas.addEventListener("mousedown", (event) => {
     if (shopHit.kind === "button") shopPressed = shopHit.button;
     else if (shopHit.kind === "close") shopPressed = "close";
   }
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  if (tradeHit?.kind === "body")
+    tradeDrag = {
+      dx: point.x - tradeAt.x,
+      dy: point.y - tradeAt.y,
+      startX: point.x,
+      startY: point.y,
+      moved: false,
+    };
   const hit =
-    shopHit === undefined ? inventoryWindowAt(point.x, point.y) : undefined;
+    shopHit === undefined && tradeHit === undefined
+      ? inventoryWindowAt(point.x, point.y)
+      : undefined;
   inventoryPressed = hit?.kind === "close" ? "close" : undefined;
   if (hit?.kind === "coin") {
     coinPressed = true;
@@ -1422,6 +1514,8 @@ function finishWindowPress(event) {
   }
   if (shopScrollDrag !== undefined) shopSuppressClick = event?.target === canvas;
   shopScrollDrag = undefined;
+  if (tradeDrag?.moved === true) tradeSuppressClick = event?.target === canvas;
+  tradeDrag = undefined;
   inventoryDrag = undefined;
   shopDrag = undefined;
   shopPressed = undefined;
@@ -1499,6 +1593,10 @@ canvas.addEventListener("click", (event) => {
     shopSuppressClick = false;
     return;
   }
+  if (tradeSuppressClick) {
+    tradeSuppressClick = false;
+    return;
+  }
   const control = canvasButtonAt(point);
   const activation = canvasButtonActivation;
   canvasButtonActivation = undefined;
@@ -1543,6 +1641,13 @@ canvas.addEventListener("click", (event) => {
       shopSellPick = shopHit.row;
       describeItem(shopHit.row.itemId);
     }
+    return;
+  }
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  if (tradeHit !== undefined) {
+    if (tradeHit.kind === "close") tradeLeave();
+    else if (tradeHit.kind === "trade") tradeConfirmAsk();
+    else if (tradeHit.kind === "coin") tradeMesoAsk();
     return;
   }
   if (equipPanel.hit(point.x, point.y)) return;
@@ -2660,11 +2765,28 @@ function frame() {
 
   drawDraggedItem();
   drawQuickDrag();
+  if (tradeOpen)
+    tradeView.draw(tradeAt, tradeModel.room, {
+      hover: typeof canvasButtonHover === "string" && canvasButtonHover.startsWith("trade:")
+        ? canvasButtonHover.slice(6)
+        : tradeHover === "close" || tradeHover === "trade" || tradeHover === "coin"
+          ? tradeHover
+          : undefined,
+      pressed: typeof canvasButtonPress === "string" && canvasButtonPress.startsWith("trade:")
+        ? canvasButtonPress.slice(6)
+        : undefined,
+    });
   systemPanel.draw();
   playerContext.draw();
   drawScreenMessages(ctx, feedback.rows(now));
   itemDialog.draw();
   npcDialog.draw();
+  if (tradeOpen && tradeHoverOffer && pointerAt && !itemDialog.open && talkingNpc === undefined) {
+    const room = tradeModel.room;
+    const side = room?.sides[tradeHoverOffer.theirs ? (room.myIndex === 0 ? 1 : 0) : room.myIndex];
+    const offer = side?.offers.get(tradeHoverOffer.roomSlot);
+    if (offer) drawItemTooltip(pointerAt.x, pointerAt.y, offer.item, "trade");
+  }
   tooltipViewer.draw();
   revivePanel.draw(now);
   renderSurface.presentUi();
@@ -3480,6 +3602,21 @@ window.addEventListener("mouseup", (e) => {
     return;
   const p = viewPoint(e);
   if (shopWindowAt(p.x, p.y)) return;
+  if (tradeOpen) {
+    const th = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room);
+    if (th !== undefined) {
+      // sub_4D5C80: only my empty cells take a drop; equips carry no count byte.
+      if (th.kind === "slot" && th.side === "mine" && !th.occupied && d.slot > 0)
+        send({
+          t: "trade-offer-item",
+          tab: d.tab,
+          slot: d.slot,
+          count: Math.floor(d.item.itemId / 10000) === 1 ? null : d.item.quantity ?? 1,
+          roomSlot: th.roomSlot,
+        });
+      return;
+    }
+  }
   if (JSON.stringify(sourceItem(d.tab, d.slot)) !== JSON.stringify(d.item))
     return;
   const eq = equipPanel.hit(p.x, p.y);
@@ -3635,6 +3772,14 @@ let inventoryPick;
 /** 4DA810/4DA8B0: independent per-tab row positions; firstSlot = 4*row+1. */
 const inventoryScroll = [0, 0, 0, 0, 0];
 let inventoryScrollDrag;
+/** CTradingRoomDlg is modeless: its sheet, press and drag live beside the shop's own. */
+let tradeOpen = false;
+let tradeAt = { ...TRADE_WINDOW.home };
+let tradeDrag;
+let tradeHover;
+let tradeHoverOffer;
+let tradeSuppressClick = false;
+let tradeEnabled = false;
 function inventoryScrollbarGeometry() {
   const capacity = inventoryTabView()?.capacity ?? 0;
   const max = Math.max(0, Math.ceil(capacity / 4) - 6);
@@ -3723,6 +3868,55 @@ function itemIcon(itemId) {
   img.src = `/api/item/${itemId}/icon.png`;
   itemIcons.set(itemId, entry);
   return entry;
+}
+
+// ------------------------------------------------- 1:1 exchange (CTradingRoomDlg)
+//
+// The room model lives in client/trade-state.ts so this page and ClientSession apply the same
+// 0x50 transitions and the same native guards; the renderer in client/trade-window.ts paints the
+// sheet exactly where sub_4D4960 paints it. BtTrade/BtCoin raise the two native boxes
+// (sub_4D61F0's confirm, sub_4D5F50's meso input) through the shared CUtilDlgEx dialogs.
+const tradeModel = tradeState();
+const tradeView = tradeRenderer({
+  ctx,
+  image: artImage,
+  avatars: (look, flip) => avatarCache.get(look, "stand1", 0, flip),
+  icon: itemIcon,
+});
+tradeView.warm();
+function tradeLeave() {
+  if (!tradeOpen) return;
+  tradeOpen = false;
+  tradeHover = tradeHoverOffer = undefined;
+  tradeModel.clear();
+  send({ t: "trade-leave" });
+}
+function tradeConfirmAsk() {
+  const room = tradeModel.room;
+  if (!room || room.sides[room.myIndex].confirmed) return;
+  itemDialog.confirm({
+    text: TRADE_TEXT.confirm,
+    accept() {
+      send({ t: "trade-confirm" });
+    },
+  });
+}
+function tradeMesoAsk() {
+  const room = tradeModel.room;
+  if (!room || room.participants.size <= 1) return;
+  const mine = room.sides[room.myIndex];
+  if (mine.confirmed) return;
+  const max = Math.max(0, Math.floor(selfView?.mesos ?? 0));
+  if (!Number.isInteger(max)) return;
+  itemDialog.quantity({
+    text: TRADE_TEXT.mesos,
+    initial: mine.mesos,
+    min: 0,
+    max,
+    accept(amount) {
+      send({ t: "trade-offer-mesos", amount });
+    },
+  });
 }
 
 /** CConfig uiOpt0 defaults to 0; CUIItem adds 1, so a new profile starts on EQUIP, not USE. */
@@ -4950,7 +5144,7 @@ function runCommand(text, local) {
   if (/^\/help$/i.test(text)) {
     local(
       "系統",
-      "/tools 開啟體驗工具（非原版、需授權）、/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息（原 /귓속말）、/f 名字（原 /찾기）、/파티정보、/party info|create|leave|invite 名字|kick 名字|accept|decline。舊附接端邀請／接受暫停。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
+      "/tools 開啟體驗工具（非原版、需授權）、/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息（原 /귓속말）、/f 名字（原 /찾기）、/파티정보、/party info|create|leave|invite 名字|kick 名字|accept|decline、/교환 名字（原交易邀請）。舊附接端邀請／接受暫停。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
     );
     return true;
   }
@@ -4960,6 +5154,10 @@ function runCommand(text, local) {
     party(command,name){
       if(!socialCommandsEnabled){local("系統","此入口尚未載入派對指令，請使用新版附接入口。");return;}
       send({t:'party-command',command,name});
+    },
+    trade(name){
+      if(!tradeEnabled){local("系統","此入口尚未載入交易房，請使用新版附接入口。");return;}
+      send({t:'trade-invite',name});
     },
   }))return true;
   if(text.startsWith('/')){local("系統","未知指令，輸入 /help 查看指令。");return true;}
@@ -5298,7 +5496,8 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),
   canOpen:()=>loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
     socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
-    shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
+    shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending &&
+    !tradeOpen,
   onOpen(){
     playerContext.close(false);
     localActionEpoch++; keys.clear(); chatHistoryPanel.cancelDrag();itemDrag=quickDrag=undefined;
@@ -5320,7 +5519,7 @@ const partyMenuState = playerMenuParty();
 const partyPrompt = partyInvitation({
   modal:itemDialog,
   context:()=>loginScreens.stage==='game' && visualFieldActive && selfView?.hp>0 && !portalPending ? self : undefined,
-  canOpen:()=>!itemDialog.open && !systemPanel.visible && !playerContext.open && talkingNpc===undefined && !browserLabOpen(),
+  canOpen:()=>!itemDialog.open && !systemPanel.visible && !playerContext.open && talkingNpc===undefined && !browserLabOpen() && !tradeOpen,
   available:()=>partyInviteIdentity,
   reply:(inviterId,accepted)=>send({t:'party-response',inviterId,accepted}),
   unavailable:()=>chatHistoryPanel.append('此附接入口未證實原生server邀請身份保護，已暫停派對邀請／接受；既有世界未重啟。','fame'),
@@ -5330,10 +5529,12 @@ function canOpenPlayerMenu() {
     socket?.readyState===WebSocket.OPEN && map?.id===self?.mapId && !portalPending &&
     !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
     talkingNpc===undefined && shop===undefined && !shopPending && !slotPending && !mesoPending &&
+    !tradeOpen &&
     !itemDrag && !quickDrag && !inventoryDrag && !inventoryScrollDrag && !shopDrag && !shopScrollDrag;
 }
 const playerContext = playerMenu({
   ctx,image:artImage,point:viewPoint,canOpen:canOpenPlayerMenu,canInvite:()=>partyInviteIdentity,
+  canTrade:()=>tradeEnabled,
   valid:target=>users.get(String(target.characterId))?.name===target.name,
   onOpen(){
     localActionEpoch++;keys.clear();ui.say.blur();chatHistoryPanel.cancelDrag();
@@ -5349,6 +5550,8 @@ const playerContext = playerMenu({
       whisperRecipient=lastWhisperRecipient=target.name;updateWhisperControl();ui.say.focus();
     }else if(action==='invite' && partyInviteIdentity && partyMenuState.leader(selfView?.characterId))
       send({t:'party-invite',name:target.name});
+    else if(action==='trade' && tradeEnabled)
+      send({t:'trade-invite',characterId:target.characterId});
   },
   onError:logLine,
 });

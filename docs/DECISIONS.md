@@ -3013,3 +3013,12 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 附接LIVE仍以新进程服务且**不重启既有原生世界、不载入或改写save、不自动登入或操作角色**；因旧原生进程无身份闸門，该入口的邀请／接受继续停用，人气与密语可用。
 
 原证位址、六格语义、指令表与精确验证见[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。
+
+## ADR-091：瀏覽器交易房（1:1 교환）全鏈與 CConfig go\* 閘門（2026-10-19）
+
+- 伺服器端 `0x25`／`0x50` 與房間規則早已存在（ADR-032、FINDINGS §4.39／§4.40）；缺的是**瀏覽器半邊**：`ClientSession` 不解 `0x50`、bridge 沒有交易 message、沒有視窗、選單교환신청停用。本輪補齊：session 解 `0x50`（含 type 7 `ready` no-op，不再throw）並emit `trade`／`trade-command` 事件；`webclient` 新增 `trade-invite`(name|characterId)／`trade-response`／`trade-offer-item`／`trade-offer-mesos`／`trade-confirm`／`trade-leave`；`field` projection 帶 `trade: true` 能力旗標（舊 bridge 缺席→fail-closed）。
+- 新純模組 `client/trade-state.ts`：視窗幾何（backgrnd 367×295 置中 (216,152)、`sub_4D63C0` 的 8+8 格、`sub_4D4960` 的名字/mesos/log/wash 座標、`sub_4D33A0` 的 avatar 錨點）、房間模型與原廠閘門（lock／alone／500ms throttle／occupied）。`client/trade-window.ts` 只負責畫與命中（canvas，modeless，照 shop 模式）；main.js 接拖放：庫存 item 拖到我方空格＝`trade-offer-item`（equip 無 count byte），BtCoin＝原輸入.box「얼마를 올리시겠습니까?」（min0/max=我的mesos/初值=已放），BtTrade＝「정말로 교환하시겠습니까?」，關窗＝type 7。
+- 🟡 取捨：原生 `sub_4D4960`／`sub_4D5440` 把 packet index 0 硬畫在右半，accepter(myIndex=1) 會看到自己道具在左；avatar 規則（`sub_4D33A0`/`sub_4D3730`：self 永遠右）與 drop 規則（`sub_4D5C80` 只收正＝右）都反對它。瀏覽器兩席一律「我在右」，inviter 與原生逐像素相同。lock 改為每次 confirm 即時對對方送 `type 13`（含第二次），wash 不再只在成交前一瞬；`serve.test.ts` 對應更新。
+- `/교환` 從「明示拒絕」變真實指令：`social-commands` 回 `{kind:"trade"}`，共用路由 `chat-input.ts` 新增 `trade()`；session 用自己 field pool 解析名字（`sub_51D7D0` 語意），miss＝「캐릭터를 찾을 수 없습니다」feedback、不送包；房間已開再邀＝「다른 작업중에는 1:1교환을 할 수 없습니다」。選單교환신청由 `trade` 能力旗標啟用（context menu case 4 原即呼叫 `sub_471A40`）。GM 閘門（`(*(n3000+9)&1)`）瀏覽器無 admin 概念→不可達、字串保留於 `TRADE_TEXT`。
+- CConfig go\* 族（`sub_43D360`：goMiniMap/goWhisper/goMessenger/goExchange/goParty/goGame，預設全1）此前只有 minimap/whisper 有消費者；本輪 `exchange` 成為真實閘門（`sub_481910` 語意：關掉時邀請.box 不顯示、以 `trade-response false` 釋放 ticket）。並新證：goWhisper=0 時原廠**自動回絕**（`sub_472910` case 9 送 `0x23 [1][34][sender][me]`）、goParty 擋 party case 3、goGame 零引用——記錄於 NATIVE_TRADE §5，未實作 consumers 的部分不改行為。
+- 驗證：typecheck/format 通過；新測試 `trade-state`(4)＋`native-trade-session`(1)＋Chromium `native-trade-browser`(1：命中矩形、50%白 wash 對原圖像素、481910 .box 原文與 Yes)；`serve.test.ts` 交易兩案 pass。完整套件結果見本輪 log。附接 LIVE（8525）重啟以載入新 bridge；舊原生世界進程仍未重啟、save 未載入或改写、無自動登入。
