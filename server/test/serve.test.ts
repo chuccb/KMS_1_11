@@ -5237,9 +5237,25 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   request(hero, { kind: "command", text: "/invite Nobody" });
   assert.deepEqual((await answers(hero, 1))[0], { kind: "inviteResult", ok: 0, name: "Nobody" });
 
-  // 6. Alt leaves: Hero is told which slot emptied.
+  // 6. Alt leaves: Hero is told which slot emptied, and then the silent type-7 roster resync
+  // follows - the client's own left handler (sub_4DF910) clears one slot WITHOUT compacting
+  // while the registry splices, so the compacted row [Hero] arrives as fill/clear/clear.
   request(alt, { kind: "leave" });
-  assert.deepEqual((await answers(hero, 1))[0], { kind: "left", slot: 1 });
+  const [leftEvent, resync] = await answers(hero, 2);
+  assert.deepEqual(leftEvent, { kind: "left", slot: 1 });
+  assert.equal(resync?.kind, "roster");
+  if (resync?.kind !== "roster") return;
+  assert.deepEqual(
+    resync.cells.map((cell) => cell.action),
+    ["fill", "clear", "clear"],
+  );
+  const [heroCell] = resync.cells;
+  if (heroCell?.action !== "fill") return;
+  assert.equal(heroCell.name, "Hero");
+  // The resynced cell carries exactly what slot 0's type-0 record carried at the opening.
+  assert.equal(heroCell.level, opened.participant.level);
+  assert.equal(heroCell.face, opened.participant.face);
+  assert.deepEqual([...heroCell.look], [...opened.participant.look]);
   assert.deepEqual(
     await alt.drainOpcodes(120),
     [],

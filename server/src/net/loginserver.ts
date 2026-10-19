@@ -185,17 +185,19 @@ import {
   MESSENGER_INVITE_RESULT,
   MESSENGER_OPCODE,
   describeClientMessengerRequest,
+  encodeMessengerCellUpdate,
   encodeMessengerChat,
   encodeMessengerInvite,
   encodeMessengerInviteResult,
   encodeMessengerJoinFailed,
   encodeMessengerLeft,
   encodeMessengerParticipant,
+  encodeMessengerRoster,
   readClientMessengerRequest,
   type ClientMessengerRequest,
   type MessengerParticipant,
 } from "../protocol/messenger.ts";
-import { MessengerRegistry, type MessengerRoom } from "../game/messenger.ts";
+import { MessengerRegistry, compactRosterCells, type MessengerRoom } from "../game/messenger.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
 import { encodeInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
@@ -1919,6 +1921,8 @@ export class GameEntryServer {
       }),
       session.characterId,
     );
+    // The messenger room hears the same change as a silent type-6 cell update (sub_4E2170).
+    this.broadcastMessengerCell(session);
     this.options.log?.(
       `game: ${label} by "${session.name}"${note} - look changed, ${session.avatarItems.length} item(s) ` +
         `sent to the rest of map ${session.instance.mapId}`,
@@ -2963,6 +2967,8 @@ export class GameEntryServer {
         `game: 0x29 level-up effect for "${session.name}" sent to ` +
           `${session.instance.memberCount - 1} other player(s)`,
       );
+      // The messenger room's copy of the new level: the silent type-6 cell update (sub_4E2170).
+      this.broadcastMessengerCell(session);
     }
     this.options.log?.(
       `game: +${gain.gained} exp for killing ${template?.name ?? templateId} ` +
@@ -4116,9 +4122,50 @@ export class GameEntryServer {
     const packet = encodeMessengerLeft(left.slot);
     for (const entry of left.room.members)
       this.sessionsByCharacter.get(entry.characterId)?.send(packet);
+    // The client's type-2 handler (`sub_4DF910`) clears the slot WITHOUT compacting, while the
+    // registry splices (so the freed slot can be reused). The silent type-7 roster resync is the
+    // native repair path for exactly that drift (`sub_4E2280`): fill the occupied cells, clear
+    // the tail. An empty room is gone - nobody is left to resync.
+    if (left.room.members.length > 0) this.broadcastMessengerRoster(left.room);
     this.options.log?.(
       `game: messenger: "${left.member.name}" left room ${left.room.id} (${left.room.members.length} left)`,
     );
+  }
+
+  /**
+   * `0x4D type 7` (`sub_4E2280`): the compacted roster, silently resynced to every member.
+   * The cell list is exactly the `compactRosterCells` policy in `game/messenger.ts`.
+   */
+  private broadcastMessengerRoster(room: MessengerRoom): void {
+    const packet = encodeMessengerRoster(
+      compactRosterCells(room.members, (member, slot) => {
+        const participant = this.messengerParticipant(member.characterId, member.name, slot);
+        return { level: participant.level, face: participant.face, look: participant.look };
+      }),
+    );
+    for (const entry of room.members) this.sessionsByCharacter.get(entry.characterId)?.send(packet);
+  }
+
+  /**
+   * `0x4D type 6` (`sub_4E2170`): update the changed member's cell **in place, silently** -
+   * name and typing untouched, no log line, and the client applies it only when `slot < 3` and
+   * that cell is occupied. Sent to the whole room INCLUDING the changer (your own cell shows
+   * your own avatar). The trigger points are this server's policy - there is no original server
+   * binary - riding along the proven client-side handling: the equip `0x28` look change and the
+   * level-up `0x29`.
+   */
+  private broadcastMessengerCell(session: FieldSession): void {
+    const room = this.messenger.roomOf(session.characterId);
+    if (room === undefined) return;
+    const slot = room.members.findIndex((entry) => entry.characterId === session.characterId);
+    if (slot < 0) return;
+    const packet = encodeMessengerCellUpdate({
+      slot,
+      level: session.character.stats.level,
+      face: session.face ?? 0,
+      look: session.avatarItems ?? [],
+    });
+    for (const entry of room.members) this.sessionsByCharacter.get(entry.characterId)?.send(packet);
   }
 
   /** 一間房的成員包（`0x4D type 0`）：每一格一個封包，**只有 `announceSlot` 那一格帶 announce**。 */

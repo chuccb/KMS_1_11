@@ -117,9 +117,19 @@ BtChat 連點不會開兩扇）。建窗即印五行說明（`sub_4DDFE0` 在送
 | 7 | `sub_4E2280` | **固定三格**（`do…while (slot<3)`），每格 `u8 marker`：`0`＝清格；`1`＝原格不動；**其他**＝讀 `u8 level`＋`u32 face`＋look 清單＋`str name` 填入（announce=0，不印入場行）| 每格獨立套用；fill/clear 都把該格 typing 旗標放掉；全程靜默 |
 
 早期筆記「type 7 是 0 結尾、讀到一半」是**錯的**——迴圈固定三次，`0` 是 clear marker。
-codec（`server/src/protocol/messenger.ts`）本輪補上 `encodeMessengerCellUpdate`／
-`encodeMessengerRoster`（`MESSENGER_ROSTER_MARKER` 0/1/2）與解碼器；伺服器遊戲邏輯目前沒有
-發送來源（換裝廣播／重同步尚未接，🟡），但 client 端模型與 codec 已完整。
+codec（`server/src/protocol/messenger.ts`）有 `encodeMessengerCellUpdate`／
+`encodeMessengerRoster`（`MESSENGER_ROSTER_MARKER` 0/1/2）與解碼器；client 端模型與 codec 完整。
+
+**type 2 不補位（本輪新證）**：`sub_4DF910` 收到離開格後只印「- '%s'님이 나가셨습니다」、清該格
+（tint 0／sprite 釋放／typing off），**絕不把後面的格往前挪**。而 `MessengerRegistry.leave` 用
+splice 補位（格子可重用）——只送 type 2 的話，client 的洞和 server 的 compact 名冊會錯位。
+type 7 就是原生的修復路（ADR-098 接通）：
+
+- **伺服器發送來源（ADR-098，政策面）**：type 6＝換裝 `0x28` 與升級 `0x29` 時對**全房間（含自己）**
+  靜默原位更新（`broadcastMessengerCell`）；type 7＝有人離開且房間還有人時，type 2 之後補送
+  compact 名冊（`broadcastMessengerRoster`→`compactRosterCells`：占有格 fill／尾巴 clear，
+  keep 用不到；clear 對空格冪等，並抹掉補位挪走的殘影）。原版 server binary 不存在，觸發點是
+  政策；client 端處理是原證。
 
 `/q`（大寫 `/Q` 亦同，ZString 比對）＝關窗；其他 `/…` 原證只有 `/초대`——未知指令不送不印
 （🟡 靜默 no-op）。
@@ -141,14 +151,14 @@ codec（`server/src/protocol/messenger.ts`）本輪補上 `encodeMessengerCellUp
   （50ms gate、同 zone 才續、thumb 永不重複）；`end()` 不補 page——原版 release 的 page 分支拿
   **press 時的 GetTickCount**（+60）跟 zone 比，`cmp [esi+3Ch], eax` 實際永不成立＝**原版死代碼**
   （`sub_4522B0` @0045230A 組譯確認）。交易／메신저／技能三窗共用。
-- 🟡 `0x4E`／`0x4F` 同一 handler、封包無法分辨 → 只送 `0x4D`；type 6/7 codec 已完成但伺服器
-  尚無發送來源（換裝廣播／名冊重同步未接）。
+- 🟡 `0x4E`／`0x4F` 同一 handler、封包無法分辨 → 只送 `0x4D`。type 6/7 的伺服器發送來源已接
+  （ADR-098：換裝／升級→type 6，離開補位→type 7）；觸發點本身仍是政策（無原版 server 可證）。
 - 🟡 GM 的 `0x5A` messenger 指令在原版被 `app9` GM 旗標包住，玩家不可達 → 未實作。
 
 ## 7. 驗證
 
-`server/test/messenger.test.ts`（codec＋registry，ADR-033；本輪加 type 6/7 round-trip＋hex＋
-describe）、`messenger-state.test.ts`（模型全 transition＋slash 規則＋捲軸幾何；本輪加 flag≠"0"、
+`server/test/messenger.test.ts`（codec＋registry，ADR-033；type 6/7 round-trip＋hex＋describe；
+ADR-098 加 `compactRosterCells` 三格政策＋wire round-trip）、`messenger-state.test.ts`（模型全 transition＋slash 規則＋捲軸幾何；本輪加 flag≠"0"、
 聊天行清發言者 tint、type 6 空格忽略／占格原位、type 7 三格靜默、無上限 log、since 時鐘）、
 `vscroll.test.ts`（50ms gate、離開 zone 停、page 連翻、thumb 不重複、release 無動作、max≤1 inert）、
 `native-messenger-session.test.ts`（0x4D→事件、0x24 四方法、CP949 邊界）、

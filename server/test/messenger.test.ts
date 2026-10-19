@@ -19,7 +19,11 @@ import {
   readMessengerResult,
   type ClientMessengerRequest,
 } from "../src/protocol/messenger.ts";
-import { MESSENGER_INVITE_TTL_MS, MessengerRegistry } from "../src/game/messenger.ts";
+import {
+  MESSENGER_INVITE_TTL_MS,
+  MessengerRegistry,
+  compactRosterCells,
+} from "../src/game/messenger.ts";
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -281,4 +285,34 @@ test("invites expire, are replaced, and are spent by joining", () => {
   registry.invite(ALT.characterId, { roomId: room.id, inviterName: "Hero" }, now);
   assert.equal(registry.join(room.id, ALT), room);
   assert.equal(registry.inviteOf(ALT.characterId, now), undefined);
+});
+
+test("compactRosterCells repairs the leave-drift with exactly three type-7 cells", () => {
+  // The native type-2 handler (sub_4DF910) clears ONE slot and never compacts, while the
+  // registry's leave splices. {Hero,Alt,Third} minus Alt(1): the server row is [Hero,Third]
+  // but every client still shows Hero(0), a hole(1) and a STALE Third(2). The silent type-7
+  // resync must therefore fill 0..1 from the compacted row and CLEAR the tail.
+  const dataOf = (member: { characterId: number }, slot: number) => ({
+    level: 20 + slot + member.characterId,
+    face: 20000 + slot,
+    look: [1040000 + slot],
+  });
+  const cells = compactRosterCells([HERO, THIRD], dataOf);
+  assert.deepEqual(cells, [
+    { action: "fill", name: "Hero", level: 21, face: 20000, look: [1040000] },
+    { action: "fill", name: "Third", level: 24, face: 20001, look: [1040001] },
+    { action: "clear" },
+  ]);
+  // It must also be wire-valid: markers 2/2/0, and the reader gives the same cells back.
+  const decoded = event(encodeMessengerRoster(cells));
+  assert.deepEqual(decoded, { kind: "roster", cells });
+  // A full room keeps all three fills; an empty room is all clears (idempotent tail policy).
+  assert.deepEqual(
+    compactRosterCells([HERO, ALT, THIRD], dataOf).map((cell) => cell.action),
+    ["fill", "fill", "fill"],
+  );
+  assert.deepEqual(
+    compactRosterCells([], dataOf).map((cell) => cell.action),
+    ["clear", "clear", "clear"],
+  );
 });

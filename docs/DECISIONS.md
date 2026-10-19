@@ -3005,10 +3005,10 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 更正兩处旧判讀：`sub_559E20`（CUIGameMenu分派）PE `00559EF5`起27bytes與C都只有index3/4/5，`UI/UIWindow.img`顶层无`Party`子树，所以这版没有party窗分支，不补后期样式窗冒称原版；玩家找人是`/찾기`（PE `005B5FB8`→`sub_4717D0`），`/헉추적`在GM闸門内。`/파티정보`→`sub_55CC40`是本机印六格名冊＋队长提示，不送封包。
 - `readPartyTable`改为固定六格。旧版丢弃空名字格会让第1格被当队长、让`type10`用名冊反推partyId、并破坏round-trip；现在解码保留`characterId:0`／`name:""`，`test/party.test.ts`钉住byte-exact重编码。`client/party-state.ts`依`55C5E0`保存`partyId`（sync/joined直接采用、self-left归零、ended只归零不清bytes），`PARTY_MAX_MEMBERS`移到client纯模块由protocol再匯出。
 - 原版送出前检查搬到client：create/leave的在队状态、invite/kick的`n3000[102]==n3000[5]`队长闸門、池`51D7D0`（lstrcmpiA）与名冊`55DB00`（strcmp）两条不同大小写规则，都用新`party-command`事件回原文（「파티의 방장이 아닙니다」「캐릭터를 찾을 수 없습니다」`"'%s'님은 파티의 멤버가 아닙니다."`），不再是一般throw；`info`死亡时可用，其余保留living政策，送出前不乐观改成员关系。
-- **修掉一个隐私漏洞**：旧bridge `say()`只认`/party`与四条`/파티*`，其余任何文字直接变`0x12`公开聊天，`{t:"say",text:"/귓속말 …"}`会被公开广播。现在browser与bridge共用`client/social-commands.ts`＋`server/src/net/chat-input.ts`：原文`/귓속말`（`526370`两段且非空）／`/찾기`／五条`/파티*`、别名`/party …`／`/w`／`/f`；`526070`是单个ASCII空白前缀，不是`\s+`；参数错／未知／含换行NUL一律拒绝且不落公开聊天；`/교환`有原`0x25`链但browser交易房未完成，明示拒绝不送假邀请；`/map`等操作者命令仍走既有typed路径与授权。
+- **修掉一个隐私漏洞**：旧bridge `say()`只认`/party`与四条`/파티*`，其余任何文字直接变`0x12`公开聊天，`{t:"say",text:"/귓속말 …"}`会被公开广播。现在browser与bridge共用`client/social-commands.ts`＋`server/src/net/chat-input.ts`：原文`/귓속말`（`526370`两段且非空）／`/찾기`／五条`/파티*`、别名`/party …`／`/w`／`/f`；`526070`是单个ASCII空白前缀，不是`\s+`；参数错／未知／含换行NUL一律拒绝且不落公开聊天；`/교환`有原`0x25`链但browser交易房未完成，明示拒絕不送假邀请；`/map`等操作者命令仍走既有typed路径与授权。
 - `/귓속말`在共用路由套用原`524A00`名字闸門（4..12 CP949 bytes、I/l少于四个、不能对自己），原版静默丢弃、这里回同一句韩文；`/찾기`原版无此闸門故不加。闸門放在指令入口而非传输层`{t:"whisper"}`，以免改掉既有wire回归契约。`field` projection新增`socialCommands`标记：旧附接进程配磁盘新browser时标记缺席→界面明示不送，不丢旧bridge不认识的message type；`partyInviteIdentity`语义不变，attach仍固定false。
 - 邀请确认抽出`client/party-invitation.ts`：第一个offer拥有modal、后来者不重定向不排队；真的入队会关自己这张并本地decline（不发明原生拒绝opcode）；场地／死亡换owner时按「是」降级为decline，旧callback不能回答新offer、不能关别人的窗、不能送两次。`client/chat-entry.ts`抽出编辑框（IME Enter不送、Shift+Enter留焦点、Escape／空内容退出），指令消费同步，被拒的私讯不会await后变公开聊天。
-- 权威端`PartyRegistry`修三处悬空：`invite()`先验party存在／inviter是现任队长／target未入队并回boolean；`create()`清新队长旧pending；解散时清该party全部待答邀请（含离线目标）；`join()`拒绝不属于registry的`Party`物件。拒绝记录邀请时`GameEntryServer`回`0x10` type0。`resolveInvite(targetId,inviterId)`不变，`test/serve.test.ts`新增「inviterId不符→unknown且真实offer未被消耗」。latest-wins单槽仍是repo政策，非原官方server已证算法。
+- 权威端`PartyRegistry`修三处悬空：`invite()`先验party存在／inviter是现任队长／target未入队并回boolean；`create()`清新队长旧pending；解散时清该party全部待答邀请（含离线目标）；`join()`拒絕不属于registry的`Party`物件。拒绝记录邀请时`GameEntryServer`回`0x10` type0。`resolveInvite(targetId,inviterId)`不变，`test/serve.test.ts`新增「inviterId不符→unknown且真实offer未被消耗」。latest-wins单槽仍是repo政策，非原官方server已证算法。
 - strict／format／build／diff通过；focused69/0（13files，13.08s），完整**1131 pass／44 fail**（1175tests／138files／5315expects，350.05s，退出码1），对ADR-088基准1090/44之failure multiset（44records／42unique）新增0／移除0，CI仍不绿。467个相对连结0断链；附接LIVE title frame32／errors[]／0WS、101支client TS全200。17模块纯import在fs／net／Bun.serve／fetch挂钩下0启动I/O，含ESM named-binding自我验证避免假零。main5394→5370行、client101支TS；`main.js`／`client_probe.mjs`迁移与既有44项失败仍未完成，CI不绿。
 - 附接LIVE仍以新进程服务且**不重启既有原生世界、不载入或改写save、不自动登入或操作角色**；因旧原生进程无身份闸門，该入口的邀请／接受继续停用，人气与密语可用。
 
@@ -3104,7 +3104,7 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - `protocol/messenger.ts`：`MESSENGER_RESULT_TYPE` 加 6/7、`MESSENGER_ROSTER_MARKER`、
   `encodeMessengerCellUpdate`/`encodeMessengerRoster`（roster 非三格即 RangeError）、解碼器與
   describe；`session.ts` `decodeMessengerEvent` 補 roster fill 名字的 CP949 還原。伺服器遊戲邏輯
-  仍無 6/7 發送來源（🟡 換裝廣播／重同步未接）。
+  仍無 6/7 發送來源（🟡 換裝廣播／重同步未接——**已於 ADR-098 接通**）。
 - `client/messenger-state.ts`：typing `flag !== "0"`；聊天行先清發言者 typing 再 append；
   type 6 只套已占格（名字／typing 不動、無行）；type 7 三格 clear/keep/fill 全靜默、fill/clear
   重設 typing；**LOG_LINES=128 cap 刪除**；`member.since` 動畫時鐘（`receive(event, now)`）；
@@ -3121,7 +3121,7 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 
 **界線**：skills 的 `+44=156`／메신저 `+44=172` 只記錄為「列內容寬提示」，append 折行以
 `sub_4DEE50` 的 170 為準（繪製端 `sub_4E1320` 不再折行）；CUISkill 滾輪是否原生限定 bar rect
-未再深挖（保留 ADR-048 全窗政策並標 🟡）；type 6/7 的伺服器觸發來源（換裝／重同步）未接；
+未再深挖（保留 ADR-048 全窗政策並標 🟡）；type 6/7 的伺服器觸發來源（換裝／重同步）未接（ADR-098 已接）；
 `0x14` 社群選單與 `0x16` 商店購買的 evidence read 仍待後續輪（**已完成於 ADR-097**：`0x14`＝雙擊玩家 `sub_512700`、s2c 無消費者；`0x16`＝`sub_4B6B40` 讀通）。
 
 **驗證**：typecheck／format／build 全綠。新增 `vscroll.test.ts`（5 tests：50ms gate、離開 zone 停、
@@ -3186,3 +3186,35 @@ YozxBHq4eFovwrQLryeSwTAcmiT+zcoA==`、42541671 bytes 與前輪紀錄一致）＋
 檔案系統中亦無副本。LIVE 改用 `tools/create-isolated-preview.ts` 新建的
 `generated/preview-save.json`（preview/preview＋observer/observer，全新 1 級新進度、地圖
 101000000）——**這是新帳號新進度，不是舊存檔的恢復**。
+
+## ADR-098：메신저 type 6/7 的伺服器發送來源接通、type 2 不補位原證與 compact 重同步政策（2026-10-20）
+
+**來源**（MapleStory.exe `.c`，hexfunc／直接讀出）：
+- **type 2（離開）的 client 行為＝只清一格、絕不補位**：`sub_4DF8B0`（讀 u8 slot）→`sub_4DF910`：
+  slot≤2→印「- '%s'님이 나가셨습니다」（名字取自該格）、tint 設 0（vtable+232）、釋放 sprite COM
+  （cell[1]）與 cell[2]、cell[4]=0、typing off——**沒有任何挪格代碼**。
+- 對照 `MessengerRegistry.leave` 的 **splice 補位**（格子可重用）與 `join` 的 push：只送 type 2 時
+  client 的洞和 server 的 compact 名冊**必然錯位**（例：A,B,C 中 B 走→client 剩 A(0),洞(1),C(2)，
+  server 認為 C 在 1）。type 7（`sub_4E2280` 三格 marker 重同步、全靜默）就是原生留的修復路。
+- `sub_4DF670`（type 0 的「自己」路徑）再證 look 清單來源：`n3000+131` 起 14 個穿戴指標各取
+  `*(item+12)`＝itemId、`src[0]`＝level（`CUserLocal+22` 系）——與 `messengerParticipant` 現行
+  欄位一致。
+
+**決定**：
+- `game/messenger.ts` 新增純函數 `compactRosterCells(members, cellOf)`：**恰好三格**，占有格＝
+  fill（marker 2、level/face/look/name）、尾巴＝clear（marker 0，對空格冪等、抹掉補位挪走的殘影）；
+  keep（marker 1）在此政策不用（codec 保留）。
+- `loginserver.ts`：
+  - `broadcastMessengerRoster(room)`＝type 7，**leaveMessenger 在 type 2 之後**對剩餘成員補送
+    （房間空掉即不存在，無人可送）；
+  - `broadcastMessengerCell(session)`＝type 6，**換裝 `0x28` 广播後**與**升級 `0x29` 广播後**各送
+    一次，收件者＝全房間**含自己**（client 端 `sub_4E2170` 只套占用格、名字/typing 不動、無行）。
+- 觸發點是**政策**（原版 server binary 不存在，不可證）；client 端處理、線格式與「type 2 不補位」
+  是原證。浏览器端 type 6/7 處理與繪製已在 ADR-096 完成，本輪零改動即相容（`messenger-state.ts`
+  的 left 也只清不挪，與原生同型——錯位由伺服器的 type 7 修復，兩端一致）。
+- 文件同步：NATIVE_MESSENGER §5b（type 2 原證＋發送來源）、§6 🟡 改已接、§7 驗證；FINDINGS 4.41.5
+  同步；NATIVE_PLAYER_INTERACTIONS 的「browser 交易房仍不完整」舊句更正為已完成（NATIVE_TRADE／
+  ADR-091/094/096）。
+
+**驗證**：typecheck／format 全綠；`messenger.test.ts` 13/13（新增 `compactRosterCells` 三格政策、
+wire round-trip markers 2/2/0、滿房全 fill、空房全 clear）。

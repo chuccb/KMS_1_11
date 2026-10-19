@@ -17,7 +17,7 @@
  *   「嗨，來聊」，給兩倍。
  * - **房間空了就消失**：2003 的聊天室沒有「主持人」也沒有殘留狀態，最後一個人離開就沒有房間。
  */
-import { MESSENGER_ROOM_SIZE } from "../protocol/messenger.ts";
+import { MESSENGER_ROOM_SIZE, type MessengerRosterCell } from "../protocol/messenger.ts";
 
 /** 邀請的存活時間（毫秒）。 */
 export const MESSENGER_INVITE_TTL_MS = 60_000;
@@ -40,6 +40,41 @@ export interface MessengerInvite {
   /** 邀請者的名字——`0x4D type 3` 要把它送給被邀請的人。 */
   inviterName: string;
   expiresAt: number;
+}
+
+/**
+ * The `0x4D type 7` (`sub_4E2280`) cell list: map the compacted roster onto **exactly three
+ * cells**.
+ *
+ * Why it is needed is settled by the client's own evidence: the type-2 (left) handler
+ * `sub_4DF910` clears that one slot and **never compacts**, while the registry's `leave`
+ * splices (so the freed slot can be reused) - type 2 alone leaves the client's holey row out of
+ * step with the server's compacted one. Type 7 is the native resync path for exactly that
+ * drift: occupied cells = fill (marker 2), tail = clear (marker 0; idempotent on an
+ * already-empty cell, and it erases the stale avatar the compaction moved away). keep
+ * (marker 1) exists in the codec for "this cell does not change"; this policy never needs it.
+ */
+export function compactRosterCells(
+  members: readonly MessengerMember[],
+  cellOf: (
+    member: MessengerMember,
+    slot: number,
+  ) => {
+    level: number;
+    face: number;
+    look: readonly number[];
+  },
+): MessengerRosterCell[] {
+  const cells: MessengerRosterCell[] = [];
+  for (let slot = 0; slot < MESSENGER_ROOM_SIZE; slot++) {
+    const member = members[slot];
+    cells.push(
+      member === undefined
+        ? { action: "clear" }
+        : { action: "fill", name: member.name, ...cellOf(member, slot) },
+    );
+  }
+  return cells;
 }
 
 export class MessengerRegistry {

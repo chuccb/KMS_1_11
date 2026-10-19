@@ -42,7 +42,9 @@ ADR-097），且本版 s2c `0x14` 無消費者（`sub_55A900` switch 只有 case
 browser 已接通：canvas 雙擊玩家→`{t:'player-info',name}`→`session.playerInfo(name)`（同圖解析名字、
 查無不送）→c2s `0x14`；伺服器只記 log 不回包（忠實靜默）。native 雙擊無類型過濾（NPC/mob 也會送
 自身 +72），非 CUser 的 +72 語意未證——browser 只對玩家送，🟡 記錄為已知差異。
-交易 id4 有真實原送出鏈，但 browser 交易房仍不完整；此輪不以選單外觀宣稱交易完成。
+交易 id4 的送出鏈（`sub_471A40`→0x25）與 browser 交易房已完成——見 NATIVE_TRADE 與
+ADR-091/094/096（窗體、log 畫家 `sub_4D5730`、捲軸 auto-repeat、goExchange 閘門）；選單外觀
+本身從不是交易完成的依據。
 
 ## 2. 已接通的產品鏈
 

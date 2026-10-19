@@ -4003,7 +4003,10 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
 
 - ~~**`type 6`／`type 7`**~~：✅ 本輪完整解碼（見 4.41.2 表與 NATIVE_MESSENGER §5b）——codec
   （`encodeMessengerCellUpdate`／`encodeMessengerRoster`＋`MESSENGER_ROSTER_MARKER`）與瀏覽器模型
-  都已實作；🟡 只剩**伺服器遊戲邏輯尚無發送來源**（換裝廣播／名冊重同步未接）。
+  都已實作；伺服器發送來源也已接（ADR-098：換裝 `0x28`／升級 `0x29`→type 6 全房間靜默原位、
+  離開 splice 補位→type 2 之後 type 7 三格重同步）。新證：type 2 的 `sub_4DF910` **只清一格、
+  絕不補位**（印「나가셨습니다」後 tint 0／sprite 釋放）——所以 registry 的 splice 必須靠 type 7
+  修復，`compactRosterCells`＝占有 fill／尾巴 clear（keep 用不到）。
 - **成員紀錄的第二個 `u8`**：位置與交易的等級相同，語意仍然只有推論。
 - **指令字串**：`/초대` 的「초대」是 CP949 的三個 byte。伺服器**不比對指令字**，只取第一個空白
   之後的字（`messengerInviteTarget`）——所以 `/invite Hero` 與 `/초대 Hero` 等價。
