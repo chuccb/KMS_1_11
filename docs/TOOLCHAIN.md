@@ -33,7 +33,7 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 | checkout Action | v7.0.1 | CI 固定完整 commit SHA |
 | setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
-版本來源（六項registry latest本輪已重查；release頁與CI Action SHA沿用前輪查證）：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
+版本來源（六項 registry latest 與兩 CI Action 於 2026-10-19 清潔輪以 API 實測**全部相符**，ADR-093；存證 `generated/native-messages/registry-latest-cleanup.json` 與 `generated/bun-install-proof.json`，Bun tarball 經 SHA512 驗證）：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
 [TypeScript registry](https://registry.npmjs.org/typescript/latest)、
 [Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、
 [Prettier registry](https://registry.npmjs.org/prettier/latest)、

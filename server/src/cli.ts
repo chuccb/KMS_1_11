@@ -4,9 +4,9 @@ import { creationCatalogOf } from "./game/creation.ts";
 /**
  * kms111-rebuild CLI.
  *
- *   node server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--out trace.jsonl]
- *   node server/src/cli.ts decode trace.jsonl [--recv-seed <n>] [--send-seed <n>] [--json]
- *   node server/src/cli.ts serve --port 8484 [--account user:pass] [--game-port 8485]
+ *   bun server/src/cli.ts capture --port 8484 [--mode session|framed|raw] [--out trace.jsonl]
+ *   bun server/src/cli.ts decode trace.jsonl [--recv-seed <n>] [--send-seed <n>] [--json]
+ *   bun server/src/cli.ts serve --port 8484 [--account user:pass] [--game-port 8485]
  *
  * `capture` runs the harness from ADR-004: point the original client (or the rewritten
  * one) at this port and it writes a JSONL trace of everything received.

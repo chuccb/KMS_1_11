@@ -4071,7 +4071,7 @@ canvasW>=280改內容W210，canvasH>=150改H112。`sub_4E5C70`以unit=1<<mag、�
 精確矩形、crop與框座標、原函式表和限制見 [`../DISPLAY_MINIMAP_VALIDATION.md`](../DISPLAY_MINIMAP_VALIDATION.md)。
 localStorage是browser設定替代，不冒稱原per-character設定或絕對閃爍相位已同步。
 
-### 4.42 ✅ 交易視窗／幾何／CConfig go\* 閘門（ADR-091）
+### 4.45 ✅ 交易視窗／幾何／CConfig go\* 閘門（ADR-091）
 
 `0x25`／`0x50` 的欄位見 §4.39／§4.40；本節補**視窗與閘門**層，完整表在
 [NATIVE_TRADE](../NATIVE_TRADE.md)：`sub_4815E0` 無視窗時只認 1/2/4（其餘斷線）、type 7 是
@@ -4485,7 +4485,7 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 以上是browser還原接線，不是新wire格式／原server規則。新增來源回歸未執行；詳細差異／操作見NATIVE_SYSTEM_UI.md。
 
 
-### 4.43 後續：主動技能0x1E與user effect type1（2026-10-18，未測試）
+### 4.46 後續：主動技能0x1E與user effect type1（2026-10-18，未測試）
 
 原55D320送30 decimal：u32 skillId、u8 level、u8 count、u32 characterId[count]。
 519270自身buff使用count0；519950以party六格／±50半開RECT找同圖其他隊友。
@@ -4496,7 +4496,7 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 未執行測試／typecheck／語法／browser／VM／probe，沒有PASS或全技能宣稱。
 
 
-### 4.44 續作：513C80多彈藥／Lucky Seven與0x400（2026-10-18，未測試）
+### 4.47 續作：513C80多彈藥／Lucky Seven與0x400（2026-10-18，未測試）
 
 511630對level bulletCount找同一疊足量ammo；513C80的damage hits為min15(bulletCount*attackCount)，
 缺／<=1個別作1，0x10的high nibble仍至多一個mob。0x24保留原技能level／id及消耗前projectileId。
@@ -4508,7 +4508,7 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 新增來源未執行，不宣稱測試PASS或全技能1:1。
 
 
-### 4.45 4636B0穿戴順序／0x17邊界與主動時鐘關聯（2026-10-18，未測試）
+### 4.48 4636B0穿戴順序／0x17邊界與主動時鐘關聯（2026-10-18，未測試）
 
 4636B0（.c約107382）：4C5020先取完整有效集合→465B50/465C60衝突與空位檢查→刪部位→4C5420。
 不能排除舊武器後重跑4C5020，否則會提前刪依賴裝備、錯誤拒絕原允許的穿戴入口。
@@ -4517,7 +4517,7 @@ GameEntry共用純規則亦驗反向swap；clone／預encode再commit，0x17尾�
 主動attackToken只加browser/bridge JSON，不改0x0F/10或0x23/24；回原動作clock，不造admission ACK。
 遠端固定receipt source/z/target identity。原證／重建政策詳[NATIVE_EQUIP_ADMISSION](../NATIVE_EQUIP_ADMISSION.md)。
 
-### 4.46 0x11→0x25魔法獨立鏈、120ms段序更正與道具欄位漏接（2026-10-18，未測試）
+### 4.49 0x11→0x25魔法獨立鏈、120ms段序更正與道具欄位漏接（2026-10-18，未測試）
 
 - 514D30／428040／PE5B2374：正常row僅group1/6的28/29；skillType3奇列全空。43FC80 alias是swingO1/O3，非magic1/2。
 - 514DDA..514DE8直接傳avatar+152 attackSpeed；不套4BE8B0的物理Booster減速。508700仍逐格clamp縮放。

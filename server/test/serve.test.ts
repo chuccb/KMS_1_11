@@ -2172,12 +2172,12 @@ test(
  * there - so it relays the id; the two opcodes without a slot send the neutral 0.
  */
 /**
- * A drag in the inventory window: c2s `0x17` (FINDINGS 4.34.1). The client moves nothing itself, so
+ * A drag in the inventory window: c2s `0x17` (FINDINGS 4.36). The client moves nothing itself, so
  * the two things worth pinning are its two answers - the `0x0B` that moves the item in this player's
  * own window, and the `0x28` that puts it on everybody else's screen.
  */
 test(
-  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map",
+  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map (first pass)",
   { timeout: 20000 },
   async (t) => {
     const log: string[] = [];
@@ -2340,7 +2340,7 @@ test(
 );
 
 test(
-  "a throw-away answers 0x0B and puts the item on the ground for the whole map",
+  "a throw-away answers 0x0B and puts the item on the ground for the whole map (first pass)",
   { timeout: 20000 },
   async (t) => {
     const log: string[] = [];
@@ -4250,7 +4250,7 @@ test(
  * `0x28`: their client draws them from the record it holds.
  */
 test(
-  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map",
+  "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map (second pass, ADR-029 real sockets)",
   { timeout: 20000 },
   async (t) => {
     const log: string[] = [];
@@ -4390,7 +4390,7 @@ test(
  * last moved, so standing on it is not enough (`DropField.reachable`, FINDINGS 4.18.6).
  */
 test(
-  "a throw-away answers 0x0B and puts the item on the ground for the whole map",
+  "a throw-away answers 0x0B and puts the item on the ground for the whole map (second pass, ADR-029 real sockets)",
   { timeout: 20000 },
   async (t) => {
     const log: string[] = [];

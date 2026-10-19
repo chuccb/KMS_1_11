@@ -374,11 +374,10 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
 ## 怎麼跑
 
 ```sh
-cd server
-node src/cli.ts serve \
+bun server/src/cli.ts serve \
   --port 8496 --game-port 8497 --web-port 8495 \
   --account admin:admin,alt:alt,newbie:newbie \
-  --data ../Data.wz --start-mesos 200 --ping off
+  --data Data.wz --start-mesos 200 --ping off
 ```
 
 `--web-port` 是**頁面自己**的 port（HTTP＋`/ws`），另外兩個是 2003 協定的 TCP port。上面這組把頁面
