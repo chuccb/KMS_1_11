@@ -34,7 +34,8 @@ import type { UiPoint } from "./ui-types.ts";
 export interface MessengerRendererOptions {
   ctx: CanvasRenderingContext2D;
   image: ImageLookup;
-  avatars(look: BrowserLook, flip: boolean): AvatarImage;
+  /** `since` is the member's cell-fill clock: the native avatar is a live, ticking Shape2D node. */
+  avatars(look: BrowserLook, flip: boolean, since: number): AvatarImage;
 }
 /** `sub_45F340`'s list arrives hair-first; the face u32 travels beside it (FINDINGS 4.41.3). */
 function browserLookOf(member: MessengerMember): BrowserLook {
@@ -71,19 +72,26 @@ export function messengerWindowAt(
 export function messengerRenderer(options: MessengerRendererOptions) {
   const { ctx, image, avatars } = options;
 
+  /**
+   * `sub_4DEE50`'s append-time wrap: the longest prefix that fits 170 px becomes a row and
+   * the remainder is re-measured with `asc_5BC328`'s four-space continuation indent.
+   */
   function wrapLines(messages: readonly string[]): string[] {
     const log = MESSENGER_WINDOW.log;
     const rows: string[] = [];
     for (const text of messages)
       for (const part of text.split("\n")) {
         let line = part;
-        while (ctx.measureText(line).width > log.wrap && line.length > 1) {
+        for (;;) {
+          if (ctx.measureText(line).width <= log.wrap || line.length <= 1) {
+            rows.push(line);
+            break;
+          }
           let cut = line.length - 1;
           while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > log.wrap) cut--;
           rows.push(line.slice(0, cut));
-          line = line.slice(cut);
+          line = log.indent + line.slice(cut);
         }
-        rows.push(line);
       }
     return rows;
   }
@@ -126,12 +134,14 @@ export function messengerRenderer(options: MessengerRendererOptions) {
     room.slots.forEach((slot, index) => {
       if (slot === undefined) return;
       const feetY = member.feetY + member.slotPitch * index;
-      const art = avatars(browserLookOf(slot), false);
+      const art = avatars(browserLookOf(slot), false, slot.since);
       if (art.ready) {
-        // `sub_4E1E30` tints the avatar COM with 0x0CFFFFFF while the member types; the
-        // COM blend is not resolvable from the thunks, so the page fades the sprite
-        // instead (🟡 the visible cue, not the exact blend).
-        if (room.typing[index] === true) ctx.globalAlpha = 0.35;
+        // `sub_4E1E30` tints the avatar COM through vtable+232 with 0xCFFFFFFF while the
+        // member types and 0 when idle. The build sets the same slot to 0x00FFFFFF and the
+        // avatar is plainly visible, so alpha 0 is the identity; CharSelect dims unchosen
+        // characters with 0x80FFFFFF (`sub_42E210`) - the alpha byte is an opacity modulate.
+        // Typing therefore draws the sprite at 0xCC/0xFF = 80 % opacity.
+        if (room.typing[index] === true) ctx.globalAlpha = 204 / 255;
         ctx.drawImage(art.img, at.x + member.avatarX + art.dx, at.y + feetY + art.dy);
         ctx.globalAlpha = 1;
       }

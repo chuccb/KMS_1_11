@@ -664,7 +664,7 @@ function handle(message) {
     }
     case 'messenger': {
       const event = message.event;
-      for (const t of messengerModel.receive(event)) {
+      for (const t of messengerModel.receive(event, performance.now())) {
         if (t.kind === 'invite') {
           // sub_4E1BB0: goMessenger (n0xC8+28) gates the invite; a closed window raises the
           // modal, an open one only prints a row (the model did that already).
@@ -1520,7 +1520,7 @@ canvas.addEventListener("mousedown", (event) => {
     ? messengerWindowAt(point.x, point.y, messengerAt, true, messengerScroll)
     : undefined;
   if (messengerHit?.kind === "scroll") {
-    messengerScroll.activate(messengerHit.zone, point.y - messengerAt.y);
+    messengerScroll.activate(messengerHit.zone, point.y - messengerAt.y, performance.now());
     messengerScrollDrag = true;
     event.preventDefault();
     return;
@@ -1550,7 +1550,7 @@ canvas.addEventListener("mousedown", (event) => {
   const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room, tradeLogScroll) : undefined;
   if (tradeHit?.kind === "scroll") {
     // sub_4521E0: arrows step, track pages, thumb starts the drag; the sheet never drags from here.
-    tradeLogScroll.activate(tradeHit.zone, point.y - tradeAt.y);
+    tradeLogScroll.activate(tradeHit.zone, point.y - tradeAt.y, performance.now());
     tradeScrollDrag = true;
     event.preventDefault();
     return;
@@ -2922,9 +2922,14 @@ function frame() {
       pressed: messengerPressed,
     }, messengerScroll);
     positionMessengerInput();
-    messengerTypingCheck(performance.now());
+    const now = performance.now();
+    messengerTypingCheck(now);
+    // sub_4523D0: the captured scrollbar's OnTimer re-hits the live cursor zone every tick
+    // and repeats the pressed arrow/page through sub_4524C0's 50 ms gate.
+    if (messengerScrollDrag && pointerAt)
+      messengerScroll.tick(now, pointerAt.x - messengerAt.x, pointerAt.y - messengerAt.y);
   }
-  if (tradeOpen)
+  if (tradeOpen) {
     tradeView.draw(tradeAt, tradeModel.room, {
       hover: typeof canvasButtonHover === "string" && canvasButtonHover.startsWith("trade:")
         ? canvasButtonHover.slice(6)
@@ -2935,6 +2940,10 @@ function frame() {
         ? canvasButtonPress.slice(6)
         : undefined,
     }, tradeLogScroll);
+    // The same CCtrlScrollBar OnTimer repeat as the messenger log (sub_4523D0/sub_4524C0).
+    if (tradeScrollDrag && pointerAt)
+      tradeLogScroll.tick(performance.now(), pointerAt.x - tradeAt.x, pointerAt.y - tradeAt.y);
+  }
   systemPanel.draw();
   playerContext.draw();
   drawScreenMessages(ctx, feedback.rows(now));
@@ -4042,6 +4051,9 @@ const tradeLogScroll = tradeLogScroller();
 const tradeView = tradeRenderer({
   ctx,
   image: artImage,
+  // The trade room's member art is parsed straight onto the sheet (sub_482340) with no live
+  // avatar node - there is not one sub_421E00 caller in the whole 004Dxxxx window range, so
+  // the native trade avatars never animate. Stand frame 0 is faithful.
   avatars: (look, flip) => avatarCache.get(look, "stand1", 0, flip),
   icon: itemIcon,
 });
@@ -4057,7 +4069,18 @@ const messengerModel = messengerState();
 const messengerView = messengerRenderer({
   ctx,
   image: artImage,
-  avatars: (look, flip) => avatarCache.get(look, "stand1", 0, flip),
+  // sub_4DFB50 builds each cell's avatar as a live Shape2D child window (v9[1], "Shape2D#
+  // Vector2D" via sub_434120) that sub_4DEAF0 ticks every 30 ms - the stand animation runs
+  // from the instant the cell is filled, driven by the member's own clock (member.since).
+  avatars: (look, flip, since) => {
+    const profile = avatarMotionCatalog.get(weaponIdOf(look))?.data;
+    const stance = profile?.stand ?? "stand1";
+    const frames = profile?.actions?.[stance]?.frames ?? [];
+    const frame = frames.length
+      ? Math.max(0, frames.indexOf(animationFrame(frames, performance.now() - since)))
+      : 0;
+    return avatarCache.get(look, stance, frame, flip);
+  },
 });
 messengerView.warm();
 const messengerScroll = messengerLogScroller();
@@ -4130,11 +4153,11 @@ function messengerSubmit() {
   if (say.kind === "command") return send({ t: "messenger-command", name: say.name });
   if (say.kind === "chat") {
     // sub_4DE490 prints the row locally first, then sends type 5.
-    messengerModel.receive({ kind: "chat", line: say.line });
+    messengerModel.receive({ kind: "chat", line: say.line }, performance.now());
     return send({ t: "messenger-say", line: say.line });
   }
   if (text.startsWith("/초대"))
-    messengerModel.receive({ kind: "chat", line: MESSENGER_TEXT.otherName });
+    messengerModel.receive({ kind: "chat", line: MESSENGER_TEXT.otherName }, performance.now());
 }
 /** `sub_4DEAF0`'s 3000 ms re-check of the typing flag, once per frame. */
 function messengerTypingCheck(now) {

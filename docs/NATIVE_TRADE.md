@@ -71,8 +71,11 @@ follow-if-at-bottom（wasBottom＝`pos ≥ 舊max−1`，append 前判定）、`
 `sub_452500` 的五個 hit zone（thumbTop＝`12 + floor(pos×180/(max−1))`）、`sub_4525B0` 箭頭±1、
 `sub_452600` 頁面±`max(floor(max/16),16)`、`sub_452670`/`sub_4526A0` thumb 拖拉
 （`pos = startPos + (double)max×dy/180`，C 的 double→int 截斷＝`Math.trunc`，再 clamp）、
-`sub_452340` 滾輪（自己 rect 內每格 ±1）。原生按住箭頭的 auto-repeat timer（`sub_4523D0`）
-不重現（🟡，與 skills 視窗同政策）。
+`sub_452340` 滾輪（自己 rect 內每格 ±1）。原生按住箭頭／頁面的 auto-repeat（`sub_4523D0`
+OnTimer＋`sub_4524C0` 50ms gate、游標仍在同一 zone 才續、thumb／zone 100 排除）已於 ADR-096
+以 `vscroll.tick()` 重現，draw loop 每幀餵游標；release（`sub_4522B0`）不補 page——原版該分支
+拿 press 時的 GetTickCount（+60）跟 release zone 比（`cmp [esi+3Ch], eax` @0045230A），永不成立
+＝**原版死代碼**，忠實不重現。
 
 ## 4. 玩家動作與原廠閘門
 
@@ -127,4 +130,4 @@ admin byte），故該閘門在瀏覽器不可達、字串保留。
 8. **log scrollbar（ADR-094）**：paint 用 `UI/Basic.img/VScr` cells（EXE 的 paint 函數未能定位，
    vtable3 已倒；cell 名與幾何由 Create 鏈 `sub_451240` 的 COM art-height get 證明 arrowLen=12、
    `sub_4D3EF0` 證明 (262,21) len=216）；互動算式全部出自 `sub_452500`/`sub_4525B0`/`sub_452600`/
-   `sub_452670`/`sub_4526A0`/`sub_4D5900` 的位元組證據；auto-repeat（`sub_4523D0`）跳過（🟡）。
+   `sub_452670`/`sub_4526A0`/`sub_4D5900` 的位元組證據；auto-repeat（`sub_4523D0`）ADR-096 補上。

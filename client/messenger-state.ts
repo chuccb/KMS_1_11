@@ -52,8 +52,12 @@ export const MESSENGER_WINDOW = {
   edit: { x: 11, y: 286, width: 176, height: 12 },
   /** id 1002: Create(parent, 1002, 1, 0, 179, 58, 218, 0), `+44 = 172` wrap. */
   scrollbar: { x: 179, y: 58, width: 12, height: 218, arrow: 12 } satisfies VScrollBarGeometry,
-  /** `sub_4E1320`: sixteen rows at x=10, y = 63 + 13k; wrap width from the scrollbar's +44. */
-  log: { x: 10, firstY: 63, lastY: 271, pitch: 13, wrap: 172 },
+  /**
+   * `sub_4E1320`: sixteen rows at x=10, y = 63 + 13k. The wrap happens at append time in
+   * `sub_4DEE50`: width **170** (`n170 = 170` through `sub_439A70`) and every continuation
+   * line is prefixed with four spaces (`asc_5BC328`, "    ").
+   */
+  log: { x: 10, firstY: 63, lastY: 271, pitch: 13, wrap: 170, indent: "    " },
   /** `sub_4E14E0`'s typing row. */
   typing: { x: 11, y: 316 },
   /** `sub_4DFB50`: avatar feet at `98 * slot + 103`, centred in the charView column. */
@@ -97,6 +101,12 @@ export interface MessengerMember {
   level: number;
   face: number;
   look: readonly number[];
+  /**
+   * The member's own animation clock: `sub_4DFB50` hangs each cell's avatar on a live
+   * Shape2D child window (`v9[1]`, positioned via `sub_424590(x,y)`) that `sub_4DEAF0`
+   * ticks every 30 ms - the stand animation runs from the moment the cell is filled.
+   */
+  since: number;
 }
 export interface MessengerRoomState {
   slots: readonly (MessengerMember | undefined)[];
@@ -110,6 +120,7 @@ export type MessengerTransition =
   | { kind: "left"; slot: number }
   | { kind: "line"; text: string }
   | { kind: "typing"; name: string; on: boolean }
+  | { kind: "cell"; slot: number }
   | { kind: "invite"; inviterName: string; roomId: number };
 
 /** `sub_4DE490`'s answer to one finished edit box. */
@@ -118,9 +129,6 @@ export type MessengerSay =
   | { kind: "command"; name: string }
   | { kind: "chat"; line: string }
   | { kind: "refused" };
-
-/** The browser caps the log so a long room cannot grow forever; native has no cap. */
-const LOG_LINES = 128;
 
 export function messengerState() {
   let room:
@@ -140,10 +148,11 @@ export function messengerState() {
           lines: [...room.lines],
           typing: [...room.typing],
         };
+  // sub_4DEE50's ZList is unbounded: rows are only ever appended, never trimmed. The
+  // scrollbar takes count-15 as its max (sub_452130), same as the trade log.
   const push = (text: string) => {
     if (room === undefined) return;
     room.lines.push(text);
-    if (room.lines.length > LOG_LINES) room.lines.splice(0, room.lines.length - LOG_LINES);
   };
 
   return {
@@ -180,14 +189,17 @@ export function messengerState() {
     dismissInvite(roomId: number) {
       if (invite?.roomId === roomId) invite = undefined;
     },
-    /** `sub_4E18D0`'s eight types, minus 6/7 which this server never sends. */
-    receive(event: MessengerEvent): MessengerTransition[] {
+    /**
+     * `sub_4E18D0`'s eight types. `now` is the caller's clock (performance.now()) and only
+     * seeds the member animation clocks; every transition is otherwise deterministic.
+     */
+    receive(event: MessengerEvent, now = 0): MessengerTransition[] {
       switch (event.kind) {
         case "participant": {
           if (room === undefined || event.participant.slot < 0 || event.participant.slot > 2)
             return [];
           const { slot, name, level, face, look } = event.participant;
-          room.slots[slot] = { name, level, face, look };
+          room.slots[slot] = { name, level, face, look, since: now };
           room.typing[slot] = false;
           if (event.announce) push(MESSENGER_TEXT.enter(name));
           return [{ kind: "participant", slot }];
@@ -227,17 +239,65 @@ export function messengerState() {
           if (room === undefined) return [];
           const split = event.line.indexOf(" : ");
           if (split < 0) {
-            // `sub_4E1E30`'s typing line: the last char is the flag, the rest the name.
+            // `sub_4E1E30`'s typing line: name = all but the last char, and the flag is
+            // `lastChar != "0"` (sub_416B00(right(line,1), "0")) - anything else counts as on.
             if (event.line.length < 2) return [];
             const name = event.line.slice(0, -1);
-            const on = event.line.slice(-1) === "1";
+            const on = event.line.slice(-1) !== "0";
             const slot = room.slots.findIndex((member) => member?.name === name);
             if (slot < 0) return [];
             room.typing[slot] = on;
             return [{ kind: "typing", name, on }];
           }
+          // A chat row also clears the speaker's tint: the same member loop runs with the
+          // flag false before sub_4DEE50 appends (vtable+232 gets 0 = identity).
+          const out: MessengerTransition[] = [];
+          const speaker = event.line.slice(0, split);
+          const said = room.slots.findIndex((member) => member?.name === speaker);
+          if (said >= 0 && room.typing[said] === true) {
+            room.typing[said] = false;
+            out.push({ kind: "typing", name: speaker, on: false });
+          }
           push(event.line);
-          return [{ kind: "line", text: event.line }];
+          out.push({ kind: "line", text: event.line });
+          return out;
+        }
+        case "cellUpdate": {
+          // `sub_4E2170`: only an occupied cell applies; level/face/look replace in place,
+          // the name and the typing flag stay, and no row is printed.
+          if (room === undefined || event.slot < 0 || event.slot > 2) return [];
+          const member = room.slots[event.slot];
+          if (member === undefined) return [];
+          room.slots[event.slot] = {
+            ...member,
+            level: event.level,
+            face: event.face,
+            look: event.look,
+          };
+          return [{ kind: "cell", slot: event.slot }];
+        }
+        case "roster": {
+          // `sub_4E2280`: exactly three marker-led cells; clear empties silently, keep is a
+          // no-op, fill replaces the cell (announce=0, so no entrance row).
+          if (room === undefined) return [];
+          const current = room;
+          const out: MessengerTransition[] = [];
+          event.cells.forEach((cell, slot) => {
+            if (cell.action === "keep") return;
+            current.typing[slot] = false;
+            current.slots[slot] =
+              cell.action === "clear"
+                ? undefined
+                : {
+                    name: cell.name,
+                    level: cell.level,
+                    face: cell.face,
+                    look: cell.look,
+                    since: now,
+                  };
+            out.push({ kind: "cell", slot });
+          });
+          return out;
         }
       }
     },

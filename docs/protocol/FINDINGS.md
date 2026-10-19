@@ -3958,8 +3958,8 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
 | `3` | `sub_4E1BB0` | `[str inviterName][u32 roomId]` | 邀請。**沒有視窗也處理**：`*(n0xC8 + 28) != 0` 才動作，沒開窗就跳模態，按「是」（`sub_52C140 == 6`）⇒ `sub_4DDF10(roomId)` |
 | `4` | `sub_4E19A0` | `[str name][u8 ok]` | `ok != 0` ⇒「- '%s'님에게 초청 메시지를 보냈습니다」、`ok == 0` ⇒「- '%s'님을 찾지 못했습니다」|
 | `5` | `sub_4E1E30` | `[str line]` | 一行聊天，字串**自己帶「說話者 : 內容」**（用 `strstr(line, " : ")` 拆）|
-| `6` | `sub_4E2170` | `[u8 slot][u8 ?][u32 ?]` | 更新某一格（沒有名字與外觀）|
-| `7` | `sub_4E2280` | 一串成員紀錄，`u8` 為 0 時結束 | 整份名冊（`sub_4DF3E0(..., announce = 0)`）|
+| `6` | `sub_4E2170` | `[u8 slot][u8 level][u32 face]` ＋ 0 結尾外觀清單（**無名字／announce**）| 原位更新一格；`slot<3` 且該格已有人（name≠0）才套用，名字與 typing 旗標不動、不印行 |
+| `7` | `sub_4E2280` | **固定三格**（`do…while(slot<3)`），每格 `[u8 marker]`：0＝清格、1＝原格不動、其他＝`[u8 level][u32 face]`＋外觀清單＋`[str name]` | 整份名冊（fill 走 `sub_4DF3E0(..., announce = 0)`，全程靜默；舊筆記「0 結尾、讀到一半」是錯的——0 是 clear marker）|
 
 `type 3` 的閘門要記下來：**視窗開著時只印一行**，沒開時才跳模態——位元組完全相同，差別在
 `this_8` 是不是 `nullptr`。
@@ -3994,8 +3994,9 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
 
 #### 4.41.5 還是 🟡 的地方
 
-- **`type 6`／`type 7`**：一個是「更新某一格」、一個是「整份名冊」，本伺服器都不送——`type 0`
-  的逐格更新已經足夠，而且 `type 7` 的結束條件（`u8 == 0`）只讀到一半。
+- ~~**`type 6`／`type 7`**~~：✅ 本輪完整解碼（見 4.41.2 表與 NATIVE_MESSENGER §5b）——codec
+  （`encodeMessengerCellUpdate`／`encodeMessengerRoster`＋`MESSENGER_ROSTER_MARKER`）與瀏覽器模型
+  都已實作；🟡 只剩**伺服器遊戲邏輯尚無發送來源**（換裝廣播／名冊重同步未接）。
 - **成員紀錄的第二個 `u8`**：位置與交易的等級相同，語意仍然只有推論。
 - **指令字串**：`/초대` 的「초대」是 CP949 的三個 byte。伺服器**不比對指令字**，只取第一個空白
   之後的字（`messengerInviteTarget`）——所以 `/invite Hero` 與 `/초대 Hero` 等價。
@@ -4020,10 +4021,15 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
 
 **`sub_4E0FF0` 的控制項矩形**（窗內座標）：id 1000 關閉鈕 (152,9,26,26)＝`UI/UIWindow.img/BtUIClose`；
 id 1001 輸入框 `CCtrlEdit(11,286,176,12)` 上限 256 字；id 1002 捲軸
-`CCtrlScrollBar::Create(parent,1002,1,0,179,58,218,0)`，`+44 = 172`＝log 折行寬。log（`sub_4E1320`）
-自 pos 繪 16 列，x=10、y=63+13k——與交易 log 同一個 CCtrlScrollBar，故共用 ADR-094 抽出的
+`CCtrlScrollBar::Create(parent,1002,1,0,179,58,218,0)`，`+44 = 172`（列內容寬提示）。log 繪製
+（`sub_4E1320`）自 pos 繪 16 列，x=10、y=63+13k；**append**（`sub_4DEE50`）以 `sub_439A70`
+按**寬 170**（`n170=170`）折行、接續行前置 `"    "`（`asc_5BC328`），ZList **無上限**，
+follow＝`pos >= count−16`（unsigned，count<16 恆 false）或新 count==16，然後 SetMax(count−15)、
+follow 才 SetPos(max−1)——與交易 log 同一個 CCtrlScrollBar，故共用 ADR-094 抽出的
 `client/vscroll.ts`（travel 218−2×12−12=182；max=rows−15）。成員欄（`sub_4DFB50`）：腳底
-y=103+98×slot、avatar 置中於 charView 欄 x=248、名字白字 (202,105+98×slot)。
+y=103+98×slot、avatar 置中於 charView 欄 x=248、名字白字 (202,105+98×slot)；頭像是
+**活的 Shape2D 子窗**（`v9[1]`，`sub_434120`＋"Shape2D#Vector2D"），OnTimer 每 30ms tick ⇒
+原版메신저頭像會播站立動畫（瀏覽器以 `member.since`＋`avatarMotionCatalog` 還原）。
 
 **PE 內逐字讀出的韓文字串**（VA→檔案偏移直接自二進位读出、cp949 解碼）：
 
@@ -4039,12 +4045,16 @@ y=103+98×slot、avatar 置中於 charView 欄 x=248、名字白字 (202,105+98�
 | `'%s'님께서 대화방\r\n 초청 메시지를 보냈습니다\r\n초청에 응하시겠습니까?` | @5BC834 | 邀請到達時**視窗已關**：模態（是→進房；沒有拒絕封包，TTL 60s 自然過期）|
 | ` 님이 입력중입니다` | aI_13 | typing 列；多個名字以「,」相接 |
 
-**打字（typing）鏈**：`sub_4DEAF0` 每 3000ms 檢查（`+96` timer、`+92` flag）：輸入框非空且未送過 →
+**打字（typing）鏈**：`sub_4DEAF0` 每 3000ms 檢查（`+96` countdown、`+92` flag）：輸入框非空且未送過 →
 `0x24 type 5` 送 `名字+"1"`；清空且送過 → `名字+"0"`。**沒有 `" : "` 分隔**——收端（`sub_4E1E30`）
-切掉最後一個字元當旗標、比對成員名，只更新 typing（頭像上蓋 `0x0CFFFFFF` 幽靈色＋底部
-(11,316) 印 `名字… 님이 입력중입니다` 列），**不印成聊天行**。伺服器政策（`loginserver.ts`
-`sayInMessenger`）：無分隔的行只重蓋前綴（防偽造他人名字）原樣轉發，絕不組成聊天行。
-瀏覽器以 globalAlpha 0.35 的淡化近似原版的 0x0CFFFFFF tint（🟡：原 tint 是叠加色、非透明度）。
+`flag = (right(line,1) != "0")`（任何非 `"0"` 字元都算 on）、比對成員名，只更新 typing
+（`vtable+232(avatar COM, flag ? 0xCFFFFFFF : 0)`＋底部 (11,316) 印 `名字… 님이 입력중입니다` 列），
+**不印成聊天行**；含 `" : "` 的聊天行則以同一迴圈 flag=0 **先清掉發言者的 tint** 再 append。
+`vtable+232`＝ARGB modulate：建構色 `0x00FFFFFF` 正常顯示 ⇒ alpha 0 是 identity；CharSelect
+`sub_42E210`（選中 `0xFFFFFFFF`／未選 `0x80FFFFFF` 可見 50% 暗）交叉證明 alpha byte＝不透明度 ⇒
+typing＝**204/255≈80%**。伺服器政策（`loginserver.ts` `sayInMessenger`）：無分隔的行只重蓋前綴
+（防偽造他人名字）原樣轉發，絕不組成聊天行。瀏覽器 `ctx.globalAlpha = 204/255`
+（舊 0.35 近似已按原證更正；`0x0CFFFFFF` 是轉錄錯誤，byte grep 證明 EXE 內不存在）。
 
 **說話與指令**（`sub_4DE490`／`sub_4E24B0`）：Enter 先比對 `/q`（視窗關閉＋`0x24 type 2`）再比對
 `/초대`（CP949 三個 byte 前綴；取空白後的名字送 `type 3`，空名／自己＝印 otherName 列不送）；
@@ -4054,13 +4064,18 @@ y=103+98×slot、avatar 置中於 charView 欄 x=248、名字白字 (202,105+98�
 **瀏覽器接線**：`ClientSession` 的 `0x4D` 分派照 `0x50` 的樣子在**邊界**轉 CP949
 （`decodeMessengerEvent` 收、`byteStringOf`＝`encodeCp949` 送——`writeAsciiString` 只吃 byte string）；
 webclient 路由 `messenger-enter/leave/command/say`；輸入框是 `#game-ui` 內的真 DOM `#messenger-say`
-（隨窗移動、Enter 送、Escape blur）。訊息上限 128 行（🟡 原版未讀出 ring 大小）。SystemMenu 的
+（隨窗移動、Enter 送、Escape blur）。訊息**無上限**（`sub_4DEE50` 的 ZList 只增不刪；舊瀏覽器
+128 行 cap 已移除）。捲軸按住 auto-repeat 以 `vscroll.tick()` 重現（`sub_4523D0` 50ms gate、
+同 zone 才續、thumb 不重複；release 的 page 分支是原版死代碼，`cmp [esi+3Ch], eax` 拿 tickcount
+比 zone）。SystemMenu 的
 goMessenger 勾選框啟用（`sub_4E1BB0` 的 `CConfig+28` 閘門；瀏覽器端 `gameSettings.messenger` 同 policy）。
 
-**驗證**：`messenger-state.test.ts`（模型全 transition＋slash 規則＋捲軸幾何）、
+**驗證**：`messenger.test.ts`（type 6/7 round-trip＋hex＋describe）、`messenger-state.test.ts`
+（模型全 transition＋slash 規則＋捲軸幾何＋flag≠"0"＋聊天清 tint＋6/7 語意＋無上限＋since）、
+`vscroll.test.ts`（50ms gate／zone 追蹤／page 連翻／thumb 不重複／release 無動作）、
 `native-messenger-session.test.ts`（0x4D→事件、0x24 四方法、CP949 邊界）、
 `native-messenger-browser.test.ts`（Chromium：hit 矩形、40 行釘底 max=25/thumbTop=194、捲動重繪、
-成員名與 typing 列像素差、邀請模態 yes→roomId 42）。
+成員名與 typing 列像素差、typing 頭像 204/255 像素差、邀請模態 yes→roomId 42）。
 
 ### 4.42 ✅ AP 請求的 bytes／🟡 能力窗與四基礎能力分配
 

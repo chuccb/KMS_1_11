@@ -654,7 +654,7 @@ export const PACKETS: readonly PacketSchema[] = [
     name: "messenger",
     status: "byte-exact",
     evidence:
-      "FINDINGS 4.41 (sub_4E18D0 dispatches the type; 0x4D/0x4E/0x4F all land there. Types 0/1/2 are the room itself through sub_4DF1D0/sub_4DF620/sub_4DF8B0, 3/4 the invitation through sub_4E1BB0/sub_4E19A0, 5 the chat line through sub_4E1E30 - types 6/7 are unread and never sent)",
+      "FINDINGS 4.41 (sub_4E18D0 dispatches the type; 0x4D/0x4E/0x4F all land there. Types 0/1/2 are the room itself through sub_4DF1D0/sub_4DF620/sub_4DF8B0, 3/4 the invitation through sub_4E1BB0/sub_4E19A0, 5 the chat line through sub_4E1E30, 6 the in-place cell update through sub_4E2170 (slot/level/face/look, occupied cells only) and 7 the fixed three-marker roster through sub_4E2280 - codec complete, the server has no sender for 6/7 yet)",
     codecs: [
       "readMessengerResult",
       "encodeMessengerParticipant",

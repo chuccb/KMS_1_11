@@ -11,6 +11,14 @@ import {
   type MessengerRoomState,
 } from "../../../client/messenger-state.ts";
 
+/** The three fixture members, shared by `room()` and `warm()` so the avatars are loaded art. */
+const MEMBER_LOOKS = [
+  { face: 20001, hair: 30000, items: [1040001, 1072001] },
+  { face: 20002, hair: 31000, items: [1041001, 1071001] },
+  { face: 20003, hair: 32000, items: [1050001, 1070001] },
+] as const;
+const MEMBER_NAMES = ["갑", "을", "병"] as const;
+
 export function installMessengerFixture() {
   const canvas = requireElement("view", "canvas");
   canvas.width = 800;
@@ -44,6 +52,10 @@ export function installMessengerFixture() {
       ctx.clearRect(0, 0, 800, 600);
       renderer.draw(at, room, {}, scroll);
     },
+    /** Whether the stand1 frame-0 art of a member look has arrived (the tint needs real pixels). */
+    avatarReady(look: { face: number; hair: number; items: readonly number[] }) {
+      return avatars.get(look, "stand1", 0, false).ready;
+    },
     pixel(x: number, y: number) {
       const d = ctx.getImageData(x, y, 1, 1).data;
       return [d[0], d[1], d[2], d[3]];
@@ -52,11 +64,13 @@ export function installMessengerFixture() {
     room(rows: number, typing = -1): MessengerRoomState | undefined {
       const model = messengerState();
       model.openLocal();
-      const members = [
-        { slot: 0, name: "갑", level: 30, face: 20001, look: [30000, 1040001, 1072001] },
-        { slot: 1, name: "을", level: 25, face: 20002, look: [31000, 1041001, 1071001] },
-        { slot: 2, name: "병", level: 20, face: 20003, look: [32000, 1050001, 1070001] },
-      ];
+      const members = MEMBER_LOOKS.map((look, slot) => ({
+        slot,
+        name: MEMBER_NAMES[slot] as string,
+        level: 30 - 5 * slot,
+        face: look.face,
+        look: [look.hair, ...look.items],
+      }));
       for (const member of members)
         model.receive({ kind: "participant", announce: false, participant: member });
       for (let i = 0; i < rows; i++) model.receive({ kind: "chat", line: `갑 : 줄 ${i}` });
@@ -78,8 +92,8 @@ export function installMessengerFixture() {
       requireElement("item-dialog-ok", "button").click();
     },
     async warm() {
-      await Promise.all(
-        [
+      await Promise.all([
+        ...[
           MESSENGER_WINDOW.backgrnd,
           MESSENGER_WINDOW.charView.path,
           ...["prev0", "prev1", "next0", "next1", "base", "thumb0", "thumb1"].map(
@@ -93,7 +107,9 @@ export function installMessengerFixture() {
           "UI/Basic.img/BtYes/normal/0",
           "UI/Basic.img/BtNo/normal/0",
         ].map((path) => images.get(path).loading),
-      );
+        // The member avatars the tint assertion paints with (stand1 frame 0, unflipped).
+        ...MEMBER_LOOKS.map((look) => avatars.get(look, "stand1", 0, false).loading),
+      ]);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     },

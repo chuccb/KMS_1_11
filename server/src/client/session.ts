@@ -13,6 +13,7 @@ import {
   encodeClientMessengerRequest,
   readMessengerResult,
   type MessengerEvent,
+  type MessengerRosterCell,
 } from "../protocol/messenger.ts";
 import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../protocol/fame.ts";
 import { encodeClientSkillUse } from "../protocol/skilluse.ts";
@@ -2428,6 +2429,12 @@ function decodeMessengerEvent(event: MessengerEvent): MessengerEvent {
       return { ...event, name: decodeByteName(event.name) };
     case "chat":
       return { ...event, line: decodeByteName(event.line) };
+    case "roster": {
+      const fix = (cell: MessengerRosterCell): MessengerRosterCell =>
+        cell.action === "fill" ? { ...cell, name: decodeByteName(cell.name) } : cell;
+      const [a, b, c] = event.cells;
+      return { ...event, cells: [fix(a), fix(b), fix(c)] };
+    }
     default:
       return event;
   }

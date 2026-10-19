@@ -70,7 +70,18 @@ export const MESSENGER_RESULT_TYPE = {
   invite: 3,
   inviteResult: 4,
   chat: 5,
+  /** `sub_4E2170`：原位更新一格（level/face/look），不動名字、不印行；空格忽略。 */
+  cellUpdate: 6,
+  /** `sub_4E2280`：整份名冊，**恰好三格**，每格一個 marker byte。 */
+  roster: 7,
 } as const;
+
+/**
+ * `type 7` 每格的 marker byte（`sub_4E2280`）：`0` ＝ 清掉那格；`1` ＝ 原格不動；
+ * 其他 ＝ 讀一筆完整成員紀錄（`u8 level`＋`u32 face`＋0 結尾 look 清單＋`str name`）填進去，
+ * announce=0（不印入場行）。迴圈是 `do { … } while (slot < 3)`——**固定三次**，不是 0 結尾。
+ */
+export const MESSENGER_ROSTER_MARKER = { clear: 0, keep: 1, fill: 2 } as const;
 
 /** `type 4` 的 `ok`：找不到人時是 0。 */
 export const MESSENGER_INVITE_RESULT = { notFound: 0, sent: 1 } as const;
@@ -217,6 +228,12 @@ export function encodeMessengerChat(line: string): Uint8Array {
   return resultWriter(MESSENGER_RESULT_TYPE.chat).writeAsciiString(line).toBytes();
 }
 
+/** `type 7` 的一格。 */
+export type MessengerRosterCell =
+  | { action: "clear" }
+  | { action: "keep" }
+  | { action: "fill"; level: number; face: number; look: readonly number[]; name: string };
+
 /** 一個 `0x4D` 讀回來的樣子（測試、`decode` 與 probe 用）。 */
 export type MessengerEvent =
   | { kind: "participant"; participant: MessengerParticipant; announce: boolean }
@@ -224,7 +241,77 @@ export type MessengerEvent =
   | { kind: "left"; slot: number }
   | { kind: "invite"; inviterName: string; roomId: number }
   | { kind: "inviteResult"; ok: number; name: string }
-  | { kind: "chat"; line: string };
+  | { kind: "chat"; line: string }
+  | { kind: "cellUpdate"; slot: number; level: number; face: number; look: readonly number[] }
+  | {
+      kind: "roster";
+      cells: readonly [MessengerRosterCell, MessengerRosterCell, MessengerRosterCell];
+    };
+
+function readLookList(reader: PacketReader): number[] {
+  const look: number[] = [];
+  for (;;) {
+    const itemId = reader.readU32();
+    if (itemId === 0) break;
+    look.push(itemId);
+  }
+  return look;
+}
+
+function readRosterCell(reader: PacketReader): MessengerRosterCell {
+  const marker = reader.readByte();
+  if (marker === MESSENGER_ROSTER_MARKER.clear) return { action: "clear" };
+  if (marker === MESSENGER_ROSTER_MARKER.keep) return { action: "keep" };
+  const level = reader.readByte();
+  const face = reader.readU32();
+  const look = readLookList(reader);
+  return { action: "fill", level, face, look, name: reader.readAsciiString() };
+}
+
+/**
+ * `type 6`（`sub_4E2170`）：原位更新一格——`u8 slot`＋`u8 level`＋`u32 face`＋0 結尾 look 清單。
+ * 名字保留原格的；只有 `slot < 3` 且那格**已有人**時 client 才會套用並重畫。
+ */
+export function encodeMessengerCellUpdate(cell: {
+  slot: number;
+  level: number;
+  face: number;
+  look: readonly number[];
+}): Uint8Array {
+  if (cell.slot < 0 || cell.slot >= MESSENGER_ROOM_SIZE) {
+    throw new RangeError(`messenger slot ${cell.slot} is outside the client's 0..2`);
+  }
+  const writer = resultWriter(MESSENGER_RESULT_TYPE.cellUpdate)
+    .writeByte(cell.slot)
+    .writeByte(cell.level & 0xff)
+    .writeU32(cell.face >>> 0);
+  for (const itemId of cell.look) writer.writeU32(itemId >>> 0);
+  return writer.writeU32(0).toBytes();
+}
+
+/**
+ * `type 7`（`sub_4E2280`）：整份名冊。`cells` 必須**恰好三格**（迴圈固定跑三次）；
+ * `fill` 格寫 `marker 2`＋`u8 level`＋`u32 face`＋look 清單＋`str name`。
+ */
+export function encodeMessengerRoster(cells: readonly MessengerRosterCell[]): Uint8Array {
+  if (cells.length !== MESSENGER_ROOM_SIZE) {
+    throw new RangeError(`the messenger roster is exactly ${MESSENGER_ROOM_SIZE} cells`);
+  }
+  const writer = resultWriter(MESSENGER_RESULT_TYPE.roster);
+  for (const cell of cells) {
+    if (cell.action === "clear") writer.writeByte(MESSENGER_ROSTER_MARKER.clear);
+    else if (cell.action === "keep") writer.writeByte(MESSENGER_ROSTER_MARKER.keep);
+    else {
+      writer
+        .writeByte(MESSENGER_ROSTER_MARKER.fill)
+        .writeByte(cell.level & 0xff)
+        .writeU32(cell.face >>> 0);
+      for (const itemId of cell.look) writer.writeU32(itemId >>> 0);
+      writer.writeU32(0).writeAsciiString(cell.name);
+    }
+  }
+  return writer.toBytes();
+}
 
 /** 讀一個 `0x4D`（不含 opcode）。 */
 export function readMessengerResult(reader: PacketReader): MessengerEvent {
@@ -254,6 +341,22 @@ export function readMessengerResult(reader: PacketReader): MessengerEvent {
       return { kind: "inviteResult", name: reader.readAsciiString(), ok: reader.readByte() };
     case MESSENGER_RESULT_TYPE.chat:
       return { kind: "chat", line: reader.readAsciiString() };
+    case MESSENGER_RESULT_TYPE.cellUpdate: {
+      // `sub_4E2170`: slot, level, face, look - no name, no announce byte.
+      const slot = reader.readByte();
+      const level = reader.readByte();
+      const face = reader.readU32();
+      return { kind: "cellUpdate", slot, level, face, look: readLookList(reader) };
+    }
+    case MESSENGER_RESULT_TYPE.roster: {
+      // `sub_4E2280`: exactly three marker-led cells.
+      const cells = [readRosterCell(reader), readRosterCell(reader), readRosterCell(reader)] as [
+        MessengerRosterCell,
+        MessengerRosterCell,
+        MessengerRosterCell,
+      ];
+      return { kind: "roster", cells };
+    }
     default:
       throw new RangeError(`0x4d type 0x${type.toString(16)} is not a known messenger result`);
   }
@@ -276,5 +379,9 @@ export function describeMessengerResult(event: MessengerEvent): string {
       return `0x4d messenger: invite of "${event.name}" ${event.ok === 0 ? "not found" : "sent"}`;
     case "chat":
       return `0x4d messenger: ${event.line}`;
+    case "cellUpdate":
+      return `0x4d messenger: slot ${event.slot} updated (level ${event.level}, face ${event.face})`;
+    case "roster":
+      return `0x4d messenger: roster [${event.cells.map((cell) => cell.action).join(", ")}]`;
   }
 }

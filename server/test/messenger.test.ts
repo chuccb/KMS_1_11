@@ -11,8 +11,10 @@ import {
   encodeMessengerInvite,
   encodeMessengerInviteResult,
   encodeMessengerJoinFailed,
+  encodeMessengerCellUpdate,
   encodeMessengerLeft,
   encodeMessengerParticipant,
+  encodeMessengerRoster,
   readClientMessengerRequest,
   readMessengerResult,
   type ClientMessengerRequest,
@@ -136,9 +138,69 @@ test("0x4d types 1..5 round-trip", () => {
   assert.deepEqual(event(encodeMessengerChat("Hero : hi")), { kind: "chat", line: "Hero : hi" });
 });
 
+test("0x4d type 6 re-stamps one cell without touching its name (sub_4E2170)", () => {
+  const bytes = encodeMessengerCellUpdate({
+    slot: 2,
+    level: 30,
+    face: 20001,
+    look: [30000, 1040002],
+  });
+  // [opcode][6][slot][level] [face 20001=0x4e21] look (0-terminated) - no name, no announce.
+  assert.equal(
+    hex(bytes),
+    "4d06" + "02" + "1e" + "214e0000" + "30750000" + "82de0f00" + "00000000",
+  );
+  assert.deepEqual(event(bytes), {
+    kind: "cellUpdate",
+    slot: 2,
+    level: 30,
+    face: 20001,
+    look: [30000, 1040002],
+  });
+  assert.throws(
+    () => encodeMessengerCellUpdate({ slot: 3, level: 1, face: 1, look: [] }),
+    RangeError,
+  );
+});
+
+test("0x4d type 7 is exactly three marker-led cells (sub_4E2280)", () => {
+  const cells = [
+    { action: "clear" },
+    { action: "fill", level: 12, face: 20000, look: [30000], name: "Alt" },
+    { action: "keep" },
+  ] as const;
+  const bytes = encodeMessengerRoster(cells);
+  // [opcode][7] [marker 0] [marker 2][level][face][look term][name] [marker 1]
+  assert.equal(
+    hex(bytes),
+    "4d07" + "00" + "02" + "0c" + "204e0000" + "30750000" + "00000000" + "0300416c74" + "01",
+  );
+  assert.deepEqual(event(bytes), { kind: "roster", cells });
+  // The native loop is do-while slot < 3: any other cell count is a protocol error.
+  assert.throws(() => encodeMessengerRoster([{ action: "keep" }, { action: "keep" }]), RangeError);
+});
+
 test("0x4d describes every type it can read", () => {
   assert.match(describeMessengerResult(event(encodeMessengerLeft(0))), /slot 0 left/);
   assert.match(describeMessengerResult(event(encodeMessengerChat("A : b"))), /A : b/);
+  assert.match(
+    describeMessengerResult(
+      event(encodeMessengerCellUpdate({ slot: 1, level: 9, face: 2, look: [] })),
+    ),
+    /slot 1 updated/,
+  );
+  assert.match(
+    describeMessengerResult(
+      event(
+        encodeMessengerRoster([
+          { action: "fill", level: 1, face: 2, look: [], name: "A" },
+          { action: "keep" },
+          { action: "clear" },
+        ]),
+      ),
+    ),
+    /roster \[fill, keep, clear\]/,
+  );
   assert.equal(MESSENGER_OPCODE.request, 0x24);
   assert.equal(MESSENGER_OPCODE.result, 0x4d);
 });

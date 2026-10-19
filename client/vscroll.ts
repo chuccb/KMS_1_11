@@ -19,8 +19,16 @@
  *   scales by **max**, the hit test by **max - 1**.
  * - `sub_4522B0` releases the capture on button up; `sub_452340` wheels by the notch
  *   count while the pointer is inside the control's own rect (PtInRect), even when the
- *   bar is disabled; `sub_4523D0`'s hold-to-repeat timer is NOT reproduced here (the
- *   skills window's scrollbar skips it too) - one press is one step/page.
+ *   bar is disabled.
+ * - Hold-to-repeat (`sub_4523D0`, the control's OnTimer, vftable[0]): every UI tick, while
+ *   the capture is down and `max > 1`, the cursor zone is re-hit from GetCursorPos and the
+ *   pressed zone's action repeats iff the cursor is STILL in that zone and `sub_4524C0`'s
+ *   gate passes - zone not 100/105 (arrows and pages repeat, the thumb never does) and
+ *   `GetTickCount() - +60 > 0x32`, i.e. one repeat per **50 ms** (+60 restamped per act;
+ *   press itself stamps +56 zone / +60 tick after acting once). Release (`sub_4522B0`)
+ *   re-hits the zone and its page branches compare **[esi+3Ch] - the press TICKCOUNT -
+ *   against the release zone**, which is never equal in practice: the original's
+ *   release-acts-again page path is dead code, so release only ends the thumb drag.
  * - `sub_4D5900`'s append rule pairs with the state below: `wasBottom` is checked
  *   BEFORE the row count grows, then `max = rows - 15` (16 visible lines), and the view
  *   only follows when it was already at the bottom.
@@ -45,6 +53,9 @@ export interface VScrollBarGeometry {
 /** One of `sub_452500`'s hit zones: 101/102 arrows, 103/104 page, 105 thumb (100 = none). */
 export type VScrollZone = "prev" | "next" | "pageUp" | "pageDown" | "thumb";
 
+/** `sub_4524C0`'s gate: a held arrow/page repeats at most once per 50 ms. */
+export const REPEAT_MS = 50;
+
 /** `sub_452600`: a track click pages by `max / 16`, but never less than 16 lines. */
 export function vScrollPage(max: number): number {
   return Math.max(16, Math.floor(max / 16));
@@ -61,7 +72,8 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     max = 1,
     pos: number | undefined,
     drag: { startY: number; startPos: number } | undefined,
-    pressed: VScrollZone | undefined;
+    pressed: VScrollZone | undefined,
+    lastAct = 0;
   const here = () => (pos === undefined ? Math.max(0, max - 1) : pos);
   const settle = (value: number) => {
     const p = Math.max(0, Math.min(max - 1, value));
@@ -121,15 +133,31 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     inBar(x: number, y: number): boolean {
       return x >= bar.x && x < bar.x + bar.width && y >= bar.y && y < bar.y + bar.height;
     },
-    /** `sub_4521E0`: the button-down action of one zone. */
-    activate(zone: VScrollZone, y: number) {
+    /** `sub_4521E0`: the button-down action of one zone, stamping +56/+60. */
+    activate(zone: VScrollZone, y: number, now = 0) {
       if (max <= 1) return;
       pressed = zone;
+      lastAct = now;
       if (zone === "prev") self.by(-1);
       else if (zone === "next") self.by(1);
       else if (zone === "pageUp") self.by(-vScrollPage(max));
       else if (zone === "pageDown") self.by(vScrollPage(max));
       else drag = { startY: y, startPos: here() };
+    },
+    /**
+     * `sub_4523D0` + `sub_4524C0`: one UI tick while the capture is down. The zone is
+     * re-hit from the live cursor, so dragging the pointer out of the pressed zone stops
+     * the repeat; the 50 ms gate makes the cadence, and the thumb never repeats.
+     */
+    tick(now: number, x: number, y: number) {
+      if (max <= 1 || pressed === undefined || pressed === "thumb") return;
+      if (now - lastAct <= REPEAT_MS) return;
+      if (self.hit(x, y) !== pressed) return;
+      lastAct = now;
+      if (pressed === "prev") self.by(-1);
+      else if (pressed === "next") self.by(1);
+      else if (pressed === "pageUp") self.by(-vScrollPage(max));
+      else self.by(vScrollPage(max));
     },
     /** `sub_4526A0`: `pos = startPos + max * dy / (track - 3*arrow)`, truncated then clamped. */
     moveTo(y: number) {
@@ -141,7 +169,11 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
       if (max <= 1) return;
       settle(here() + delta);
     },
-    /** `sub_4522B0`: release ends the drag and the pressed art. */
+    /**
+     * `sub_4522B0`: release ends the drag and the pressed art. Its page-zone branches
+     * compare the press tickcount against the release zone and can never fire (dead code
+     * in the original), so nothing acts on release - faithfully.
+     */
     end() {
       drag = undefined;
       pressed = undefined;

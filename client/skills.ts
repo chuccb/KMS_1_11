@@ -23,6 +23,7 @@ interface SkillWindowOptions {
 }
 import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
+import { vScrollPage, vScrollScroller } from "./vscroll.ts";
 import { tooltipAnchor } from "./tooltip.ts";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
 export const SKILL_WINDOW = {
@@ -65,8 +66,7 @@ export function skillWindow({
   let at = { ...SKILL_WINDOW.home },
     opened = false,
     books: SkillBook[] = [],
-    selected = 0,
-    offset = 0;
+    selected = 0;
   let learned = new Map<number, number>(),
     job: number | undefined,
     epoch = 0,
@@ -75,8 +75,15 @@ export function skillWindow({
     hover: string | undefined,
     pressed: string | undefined,
     drag: UiPoint | undefined,
-    scrollDrag: number | undefined,
+    pointer: UiPoint | undefined,
     tooltip: { skill: SkillInfo; x: number; y: number } | undefined;
+  // The skill list's CCtrlScrollBar, created exactly like the trade and messenger ones:
+  // sub_4ECD40's `vtable[8](bar, this, 2001, 1, 0, 161, 116, 162, 0)` (+44 = 156), and
+  // sub_4EE420 keeps `SetMax(bar, listCount - 3)` - four visible rows, so rowCapacity 4.
+  // sub_4ED8E0 draws from `*(bar + 48)` (pos) straight into the 8-byte skill records.
+  const scrollBar = vScrollScroller({ x: 161, y: 116, width: 12, height: 162, arrow: 12 }, 4);
+  /** The old hand-rolled 0..rows-4 offset is exactly the native scrollbar pos. */
+  const offset = () => scrollBar.pos;
   const catalogs = new Map<number, SkillCatalogue>();
   let signature = "",
     learnedRevision = 0;
@@ -96,13 +103,13 @@ export function skillWindow({
       height: `${h}px`,
     });
   const rows = () => books[selected]?.skills ?? [];
-  const max = () => Math.max(0, rows().length - 4);
-  const active = (i: number) => rows()[offset + i];
+  const active = (i: number) => rows()[offset() + i];
   const canUp = (skill: SkillInfo | undefined) =>
     !!skill && (getSelf()?.sp ?? 0) > 0 && skillState(skill, learned) === 1;
   const blocked = () =>
     pending || performance.now() < nextAt || !((getSelf()?.hp ?? 0) > 0) || isModal();
   function sync() {
+    scrollBar.sync(rows().length);
     const self = getSelf();
     const key = [
       opened,
@@ -112,7 +119,7 @@ export function skillWindow({
       self?.hp,
       self?.sp,
       selected,
-      offset,
+      offset(),
       books.map((b) => b.id).join(","),
       learnedRevision,
     ].join("|");
@@ -155,7 +162,8 @@ export function skillWindow({
     job = current;
     const token = ++epoch;
     books = [];
-    selected = offset = 0;
+    selected = 0;
+    scrollBar.reset();
     tooltip = undefined;
     try {
       let data = catalogs.get(current);
@@ -186,8 +194,9 @@ export function skillWindow({
     }
     sync();
   }
+  /** Absolute offset; the shared scroller clamps into [0, max-1] like sub_452150. */
   function scroll(n: number) {
-    offset = Math.max(0, Math.min(max(), Math.trunc(n)));
+    scrollBar.by(Math.trunc(n) - scrollBar.pos);
     tooltip = undefined;
     sync();
   }
@@ -200,7 +209,7 @@ export function skillWindow({
     el(`skill-tab-${i}`).addEventListener("click", () => {
       if (isModal() || !books[i]) return;
       selected = i;
-      offset = 0;
+      scroll(0);
       tooltip = undefined;
       sync();
     });
@@ -246,28 +255,32 @@ export function skillWindow({
         books.length - 1,
         Math.max(0, Math.floor(((p.x - 7) * books.length) / 154)),
       );
-      offset = 0;
+      scroll(0);
       sync();
     } else if (p.x >= 11 && p.x < 46 && p.y >= 119 && p.y < 279) {
-      const index = skillRowAt(p.x, p.y, rows().length, offset),
+      const index = skillRowAt(p.x, p.y, rows().length, offset()),
         skill = rows()[index];
       if (skill && (learned.get(skill.id) ?? 0) > 0 && activeSkill(skill.id))
         onBindDrag(skill, point(e));
-    } else if (p.x >= 161 && p.x < 173 && p.y >= 116 && p.y < 278 && max()) {
-      const y = p.y - 116,
-        thumb = 12 + (126 * offset) / max();
-      if (y < 12) scroll(offset - 1);
-      else if (y >= 150) scroll(offset + 1);
-      else if (y >= thumb && y < thumb + 12) scrollDrag = y - thumb;
-      else scroll(offset + (y < thumb ? -4 : 4));
-      e.preventDefault();
+    } else if (p.x >= 161 && p.x < 173 && p.y >= 116 && p.y < 278) {
+      // sub_452500/sub_4521E0 through the shared scroller: arrows step, the track pages by
+      // sub_452600's max(floor(max/16),16), the thumb starts the drag, and holding repeats
+      // every 50 ms (sub_4523D0) - the old hand-rolled ±4 page was not the native amount.
+      const zone = scrollBar.hit(p.x, p.y);
+      if (zone) {
+        scrollBar.activate(zone, p.y, performance.now());
+        pointer = p;
+        tooltip = undefined;
+        sync();
+        e.preventDefault();
+      }
     }
   });
   root.addEventListener("dblclick", (e) => {
     if (e.button !== 0 || isModal() || (e.target instanceof Element && e.target.closest("button")))
       return;
     const p = local(e),
-      index = skillRowAt(p.x, p.y, rows().length, offset),
+      index = skillRowAt(p.x, p.y, rows().length, offset()),
       skill = rows()[index];
     if (!skill || !((learned.get(skill.id) ?? 0) > 0)) return;
     if (!activeSkill(skill.id)) {
@@ -282,15 +295,15 @@ export function skillWindow({
     (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!isModal() && e.deltaY) scroll(offset + Math.sign(e.deltaY));
+      if (!isModal() && e.deltaY) scroll(offset() + Math.sign(e.deltaY));
     },
     { passive: false },
   );
   root.addEventListener("mousemove", (e) => {
     const p = local(e),
-      i = skillRowAt(p.x, p.y, rows().length, offset);
+      i = skillRowAt(p.x, p.y, rows().length, offset());
     tooltip =
-      !isModal() && i >= 0 && !drag && scrollDrag === undefined
+      !isModal() && i >= 0 && !drag && !scrollBar.dragging
         ? { skill: rows()[i], x: p.x + at.x, y: p.y + at.y }
         : undefined;
   });
@@ -306,7 +319,12 @@ export function skillWindow({
       };
       sync();
     }
-    if (scrollDrag !== undefined) scroll(((local(e).y - 116 - 12 - scrollDrag) * max()) / 126);
+    pointer = local(e);
+    // sub_4526A0: pos = startPos + max * dy / (len - 3*arrow), truncated then clamped.
+    if (scrollBar.dragging) {
+      scrollBar.moveTo(pointer.y);
+      sync();
+    }
   });
   const release = () => {
     if (drag)
@@ -314,7 +332,7 @@ export function skillWindow({
         localStorage.setItem("kms111.skillAt", JSON.stringify(at));
       } catch {}
     drag = undefined;
-    scrollDrag = undefined;
+    scrollBar.end(); // sub_4522B0: the release-page branch is dead code in the original.
     pressed = undefined;
   };
   window.addEventListener("mouseup", release);
@@ -333,7 +351,7 @@ export function skillWindow({
       e.preventDefault();
       e.stopPropagation();
       selected = (selected + (e.key === "ArrowRight" ? 1 : books.length - 1)) % books.length;
-      offset = 0;
+      scroll(0);
       tooltip = undefined;
       sync();
       el(`skill-tab-${selected}`).focus();
@@ -345,10 +363,13 @@ export function skillWindow({
       e.preventDefault();
       e.stopPropagation();
       scroll(
-        offset +
-          ({ ArrowUp: -1, ArrowDown: 1, PageUp: -4, PageDown: 4 }[
-            e.key as "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown"
-          ] ?? 0),
+        offset() +
+          ({
+            ArrowUp: -1,
+            ArrowDown: 1,
+            PageUp: -vScrollPage(scrollBar.max),
+            PageDown: vScrollPage(scrollBar.max),
+          }[e.key as "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown"] ?? 0),
       );
     } else if (e.key === "Enter" || e.key === " ") e.stopPropagation();
   });
@@ -446,6 +467,10 @@ export function skillWindow({
       if (!opened || !isInGame()) return;
       void load();
       sync();
+      // sub_4523D0: while the capture is down, every tick re-hits the live cursor zone and
+      // repeats the pressed arrow/page through the 50 ms gate (the thumb never repeats).
+      if (scrollBar.pressed && scrollBar.pressed !== "thumb" && pointer)
+        scrollBar.tick(performance.now(), pointer.x, pointer.y);
       stamp("UI/UIWindow.img/Skill/backgrnd", 0, 0);
       ctx.save();
       ctx.font = "11px 'Dotum','돋움','KMSCJK',sans-serif";
@@ -485,16 +510,30 @@ export function skillWindow({
                   : "normal";
           stamp(`UI/UIWindow.img/Skill/BtSpUp/${face}/0`, 139, 137 + 40 * i);
         }
-        const enabled = max() > 0,
+        const enabled = scrollBar.max > 1,
           prefix = `UI/Basic.img/VScr/${enabled ? "enabled" : "disabled"}`;
         for (let y = 128; y < 266; y += 12) stamp(`${prefix}/base`, 161, y);
-        stamp(`${prefix}/${enabled ? "prev0" : "prev"}`, 161, 116);
-        stamp(`${prefix}/${enabled ? "next0" : "next"}`, 161, 266);
+        // The pressed arrow cells light up while held, exactly like paintVScrollbar.
+        stamp(
+          `${prefix}/${
+            enabled && scrollBar.pressed === "prev" ? "prev1" : enabled ? "prev0" : "prev"
+          }`,
+          161,
+          116,
+        );
+        stamp(
+          `${prefix}/${
+            enabled && scrollBar.pressed === "next" ? "next1" : enabled ? "next0" : "next"
+          }`,
+          161,
+          266,
+        );
+        // sub_452500's thumbTop: arrow + floor(pos * (len - 3*arrow) / (max - 1)).
         if (enabled)
           stamp(
-            `${prefix}/${scrollDrag === undefined ? "thumb0" : "thumb1"}`,
+            `${prefix}/${scrollBar.dragging ? "thumb1" : "thumb0"}`,
             161,
-            128 + Math.round((126 * offset) / max()),
+            116 + scrollBar.thumbTop(),
           );
       }
       stamp(

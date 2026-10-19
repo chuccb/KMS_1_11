@@ -50,6 +50,16 @@ Gate=0 才用 skill0／iconDisabled；max 的 -1 仍是 skill1／正常 icon，�
 `kms111.skillAt`。DOM 透明命中層配 canvas 原圖；提供 tab／SP ARIA、鍵盤操作。這是瀏覽器輸入整合，
 **不是已重建整套 CConfig 自訂按鍵**。視窗全矩形阻擋穿透，原數量 modal 優先，避免背景背包 tooltip 蓋上來。
 
+**捲軸原證（ADR-096 補）**：CUISkill 的捲軸就是交易／메신저同一個 `CCtrlScrollBar`——
+`sub_4ECD40` 以 `vtable[8](bar, this, id 2001, 1, 0, x=161, y=116, len=162, 0)` 建立、
+`+44 = 156`（列內容寬提示）；`sub_4EE420` 對目前書的 ZList 下 `sub_452130(bar, count−3)`
+＝SetMax（四列可見 ⇒ pos ∈ 0..rows−4，與舊手寫 offset 同域）；`sub_4ED8E0` 直接讀
+`*(bar+48)`（pos）逐筆畫 8-byte 技能紀錄。因此 `client/skills.ts` 已改用共用
+`client/vscroll.ts`（rowCapacity 4）：箭頭 ±1、頁面 `max(floor(max/16),16)`（舊手寫 ±4 非原生量）、
+thumbTop `12+floor(pos×126/(max−1))`、drag `startPos+max×dy/126` 截斷後 clamp、按住 50ms
+auto-repeat（`sub_4523D0`/`sub_4524C0`，thumb 不重複；release 的 page 分支是原版死代碼）。
+🟡 滾輪維持 ADR-048 的全窗捲動政策（原生 `sub_452340` 只認捲軸自己的 rect）。
+
 2026-10-18 ADR-064 已取代舊簡化 tooltip：按 `5029A0` 的 type5／290×128／separator114、
 14px BA 標題、原 normal icon 兩倍、desc(92,35)及原 `503AF0` 字符折行；底部依目前已學等級
 顯示 `[현재레벨 N]`／hs、下一級 `[다음레벨 N]`／hs。0 級不顯目前、滿級不顯下一級；

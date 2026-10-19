@@ -107,3 +107,107 @@ test("the messenger log scrollbar is the same CCtrlScrollBar at (179,58) len 218
   scroll.reset();
   assert.equal(scroll.max, 1);
 });
+
+test("sub_4E1E30's flag is 'last char is not 0' and a chat row clears the speaker", () => {
+  const model = messengerState();
+  model.openLocal();
+  model.receive(member(0, "갑"));
+  // sub_416B00(right(line,1), "0"): anything but "0" raises the tint (0xCFFFFFFF).
+  model.receive({ kind: "chat", line: "갑2" });
+  assert.deepEqual(model.room?.typing, [true, false, false]);
+  model.receive({ kind: "chat", line: "갑0" });
+  assert.deepEqual(model.room?.typing, [false, false, false]);
+  // The separator path runs the same member loop with the flag false: the speaker's own
+  // "name : text" row takes the tint back down before the row is appended.
+  model.receive({ kind: "chat", line: "갑1" });
+  const out = model.receive({ kind: "chat", line: "갑 : 안녕" });
+  assert.deepEqual(model.room?.typing, [false, false, false]);
+  assert.deepEqual(out, [
+    { kind: "typing", name: "갑", on: false },
+    { kind: "line", text: "갑 : 안녕" },
+  ]);
+  // A row from a member who was not typing only appends.
+  assert.deepEqual(model.receive({ kind: "chat", line: "갑 : 다시" }), [
+    { kind: "line", text: "갑 : 다시" },
+  ]);
+});
+
+test("type 6 re-stamps an occupied cell in place and ignores an empty one", () => {
+  const model = messengerState();
+  model.openLocal();
+  const rows = model.room?.lines.length;
+  // Empty cell: sub_4E2170's `if (name != 0)` guard drops the update silently.
+  assert.deepEqual(
+    model.receive({ kind: "cellUpdate", slot: 1, level: 40, face: 21000, look: [31000] }),
+    [],
+  );
+  // (locals: asserting on model.room.slots[1] directly would narrow the element access)
+  const empty: unknown = model.room?.slots[1];
+  assert.equal(empty, undefined);
+  model.receive({ ...member(1, "을"), announce: false });
+  const out = model.receive({
+    kind: "cellUpdate",
+    slot: 1,
+    level: 40,
+    face: 21000,
+    look: [31000, 1040009],
+  });
+  assert.deepEqual(out, [{ kind: "cell", slot: 1 }]);
+  const cell = model.room?.slots[1];
+  assert.equal(cell?.name, "을", "the name stays");
+  assert.equal(cell?.level, 40);
+  assert.equal(cell?.face, 21000);
+  assert.deepEqual(cell?.look, [31000, 1040009]);
+  assert.equal(model.room?.lines.length, rows, "no row is printed");
+  // Out-of-range slots are dropped like every other type.
+  assert.deepEqual(model.receive({ kind: "cellUpdate", slot: 3, level: 1, face: 1, look: [] }), []);
+});
+
+test("type 7 replays the whole roster silently, exactly three cells", () => {
+  const model = messengerState();
+  model.openLocal();
+  model.receive(member(0, "갑"));
+  model.receive({ kind: "chat", line: "갑1" });
+  const rows = model.room?.lines.length;
+  const out = model.receive(
+    {
+      kind: "roster",
+      cells: [
+        { action: "keep" },
+        { action: "fill", level: 7, face: 20500, look: [33000], name: "새" },
+        { action: "clear" },
+      ],
+    },
+    999,
+  );
+  assert.deepEqual(out, [
+    { kind: "cell", slot: 1 },
+    { kind: "cell", slot: 2 },
+  ]);
+  assert.equal(model.room?.slots[0]?.name, "갑", "keep leaves the cell alone");
+  assert.deepEqual(model.room?.typing, [true, false, false], "keep does not reset the flag");
+  assert.equal(model.room?.slots[1]?.name, "새");
+  assert.equal(model.room?.slots[1]?.since, 999, "fill reseeds the animation clock");
+  assert.equal(model.room?.slots[2], undefined);
+  assert.equal(model.room?.lines.length, rows, "announce=0: fill prints no entrance row");
+  // Clear also takes the typing flag down with the cell.
+  model.receive({ kind: "chat", line: "갑1" });
+  model.receive({
+    kind: "roster",
+    cells: [{ action: "clear" }, { action: "keep" }, { action: "keep" }],
+  });
+  assert.deepEqual(model.room?.typing, [false, false, false]);
+});
+
+test("sub_4DEE50's log is an unbounded ZList and member.since seeds the avatar clock", () => {
+  const model = messengerState();
+  model.openLocal();
+  model.receive(member(0, "갑"), 1234);
+  assert.equal(model.room?.slots[0]?.since, 1234);
+  for (let i = 0; i < 300; i++) model.receive({ kind: "chat", line: `갑 : 줄 ${i}` });
+  // The native list only ever grows (the scrollbar takes count-15 as its max); no browser cap.
+  assert.equal(model.room?.lines.length, 5 + 300);
+  // The wrap constants the renderer shares with sub_4DEE50: width 170, four-space indent.
+  assert.equal(MESSENGER_WINDOW.log.wrap, 170);
+  assert.equal(MESSENGER_WINDOW.log.indent, "    ");
+});

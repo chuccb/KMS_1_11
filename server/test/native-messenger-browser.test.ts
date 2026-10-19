@@ -48,6 +48,9 @@ test(
           return new Response(css, { headers: { "content-type": "text/css" } });
         if (/^\/api\/(item\/\d+|png\/[^/]+)$/.test(url.pathname))
           return fetch(`http://127.0.0.1:${api.port}${url.pathname}`);
+        // The member avatars compose through /api/avatar.png (query string and all).
+        if (url.pathname === "/api/avatar.png")
+          return fetch(`http://127.0.0.1:${api.port}${url.pathname}${url.search}`);
         if (url.pathname === "/fonts/kms-cjk.woff2")
           return new Response(
             Bun.file(resolve(import.meta.dirname, "../../client/fonts/kms-cjk.woff2")),
@@ -173,6 +176,32 @@ test(
       assert.notEqual(members.blank.name, members.withMembers.name, "member names paint");
       assert.notEqual(members.blank.typing, members.withMembers.typing, "typing row paints");
       assert.notEqual(members.idle.typing, members.withMembers.typing, "typing row clears");
+
+      // 3b. The avatar tint of sub_4E1E30 (vtable+232, 0xCFFFFFFF while typing / 0 idle, and
+      //     0 is the identity because the build passes 0x00FFFFFF): the browser paints the
+      //     typing sprite at 204/255 globalAlpha, so the avatar band must differ pixel-wise.
+      const tint = await page.evaluate(() => {
+        const f = (
+          window as never as {
+            messengerFixture: import("./fixtures/messenger-browser.ts").MessengerFixture;
+          }
+        ).messengerFixture;
+        // Slot 0's avatar column: feet at local (248, 103), sprite body above it.
+        const band = () => {
+          const cells: string[] = [];
+          for (let dx = 196; dx <= 300; dx += 4)
+            for (let dy = 35; dy <= 100; dy += 5)
+              cells.push(f.pixel(f.at.x + dx, f.at.y + dy).join());
+          return cells.join("|");
+        };
+        const ready = f.avatarReady({ face: 20001, hair: 30000, items: [1040001, 1072001] });
+        f.render(f.room(3, 0)); // 갑 typing
+        const typing = band();
+        f.render(f.room(3)); // same room, same rows, nobody typing
+        return { ready, typing, idle: band() };
+      });
+      assert.equal(tint.ready, true, "the member avatar art is warmed through /api/png");
+      assert.notEqual(tint.typing, tint.idle, "the typing avatar draws at 204/255 opacity");
 
       // 4. sub_4E1BB0's invitation box through the shared production modal.
       const invite = await page.evaluate(() => {

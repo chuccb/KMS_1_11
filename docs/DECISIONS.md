@@ -3055,8 +3055,80 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - **動機**：ADR-033 只做通伺服器的半邊（`0x24`/`0x4D` codec＋三人房 registry＋TTL 邀請）；視窗半邊（`sub_4E18D0` 分派之後的一切）在 FINDINGS §4.41 標「未讀」。本輪把 CUIMessenger 的**開窗兩條路、控制項矩形、log／成員欄／typing 列繪製、PE 韓文字串逐字、typing 3 秒鏈、CConfig goMessenger 閘門**全部讀出並接到瀏覽器，原證總表＝新增 [`NATIVE_MESSENGER.md`](NATIVE_MESSENGER.md)、協定側＝FINDINGS §4.41.6。
 - **字串證據方法**：listing 的 `.data` db 偽行會截斷／誤抓 hex（本輪實測），改為**直接解析 PE 節表**（e_lfanew→section table→VA−imageBase→檔案偏移）讀原始 bytes 至 NUL、cp949 解碼：模態 @5BC834、印行 @5BC87C（`sub_4E1BB0` 內 push aS_8/aSE_0 @004E1C44/004E1CCE）等九組字串逐字入檔。
 - **共用化**：ADR-094 的 CCtrlScrollBar 還原自 `trade-state.ts` 抽成 `client/vscroll.ts`（`vScrollScroller`/`paintVScrollbar`，交易＝wrapper 不改行為），messenger log（(179,58,218)、`+44=172` 折行、16 列 y=63+13k）直接用同一個狀態機——同一支原生控制項，一份還原。
-- **typing 政策**（`sub_4DEAF0`/`sub_4E1E30`）：無 `" : "` 分隔的 type 5 ＝`名字+旗標`；伺服器只重蓋前綴原樣轉發（防偽造他人名字）、絕不組成聊天行；瀏覽器 3 秒節流、收端切最後字元更新 typing。🟡 頭像以 globalAlpha 0.35 近似 `0x0CFFFFFF` tint、log 上限 128 行（原版 ring 未讀出）、未知 `/…` 靜默 no-op、auto-repeat 不重現——全列於 NATIVE_MESSENGER §6。
+- **typing 政策**（`sub_4DEAF0`/`sub_4E1E30`）：無 `" : "` 分隔的 type 5 ＝`名字+旗標`；伺服器只重蓋前綴原樣轉發（防偽造他人名字）、絕不組成聊天行；瀏覽器 3 秒節流、收端切最後字元更新 typing。🟡 當時以 globalAlpha 0.35 近似 tint、log 上限 128 行、auto-repeat 不重現（**均已被 ADR-096 按原證更正**：tint＝`0xCFFFFFFF` ARGB modulate＝204/255、ZList 無上限＋折行 170＋四空白縮排、`vscroll.tick()` 50ms auto-repeat；`0x0CFFFFFF` 是轉錄錯誤，EXE 內不存在）；未知 `/…` 靜默 no-op 仍為現行政策——全列於 NATIVE_MESSENGER §6。
 - **CP949 邊界**：`writeAsciiString` 只吃 byte string（>0xFF 即 throw）——ClientSession 收 `0x4D` 先 `decodeMessengerEvent`、`messengerSay/Command` 送前先 `byteStringOf`＝`encodeCp949`；loginserver 內部（session.name、wire line）全程 byte string，與交易鏈同政策。此邊界由 `native-messenger-session.test.ts` 用韓文名逐包驗證。
 - **選項 UI**：SystemMenu 第三格（goMessenger）解除停用——`sub_4E1BB0` 的 `CConfig+28` 閘門現在有瀏覽器消費者；`native-chat-gameoptions.test.ts` 的來源斷言同步改為新政策（只剩 goGame 停用，原版零引用）。
 - **沙箱二次重置與恢復**：本輪中段沙箱再次被重建（與 ADR-093 同型）：`.git` 退回基點 `99ff07b`、未推送的 Part A commit `4fc8877`（交易 scrollbar）物件遺失，但**工作樹完整保留**（Part A＋Part B 全部修改仍在磁碟）。恢復：`git fetch` → `git reset --mixed 44e5f33`（分支重新對齊已推送的 ADR-093 頭）→ 重建 Bun 1.4.3（registry 官方 tarball、42541671 bytes 相符）＋`bun install --frozen-lockfile`（27 包）→ Part A 以本輪同一棵樹**重新入commit**（內容與 `4fc8877` 等價：vscroll 抽取、trade scrollbar、FINDINGS §4.45 附記、ADR-094 本文都在）。教訓沿用 ADR-093：**已推送的 commit 才存在**；長時間未推送的中间 commit 遇上沙箱重置只能靠工作樹倖存。
 - **驗證**：typecheck／format／build 全綠；新增 `messenger-state.test.ts`（3）、`native-messenger-session.test.ts`（1）、`native-messenger-browser.test.ts`（1，Chromium 全鏈）全過。完整套件 **1187 tests：1136 pass／51 fail／2 errors**（`generated/full-fail-unique.txt`＋`generated/full-tests-final.log`）；對「舊沙箱 Part A 基準 44 fail」的 +7 差額經**同沙箱 HEAD（44e5f33，git stash）對照實跑**：`field/webclient/client-session` 三檔 13 fail 與 `serve.test` 失敗集**在 HEAD 完全相同**（位元級 diff 為空）→ 環境性（沙箱重建後的 Chromium probe／real-socket flake，與 ADR-092/093 記錄同型），**added 0／removed 0 非環境性失敗**；唯一由本輪改動引起的失敗（gameoptions 來源斷言）已隨政策更新修復。LIVE 以 README 標準 serve 指令重開（8515 web／8516 login／8517 game、preview/observer、全新世界全新 save——舊 save 已毀於重置，不冒稱恢復）。
+
+
+## ADR-096：捲軸 auto-repeat 原證還原、메신저 type 6/7 解碼與 typing tint／log 政策更正（2026-10-19）
+
+**來源**（全部 MapleStory.exe PE／`.lst` 組譯／`.exe.c`，hexfunc 逐函數讀出）：
+- **CCtrlScrollBar 按住重複**：`sub_4521E0` press 存 `+56` zone／`+60` GetTickCount 並立即作用一次；
+  `sub_4523D0`（OnTimer，vftable[0]，宿主經 `sub_41A220` 的 10ms SetTimer 0xFF）在 `max>1` 且 captured
+  時以 GetCursorPos 重算 zone，**與 `+56` 相同**且 `sub_4524C0` gate 通過（zone ∉ {100,105} 且
+  `now−(+60) > 0x32` ⇒ 重stamp `+60`）才重複同一動作；`sub_4522B0` release 的 page 分支組譯為
+  `cmp [esi+3Ch], eax`（@0045230A）——拿 **press 時的 tickcount** 跟 release zone 比，實際永不成立
+  ＝**原版死代碼**；thumb release 走 `sub_452730`。
+- **CUISkill 的捲軸就是同一個 CCtrlScrollBar**：RTTI（`.?AVCUISkill@@` → COL → vftable 0x587374 →
+  constructor `sub_4EC910`）；`sub_4ECD40` 以 `vtable[8](bar, this, 2001, 1, 0, 161, 116, 162, 0)` 建立
+  （`+44=156`＝列內容寬），`sub_4EE420` 對目前書的 ZList 做 `SetMax(bar, count−3)`（四列可見），
+  `sub_4ED8E0` 直接讀 `*(bar+48)`（pos）逐筆畫 8-byte 紀錄 ⇒ 舊 skills.ts 手寫捲軸的
+  「page ±4」與「thumb 分母 max()」都不是原生量。
+- **메신저 `0x4D` type 6/7**：`sub_4E2170`（`u8 slot,u8 level,u32 face`,0 結尾 look；`slot<3` 且
+  name≠0 才原位套用，不印行）；`sub_4E2280`（`do…while(slot<3)` **固定三格**，每格 `u8 marker`：
+  0＝clear／1＝keep／其他＝fill `u8 level,u32 face,look,str name`，announce=0 靜默）。舊筆記
+  「type 7 是 0 結尾、只讀到一半」作廢。
+- **log append `sub_4DEE50`**：`sub_439A70` 以 **170**（`n170=170`）折行、接續行前置 `"    "`
+  （`asc_5BC328`）、ZList `this[20]` **無上限**；follow＝`pos >= count−16`（unsigned，count<16 恆
+  false）或新 count==16，然後 `sub_452130(count−15)`=SetMax、follow 才 `sub_452110(max−1)`=SetPos。
+- **typing tint**：`sub_4E1E30` 無分隔行 `flag=(right(line,1) != "0")`（`sub_416B00`），
+  `vtable+232(avatar COM, flag ? 0xCFFFFFFF : 0)`；有分隔的聊天行以同一迴圈 flag=0 **先清發言者
+  tint** 再 append。slot 232 實作在 Gr2D DLL（EXE 零 vtable，前輪掃描證明）；語意由兩點釘死：
+  建構色 `sub_427BB0(0x00FFFFFF)` 正常顯示 ⇒ **alpha 0＝identity**；CharSelect `sub_42E210`
+  選中 `0xFFFFFFFF`／未選 `0x80FFFFFF`（可見 50% 暗）⇒ alpha byte＝不透明度 ⇒ typing＝204/255。
+- **頭像動畫**：`sub_4DFB50` 的 `v9[1]` 是 `sub_434120`＋`"Shape2D#Vector2D"` 建的**子窗**，
+  `sub_424410/424590` 定位、`sub_4245E0` 顯示，`sub_4DEAF0`（OnTimer）每 30ms tick ⇒ 原版메신저
+  頭像播站立動畫；tint 目標是 `v9[3]` 的 sprite COM。交易窗（004Dxxxx）**零** `sub_421E00`/
+  `sub_4739B0` caller、`sub_482340` 只解析線格式 ⇒ 交易頭像原生靜止。
+
+**決定**：
+- `client/vscroll.ts`：`activate(zone,y,now)` stamp、新增 `tick(now,x,y)`（50ms gate＝`REPEAT_MS`、
+  游標須仍在 pressed zone、thumb 永不重複）、`end()` 不補 page（死代碼忠實不重現）。
+  main.js draw loop 在 captured 時每幀餵 `pointerAt`（交易＋메신저）。
+- `client/skills.ts` 捲軸改用**共用 vScrollScroller**（bar {161,116,12,162}、rowCapacity 4）：
+  page 換成 `max(floor(max/16),16)`、thumbTop 換成 `12+floor(pos×126/(max−1))`、drag 換成
+  `startPos+max×dy/126` 截斷、auto-repeat 同上；`offset`≡`pos`（0..rows−4 不變）。
+  滾輪維持 ADR-048 的全窗政策（原生 `sub_452340` 只認自己 rect——🟡 保留為瀏覽器政策）。
+- `protocol/messenger.ts`：`MESSENGER_RESULT_TYPE` 加 6/7、`MESSENGER_ROSTER_MARKER`、
+  `encodeMessengerCellUpdate`/`encodeMessengerRoster`（roster 非三格即 RangeError）、解碼器與
+  describe；`session.ts` `decodeMessengerEvent` 補 roster fill 名字的 CP949 還原。伺服器遊戲邏輯
+  仍無 6/7 發送來源（🟡 換裝廣播／重同步未接）。
+- `client/messenger-state.ts`：typing `flag !== "0"`；聊天行先清發言者 typing 再 append；
+  type 6 只套已占格（名字／typing 不動、無行）；type 7 三格 clear/keep/fill 全靜默、fill/clear
+  重設 typing；**LOG_LINES=128 cap 刪除**；`member.since` 動畫時鐘（`receive(event, now)`）；
+  `MESSENGER_WINDOW.log` 改 `wrap:170`＋`indent:"    "`。
+- `client/messenger-window.ts`：wrapLines 照 `sub_4DEE50`（前綴 fit 170、餘行加四空白再量）；
+  tint `globalAlpha = 204/255`；avatars callback 加 `since`。main.js 메신저頭像以
+  `avatarMotionCatalog`＋`animationFrame(frames, now−since)` 播 stand（冷資料 frame 0），交易頭像
+  維持 stand1 frame 0（原證靜止）。
+- 文件更正：`0x0CFFFFFF` 是轉錄錯誤（byte grep 證明不存在），DECISIONS:ADR-095／FINDINGS §4.41.6／
+  NATIVE_MESSENGER 三處改 `0xCFFFFFFF` 並標明更正；NATIVE_MESSENGER 新增 §5b（type 6/7 全表）
+  與 log append／頭像動畫／tint 語意；FINDINGS 4.41.2 表 6/7 行重寫、4.41.5 该项改 ✅；
+  NATIVE_TRADE §3 auto-repeat 段落改「已重現＋release 死代碼」；SKILLS.md 加捲軸原證節；
+  schema.ts 0x4d 註記更新。
+
+**界線**：skills 的 `+44=156`／메신저 `+44=172` 只記錄為「列內容寬提示」，append 折行以
+`sub_4DEE50` 的 170 為準（繪製端 `sub_4E1320` 不再折行）；CUISkill 滾輪是否原生限定 bar rect
+未再深挖（保留 ADR-048 全窗政策並標 🟡）；type 6/7 的伺服器觸發來源（換裝／重同步）未接；
+`0x14` 社群選單與 `0x16` 商店購買的 evidence read 仍待後續輪。
+
+**驗證**：typecheck／format／build 全綠。新增 `vscroll.test.ts`（5 tests：50ms gate、離開 zone 停、
+page 連翻＋clamp、thumb 不重複、release 無動作、max≤1 inert）、`messenger.test.ts` +2（type 6/7
+hex round-trip＋describe）、`messenger-state.test.ts` +4（flag≠"0"＋聊天清 tint、type 6 守衛、
+type 7 三格靜默、無上限 log＋since）、`native-messenger-browser.test.ts` 加 typing 頭像 204/255
+像素差（fixture 補 `/api/avatar.png` proxy＋成員頭像 warm）。完整套件 **1198 tests：1146 pass／
+52 fail**——fail 集與 ADR-095 基準（51）逐名比對：`wiring: GameOpt…` 本輪通過、
+`readonly game snapshots…` 本輪失敗但**單獨重跑通過**（Chromium 負載 flake，與基準同型的環境性
+漂移）；**非環境性回歸 0**。
