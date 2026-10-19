@@ -1696,6 +1696,23 @@ canvas.addEventListener("dblclick", (event) => {
     return;
   }
   if (shopHit !== undefined) return;
+  // sub_4697A0 msg 515 (WM_LBUTTONDBLCLK) -> sub_5122D0 -> sub_512700: a double-clicked
+  // player sends c2s 0x14 with its u32 charid. Windows win over the field first (the native
+  // message routing), and the original has no s2c 0x14 consumer - nothing comes back.
+  if (
+    point.y < STATUS_BAR.y &&
+    !inventoryWindowAt(point.x, point.y) &&
+    !statPanel.contains(point.x, point.y) &&
+    !skillPanel.contains(point.x, point.y) &&
+    !miniMapPanel.contains(point.x, point.y)
+  ) {
+    const world = screenToWorld(point, camera, renderSurface.viewport());
+    for (const user of users.values())
+      if (playerContains(user, playerHitHistory.get(user), world)) {
+        send({ t: "player-info", name: user.name });
+        return;
+      }
+  }
   const hit = inventoryWindowAt(point.x, point.y);
   if (hit?.kind !== "slot" || hit.item === undefined) return;
   if (inventoryTab === 1) {
@@ -5028,6 +5045,16 @@ function buyShopRow(index) {
       itemId: row.itemId,
       count,
     });
+    // 4B6B40's tail: once the buy goes out, the inventory flips to the item's own tab
+    // (v12[11] != itemId/1000000 - 1 -> sub_459160(v12, cat-1)).
+    const tab = Math.floor(row.itemId / 1000000) - 1;
+    if (tab >= 0 && tab <= 4 && inventoryTab !== tab) {
+      inventoryTab = tab;
+      try {
+        localStorage.setItem("kms111.inventoryTab", String(inventoryTab));
+      } catch {}
+      inventoryPick = undefined;
+    }
   };
   if (Math.floor(row.itemId / 10000) === 207)
     itemDialog.confirm({

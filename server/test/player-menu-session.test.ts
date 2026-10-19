@@ -190,6 +190,19 @@ test(
         .map((p) => readClientFameRequest(new PacketReader(p, 1))),
       [{ targetId: 7, up: true }],
     );
+    // 0x14 개인정보 (sub_512700, the player DOUBLE-click): resolve the name in the same map
+    // like fame, wire-exact [0x14][u32 charid]; a missing name sends nothing at all, and the
+    // original has no s2c consumer - the peer never answers and no session event may appear.
+    const eventCountBeforeInfo = events.length;
+    await session.playerInfo("Missing");
+    await session.playerInfo("상대이름");
+    await barrier();
+    assert.deepEqual(
+      received.filter((p) => p[0] === CLIENT_FIELD_OPCODE.playerInfo).map((p) => [...p]),
+      [[0x14, 7, 0, 0, 0]],
+      "unknown name must not send, known name sends exactly [0x14][u32 charid]",
+    );
+    assert.equal(events.length, eventCountBeforeInfo + 1, "only the barrier notice is new");
     const sync = waitFor((event) => event.kind === "party" && event.result.kind === "sync");
     send(
       encodePartyResult({

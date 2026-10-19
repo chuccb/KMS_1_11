@@ -119,7 +119,9 @@ import {
   readNpcId,
   readNpcState,
   readNpcIdle,
+  CLIENT_NPC_IDLE_OPCODE,
 } from "./npc.ts";
+import { CLIENT_SKILL_USE_OPCODE, readClientSkillUse } from "./skilluse.ts";
 import {
   MOB_OPCODE,
   mobActionName,
@@ -523,10 +525,21 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.emotion) {
       return `0x13 emotion: ${describeClientEmotion(readClientEmotion(new PacketReader(plain, 1)))}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.playerInfo) {
+      return `0x14 player info (double-click): characterId=${new PacketReader(plain, 1).readU32()}`;
+    }
     if (opcode === MESO_DROP_OPCODE)
       return describeMesoDrop(readMesoDrop(new PacketReader(plain, 1)));
     if (opcode === SKILL_REQUEST_OPCODE)
       return describeSkillRequest(readSkillRequest(new PacketReader(plain, 1)));
+    if (opcode === CLIENT_SKILL_USE_OPCODE) {
+      const use = readClientSkillUse(new PacketReader(plain, 1));
+      return `${hexOpcode(opcode)} skill use: skillId=${use.skillId} level=${use.level} targets=${use.targets.join(",") || "-"}`;
+    }
+    if (opcode === CLIENT_NPC_IDLE_OPCODE) {
+      const idle = readNpcIdle(new PacketReader(plain, 1), plain.length > 7);
+      return `${hexOpcode(opcode)} npc idle request: npcId=${idle.npcId} action=${idle.action} speech=${idle.speech}`;
+    }
     if (opcode === ABILITY_REQUEST_OPCODE) {
       return describeAbilityRequest(readAbilityRequest(new PacketReader(plain, 1)));
     }
@@ -1102,6 +1115,15 @@ export const CLIENT_FIELD_OPCODE = {
    * other direction, like `0x0D`/`0x0B`.
    */
   shop: CLIENT_SHOP_OPCODE,
+  /**
+   * The double-clicked player (`sub_4697A0` message **515 = WM_LBUTTONDBLCLK** → `sub_5122D0`
+   * → `sub_512700`): the cursor is hit against the field's object pool (`sub_49F1F0` on
+   * `dword_5C2050`) and `[0x14][u32 characterId (obj+72)]` goes out. There is **no s2c 0x14
+   * consumer in this build** (`sub_55A900`'s switch covers cases 11..19; 20 hits the default),
+   * so 개인정보 was invisible in the original. The right-click popup's same-named item is dead
+   * there too: `sub_5128B0` stores it with n2=0 and its selection switch has no case 0.
+   */
+  playerInfo: 0x14,
   /**
    * The NPC dialog's answer (`protocol/quest.ts`): `[0x15][u8 sub-op][u8 answer]` plus, for the
    * sub-ops that carry one, the text or the number. Sent by the five CQuestMan dialogs
@@ -1856,6 +1878,14 @@ export interface ClientChat {
 
 export function readClientChat(reader: PacketReader): ClientChat {
   return { text: reader.readStringBytes() };
+}
+
+/** `sub_512700`: `[0x14][u32 characterId]` - the player under the double-click. */
+export function encodeClientPlayerInfo(characterId: number): Uint8Array {
+  const writer = new PacketWriter(5);
+  writer.writeByte(CLIENT_FIELD_OPCODE.playerInfo);
+  writer.writeU32(characterId >>> 0);
+  return writer.toBytes();
 }
 
 export function encodeClientChat(chat: ClientChat): Uint8Array {

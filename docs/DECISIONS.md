@@ -3122,7 +3122,7 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 **界線**：skills 的 `+44=156`／메신저 `+44=172` 只記錄為「列內容寬提示」，append 折行以
 `sub_4DEE50` 的 170 為準（繪製端 `sub_4E1320` 不再折行）；CUISkill 滾輪是否原生限定 bar rect
 未再深挖（保留 ADR-048 全窗政策並標 🟡）；type 6/7 的伺服器觸發來源（換裝／重同步）未接；
-`0x14` 社群選單與 `0x16` 商店購買的 evidence read 仍待後續輪。
+`0x14` 社群選單與 `0x16` 商店購買的 evidence read 仍待後續輪（**已完成於 ADR-097**：`0x14`＝雙擊玩家 `sub_512700`、s2c 無消費者；`0x16`＝`sub_4B6B40` 讀通）。
 
 **驗證**：typecheck／format／build 全綠。新增 `vscroll.test.ts`（5 tests：50ms gate、離開 zone 停、
 page 連翻＋clamp、thumb 不重複、release 無動作、max≤1 inert）、`messenger.test.ts` +2（type 6/7
@@ -3132,3 +3132,57 @@ type 7 三格靜默、無上限 log＋since）、`native-messenger-browser.test.
 52 fail**——fail 集與 ADR-095 基準（51）逐名比對：`wiring: GameOpt…` 本輪通過、
 `readonly game snapshots…` 本輪失敗但**單獨重跑通過**（Chromium 負載 flake，與基準同型的環境性
 漂移）；**非環境性回歸 0**。
+
+## ADR-097：`0x14`／`0x16` 全鏈解碼、雙擊 개인정보 接通與 describer 0x1e/0x2f 補洞（2026-10-20）
+
+**來源**（MapleStory.exe `.c`／`.lst`，hexfunc 逐函數讀出）：
+- **`sub_4697A0` 是 CField 的滑鼠訊息入口**：513＝WM_LBUTTONDOWN、**515＝WM_LBUTTONDBLCLK**、
+  **517＝WM_RBUTTONUP**，轉發 `sub_5122D0`。舊 FINDINGS 把 c2s `0x14` 歸給 `sub_512570`——實為
+  **快捷鍵**（200ms 冷卻；kind1 本地、kind2 USE 200-202→`sub_55B2C0` 0x18），誤標已更正三處。
+- **雙擊→`sub_512700`**：`sub_5478F0` GetCursorPos→`sub_49F1F0(dword_5C2050)`（IGObj registry、
+  建構 `sub_49F020`；命中＝rect 含點、**無類型過濾**）→取 `obj[18]`(+72)→`sub_4A1EA0(&buf,20)`＋
+  `sub_43AD50` ⇒ **c2s `0x14`＝`[u32 characterId]`**。`sub_55A900`（s2c 0x0A-0x14 分派）switch 只有
+  case 11..19——**本版無 s2c `0x14` 消費者，原版静默**。
+- **右鍵→`sub_5128B0`**：`sub_51D6C0(CUserPool,&pt)` 命中→六項彈出（`asc_5BD8E4..8AC`），選擇值 n2：
+  `개인정보`＝0（**switch 無 case＝原版死項**）、`인기도 +`/`−`＝1/2→`sub_55D7B0(name,1/0)`＝0x20、
+  `귓속말`＝3→`sub_4FB160(chatUI,name,1)`、`교환신청`＝4→`sub_471A40(name)`（`sub_51D7D0` 名字→id、
+  「1:1교환을 할 수 없습니다」忙碌閘、0x25）、`파티초대`＝5（`x+404≠0 ∧ x+408==x+20` 自己是隊長）→
+  `sub_472050(name)`（「이미 소속된 파티」檢查、0x26）——與已接通的 browser 鏈逐項一致。
+- **`sub_4B6B40`（0x16 buy）讀通**：row＝`this[44]`∈[0,count)（列基 `this[37]`、48B/列；`this[46]`≠0
+  跳過）；itemId/1e6≠1→「몇 개를 사시겠습니까?」（`sub_4B7960`、上限 row[8]），EQUIP→1；
+  itemId/10000==207→「정말로 사시겠습니까?」（`sub_52C140`==6）強制 1；total=count×row[4]（i64）、
+  現金=`(CUserLocal+89)^(+93)`（`sub_463050`），不足→`sub_52BBE0`「현금이 부족합니다」**不送包**；
+  wire=`[u8 0][u16 pos=this+176][u32 itemId][u16 count]`、送後設 `+46=1`；**尾巴**：
+  `this[31][11]`≠大類−1→`sub_459160(大類−1)` 翻回頁籤。
+
+**決定**：
+- `protocol/field.ts`：`CLIENT_FIELD_OPCODE.playerInfo=0x14`＋`encodeClientPlayerInfo(characterId)`＋
+  describer 行；順手補掉 `describeClientFieldPacket` 的兩個**既有基準 fail**：`0x1e`
+  （`readClientSkillUse`）與 `0x2f`（`readNpcIdle`）的 c2s describe——schema.test
+  「every row with a field codec…」由 fail 轉 pass（基準 fail 51→50）。
+- browser 雙擊鏈：main.js canvas dblclick（視窗優先後，沿用 contextmenu 的 STATUS_BAR／面板排除與
+  `playerContains`＋`playerHitHistory` 命中）→`{t:'player-info',name}`→`webclient.ts` case→
+  `session.playerInfo(name)`（同 fame 以同圖名字解析、查無靜默不送）→c2s `0x14`。
+  `loginserver.ts handlePlayerInfoRequest`：讀 u32、**只記 log 不回包**（忠實原版無消費者）。
+- `client/player-menu-data.ts` 的 `개인정보` 維持停用（原版死項＝忠實），reason 換成證據版；
+  main.js `buyShopRow` 補上原生頁籤翻回尾巴（其餘閘門前輪已逐項吻合；數量對話框仍照
+  DECISIONS:1781 的既定 browser 政策不做）。
+- **界線 🟡**：native 雙擊無類型過濾（NPC/mob 也會送自身 +72），非 CUser 的 +72 語意未證——
+  browser 只對玩家送 0x14，NPC/mob 雙擊不送，記錄為已知差異；自己雙擊自己沿用 users pool
+  （與 contextmenu 同池）。s2c `0x14` 永遠不實作（無原證）。
+
+**驗證**：typecheck／format／build 全綠；schema.test 6/6；`player-menu-session.test.ts` 新增 0x14
+斷言（同圖名字解析、查無不送、byte-exact `[0x14][u32 7]`、不產生任何 session 事件）。完整套件
+**1198 tests：1155 pass／43 fail**——比 ADR-096 基準（1146/52）少 9 個 fail：schema describer 1 個
+由本輪修掉，其餘為環境性整合測試在本輪環境下自行轉綠；43 個 fail 全部是既知環境性家族
+（mob/kill/drop/shop/equip 整合類），**無新增回歸**。
+
+**事故記錄（誠實）**：本輪開始時沙箱被還原——git ref 退回分支點、ignored 產物
+（`generated/`、`node_modules/`、`dist/`、`kms111-save.json`）全部消失。已處置：(1) 遠端
+`5ba1da9` 完好，`git fetch`＋`update-ref` 還原分支指針，工作區僅含本輪修改；(2) bun 1.4.3 以
+registry 原始 tarball 重建（sha512 `RArgnpjeXjaGzjp5h7Rs89cUYJutO8IyqR3itE8OBaBzEt8KNm2jp/
+YozxBHq4eFovwrQLryeSwTAcmiT+zcoA==`、42541671 bytes 與前輪紀錄一致）＋`bun install
+--frozen-lockfile`；(3) **舊 `kms111-save.json`（角色 chui）無法還原**——它從未被 git 追蹤，
+檔案系統中亦無副本。LIVE 改用 `tools/create-isolated-preview.ts` 新建的
+`generated/preview-save.json`（preview/preview＋observer/observer，全新 1 級新進度、地圖
+101000000）——**這是新帳號新進度，不是舊存檔的恢復**。

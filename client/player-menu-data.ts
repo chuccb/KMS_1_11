@@ -34,7 +34,16 @@ export function playerMenuRows(
   return [
     { text: name, enabled: false },
     // Native id0 falls through 5128B0's switch. Browser policy makes that no-op visibly disabled.
-    { text: "개인정보", action: "info", enabled: false, reason: "原版此選項未接處理分支" },
+    {
+      text: "개인정보",
+      action: "info",
+      enabled: false,
+      // Faithfully dead: sub_5128B0 stores this popup item with n2=0 and its selection switch
+      // has no case 0. The real 0x14 belongs to the player DOUBLE-click path (sub_512700), and
+      // even that has no s2c consumer in this build (sub_55A900's switch stops at case 19).
+      reason:
+        "原版彈出選單此项 n2=0 無 switch 分支（死項）；0x14 屬雙擊玩家路徑且本版無 s2c 消費者",
+    },
     { text: "인기도 +", action: "fameUp", enabled: true },
     { text: "인기도 -", action: "fameDown", enabled: true },
     { text: "귓속말", action: "whisper", enabled: true },

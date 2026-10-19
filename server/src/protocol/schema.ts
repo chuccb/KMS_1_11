@@ -566,6 +566,19 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
+    opcode: 0x14,
+    direction: "c2s",
+    stage: "field",
+    name: "playerInfo",
+    status: "byte-exact",
+    evidence:
+      "sub_4697A0 message 515 (WM_LBUTTONDBLCLK) -> sub_5122D0 -> sub_512700: GetCursorPos, sub_49F1F0 hits the field's object pool (dword_5C2050) and sends [0x14][u32 charid(obj+72)]. sub_55A900's s2c switch covers cases 11..19 only, so NO 0x14 response consumer exists in this build; the right-click popup's 개인정보 item is separately dead (sub_5128B0 n2=0, no switch case). The old FINDINGS attribution of 0x14 to sub_512570 was wrong - that is the quickslot handler (kind 1 local / kind 2 USE 200-202 -> sub_55B2C0 0x18, 200 ms gate).",
+    codecs: ["encodeClientPlayerInfo"],
+    fields: [
+      { name: "characterId", type: "u32", note: "the double-clicked player (field object +72)" },
+    ],
+  },
+  {
     opcode: party.PARTY_OPCODE.request,
     direction: "c2s",
     stage: "field",

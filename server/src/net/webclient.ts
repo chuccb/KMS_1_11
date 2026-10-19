@@ -687,6 +687,9 @@ class BrowserSession {
           if (typeof message.name !== "string" || typeof message.up !== "boolean")
             throw new Error("fame requires a name and a boolean up value");
           return await this.require().giveFame(message.name, message.up);
+        case "player-info":
+          if (typeof message.name !== "string") throw new Error("player-info requires a name");
+          return await this.require().playerInfo(message.name);
         case "party-command":
           if (!isPartyCommand(message.command) || typeof message.name !== "string")
             throw new Error("party-command requires a known command and string name");

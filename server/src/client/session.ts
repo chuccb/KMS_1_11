@@ -28,7 +28,11 @@ import { questReplyFor, type QuestReplyDetail } from "./questreply.ts";
 import { SYSTEM_NOTICE_OPCODE, readSystemNotice } from "../protocol/notice.ts";
 import { ClientRandom } from "../protocol/random.ts";
 import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
-import { encodeClientStatReport, type ClientStatReport } from "../protocol/field.ts";
+import {
+  encodeClientPlayerInfo,
+  encodeClientStatReport,
+  type ClientStatReport,
+} from "../protocol/field.ts";
 import {
   SKILL_UPDATE_OPCODE,
   encodeSkillRequest,
@@ -1041,6 +1045,18 @@ export class ClientSession {
       throw error;
     }
   }
+  /**
+   * `sub_512700` (a double-clicked player): resolve the name in the current field pool exactly
+   * like fame does and send c2s `0x14 [u32 characterId]`. The original has no s2c consumer for
+   * it, so nothing answers and nothing shows - faithfully. A missing target sends nothing.
+   */
+  async playerInfo(name: string): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0) return;
+    const target = [...this.users.values()].find((user) => samePlayerName(user.name, name));
+    if (!target) return;
+    await this.gameLink.send(encodeClientPlayerInfo(target.characterId));
+  }
+
   /** 5128B0 -> 55D7B0: resolve name in the current user pool BEFORE reserving cooldown.
    * Native permits the target to leave between menu-open and selection; no stale id is sent.
    * Living-session gating is a browser safety policy, not an original fame level restriction.

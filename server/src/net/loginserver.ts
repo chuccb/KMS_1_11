@@ -3178,6 +3178,12 @@ export class GameEntryServer {
           this.handleFameRequest(session, event.plain);
           continue;
         }
+        // 개인정보（雙擊玩家，`sub_512700`）。原版 s2c 沒有任何 0x14 消費者（`sub_55A900`
+        // 的 switch 只到 case 19），所以忠實做法是記錄後不回任何包。
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.playerInfo) {
+          this.handlePlayerInfoRequest(session, event.plain);
+          continue;
+        }
         // 交易（`/교환`、邀請的「是」、放道具／放錢／確認／關窗）。`0x25` 是所有小房間共用的
         // 請求 opcode，房間種類在第一個 payload byte（FINDINGS §4.39）。
         if (session !== undefined && opcode === MINIROOM_OPCODE.request) {
@@ -3523,6 +3529,23 @@ export class GameEntryServer {
    * `type 5`（「'name'님께서 …」）＋ 一個 `0x0D`（`fame` 的 bit `0x20000`）讓他的能力視窗跟著動。
    * 給的人**不會**收到 `0x0D` —— 自己的人氣沒變。
    */
+  /** `sub_512700`'s `[0x14][u32 characterId]`: log it; the original client shows nothing. */
+  private handlePlayerInfoRequest(session: FieldSession, plain: Uint8Array): void {
+    let characterId: number;
+    try {
+      characterId = new PacketReader(plain, 1).readU32();
+    } catch (error) {
+      this.options.log?.(`game: 0x14 player info unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const target = session.instance.member(characterId);
+    this.options.log?.(
+      `game: 0x14 player info from "${session.name}" -> ${characterId}${
+        target === undefined ? " (not in this map)" : ""
+      }`,
+    );
+  }
+
   private handleFameRequest(session: FieldSession, plain: Uint8Array): void {
     let request: ClientFameRequest;
     try {
