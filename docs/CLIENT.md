@@ -129,7 +129,7 @@ API metadata、faceFrame合成／PNG cache／預熱、異常輸入與回歸來�
 目前／下一級 hs、runtime 字型行高與各 caller anchor；資料更新後重命中，modal／拖曳／失焦清理舊 hover。
 裝備需求逐項比有效 BasicStat，只有商店買入明確用模板；讀不到持有 instance stats 不回退到 WZ。
 工具新增唯讀提示框閱覽，初心者不用套配置就能看技能 0／1／MAX。合成比較值與 CUC 明確標示，不改角色。
-仍不代表技能施放、卷軸、cash／pet、任務腳本或完整原 GDI 字型已完成。
+仍不代表技能施放、cash／pet、任務腳本或完整原 GDI 字型已完成（卷軸強化已於 ADR-099 接通）。
 詳 [NATIVE_RICH_TOOLTIPS](NATIVE_RICH_TOOLTIPS.md)／ADR-064；新來源未執行，不以啟服當 PASS。
 
 
@@ -528,6 +528,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | 關商店 | `{t:"shop",action:"close"}` | c2s `0x16` 的 close → **不回包**（2003 client 的 close 不 arm flag） |
 | 回答對話 | `{t:"talk",answer}` | c2s `0x15`（answer 1＝下一句、0＝結束） |
 | 用消耗品（雙擊） | `{t:"use",slot,itemId}` | c2s `0x18`（203 家族 `0x19`）→ s2c `0x0B`（少一瓶）＋`0x0D`（HP／MP 動了）；被拒絕時是空 `0x0B` |
+| 卷軸強化（拖到已穿裝備） | `{t:"scroll",scrollSlot,equipSlot}` | c2s `0x1A` → s2c `0x0B`（消耗卷軸＋put 升級後的裝備，負 worn 格）；category 不合／無 upgrade slot 等被拒絕時是空 `0x0B`（ADR-099） |
 | 揮擊（Ctrl） | `{t:"attack",mobId,facingLeft}` | c2s `0x1B` → s2c `0x34`（怪的 stat）／`0x30`（倒下動畫）／`0x31`（屍體消失），傷害數字在送的人自己的封包裡 |
 | 升級特效（別人的） | — | s2c `0x29` |
 
@@ -604,7 +605,10 @@ error        { message }
   封包來源在 `test/shops.test.ts`；最新補充成功路徑未執行測試，不沿用舊PASS。
 - **背包與裝備的剩餘範圍**：一般搬移／穿脫、地面丟棄數量窗與容量捲動已接（最新項目未測試）；
   原金幣按鈕與meso丟棄已接（未測試）；背包內自由拆疊／合併、現金裝備／寵物未齊。拖到場景是丟棄，狀態列／瀏覽器外是取消。
-- **卷軸（204）**：雖然一般拖放已接，卷軸目標／成功失敗效果仍未接，頁面不送該0x1A。
+- **卷軸（204）**：已接（ADR-099）——把 USE 的 `204` 卷軸拖到紙娃娃上**已穿**的裝備會送 c2s `0x1A`，
+  伺服器按 WZ `Item/Consume/0204.img` 的 `success`／`inc*` 與 category 相容規則重驗、roll、原地升級，
+  回 `0x0B`（消耗卷軸＋put 升級後的裝備；拒絕是空 `0x0B`）。瀏覽器背包一次只顯示一個 tab，**無法**把
+  卷軸拖到 equip 背包**內**的裝備（正格）；原生 EXE 這條不受影響。原證與欄位詳 [FINDINGS §4.50](protocol/FINDINGS.md)。
 - **天氣／霧**：頁面尚未接。原版小地圖已完成上述範圍，來源是地圖的 `miniMap/canvas` 與 `UI/UIWindow.img/MiniMap`，不是 `MapHelper/mark`。
 - **角色動作／碰撞**：已接走路、跳躍、下跳、牆與單向平台、攀爬、繩頂登台；坐下與完整技能動作仍未齊。
 - **素材**：先前「Data.wz 少圖塊」結論已撤回；根因是 shared-name/type2 reader 漏讀。

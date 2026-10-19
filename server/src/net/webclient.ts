@@ -794,6 +794,11 @@ class BrowserSession {
           });
         case "use":
           return await this.useItem(Number(message.slot ?? 0), Number(message.itemId ?? 0));
+        case "scroll":
+          return await this.scrollUpgrade(
+            Number(message.scrollSlot ?? 0),
+            Number(message.equipSlot ?? 0),
+          );
         case "npc-idle":
           return await this.require().npcIdle(
             Number(message.npcId),
@@ -1623,6 +1628,20 @@ class BrowserSession {
     if (!Number.isInteger(itemId) || itemId <= 0)
       return this.send({ t: "error", message: "use needs an item id" });
     await this.require().useItem(slot, itemId);
+  }
+
+  /**
+   * `{t:"scroll", scrollSlot, equipSlot}`: a `204` upgrade scroll dragged onto an equip. `scrollSlot`
+   * is a positive USE-tab slot; `equipSlot` is the equip's slot (negative for a worn item). The
+   * pairing/success authority is the server's (`handleScrollUpgrade`); this only rejects a shape the
+   * session could never send.
+   */
+  private async scrollUpgrade(scrollSlot: number, equipSlot: number): Promise<void> {
+    if (!Number.isInteger(scrollSlot) || scrollSlot <= 0)
+      return this.send({ t: "error", message: "scroll needs a USE-tab scroll slot" });
+    if (!Number.isInteger(equipSlot) || equipSlot === 0 || equipSlot < -14 || equipSlot > 32767)
+      return this.send({ t: "error", message: "scroll needs an equip slot" });
+    await this.require().scrollUpgrade(scrollSlot, equipSlot);
   }
 
   close(): void {

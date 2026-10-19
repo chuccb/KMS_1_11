@@ -99,9 +99,18 @@ status panel上方(y<392)，這是防誤丟的瀏覽器邊界政策，不是宣�
 
 ## 尚未實作
 
-背包內拆疊／合併的完整原版分支、meso丟棄按鈕、卷軸強化、cash穿戴／寵物、補充飛鏢成功路徑、
+背包內拆疊／合併的完整原版分支、meso丟棄按鈕、cash穿戴／寵物、補充飛鏢成功路徑、
 裝備／buff總值與Detail、自然升級AP/SP與HPMP成長仍未完成。
 本輪是四組操作的實作交付，不是全遊戲1:1完成或已驗證可正式運營的聲明。
+
+## 卷軸強化（c2s `0x1A`，2026-10-20，ADR-099）
+
+`0204` 升級卷軸的全鏈已接通，不再列於上方缺口：client 拖一張 `204` 卷軸到一件 `1xxxxxx` 裝備上送
+`[0x1A][s16 scrollSlot][s16 equipSlot]`（穿在紙娃娃上的裝備取負格），伺服器按 WZ `Item/Consume/0204.img`
+的 `success`／`inc*` 與 category 相容規則重驗、roll、原地升級（`ruc-=1`／`cuc+=1`、增量只在成功時加），
+回一個 `0x0B`（消耗卷軸＋put 升級後的裝備），拒絕回空 `0x0B`。原證（`sub_55B0E0` 與其 drag caller）、
+category 全表、伺服器政策與瀏覽器限制詳 [FINDINGS §4.50](protocol/FINDINGS.md)／ADR-099；
+`game/scrolls.test.ts`＋`serve.test.ts` 整合覆蓋成功／錯 category 拒絕。
 
 
 ### 隔離預覽部署

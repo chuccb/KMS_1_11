@@ -553,6 +553,9 @@ export function describeClientFieldPacket(plain: Uint8Array): string | undefined
     if (opcode === CLIENT_FIELD_OPCODE.changeSlot) {
       return `0x17 change slot: ${describeClientChangeSlot(readClientChangeSlot(new PacketReader(plain, 1)))}`;
     }
+    if (opcode === CLIENT_FIELD_OPCODE.scrollUpgrade) {
+      return describeClientScrollUpgrade(readClientScrollUpgrade(new PacketReader(plain, 1)));
+    }
     if (opcode === CLIENT_FIELD_OPCODE.userRequest) {
       return describeClientUserRequest(readClientUserRequest(new PacketReader(plain, 1)));
     }
@@ -1093,6 +1096,18 @@ export const CLIENT_FIELD_OPCODE = {
    * `-1` is 마을 귀환 주문서 - "the nearest town".
    */
   useMapItem: 0x19,
+  /**
+   * `sub_55B0E0`: `[0x1A][s16 scrollSlot][s16 equipSlot]` - the fourth of the CWvsApp inventory
+   * senders (see `useItem`), and the one for a **204 upgrade scroll dragged onto an equip**. It
+   * shares the family prologue - `*(this+6) == 0` (one at a time), the alive HP-pair gate, and a
+   * **500 ms** cooldown (`>= 0x1F4`, like `changeSlot`, not the 200 ms of `useItem`) - then appends
+   * its two `s16` slots. `scrollSlot` is a USE-tab slot; `equipSlot` is the equip's slot, negative
+   * for a worn item (the client's drag handler `sub_4D9110`-derived target), positive for one still
+   * in the equip tab. The client validates the pairing first (`.c:~107952`: `scrollId/10000 == 204`,
+   * `equipId/1000000 == 1`, and the two categories equal - `game/scrolls.ts` `scrollMatchesEquip`)
+   * and does nothing locally: the upgraded equip has to come back as a `0x0B`.
+   */
+  scrollUpgrade: 0x1a,
   /**
    * `CField::SendInteract` (`sub_472590`): `[0x0D][s32 kind][string name]`. The two click handlers
    * `sub_5124C0` / `sub_512510` send `kind = -1` and the name of the object under the cursor when
@@ -2246,6 +2261,36 @@ export function describeClientChangeSlot(request: ClientChangeSlot): string {
   const where = (slot: number): string =>
     slot === 0 ? "ground" : slot < 0 ? `worn ${-slot}` : `slot ${slot}`;
   return `tab ${request.tab} ${where(request.fromSlot)} -> ${where(request.toSlot)} count=${request.count}`;
+}
+
+/**
+ * One `0x1A` scroll-upgrade request: a USE-tab scroll applied to an equip (`game/scrolls.ts`).
+ * Both slots are `s16` - the client's own argument type (`sub_55B0E0(this, __int16, __int16)`), and
+ * `equipSlot` is negative for a worn item, exactly like `changeSlot`'s worn slots.
+ */
+export interface ClientScrollUpgrade {
+  /** The USE-tab slot holding the scroll. */
+  scrollSlot: number;
+  /** The equip's slot: negative for a worn item, positive for one in the equip tab. */
+  equipSlot: number;
+}
+
+export function readClientScrollUpgrade(reader: PacketReader): ClientScrollUpgrade {
+  return { scrollSlot: toS16(reader.readU16()), equipSlot: toS16(reader.readU16()) };
+}
+
+export function encodeClientScrollUpgrade(request: ClientScrollUpgrade): Uint8Array {
+  const writer = new PacketWriter(5);
+  writer.writeByte(CLIENT_FIELD_OPCODE.scrollUpgrade);
+  writer.writeU16(request.scrollSlot & 0xffff);
+  writer.writeU16(request.equipSlot & 0xffff);
+  return writer.toBytes();
+}
+
+export function describeClientScrollUpgrade(request: ClientScrollUpgrade): string {
+  const equip =
+    request.equipSlot < 0 ? `worn ${-request.equipSlot}` : `equip slot ${request.equipSlot}`;
+  return `0x1a scroll upgrade: USE slot ${request.scrollSlot} -> ${equip}`;
 }
 
 /** The bits of `0x28`'s flags word; each set bit is one word that follows. */

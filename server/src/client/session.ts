@@ -135,6 +135,7 @@ import {
   encodeClientUserRequest,
   encodeClientUseItem,
   encodeClientChangeSlot,
+  encodeClientScrollUpgrade,
   type ClientChangeSlot,
   INTERACT_KIND_CURSOR,
   INTERACT_KIND_REVIVE,
@@ -1560,6 +1561,41 @@ export class ClientSession {
     }
     const opcode = family === 203 ? 0x19 : 0x18;
     await link.send(encodeClientUseItem({ slot, itemId }, opcode));
+  }
+
+  /**
+   * A `204` upgrade scroll dragged onto an equip: `0x1A`, `[s16 scrollSlot][s16 equipSlot]`
+   * (`sub_55B0E0`, `game/scrolls.ts`). `scrollSlot` is a positive USE-tab slot; `equipSlot` is the
+   * equip's slot - negative for a worn item, positive for one still in the equip tab. This shares the
+   * inventory window's one-at-a-time gate and 500 ms cooldown with `changeSlot` (the native sender
+   * arms the same `*(this+6)` byte and `>= 0x1F4` guard), and the upgraded equip comes back as a
+   * `0x0B`. The pairing/success authority is the server's, so nothing is validated locally beyond the
+   * field shapes and the gate.
+   */
+  async scrollUpgrade(scrollSlot: number, equipSlot: number): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0)
+      throw new Error("scrollUpgrade needs a living character in a field");
+    if (
+      ![scrollSlot, equipSlot].every(Number.isInteger) ||
+      scrollSlot <= 0 ||
+      equipSlot === 0 ||
+      equipSlot < -14 ||
+      equipSlot > 32767 ||
+      this.skillPending ||
+      this.slotPending ||
+      this.mesoPending ||
+      this.shopPending ||
+      performance.now() < this.nextSlotAt
+    )
+      throw new Error("invalid scroll-upgrade fields, or an inventory request is pending");
+    this.slotPending = true;
+    this.nextSlotAt = performance.now() + 500;
+    try {
+      await this.gameLink.send(encodeClientScrollUpgrade({ scrollSlot, equipSlot }));
+    } catch (error) {
+      this.slotPending = false;
+      throw error;
+    }
   }
 
   /**

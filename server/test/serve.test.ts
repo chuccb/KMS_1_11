@@ -38,6 +38,7 @@ import {
   USER_EFFECT_LEVEL_UP,
   encodeClientAttack,
   encodeClientChangeSlot,
+  encodeClientScrollUpgrade,
   encodeClientChat,
   encodeClientStatReport,
   encodeClientUseItem,
@@ -115,7 +116,8 @@ import {
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
-import { equipSlot, nonEquipSlot } from "../src/protocol/itemslot.ts";
+import { scrollSpecProvider } from "../src/game/scrolls.ts";
+import { equipSlot, nonEquipSlot, type ItemSlotEquip } from "../src/protocol/itemslot.ts";
 import {
   QUEST_REPLY_OPCODE,
   QUEST_TALK_OPCODE,
@@ -2335,6 +2337,128 @@ test(
       (await alt.drainOpcodes(150)).filter((opcode) => opcode === FIELD_OPCODE.userLook),
       [],
       "and a refused drag tells the map nothing",
+    );
+  },
+);
+
+test(
+  "a 204 scroll on a worn equip answers 0x0B with the upgraded item and the consumed scroll (c2s 0x1A)",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // Standing monsters: this test counts packets by opcode, and a walking one would only add noise.
+      mobTickMs: 10_000,
+      dropPolicy: () => [],
+      scrollSpec: scrollSpecProvider(archive!),
+      // A deterministic roll that always lands under the scroll's success: this pass proves the win.
+      scrollRandom: { next: () => 0, range: () => 0 },
+      handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x55667788 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    // The hat is on the head (worn part 1), not in the bag: this is the browser's drag-onto-avatar
+    // path, where the equip slot the client names is negative (FINDINGS 4.34.6).
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 7, name: "Hero" },
+      startingCharacterItems(),
+    );
+    heroRecord.items!.worn.set(1, equipSlot(1002000, { ruc: 3, pdd: 10, mdd: 5 }));
+    // 02040001 is a 60% hat scroll (incPDD 2 + incMDD 1); 02043000 is a one-handed-sword scroll
+    // (family 30) that must NOT fit a hat (family 0).
+    heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
+      1,
+      nonEquipSlot(2040001, 1),
+    );
+    heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
+      3,
+      nonEquipSlot(2043000, 1),
+    );
+
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.drain();
+
+    // Apply the hat scroll (USE slot 1) to the worn hat (slot -1): c2s 0x1A [s16 scrollSlot][s16 equipSlot].
+    const body = encodeClientScrollUpgrade({ scrollSlot: 1, equipSlot: -1 });
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.scrollUpgrade,
+      body: body.slice(1),
+    });
+
+    // The answer is one 0x0B: the scroll leaves the USE tab and the upgraded hat is put back at -1.
+    const saw = await hero.takeOpcode(INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(saw[saw.length - 1]!, 1));
+    assert.deepEqual(
+      change.changes.map((entry) => [entry.op, entry.inventory, entry.slot]),
+      [
+        [INVENTORY_OP.clear, INVENTORY_TAB.consume, 1],
+        [INVENTORY_OP.put, INVENTORY_TAB.equip, -1],
+      ],
+      "the scroll is consumed (its single copy clears the slot) and the hat is put back worn",
+    );
+    const hatPut = change.changes[1]!;
+    const hat = hatPut.op === INVENTORY_OP.put ? (hatPut.item as ItemSlotEquip) : undefined;
+    assert.ok(hat, "the put carries the equip record");
+    assert.equal(hat.itemId, 1002000);
+    assert.equal(hat.ruc, 2, "one upgrade slot consumed");
+    assert.equal(hat.cuc, 1, "one use recorded");
+    assert.equal(hat.pdd, 12, "10 + incPDD 2 on a success");
+    assert.equal(hat.mdd, 6, "5 + incMDD 1 on a success");
+    assert.equal(hat.str, 0, "a field the scroll does not touch is untouched");
+
+    // The record itself is upgraded, not a copy: a relog reads the scrolled hat back (ADR-017).
+    const worn = heroRecord.items!.worn.get(1) as ItemSlotEquip;
+    assert.equal(worn.pdd, 12);
+    assert.equal(worn.ruc, 2);
+    assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.has(1), false);
+    assert.ok(
+      log.some((line) => line.includes("0x1a scroll 2040001") && line.includes("success")),
+      log.join("\n"),
+    );
+
+    // A sword scroll on the hat: the category gate refuses it with an empty 0x0B and the hat is whole.
+    const mismatch = encodeClientScrollUpgrade({ scrollSlot: 3, equipSlot: -1 });
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.scrollUpgrade,
+      body: mismatch.slice(1),
+    });
+    const refused = await hero.takeOpcode(INVENTORY_OPCODE);
+    const empty = readInventoryChange(new PacketReader(refused[refused.length - 1]!, 1));
+    assert.deepEqual(
+      [empty.result, empty.changes],
+      [1, []],
+      "a category mismatch is an empty 0x0B",
+    );
+    assert.equal((heroRecord.items!.worn.get(1) as ItemSlotEquip).pdd, 12, "the hat is unchanged");
+    assert.equal(
+      heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.has(3),
+      true,
+      "the refused sword scroll is still in the bag",
+    );
+    assert.ok(
+      log.some((line) => line.includes("0x1a scroll") && line.includes("does not fit")),
+      log.join("\n"),
     );
   },
 );

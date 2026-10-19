@@ -4633,6 +4633,107 @@ GameEntry共用純規則亦驗反向swap；clone／預encode再commit，0x17尾�
 [NATIVE_MAGIC_SKILLS](../NATIVE_MAGIC_SKILLS.md)／ADR-073。所有本輪回歸來源均未執行，不援用歷史PASS。
 
 
+### 4.50 ✅ 卷軸強化：c2s `0x1A`（`sub_55B0E0`）——完整鏈（ADR-099）
+
+**這不是 s2c `0x1A`**（§4.31 的 userMessage／密語家族）：c2s 與 s2c 是兩張 opcode 表，互不相撞。
+本節是**client → server** 的 `0x1A`：把一張 `0204` 升級卷軸拖到一件裝備上。
+
+#### 4.50.1 封包：`[0x1A][s16 scrollSlot][s16 equipSlot]`（byte-exact）
+
+`sub_55B0E0(this, __int16 a2, __int16 a3)`（`.c:351717`，`.text:0055B130`）：
+- `sub_4A1EA0(&buf, 26, nullptr)`——**26 = 0x1A**，先立封包头；
+- 接著 `*(_WORD*)(p) = a2; p += 2;`、`*(_WORD*)(p) = a3; p += 2;`——兩個 s16；
+- `sub_43AD50(this_13, &buf)` 送出，`*(this+6) = 1`（設 busy）、`*(this+7) = timeGetTime()`（記時刻）。
+
+所以 `a2 = scrollSlot`（USE tab 的正格）、`a3 = equipSlot`（見 4.50.2：穿在身上時是**負格**）。
+Codec：`protocol/field.ts` 的 `ClientScrollUpgrade{scrollSlot,equipSlot}`／`readClientScrollUpgrade`／
+`encodeClientScrollUpgrade`（PacketWriter(5)：u8 opcode + s16×2）／`describeClientScrollUpgrade`；
+`CLIENT_FIELD_OPCODE.scrollUpgrade = 0x1a` 接在 `useMapItem 0x19` 之後。
+
+#### 4.50.2 client 的三道閘＋相容規則（`sub_55B0E0` 與其 drag caller `.c:107957`）
+
+`sub_55B0E0` 自己在送出前有三道閘（與 §4.36 `sub_55ACB0` 同型）：
+- `if (*(this+6)) return;`——**busy**：上一封還沒被回答就不送第二封；
+- `(*(this+9))` 的 `+53 ^ +55` 兩個 word `> 0`——狀態檢查（alive／可操作）；
+- `timeGetTime() - *(this+7) >= 0x1F4`——**500ms 冷卻**（0x1F4 = 500）。
+
+caller（拖放到裝備的那支分支，`.c:107957`）先決定「這是不是一張合法卷軸」：
+
+```c
+v10 = *(v7 + 12);   // 被拖道具（卷軸）的 itemId
+v11 = *(v9 + 12);   // 目標（裝備）的 itemId
+if ( v10 / 10000 == 204            // 卷軸 family == 204
+  && v11 / 1000000 == 1            // 目標 family == 1（裝備）
+  && v11 / 10000 % 100 == (v10 % 10000) / 100 )   // category 相等
+  sub_55B0E0(n3000_1, *(this + 4), v8);
+```
+
+（`1374389535LL * x >> 32 >> 5` 是編譯器的 `/100`。）`v8 = -sub_4D9110(x, y)`：目標格由畫面座標取得，
+**穿在紙娃娃上的取負**（`-part`）；`a2 = *(this+4)` 是卷軸自己的來源格。
+⇒ `scrollMatchesEquip(scrollId, equipId)`（`game/scrolls.ts`）就是這條規則的直譯，並逐一对過
+WZ 全 75 張卷軸的韩文名與 category：
+
+| category | 裝備 | 卷軸 id 段 |
+|---|---|---|
+| 0 | 투구（頭盔）`100xxxx` | `0204000x` |
+| 3 | 귀장식（耳飾）`103xxxx` | `0204003x` |
+| 4 | 상의（上衣）`104xxxx` | `0204004x` |
+| 5 | 전신갑옷（全身甲）`105xxxx` | `0204005x` |
+| 6 | 하의（下衣）`106xxxx` | `0204006x` |
+| 7 | 신발（鞋）`107xxxx` | `0204007x` |
+| 8 | 장갑（手套）`108xxxx` | `0204008x` |
+| 9 | 방패（盾）`109xxxx` | `0204009x` |
+| 10 | 망토（披風）`110xxxx` | `0204100x` |
+| 30–33 | 한손검/도/둔기/단검（單手劍/刀/鈍器/短劍）`130–133xxxx` | `0204300x`…`0204330x` |
+| 37 | 완드（魔杖）`137xxxx` | `0204370x` |
+| 38 | 스태프（法杖）`138xxxx` | `0204380x` |
+| 40–47 | 두손검/도끼/둔기/창/폴암/활/석궁/아대（雙手劍/斧/鈍器/槍/長柄/弓/弩/拳套）`140–147xxxx` | `0204400x`…`0204470x` |
+
+#### 4.50.3 WZ 效果表：`Item/Consume/0204.img/<id>/info`
+
+`success`（全族只有 10／60／100 三種）＋**正的** `inc*` 增量；**沒有 `spec`**（§4.34.3 已列 0204
+「沒有 spec、price 全是 1」），**沒有 `recover`／`destroy`** ⇒ 失敗絕不銷毀裝備。
+`inc*` → equip stat 的對照（`SCROLL_INC_TO_STAT`）：incSTR→str、incDEX→dex、incINT→int、incLUK→luk、
+incMHP→maxHp、incMMP→maxMp、incPAD→pad、incMAD→mad、incPDD→pdd、incMDD→mdd、incACC→acc、
+incEVA→eva、incCraft→craft、incSpeed→speed、incJump→jump。
+實例（dump 對過）：`02040000`=100%/incPDD1；`02040001`=60%/incPDD2+incMDD1；
+`02040002`=10%/incPDD5+incMDD3+incACC1；`02043000`=100%/incPAD1。
+Reader：`scrollSpecOf(archive,itemId)`／`scrollSpecProvider(archive)`（`game/scrolls.ts`），讀不到回
+`undefined`（非 204、`--data off`、無該 node、success 非 0..100 整數），絕不 throw。
+
+#### 4.50.4 伺服器端（ADR-099）
+
+`loginserver.ts` 的 `handleScrollUpgrade` ＋ `0x1A` dispatch（接在 changeSlot dispatch 之後）；
+`cli.ts` 接 `scrollSpecProvider(archive)`。
+- **成功 roll＝政策**（原版 server binary 不存在，不可證）：`scrollRandom.range(0,100) < success`；
+  `scrollRandom` 是可注入的 `RandomSource`（預設 `ClientRandom`，seed 0x5c07/0x1a0f/0x2e3c），測試注入定值。
+- **slot 會計＝政策**：一次使用必耗一格 `ruc-=1`／`cuc+=1`（`ruc+cuc` 不變）；增量**只在成功時加**。
+- 全部 client 閘由伺服器重驗：`scrollSlot>0`、USE 格有卷軸、equip 格有裝備、`scrollMatchesEquip`、
+  `ruc>0`、`scrollSpec` 讀得到、非 busy（shop／talk／trade）；任一不過 ⇒ **空 `0x0B`**
+  （`encodeInventoryChange([])`，與 §4.36 的拒絕同型——client 的 busy 閘非收到 `0x0B` 不會解）。
+- 成功 ⇒ 一個 `0x0B`：`[takeItem 卷軸的 change][put 升級後的裝備回原格（負 worn 格在 tab1 合法）]`；
+  **不广播 `0x28` look**（升級不改外觀 id，只是同一格換內容）。之後 `persist()` ＋ log。
+- 裝備是**原地**升級（同一格）：worn（負）讀寫 `items.worn`、bag（正）讀寫 `inventories[equip-1]`。
+
+#### 4.50.5 瀏覽器側
+
+`client/main.js` 的 `scrollRequest(scrollSlot, equipSlot)` mirror `slotRequest` 的 500ms 閘（設
+`slotPending`、送 `{t:"scroll",...}`）；`equipPanel.hit` 的 drop 分支在 wearItem **之前**加了 scroll case：
+把 USE 的 204 卷軸拖到紙娃娃上**已穿**的裝備（`eq.kind==="slot"` 且 `eq.slot<0`）就走這條。
+`webclient.ts` 的 `case "scroll"` → `ClientSession.scrollUpgrade` → `encodeClientScrollUpgrade`；
+`slotPending` 由既有 `"inventory"` case 在 message.ack 時清除。
+- **誠實限制**：瀏覽器背包 UI 一次只顯示一個 tab，**無法把卷軸拖到 equip 背包內的裝備**（正格）；
+  這條在原生 EXE 不受影響（caller 直接給正/負格）。伺服器對正、負 equipSlot 都接受。
+
+#### 4.50.6 驗證
+
+`game/scrolls.test.ts`（4 項：scrollMatchesEquip 的 family＋category、applyScroll 的 slot 會計／只在成功加增量／
+不改 input、SCROLL_INC_TO_STAT 全對應真 stat、scrollSpecOf 讀真 WZ 的 success＋inc 與各種 undefined）；
+`serve.test.ts` 整合（真 archive＋注入定值成功 roll：對 worn hat 卷 ⇒ `0x0B` = [clear 卷軸][put hat
+pdd12/mdd6/ruc2/cuc1]、record 原地升級；錯 category（單手劍卷軸投頭盔）⇒ 空 `0x0B` 且 hat 不動、卷軸留袋）。
+typecheck／build／format 全綠。
+
+
 ## 0x13／0x11呈現續作（2026-10-19，ADR-088）
 
 - 55CDE0不是只支援type0：所有type讀同一個CP949 string，0→font5公告、1→52BBE0→52C320→461C50置中264×132 Notice/OK modal；2..255忽略。codec、ClientSession與真bridge JSON保留type，本輪已接browser。

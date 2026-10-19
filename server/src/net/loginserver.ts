@@ -96,7 +96,7 @@ import {
   type SessionEvent,
 } from "../protocol/session.ts";
 import type { MobTemplate, MobDamage } from "../game/mobs.ts";
-import type { DropPolicy } from "../game/drops.ts";
+import type { DropPolicy, RandomSource } from "../game/drops.ts";
 import type { NpcTemplate } from "../game/npcs.ts";
 import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
 import { MesoWallet, pickUpDrop, takeItem, grantItem } from "../game/rewards.ts";
@@ -125,6 +125,8 @@ import {
   readClientChangeSlot,
   describeClientChangeSlot,
   type ClientChangeSlot,
+  readClientScrollUpgrade,
+  type ClientScrollUpgrade,
   readClientEmotion,
   describeClientEmotion,
   type ClientEmotion,
@@ -198,8 +200,15 @@ import {
   type MessengerParticipant,
 } from "../protocol/messenger.ts";
 import { MessengerRegistry, compactRosterCells, type MessengerRoom } from "../game/messenger.ts";
+import { applyScroll, scrollMatchesEquip, type ScrollSpec } from "../game/scrolls.ts";
+import { ClientRandom } from "../protocol/random.ts";
 import { encodeLootNotice } from "../protocol/drop.ts";
-import { encodeInventoryChange, type InventoryChange } from "../protocol/inventory.ts";
+import {
+  encodeInventoryChange,
+  INVENTORY_OP,
+  INVENTORY_TAB,
+  type InventoryChange,
+} from "../protocol/inventory.ts";
 import { diffStats, encodeStatUpdate } from "../protocol/stat.ts";
 import {
   CLIENT_OBJECT_CLICK_OPCODE,
@@ -905,6 +914,19 @@ export interface GameEntryServerOptions {
    * (`handleUseItem`).
    */
   consumeSpec?: (itemId: number) => ConsumeSpec | undefined;
+  /**
+   * What a `204` upgrade scroll does (`Item/Consume/0204.img -> info`): its `success` percent and
+   * `inc*` deltas. `scrollSpecProvider(WzArchive)` is the real one. Without it (or for an id the
+   * archive has no scroll `info` for) every `0x1A` is refused with an empty `0x0B`
+   * (`handleScrollUpgrade`).
+   */
+  scrollSpec?: (itemId: number) => ScrollSpec | undefined;
+  /**
+   * The success roll's generator. There is no original server binary, so the roll is this server's
+   * policy; the default is a seeded `ClientRandom` (the client's own generator) and a test injects a
+   * fixed one to force a success or a failure.
+   */
+  scrollRandom?: RandomSource;
   /** Native 463BE0 rejects WZ cash items as well as a wire cash serial. Unknown facts refuse. */
   dropItemAllowed?: (itemId: number) => boolean;
   /** WZ basic action/speed facts; absent data refuses shots rather than inventing them. */
@@ -1047,6 +1069,8 @@ export class GameEntryServer {
    * id，邀請卻可以跨地圖（聊天室本來就不在同一張圖上）。
    */
   private readonly messenger = new MessengerRegistry();
+  /** The scroll success roll's generator (`handleScrollUpgrade`); seeded, or a test's fixed one. */
+  private readonly scrollRandom: RandomSource;
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
   private listenPort = 0;
@@ -1054,6 +1078,7 @@ export class GameEntryServer {
 
   constructor(options: GameEntryServerOptions) {
     this.options = options;
+    this.scrollRandom = options.scrollRandom ?? new ClientRandom(0x5c07, 0x1a0f, 0x2e3c);
     this.online = options.online ?? new OnlineAccounts();
     this.heartbeat = new Heartbeat({
       intervalMs: options.pingMs ?? DEFAULT_PING_MS,
@@ -2129,6 +2154,104 @@ export class GameEntryServer {
   }
 
   /**
+   * A `204` upgrade scroll dragged onto an equip: `0x1A`, `[s16 scrollSlot][s16 equipSlot]`
+   * (`game/scrolls.ts`, FINDINGS 4.34.6). The client already refused a mismatched pair before it
+   * sent anything, but the server is the authority, so it re-checks the whole pairing: the scroll is
+   * really in that USE slot, the target really is an equip in its slot (negative = worn, positive =
+   * the equip tab), the two categories match, and the equip still has an upgrade slot (`ruc >= 1`).
+   *
+   * The success roll is this server's policy - there is no original server binary - over the scroll's
+   * own `info/success`. One use always burns a slot (`ruc -= 1`, `cuc += 1`); the `inc*` deltas land
+   * only on a success, and this era's scrolls never destroy the equip on a failure. Either way the
+   * answer is a `0x0B`: the spent scroll and the (maybe) upgraded equip. A refusal is an *empty*
+   * `0x0B`, the same "nothing moved" the use-item path sends, so the client's gate clears. Scrolling
+   * changes stats, not the avatar, so there is no `0x28` look broadcast.
+   */
+  private handleScrollUpgrade(session: FieldSession, plain: Uint8Array): void {
+    let request: ClientScrollUpgrade;
+    try {
+      request = readClientScrollUpgrade(new PacketReader(plain, 1));
+    } catch (error) {
+      // Nothing can be answered: the slots are what the answer would name, and they did not parse.
+      this.options.log?.(`game: 0x1a scroll upgrade unreadable: ${(error as Error).message}`);
+      return;
+    }
+    const { scrollSlot, equipSlot } = request;
+    const refuse = (reason: string): void => {
+      session.send(encodeInventoryChange([]));
+      this.options.log?.(
+        `game: 0x1a scroll USE slot ${scrollSlot} -> equip slot ${equipSlot} by ` +
+          `"${session.name}" refused (${reason})`,
+      );
+    };
+    // Server safety policy, same as use-item: never mutate the bags behind an open window.
+    if (session.shop || session.talk || this.trades.roomOf(session.characterId)) {
+      refuse("close the shop, conversation or trade before scrolling");
+      return;
+    }
+    if (scrollSlot <= 0) {
+      refuse("the scroll slot must be a positive USE-tab slot");
+      return;
+    }
+    const items = structuredClone(session.character.items ?? emptyCharacterItems());
+    const scroll = items.inventories[INVENTORY_TAB.consume - 1]?.items.get(scrollSlot);
+    if (scroll === undefined) {
+      refuse(`USE slot ${scrollSlot} is empty`);
+      return;
+    }
+    const scrollId = scroll.itemId;
+    const equip =
+      equipSlot < 0
+        ? items.worn.get(-equipSlot)
+        : items.inventories[INVENTORY_TAB.equip - 1]?.items.get(equipSlot);
+    if (equip === undefined || equip.kind !== "equip") {
+      refuse(`slot ${equipSlot} does not hold an equip`);
+      return;
+    }
+    if (!scrollMatchesEquip(scrollId, equip.itemId)) {
+      refuse(`scroll ${scrollId} does not fit equip ${equip.itemId}`);
+      return;
+    }
+    if (equip.ruc <= 0) {
+      refuse(`equip ${equip.itemId} has no upgrade slot left`);
+      return;
+    }
+    const spec = this.options.scrollSpec?.(scrollId);
+    if (spec === undefined) {
+      refuse("the archive does not carry this scroll's info (no Item/Consume/0204 success)");
+      return;
+    }
+    // Consume one scroll (a USE-tab stack) before writing the upgraded equip back.
+    const taken = takeItem(items, scrollId, scrollSlot, 1);
+    if (taken === undefined) {
+      refuse(`USE slot ${scrollSlot} does not hold scroll ${scrollId}`);
+      return;
+    }
+    const success = this.scrollRandom.range(0, 100) < spec.success;
+    const upgraded = applyScroll(equip, spec, success);
+    if (equipSlot < 0) items.worn.set(-equipSlot, upgraded);
+    else items.inventories[INVENTORY_TAB.equip - 1]!.items.set(equipSlot, upgraded);
+    session.character.items = items;
+    session.send(
+      encodeInventoryChange([
+        taken.change,
+        { op: INVENTORY_OP.put, inventory: INVENTORY_TAB.equip, slot: equipSlot, item: upgraded },
+      ]),
+    );
+    this.persist();
+    const gained = success
+      ? Object.entries(spec.inc)
+          .map(([stat, amount]) => `${stat}+${amount}`)
+          .join(" ") || "no deltas"
+      : "no deltas";
+    this.options.log?.(
+      `game: 0x1a scroll ${scrollId} on equip ${equip.itemId} by "${session.name}" -> ` +
+        `${success ? "success" : "failure"} (${gained}), ${upgraded.ruc} upgrade slot(s) left, ` +
+        `${taken.remaining} scroll(s) left in the slot`,
+    );
+  }
+
+  /**
    * The `0x19` half: a 203-family item changes the map the item itself names (`spec/moveTo`), through
    * the same `enterMap` a portal or a revive uses.
    *
@@ -3132,6 +3255,12 @@ export class GameEntryServer {
         // follows the `0x0B` this answers with, and the field hears a `0x28` when the worn set moved.
         if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.changeSlot) {
           this.handleChangeSlot(session, event.plain);
+          continue;
+        }
+        // A `204` upgrade scroll dragged onto an equip: `0x1A`. Answered with a `0x0B` even when
+        // refused, or the client's inventory gate (`*(CWvsApp + 0x18)`) would never clear.
+        if (session !== undefined && opcode === CLIENT_FIELD_OPCODE.scrollUpgrade) {
+          this.handleScrollUpgrade(session, event.plain);
           continue;
         }
         // Using a portal: `0x0D` with the name of the portal under the cursor, answered with the

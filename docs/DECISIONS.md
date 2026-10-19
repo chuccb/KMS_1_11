@@ -3218,3 +3218,43 @@ YozxBHq4eFovwrQLryeSwTAcmiT+zcoA==`、42541671 bytes 與前輪紀錄一致）＋
 
 **驗證**：typecheck／format 全綠；`messenger.test.ts` 13/13（新增 `compactRosterCells` 三格政策、
 wire round-trip markers 2/2/0、滿房全 fill、空房全 clear）。
+
+## ADR-099：卷軸強化 c2s `0x1A`（`sub_55B0E0`）全鏈實作——WZ 效果表、category 相容、伺服器 roll／slot 會計政策（2026-10-20）
+
+**來源**（MapleStory.exe `.c`，hexfunc／反編譯直接讀出）：
+- **c2s `0x1A` ＝ 卷軸強化，不是 s2c `0x1A`（userMessage／密語 §4.31）**：兩張 opcode 表不相撞。
+  `sub_55B0E0(this, __int16 a2, __int16 a3)`（`.c:351717`，`.text:0055B130`）在 CWvsApp 層的 `0x17`–`0x1A`
+  家族（FINDINGS line 1265 已列），`sub_4A1EA0(&buf, 26, …)` 立封包头（**26＝0x1A**）後寫兩個 s16
+  （`a2`、`a3`）、`sub_43AD50` 送出；三道閘與 `0x17` 同型：busy（`this+6`）、狀態（`this+9` 的 `+53^+55>0`）、
+  500ms 冷卻（`timeGetTime()-*(this+7) >= 0x1F4`），送出後設 busy＋時刻。
+- **相容規則在 drag 的 caller**（`.c:107957`）：`v10/10000==204 && v11/1000000==1 && v11/10000%100==(v10%10000)/100`
+  （`1374389535*x>>32>>5` 是編譯器的 `/100`），通過才 `sub_55B0E0(n3000_1, *(this+4), v8)`；
+  `v8 = -sub_4D9110(x,y)` ⇒ **穿在紙娃娃上的取負格**（`-part`），`a2＝*(this+4)`＝卷軸來源格。
+- **WZ `Item/Consume/0204.img/<id>/info`**：`success`（全族只有 10／60／100 三檔）＋正的 `inc*`；**沒有 `spec`**
+  （FINDINGS §4.34.3 已列 0204「沒有 spec、price 全是 1」）、**沒有 `recover`／`destroy`** ⇒ 失敗不銷毀裝備。
+  75 張卷軸逐一对過韩文名與 category（0 투구／3 귀장식／4 상의／…／30–33 한손／37 완드／38 스태프／40–47 두손·활·석궁·아대）。
+
+**決定**：
+- 新增 `game/scrolls.ts`（純函數＋reader）：`SCROLL_INC_TO_STAT`（inc*→equip stat）、`ScrollSpec{success,inc}`、
+  `scrollSpecOf(archive,itemId)`／`scrollSpecProvider(archive)`（讀不到回 `undefined`，絕不 throw——caller 是 packet handler）、
+  `scrollMatchesEquip(scrollId,equipId)`（caller 規則直譯）、`applyScroll(equip,spec,success)`（不 mutate input）。
+- `protocol/field.ts`：`CLIENT_FIELD_OPCODE.scrollUpgrade＝0x1a`（接 useMapItem 0x19 之後）、`ClientScrollUpgrade{scrollSlot,equipSlot}`、
+  read／encode（PacketWriter(5)：u8＋s16×2）／describe。
+- `loginserver.ts` `handleScrollUpgrade` ＋ `0x1A` dispatch（接 changeSlot 之後）；`GameEntryServerOptions` 注入
+  `scrollSpec?`／`scrollRandom?`；`cli.ts` 接 `scrollSpecProvider(archive)`。
+- **伺服器政策**（原版 server binary 不存在，roll 與 slot 會計是「政策」不是「原證」——明說）：
+  - 成功 roll ＝ `scrollRandom.range(0,100) < success`；`scrollRandom` 預設 `ClientRandom`（seed 0x5c07/0x1a0f/0x2e3c），
+    **可注入**讓測試定值。
+  - 一次使用必耗一格（`ruc-=1`／`cuc+=1`，總和不變）；增量**只在成功時加**。
+  - 全部 client 閘由伺服器**重驗**（scrollSlot>0、USE 格有卷軸、equip 格有裝備、category、ruc>0、spec 讀得到、非 busy）；
+    任一不過 ⇒ **空 `0x0B`**（與 §4.36 拒絕同型——client busy 閘非收 `0x0B` 不解）。
+  - 成功 ⇒ 一個 `0x0B`：`[takeItem 卷軸的 change][put 升級後的裝備回原格]`；**不广播 `0x28` look**（外觀 id 不變）；`persist()`＋log。
+  - 裝備**原地**升級：worn（負）讀寫 `items.worn`、bag（正）讀寫 `inventories[equip-1]`；`takeItem` 只耗卷軸（USE 正格）。
+- 浏览器：`client/main.js` `scrollRequest` mirror `slotRequest` 的 500ms 閘、`equipPanel.hit` 的 drop 分支在 wearItem
+  **之前**加 scroll case（拖 204 卷軸到**已穿**負格走這條）；`webclient.ts` `case "scroll"` → `ClientSession.scrollUpgrade` → encode。
+  **誠實限制**：瀏覽器背包一次只顯示一個 tab，無法把卷軸拖到 equip 背包**內**的裝備（正格）；原生 EXE 這條不受影響，伺服器正負格都收。
+
+**驗證**：typecheck／build／format 全綠；`game/scrolls.test.ts` 4/4（scrollMatchesEquip family＋category、applyScroll slot 會計／
+只在成功加增量／不改 input、SCROLL_INC_TO_STAT 全對應真 stat、scrollSpecOf 讀真 WZ success＋inc 與各種 undefined）；
+`serve.test.ts` 整合 1/1（真 archive＋注入定值成功 roll：對 worn hat 卷 ⇒ `0x0B`＝[clear 卷軸][put hat pdd12/mdd6/ruc2/cuc1]、
+record 原地升級；錯 category（單手劍卷投頭盔）⇒ 空 `0x0B`、hat 不動、卷軸留袋）。完整原證與欄位詳 FINDINGS §4.50。

@@ -3739,6 +3739,28 @@ function slotRequest(tab, fromSlot, toSlot, count = -1) {
   send({ t: "change-slot", tab, fromSlot, toSlot, count });
   void audio.effect("UI/DragEnd");
 }
+// sub_55B0E0: a 204 scroll dropped on an equip sends 0x1A with both slots. It shares the
+// inventory window's one-at-a-time gate and 500 ms cooldown with change-slot (same native
+// `*(this+6)` byte); the upgraded equip comes back as a 0x0B that clears slotPending.
+function scrollRequest(scrollSlot, equipSlot) {
+  if (
+    slotPending ||
+    mesoPending ||
+    shopPending ||
+    shop !== undefined ||
+    talkingNpc !== undefined ||
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    performance.now() < slotNextAt ||
+    !selfView ||
+    selfView.hp <= 0
+  )
+    return;
+  slotPending = true;
+  slotNextAt = performance.now() + 500;
+  send({ t: "scroll", scrollSlot, equipSlot });
+  void audio.effect("UI/DragEnd");
+}
 async function wearItem(item, slot, part = bodyPart(item.itemId)) {
   const character = selfView?.characterId,
     mapId = selfView?.mapId,
@@ -3806,6 +3828,20 @@ window.addEventListener("mouseup", (e) => {
     return;
   const eq = equipPanel.hit(p.x, p.y);
   if (eq) {
+    // A 204 scroll dropped on a worn equip: 0x1A. eq.slot is already the negative worn slot; the
+    // pairing/success authority is the server's. Bag equips are not visible while the USE tab is
+    // up, so the browser scrolls a worn item (equip it first) - the server also takes a positive
+    // equip-tab slot for the native client.
+    if (
+      eq.kind === "slot" &&
+      eq.item &&
+      d.tab === 2 &&
+      d.slot > 0 &&
+      Math.floor(d.item.itemId / 10000) === 204
+    ) {
+      scrollRequest(d.slot, eq.slot);
+      return;
+    }
     if (eq.kind === "slot" && d.tab === 1 && d.slot > 0)
       void wearItem(d.item, d.slot, -eq.slot);
     return;
