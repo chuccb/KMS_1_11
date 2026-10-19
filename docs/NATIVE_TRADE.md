@@ -62,10 +62,17 @@
 | 數量字 | 左齊錨點 (35c+291, 35r+148)＝格左上 (-1,+19)；逐位數、x 依位寬＋間距前進；裝備（`id/1000000==1`）不畫 | `sub_4D5440`＋`sub_525AE0` |
 | lock wash | 我 (286,124,76,144)；對方 (4,124,76,144)，`0x80FFFFFF`（50% 白）| `this+63`／`this+64` |
 | log 文字 | `for (y=26; y<234; y+=13)` 於 x=94、font=`this+61`、首列＝scrollbar 位置 `*(this[58]+48)` → 恰 **16 列** | `sub_4D5730` |
+| scrollbar | `UI/Basic.img/VScr` 12×12 cells：prev@(262,21)、base 每 12px 舖滿 y=33..215、next@(262,225)、thumb@(262, 21+thumbTop)；按下／拖拉換 `prev1`/`next1`/`thumb1`；disabled（max≤1）用 `disabled/{prev,next,base}` | `sub_4D3EF0` id=1003 ＋ skills 視窗同款 |
 
 顏色格式為 **ARGB**（對照 `0xffeaeff2` → `#eaeff2`，見 `client/utildialog.ts`）。
 `sub_4D5900`（type 5）把文字以 4 個空格前綴、166 px 寬換行塞進 log（`asc_5BC328` = `"    "`）。
-瀏覽器的 log 沒有 scrollbar 拖拉，釘底顯示最後 16 列（🟡；原生新訊息到達時 scrollbar 也在底）。
+log 的 CCtrlScrollBar 全鏈已實作（`tradeLogScroller`，`client/trade-state.ts`）：`sub_4D5900` 的
+follow-if-at-bottom（wasBottom＝`pos ≥ 舊max−1`，append 前判定）、`sub_452150` 的 clamp、
+`sub_452500` 的五個 hit zone（thumbTop＝`12 + floor(pos×180/(max−1))`）、`sub_4525B0` 箭頭±1、
+`sub_452600` 頁面±`max(floor(max/16),16)`、`sub_452670`/`sub_4526A0` thumb 拖拉
+（`pos = startPos + (double)max×dy/180`，C 的 double→int 截斷＝`Math.trunc`，再 clamp）、
+`sub_452340` 滾輪（自己 rect 內每格 ±1）。原生按住箭頭的 auto-repeat timer（`sub_4523D0`）
+不重現（🟡，與 skills 視窗同政策）。
 
 ## 4. 玩家動作與原廠閘門
 
@@ -117,3 +124,7 @@ admin byte），故該閘門在瀏覽器不可達、字串保留。
    槽非空 → `AVCDisconnect(0x21000003)`；槽空 → 釋放舊指標、清槽、`sub_482340(idx, reader)`＋
    vtable+0x38（「開另一種房間」的入口，本版本的交易以外的房間）。本伺服器從不送 type 6，
    瀏覽器 codec 對未知 type 丟 `RangeError`——行為差異不可達。
+8. **log scrollbar（ADR-094）**：paint 用 `UI/Basic.img/VScr` cells（EXE 的 paint 函數未能定位，
+   vtable3 已倒；cell 名與幾何由 Create 鏈 `sub_451240` 的 COM art-height get 證明 arrowLen=12、
+   `sub_4D3EF0` 證明 (262,21) len=216）；互動算式全部出自 `sub_452500`/`sub_4525B0`/`sub_452600`/
+   `sub_452670`/`sub_4526A0`/`sub_4D5900` 的位元組證據；auto-repeat（`sub_4523D0`）跳過（🟡）。

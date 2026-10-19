@@ -136,6 +136,76 @@ test(
       assert.ok(close(pixels.washed, [221, 230, 238, 255]), `wash ${pixels.washed}`);
       assert.ok(close(pixels.plain, [187, 204, 221, 255]), `sheet ${pixels.plain}`);
 
+      // 2b. The log's CCtrlScrollBar: VScr cells, sub_452500's zones and the scrolled view.
+      const bar = await page.evaluate(() => {
+        const f = (
+          window as never as { tradeFixture: import("./fixtures/trade-browser.ts").TradeFixture }
+        ).tradeFixture;
+        const room = {
+          myIndex: 0,
+          participants: new Map(),
+          sides: [
+            { offers: new Map(), mesos: 0, confirmed: false },
+            { offers: new Map(), mesos: 0, confirmed: false },
+          ],
+          messages: Array.from({ length: 40 }, (_, i) => `log line ${i + 1}`),
+        };
+        const zone = (v: number) => f.hit(f.at.x + 267, f.at.y + 21 + v);
+        // A strip across the first painted log row (top-baseline y 26, glyphs to ~37): the top
+        // view shows "log line 1" there, the bottom view "log line 25".
+        const firstRow = () => {
+          const cells: string[] = [];
+          for (let dx = 0; dx < 166; dx += 2)
+            cells.push(f.pixel(f.at.x + 94 + dx, f.at.y + 30).join());
+          return cells.join("|");
+        };
+        f.render(room as never); // pinned at the bottom: max = 25, thumbTop = 192
+        const pinned = {
+          max: f.scroll.max,
+          pos: f.scroll.pos,
+          thumbTop: f.scroll.thumbTop(),
+          thumb: zone(197),
+          aboveThumb: zone(100),
+          up: zone(5),
+          down: zone(210),
+          pixels: [0, 3, 6, 9].map((dx) => f.pixel(f.at.x + 262 + dx, f.at.y + 21 + 197)),
+        };
+        f.scroll.by(-24); // sub_4525B0 back to the top: thumb parks under the up arrow
+        f.render(room as never);
+        const top = {
+          pos: f.scroll.pos,
+          thumbTop: f.scroll.thumbTop(),
+          thumb: zone(17),
+          belowThumb: zone(100),
+          pixels: [0, 3, 6, 9].map((dx) => f.pixel(f.at.x + 262 + dx, f.at.y + 21 + 197)),
+          row: firstRow(),
+        };
+        f.scroll.by(24);
+        f.render(room as never);
+        const bottom = {
+          pos: f.scroll.pos,
+          row: firstRow(),
+        };
+        return { pinned, top, bottom };
+      });
+      assert.equal(bar.pinned.max, 25, "40 wrapped rows -> max = 40 - 15");
+      assert.equal(bar.pinned.pos, 24);
+      assert.equal(bar.pinned.thumbTop, 192);
+      assert.deepEqual(bar.pinned.thumb, { kind: "scroll", zone: "thumb" });
+      assert.deepEqual(bar.pinned.aboveThumb, { kind: "scroll", zone: "pageUp" });
+      assert.deepEqual(bar.pinned.up, { kind: "scroll", zone: "prev" });
+      assert.deepEqual(bar.pinned.down, { kind: "scroll", zone: "next" });
+      assert.equal(bar.top.pos, 0);
+      assert.equal(bar.top.thumbTop, 12);
+      assert.deepEqual(bar.top.thumb, { kind: "scroll", zone: "thumb" });
+      assert.deepEqual(bar.top.belowThumb, { kind: "scroll", zone: "pageDown" });
+      assert.ok(
+        bar.pinned.pixels.some((p, i) => p.join() !== bar.top.pixels[i]!.join()),
+        `the thumb cell leaves the track: ${JSON.stringify(bar.pinned.pixels)}`,
+      );
+      assert.notEqual(bar.top.row, bar.bottom.row, "scrolling repaints the first visible log row");
+      assert.equal(bar.bottom.pos, 24, "stepping down re-pins at max - 1");
+
       // 3. sub_481910's box: original wording, line breaks, and the Yes answer.
       const opened = await page.evaluate(() => {
         const f = (

@@ -7,9 +7,17 @@ import {
   TRADE_WINDOW,
   tradeCommandLines,
   tradeFinishText,
+  tradeLogScroller,
   tradeState,
 } from "./trade-state.ts";
 import { tradeRenderer, tradeWindowAt } from "./trade-window.ts";
+import {
+  MESSENGER_TEXT,
+  MESSENGER_WINDOW,
+  messengerLogScroller,
+  messengerState,
+} from "./messenger-state.ts";
+import { messengerRenderer, messengerWindowAt } from "./messenger-window.ts";
 import { partyMessage } from "./party.ts";
 import { playerMenu } from "./player-menu.ts";
 import { playerContains, playerMenuParty } from "./player-menu-data.ts";
@@ -372,7 +380,8 @@ function connect() {
       ui.chatbox.classList.add("hidden");
       testToolsPanel.close(); skillPanel.toggle(false); statPanel.toggle(false); equipPanel.toggle(false);
       toggleInventory(false); closeShop(false); closeDialogue(false);
-      tradeOpen = false; tradeModel.clear(); tradeHover = tradeHoverOffer = undefined;
+      tradeOpen = false; tradeModel.clear(); tradeHover = tradeHoverOffer = undefined; tradeLogScroll.reset();
+      closeMessenger(false);
       audio.stop(); loginScreens.showPanel(ui.connect); loginScreens.closeTitleLogin();
     }
   });
@@ -636,10 +645,12 @@ function handle(message) {
           tradeOpen = true;
           tradeAt = { ...TRADE_WINDOW.home };
           tradeHover = tradeHoverOffer = undefined;
+          tradeLogScroll.reset();
           playerContext.close(false);
         } else if (t.kind === 'closed') {
           tradeOpen = false;
           tradeHover = tradeHoverOffer = undefined;
+          tradeLogScroll.reset();
           const text = tradeFinishText(event.code);
           if (text !== undefined) itemDialog.notice({ text, accept(){} });
         }
@@ -649,6 +660,29 @@ function handle(message) {
           text: event.code === 2 ? TRADE_TEXT.busy(event.name ?? '') : TRADE_TEXT.notFound,
           accept(){},
         });
+      return;
+    }
+    case 'messenger': {
+      const event = message.event;
+      for (const t of messengerModel.receive(event)) {
+        if (t.kind === 'invite') {
+          // sub_4E1BB0: goMessenger (n0xC8+28) gates the invite; a closed window raises the
+          // modal, an open one only prints a row (the model did that already).
+          const canAsk = systemPanel.gameSettings.messenger &&
+            loginScreens.stage === 'game' && visualFieldActive && selfView?.hp > 0 && !portalPending &&
+            !itemDialog.open && !systemPanel.visible && !playerContext.open &&
+            talkingNpc === undefined && !browserLabOpen() && !messengerOpen;
+          if (!canAsk) { messengerModel.dismissInvite(event.roomId); continue; }
+          itemDialog.confirm({
+            text: MESSENGER_TEXT.inviteModal(event.inviterName),
+            accept() {
+              if (!messengerModel.answerInvite(event.roomId)) return;
+              openMessengerAt(event.roomId);
+            },
+            reject() { messengerModel.dismissInvite(event.roomId); },
+          });
+        }
+      }
       return;
     }
     case 'party': {
@@ -1254,10 +1288,10 @@ let canvasButtonHover, canvasButtonPress, canvasButtonActivation;
 function canvasButtonAt(p) {
   if (loginScreens.stage !== "game" || !visualFieldActive || revivePanel.open || itemDialog.open ||
       systemPanel.visible || browserLabOpen() || itemDrag || quickDrag || shopDrag || inventoryDrag ||
-      shopScrollDrag || inventoryScrollDrag || tradeDrag ||
+      shopScrollDrag || inventoryScrollDrag || tradeDrag || tradeScrollDrag || messengerDrag || messengerScrollDrag ||
       statPanel.contains(p.x,p.y) || skillPanel.contains(p.x,p.y)) return;
   if (tradeOpen) {
-    const tradeHit = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room);
+    const tradeHit = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room, tradeLogScroll);
     if (tradeHit !== undefined) {
       if (tradeHit.kind === "close" || tradeHit.kind === "trade" || tradeHit.kind === "coin")
         return `trade:${tradeHit.kind}`;
@@ -1374,6 +1408,29 @@ canvas.addEventListener("mousemove", (event) => {
       return;
     }
   }
+  if (messengerScrollDrag) {
+    messengerScroll.moveTo(point.y - messengerAt.y);
+    return;
+  }
+  if (messengerDrag) {
+    if (
+      !messengerDrag.moved &&
+      Math.abs(point.x - messengerDrag.startX) + Math.abs(point.y - messengerDrag.startY) > 3
+    )
+      messengerDrag.moved = true;
+    if (messengerDrag.moved) {
+      messengerAt = {
+        x: messengerDrag.origX + point.x - messengerDrag.startX,
+        y: messengerDrag.origY + point.y - messengerDrag.startY,
+      };
+    }
+    return;
+  }
+  if (tradeScrollDrag) {
+    // sub_4526A0: the thumb follows the pointer proportionally inside the 180 px travel.
+    tradeLogScroll.moveTo(point.y - tradeAt.y);
+    return;
+  }
   if (tradeDrag) {
     if (
       !tradeDrag.moved &&
@@ -1387,7 +1444,17 @@ canvas.addEventListener("mousemove", (event) => {
       };
     return;
   }
-  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  const messengerHit = messengerOpen
+    ? messengerWindowAt(point.x, point.y, messengerAt, true, messengerScroll)
+    : undefined;
+  messengerHover = messengerOpen
+    ? messengerHit?.kind === "close"
+      ? "close"
+      : undefined
+    : messengerButtonAt(point)
+      ? "button"
+      : undefined;
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room, tradeLogScroll) : undefined;
   if (tradeHit !== undefined) {
     tradeHover = tradeHit.kind;
     tradeHoverOffer = tradeHit.kind === "slot" && tradeHit.occupied ? tradeHit : undefined;
@@ -1449,7 +1516,45 @@ canvas.addEventListener("mousedown", (event) => {
     if (shopHit.kind === "button") shopPressed = shopHit.button;
     else if (shopHit.kind === "close") shopPressed = "close";
   }
-  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  const messengerHit = messengerOpen
+    ? messengerWindowAt(point.x, point.y, messengerAt, true, messengerScroll)
+    : undefined;
+  if (messengerHit?.kind === "scroll") {
+    messengerScroll.activate(messengerHit.zone, point.y - messengerAt.y);
+    messengerScrollDrag = true;
+    event.preventDefault();
+    return;
+  }
+  if (messengerHit?.kind === "close") {
+    messengerPressed = "close";
+    return;
+  }
+  if (messengerHit?.kind === "edit") {
+    messengerSayInput.focus();
+    return;
+  }
+  if (messengerHit?.kind === "body") {
+    messengerDrag = {
+      startX: point.x,
+      startY: point.y,
+      origX: messengerAt.x,
+      origY: messengerAt.y,
+      moved: false,
+    };
+    return;
+  }
+  if (!messengerOpen && messengerButtonAt(point)) {
+    messengerPressed = "button";
+    return;
+  }
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room, tradeLogScroll) : undefined;
+  if (tradeHit?.kind === "scroll") {
+    // sub_4521E0: arrows step, track pages, thumb starts the drag; the sheet never drags from here.
+    tradeLogScroll.activate(tradeHit.zone, point.y - tradeAt.y);
+    tradeScrollDrag = true;
+    event.preventDefault();
+    return;
+  }
   if (tradeHit?.kind === "body")
     tradeDrag = {
       dx: point.x - tradeAt.x,
@@ -1518,7 +1623,27 @@ function finishWindowPress(event) {
   }
   if (shopScrollDrag !== undefined) shopSuppressClick = event?.target === canvas;
   shopScrollDrag = undefined;
+  if (messengerDrag?.moved === true) messengerSuppressClick = event?.target === canvas;
+  if (messengerScrollDrag) {
+    messengerScrollDrag = false;
+    messengerScroll.end();
+    messengerSuppressClick = event?.target === canvas;
+  }
+  if (messengerPressed === "close") {
+    const hit =
+      messengerOpen && pointerAt ? messengerWindowAt(pointerAt.x, pointerAt.y, messengerAt, true) : undefined;
+    if (hit?.kind === "close") closeMessenger();
+  }
+  if (messengerPressed === "button" && !messengerOpen && pointerAt && messengerButtonAt(pointerAt))
+    openMessengerAt(0);
+  messengerPressed = undefined;
+  messengerDrag = undefined;
   if (tradeDrag?.moved === true) tradeSuppressClick = event?.target === canvas;
+  if (tradeScrollDrag) {
+    tradeScrollDrag = false;
+    tradeLogScroll.end();
+    tradeSuppressClick = event?.target === canvas;
+  }
   tradeDrag = undefined;
   inventoryDrag = undefined;
   shopDrag = undefined;
@@ -1647,7 +1772,17 @@ canvas.addEventListener("click", (event) => {
     }
     return;
   }
-  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room) : undefined;
+  if (messengerSuppressClick) {
+    messengerSuppressClick = false;
+    return;
+  }
+  if (
+    messengerOpen &&
+    messengerWindowAt(point.x, point.y, messengerAt, true) !== undefined
+  )
+    return;
+  if (!messengerOpen && messengerButtonAt(point)) return;
+  const tradeHit = tradeOpen ? tradeWindowAt(point.x, point.y, tradeAt, tradeModel.room, tradeLogScroll) : undefined;
   if (tradeHit !== undefined) {
     if (tradeHit.kind === "close") tradeLeave();
     else if (tradeHit.kind === "trade") tradeConfirmAsk();
@@ -1721,6 +1856,17 @@ canvas.addEventListener(
         setInventoryScroll(
           inventoryScrollbarGeometry().row + Math.sign(event.deltaY),
         );
+      event.preventDefault();
+      return;
+    }
+    if (messengerOpen && messengerScroll.inBar(point.x - messengerAt.x, point.y - messengerAt.y)) {
+      if (event.deltaY !== 0) messengerScroll.by(Math.sign(event.deltaY));
+      event.preventDefault();
+      return;
+    }
+    // sub_452340: the trade log wheel acts over the scrollbar's own rect, one line per notch.
+    if (tradeOpen && tradeLogScroll.inBar(point.x - tradeAt.x, point.y - tradeAt.y)) {
+      if (event.deltaY !== 0) tradeLogScroll.by(Math.sign(event.deltaY));
       event.preventDefault();
       return;
     }
@@ -2443,6 +2589,7 @@ function drawStatusBar() {
   ctx.fillRect(214, STATUS_BAR.y + 190, 20, 12);
   statusText(`${expPercent(selfView.exp, selfView.expToNext ?? 0)}%`, 214, STATUS_BAR.y + 190);
   drawQuickItems();
+  drawMessengerButton();
   drawWhisperRecipient();
   statusText(`Lv.${selfView.level}`, 54, STATUS_BAR.y + 116);
   statusText(jobNameOf(selfView.job), 136, STATUS_BAR.y + 116, "right");
@@ -2769,6 +2916,14 @@ function frame() {
 
   drawDraggedItem();
   drawQuickDrag();
+  if (messengerOpen) {
+    messengerView.draw(messengerAt, messengerModel.room, {
+      hover: messengerHover,
+      pressed: messengerPressed,
+    }, messengerScroll);
+    positionMessengerInput();
+    messengerTypingCheck(performance.now());
+  }
   if (tradeOpen)
     tradeView.draw(tradeAt, tradeModel.room, {
       hover: typeof canvasButtonHover === "string" && canvasButtonHover.startsWith("trade:")
@@ -2779,7 +2934,7 @@ function frame() {
       pressed: typeof canvasButtonPress === "string" && canvasButtonPress.startsWith("trade:")
         ? canvasButtonPress.slice(6)
         : undefined,
-    });
+    }, tradeLogScroll);
   systemPanel.draw();
   playerContext.draw();
   drawScreenMessages(ctx, feedback.rows(now));
@@ -3607,7 +3762,7 @@ window.addEventListener("mouseup", (e) => {
   const p = viewPoint(e);
   if (shopWindowAt(p.x, p.y)) return;
   if (tradeOpen) {
-    const th = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room);
+    const th = tradeWindowAt(p.x, p.y, tradeAt, tradeModel.room, tradeLogScroll);
     if (th !== undefined) {
       // sub_4D5C80: only my empty cells take a drop; equips carry no count byte.
       if (th.kind === "slot" && th.side === "mine" && !th.occupied && d.slot > 0)
@@ -3780,6 +3935,7 @@ let inventoryScrollDrag;
 let tradeOpen = false;
 let tradeAt = { ...TRADE_WINDOW.home };
 let tradeDrag;
+let tradeScrollDrag = false;
 let tradeHover;
 let tradeHoverOffer;
 let tradeSuppressClick = false;
@@ -3881,6 +4037,8 @@ function itemIcon(itemId) {
 // sheet exactly where sub_4D4960 paints it. BtTrade/BtCoin raise the two native boxes
 // (sub_4D61F0's confirm, sub_4D5F50's meso input) through the shared CUtilDlgEx dialogs.
 const tradeModel = tradeState();
+// The log's CCtrlScrollBar state (sub_4D5900/sub_452500 arithmetic lives in trade-state.ts).
+const tradeLogScroll = tradeLogScroller();
 const tradeView = tradeRenderer({
   ctx,
   image: artImage,
@@ -3888,10 +4046,115 @@ const tradeView = tradeRenderer({
   icon: itemIcon,
 });
 tradeView.warm();
+
+// ------------------------------------------------- 메신저 (CUIMessenger, ADR-095)
+//
+// The three-person chat room: model in client/messenger-state.ts, paint in
+// client/messenger-window.ts, scrollbar in client/vscroll.ts. The StatusBar's BtChat
+// (sub_4F6B70 id 1004 at bar-local (65,91), the bar sits at y=392) opens a fresh room;
+// the invite modal's yes re-sends the room id from 0x4D type 3 (sub_4DDF10).
+const messengerModel = messengerState();
+const messengerView = messengerRenderer({
+  ctx,
+  image: artImage,
+  avatars: (look, flip) => avatarCache.get(look, "stand1", 0, flip),
+});
+messengerView.warm();
+const messengerScroll = messengerLogScroller();
+let messengerOpen = false;
+let messengerAt = { ...MESSENGER_WINDOW.home };
+let messengerDrag, messengerScrollDrag = false;
+let messengerHover, messengerPressed;
+let messengerSuppressClick = false;
+let messengerTypingSent = false, messengerTypingAt = 0;
+const messengerSayInput = document.getElementById("messenger-say");
+/** `sub_4F6B70`: BtChat, id 1004, two states, bar-local (65,91) -> page (65,483). */
+const MESSENGER_BUTTON = Object.freeze({ x: 65, y: 483, width: 38, height: 17 });
+function messengerButtonAt(p) {
+  return (
+    loginScreens.stage === "game" && visualFieldActive && !revivePanel.open && !itemDialog.open &&
+    !systemPanel.visible && !playerContext.open &&
+    p.x >= MESSENGER_BUTTON.x && p.x < MESSENGER_BUTTON.x + MESSENGER_BUTTON.width &&
+    p.y >= MESSENGER_BUTTON.y && p.y < MESSENGER_BUTTON.y + MESSENGER_BUTTON.height
+  );
+}
+function drawMessengerButton() {
+  if (loginScreens.stage !== "game" || !visualFieldActive) return;
+  const state = messengerPressed === "button" ? "pressed" : messengerHover === "button" ? "mouseOver" : "normal";
+  const art = artImage(`UI/StatusBar.img/BtChat/${state}/0`);
+  if (art.ready) ctx.drawImage(art.img, MESSENGER_BUTTON.x, MESSENGER_BUTTON.y);
+}
+function positionMessengerInput() {
+  messengerSayInput.style.left = `${messengerAt.x + MESSENGER_WINDOW.edit.x}px`;
+  messengerSayInput.style.top = `${messengerAt.y + MESSENGER_WINDOW.edit.y}px`;
+}
+/** `sub_4DDF10(roomId)`: create the window first, the wire answer fills the cells. */
+function openMessengerAt(roomId) {
+  if (messengerOpen || !selfView || revivePanel.open || itemDialog.open || systemPanel.visible ||
+      playerContext.open || shop !== undefined || talkingNpc !== undefined) return;
+  messengerAt = { ...MESSENGER_WINDOW.home };
+  messengerHover = messengerPressed = messengerDrag = undefined;
+  messengerScroll.reset();
+  messengerModel.openLocal();
+  messengerOpen = true;
+  messengerTypingSent = false;
+  messengerTypingAt = 0;
+  send({ t: "messenger-enter", roomId });
+  messengerSayInput.value = "";
+  messengerSayInput.hidden = false;
+  positionMessengerInput();
+  messengerSayInput.focus();
+  void audio.effect("UI/MenuUp");
+}
+/** `sub_4DDFA0`: the window goes away; the room only learns through `0x24 type 2`. */
+function closeMessenger(notify = true) {
+  if (!messengerOpen) return;
+  messengerOpen = false;
+  messengerHover = messengerPressed = messengerDrag = undefined;
+  messengerScrollDrag = false;
+  messengerScroll.reset();
+  messengerModel.closeLocal();
+  messengerSayInput.hidden = true;
+  messengerSayInput.blur();
+  messengerTypingSent = false;
+  if (notify) send({ t: "messenger-leave" });
+  void audio.effect("UI/MenuDown");
+}
+/** `sub_4DE490` + `sub_4E24B0` for one finished edit row. */
+function messengerSubmit() {
+  const text = messengerSayInput.value;
+  messengerSayInput.value = "";
+  if (!selfView || text === "") return;
+  const say = messengerModel.say(text, selfView.name);
+  if (say.kind === "close") return closeMessenger();
+  if (say.kind === "command") return send({ t: "messenger-command", name: say.name });
+  if (say.kind === "chat") {
+    // sub_4DE490 prints the row locally first, then sends type 5.
+    messengerModel.receive({ kind: "chat", line: say.line });
+    return send({ t: "messenger-say", line: say.line });
+  }
+  if (text.startsWith("/초대"))
+    messengerModel.receive({ kind: "chat", line: MESSENGER_TEXT.otherName });
+}
+/** `sub_4DEAF0`'s 3000 ms re-check of the typing flag, once per frame. */
+function messengerTypingCheck(now) {
+  if (!selfView || now - messengerTypingAt < 3000) return;
+  const has = messengerSayInput.value !== "";
+  if (has === messengerTypingSent) return;
+  messengerTypingSent = has;
+  messengerTypingAt = now;
+  send({ t: "messenger-say", line: messengerModel.typingLine(selfView.name, has) });
+}
+messengerSayInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); messengerSubmit(); }
+  else if (event.key === "Escape") messengerSayInput.blur();
+});
+messengerSayInput.addEventListener("blur", () => { messengerTypingAt = 0; });
 function tradeLeave() {
   if (!tradeOpen) return;
   tradeOpen = false;
   tradeHover = tradeHoverOffer = undefined;
+  tradeLogScroll.reset();
   tradeModel.clear();
   send({ t: "trade-leave" });
 }

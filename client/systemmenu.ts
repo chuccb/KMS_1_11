@@ -242,7 +242,7 @@ export function systemMenu({
     const labels = [
       "顯示小地圖",
       "接受悄悄話",
-      "接受Messenger邀請（尚未接瀏覽器介面）",
+      "接受Messenger邀請",
       "接受交易邀請",
       "接受組隊邀請",
       "小遊戲（原版亦停用）",
@@ -261,10 +261,10 @@ export function systemMenu({
           c.el.setAttribute("aria-checked", String(gameDraft[id]));
         },
         // CConfig consumers: goMiniMap/goWhisper/goExchange/goParty are all honoured by the page
-        // (sub_4E7030, sub_472910 case 9, sub_481910, party s2c case 3). goMessenger gates the
-        // 0x5A messenger window, which the browser has not implemented; goGame (+10) has zero
-        // references even in the original client - both stay disabled, as the original is silent.
-        i === 2 || i === 5,
+        // (sub_4E7030, sub_472910 case 9, sub_481910, party s2c case 3), and goMessenger gates
+        // sub_4E1BB0's invite (ADR-095 wired the CUIMessenger chain). goGame (+10) has zero
+        // references even in the original client - it stays disabled, as the original is silent.
+        i === 5,
       );
       c.el.setAttribute("role", "checkbox");
       c.el.setAttribute("aria-checked", String(gameDraft[id]));

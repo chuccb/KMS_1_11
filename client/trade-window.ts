@@ -1,13 +1,16 @@
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
+import { paintVScrollbar } from "./vscroll.ts";
 import { HUD_FONT } from "./hud.ts";
 import type { AvatarImage, BrowserLook } from "./image-cache.ts";
 import {
   TRADE_SLOTS,
   TRADE_WINDOW,
   tradeSlotRect,
+  type TradeLogScroll,
   type TradeRoomState,
   type TradeParticipant,
+  type TradeScrollZone,
 } from "./trade-state.ts";
 
 /**
@@ -20,6 +23,8 @@ import {
  *   - backgrnd 367x295 centred by `sub_461C50`'s rule, so (216,152);
  *   - message log filled (92,21,182,217) at 50 % black, lines wrapped at 166 px like `sub_4D5900`,
  *     text rows from (94,26) at a 13 px pitch up to y<234 like `sub_4D5730` (16 visible lines);
+ *   - the log's CCtrlScrollBar painted from `UI/Basic.img/VScr` cells and driven by the
+ *     `tradeLogScroller` arithmetic (`sub_452500`/`sub_4525B0`/`sub_452600`/`sub_452670`);
  *   - item counts left-anchored at (35c+291, 35r+148) like `sub_4D5440`'s `sub_525AE0` digits;
  *   - names centred on 44/327 at y=110, mesos right-aligned at 84/366 at y=277 (`sub_4D4960`);
  *   - avatars at (36,103) and (330,103), mine mirrored towards the middle (`sub_4D33A0`);
@@ -41,6 +46,7 @@ export type TradeHit =
   | { kind: "trade" }
   | { kind: "coin" }
   | { kind: "body" }
+  | { kind: "scroll"; zone: TradeScrollZone }
   | { kind: "slot"; side: "mine" | "theirs"; roomSlot: number; occupied: boolean };
 
 const CONTROL_RECTS = {
@@ -49,12 +55,13 @@ const CONTROL_RECTS = {
   coin: TRADE_WINDOW.coin,
 } as const;
 
-/** `sub_4D63C0` + `sub_4D46C0` in page coordinates; undefined outside the sheet. */
+/** `sub_4D63C0` + `sub_4D46C0` + `sub_452500` in page coordinates; undefined outside the sheet. */
 export function tradeWindowAt(
   x: number,
   y: number,
   at: UiPoint,
   room: TradeRoomState | undefined,
+  scroll?: TradeLogScroll,
 ): TradeHit | undefined {
   const lx = x - at.x,
     ly = y - at.y;
@@ -66,6 +73,9 @@ export function tradeWindowAt(
     if (lx >= box.x && lx < box.x + box.width && ly >= box.y && ly < box.y + box.height)
       return { kind };
   }
+  // The log scrollbar acts before the sheet body: sub_4521E0 eats the click, so it never drags.
+  const zone = scroll?.hit(lx, ly);
+  if (zone !== undefined) return { kind: "scroll", zone };
   for (const side of ["mine", "theirs"] as const) {
     const offers = room?.sides[side === "mine" ? room.myIndex : room.myIndex === 0 ? 1 : 0].offers;
     for (let slot = 1; slot <= TRADE_SLOTS; slot++) {
@@ -93,11 +103,14 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
           items: participant.look.slice(1),
         };
 
-  function drawLog(at: UiPoint, messages: readonly string[]) {
+  function drawLog(at: UiPoint, messages: readonly string[], scroll: TradeLogScroll | undefined) {
     const log = TRADE_WINDOW.log;
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(at.x + log.x, at.y + log.y, log.width, log.height);
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      scroll?.sync(0);
+      return;
+    }
     ctx.save();
     ctx.beginPath();
     ctx.rect(at.x + log.x + 2, at.y + log.y + 2, log.wrap, log.height - 4);
@@ -118,16 +131,27 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
         }
         rows.push(line);
       }
-    // sub_4D5730: `for (y = 26; y < 234; y += 13)` at x=94, first row = the scrollbar position.
-    // The browser log has no scrollbar drag yet, so it shows the tail (scroll pinned to bottom).
+    // sub_4D5730: `for (y = 26; y < 234; y += 13)` at x=94, first row = the scrollbar position
+    // (without a scroller the view stays pinned to the tail, which is where a fresh room sits).
     const line = log.line;
     const capacity = Math.max(1, Math.floor((line.lastY - line.firstY) / line.pitch));
+    if (scroll) scroll.sync(rows.length);
+    const first = scroll ? scroll.pos : Math.max(0, rows.length - capacity);
     rows
-      .slice(Math.max(0, rows.length - capacity))
+      .slice(first, first + capacity)
       .forEach((row, index) =>
         ctx.fillText(row, at.x + line.x, at.y + line.firstY + index * line.pitch),
       );
     ctx.restore();
+  }
+
+  /**
+   * The log's CCtrlScrollBar (id 1003) in `UI/Basic.img/VScr` cells; the arithmetic and
+   * the cell stamping live in the shared `client/vscroll.ts`.
+   */
+  function drawScrollbar(at: UiPoint, scroll: TradeLogScroll | undefined) {
+    if (scroll === undefined) return;
+    paintVScrollbar(ctx, image, at, TRADE_WINDOW.scrollbar, scroll);
   }
 
   function drawSide(at: UiPoint, room: TradeRoomState, side: "mine" | "theirs") {
@@ -162,12 +186,14 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
     at: UiPoint,
     room: TradeRoomState | undefined,
     ui: { hover?: string; pressed?: string },
+    scroll?: TradeLogScroll,
   ) {
     const bg = image(TRADE_WINDOW.path);
     if (bg.ready) ctx.drawImage(bg.img, at.x, at.y);
     if (room === undefined) return;
     ctx.save();
-    drawLog(at, room.messages);
+    drawLog(at, room.messages, scroll);
+    drawScrollbar(at, scroll);
     ctx.font = HUD_FONT;
     ctx.fillStyle = "#000000";
     ctx.textBaseline = "top";

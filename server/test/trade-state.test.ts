@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   TRADE_WINDOW,
   TRADE_TEXT,
+  tradeLogPage,
+  tradeLogScroller,
   tradeSlotRect,
   tradeState,
   tradeFinishText,
@@ -157,4 +159,95 @@ test("sub_4D5C80/sub_4D5F50 guards: locked, alone, 500 ms throttle, occupied cel
   assert.equal(state.roomSlotForDrop(11 + 5, 129 + 5), undefined, "their side takes no drops");
   state.confirmLocally();
   assert.equal(state.canOffer(2000), false, "my lock stops offers");
+});
+
+// --------------------------------------------------------------------------- the log scrollbar
+
+test("sub_452500 zones, sub_452150 clamps and sub_4D5900's follow rule", () => {
+  const bar = TRADE_WINDOW.scrollbar;
+  const scroll = tradeLogScroller();
+  // Disabled while the log fits: max <= 1 means zone 100 everywhere, but PtInRect still wheels.
+  assert.equal(scroll.max, 1);
+  assert.equal(scroll.pinnedBottom, true);
+  assert.equal(scroll.hit(bar.x, bar.y), undefined);
+  assert.equal(scroll.hit(bar.x + 5, bar.y + 100), undefined);
+  assert.ok(scroll.inBar(bar.x + 5, bar.y + 100));
+  scroll.activate("next", 0);
+  scroll.by(3);
+  assert.equal(scroll.pos, 0, "nothing moves while disabled");
+  assert.equal(scroll.thumbTop(), bar.arrow, "thumb parks under the up arrow");
+
+  // sub_4D5900: max = rows - 15; the view follows the bottom while it is at the bottom.
+  scroll.sync(20);
+  assert.equal(scroll.max, 5);
+  assert.equal(scroll.pos, 4);
+  assert.equal(scroll.pinnedBottom, true);
+  scroll.sync(30);
+  assert.equal(scroll.pos, 14, "still pinned, so the append scrolled along");
+  scroll.by(-2);
+  assert.equal(scroll.pos, 12);
+  assert.equal(scroll.pinnedBottom, false);
+  scroll.sync(40);
+  assert.equal(scroll.max, 25);
+  assert.equal(scroll.pos, 12, "sub_4D5900 only follows when already at the bottom");
+  scroll.sync(18);
+  assert.equal(scroll.max, 3);
+  assert.equal(scroll.pos, 2, "sub_452150 clamps into [0, max - 1]");
+  scroll.sync(24);
+  assert.equal(scroll.pos, 8, "the clamped view was at the bottom, so it follows again");
+
+  // sub_452500's zones, with the view pinned so the thumb sits at the track end.
+  scroll.reset();
+  scroll.sync(32); // max = 17, pinned at 16 -> thumbTop = 12 + floor(16 * 180 / 16) = 192
+  const wy = (v: number) => bar.y + v;
+  assert.equal(scroll.hit(bar.x, wy(0)), "prev");
+  assert.equal(scroll.hit(bar.x, wy(12)), "prev", "v <= 12 is the up arrow");
+  assert.equal(scroll.hit(bar.x, wy(13)), "pageUp");
+  assert.equal(scroll.hit(bar.x, wy(191)), "pageUp");
+  assert.equal(scroll.hit(bar.x, wy(192)), "thumb");
+  assert.equal(scroll.hit(bar.x + 11, wy(203)), "thumb", "v <= thumbTop + 12");
+  assert.equal(scroll.hit(bar.x, wy(204)), "next", "v >= 204 is the down arrow, thumb or not");
+  assert.equal(scroll.hit(bar.x + 12, wy(100)), undefined, "outside the control rect");
+  assert.equal(scroll.hit(bar.x - 1, wy(100)), undefined);
+  assert.equal(scroll.hit(bar.x, wy(216)), undefined);
+
+  // sub_4525B0 steps by one; sub_452600 pages by max(floor(max / 16), 16).
+  scroll.activate("prev", wy(scroll.thumbTop()));
+  assert.equal(scroll.pos, 15);
+  assert.equal(scroll.pressed, "prev");
+  scroll.end();
+  assert.equal(scroll.pressed, undefined);
+  scroll.activate("next", wy(210));
+  assert.equal(scroll.pinnedBottom, true, "one step down re-pins at max - 1");
+  assert.equal(tradeLogPage(17), 16);
+  assert.equal(tradeLogPage(185), 16, "floor(185 / 16) = 11 loses to the 16-line page");
+  assert.equal(tradeLogPage(385), 24);
+  scroll.sync(200); // max = 185, pinned at 184
+  scroll.activate("pageUp", wy(100));
+  assert.equal(scroll.pos, 168);
+  scroll.activate("pageDown", wy(100));
+  assert.equal(scroll.pinnedBottom, true);
+
+  // sub_452670/sub_4526A0: the thumb drag is startPos + max * dy / 180, truncated then clamped.
+  scroll.reset();
+  scroll.sync(181); // max = 166
+  scroll.by(-100);
+  assert.equal(scroll.pos, 65);
+  const startY = wy(scroll.thumbTop()); // 21 + 12 + floor(65 * 180 / 165) = 103
+  assert.equal(startY, 103);
+  scroll.activate("thumb", startY);
+  assert.equal(scroll.dragging, true);
+  scroll.moveTo(startY + 89);
+  assert.equal(scroll.pos, 147, "65 + trunc(166 * 89 / 180) = 65 + 82");
+  scroll.moveTo(startY + 90);
+  assert.equal(scroll.pos, 148);
+  scroll.moveTo(startY - 90);
+  assert.equal(scroll.pos, 0, "negative results clamp at the top");
+  scroll.moveTo(startY + 10000);
+  assert.equal(scroll.pinnedBottom, true, "dragging past the end re-pins");
+  scroll.end();
+  assert.equal(scroll.dragging, false);
+  scroll.reset();
+  assert.equal(scroll.max, 1);
+  assert.equal(scroll.pos, 0);
 });

@@ -4053,7 +4053,25 @@ export class GameEntryServer {
       return;
     }
     const separator = line.indexOf(" : ");
-    const text = separator < 0 ? line : line.slice(separator + 3);
+    if (separator < 0) {
+      // `sub_4DEAF0`'s typing row: `name` + "1"/"0" with no separator. Relay it verbatim
+      // (prefix re-stamped, so a forged name cannot tint somebody else's avatar) and
+      // never as chat - the receivers split the last char, not " : ".
+      const flag = line.slice(-1);
+      if (line.length < 2 || (flag !== "0" && flag !== "1")) {
+        this.options.log?.(`game: messenger: room ${room.id} dropped separator-less "${line}"`);
+        return;
+      }
+      const composed = `${session.name}${flag}`;
+      const typingPacket = encodeMessengerChat(composed);
+      for (const entry of room.members) {
+        if (entry.characterId === session.characterId) continue;
+        this.sessionsByCharacter.get(entry.characterId)?.send(typingPacket);
+      }
+      this.options.log?.(`game: messenger: room ${room.id} typing ${flag} from "${session.name}"`);
+      return;
+    }
+    const text = line.slice(separator + 3);
     const composed = `${session.name} : ${text}`;
     const packet = encodeMessengerChat(composed);
     for (const entry of room.members) {

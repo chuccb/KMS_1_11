@@ -1,5 +1,6 @@
 import type { MiniRoomEvent } from "../server/src/protocol/miniroom.ts";
 import type { ItemSlot } from "../server/src/protocol/itemslot.ts";
+import { vScrollScroller } from "./vscroll.ts";
 
 /** `sub_4D2DB0` allocates eight 16-byte cells per side; `sub_4D63C0` numbers them 1..8.
  * Lives here (not in the server codec) so browser modules never pull a server runtime import;
@@ -22,6 +23,12 @@ export const TRADE_SLOTS = 8;
  *     50 % white wash over (286,124,76,144) or (4,124,76,144) once a side locks.
  *   - log text is `sub_4D5730`: `for (y = 26; y < 234; y += 13)` at x=94 with the font at `this+61`
  *     and the first visible line = the scrollbar position `*(this[58] + 48)` -> 16 rows.
+ *   - the log scrollbar is a CCtrlScrollBar (`sub_4D3EF0` creates id 1003 at (262,21) length 216):
+ *     `sub_4D5900` sets max = rows-15 on every append and follows to the new bottom only when the
+ *     view was already at it; `sub_452150` clamps pos to [0, max-1]; `sub_452500` splits the track
+ *     into 12 px arrows, a 12 px thumb at `12 + pos*180/(max-1)` and two page zones; `sub_4525B0`
+ *     steps +-1, `sub_452600` pages +-max(max/16, 16), `sub_452670`/`sub_4526A0` drag the thumb by
+ *     `startPos + max*dy/180`, and `sub_452340` accepts the wheel over the control rect only.
  *   - an offered item's count is `sub_4D5440` + `sub_525AE0` (a per-digit painter: left/top anchor,
  *     x advances by digit width + spacing): non-equipment draws its count from (35c+291, 35r+148),
  *     i.e. one pixel left of the cell at 19 below its top; equipment (id / 1000000 == 1) draws none.
@@ -50,7 +57,7 @@ export const TRADE_WINDOW = {
   },
   /** `sub_4D5440`: the count glyph anchor relative to the slot cell (`sub_525AE0` = left/top). */
   count: { dx: -1, dy: 19 },
-  scrollbar: { x: 262, y: 21, width: 12, height: 216 },
+  scrollbar: { x: 262, y: 21, width: 12, height: 216, arrow: 12 },
   slots: { size: 32, pitch: 35, columns: 2, rows: 4, top: 129, left: 11, right: 292 },
   names: { left: 44, right: 327, y: 110 },
   mesos: { left: 84, right: 366, y: 277 },
@@ -76,6 +83,19 @@ export function tradeSlotRect(side: "mine" | "theirs", roomSlot: number) {
     height: TRADE_WINDOW.slots.size,
   };
 }
+
+/** One of `sub_452500`'s hit zones, re-exported from the shared CCtrlScrollBar module. */
+export type { VScrollZone as TradeScrollZone } from "./vscroll.ts";
+export { vScrollPage as tradeLogPage } from "./vscroll.ts";
+
+/**
+ * The trade log's CCtrlScrollBar state (id 1003): the shared `vScrollScroller` bound to
+ * the sheet's own control rect, created at (262,21) with len 216 by `sub_4D3EF0`.
+ */
+export function tradeLogScroller() {
+  return vScrollScroller(TRADE_WINDOW.scrollbar);
+}
+export type TradeLogScroll = ReturnType<typeof tradeLogScroller>;
 
 /** The string literals the client owns, with the PE address of each Korean original. */
 export const TRADE_TEXT = {

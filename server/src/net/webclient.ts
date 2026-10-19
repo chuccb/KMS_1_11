@@ -749,6 +749,20 @@ class BrowserSession {
           return await this.require().tradeConfirm();
         case "trade-leave":
           return await this.require().tradeLeave();
+        case "messenger-enter":
+          if (!Number.isInteger(message.roomId) || Number(message.roomId) < 0)
+            throw new Error("messenger-enter requires a non-negative integer roomId");
+          return await this.require().messengerEnter(Number(message.roomId));
+        case "messenger-leave":
+          return await this.require().messengerLeave();
+        case "messenger-command":
+          if (typeof message.name !== "string" || message.name.length === 0)
+            throw new Error("messenger-command requires a name");
+          return await this.require().messengerCommand(String(message.name));
+        case "messenger-say":
+          if (typeof message.line !== "string" || message.line.length === 0)
+            throw new Error("messenger-say requires a line");
+          return await this.require().messengerSay(String(message.line));
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
         case "ability-up": {

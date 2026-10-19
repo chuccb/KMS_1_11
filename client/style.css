@@ -226,6 +226,26 @@ body {
   pointer-events: auto;
 }
 
+/* CCtrlEdit id 1001 of CUIMessenger: (11,286) 176x12 in window coordinates; main.js moves
+   it with the window. Transparent like the chat bar input so the sheet art shows through. */
+#messenger-say {
+  position: absolute;
+  width: 176px;
+  height: 12px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #000;
+  color-scheme: light;
+  font:
+    12px "Gulim",
+    "굴림",
+    "KMSCJK",
+    sans-serif;
+}
+
 #chatbox {
   position: absolute;
   left: 243px;

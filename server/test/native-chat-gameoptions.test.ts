@@ -163,13 +163,17 @@ test("wiring: original GameOpt paths, unavailable social controls disabled, priv
     menu = file("systemmenu.ts"),
     log = file("chatlog.ts");
   assert.match(menu, /game:\s*\{\s*x:\s*317,\s*y:\s*177\s*\}/);
-  assert.match(menu, /i === 2 \|\| i === 5/);
+  // ADR-095 wired goMessenger (sub_4E1BB0's invite gate), so only goGame (zero original
+  // references) keeps its checkbox disabled.
+  assert.match(menu, /i === 5,/);
   assert.match(menu, /54,\s*203,\s*50,\s*23/);
   assert.match(menu, /applyGame\(accept\s*\?\s*gameDraft\s*:\s*gameOriginal\)/);
   assert.match(main, /systemPanel.gameSettings.whisper/);
   // goExchange gates the trade invite box (sub_481910), goParty the party invite (party s2c case 3).
   assert.match(main, /systemPanel\.gameSettings\.exchange/);
   assert.match(main, /if\(systemPanel\.gameSettings\.party\) partyPrompt\.offer/);
+  // goMessenger gates sub_4E1BB0's invite modal in the browser the same way (ADR-095).
+  assert.match(main, /systemPanel\.gameSettings\.messenger/);
   assert.match(main, /channel==='field'/);
   assert.match(main, /kind:'speech'.*z:250210/);
   assert.match(log, /list\.children\.length\s*>\s*64/);

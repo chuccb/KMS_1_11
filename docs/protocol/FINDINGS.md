@@ -1139,7 +1139,7 @@ python3 tools/kstr.py MapleStory.exe.c sub_470E10
 | `0x16` | 商店購買 | `sub_4B6B40` | 未讀；字串「정말로 사시겠습니까?」「몇 개를 사시겠습니까?」「현금이 부족합니다」|
 | `0x20` | **人氣**（인기도 +／−）| `sub_55D7B0` | `u32 目標角色 id` + `u8 up`；字串「캐릭터를 찾을 수 없습니다」「잠시 후 다시 시도해 보세요」是 client 自己的前置（§4.38）|
 | `0x14` | 社群選單（개인정보／인기도 +／인기도 -／귓속말／교환신청／파티초대）| `sub_512570` | 未讀；送出前用 `sub_51D7D0(CUserPool, name)` 找玩家 |
-| `0x24` | messenger（쪽지）| `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`（CUIMessenger）| 未讀 |
+| `0x24` | messenger（쪽지）| `sub_4DDFE0`／`sub_4DE280`／`sub_4DE490`／`sub_4DEAF0`（CUIMessenger）| ✅ §4.41（伺服器）＋§4.41.6（視窗／瀏覽器全鏈，ADR-095）；s2c `0x4D` 同節 |
 
 `/헉*`（GM）系列全被 `if ((*(CWvsApp+9) & 1) != 0)` 包住——那就是 §4.8 `0x01` 回包的 `app9`；
 玩家指令（`/귓속말`、`/찾기`、`/교환`、`/파티*`）在這層之外。
@@ -4003,6 +4003,65 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
   §4.39 的舊筆記寫反了，這裡以機器碼為準。
 - **`0x4E`／`0x4F`**：同一個 handler，但沒有辦法從封包分辨三者，所以只送 `0x4D`。
 
+#### 4.41.6 ✅ 瀏覽器側 CUIMessenger：視窗、字串、typing 政策（ADR-095）
+
+§4.41 解出了封包；本節是**視窗這一側**的原證與對應實作（`client/messenger-state.ts` 模型＋
+`client/messenger-window.ts` 繪製／hit＋`client/main.js` 接線），證據全部出自 PE／listing／WZ。
+
+**開窗的兩條路**：
+
+1. 狀態列的 **BtChat**（`sub_4F6B70` 建 `CCtrlButton(parent, 1004, 2, 65, 91, 38, 17, "UI/StatusBar.img/BtChat")`；
+   狀態列原點 y=392 → 頁面 (65,483)。`sub_4F88C0` case 1004 → `sub_4DDF10(0)`）：`roomId=0`＝開新房。
+2. 邀請模態的「是」（`sub_4E1BB0`）→ `sub_4DDF10(roomId)`，roomId 就是 `0x4D type 3` 帶來的那個 u32。
+
+`sub_4DDF10` 先建窗（`sub_4DDAF0`：`this_8 == nullptr` 才 HeapAlloc；已開著＝no-op，所以 BtChat
+連點不會開兩扇），視窗 297×335、home (500,50)（`sub_43D750` uiWndX5/uiWndY5）。建窗即印五行說明
+（`sub_4DDFE0` 在送 `0x24 type 0` **之前**先印）；之後的 participant 回包逐格填人。
+
+**`sub_4E0FF0` 的控制項矩形**（窗內座標）：id 1000 關閉鈕 (152,9,26,26)＝`UI/UIWindow.img/BtUIClose`；
+id 1001 輸入框 `CCtrlEdit(11,286,176,12)` 上限 256 字；id 1002 捲軸
+`CCtrlScrollBar::Create(parent,1002,1,0,179,58,218,0)`，`+44 = 172`＝log 折行寬。log（`sub_4E1320`）
+自 pos 繪 16 列，x=10、y=63+13k——與交易 log 同一個 CCtrlScrollBar，故共用 ADR-094 抽出的
+`client/vscroll.ts`（travel 218−2×12−12=182；max=rows−15）。成員欄（`sub_4DFB50`）：腳底
+y=103+98×slot、avatar 置中於 charView 欄 x=248、名字白字 (202,105+98×slot)。
+
+**PE 內逐字讀出的韓文字串**（VA→檔案偏移直接自二進位读出、cp949 解碼）：
+
+| 字串 | PE 位置 | 用途 |
+|---|---|---|
+| `[ Maple Messenger 도움말 ]`＋四行 | `.data` help 區塊 | 開窗即印的五行 |
+| `- '%s'님이 입장하셨습니다` | aSI_0 | `type 0` announce |
+| `- '%s'님이 퇴장하셨습니다` | — | `type 2` |
+| `- 초청 받은 대화방에 참가하지 못했습니다` | — | `type 1` |
+| `- '%s'님에게 초청 메시지를 보냈습니다`／`- '%s'님을 찾지 못했습니다` | — | `type 4` ok=1／0 |
+| `- 다른 캐릭터의 이름을 입력하세요.` | — | `/초대` 名字空／邀自己 |
+| `- '%s'님께서 대화방 초청 메시지를 보냈습니다` | @5BC87C（`sub_4E1BB0` 內 push aS_8/aSE_0，004E1C44/004E1CCE）| 邀請到達時**視窗已開**：只印一行 |
+| `'%s'님께서 대화방\r\n 초청 메시지를 보냈습니다\r\n초청에 응하시겠습니까?` | @5BC834 | 邀請到達時**視窗已關**：模態（是→進房；沒有拒絕封包，TTL 60s 自然過期）|
+| ` 님이 입력중입니다` | aI_13 | typing 列；多個名字以「,」相接 |
+
+**打字（typing）鏈**：`sub_4DEAF0` 每 3000ms 檢查（`+96` timer、`+92` flag）：輸入框非空且未送過 →
+`0x24 type 5` 送 `名字+"1"`；清空且送過 → `名字+"0"`。**沒有 `" : "` 分隔**——收端（`sub_4E1E30`）
+切掉最後一個字元當旗標、比對成員名，只更新 typing（頭像上蓋 `0x0CFFFFFF` 幽靈色＋底部
+(11,316) 印 `名字… 님이 입력중입니다` 列），**不印成聊天行**。伺服器政策（`loginserver.ts`
+`sayInMessenger`）：無分隔的行只重蓋前綴（防偽造他人名字）原樣轉發，絕不組成聊天行。
+瀏覽器以 globalAlpha 0.35 的淡化近似原版的 0x0CFFFFFF tint（🟡：原 tint 是叠加色、非透明度）。
+
+**說話與指令**（`sub_4DE490`／`sub_4E24B0`）：Enter 先比對 `/q`（視窗關閉＋`0x24 type 2`）再比對
+`/초대`（CP949 三個 byte 前綴；取空白後的名字送 `type 3`，空名／自己＝印 otherName 列不送）；
+其他 `/…` 原證只有這兩條指令——未知指令不送不印（🟡 靜默 no-op）。一般文字：client **自己組好**
+`自己名字 + " : " + 文字`，**先印在自己的訊息區**才送 `type 5`（所以伺服器不回送給說話的人）。
+
+**瀏覽器接線**：`ClientSession` 的 `0x4D` 分派照 `0x50` 的樣子在**邊界**轉 CP949
+（`decodeMessengerEvent` 收、`byteStringOf`＝`encodeCp949` 送——`writeAsciiString` 只吃 byte string）；
+webclient 路由 `messenger-enter/leave/command/say`；輸入框是 `#game-ui` 內的真 DOM `#messenger-say`
+（隨窗移動、Enter 送、Escape blur）。訊息上限 128 行（🟡 原版未讀出 ring 大小）。SystemMenu 的
+goMessenger 勾選框啟用（`sub_4E1BB0` 的 `CConfig+28` 閘門；瀏覽器端 `gameSettings.messenger` 同 policy）。
+
+**驗證**：`messenger-state.test.ts`（模型全 transition＋slash 規則＋捲軸幾何）、
+`native-messenger-session.test.ts`（0x4D→事件、0x24 四方法、CP949 邊界）、
+`native-messenger-browser.test.ts`（Chromium：hit 矩形、40 行釘底 max=25/thumbTop=194、捲動重繪、
+成員名與 typing 列像素差、邀請模態 yes→roomId 42）。
+
 ### 4.42 ✅ AP 請求的 bytes／🟡 能力窗與四基礎能力分配
 
 `sub_4F2D70`（CUIStat button ids 2000..2005）呼叫 `sub_55CF60`。後者用
@@ -4093,6 +4152,21 @@ font=`this+61`、首列＝scrollbar 位置 `*(this[58]+48)` → **恰 16 列**�
 （MapleStory.exe.c:353029）**整包靜默忽略**——不顯示「'%s'님이 파티에 초대했습니다.\r\n파티에
 가입하시겠습니까?」（PE 0x5C0304 原文，與瀏覽器逐字相同）、**不回任何包**；瀏覽器已同語意接上，
 選項 UI 的 exchange／party 兩格因此啟用（messenger＝無瀏覽器消費者、game＝原版零引用，仍停用）。
+⑤（ADR-094）log scrollbar（id 1003）全鏈完成： dword 佈局 +48 pos／+52 max／+56 hit-zone／+64 capture／
++68 arrowLen=12（`sub_451240` Create 後以 COM art cell 高度回填，asm 004512E4-004512F5）／+72 trackLen=216／
++84/88/92 drag startPos/X/Y（`sub_452670`）；建立參數 Create(parent,1003,1,0,x=262,y=21,len=216,0,1) 於
+`sub_4D3EF0`（asm 4D4262-4D42E8），`+44=166` 為 log 換行寬。clamp=`sub_452150`（max>1 → pos∈[0,max−1]）；
+hit zone=`sub_452500`（外／max≤1→100；v≤12→101 up；v≥204→102 down；thumbTop=12+floor(pos×180/(max−1))；
+<thumbTop→103 pageUp；≤thumbTop+12→105 thumb；else 104 pageDown）；箭頭±1=`sub_4525B0`(notify 300/301)；
+頁面±max(floor(max/16),16)=`sub_452600`(302/303)；拖拉 pos=startPos+(double)max×dy/180 截斷+clamp=
+`sub_4526A0`(304，hit 用 max−1、移動用 max)；放開=`sub_4522B0` ReleaseCapture；滾輪=`sub_452340`
+PtInRect(own rect)→pos±steps；按住 auto-repeat=`sub_4523D0`（timer，瀏覽器不重現🟡，同 skills 政策）。
+append 規則=`sub_4D5900`：wasBottom=pos≥舊max−16 於 append **前**判定，append 後 max=count−15，
+wasBottom∧max>1→pos=max−1；繪製=`sub_4D5730` 自 pos 起 16 列。art=`UI/Basic.img/VScr/{enabled:{prev0,prev1,
+next0,next1,base,thumb0,thumb1},disabled:{prev,next,base}}` 皆 12×12 Canvas（WZ dump 實證；EXE 無 VScr ASCII，
+paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原）。實作：`client/trade-state.ts`
+`tradeLogScroller()`（純函數庫）＋`client/trade-window.ts` paint/hit＋`client/main.js` 滑鼠／滾輪接線；
+單元（zone/clamp/follow/page/drag 截斷）＋Chromium（VScr cells、thumb 移動、首列重繪）皆綠。
 
 ## 5. 字元編碼
 

@@ -6,6 +6,7 @@ import { tradeRenderer, tradeWindowAt } from "../../../client/trade-window.ts";
 import {
   TRADE_TEXT,
   TRADE_WINDOW,
+  tradeLogScroller,
   tradeState,
   type TradeRoomState,
 } from "../../../client/trade-state.ts";
@@ -30,17 +31,19 @@ export function installTradeFixture() {
     audio: { effect: () => {} },
   });
   const state = tradeState();
+  const scroll = tradeLogScroller();
   const at = { ...TRADE_WINDOW.home };
   return {
     calls: () => calls,
     state,
+    scroll,
     at,
     hit(x: number, y: number) {
-      return tradeWindowAt(x, y, at, state.room);
+      return tradeWindowAt(x, y, at, state.room, scroll);
     },
     render(room: TradeRoomState | undefined) {
       ctx.clearRect(0, 0, 800, 600);
-      renderer.draw(at, room, {});
+      renderer.draw(at, room, {}, scroll);
     },
     pixel(x: number, y: number) {
       const d = ctx.getImageData(x, y, 1, 1).data;
@@ -64,6 +67,10 @@ export function installTradeFixture() {
       await Promise.all(
         [
           TRADE_WINDOW.path,
+          ...["prev0", "prev1", "next0", "next1", "base", "thumb0", "thumb1"].map(
+            (cell) => `UI/Basic.img/VScr/enabled/${cell}`,
+          ),
+          ...["prev", "next", "base"].map((cell) => `UI/Basic.img/VScr/disabled/${cell}`),
           "UI/UIWindow.img/BtUIClose/normal/0",
           "UI/UIWindow.img/Trade/BtTrade/normal/0",
           "UI/UIWindow.img/Trade/BtCoin/normal/0",

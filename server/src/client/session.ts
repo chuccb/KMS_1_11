@@ -8,6 +8,12 @@ import {
   readMiniRoomResult,
   type MiniRoomEvent,
 } from "../protocol/miniroom.ts";
+import {
+  MESSENGER_OPCODE,
+  encodeClientMessengerRequest,
+  readMessengerResult,
+  type MessengerEvent,
+} from "../protocol/messenger.ts";
 import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../protocol/fame.ts";
 import { encodeClientSkillUse } from "../protocol/skilluse.ts";
 import {
@@ -401,6 +407,7 @@ export type ClientEvent =
   | { kind: "party"; result: PartyResult }
   | { kind: "party-command"; feedback: PartyCommandFeedback }
   | { kind: "trade"; event: MiniRoomEvent }
+  | { kind: "messenger"; event: MessengerEvent }
   | { kind: "trade-command"; feedback: TradeCommandFeedback }
   | { kind: "fame"; result: FameFeedback }
   | { kind: "user-enter"; user: UserView }
@@ -1181,6 +1188,38 @@ export class ClientSession {
     await this.gameLink.send(encodeClientMiniRoomRequest({ kind: "leave" }));
   }
 
+  /**
+   * 메신저（`0x24`）: the four native senders. `roomId == 0` opens a fresh room
+   * (`sub_4DDFE0` via the StatusBar's BtChat, id 1004); the invite modal's yes re-sends the
+   * room id the server put in `0x4D type 3` (`sub_4DDF10`).
+   */
+  async messengerEnter(roomId: number): Promise<void> {
+    if (!this.gameLink) throw new Error("messenger needs a field session");
+    await this.gameLink.send(encodeClientMessengerRequest({ kind: "enter", roomId }));
+  }
+
+  /** `sub_4DE280`: closing the window leaves the room. */
+  async messengerLeave(): Promise<void> {
+    if (!this.gameLink) return;
+    await this.gameLink.send(encodeClientMessengerRequest({ kind: "leave" }));
+  }
+
+  /** `sub_4E24B0`: `/초대 <name>` sends the name only. */
+  async messengerCommand(name: string): Promise<void> {
+    if (!this.gameLink) return;
+    await this.gameLink.send(
+      encodeClientMessengerRequest({ kind: "command", text: byteStringOf(name) }),
+    );
+  }
+
+  /** `sub_4DE490`/`sub_4DEAF0`: a chat row or the separator-less typing row. */
+  async messengerSay(line: string): Promise<void> {
+    if (!this.gameLink) return;
+    await this.gameLink.send(
+      encodeClientMessengerRequest({ kind: "chat", line: byteStringOf(line) }),
+    );
+  }
+
   async attack(
     targets: {
       mobId: number;
@@ -1804,6 +1843,15 @@ export class ClientSession {
           this.emit({ kind: "trade", event });
           return;
         }
+        case MESSENGER_OPCODE.result: {
+          // `sub_4E18D0`: one handler for 0x4D-0x4F; the view owns the CUIMessenger model and
+          // decides modal vs printed row, exactly like the native's this_8 null check.
+          this.emit({
+            kind: "messenger",
+            event: decodeMessengerEvent(readMessengerResult(new PacketReader(plain, 1))),
+          });
+          return;
+        }
         case SYSTEM_NOTICE_OPCODE: {
           const notice = readSystemNotice(new PacketReader(plain, 1));
           if (notice.type === 0 || notice.type === 1)
@@ -2359,6 +2407,30 @@ function samePlayerName(a: string, b: string): boolean {
  */
 function decodeByteName(name: string): string {
   return decodeCp949(Uint8Array.from(name, (c) => c.charCodeAt(0)));
+}
+
+/** The browser side of `0x24` speaks JS strings; the wire is CP949 bytes (writeAsciiString). */
+function byteStringOf(text: string): string {
+  return String.fromCharCode(...encodeCp949(text));
+}
+
+/** `0x4D` carries its names and its rows as raw CP949 bytes, exactly like `0x50` does. */
+function decodeMessengerEvent(event: MessengerEvent): MessengerEvent {
+  switch (event.kind) {
+    case "participant":
+      return {
+        ...event,
+        participant: { ...event.participant, name: decodeByteName(event.participant.name) },
+      };
+    case "invite":
+      return { ...event, inviterName: decodeByteName(event.inviterName) };
+    case "inviteResult":
+      return { ...event, name: decodeByteName(event.name) };
+    case "chat":
+      return { ...event, line: decodeByteName(event.line) };
+    default:
+      return event;
+  }
 }
 
 /** `0x50` carries its names and its log text as raw CP949 bytes, like party and fame do. */
