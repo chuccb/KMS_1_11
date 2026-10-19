@@ -1,4 +1,8 @@
-import { partyMessage, partyInvitationText } from "./party.ts";
+import { chatEntry } from "./chat-entry.ts";
+import { partyInvitation } from "./party-invitation.ts";
+import { runSocialCommand } from "./social-commands.ts";
+import { partyCommandLines } from "./party-state.ts";
+import { partyMessage } from "./party.ts";
 import { playerMenu } from "./player-menu.ts";
 import { playerContains, playerMenuParty } from "./player-menu-data.ts";
 import { fameMessage } from "./fame.ts";
@@ -481,6 +485,7 @@ function handle(message) {
       visualFieldActive = true;
       playerMenuEnabled = message.playerMenu === true;
       partyInviteIdentity = message.partyInviteIdentity === true;
+      socialCommandsEnabled = message.socialCommands === true;
       contactField = message.contactField;
       void damageArt.preload();
       void deathFx.preload();
@@ -595,23 +600,16 @@ function handle(message) {
       if(text!==undefined)chatHistoryPanel.append(text,'fame');
       return;
     }
+    case 'party-command':
+      for(const text of partyCommandLines(message.feedback))chatHistoryPanel.append(text,'fame');
+      return;
     case 'party': {
       const r=message.result;
       partyMenuState.receive(r,selfView?.characterId??0);
       playerContext.close(false);
-      if(r.kind==='invite') {
-        if(!partyInviteIdentity){
-          send({t:'party-response',inviterId:r.inviterId,accepted:false});
-          chatHistoryPanel.append('此附接入口未證實原生server邀請身份保護，已暫停派對邀請／接受；既有世界未重啟。','fame');return;
-        }
-        if(itemDialog.open||systemPanel.visible||playerContext.open||talkingNpc!==undefined||portalPending) {
-          send({t:'party-response',inviterId:r.inviterId,accepted:false});return;
-        }
-        const field=self;
-        itemDialog.confirm({text:partyInvitationText(r.inviterName),
-          accept:()=>{if(self===field)send({t:'party-response',inviterId:r.inviterId,accepted:true});},
-          reject:()=>send({t:'party-response',inviterId:r.inviterId,accepted:false})});
-      }else {
+      if(r.kind==='invite') partyPrompt.offer(r.inviterId,r.inviterName);
+      else {
+        partyPrompt.membershipChanged(partyMenuState.id!==0);
         const text=partyMessage(r,selfView?.characterId??0,selfView?.name??'');
         if(text!==undefined)chatHistoryPanel.append(text,'fame');
       }
@@ -4883,10 +4881,10 @@ window.addEventListener("blur", () => {
 /**
  * Browser commands; map jumps still use the native 0x0D packet and server-side operator policy.
  *
- * The 2003 client spells them `/귓속말` and `/헉추적`; the spellings never reach the wire - the
+ * The ordinary-player commands are `/귓속말` and `/찾기`; the spellings never reach the wire - the
  * client translates them into `0x23` kind 0x06 / 0x05 itself - so `/w` and `/f` are this page's own
- * names for the same two requests (ADR-036). Anything that is not one of them is chat, including a
- * line that merely starts with a slash.
+ * names for the same two requests (ADR-036). Native social commands now share the strict router;
+ * a slash line never falls through to field chat (also enforced at the bridge boundary).
  *
  * @param {string} text what was typed
  * @param {() => void} local print a line in this page's own chat box
@@ -4952,58 +4950,28 @@ function runCommand(text, local) {
   if (/^\/help$/i.test(text)) {
     local(
       "系統",
-      "/tools 開啟體驗工具（非原版、需授權）、/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息、/f 名字。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
+      "/tools 開啟體驗工具（非原版、需授權）、/map ID（別名 /warp、/go、/헉맵；需開放權限）、/maps [關鍵字]、/where、/w 名字 訊息（原 /귓속말）、/f 名字（原 /찾기）、/파티정보、/party info|create|leave|invite 名字|kick 名字|accept|decline。舊附接端邀請／接受暫停。傳送點：地面按↑；type 3 自動進入；M 顯示／隱藏小地圖。",
     );
     return true;
   }
-  const match = /^\/(w|f)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
-  if (!match) {
-    if (text.startsWith("/")) {
-      local("系統", "未知指令，輸入 /help 查看指令。");
-      return true;
-    }
-    return false;
-  }
-  const [, command, name, rest] = match;
-  if (command === "f") {
-    if (rest !== undefined && rest !== "") {
-      local("系統", "用法：/f 名字");
-      return true;
-    }
-    beginUserRequest(name);
-    return true;
-  }
-  if (rest === undefined || rest === "") {
-    local("系統", "用法：/w 名字 訊息");
-    return true;
-  }
-  beginUserRequest(name,rest);
-  return true;
+  if(runSocialCommand(text,{
+    request:beginUserRequest,
+    error:message=>local("系統",message),
+    party(command,name){
+      if(!socialCommandsEnabled){local("系統","此入口尚未載入派對指令，請使用新版附接入口。");return;}
+      send({t:'party-command',command,name});
+    },
+  }))return true;
+  if(text.startsWith('/')){local("系統","未知指令，輸入 /help 查看指令。");return true;}
+  return false;
 }
 
-// Chat focus is an interaction boundary too: do not let a cold Ctrl arrive while editing.
-ui.say.addEventListener('focus',()=>{keys.clear();localActionEpoch++;quickDrag=undefined;});
-ui.say.addEventListener("keydown", (event) => {
-  if(event.isComposing||event.keyCode===229)return;
-  // 4F8CB0: Esc clears the edit; left/right on an empty edit return focus to the field.
-  if(event.key==='Escape'||(['ArrowLeft','ArrowRight'].includes(event.key)&&!ui.say.value)){
-    event.preventDefault();event.stopPropagation();ui.say.value='';ui.say.blur();return;
-  }
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  event.stopPropagation(); // Blurring before bubbling must not let the global Enter handler reopen chat.
-  const text = ui.say.value.trim();
-  ui.say.value = "";
-  if (text !== "" && !runCommand(text, chatLine)) {
-    if (whisperRecipient) {
-      beginUserRequest(whisperRecipient,text);
-    } else send({ t: "say", text });
-  }
-  if (!event.shiftKey) ui.say.blur();
-});
-
-ui.say.addEventListener("blur", () => {
-  ui.say.placeholder = ""; // Native idle field is blank; browser instructions live in title/aria-label.
+// Shared strict edit lifecycle; gameplay and transport remain owned by this integration.
+chatEntry({
+  input:ui.say,
+  onFocus(){keys.clear();localActionEpoch++;quickDrag=undefined;},
+  command:text=>runCommand(text,chatLine),
+  send(text){if(whisperRecipient)beginUserRequest(whisperRecipient,text);else send({t:'say',text});},
 });
 
 /** The first thing a user sees; also what a refresh returns to. */
@@ -5346,9 +5314,17 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
 /** 5128B0's user-pool hit is world-space; lens zoom only changes the inverse projection.
  * Weak keys retain the previous rendered remote pose without keeping departed actors alive.
  */
-let playerMenuEnabled = false, partyInviteIdentity = false;
+let playerMenuEnabled = false, partyInviteIdentity = false, socialCommandsEnabled = false;
 const playerHitHistory = new WeakMap();
 const partyMenuState = playerMenuParty();
+const partyPrompt = partyInvitation({
+  modal:itemDialog,
+  context:()=>loginScreens.stage==='game' && visualFieldActive && selfView?.hp>0 && !portalPending ? self : undefined,
+  canOpen:()=>!itemDialog.open && !systemPanel.visible && !playerContext.open && talkingNpc===undefined && !browserLabOpen(),
+  available:()=>partyInviteIdentity,
+  reply:(inviterId,accepted)=>send({t:'party-response',inviterId,accepted}),
+  unavailable:()=>chatHistoryPanel.append('此附接入口未證實原生server邀請身份保護，已暫停派對邀請／接受；既有世界未重啟。','fame'),
+});
 function canOpenPlayerMenu() {
   return playerMenuEnabled && loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 &&
     socket?.readyState===WebSocket.OPEN && map?.id===self?.mapId && !portalPending &&

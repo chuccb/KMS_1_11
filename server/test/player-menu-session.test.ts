@@ -205,7 +205,7 @@ test(
     assert.ok(event.kind === "party" && event.result.kind === "sync");
     assert.deepEqual(
       event.result.members.map((m) => m.name),
-      ["자기이름", "상대이름"],
+      ["자기이름", "상대이름", "", "", "", ""],
     );
     const invite = waitFor((event) => event.kind === "party" && event.result.kind === "invite");
     send(
@@ -282,10 +282,11 @@ test(
       }),
     );
     await asciiRoster;
-    await assert.rejects(
-      session.partyCommand("kick", "otheruser"),
-      /找不到/,
-      "55DB00 roster lookup is case-sensitive strcmp",
+    await session.partyCommand("kick", "otheruser");
+    assert.deepEqual(
+      events.at(-1),
+      { kind: "party-command", feedback: { kind: "memberNotFound", name: "otheruser" } },
+      "55DB00 exact strcmp refusal is local font6, not a generic bridge error",
     );
     await session.partyCommand("kick", "OtherUser");
     await barrier();
@@ -298,7 +299,11 @@ test(
     await left;
     await session.giveFame("OtherUser", true);
     assert.deepEqual(events.at(-1), { kind: "fame", result: { kind: "notFound" } });
-    await assert.rejects(session.partyCommand("invite", "OtherUser"), /找不到/);
+    await session.partyCommand("invite", "OtherUser");
+    assert.deepEqual(events.at(-1), {
+      kind: "party-command",
+      feedback: { kind: "targetNotFound" },
+    });
     const finalInvite = waitFor((e) => e.kind === "party" && e.result.kind === "invite");
     send(encodePartyResult({ kind: "invite", inviterId: 7, inviterName: byteName("첫초대자") }));
     await finalInvite;

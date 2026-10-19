@@ -37,7 +37,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 93個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 101個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/social-commands.ts`／`party-state.ts`／`party-invitation.ts`／`chat-entry.ts` | 原社交指令嚴格解析（`/파티*`／`/귓속말`／`/찾기`＋明示別名）、`55C5E0` 六格名冊狀態、邀請確認所有權與編輯框生命週期；`server/src/net/chat-input.ts` 與 bridge 共用同一路由，斜線行不會落到公開聊天 |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
 | `client/drop-presentation.ts`／`drop-renderer.ts` | unknown drop/remove守衛、連續動畫、原PNG底部貼地與固定金幣幀；不代替server選fh |
@@ -57,7 +58,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `analysis/` | 既有研究輸出，不能把過時 manifest 描述當現在的解析結果 |
 | `generated/` | 可重建工具／素材與不可隨意重建的玩家 save／備份並存；均忽略但重要性不同 |
 
-**共用邏輯現況**：server 會 import `client/jobs.ts`、`characterstats.ts`、`mobmotion.ts` 等純模組，
+**共用邏輯現況**：server 會 import `client/jobs.ts`、`characterstats.ts`、`mobmotion.ts`、
+`client/social-commands.ts`、`client/party-state.ts`（`PARTY_MAX_MEMBERS` 由 `protocol/party.ts` 再匯出）等純模組，
 所以不能再寫「server 絕不 import client」。這些模組不得在載入時碰 DOM／Canvas／Audio；
 未來可獨立成共用目錄，但目前沒有建立 `shared/`，本輪也不搬路徑，以免破壞既有匯入與資源 URL。
 不能把此債務或未來方向描述成已完成的架構。

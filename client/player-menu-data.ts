@@ -1,5 +1,5 @@
 import type { UiPoint } from "./ui-types.ts";
-import type { PartyResult } from "../server/src/protocol/party.ts";
+export { partyState as playerMenuParty } from "./party-state.ts";
 export type PlayerMenuAction = "info" | "fameUp" | "fameDown" | "whisper" | "trade" | "invite";
 export interface PlayerMenuTarget {
   characterId: number;
@@ -97,32 +97,4 @@ export function playerContains(current: UiPoint, previous: UiPoint | undefined, 
     point.y >= Math.min(current.y, old.y) - 65 &&
     point.y < Math.max(current.y, old.y)
   );
-}
-/** Native shows invite only for partyId!=0 && first roster id==self id (5128B0).
- * Keep roster across map changes, like ClientSession; clear on session/title/disconnect only.
- */
-export function playerMenuParty() {
-  let partyId = 0,
-    ids: number[] = [];
-  return {
-    receive(result: PartyResult, selfId: number) {
-      if (result.kind === "created") {
-        partyId = result.partyId;
-        ids = [selfId];
-      } else if (result.kind === "sync" || result.kind === "joined" || result.kind === "left") {
-        ids = result.members.map((member) => member.characterId);
-        partyId = ids.includes(selfId) ? result.partyId : 0;
-      } else if (result.kind === "ended") {
-        partyId = 0;
-        ids = [];
-      }
-    },
-    leader(selfId: number | undefined) {
-      return !!partyId && selfId !== undefined && ids[0] === selfId;
-    },
-    clear() {
-      partyId = 0;
-      ids = [];
-    },
-  };
 }

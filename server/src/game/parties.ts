@@ -74,6 +74,7 @@ export class PartyRegistry {
     const party: Party = { id: this.nextId++, leaderId: leader.characterId, members: [leader] };
     this.parties.set(party.id, party);
     this.partyIdOf.set(leader.characterId, party.id);
+    this.invites.delete(leader.characterId);
     return party;
   }
 
@@ -87,7 +88,7 @@ export class PartyRegistry {
    * （呼叫端負責回 `0x10` type 15／7）。
    */
   join(party: Party, member: PartyMember): PartyMember[] | undefined {
-    if (!this.hasRoom(party)) return undefined;
+    if (this.parties.get(party.id) !== party || !this.hasRoom(party)) return undefined;
     if (this.partyIdOf.has(member.characterId)) return undefined;
     party.members.push(member);
     this.partyIdOf.set(member.characterId, party.id);
@@ -95,9 +96,20 @@ export class PartyRegistry {
     return party.members;
   }
 
-  /** 記一個邀請（`target` 之後可以用 `inviteOf` 查回來）。 */
-  invite(partyId: number, inviterId: number, targetId: number): void {
+  /** Repo lifecycle policy: only a current leader may record an offer to a nonmember.
+   * latest-wins remains unchanged; rejected/stale attempts cannot replace a valid slot.
+   */
+  invite(partyId: number, inviterId: number, targetId: number): boolean {
+    const party = this.partyOf(inviterId);
+    if (
+      !party ||
+      party.id !== partyId ||
+      party.leaderId !== inviterId ||
+      this.partyIdOf.has(targetId)
+    )
+      return false;
     this.invites.set(targetId, { partyId, inviterId });
+    return true;
   }
 
   inviteOf(targetId: number): PartyInvite | undefined {
@@ -144,6 +156,9 @@ export class PartyRegistry {
     if (leaderLeft || remaining.length === 0) {
       for (const rest of remaining) this.partyIdOf.delete(rest.characterId);
       this.parties.delete(party.id);
+      // Outgoing invitations are not membership rows. Release them too, including offline targets.
+      for (const [target, invite] of this.invites)
+        if (invite.partyId === party.id) this.invites.delete(target);
       return { party, member, leaderLeft, members, remaining: [] };
     }
     party.members.splice(index, 1);

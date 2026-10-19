@@ -1,9 +1,9 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-19。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-19（ADR-090 社交指令鏈）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
-**有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
+**有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。全案TS／ESNext／Bun整理也未完成，
 main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
@@ -16,7 +16,8 @@ main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIG
 
 | 範圍 | 現況入口 |
 |---|---|
-| 角色右鍵／人氣／密語／隊長邀請 | [原角色互動](NATIVE_PLAYER_INTERACTIONS.md)：原WZ／UnionRect／送出與回覆／綁定modal；權威inviterId核對與舊附接端invite／accept停用；交易房、完整人物資訊／party玩法仍未完成 |
+| 角色右鍵／人氣／密語／隊長邀請 | [原角色互動](NATIVE_PLAYER_INTERACTIONS.md)：原WZ／UnionRect／送出與回覆／綁定modal；權威inviterId核對與舊附接端invite／accept停用 |
+| 原社交指令（`/파티정보`等五條＋`/귓속말`／`/찾기`）、名冊六格、邀請所有權 | [原社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)：原送出前检查搬回client、斜線行不再落公開聊天、`524A00`密語闸門；這版GameMenu無party窗分支（原證），交易房／Messenger／人物資訊id0仍未完成 |
 | 原Notice/OK與六列loot／EXP訊息 | [原訊息呈現](NATIVE_FEEDBACK.md)：真type1 modal、整數fade、共同名稱cache／音效／生命週期；非GDI逐像素或全UI管理器 |
 | 可選本機物理步長／插值、十種鏡頭 | [手感實驗](MOTION_EXPERIMENTS.md)，明示非原版；預設30ms不變 |
 | 普通地空力學／有向整數地形／物理場界／繩梯／30ms有序wire | [普通力學](NATIVE_LOCOMOTION.md)與[有向整數地形／物理場界](NATIVE_TERRAIN.md)，非完整CVecCtrl |
@@ -57,7 +58,7 @@ main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIG
 - 自然 AP／SP、原轉職流程與加成；資料未定位不套慣見5／3或後期規則。
 - 卷軸、cash／pet、完整怪物owner攻擊 AI／狀態機、monster skill、飛行／仇恨等分支；基本active metadata與呈現已接，不代表全AI完成。
 - 原 quest／taxi／trunk scripts：原 server 腳本缺證據，不自創價格／路線／任務。
-- 組隊已接指令／名冊／原式邀請與Rage收件者，尚非完整party視窗；交易／Messenger等完整瀏覽器UI仍待接通。
+- 組隊已接指令／名冊（固定六格）／原式邀請與Rage收件者；這版原檔的GameMenu沒有party視窗分支，`/파티정보`是本機印名冊，故不补后期样式窗。交易／Messenger等完整瀏覽器UI仍待接通。
 
 ## 優先序 4：工程整理與營運基礎
 

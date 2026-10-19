@@ -1324,7 +1324,7 @@ s2c `0x23`（`encodeUserAttack`，FINDINGS **§4.11.7b**）。三個細節是決
 | 誰是權威 | 隊伍只存在伺服器上；client 的 `CWvsApp + 404`（party id）與 102-byte 名冊是**被寫的那一邊**，它沒有任何送出者會改自己（FINDINGS §4.37.3） |
 | 證據邊界 | 五個請求、九個回包、名冊的形狀、兩種 `flag` 的意思全部是 binary 讀出來的；「誰能邀請誰」「隊伍幾個人」也是 client 自己的常數（6 格），沒有新增規則 |
 | 失效處理 | 邀請不是狀態機：接受時重新驗「隊伍還在＋有位子＋自己不在隊伍」，所以不需要過期時間，也不需要清理常式 |
-| 跨圖 | 名冊沒有地圖，強迫同圖只會多一條沒有證據的規則；client 的 `/파티초대` 查不到別圖的人是**client 的限制**，不是協定的限制（§4.37.7） |
+| 跨圖 | 名冊沒有地圖，強迫同圖只會多一條沒有證據的規則；client 的 `/파티초대` 查不到別圖的人是**client 的限制**，不是協定的限制（§4.37.8） |
 
 **被否決的選項與原因**：
 
@@ -2999,3 +2999,17 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - Server配額仍為本repo政策：level15、UTC day／month、判斷次序、u16 clamp與runtime ledger，不冒稱官方原server；未猜Magic Guard／Booster等公式。精確baseline差異與LIVE只讀證據見專文，CI既有44個失敗仍明示。
 
 常數、證據地址、精確驗證與剩餘差異見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)。
+
+## ADR-090：原社交指令鏈、名冊六格與邀請所有權（2026-10-19）
+
+- 更正兩处旧判讀：`sub_559E20`（CUIGameMenu分派）PE `00559EF5`起27bytes與C都只有index3/4/5，`UI/UIWindow.img`顶层无`Party`子树，所以这版没有party窗分支，不补后期样式窗冒称原版；玩家找人是`/찾기`（PE `005B5FB8`→`sub_4717D0`），`/헉추적`在GM闸門内。`/파티정보`→`sub_55CC40`是本机印六格名冊＋队长提示，不送封包。
+- `readPartyTable`改为固定六格。旧版丢弃空名字格会让第1格被当队长、让`type10`用名冊反推partyId、并破坏round-trip；现在解码保留`characterId:0`／`name:""`，`test/party.test.ts`钉住byte-exact重编码。`client/party-state.ts`依`55C5E0`保存`partyId`（sync/joined直接采用、self-left归零、ended只归零不清bytes），`PARTY_MAX_MEMBERS`移到client纯模块由protocol再匯出。
+- 原版送出前检查搬到client：create/leave的在队状态、invite/kick的`n3000[102]==n3000[5]`队长闸門、池`51D7D0`（lstrcmpiA）与名冊`55DB00`（strcmp）两条不同大小写规则，都用新`party-command`事件回原文（「파티의 방장이 아닙니다」「캐릭터를 찾을 수 없습니다」`"'%s'님은 파티의 멤버가 아닙니다."`），不再是一般throw；`info`死亡时可用，其余保留living政策，送出前不乐观改成员关系。
+- **修掉一个隐私漏洞**：旧bridge `say()`只认`/party`与四条`/파티*`，其余任何文字直接变`0x12`公开聊天，`{t:"say",text:"/귓속말 …"}`会被公开广播。现在browser与bridge共用`client/social-commands.ts`＋`server/src/net/chat-input.ts`：原文`/귓속말`（`526370`两段且非空）／`/찾기`／五条`/파티*`、别名`/party …`／`/w`／`/f`；`526070`是单个ASCII空白前缀，不是`\s+`；参数错／未知／含换行NUL一律拒绝且不落公开聊天；`/교환`有原`0x25`链但browser交易房未完成，明示拒绝不送假邀请；`/map`等操作者命令仍走既有typed路径与授权。
+- `/귓속말`在共用路由套用原`524A00`名字闸門（4..12 CP949 bytes、I/l少于四个、不能对自己），原版静默丢弃、这里回同一句韩文；`/찾기`原版无此闸門故不加。闸門放在指令入口而非传输层`{t:"whisper"}`，以免改掉既有wire回归契约。`field` projection新增`socialCommands`标记：旧附接进程配磁盘新browser时标记缺席→界面明示不送，不丢旧bridge不认识的message type；`partyInviteIdentity`语义不变，attach仍固定false。
+- 邀请确认抽出`client/party-invitation.ts`：第一个offer拥有modal、后来者不重定向不排队；真的入队会关自己这张并本地decline（不发明原生拒绝opcode）；场地／死亡换owner时按「是」降级为decline，旧callback不能回答新offer、不能关别人的窗、不能送两次。`client/chat-entry.ts`抽出编辑框（IME Enter不送、Shift+Enter留焦点、Escape／空内容退出），指令消费同步，被拒的私讯不会await后变公开聊天。
+- 权威端`PartyRegistry`修三处悬空：`invite()`先验party存在／inviter是现任队长／target未入队并回boolean；`create()`清新队长旧pending；解散时清该party全部待答邀请（含离线目标）；`join()`拒绝不属于registry的`Party`物件。拒绝记录邀请时`GameEntryServer`回`0x10` type0。`resolveInvite(targetId,inviterId)`不变，`test/serve.test.ts`新增「inviterId不符→unknown且真实offer未被消耗」。latest-wins单槽仍是repo政策，非原官方server已证算法。
+- strict／format／build／diff通过；focused69/0（13files，13.08s），完整**1131 pass／44 fail**（1175tests／138files／5315expects，350.05s，退出码1），对ADR-088基准1090/44之failure multiset（44records／42unique）新增0／移除0，CI仍不绿。467个相对连结0断链；附接LIVE title frame32／errors[]／0WS、101支client TS全200。17模块纯import在fs／net／Bun.serve／fetch挂钩下0启动I/O，含ESM named-binding自我验证避免假零。main5394→5370行、client101支TS；`main.js`／`client_probe.mjs`迁移与既有44项失败仍未完成，CI不绿。
+- 附接LIVE仍以新进程服务且**不重启既有原生世界、不载入或改写save、不自动登入或操作角色**；因旧原生进程无身份闸門，该入口的邀请／接受继续停用，人气与密语可用。
+
+原证位址、六格语义、指令表与精确验证见[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。

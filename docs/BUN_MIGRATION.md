@@ -2,7 +2,14 @@
 
 2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：原角色互動／附接橋接（ADR-089）
+## 最新增量：原社交指令鏈與名冊六格（ADR-090）
+
+新增strict `social-commands`／`party-state`／`party-invitation`／`chat-entry`及`server/src/net/chat-input.ts`，browser與bridge共用同一指令路由；
+`readPartyTable`改為固定六格，`PARTY_MAX_MEMBERS`移到client純模块由protocol再匯出。未關strict／erasableSyntaxOnly，未新增依賴，未把JS只更名冒充遷移。
+client101支TS；main5394→5370行（抽出編輯框與邀請確認），仍不是完整main TS遷移，client_probe.mjs及原44項失敗亦未完成。
+本輪結果、原證位址與安全邊界見[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。
+
+## 前輪增量：原角色互動／附接橋接（ADR-089）
 
 新增strict `player-menu-data`／`player-menu`／`fame`／`party`及Session送出clock、具原PE／WZ／真Chromium與加密synthetic peer回歸，
 另有不建立世界／save的`tools/attach-web.ts`；補權威party邀請身份檢查並對舊附接端fail-closed；未關strict／erasableSyntaxOnly，沒有新增依賴或把JS只更名冒充遷移。

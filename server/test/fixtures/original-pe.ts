@@ -20,6 +20,16 @@ export function originalPe(name: string) {
     throw Error(`Unmapped original VA ${va.toString(16)}`);
   }
   return {
+    bytesAt(va: number, length: number) {
+      const start = offset(va);
+      if (
+        !Number.isSafeInteger(length) ||
+        length < 1 ||
+        offset(va + length - 1) !== start + length - 1
+      )
+        throw Error("Invalid original PE byte range");
+      return Buffer.from(bytes.subarray(start, start + length));
+    },
     containsCp949(text: string) {
       return bytes.includes(Buffer.from(encodeCp949(text)));
     },

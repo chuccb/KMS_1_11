@@ -44,7 +44,7 @@
  * `sub_55DB00` 用 `this + 432 + 13 * i` 找名字、用 `this + 408 + 4 * i` 取回角色 id（i = 0..5），
  * `sub_55CC40`（`/파티정보`）也以 13 bytes 步進印出六個名字。於是名冊＝
  * `u32 characterId[6]`（24 bytes）+ `char name[6][13]`（78 bytes）＝ **102 bytes**，
- * 空位是全 0。名字欄位與 `CharacterData` 的那一個相同（13 bytes、NUL 結尾、ASCII），所以直接沿用
+ * 空位是全 0。名字欄位與 `CharacterData` 的那一個相同（13 bytes、NUL 結尾、CP949 raw byte-string），所以直接沿用
  * `chardata.ts` 的 `nameFieldBytes`／`nameFieldToString`。
  *
  * 兩件 client 自己的事，伺服器不需要模仿但值得知道：
@@ -54,6 +54,7 @@
  *    用它填名冊第 0 格：`lstrcpyA(this + 432, *(this + 36) + 4)`），所以「角色還沒載入」時邀請整包
  *    丟掉。我們的伺服器只在遊戲內送它，所以一定會被讀到。
  */
+import { PARTY_MAX_MEMBERS } from "../../../client/party-state.ts";
 import { PacketReader, PacketWriter } from "./packet.ts";
 import { CHARACTER_NAME_BYTES, nameFieldBytes, nameFieldToString } from "./chardata.ts";
 
@@ -66,7 +67,7 @@ export const PARTY_OPCODE = {
 } as const;
 
 /** 名冊的格數：`sub_45F5C0` 的 102 bytes 就是 6 × (4 + 13)。 */
-export const PARTY_MAX_MEMBERS = 6;
+export { PARTY_MAX_MEMBERS } from "../../../client/party-state.ts";
 
 /** 一個隊員：角色 id 與名字（名字就是 `CharacterData` 的 13-byte 欄位）。 */
 export interface PartyMember {
@@ -176,14 +177,14 @@ export function encodePartyTable(members: readonly PartyMember[]): Uint8Array {
   return writer.toBytes();
 }
 
-/** 讀回 102-byte 名冊（`0x10` 的測試與 `decode` 用）。名字為空的格子會被丟掉。 */
+/** 讀回完整六格102-byte名冊。55C5E0是memcpy：空名字／id0也不可壓縮，否則會把第二格誤升為隊長。 */
 export function readPartyTable(reader: PacketReader): PartyMember[] {
   const ids: number[] = [];
   for (let i = 0; i < PARTY_MAX_MEMBERS; i++) ids.push(reader.readU32());
   const members: PartyMember[] = [];
   for (let i = 0; i < PARTY_MAX_MEMBERS; i++) {
     const name = nameFieldToString(reader.readBytes(CHARACTER_NAME_BYTES));
-    if (name !== "") members.push({ characterId: ids[i]!, name });
+    members.push({ characterId: ids[i]!, name });
   }
   return members;
 }
@@ -321,13 +322,22 @@ export function describePartyResult(result: PartyResult): string {
     case "invite":
       return `0x10 party: invite from ${result.inviterId} "${result.inviterName}"`;
     case "sync":
-      return `0x10 party: sync ${result.partyId} [${result.members.map((m) => m.name).join(", ")}]`;
+      return `0x10 party: sync ${result.partyId} [${result.members
+        .filter((m) => m.name !== "")
+        .map((m) => m.name)
+        .join(", ")}]`;
     case "created":
       return `0x10 party: created ${result.partyId}`;
     case "joined":
-      return `0x10 party: ${result.name} joined ${result.partyId} [${result.members.map((m) => m.name).join(", ")}]`;
+      return `0x10 party: ${result.name} joined ${result.partyId} [${result.members
+        .filter((m) => m.name !== "")
+        .map((m) => m.name)
+        .join(", ")}]`;
     case "left":
-      return `0x10 party: ${result.name}${result.kicked ? " kicked from" : " left"} ${result.partyId} [${result.members.map((m) => m.name).join(", ")}]`;
+      return `0x10 party: ${result.name}${result.kicked ? " kicked from" : " left"} ${result.partyId} [${result.members
+        .filter((m) => m.name !== "")
+        .map((m) => m.name)
+        .join(", ")}]`;
     case "ended":
       return `0x10 party: ${result.partyId} ended (leader ${result.leaderId} left)`;
     default:

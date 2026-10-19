@@ -14,6 +14,7 @@
 | [BUN_MIGRATION](BUN_MIGRATION.md) | 嚴格TS／ESNext／Bun已完成與未完成範圍、全套失敗multiset |
 | [BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md) | 顯示／DPR、影像快取、唯讀診斷與歷史native工具限制 |
 | [STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md) | 七支browser工具的strict TS／安全入口、NPC/mob資料邊界與剩餘範圍 |
+| [NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md) | 原社交指令鏈（`/파티정보`等五條＋`/귓속말`／`/찾기`）、名冊固定六格、`524A00`密語闸門、邀請所有權與GameMenu無party分支的原證 |
 | [NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md) | 真CUIContextMenu、四片WZ、人氣／密語／隊長邀請、韓文回覆／modal身份、既有世界不重啟的新版橋接與驗證 |
 | [NATIVE_FEEDBACK](NATIVE_FEEDBACK.md) | 原0x13 OK提示窗、六列loot/EXP、Shape2D整數fade、名稱cache／音效／modal生命週期與該輪驗證 |
 | [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md) | frame／play工具真實作遷移、同幀畫布證據、明示手動fixture與有界keyboard計畫 |

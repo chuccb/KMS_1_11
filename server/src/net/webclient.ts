@@ -1,3 +1,5 @@
+import { isPartyCommand } from "../../../client/social-commands.ts";
+import { routeChatInput } from "./chat-input.ts";
 import { Transpiler } from "bun";
 import { clientEventJson } from "./client-event-json.ts";
 import { readBrowserMovePath } from "./browsermove.ts";
@@ -685,6 +687,15 @@ class BrowserSession {
           if (typeof message.name !== "string" || typeof message.up !== "boolean")
             throw new Error("fame requires a name and a boolean up value");
           return await this.require().giveFame(message.name, message.up);
+        case "party-command":
+          if (!isPartyCommand(message.command) || typeof message.name !== "string")
+            throw new Error("party-command requires a known command and string name");
+          if (
+            (message.command === "invite" || message.command === "kick") !==
+            message.name.length > 0
+          )
+            throw new Error("only invite/kick take a nonempty name");
+          return await this.partyCommand(message.command, message.name);
         case "party-invite":
           if (typeof message.name !== "string") throw new Error("party-invite requires a name");
           return await this.partyCommand("invite", message.name);
@@ -1401,25 +1412,13 @@ class BrowserSession {
   }
 
   private async say(text: string): Promise<void> {
-    const command =
-      /^\/(?:party|파티)\s+(create|leave|invite|kick|accept|decline)(?:\s+(.+))?$/.exec(
-        text.trim(),
-      );
-    const native = /^\/(파티만들기|파티탈퇴|파티초대|파티강퇴)(?:\s+(.+))?$/.exec(text.trim());
-    if (command) return await this.partyCommand(command[1]!, command[2] ?? "");
-    if (native)
-      return await this.partyCommand(
-        (
-          {
-            파티만들기: "create",
-            파티탈퇴: "leave",
-            파티초대: "invite",
-            파티강퇴: "kick",
-          } as Record<string, string>
-        )[native[1]!]!,
-        native[2] ?? "",
-      );
-    await this.require().say(encodeCp949(text));
+    await routeChatInput(text, {
+      party: (command, name) => this.partyCommand(command, name),
+      whisper: (name, message) => this.whisper(name, message),
+      selfName: () => this.session?.selfView?.name ?? "",
+      find: (name) => this.find(name),
+      say: (message) => this.require().say(encodeCp949(message)),
+    });
   }
 
   private async move(
@@ -1474,7 +1473,7 @@ class BrowserSession {
     await this.require().whisper(String.fromCharCode(...encodeCp949(target)), encodeCp949(text));
   }
 
-  /** `/헉추적`: `0x23` kind 0x05, answered by `find-answer` (`0x1A` 0x09). */
+  /** `/찾기`: `0x23` kind 0x05, answered by `find-answer` (`0x1A` 0x09). */
   private async find(name: string): Promise<void> {
     const target = name.trim();
     if (target === "") return this.send({ t: "error", message: "find needs a name" });

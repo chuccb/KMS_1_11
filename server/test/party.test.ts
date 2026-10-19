@@ -112,7 +112,10 @@ test("the 102-byte roster is `u32 id[6]` + `char name[6][13]`", () => {
   const table = encodePartyTable(TWO_MEMBERS);
   assert.equal(table.length, 102);
   assert.equal(hex(table), TABLE_TWO);
-  assert.deepEqual(readPartyTable(new PacketReader(table)), TWO_MEMBERS);
+  assert.deepEqual(readPartyTable(new PacketReader(table)), [
+    ...TWO_MEMBERS,
+    ...Array.from({ length: 4 }, () => ({ characterId: 0, name: "" })),
+  ]);
   // Six slots is the client's own limit (`sub_45F5C0` copies 0x66 bytes).
   assert.equal(PARTY_MAX_MEMBERS, 6);
   assert.throws(
@@ -192,7 +195,23 @@ test("0x10 round-trips, and an unknown type reads as the client's default case",
   ];
   for (const result of results) {
     const bytes = encodePartyResult(result);
-    assert.deepEqual(readPartyResult(new PacketReader(bytes, 1)), result);
+    const decoded = readPartyResult(new PacketReader(bytes, 1));
+    const expected =
+      "members" in result
+        ? {
+            ...result,
+            members: Array.from(
+              { length: 6 },
+              (_, i) => result.members[i] ?? { characterId: 0, name: "" },
+            ),
+          }
+        : result;
+    assert.deepEqual(decoded, expected);
+    assert.deepEqual(
+      encodePartyResult(decoded),
+      bytes,
+      "fixed-slot decode re-encodes byte-exact, including all zero slots",
+    );
   }
   // Types with no case (the client's `default`) come back as `unknown`, and `7`/`14` share a message.
   assert.deepEqual(readPartyResult(new PacketReader(bytesFromHex("100e"), 1)), {

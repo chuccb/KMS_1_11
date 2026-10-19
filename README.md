@@ -147,7 +147,8 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 
 ## 最近功能與限制
 
-- 本輪：[原角色右鍵／人氣／派對邀請整鏈](docs/NATIVE_PLAYER_INTERACTIONS.md)／ADR-089：更正真選單入口、四片原WZ／角色UnionRect／密語、人氣送出冷卻與CP949回覆、隊長邀請及綁定確認對象；停用未完成交易房，不捏造server規則；補server接受inviterId核對，未證實的舊附接端暫停invite／accept。附接新web可保留既有記憶體世界，不重啟玩家進度。
+- 本輪：[原社交指令鏈與名冊六格](docs/NATIVE_SOCIAL_COMMANDS.md)／ADR-090：更正GameMenu在這版沒有party窗分支（PE机器码／C／listing／WZ顶层交叉），`/파티정보`是本機印六格名冊＋队长提示；名冊解碼改固定六格，避免空格被當成队长；原送出前检查搬回client並回原文；browser與bridge共用嚴格指令路由，斜線行不再落到公開聊天，`/귓속말`套用原`524A00`名字闸門；邀请确认抽出所有权与生命週期；权威registry修掉悬空邀请。
+- 前輪：[原角色右鍵／人氣／派對邀請整鏈](docs/NATIVE_PLAYER_INTERACTIONS.md)／ADR-089：更正真選單入口、四片原WZ／角色UnionRect／密語、人氣送出冷卻與CP949回覆、隊長邀請及綁定確認對象；停用未完成交易房，不捏造server規則；補server接受inviterId核對，未證實的舊附接端暫停invite／accept。附接新web可保留既有記憶體世界，不重啟玩家進度。
 
 - 前輪：[原版提示窗與六列螢幕訊息](docs/NATIVE_FEEDBACK.md)／ADR-088：補真正0x13/type1 OK modal、loot／金幣／拒絕／同級EXP、原6000ms整數fade、名字cache失敗重試與自己taken音效；含CP949／加密合包／原WZ Chromium與生命週期回歸，沒有改獎勵／角色／存檔。
 
@@ -176,5 +177,5 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 原 server 缺失的規則明示為重建政策；不以後期版本或「缺素材」猜測代替原證據。
 
 本輪依授權執行 strict型別／格式／單元與完整回歸／建置、隔離component與唯讀title驗證；不自動登入／操作玩家角色或修改玩家save。
-最新結果與未完成項目見 [角色互動續作](docs/NATIVE_PLAYER_INTERACTIONS.md)；前輪工具整理見[frame／play](docs/STRICT_FRAME_PLAY_TOOLS.md)。
+最新結果與未完成項目見 [原社交指令鏈](docs/NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](docs/NATIVE_PLAYER_INTERACTIONS.md)；前輪工具整理見[frame／play](docs/STRICT_FRAME_PLAY_TOOLS.md)。
 套件安裝、版本顯示、工具編譯、靜態閱讀與啟服都不算功能 PASS。舊測試數字只對應當時提交。

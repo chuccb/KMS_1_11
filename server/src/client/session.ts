@@ -1,3 +1,4 @@
+import { partyState, partyInfo, type PartyCommandFeedback } from "../../../client/party-state.ts";
 import { FameRequestClock, type FameFeedback } from "./fame.ts";
 import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../protocol/fame.ts";
 import { encodeClientSkillUse } from "../protocol/skilluse.ts";
@@ -6,7 +7,6 @@ import {
   readPartyResult,
   encodeClientPartyRequest,
   type PartyResult,
-  type PartyMember,
   type ClientPartyRequest,
 } from "../protocol/party.ts";
 import { questReplyFor, type QuestReplyDetail } from "./questreply.ts";
@@ -391,6 +391,7 @@ export type ClientEvent =
   | { kind: "active-skill-result"; skillId: number; accepted: boolean }
   | { kind: "skill-effect"; characterId: number; skillId: number; skillLevel: number }
   | { kind: "party"; result: PartyResult }
+  | { kind: "party-command"; feedback: PartyCommandFeedback }
   | { kind: "fame"; result: FameFeedback }
   | { kind: "user-enter"; user: UserView }
   | {
@@ -719,8 +720,7 @@ export class ClientSession {
   private activeSkillPending: number | undefined;
   private nextActiveAt = 0;
   private readonly fameClock = new FameRequestClock();
-  private partyId = 0;
-  private partyMembers: readonly PartyMember[] = [];
+  private readonly party = partyState();
   private partyInvite: number | undefined;
   private nextSkillAt = 0;
   private mesoPending = false;
@@ -993,9 +993,10 @@ export class ClientSession {
       performance.now() < Math.max(this.nextActiveAt, this.nextSkillAt)
     )
       throw new Error("技能等待前一項操作完成");
-    if (party && !this.partyId) throw new Error("此版本的憤怒入口需要先建立或加入隊伍");
+    if (party && !this.party.id) throw new Error("此版本的憤怒入口需要先建立或加入隊伍");
     const targets = party
-      ? this.partyMembers
+      ? this.party
+          .roster()
           .filter((member) => {
             const user = this.users.get(member.characterId);
             return (
@@ -1056,27 +1057,45 @@ export class ClientSession {
       this.partyInvite = undefined;
       return;
     }
-    if (!this.gameLink || !this.self || this.self.hp <= 0)
-      throw new Error("party needs a living field session");
+    if (!this.gameLink || !this.self) throw new Error("party needs a field session");
+    if (command === "info") {
+      this.emit({
+        kind: "party-command",
+        feedback: { kind: "info", lines: partyInfo(this.party, this.self.characterId) },
+      });
+      return;
+    }
+    // Living is existing browser policy; native471CD0/471E90/472050/4722E0 checks below are separate.
+    if (this.self.hp <= 0) throw new Error("party needs a living field session");
+    const reject = (feedback: PartyCommandFeedback) =>
+      this.emit({ kind: "party-command", feedback });
     let request: ClientPartyRequest;
-    if (command === "create") request = { kind: "create" };
-    else if (command === "leave") request = { kind: "leave", unknown: 0 };
-    else if (command === "accept") {
+    if (command === "create") {
+      if (this.party.id) return reject({ kind: "alreadyInParty" });
+      request = { kind: "create" };
+    } else if (command === "leave") {
+      if (!this.party.id) return reject({ kind: "notInParty" });
+      request = { kind: "leave", unknown: 0 };
+    } else if (command === "accept") {
       if (this.partyInvite === undefined) throw new Error("no current party invitation");
       request = { kind: "accept", inviterId: this.partyInvite };
       this.partyInvite = undefined;
     } else if (command === "invite" || command === "kick") {
-      const target =
+      if (!this.party.leader(this.self.characterId)) return reject({ kind: "notLeader" });
+      const targetId =
         command === "invite"
-          ? [...this.users.values()].find((u) => samePlayerName(u.name, name))
-          : this.partyMembers.find((u) => u.name === name); // 55DB00 uses strcmp, unlike pool51D7D0.
-      if (!target) throw new Error("找不到可邀請／移除的隊員");
-      request =
-        command === "invite"
-          ? { kind: "invite", targetId: target.characterId }
-          : { kind: "kick", targetId: target.characterId };
+          ? [...this.users.values()].find((u) => samePlayerName(u.name, name))?.characterId
+          : this.party.targetId(name);
+      if (!targetId)
+        return reject(
+          command === "invite" ? { kind: "targetNotFound" } : { kind: "memberNotFound", name },
+        );
+      request = command === "invite" ? { kind: "invite", targetId } : { kind: "kick", targetId };
     } else
-      throw new Error("party: create | invite <name> | accept | decline | leave | kick <name>");
+      throw new Error(
+        "party: info | create | invite <name> | accept | decline | leave | kick <name>",
+      );
+    // Never optimistically change roster or partyId: only native0x10 changes membership.
     await this.gameLink.send(encodeClientPartyRequest(request));
   }
 
@@ -1643,8 +1662,7 @@ export class ClientSession {
     this.activeSkillPending = undefined;
     this.nextActiveAt = 0;
     this.fameClock.reset();
-    this.partyId = 0;
-    this.partyMembers = [];
+    this.party.clear();
     this.partyInvite = undefined;
     this.nextSkillAt = 0;
     this.userRequestUntil = 0;
@@ -1688,19 +1706,9 @@ export class ClientSession {
             // with no unbounded queue: later offers cannot retarget the displayed confirmation.
             if (this.partyInvite !== undefined || !this.self || this.self.hp <= 0) return;
             this.partyInvite = result.inviterId;
-          } else if (result.kind === "created") {
-            this.partyId = result.partyId;
-            this.partyMembers = this.self
-              ? [{ characterId: this.self.characterId, name: this.self.name }]
-              : [];
-          } else if (result.kind === "sync" || result.kind === "joined" || result.kind === "left") {
-            this.partyMembers = result.members.filter((m) => m.characterId !== 0);
-            this.partyId = this.partyMembers.some((m) => m.characterId === this.self?.characterId)
-              ? result.partyId
-              : 0;
-          } else if (result.kind === "ended") {
-            this.partyId = 0;
-            this.partyMembers = [];
+          } else {
+            this.party.receive(result, this.self?.characterId ?? 0, this.self?.name ?? "");
+            if (this.party.id) this.partyInvite = undefined;
           }
           this.emit({ kind: "party", result });
           return;
@@ -2275,6 +2283,7 @@ export const CLIENT_EVENT_KINDS = [
   "active-skill-result",
   "skill-effect",
   "party",
+  "party-command",
   "fame",
   "ability-result",
   "skill-result",

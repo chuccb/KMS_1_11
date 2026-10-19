@@ -15,6 +15,7 @@
 | 461C50 + WZ GameMenu/backgrnd=176×240、SysOpt/backgrnd=347×225 | 800×600中心，整數右移1；座標312,180與226,187 | 同尺寸canvas原圖，DOM只做透明命中／焦點 |
 | 52C8E0 + PE 5BC260／5BE784等 UTF16 字串 | CLOSE128,9；六列20,63+27i，136×23；Quest/Party/Community/GameOpt/SysOpt/Quit | 完整原按鈕位置；未有功能的四列 disabled，title／aria 明示 |
 | 52D020／559E20 | 六列回index；3開GameOpt、4開SysOpt、5呼55D9F0 | 本輪接4與5；不把未完成GameOpt當成系統設定 |
+| 559E20（ADR-090更正）| PE `00559EF5`起27bytes＝`mov eax,[ecx+98h]`／`sub eax,3`／`jz`／`dec`／`jz`／`dec`／`jnz loc_55A067`：**只有3／4／5有分支**，`UI/UIWindow.img`顶层也没有`Party`子树 | Quest／Party／Community停用是這版原況，不是漏接；派對資訊走`/파티정보`（[社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)），不补后期样式party窗 |
 | 55D9F0 | 關連線／重設context後回登入stage，不是銷毀角色或離開整個OS | browser關本WS、等待close清理、回title，可再次連線；由既有server下線保存 |
 | 55A700 鍵盤分派 | Escape順序Item→Equip→Stat→Skill→GameMenu | 先取消拖曳／關窗，無窗才開Menu；輸入聊天時先退出編輯 |
 | 52D800 + listing 52DD59..52DD72 | video 4段；BGM／SE各20段；音量slider116,84／116,118，寬122；mute320,84／320,118；OK200,183／Cancel270,183 | 只開放兩組音量與靜音；不偽造DirectX畫質與截圖目的地功能 |
@@ -64,7 +65,7 @@ PE的部分寬字串在反編譯註解只顯示「UI」，本輪直接按section
 
 ## 4. 仍未完成／與原生的界線
 
-- Quest／Party／Community／GameOpt視窗仍缺。原圖列出但disabled，不能把既有server組隊封包說成完整UI。
+- Quest／Community／GameOpt視窗仍缺；**Party在這版原檔沒有對應分支**（ADR-090以PE机器码／C／listing／WZ顶层属性交叉确认），故不是「漏接的party窗」，派對資訊入口是`/파티정보`。原圖列出但disabled，不能把既有server組隊封包說成完整UI。
 - SysOpt的DirectX畫質／Win32截圖目的地未移植，保留disabled位置，沒有把瀏覽器縮放冒稱原soVideo。
   PE 5BE860直接decode確認第一項「메이플스토리 폴더」、5BE854「바탕 화면」、5BE850「C:\」。
   原selector的disabled外框／文字為browser繪製，非逐像素原CCtrlComboBox；Menu hover目前取原mouseOver第0格，未重建全部高亮動畫timing。

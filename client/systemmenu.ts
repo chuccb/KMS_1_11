@@ -46,7 +46,8 @@ const ORIGIN = {
   sound: { x: 226, y: 187 },
 } as const;
 /** CUIGameMenu 52C8E0 and CUISysOpt 52D800. Native art, transparent DOM hit targets.
- * Unsupported Quest/Party/Community and DirectX/video/screenshot controls stay disabled.
+ * 559E20 handles GameMenu indices3/4/5 only: Quest/Party/Community have no branch here.
+ * DirectX/video/screenshot controls remain unsupported.
  * No fake packet or modern settings skin stands in for their missing implementations.
  */
 export function systemMenu({
@@ -373,9 +374,9 @@ export function systemMenu({
     );
     const names = ["Quest", "Party", "Community", "GameOpt", "SysOpt", "Quit"];
     const labels = [
-      "任務（尚未實作）",
-      "組隊視窗（尚未實作）",
-      "社群視窗（尚未實作）",
+      "任務（此原版選單入口無處理分支）",
+      "派對（此原版選單入口無處理分支；使用 /파티정보）",
+      "社群（此原版選單入口無處理分支）",
       "遊戲設定（小地圖／悄悄話）",
       "系統設定",
       "離開目前連線並回到登入畫面",

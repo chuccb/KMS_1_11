@@ -3471,7 +3471,10 @@ export class GameEntryServer {
           session.send(encodePartyResult({ kind: "alreadyInParty" }));
           return;
         }
-        this.parties.invite(party.id, session.characterId, target.characterId);
+        if (!this.parties.invite(party.id, session.characterId, target.characterId)) {
+          session.send(encodePartyResult({ kind: "unknown" }));
+          return;
+        }
         target.send(
           encodePartyResult({
             kind: "invite",

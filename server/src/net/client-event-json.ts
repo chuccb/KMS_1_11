@@ -11,6 +11,8 @@ export function clientEventJson(
   return {
     t: kind,
     ...rest,
-    ...(kind === "field" ? { contactField, playerMenu: true, partyInviteIdentity } : {}),
+    ...(kind === "field"
+      ? { contactField, playerMenu: true, socialCommands: true, partyInviteIdentity }
+      : {}),
   };
 }

@@ -4653,6 +4653,13 @@ test(
       "the inviter is not told about its own invite",
     );
 
+    // The wire's displayed inviter is authoritative, not merely the latest stored target slot.
+    party(alt, { kind: "accept", inviterId: 999 });
+    assert.deepEqual(
+      await result(alt),
+      { kind: "unknown" },
+      "mismatched native inviter cannot join or consume the real offer",
+    );
     party(alt, { kind: "accept", inviterId: 61 });
     const joined = {
       kind: "joined",
@@ -4661,6 +4668,7 @@ test(
       members: [
         { characterId: 61, name: "Hero" },
         { characterId: 62, name: "Alt" },
+        ...Array.from({ length: 4 }, () => ({ characterId: 0, name: "" })),
       ],
     } as const;
     assert.deepEqual(await result(hero), joined);
@@ -4675,7 +4683,10 @@ test(
       characterId: 62,
       kicked: false,
       name: "Alt",
-      members: [{ characterId: 61, name: "Hero" }],
+      members: [
+        { characterId: 61, name: "Hero" },
+        ...Array.from({ length: 5 }, () => ({ characterId: 0, name: "" })),
+      ],
     } as const;
     assert.deepEqual(await result(alt), left);
     assert.deepEqual(await result(hero), left);

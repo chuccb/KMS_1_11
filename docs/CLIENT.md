@@ -1,6 +1,21 @@
 # 瀏覽器客戶端（`client/` ＋ `serve --web-port`）
 
-## 2026-10-19：frame／play手動工具strict TS整理
+## 2026-10-19：原社交指令鏈、名冊六格與邀請所有權（ADR-090）
+
+聊天框现在完整认得原版社交指令：`/파티정보`（本机印六格名冊＋「당신은 파티장입니다.」，不送封包）、
+`/파티만들기`／`/파티탈퇴`／`/파티초대 名字`／`/파티강퇴 名字`、`/귓속말 名字 内容`、`/찾기 名字`，
+以及本页面别名 `/party info|create|leave|invite|kick|accept|decline`、`/w`、`/f`。
+送出前的原版检查（在队状态、`n3000[102]==n3000[5]` 队长闸門、同图池 `lstrcmpiA` 与名冊 `strcmp` 两条大小写规则、
+`524A00` 密语名字闸門）都在 client 端先挡并印原文，不再是一般错误；**斜线行绝不会变成公开聊天**。
+名冊解码改为固定六格，空格不再被当成队长。邀请确认窗有自己的所有权：第一个 offer 拥有 modal、
+真入队会关掉自己这张并本地拒绝、场地／死亡换 owner 时按「是」降级为拒绝，旧 callback 不能回答新 offer。
+编辑框（IME Enter 不送、Shift+Enter 留焦点、Escape 退出）抽成 strict TS。
+main5394→5370行，client101支TS；`main.js`／`client_probe.mjs` 仍未完成迁移。
+这版 GameMenu 的 Quest／Party／Community 停用是**原况**（PE `00559EF5` 只有 index3/4/5 分支、
+`UI/UIWindow.img` 无 `Party` 子树），不补后期样式 party 窗。原证、界线与验证见
+[NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。附接 LIVE 的邀请／接受仍停用（旧原生进程无身份闸門）。
+
+## 前輪2026-10-19：frame／play手動工具strict TS整理
 
 本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
 

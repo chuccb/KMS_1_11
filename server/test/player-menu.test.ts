@@ -176,7 +176,11 @@ test("5128B0 party invitation row is only for first-roster leader; updates/leave
   assert.equal(party.leader(1), false);
   assert.equal(party.leader(2), true);
   party.receive({ kind: "sync", partyId: 9, members: [{ characterId: 2, name: "Two" }] }, 1);
-  assert.equal(party.leader(2), false, "self missing means no current party");
+  assert.equal(
+    party.leader(2),
+    true,
+    "55C5E0 sync sets partyId directly; it does not infer self membership",
+  );
   party.receive({ kind: "created", partyId: 9 }, 1);
   party.clear();
   assert.equal(party.leader(1), false);
