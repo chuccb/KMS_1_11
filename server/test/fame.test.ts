@@ -91,7 +91,10 @@ test("0x12 reads back what it wrote", () => {
     "0x12 fame: Hero down (someone famed you)",
   );
   // `type 0x09` is not one of the six: the client would take its default branch, and so does this.
-  assert.throws(() => readFameResult(new PacketReader(Uint8Array.from([0x09]), 0)), RangeError);
+  assert.deepEqual(readFameResult(new PacketReader(Uint8Array.from([0x09]), 0)), {
+    kind: "unknown",
+    type: 9,
+  });
 });
 
 test("the two field describers know the pair", () => {

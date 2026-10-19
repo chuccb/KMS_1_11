@@ -147,7 +147,9 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 
 ## 最近功能與限制
 
-- 本輪：[原版提示窗與六列螢幕訊息](docs/NATIVE_FEEDBACK.md)／ADR-088：補真正0x13/type1 OK modal、loot／金幣／拒絕／同級EXP、原6000ms整數fade、名字cache失敗重試與自己taken音效；含CP949／加密合包／原WZ Chromium與生命週期回歸，沒有改獎勵／角色／存檔。
+- 本輪：[原角色右鍵／人氣／派對邀請整鏈](docs/NATIVE_PLAYER_INTERACTIONS.md)／ADR-089：更正真選單入口、四片原WZ／角色UnionRect／密語、人氣送出冷卻與CP949回覆、隊長邀請及綁定確認對象；停用未完成交易房，不捏造server規則；補server接受inviterId核對，未證實的舊附接端暫停invite／accept。附接新web可保留既有記憶體世界，不重啟玩家進度。
+
+- 前輪：[原版提示窗與六列螢幕訊息](docs/NATIVE_FEEDBACK.md)／ADR-088：補真正0x13/type1 OK modal、loot／金幣／拒絕／同級EXP、原6000ms整數fade、名字cache失敗重試與自己taken音效；含CP949／加密合包／原WZ Chromium與生命週期回歸，沒有改獎勵／角色／存檔。
 
 - 前輪續作：[有向整數地形與物理場界](docs/NATIVE_TERRAIN.md)／ADR-078：floor／wall／ceiling共用crossing、endpoint pair、group、ground反向連結、兩pass餘時、真接觸時間到remote，map／player／mob與特別KB連動；尚非完整R-tree／全域相位，未執行測試。
 - 前輪：[普通移動力學與有序wire](docs/NATIVE_LOCOMOTION.md)／ADR-077：原地空力／切線速度、抓繩／繩梯／死亡停止、30ms本地controller、journal／bridge／末端權威，未執行測試。
@@ -174,5 +176,5 @@ bun server/src/cli.ts serve --host 0.0.0.0 --port 8516 --game-port 8517 --web-po
 原 server 缺失的規則明示為重建政策；不以後期版本或「缺素材」猜測代替原證據。
 
 本輪依授權執行 strict型別／格式／單元與完整回歸／建置、隔離component與唯讀title驗證；不自動登入／操作玩家角色或修改玩家save。
-最新結果與未完成項目見 [原訊息呈現續作](docs/NATIVE_FEEDBACK.md)；前輪工具整理見[frame／play](docs/STRICT_FRAME_PLAY_TOOLS.md)。
+最新結果與未完成項目見 [角色互動續作](docs/NATIVE_PLAYER_INTERACTIONS.md)；前輪工具整理見[frame／play](docs/STRICT_FRAME_PLAY_TOOLS.md)。
 套件安裝、版本顯示、工具編譯、靜態閱讀與啟服都不算功能 PASS。舊測試數字只對應當時提交。

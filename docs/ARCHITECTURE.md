@@ -3,6 +3,10 @@
 更新：2026-10-19。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
+現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
+輸入捕獲與modal身份；`tools/attach-web.ts` 可另開web橋接連既有本機TCP世界，不複製／重啟世界或操作save。
+獨立橋接拿不到原process內的testTools／私人mobPresentation callbacks；未證實邀請身份的舊原生端亦停用invite／accept，與同程序serve有明示差異。
+
 ## 執行資料流
 
 ```text

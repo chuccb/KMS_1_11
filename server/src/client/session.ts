@@ -1,3 +1,5 @@
+import { FameRequestClock, type FameFeedback } from "./fame.ts";
+import { FAME_OPCODE, encodeClientFameRequest, readFameResult } from "../protocol/fame.ts";
 import { encodeClientSkillUse } from "../protocol/skilluse.ts";
 import {
   PARTY_OPCODE,
@@ -389,6 +391,7 @@ export type ClientEvent =
   | { kind: "active-skill-result"; skillId: number; accepted: boolean }
   | { kind: "skill-effect"; characterId: number; skillId: number; skillLevel: number }
   | { kind: "party"; result: PartyResult }
+  | { kind: "fame"; result: FameFeedback }
   | { kind: "user-enter"; user: UserView }
   | {
       kind: "user-look";
@@ -715,6 +718,7 @@ export class ClientSession {
   private skillPending = false;
   private activeSkillPending: number | undefined;
   private nextActiveAt = 0;
+  private readonly fameClock = new FameRequestClock();
   private partyId = 0;
   private partyMembers: readonly PartyMember[] = [];
   private partyInvite: number | undefined;
@@ -889,6 +893,7 @@ export class ClientSession {
    * session is really in the game - and emits `field` with the snapshot that came with it.
    */
   async enterGame(redirect: CharacterSelectReply): Promise<void> {
+    this.fameClock.reset();
     const port = this.options.gamePort ?? redirect.port;
     const host = this.options.gameHost ?? redirect.ip;
     this.link?.close();
@@ -1015,7 +1020,42 @@ export class ClientSession {
       throw error;
     }
   }
+  /** 5128B0 -> 55D7B0: resolve name in the current user pool BEFORE reserving cooldown.
+   * Native permits the target to leave between menu-open and selection; no stale id is sent.
+   * Living-session gating is a browser safety policy, not an original fame level restriction.
+   */
+  async giveFame(name: string, up: boolean): Promise<void> {
+    if (!this.gameLink || !this.self || this.self.hp <= 0)
+      throw new Error("fame needs a living field session");
+    const target = [...this.users.values()].find((user) => samePlayerName(user.name, name));
+    if (!target) {
+      this.emit({ kind: "fame", result: { kind: "notFound" } });
+      return;
+    }
+    if (!this.fameClock.reserve()) {
+      this.emit({ kind: "fame", result: { kind: "cooldown" } });
+      return;
+    }
+    await this.gameLink.send(encodeClientFameRequest({ targetId: target.characterId, up }));
+  }
+
+  /** Browser confirmation is bound to the inviter shown, never whichever packet arrived last.
+   * Declines are local-only and may clear while dead. Stale/modal-epoch responses do nothing.
+   */
+  async replyToPartyInvite(inviterId: number, accepted: boolean): Promise<void> {
+    if (this.partyInvite !== inviterId) return;
+    if (!accepted) {
+      this.partyInvite = undefined;
+      return;
+    }
+    await this.partyCommand("accept");
+  }
+
   async partyCommand(command: string, name = ""): Promise<void> {
+    if (command === "decline") {
+      this.partyInvite = undefined;
+      return;
+    }
     if (!this.gameLink || !this.self || this.self.hp <= 0)
       throw new Error("party needs a living field session");
     let request: ClientPartyRequest;
@@ -1025,14 +1065,11 @@ export class ClientSession {
       if (this.partyInvite === undefined) throw new Error("no current party invitation");
       request = { kind: "accept", inviterId: this.partyInvite };
       this.partyInvite = undefined;
-    } else if (command === "decline") {
-      this.partyInvite = undefined;
-      return;
     } else if (command === "invite" || command === "kick") {
       const target =
         command === "invite"
-          ? [...this.users.values()].find((u) => u.name === name)
-          : this.partyMembers.find((u) => u.name === name);
+          ? [...this.users.values()].find((u) => samePlayerName(u.name, name))
+          : this.partyMembers.find((u) => u.name === name); // 55DB00 uses strcmp, unlike pool51D7D0.
       if (!target) throw new Error("找不到可邀請／移除的隊員");
       request =
         command === "invite"
@@ -1605,6 +1642,7 @@ export class ClientSession {
     this.skillPending = false;
     this.activeSkillPending = undefined;
     this.nextActiveAt = 0;
+    this.fameClock.reset();
     this.partyId = 0;
     this.partyMembers = [];
     this.partyInvite = undefined;
@@ -1618,10 +1656,39 @@ export class ClientSession {
     const opcode = plain[0]!;
     try {
       switch (opcode) {
+        case FAME_OPCODE.result: {
+          const raw = readFameResult(new PacketReader(plain, 1));
+          const result =
+            raw.kind === "changed" || raw.kind === "received"
+              ? { ...raw, name: decodeByteName(raw.name) }
+              : raw;
+          this.emit({ kind: "fame", result });
+          return;
+        }
         case PARTY_OPCODE.result: {
-          const result = readPartyResult(new PacketReader(plain, 1));
-          if (result.kind === "invite") this.partyInvite = result.inviterId;
-          else if (result.kind === "created") {
+          const raw = readPartyResult(new PacketReader(plain, 1));
+          // Protocol names remain raw CP949 byte strings (including the fixed102-byte roster).
+          const result: PartyResult =
+            raw.kind === "invite"
+              ? { ...raw, inviterName: decodeByteName(raw.inviterName) }
+              : raw.kind === "joined" || raw.kind === "left"
+                ? {
+                    ...raw,
+                    name: decodeByteName(raw.name),
+                    members: raw.members.map((m) => ({ ...m, name: decodeByteName(m.name) })),
+                  }
+                : raw.kind === "sync"
+                  ? {
+                      ...raw,
+                      members: raw.members.map((m) => ({ ...m, name: decodeByteName(m.name) })),
+                    }
+                  : raw;
+          if (result.kind === "invite") {
+            // Native processes this inside a blocking modal. Browser policy is first-inviter-wins,
+            // with no unbounded queue: later offers cannot retarget the displayed confirmation.
+            if (this.partyInvite !== undefined || !this.self || this.self.hp <= 0) return;
+            this.partyInvite = result.inviterId;
+          } else if (result.kind === "created") {
             this.partyId = result.partyId;
             this.partyMembers = this.self
               ? [{ characterId: this.self.characterId, name: this.self.name }]
@@ -1654,6 +1721,7 @@ export class ClientSession {
           this.nextActiveAt = 0;
           this.nextReviveAt = 0;
           this.userRequestUntil = 0;
+          this.partyInvite = undefined;
           this.abilityPending = false;
           this.skillPending = false;
           this.nextSkillAt = 0;
@@ -1952,6 +2020,7 @@ export class ClientSession {
         case STAT_OPCODE: {
           const update = readStatUpdate(new PacketReader(plain, 1));
           this.applyStats(update.diff);
+          if (this.self && this.self.hp <= 0) this.partyInvite = undefined;
           if (update.ack && this.activeSkillPending !== undefined) {
             const skillId = this.activeSkillPending;
             this.activeSkillPending = undefined;
@@ -2178,6 +2247,12 @@ export class ClientSession {
   }
 }
 
+/** 51D7D0 uses lstrcmpiA. Legal player names have only ASCII case or KS Hangul. */
+function samePlayerName(a: string, b: string): boolean {
+  const fold = (value: string) => value.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  return fold(a) === fold(b);
+}
+
 /**
  * `0x1A` text is CP949 bytes, never UTF-8 (`protocol/cp949.ts`): the 2003 client hands the bytes to
  * its own ANSI renderer. Decoding them as UTF-8 happens to work for ASCII - which is why the first
@@ -2200,6 +2275,7 @@ export const CLIENT_EVENT_KINDS = [
   "active-skill-result",
   "skill-effect",
   "party",
+  "fame",
   "ability-result",
   "skill-result",
   "skills",

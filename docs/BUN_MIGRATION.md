@@ -2,7 +2,14 @@
 
 2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：原訊息與名稱資源整鏈（ADR-088）
+## 最新增量：原角色互動／附接橋接（ADR-089）
+
+新增strict `player-menu-data`／`player-menu`／`fame`／`party`及Session送出clock、具原PE／WZ／真Chromium與加密synthetic peer回歸，
+另有不建立世界／save的`tools/attach-web.ts`；補權威party邀請身份檢查並對舊附接端fail-closed；未關strict／erasableSyntaxOnly，沒有新增依賴或把JS只更名冒充遷移。
+client97支TS；main5321→5394行是整合接點，仍不是完整main TS遷移，client_probe.mjs及原44項失敗亦未完成。
+本輪結果、完整失敗比較、同世界新版LIVE與獨立橋接能力差異見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)。
+
+## 前輪增量：原訊息與名稱資源整鏈（ADR-088）
 
 新增真正strict的feedback-data／feedback／feedback-renderer／item-metadata，拆出真bridge共用client-event-json；不是更名或any／declaration／strict放寬。
 主入口5356→5321行，client93支TS；舊client_probe.mjs709行與其他深schema／44項基準失敗仍未完成。

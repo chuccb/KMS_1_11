@@ -1,3 +1,7 @@
+import { partyMessage, partyInvitationText } from "./party.ts";
+import { playerMenu } from "./player-menu.ts";
+import { playerContains, playerMenuParty } from "./player-menu-data.ts";
+import { fameMessage } from "./fame.ts";
 import { loginScreen } from "./login-screen.ts";
 import { sceneSurface, screenToWorld } from "./scene-surface.ts";
 import { lensControls } from "./lens-controls.ts";
@@ -315,6 +319,7 @@ function connect() {
     if (socket !== connection) return;
     loginScreens.setLoginPending(false);
     feedback.reset();
+    playerContext.close(false); partyMenuState.clear();
     systemPanel.close(false, false);
     itemDialog.close(false);
     quickDrag = undefined;
@@ -381,6 +386,8 @@ function handle(message) {
   if (skillPanel.receive(message)) return;
   if (statPanel.receive(message)) return;
   if (["field", "disconnect", "login"].includes(message.t)) {
+    playerContext.close(false);
+    if (message.t !== "field") partyMenuState.clear();
     skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();buffs.clear();
     resetContact();
     resetFace(selfView);
@@ -472,6 +479,8 @@ function handle(message) {
 
     case "field":
       visualFieldActive = true;
+      playerMenuEnabled = message.playerMenu === true;
+      partyInviteIdentity = message.partyInviteIdentity === true;
       contactField = message.contactField;
       void damageArt.preload();
       void deathFx.preload();
@@ -581,22 +590,30 @@ function handle(message) {
       const at=prediction.start+prediction.target.delayMs;
       scheduleActiveHits(message.mobId,message.damages??[],message.skillId,message.skillLevel,at,prediction.target.presentation);return;
     }
+    case 'fame': {
+      const text=fameMessage(message.result,selfView?.name??'');
+      if(text!==undefined)chatHistoryPanel.append(text,'fame');
+      return;
+    }
     case 'party': {
       const r=message.result;
+      partyMenuState.receive(r,selfView?.characterId??0);
+      playerContext.close(false);
       if(r.kind==='invite') {
-        if(itemDialog.open||systemPanel.visible||talkingNpc!==undefined||portalPending) {
-          send({t:'party-response',accepted:false});return;
+        if(!partyInviteIdentity){
+          send({t:'party-response',inviterId:r.inviterId,accepted:false});
+          chatHistoryPanel.append('此附接入口未證實原生server邀請身份保護，已暫停派對邀請／接受；既有世界未重啟。','fame');return;
+        }
+        if(itemDialog.open||systemPanel.visible||playerContext.open||talkingNpc!==undefined||portalPending) {
+          send({t:'party-response',inviterId:r.inviterId,accepted:false});return;
         }
         const field=self;
-        itemDialog.confirm({text:`'${r.inviterName}'님이 파티에 초대했습니다.\n파티에 가입하시겠습니까?`,
-          accept:()=>{if(self===field)send({t:'party-response',accepted:true});},
-          reject:()=>send({t:'party-response',accepted:false})});
+        itemDialog.confirm({text:partyInvitationText(r.inviterName),
+          accept:()=>{if(self===field)send({t:'party-response',inviterId:r.inviterId,accepted:true});},
+          reject:()=>send({t:'party-response',inviterId:r.inviterId,accepted:false})});
       }else {
-        const notices={created:'새로운 파티를 만들었습니다.',ended:'파티가 해체되었습니다.',
-          left:'파티원이 탈퇴했습니다.',joined:'파티에 가입했습니다.',alreadyInParty:'이미 가입한 파티가 있습니다.',
-          notInParty:'가입한 파티가 없습니다.',beginnerCannotCreate:'초보자는 파티를 만들 수 없습니다.',
-          full:'파티원이 가득 찼습니다.',unknown:'파티 요청을 처리하지 못했습니다.'};
-        if(notices[r.kind])chatLine('파티',notices[r.kind]);
+        const text=partyMessage(r,selfView?.characterId??0,selfView?.name??'');
+        if(text!==undefined)chatHistoryPanel.append(text,'fame');
       }
       return;
     }
@@ -608,6 +625,7 @@ function handle(message) {
       if (selfView && message.self.level > selfView.level)
         void audio.effect("Game/LevelUp");
       if (selfView?.hp > 0 && message.self.hp <= 0) {
+        playerContext.close(false);
         selfDeathSettled = false;
         if (playerBody && map?.id === self?.mapId)
           deathFx.observe(message.self.characterId, true, selfDisplayPosition(), performance.now());
@@ -697,6 +715,7 @@ function handle(message) {
     }
 
     case "user-leave":
+      if(playerContext.state?.target.characterId===message.characterId)playerContext.close(false);
       deathFx.remove(message.characterId);
       users.delete(String(message.characterId));
       speechBalloons.remove(message.characterId);
@@ -1152,7 +1171,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
-    itemDialog.open || systemPanel.visible || browserLabOpen() || talkingNpc !== undefined ||
+    itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() || talkingNpc !== undefined ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -1234,7 +1253,7 @@ let pointerAt;
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
   pointerAt = point;
-  if ((itemDialog.open || systemPanel.visible) || itemDrag || quickDrag) return;
+  if ((itemDialog.open || systemPanel.visible || playerContext.open) || itemDrag || quickDrag) return;
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
   if (shopScrollDrag !== undefined) {
@@ -1317,7 +1336,7 @@ canvas.addEventListener("mousemove", (event) => {
 });
 
 canvas.addEventListener("mousedown", (event) => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || event.button > 0) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || event.button > 0) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1440,7 +1459,7 @@ for (const surface of [canvas, ui.gameUi])
 let inventorySuppressClick = false;
 
 canvas.addEventListener("dblclick", (event) => {
-  if ((itemDialog.open || systemPanel.visible) || shopPending || slotPending || mesoPending) return;
+  if ((itemDialog.open || systemPanel.visible || playerContext.open) || shopPending || slotPending || mesoPending) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1470,7 +1489,7 @@ canvas.addEventListener("dblclick", (event) => {
 
 canvas.addEventListener("click", (event) => {
   if (event.button !== 0) return;
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible)) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
   // The status bar is drawn over the world, so its buttons win over anything behind them - and the
   // inventory window is above both.
   const point = viewPoint(event);
@@ -1584,7 +1603,7 @@ canvas.addEventListener("click", (event) => {
 canvas.addEventListener(
   "wheel",
   (event) => {
-    if ((itemDialog.open || systemPanel.visible) || itemDrag || quickDrag) return;
+    if ((itemDialog.open || systemPanel.visible || playerContext.open) || itemDrag || quickDrag) return;
     const point = viewPoint(event);
     if (
       !shopWindowAt(point.x, point.y) &&
@@ -1801,6 +1820,7 @@ const projectiles = [];
 /** World origin of the active lens; independent from the native 800x600 UI. */
 const camera = createCamera();
 function clearPresentationInput() {
+  playerContext.close(false);
   keys.clear();
   if (playerBody) {
     playerBody.jumpQueued = false;
@@ -2262,7 +2282,7 @@ function loadQuickItems() {
 function useBagItem(item) {
   const now = performance.now();
   if (!item || loginScreens.stage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
-      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible) || browserLabOpen() || shop !== undefined ||
+      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
   nextBagUseAt = now + 200;
@@ -2352,7 +2372,7 @@ function browserLabOpen() {
   return testToolsPanel.open || motionSettings.open || lensSettings.open;
 }
 function movementBlocked() {
-  return document.hidden || !document.hasFocus() || portalPending || itemDialog.open ||
+  return document.hidden || !document.hasFocus() || portalPending || playerContext.open || itemDialog.open ||
     systemPanel.visible || browserLabOpen() || selfView?.hp <= 0 || shop !== undefined ||
     talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
@@ -2434,6 +2454,7 @@ function frame() {
   }
   if (selfView) stanceOfEntity(selfView, now);
   for (const user of users.values()) {
+    playerHitHistory.set(user,{x:user.x,y:user.y});
     movementFace(user, now);
     sampleMotion(user, now, terrain);
     stanceOfEntity(user, now); // Native ordinary clocks also update off-screen, not only on draw.
@@ -2625,12 +2646,12 @@ function frame() {
     const bagHit = inventoryWindowAt(pointerAt.x, pointerAt.y);
     const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
     const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !browserLabOpen() &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible || playerContext.open) && !browserLabOpen() &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y)) {
       if(pointed?.skill){const at=tooltipAnchor('skill',pointerAt.x,pointerAt.y);nativeTips.skill(at.x,at.y,pointed.skill,pointed.level);}
       else drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
     }
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible) && !browserLabOpen() && !pointed &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible || playerContext.open) && !browserLabOpen() && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
@@ -2642,6 +2663,7 @@ function frame() {
   drawDraggedItem();
   drawQuickDrag();
   systemPanel.draw();
+  playerContext.draw();
   drawScreenMessages(ctx, feedback.rows(now));
   itemDialog.draw();
   npcDialog.draw();
@@ -2989,7 +3011,7 @@ async function swing(skillId=0) {
     shop ||
     shopPending ||
     talkingNpc ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     slotPending ||
     mesoPending ||
     quickDrag || itemDrag ||
@@ -3010,7 +3032,7 @@ async function swing(skillId=0) {
       const readyArt=skillArt=await preloadSkillArt(skillData,skillLevel);
       entity=selfView;
       if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
-        selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible)||
+        selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible||playerContext.open)||
         browserLabOpen()||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
         socket?.readyState!==WebSocket.OPEN||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
       if(rule.kind==='buff'){
@@ -3037,7 +3059,7 @@ async function swing(skillId=0) {
       shop ||
       shopPending ||
       talkingNpc ||
-      (itemDialog.open || systemPanel.visible) ||
+      (itemDialog.open || systemPanel.visible || playerContext.open) ||
       slotPending ||
       mesoPending
     )
@@ -3092,7 +3114,7 @@ async function swing(skillId=0) {
     if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch || localActionEpoch !== interaction
       || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
       || !playerBody || playerBody.ladder || map?.id !== self.mapId || portalPending
-      || shop || shopPending || talkingNpc || (itemDialog.open || systemPanel.visible) || slotPending || mesoPending
+      || shop || shopPending || talkingNpc || (itemDialog.open || systemPanel.visible || playerContext.open) || slotPending || mesoPending
       || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt
       || (magic&&!playerBody.grounded)
       || (locomotion(playerBody) === "prone") !== prone
@@ -3254,7 +3276,7 @@ function drawWhisperRecipient() {
   ctx.fillText(whisperRecipient || "모두에게",246,581);ctx.restore();
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || browserLabOpen() ||
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() ||
       loginScreens.stage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
   const owner=quickOwner, epoch=itemEpoch;
@@ -3317,7 +3339,7 @@ function beginSkillDrag(skill,p) {
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
   if (!itemId || loginScreens.stage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
-      portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() || shop!==undefined ||
+      portalPending || itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
   if (quickSkillAllowed(itemId)?!skillPanel.level(itemId.skillId):!quickItemState(inventory,itemId).item) return false;
@@ -3341,7 +3363,7 @@ window.addEventListener("mouseup",e=>{
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
       (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginScreens.stage!=="game" || !visualFieldActive ||
-      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || browserLabOpen() ||
+      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() ||
       shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
@@ -3375,7 +3397,7 @@ function beginItemDrag(source, p) {
     slotPending ||
     mesoPending ||
     shopPending ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     shop ||
     talkingNpc !== undefined ||
     !selfView ||
@@ -3510,7 +3532,7 @@ async function dropInventoryItem(d, at) {
     talkingNpc === undefined &&
     JSON.stringify(sourceItem(d.tab, d.slot)) === snapshot;
   const facts = await describeItem(d.item.itemId);
-  if (!valid() || (itemDialog.open || systemPanel.visible)) return;
+  if (!valid() || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
   if (!facts || facts.cash || d.item.cash) {
     chatLine(
       "系統",
@@ -3633,7 +3655,7 @@ function setInventoryScroll(row) {
   inventoryPick = inventoryHover = undefined;
 }
 window.addEventListener("mousemove", (event) => {
-  if (!inventoryScrollDrag || (itemDialog.open || systemPanel.visible)) return;
+  if (!inventoryScrollDrag || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
   const g = inventoryScrollbarGeometry();
   const p = viewPoint(event);
   setInventoryScroll(
@@ -3962,7 +3984,7 @@ function dropMesosDialog(at) {
     !mesoPending;
   if (
     !valid() ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     performance.now() < mesoNextAt ||
     selfView.mesos < 10
   )
@@ -4500,7 +4522,7 @@ function buyShopRow(index) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     selfView?.hp <= 0
   )
     return;
@@ -4573,7 +4595,7 @@ function rechargeShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     selfView?.hp <= 0
   )
     return;
@@ -4606,7 +4628,7 @@ function sellShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible) ||
+    (itemDialog.open || systemPanel.visible || playerContext.open) ||
     selfView?.hp <= 0
   )
     return;
@@ -4726,7 +4748,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); motionSettings.close(); }
     return;
   }
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
+  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     isEditingControl(document.activeElement) &&
@@ -5025,7 +5047,7 @@ const skillPanel = skillWindow({
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginScreens.stage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
-    (itemDialog.open || systemPanel.visible) || browserLabOpen() || talkingNpc !== undefined,
+    (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5085,6 +5107,7 @@ const revivePanel = reviveWindow({
   isInGame: () =>
     loginScreens.stage === "game" && socket?.readyState === WebSocket.OPEN,
   onOpen() {
+    playerContext.close(false);
     localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;
     itemDialog.close(false);
     testToolsPanel.close();
@@ -5239,6 +5262,7 @@ const itemDialog = itemDialogs({
   image: artImage,
   audio,
   onOpen() {
+    playerContext.close(false);
     localActionEpoch++;quickDrag=undefined;
     keys.clear();
     itemDrag = undefined;
@@ -5251,7 +5275,7 @@ const itemDialog = itemDialogs({
 const feedback = gameFeedback({
   dialog: itemDialog, item: describeItem, now: () => performance.now(),
   chat: text => chatHistoryPanel.append(text, "notice"),
-  blocked: () => creationDialogs.open || revivePanel.open || talkingNpc !== undefined || systemPanel.visible || browserLabOpen(),
+  blocked: () => creationDialogs.open || revivePanel.open || talkingNpc !== undefined || playerContext.open || systemPanel.visible || browserLabOpen(),
   onError: error => logLine(`feedback resource: ${String(error)}`),
 });
 
@@ -5273,6 +5297,7 @@ const npcDialog = npcDialogue({ctx,image:artImage,audio,point:viewPoint,
 
 function beginContentModal() {
   talkingNpc = true; // Shared content-modal sentinel, not a fabricated NPC identity.
+  playerContext.close(false);
   localActionEpoch++; keys.clear(); ui.say.blur();
   itemDialog.close(false); systemPanel.close(false,false); testToolsPanel.close();
   chatHistoryPanel.cancelDrag(); quickDrag=itemDrag=undefined;
@@ -5288,7 +5313,7 @@ const tooltipViewer = tooltipPreview({renderer:nativeTips, point:viewPoint,
 
 function openTooltipExample(kind) {
   if(loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 || talkingNpc!==undefined ||
-      revivePanel.open || itemDialog.open || systemPanel.visible || shop!==undefined ||
+      revivePanel.open || itemDialog.open || systemPanel.visible || playerContext.open || shop!==undefined ||
       shopPending || slotPending || mesoPending || portalPending)return false;
   return tooltipViewer.show(kind);
 }
@@ -5296,7 +5321,7 @@ function openTooltipExample(kind) {
 function openDialogueExample(kind, page = 0) {
   const body=dialogueExample(kind,page);
   if(!body || loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
-      talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible ||
+      talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible || playerContext.open ||
       shop!==undefined || shopPending || slotPending || mesoPending || portalPending)return false;
   return npcDialog.show(0,body,{preview:true,page,exampleKind:kind});
 }
@@ -5307,6 +5332,7 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
     socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending,
   onOpen(){
+    playerContext.close(false);
     localActionEpoch++; keys.clear(); chatHistoryPanel.cancelDrag();itemDrag=quickDrag=undefined;
     inventoryDrag=inventoryScrollDrag=shopDrag=shopScrollDrag=undefined;
     inventoryPick=inventoryHover=equipHover=undefined; pointerAt=undefined;ui.say.blur();
@@ -5316,6 +5342,53 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
     quitToTitle=true;socket.close(1000,"return to title");
   },
 });
+
+/** 5128B0's user-pool hit is world-space; lens zoom only changes the inverse projection.
+ * Weak keys retain the previous rendered remote pose without keeping departed actors alive.
+ */
+let playerMenuEnabled = false, partyInviteIdentity = false;
+const playerHitHistory = new WeakMap();
+const partyMenuState = playerMenuParty();
+function canOpenPlayerMenu() {
+  return playerMenuEnabled && loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 &&
+    socket?.readyState===WebSocket.OPEN && map?.id===self?.mapId && !portalPending &&
+    !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
+    talkingNpc===undefined && shop===undefined && !shopPending && !slotPending && !mesoPending &&
+    !itemDrag && !quickDrag && !inventoryDrag && !inventoryScrollDrag && !shopDrag && !shopScrollDrag;
+}
+const playerContext = playerMenu({
+  ctx,image:artImage,point:viewPoint,canOpen:canOpenPlayerMenu,canInvite:()=>partyInviteIdentity,
+  valid:target=>users.get(String(target.characterId))?.name===target.name,
+  onOpen(){
+    localActionEpoch++;keys.clear();ui.say.blur();chatHistoryPanel.cancelDrag();
+    pointerAt=inventoryHover=equipHover=statusHover=hoveredPortal=undefined;
+    canvasButtonPress=canvasButtonActivation=undefined;
+  },
+  onAction(action,target){
+    if(!canOpenPlayerMenu() || users.get(String(target.characterId))?.name!==target.name)return;
+    if(action==='fameUp'||action==='fameDown')send({t:'fame',name:target.name,up:action==='fameUp'});
+    else if(action==='whisper'){
+      const reason=whisperNameError(target.name,selfView?.name);
+      if(reason){chatHistoryPanel.append(reason,'fame');return;}
+      whisperRecipient=lastWhisperRecipient=target.name;updateWhisperControl();ui.say.focus();
+    }else if(action==='invite' && partyInviteIdentity && partyMenuState.leader(selfView?.characterId))
+      send({t:'party-invite',name:target.name});
+  },
+  onError:logLine,
+});
+canvas.addEventListener('contextmenu',event=>{
+  event.preventDefault();
+  if(!canOpenPlayerMenu())return;
+  const point=viewPoint(event);
+  if(point.y>=STATUS_BAR.y || inventoryWindowAt(point.x,point.y) || equipPanel.hit(point.x,point.y) ||
+      statPanel.contains(point.x,point.y) || skillPanel.contains(point.x,point.y) || miniMapPanel.contains(point.x,point.y))return;
+  const world=screenToWorld(point,camera,renderSurface.viewport());
+  for(const user of users.values())if(playerContains(user,playerHitHistory.get(user),world)){
+    void playerContext.show({characterId:user.characterId,name:user.name},point,partyMenuState.leader(selfView?.characterId));
+    break;
+  }
+});
+void playerContext.warm();
 
 // Signal readiness only after every UI constructor and handler has initialized.
 window.dispatchEvent(new Event(CLIENT_READY_EVENT));

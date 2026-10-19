@@ -17,7 +17,8 @@
  *    「同一個角色只會有一條連線」的規則延伸到隊伍上。
  *
  * 邀請是**一個目標一格**（後到的邀請蓋掉前一個）：client 的邀請對話框是模態的（`sub_52C140`），
- * 一個玩家不可能同時看著兩個邀請。
+ * 一個玩家不可能同時看著兩個邀請。後到覆蓋是本repo政策，不是原server證據；
+ * resolveInvite仍必須核對接受包的inviterId，不能讓舊確認加入另一個隊伍。
  */
 import { PARTY_MAX_MEMBERS, type PartyMember } from "../protocol/party.ts";
 
@@ -101,6 +102,17 @@ export class PartyRegistry {
 
   inviteOf(targetId: number): PartyInvite | undefined {
     return this.invites.get(targetId);
+  }
+
+  /** Native0x26/type2 carries the inviter the client actually confirmed. A newer offer may
+   * replace the stored slot, but must NEVER redirect an older acceptance to another party.
+   * A stale/mismatched offer is a refusal; do not consume or mutate the current invitation.
+   */
+  resolveInvite(targetId: number, inviterId: number): Party | undefined {
+    const invite = this.invites.get(targetId);
+    if (!invite || invite.inviterId !== inviterId) return undefined;
+    const party = this.partyOf(inviterId);
+    return party?.id === invite.partyId && party.leaderId === inviterId ? party : undefined;
   }
 
   dropInvite(targetId: number): void {

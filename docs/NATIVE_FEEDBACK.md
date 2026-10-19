@@ -94,3 +94,7 @@ bun server/scripts/frame_probe.ts 8515
 新收到的EXP／掉落／拒絕會自動走本輪呈現；**不是每則都能由無怪城鎮立即觸發**，不為展示而假發獎勵或偽造ledger。
 遠近／清晰尺寸／鏡頭與轉場設定仍保留。網頁更新後重新整理即可，不為載入改動任意重啟已有進度的服務。
 `--save off` 不寫任何玩家存檔，**服務停止會失去此新世界記憶體進度**；實際URL／在線狀態以本次LIVE程序為準。
+
+
+後續ADR-089已補角色右鍵／人氣／派對邀請的相連鏈，並保留本輪memory-only世界不重啟；
+最新驗證與同世界新版入口見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)。本頁數字仍對應ADR-088，不覆寫歷史。

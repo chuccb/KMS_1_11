@@ -114,7 +114,18 @@ const CONTENT_TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
+/** No remote version is guessed: attached old worlds fail closed for invite/accept, not just UI.
+ * A same-process serve may assert the native server's resolveInvite protection explicitly.
+ */
+export function assertPartyInviteIdentity(verified: boolean | undefined, command: string): void {
+  if (verified !== true && (command === "invite" || command === "accept"))
+    throw new Error(
+      "此附接入口尚未證實原生server的邀請身份檢查，已停用派對邀請／接受以避免加入錯誤隊伍；既有世界未重啟。",
+    );
+}
 export interface WebClientOptions {
+  /** Only true when the native server checks0x26/type2 inviterId against its invitation ledger. */
+  partyInviteIdentity?: boolean;
   /** Port of the HTTP + WebSocket listener. */
   port: number;
   host?: string;
@@ -670,9 +681,25 @@ class BrowserSession {
         case "active-ranged":
         case "active-magic":
           return await this.serialMotion(() => this.activeAttack(message));
+        case "fame":
+          if (typeof message.name !== "string" || typeof message.up !== "boolean")
+            throw new Error("fame requires a name and a boolean up value");
+          return await this.require().giveFame(message.name, message.up);
+        case "party-invite":
+          if (typeof message.name !== "string") throw new Error("party-invite requires a name");
+          return await this.partyCommand("invite", message.name);
         case "party-response":
-          return await this.require().partyCommand(
-            message.accepted === true ? "accept" : "decline",
+          if (
+            !Number.isInteger(message.inviterId) ||
+            Number(message.inviterId) <= 0 ||
+            typeof message.accepted !== "boolean"
+          )
+            throw new Error("party-response requires an inviter id and a boolean answer");
+          if (message.accepted)
+            assertPartyInviteIdentity(this.options.partyInviteIdentity, "accept");
+          return await this.require().replyToPartyInvite(
+            Number(message.inviterId),
+            message.accepted,
           );
         case "skill-up":
           return await this.require().increaseSkill(Number(message.skillId));
@@ -1161,7 +1188,11 @@ class BrowserSession {
         (event.kind === "self" && event.self.hp <= 0)
       )
         this.buffs.clear();
-      const json = clientEventJson(event, this.contactField);
+      const json = clientEventJson(
+        event,
+        this.contactField,
+        this.options.partyInviteIdentity === true,
+      );
       if (
         (event.kind === "mob-enter" || event.kind === "mob-move") &&
         this.username &&
@@ -1364,15 +1395,20 @@ class BrowserSession {
     return this.session;
   }
 
+  private async partyCommand(command: string, name = ""): Promise<void> {
+    assertPartyInviteIdentity(this.options.partyInviteIdentity, command);
+    await this.require().partyCommand(command, name);
+  }
+
   private async say(text: string): Promise<void> {
     const command =
       /^\/(?:party|파티)\s+(create|leave|invite|kick|accept|decline)(?:\s+(.+))?$/.exec(
         text.trim(),
       );
     const native = /^\/(파티만들기|파티탈퇴|파티초대|파티강퇴)(?:\s+(.+))?$/.exec(text.trim());
-    if (command) return await this.require().partyCommand(command[1]!, command[2] ?? "");
+    if (command) return await this.partyCommand(command[1]!, command[2] ?? "");
     if (native)
-      return await this.require().partyCommand(
+      return await this.partyCommand(
         (
           {
             파티만들기: "create",

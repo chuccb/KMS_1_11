@@ -2985,3 +2985,17 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 缺舊save／舊程序後依既有授權另開memory-only隔離世界，不冒稱恢復。保留新LIVE同程序PID6716；93modules200與title frame29／errors[]／0WS，不登入、不操作玩家角色、不改save；停止服務會失去新記憶體進度。
 
 常數逐項來源、完整驗證／剩餘差異與重跑命令見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)。
+
+## ADR-089：原版玩家選單、人氣回覆、派對身份與保進度附接邊界（2026-10-19）
+
+- 新增嚴格TS的player-menu data／canvas＋透明可存取DOM／fame presentation／party projection及FameRequestClock；入口仍JS，client97支TS、main5394行，未冒稱全面遷移。
+- 原選單是5128B0→5478F0／51D6C0→52E050；四片WZ、UnionRect、三行＋隊長限定invite、原色與hover、內右鍵不執行／外鍵關閉交叉PE／C／listing／真WZ。info0無handler、browser交易房未完成，明示停用，不偽裝可用。
+- Whisper只選收件人不發空包；fame完整0x20→0x12／0x0D→CP949→JSON→原文／Notice1000拒絕／Font6，unknown6..255仍generic、不丟後續stat。55D7B0池lookup先於原signed DWORD300000ms gate；實際now−interval初始化、map保留／session reset、送失敗不refund，未以undefined免檢第一次long-idle。
+- 原池51D7D0的lstrcmpiA與55DB00名冊strcmp分別處理，不以全Unicode fold改名字或把kick錯改不分大小寫。韓文名冊／inviter解碼一次；modal接受綁id、decline無封包、field／death／disconnect清pending、後到不排隊。
+- **權威鏈一併修**：舊重建GameEntryServer按當前pending入隊卻未比accept的inviterId，可能把舊A確認導向被B覆蓋的slot。新增PartyRegistry.resolveInvite核對target／inviter／party／leader，原handler用請求id呼叫；舊確認只會拒絕，不加入別隊，也不消耗新offer。保留既有server單槽latest-wins政策，原官方server儲存規則仍未知。
+- field capability分playerMenu與partyInviteIdentity。同程序新serve才明示已具身份檢查；attach-web固定false且不可CLI繞過，UI停用invite，incoming不開接受窗，bridge直JSON及兩種斜線路徑也阻擋invite／accept。不是只隱藏按鈕；create／leave／kick與人氣／密語不受此限制。
+- 新8525附接既有8516／8517，**不停止原生世界、不載入或改寫save、不自動登入或操作LIVE角色**。舊process無法熱載新權威保護，故此附接LIVE暫停派對邀請／接受，不假稱已修執行中server；也無同程序testTools／私人mobPresentation callback。不能以重啟抹掉原記憶體進度換取表面完成。
+- strict／format／build／diff通過；focused42/0／9files，最終1110/44／1154tests／134files／338.13s，對上輪1090/44之failure multiset新增0／移除0。11純imports／0應用I/O；97支TS均200、preview Host200，title frame12／errors[]／0WS；456個標準inline相對連結0斷鏈。
+- Server配額仍為本repo政策：level15、UTC day／month、判斷次序、u16 clamp與runtime ledger，不冒稱官方原server；未猜Magic Guard／Booster等公式。精確baseline差異與LIVE只讀證據見專文，CI既有44個失敗仍明示。
+
+常數、證據地址、精確驗證與剩餘差異見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)。

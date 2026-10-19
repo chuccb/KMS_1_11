@@ -3668,7 +3668,7 @@ ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameF
 
 角色右鍵選單上的「인기도 +」／「인기도 -」是 2003 年唯一的社交評分，兩個方向都解到欄位層。
 
-**送出**：`0x20` 只有一個送出者 `sub_55D7B0(CWvsApp, name, up)`，呼叫點是 `sub_5478F0` 的選單
+**送出**：`0x20` 只有一個送出者 `sub_55D7B0(CWvsApp, name, up)`，呼叫點是 `sub_5128B0` 的選單
 （`n2 = 1` → up = 1、`n2 = 2` → up = 0）。它在送出前做三件**client 自己的**事：
 
 1. 在自己的 `CUserPool` 裡用**名字**找那個人（`sub_51D7D0`）——所以目標一定在**同一張圖**；
@@ -3676,7 +3676,7 @@ ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameF
 2. 5 分鐘的本地冷卻（`timeGetTime() - *(app + 0x2AC) < 300000`）→「잠시 후 다시 시도해 보세요」。
 3. 送出 `[0x20][u32 目標角色 id][u8 up]`（`id` 來自 `*(user + 56)`）。
 
-⇒ 伺服器不需要重做「同不同圖」或冷卻，但**必須**自己判斷「能不能給」——封包可以偽造。
+⇒ 這只證明原client的送出限制，不能推論原server沒有再檢查。本repo仍權威檢查同圖目標；原server的冷卻／配額規則未知。
 
 **回包**：`0x12` 的處理函式是 `sub_55C390`（`sub_55A900` 的 case 18）：
 
@@ -3697,6 +3697,12 @@ ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameF
 所以「給人氣」的另一半是**給被給的人一個 `0x0D`**（`diffStats` 的 `fame`），他的能力視窗才會跟著動；
 給的人自己沒有任何紀錄變動，因此**不送** `0x0D`。
 
+**ADR-089交叉更正／browser鏈**：5478F0只是游標座標轉換，不是選單。5128B0→51D6C0／5085E0的UnionRect→
+CUIContextMenu52E050／52F0B0／52E780使用完整PE UTF16 `UI/UIWindow.img/ContextMenu` 四片原WZ。
+55D7B0先名字查找再做signedDWORD差，送出前記時間（拒絕照樣冷卻）；558FD0初始化為now−300000。
+codec名字維持CP949 byte-string，Session對外一次解碼；0x12未知6..255應走原generic font6，不是decoder exception。
+派對邀請及名冊解碼、綁定modal inviterId、重建server以resolveInvite核對接受id防轉錯隊、未證實舊端fail-closed，及原文／測試／保進度LIVE見[原角色互動](../NATIVE_PLAYER_INTERACTIONS.md)。
+
 #### 4.38.1 伺服器端（ADR-031）
 
 `0x20` 的目標用**場地**找（`FieldInstance.member(id)`）：client 只可能送同圖的 id（選單來自
@@ -3706,7 +3712,7 @@ ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameF
 |---|---|---|
 | 初學者的界線 | `FAME_MIN_LEVEL = 15` | client 沒有任何等級檢查（只有 5 分鐘冷卻），所以「초보자는…」那句話一定是伺服器說的。2003 的實際數字不在 binary 裡 → 選 15 並記錄 |
 | 「今天」／「這個月」 | UTC 的日序號／月序號（`fameClock`） | 不隨時區或重開機跳動；同時讓「월」的訊息有明確的界線 |
-| 哪一條先問 | 自己 → 初學者 → **這個月同一個人**（`4`）→ **今天**（`3`） | 同一個人、同一天再給一次時，client 顯示的是「這個月」那一句 |
+| 哪一條先問 | 自己 → 初學者 → **這個月同一個人**（`4`）→ **今天**（`3`） | 專案選擇優先回本月重複目標訊息；原server檢查順序未知 |
 | 人氣的範圍 | `[0, 65535]` | 紀錄是 u16；往下給 0 分的人不會變成負數 |
 | 配額存哪 | `GameEntryServer` 的 `FameLedgers`（**不進存檔**） | 它不是角色狀態的一部分（`CharacterData` 沒有那一格）；2003 的伺服器怎麼記看不出來 → §4.38.2 |
 

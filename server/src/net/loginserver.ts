@@ -3420,9 +3420,8 @@ export class GameEntryServer {
           session.send(encodePartyResult({ kind: "alreadyInParty" }));
           return;
         }
-        const invite = this.parties.inviteOf(session.characterId);
-        const party = invite === undefined ? undefined : this.parties.partyOf(invite.inviterId);
-        if (invite === undefined || party === undefined || party.id !== invite.partyId) {
+        const party = this.parties.resolveInvite(session.characterId, request.inviterId);
+        if (party === undefined) {
           this.options.log?.(
             `game: party: "${session.name}" accepted an invite from ${request.inviterId} that is no longer valid`,
           );

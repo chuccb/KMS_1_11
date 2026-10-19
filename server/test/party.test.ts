@@ -291,3 +291,31 @@ test("PartyRegistry: a member leaves, the leader's leave disbands", () => {
   assert.equal(PARTY_OPCODE.request, 0x26);
   assert.equal(PARTY_RESULT_TYPE.memberLeft, 10);
 });
+
+test("PartyRegistry authoritative resolveInvite binds target/confirmed inviter/party/leader; overwritten or dissolved offers cannot redirect acceptance", () => {
+  const parties = new PartyRegistry(),
+    a = parties.create({ characterId: 1, name: "LeaderA" }),
+    b = parties.create({ characterId: 2, name: "LeaderB" });
+  assert.equal(parties.resolveInvite(7, 1), undefined);
+  parties.invite(a.id, 1, 7);
+  assert.equal(parties.resolveInvite(8, 1), undefined);
+  assert.equal(parties.resolveInvite(7, 2), undefined);
+  assert.equal(parties.resolveInvite(7, 1), a);
+  parties.invite(b.id, 2, 7);
+  assert.equal(
+    parties.resolveInvite(7, 1),
+    undefined,
+    "old modal A must NOT join current pending party B",
+  );
+  assert.deepEqual(
+    parties.inviteOf(7),
+    { partyId: b.id, inviterId: 2 },
+    "wrong response cannot consume current offer",
+  );
+  assert.equal(parties.resolveInvite(7, 2), b);
+  parties.leave(2);
+  assert.equal(parties.resolveInvite(7, 2), undefined);
+  parties.invite(a.id, 1, 7);
+  parties.join(a, { characterId: 7, name: "Target" });
+  assert.equal(parties.resolveInvite(7, 1), undefined, "join consumes invite");
+});

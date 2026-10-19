@@ -97,8 +97,8 @@
 | D01 未接／未知 | 原任務全流程 | 對話codec／五類dialog／富文字已有；任務狀態、接受／完成條件、殺怪／交物計數、獎勵及持久化不是完整產品鏈 | `game/dialogue.ts`、`protocol/quest.ts`；`client/npcdialogue.ts`、`systemmenu.ts` |
 | D02 差異／未知 | 原掉落表／機率／金錢 | ADR-083已修權威真fh落點及原PNG底部貼地（新呈現政策），全100圖379422組與component通過；不等於恢復原server選點／機率。見[掉落與fh](DROP_FOOTHOLD_LANDING.md)。現行defaultDropPolicy是金錢、對應雜物、按級藥水三種roll；60%／30%／5%、level×3金錢跨度等是本repo政策，不是原掉落表。原RNG演算法不會把自訂掉落機率變成官方機率 | `game/drops.ts` 的 constants／defaultDropPolicy |
 | D03 差異／未知 | 原商店庫存與回收價 | item price有WZ來源，但何NPC賣何物、庫存、數量上限、sell ratio=0.5及部分取整屬重建政策；買賣／飛鏢補充可用不等於原商店經濟完成 | `game/shops.ts`；[商店與補充](MESO_RECHARGE.md) |
-| D04 部分／未接／未知 | 組隊經驗、貢獻與掉落歸屬 | party名冊／邀請／指令與Rage收件者已有；awardKillExp仍對kill session發template.exp，沒有完整隊伍經驗分配與貢獻公式。完整掉落歸屬／分配規則亦未證明 | `net/loginserver.ts` 的 awardKillExp；`game/parties.ts`、`drops.ts` |
-| D05 部分／未知 | 人氣規則與配額持久化 | 有server與protocol；Lv15門檻、UTC日月與順序是policy，ledger不入save，重啟即重置。不能把它當已恢復原server日／月配額 | `game/fame.ts`；browser完整人物資訊／給人氣UI也未接全 |
+| D04 部分／未接／未知 | 組隊經驗、貢獻與掉落歸屬 | party名冊／邀請／指令與Rage收件者已有；ADR-089補隊長右鍵邀請、韓文／modal對象、原回覆及權威inviterId核對（舊附接LIVE停用invite／accept），awardKillExp仍對kill session發template.exp，沒有完整隊伍經驗分配與貢獻公式。完整掉落歸屬／分配規則亦未證明 | `net/loginserver.ts` 的 awardKillExp；`game/parties.ts`、`drops.ts` |
+| D05 部分／未知 | 人氣規則與配額持久化 | 有server與protocol；Lv15門檻、UTC日月與順序是policy，ledger不入save，重啟即重置。不能把它當已恢復原server日／月配額 | `game/fame.ts`；[ADR-089角色互動](NATIVE_PLAYER_INTERACTIONS.md)已接原人氣UI／0x12／0x0D，本輪未把資訊id0或交易房偽裝完成 |
 | D06 部分 | 交易／Messenger有server，不等於browser可用 | 邀請、交易房／道具金錢承諾及原子成交、三人聊天室已有規則／codec；ClientSession與完整瀏覽器操作／邀請／房間視窗沒有完整產品鏈 | `game/trades.ts`、`messenger.ts`；`net/loginserver.ts`；`client/systemmenu.ts` |
 | D07 未接／未知 | 倉庫／計程車／其他原NPC服務 | 沒有完整原服務腳本、條件、費用及流程；不能以/map或任意存取替代。已有trunk／taxi資料或對話素材不代表服務已實作 | `game/dialogue.ts`、`net/loginserver.ts`；[路線圖](ROADMAP.md) |
 | D08 未接／部分 | Cash／pet／小遊戲 | cash tab、序號或avatar某些資料欄存在，不等於商城流程、寵物控制／物品／互動、小遊戲房與UI已完成；範圍仍應限本版原證，不補後版系統 | `protocol/itemslot.ts`、`game/avatar.ts`、`systemmenu.ts`；原C有CCashShop但非現行browser完整產品路徑 |

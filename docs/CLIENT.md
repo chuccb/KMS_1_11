@@ -123,6 +123,13 @@ API metadata、faceFrame合成／PNG cache／預熱、異常輸入與回歸來�
 > 完整還原仍在進行；本頁逐輪紀錄有歷史性，現行架構見 [ARCHITECTURE](ARCHITECTURE.md)，
 > 工作優先序見 [ROADMAP](ROADMAP.md)，技術方向見 ADR-065。舊 PASS 不代表後續改動已驗證。
 
+## 2026-10-19續作：同圖角色右鍵／人氣／派對邀請
+
+更正入口5128B0、四片ContextMenu原素材、角色UnionRect與lens反投影；密語沿既有原鏈，人氣接0x20→0x12／0x0D、
+五分鐘送出時冷卻、韓文／未知回覆。隊長限定邀請列與Yes/No綁定顯示的inviterId，修後到邀請覆蓋及韓文名冊。
+未完成交易房及原id0未處理列可見停用；鍵盤／邊緣／capture是明示browser政策。新bridge capability避免舊服務假支援；另補GameEntryServer權威inviterId核對，未證實舊附接端暫停invite／accept。
+原證、元件／synthetic peer驗證、仍未完成與保住既有世界的新入口見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)。
+
 ## 2026-10-19續作：原公告／六列訊息與名稱資源
 
 0x13/type1更正為原CUtilDlg1000 OK modal；loot／mesos／拒絕／同級EXP接原六列290×14與6000ms整數fade。

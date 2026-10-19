@@ -283,7 +283,8 @@ body {
 #chat-lines li.error {
   color: #ffafaf;
 }
-#chat-lines li.find {
+#chat-lines li.find,
+#chat-lines li.fame {
   color: #bbbbbb;
 }
 #chat-scroll {
@@ -1119,4 +1120,31 @@ body {
 #camera-status {
   font-variant-numeric: tabular-nums;
   color: #f2da9c;
+}
+
+/* CUIContextMenu: canvas owns the WZ pixels; DOM provides only focus, semantics and hit targets. */
+.player-menu {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 25;
+  outline: none;
+}
+.player-menu button {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  box-shadow: none;
+  outline: none;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: inherit;
+}
+.player-menu button:disabled {
+  pointer-events: none;
+  opacity: 1;
+  cursor: inherit;
 }

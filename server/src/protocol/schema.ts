@@ -1633,12 +1633,12 @@ export const PACKETS: readonly PacketSchema[] = [
       {
         name: "type",
         type: "u8",
-        note: "0 changed / 1 ignored / 2 beginner / 3 already today / 4 already this month / 5 received",
+        note: "0 changed / 1 ignored / 2 beginner / 3 already today / 4 already this month / 5 received; 6..255 generic error, no payload",
       },
       {
         name: "name",
         type: STRING,
-        note: "type 0: the target; type 5: the giver (the client adds its own name)",
+        note: "CP949 byte string; type 0: the target; type 5: the giver (the client adds its own name)",
       },
       { name: "up", type: "u8", note: "types 0 and 5 only" },
     ],

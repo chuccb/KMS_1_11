@@ -552,6 +552,7 @@ async function runServe(rest: string[]): Promise<number> {
   if (webPort !== undefined) {
     try {
       web = await startWebClient({
+        partyInviteIdentity: game !== undefined,
         port: webPort,
         host,
         loginPort: info.port,

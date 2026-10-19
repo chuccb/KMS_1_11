@@ -4,11 +4,12 @@
  * EVIDENCE (MapleStory.exe.c, FINDINGS 4.38)
  * -----------------------------------------------------------------------------
  * **送出**：`0x20` 只有一個送出者 `sub_55D7B0(CWvsApp, name, up)`，兩個呼叫點都是角色右鍵選單
- * （`sub_5478F0` 的 `인기도 +`／`인기도 -`，`n2 = 1`／`2`）。它先在自己的 `CUserPool` 裡找那個人
+ * （`sub_5128B0` 的 `인기도 +`／`인기도 -`，`n2 = 1`／`2`）。它先在自己的 `CUserPool` 裡找那個人
  * （**同一張圖**）、沒有就本地印「캐릭터를 찾을 수 없습니다」；通過 5 分鐘的本地冷卻
  * （`timeGetTime() - *(app+0x2AC) < 300000` →「잠시 후 다시 시도해 보세요」）才送出
  * `[0x20][u32 角色 id][u8 up]`（`up`：1 ＝ 올리기、0 ＝ 내리기）。冷卻與「找不到」都在 client，
- * 所以伺服器**不需要**重做它們 —— 但重做也不會錯（封包可以偽造）。
+ * 這只證明原 client 的送出門檻，不能推論原 server 沒有檢查。
+ * 本 repo 仍權威檢查同圖目標；其他原 server 限制未知。
  *
  * **回包**：`0x12` 的處理函式是 `sub_55C390`，`u8 type` 之後：
  *
@@ -24,6 +25,9 @@
  *
  * 注意 `type 5` 的第二個名字：處理函式讀的是 `*(CWvsApp + 36) + 4`（本機角色的名字，§4.37.4），
  * **不是封包裡的欄位** —— 所以 `0x12` 的兩個字串型別都只有一個名字是由伺服器給的。
+ */
+/** Names in this codec are CP949 BYTE STRINGS, like CharacterStats.name, not Unicode.
+ * ClientSession decodes once when projecting a field event; do not UTF-8 or double-encode them.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 
@@ -82,7 +86,9 @@ export type FameResult =
   | { kind: "alreadyToday" }
   | { kind: "alreadyThisMonth" }
   /** 給被給的人（`name` 是給的人；第二個名字由 client 自己補）。 */
-  | { kind: "received"; name: string; up: boolean };
+  | { kind: "received"; name: string; up: boolean }
+  /** 55C390 default: generic font6 message, no further payload. */
+  | { kind: "unknown"; type: number };
 
 /** 寫一個 `0x12`。 */
 export function encodeFameResult(result: FameResult): Uint8Array {
@@ -102,6 +108,10 @@ export function encodeFameResult(result: FameResult): Uint8Array {
       return writer.writeByte(FAME_RESULT_TYPE.alreadyToday).toBytes();
     case "alreadyThisMonth":
       return writer.writeByte(FAME_RESULT_TYPE.alreadyThisMonth).toBytes();
+    case "unknown":
+      if (!Number.isInteger(result.type) || result.type < 6 || result.type > 255)
+        throw new RangeError("Unknown fame type must be an integer in 6..255");
+      return writer.writeByte(result.type).toBytes();
     case "received":
       return writer
         .writeByte(FAME_RESULT_TYPE.received)
@@ -131,7 +141,7 @@ export function readFameResult(reader: PacketReader): FameResult {
     case FAME_RESULT_TYPE.received:
       return { kind: "received", name: reader.readAsciiString(), up: reader.readByte() !== 0 };
     default:
-      throw new RangeError(`0x12 type 0x${type.toString(16)} is not a fame result (0x00-0x05)`);
+      return { kind: "unknown", type };
   }
 }
 
@@ -142,6 +152,8 @@ export function describeFameResult(result: FameResult): string {
       return `0x12 fame: ${result.name} ${result.up ? "up" : "down"}`;
     case "received":
       return `0x12 fame: ${result.name} ${result.up ? "up" : "down"} (someone famed you)`;
+    case "unknown":
+      return `0x12 fame: unknown type ${result.type}`;
     default:
       return `0x12 fame: ${result.kind}`;
   }
