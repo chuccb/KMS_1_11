@@ -2,7 +2,16 @@
 
 2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：真實畫布／有界鍵盤工具（ADR-087）
+## 最新增量：原訊息與名稱資源整鏈（ADR-088）
+
+新增真正strict的feedback-data／feedback／feedback-renderer／item-metadata，拆出真bridge共用client-event-json；不是更名或any／declaration／strict放寬。
+主入口5356→5321行，client93支TS；舊client_probe.mjs709行與其他深schema／44項基準失敗仍未完成。
+六項registry latest重新核對與exact pins一致；strict／format／build／diff通過。
+聚焦49/0（8files，6.82s），完整1090/44（1134tests／129files，320.71s），對本輪前1064/44（319.36s）failure multiset新增0／移除0；CI仍不綠。
+41純imports／0 I/O；原EXE/Shape2D binary anchors、全equipment metadata及DPR1/2原WZ component通過。LIVE93模組200，title-only frame29／errors[]／0WS；新記憶體世界不是舊角色恢復。
+完整原證、政策與安全邊界見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)。
+
+## 前輪增量：真實畫布／有界鍵盤工具（ADR-087）
 
 frame_probe／play_probe已改為strict TS實作與Bun runner；刪除2支舊MJS。共用明示fixture／序號與原PNG→buffer→view證據，拒絕fake DOM／直接攻擊與移動封包。
 工具鏈latest與exact pins相同；focused25/0、完整1064/44（1108tests／124files，267.35s），對本輪前基準failure multiset新增0／移除0，CI仍不綠。

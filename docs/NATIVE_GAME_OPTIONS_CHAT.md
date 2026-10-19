@@ -31,7 +31,7 @@ FINDINGS§4.26／4.31／4.35.5／§6第17項已同步更正；ADR-019與舊交�
 | 4373A0→4386E0＋原avatar canvas原點 | 寬12+12×欄；高6+箭高+14×行；x3−trunc(w/2)，y−h−avatarOriginY−5；root z−1073471624 | 相對field root z250210，portal250110／damage250310；獨立speech record排序key |
 | 4FB670／4FBEE0 | wrap444−VScr12=432、續行五空白、上限64換行record、六行13px、讀者最後操作>5000ms才自動追尾（或已在底／≤7record） | 手動量測產生固定li列；不是CSS把64則訊息任意折行 |
 | 4F8CB0 | Esc清空退出、empty edit左右鍵退出 | IME組字保留；focus清移動鍵與cold-action ticket |
-| 55CDE0、EXE `[공지사항] %s` | s2c13/type0＋CP949 string→font5；type1走52BBE0 | 新notice codec／catalogue resolver／session event；map命令拒絕不偽裝System密語 |
+| 55CDE0、EXE `[공지사항] %s` | s2c13/type0＋CP949 string→font5；type1走52BBE0 | notice codec／catalogue resolver／session event；ADR-088再接type1 CUtilDlg1000 OK，不偽裝System密語 |
 | 472910＋原StatusBar constructor | 找不到font6；find成功font3；EXE raw offsets1B61A9／1B617D／1B61C5附近確認韓文文案 | 成功find首回主動載本機metadata組street:map；async只更新仍存在的原行 |
 
 原Data.wz不缺素材。WZ dump僅作素材研究，不是執行遊戲測試；未提交大型dump、原檔副本或生成資料。
@@ -71,7 +71,7 @@ FINDINGS§4.26／4.31／4.35.5／§6第17項已同步更正；ADR-019與舊交�
 - 這輪一般氣泡、normal/dead造型與root層已接，不是完整Gr2D layer cache／CShape2D／CVecCtrl／30ms同步引擎。
   只cache氣泡layout，尚未cache整張氣泡canvas；Menu hover仍用原mouseOver第0格，完整動畫未重建。
 - 缺request ID時，3秒逾時後舊09／0A與新請求無法完全關聯；不要聲稱防偽receipt解決了這件事。
-- 13/type1中央公告尚未接。`55C130`原loot取得提示走4EB440螢幕提示，不是StatusBar；browser仍保留舊loot log，未冒稱完成。
+- 此項已由2026-10-19 ADR-088續作取代：13/type1是CUtilDlg1000 OK，已接原框與完整收件／modal鏈；`55C130` loot與同級EXP已走六列4EB440提示，移除舊loot chat。原證／browser政策／本輪結果見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)。
 - 任務／Messenger／交易／Party／小遊戲完整UI，SysOpt的DirectX畫質／Win32截圖，完整UI focus manager仍缺。
   技能施放／魔法／buff、aggro／飛行、自然AP/SP／原轉職、卷軸、cash/pet等既有界線未改。
 

@@ -123,7 +123,13 @@ API metadata、faceFrame合成／PNG cache／預熱、異常輸入與回歸來�
 > 完整還原仍在進行；本頁逐輪紀錄有歷史性，現行架構見 [ARCHITECTURE](ARCHITECTURE.md)，
 > 工作優先序見 [ROADMAP](ROADMAP.md)，技術方向見 ADR-065。舊 PASS 不代表後續改動已驗證。
 
-## 最新實作：NPC圖文內容與選項（2026-10-18，未測試）
+## 2026-10-19續作：原公告／六列訊息與名稱資源
+
+0x13/type1更正為原CUtilDlg1000 OK modal；loot／mesos／拒絕／同級EXP接原六列290×14與6000ms整數fade。
+同時補CP949→session→真JSON→strict狀態、名字cache暫錯重試／取消、自己taken音效及modal／換場／斷線生命週期。
+實際原證、WZ component與完整回歸／政策界線見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)；不改角色／獎勵／save、不宣稱全UI原機等價。
+
+## 前輪實作：NPC圖文內容與選項（2026-10-18，未測試）
 
 補 `#i` 普通道具圖、`#s` normal技能圖、原尺寸／行底對齊／不同row高度、圖文與純圖選項／名稱tip。
 `##` escape、整段量測折行、掛行／續行空白；實際高度連到命中、底線、捲動、鍵盤reveal與可及文字。

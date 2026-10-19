@@ -3,9 +3,9 @@
 > 2026-10-18：僅同步已遷移的模組路徑；TypeScript 遷移不提升以下原版對等評級。實際遷移／驗證狀態見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 盤點日期：2026-10-18。程式基準：`4f9ad1b`（ADR-076 怪物主動攻擊交付之後）。
-續作更新：ADR-077補普通力學／抓繩／本地30ms有序path，ADR-078補有向整數crossing／雙接觸／physical bounds／碰撞時刻及特別KB連動；A01/A04/A05/B02如下更新。[普通力學](NATIVE_LOCOMOTION.md)、[地形原證與剩餘界線](NATIVE_TERRAIN.md)。其餘維持原盤點基準。
+續作更新：ADR-077補普通力學／抓繩／本地30ms有序path，ADR-078補有向整數crossing／雙接觸／physical bounds／碰撞時刻及特別KB連動；A01/A04/A05/B02如下更新。[普通力學](NATIVE_LOCOMOTION.md)、[地形原證與剩餘界線](NATIVE_TERRAIN.md)。2026-10-19 ADR-088另補E05原Notice/OK與六列訊息完整收件鏈；其餘維持原盤點基準。
 
-這是**靜態現況盤點**，不是遊戲驗收、逐像素比較或新的原版實機測量。本輪閱讀現行程式、ADR、原證整理與路線圖，未執行測試／check／typecheck／語法檢查／browser／VM／HTTP或登入probe。
+這是**靜態現況盤點**，不是遊戲驗收、逐像素比較或新的原版實機測量。原盤點當時閱讀程式、ADR、原證整理與路線圖，未執行驗證；不代表後續增量未測。E05當前型別／回歸／原WZ component與唯讀title結果見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)，仍未登入／操作玩家角色。
 
 ## 先講結論
 
@@ -113,7 +113,7 @@
 | E02 部分／差異 | Gr2D混色、layer與avatar所有分支 | 真zmap、body front/back、child5殘影、世界FX與建立順序已有；native所有COM layer、blend／閃色、blocked-slot、同z同刻全域順序未全移植。remote全部受傷閃色／attr4家族也非完整 | `scene.mjs`、`game/avatar.ts`、`faces.mjs`；[圖層](NATIVE_LAYER_PRIORITY.md)、[臉部](NATIVE_FACE_ANIMATION.md) |
 | E03 部分／未接 | 全視窗管理與UI動畫 | 單個視窗能拖曳／關閉不等於原window manager、焦點／遮擋／Tab／modal全鏈。Menu hover仍只取mouseOver第0格，selector／部分disabled框由browser畫，非原CCtrl全等價 | `client/systemmenu.ts`、`main.js`；[系統UI](NATIVE_SYSTEM_UI.md) |
 | E04 未接／部分 | 任務／Party／Community等完整視窗 | Menu的Quest／Party／Community仍停用；party指令／原式邀請不是完整party窗。交易、Messenger、人物資訊／人氣、原收件人選擇等UI未接全 | `systemmenu.ts`、`gameoptions.mjs`、`session.ts` events；[聊天設定](NATIVE_GAME_OPTIONS_CHAT.md) |
-| E05 未接／差異 | 中央公告、原取得道具提示 | 0x13目前只讀type0；type1中央公告尚未接。loot仍寫chat/log，沒有完整原4EB440螢幕提示 | `protocol/notice.ts`；`main.js` 的 system-notice／loot |
+| E05 已接／仍有呈現差異 | 原Notice/OK、六列loot／EXP提示 | ADR-088更正type1為CUtilDlg1000 modal；256type解碼、真bridge、原PNG／置中／CRLF／鍵盤、六列／整數6000ms fade、名字與音效生命週期已接。GDI字型、同步WZ名稱與全native modal loop仍非browser等價 | [原證、政策與驗證](NATIVE_FEEDBACK.md)；`feedback*.ts`／`item-metadata.ts`／`protocol/notice.ts` |
 | E06 未知／平台差異 | 完整按鍵對照與本機設定 | 七原快捷格、技能／藥水拖放已有；其餘完整按鍵對照仍需逐入口確認，是否另有獨立改鍵窗要原證，不能直接要求後版自由改鍵UI。localStorage取代native registry，跨瀏覽器／裝置不等同原設定機制 | `quickslots.mjs`、`gameoptions.mjs`、`systemsettings.mjs` |
 | E07 未接／平台差異 | 原DirectX畫質與截圖目的地 | SysOpt對應控制仍disabled；瀏覽器縮放／DPR不是soVideo，不能把browser截圖當原Win32路徑功能 | `systemmenu.ts` 的 openSound；[SysOpt界線](NATIVE_SYSTEM_UI.md) |
 | E08 部分／差異／未驗收 | BGM／音效播放端與觸發覆蓋 | 原Sound_DX8 payload／MP3或PCM、BGM與多條動作音已有；播放端改Web Audio、需手勢解鎖、有16並發上限與冷載入deadline。未逐聲／逐事件重建DirectSound／ACM全部行為；不能說音訊都沒有，也不能說所有原聲時序已一致 | `game/audio.ts`、`client/audio.ts`；[音訊歷史](CLIMB_AUDIO_VALIDATION.md) |

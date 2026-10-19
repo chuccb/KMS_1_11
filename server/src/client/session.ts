@@ -415,7 +415,7 @@ export type ClientEvent =
   | { kind: "meso-drop-result"; changed: boolean }
   | { kind: "chat"; name: string; text: string; channel: "field" | "whisper"; characterId?: number }
   | { kind: "whisper-refused"; name: string }
-  | { kind: "system-notice"; text: string }
+  | { kind: "system-notice"; type: 0 | 1; text: string }
   | { kind: "inventory"; inventory: InventoryView; ack?: boolean }
   | { kind: "shop-open"; shop: ShopView }
   | { kind: "shop-result"; code: number; message: string }
@@ -1640,7 +1640,12 @@ export class ClientSession {
         }
         case SYSTEM_NOTICE_OPCODE: {
           const notice = readSystemNotice(new PacketReader(plain, 1));
-          this.emit({ kind: "system-notice", text: decodeChatText(notice.text) });
+          if (notice.type === 0 || notice.type === 1)
+            this.emit({
+              kind: "system-notice",
+              type: notice.type,
+              text: decodeChatText(notice.text),
+            });
           return;
         }
         case FIELD_OPCODE.setField: {

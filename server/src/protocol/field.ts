@@ -687,7 +687,8 @@ export function describeFieldPacket(plain: Uint8Array): string | undefined {
   }
   if (opcode === SYSTEM_NOTICE_OPCODE) {
     try {
-      return `0x13 system notice: ${decodeCp949(readSystemNotice(new PacketReader(plain, 1)).text)}`;
+      const notice = readSystemNotice(new PacketReader(plain, 1));
+      return `0x13 system notice type=${notice.type}: ${decodeCp949(notice.text)}`;
     } catch (error) {
       return `0x13 system notice: (unreadable: ${(error as Error).message})`;
     }

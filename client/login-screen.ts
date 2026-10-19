@@ -434,6 +434,7 @@ export function loginScreen(options: LoginScreenOptions) {
   window.addEventListener(
     "keydown",
     (event) => {
+      if (options.labOpen()) return;
       if (stage === "title") {
         if (event.key === "Escape" && dialogOpen) closeTitleLogin();
         return;

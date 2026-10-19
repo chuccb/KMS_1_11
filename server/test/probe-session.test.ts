@@ -197,7 +197,7 @@ test("tool/component imports are inert in a separate process even with networkin
   ]);
   assert.equal(status, 0, errors);
   assert.equal(errors, "");
-  assert.deepEqual(JSON.parse(output), { imported: 35, attempts: 0 });
+  assert.deepEqual(JSON.parse(output), { imported: 41, attempts: 0 });
 });
 
 test("native smoke creation fixture uses actual male MakeCharInfo choices, native dice and valid CP949 names", async () => {

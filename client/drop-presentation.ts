@@ -114,9 +114,11 @@ export function dropPosition(
   };
 }
 /** Capture the current airborne point, so an early pickup cannot teleport to the final ground. */
-export function beginDropPickup(record: DropRecord, now: number, characterId: number): void {
-  if (record.takenAt !== undefined) return;
+/** True only on the first pool removal; callers must not replay self pickup sound for duplicates. */
+export function beginDropPickup(record: DropRecord, now: number, characterId: number): boolean {
+  if (record.takenAt !== undefined) return false;
   record.pickupOrigin = dropPosition(record, now) ?? record.drop;
   record.takenAt = now;
   record.takenBy = characterId;
+  return true;
 }

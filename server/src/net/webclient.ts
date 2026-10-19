@@ -1,4 +1,5 @@
 import { Transpiler } from "bun";
+import { clientEventJson } from "./client-event-json.ts";
 import { readBrowserMovePath } from "./browsermove.ts";
 import type { MobPresentation } from "../game/mobs.ts";
 import { MOB_BODY_ACTIONS, mobForcedName } from "../../../client/mob-attacks.ts";
@@ -64,7 +65,7 @@ import { readFileSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deathArtOf } from "../game/deathart.ts";
-import { ClientSession, type ClientEvent } from "../client/session.ts";
+import { ClientSession } from "../client/session.ts";
 import { encodeCp949, decodeCp949 } from "../protocol/cp949.ts";
 import type { ItemCatalog } from "../game/iteminfo.ts";
 import type { CharacterData } from "../protocol/chardata.ts";
@@ -1160,7 +1161,7 @@ class BrowserSession {
         (event.kind === "self" && event.self.hp <= 0)
       )
         this.buffs.clear();
-      const json = this.eventJson(event);
+      const json = clientEventJson(event, this.contactField);
       if (
         (event.kind === "mob-enter" || event.kind === "mob-move") &&
         this.username &&
@@ -1532,11 +1533,6 @@ class BrowserSession {
     if (!Number.isInteger(itemId) || itemId <= 0)
       return this.send({ t: "error", message: "use needs an item id" });
     await this.require().useItem(slot, itemId);
-  }
-
-  private eventJson(event: ClientEvent): Record<string, unknown> {
-    const { kind, ...rest } = event;
-    return { t: kind, ...rest, ...(kind === "field" ? { contactField: this.contactField } : {}) };
   }
 
   close(): void {

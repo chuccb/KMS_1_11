@@ -736,12 +736,16 @@ export const PACKETS: readonly PacketSchema[] = [
     direction: "s2c",
     stage: "field",
     name: "systemNotice",
-    status: "partial",
+    status: "byte-exact",
     evidence:
-      "55CDE0: type0 + string -> [공지사항] text in StatusBar font5; type1 center notice not implemented",
+      "55CDE0: type0 -> StatusBar font5; type1 -> 52BBE0 CUtilDlg1000 Notice/OK; other types read string then ignore",
     codecs: ["readSystemNotice", "encodeSystemNotice"],
     fields: [
-      { name: "type", type: "u8", note: "only 0 implemented" },
+      {
+        name: "type",
+        type: "u8",
+        note: "0=chat, 1=Notice/OK modal; other types ignored after string",
+      },
       { name: "text", type: STRING },
     ],
   },

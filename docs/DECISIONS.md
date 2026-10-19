@@ -2970,3 +2970,18 @@ main抽出drop-presentation／drop-renderer：unknown drop/remove與icon守衛�
 - 依既有授權開全新隔離進度，而非舊save恢復；只跑title-only、0WS、save SHA256不變，不替玩家登入／操作角色。舊PID4942已不在當前沙箱。
 
 現行命令、全部明示參數、證據限制與新入口見 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。
+
+
+## ADR-088：依原CUtilDlg與Shape2D補齊公告／六列訊息完整接收鏈（2026-10-19）
+
+- 交叉原EXE、C/listing、Shape2D.dll及WZ；更正0x13/type1為52BBE0→52C320的CUtilDlg1000單OK modal，不是橫幅。所有type先讀string，0chat、1modal、其他忽略，含ClientSession／真bridge共用JSON projection。
+- 使用Notice264×132、中心268,234與OK100,92；Yes/No59/140、CRLF／14px／原文字帶與雙色shadow、Y/N及共用modal守衛。Notice焦點OK；破壞性confirm仍No先焦點，明示browser安全政策，不假稱原Yes先焦點。
+- loot／mesos／拒絕與同級正向EXP接六個290×14池，x504／y382+14i、head→tail、過期不重排；保留原文及signed32格式。Shape2D vtable+98→10011030→10010AD0→10010C40確認6000ms整數線性alpha，半程128/255。
+- 移除ID假名稱／輪詢改聊天字；共用metadata校驗identity與label／tooltip投影、promise去重、404負快取、暫錯重試、bounded cache/pending及AbortSignal／generation。未將其說成完整native item schema；全原equipment template及consume/ammo/etc代表通過。
+- 名稱反序完成仍依接收序與原TTL，不在舊field／斷線／dispose後復活；Notice FIFO不搶別的owner，Enter-repeat／Tab／Escape與登入標題behind-modal守衛連動。既有已成立screen singleton列跨field繼續原fade。
+- PickUpItem從獎勵訊息移到4A95B0所證0x44本機taken；首次drop動畫轉態回報boolean，重複／其他人／拒絕不重播。未改獎勵、物理、相機或角色instance。
+- 六項registry latest與exact pins一致；strict／format／build／diff通過，focused49/0（8files），41純imports／0 I/O；真Chromium DPR1/2原WZ／實HTML／metadata、鍵鼠、canvas例外恢復通過，非GDI逐像素等價。
+- 整理前1064/44（1108tests／124files，319.36s），最終1090/44（1134tests／129files，320.71s）；failure multiset新增0／移除0，CI仍不綠。main5356→5321行、client93支TS，主入口／client_probe.mjs與其餘深schema仍未完成。
+- 缺舊save／舊程序後依既有授權另開memory-only隔離世界，不冒稱恢復。保留新LIVE同程序PID6716；93modules200與title frame29／errors[]／0WS，不登入、不操作玩家角色、不改save；停止服務會失去新記憶體進度。
+
+常數逐項來源、完整驗證／剩餘差異與重跑命令見[NATIVE_FEEDBACK](NATIVE_FEEDBACK.md)。

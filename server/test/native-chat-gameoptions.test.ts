@@ -75,11 +75,17 @@ test("472910 refusal: 0x23/0x22 has sender + own name; 0x1A/0x22 only names refu
   assert.deepEqual(readUserWhisperRefused(new PacketReader(answer, 1)), { name: "Alt" });
   assert.throws(() => readUserWhisperRefused(new PacketReader(Uint8Array.of(0x12, 0, 0))));
 });
-test("55CDE0 type0 system notice is not fake System whisper; unsupported center type rejected", () => {
+test("55CDE0 type0 stays byte-exact; type1 is a notice dialog, not a fake whisper", () => {
   const packet = encodeSystemNotice(encodeCp949("hello"));
   assert.equal(toHex(packet), "1300050068656c6c6f");
-  assert.deepEqual(readSystemNotice(new PacketReader(packet, 1)), { text: encodeCp949("hello") });
-  assert.throws(() => readSystemNotice(new PacketReader(Uint8Array.of(1, 0, 0))));
+  assert.deepEqual(readSystemNotice(new PacketReader(packet, 1)), {
+    type: 0,
+    text: encodeCp949("hello"),
+  });
+  assert.deepEqual(readSystemNotice(new PacketReader(Uint8Array.of(1, 0, 0))), {
+    type: 1,
+    text: new Uint8Array(),
+  });
 });
 test("4373A0 native balloon cells: 84px wrap, odd single-line columns, dead arrow taller, five-second lifetime", () => {
   const measure = (t: string) => t.length * 6;

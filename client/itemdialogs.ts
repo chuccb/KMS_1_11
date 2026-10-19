@@ -24,7 +24,7 @@ export interface ConfirmDialogOptions extends DialogOptions {
 type DialogSpec =
   | (QuantityDialogOptions & { mode: "quantity" })
   | (TextDialogOptions & { mode: "text" })
-  | (ConfirmDialogOptions & { mode: "confirm" });
+  | (ConfirmDialogOptions & { mode: "confirm" | "notice" });
 type DialogState = DialogSpec & {
   lines: string[];
   textHeight: number;
@@ -33,6 +33,7 @@ type DialogState = DialogSpec & {
   width: number;
   height: number;
 };
+import { BASIC_DIALOG, basicDialogLines, basicDialogTextY } from "./feedback-data.ts";
 import { drawUtilFrame } from "./utildialog.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 /** CUtilDlgEx numeric input: 4643F0 / 4B7960 / 535EF0 / 532A80 / 531110.
@@ -105,11 +106,11 @@ export function itemDialogs({
   function open(options: DialogSpec) {
     const { mode } = options;
     if (current) return false;
-    const editing = mode !== "confirm";
-    const lines = linesOf(options.text, editing ? 230 : 236);
+    const editing = mode === "quantity" || mode === "text";
+    const lines = editing ? linesOf(options.text, 230) : basicDialogLines(options.text);
     const textHeight = lines.length * 16;
-    const width = editing ? 252 : 264;
-    const height = editing ? textHeight + 99 : 132;
+    const width = editing ? 252 : BASIC_DIALOG.width;
+    const height = editing ? textHeight + 99 : BASIC_DIALOG.height;
     const x = Math.max(0, Math.min(800 - width, Math.round((options.at?.x ?? 400) - width / 2)));
     const y = Math.max(0, Math.min(600 - height, Math.round((options.at?.y ?? 300) - height / 2)));
     previousFocus = focusTarget(document.activeElement);
@@ -117,7 +118,11 @@ export function itemDialogs({
     label.textContent = options.text;
     error.textContent = "";
     input.classList.toggle("hidden", !editing);
-    if (options.mode !== "confirm") {
+    cancel.classList.toggle("hidden", mode === "notice");
+    cancel.disabled = mode === "notice";
+    ok.textContent = mode === "confirm" ? "예" : "확인";
+    cancel.textContent = mode === "confirm" ? "아니오" : "취소";
+    if (options.mode === "quantity" || options.mode === "text") {
       input.value = String(options.initial);
       input.maxLength =
         options.mode === "text" ? (options.maxLength ?? 12) : String(options.max).length;
@@ -134,15 +139,28 @@ export function itemDialogs({
     box(ok, editing ? x + width - 119 : x + width / 2 - 50, buttonY, 50, 23);
     box(cancel, editing ? x + width - 65 : x + width / 2 + 4, buttonY, 50, 23);
     if (!editing) {
-      box(ok, x + 60, y + 92, 65, 24);
-      box(cancel, x + 138, y + 92, 65, 24);
+      box(
+        ok,
+        x + (mode === "notice" ? BASIC_DIALOG.okX : BASIC_DIALOG.yesX),
+        y + BASIC_DIALOG.buttonY,
+        BASIC_DIALOG.buttonWidth,
+        BASIC_DIALOG.buttonHeight,
+      );
+      box(
+        cancel,
+        x + BASIC_DIALOG.noX,
+        y + BASIC_DIALOG.buttonY,
+        BASIC_DIALOG.buttonWidth,
+        BASIC_DIALOG.buttonHeight,
+      );
     }
     root.classList.remove("hidden");
     onOpen();
     if (editing) {
       input.focus();
       input.select();
-    } else cancel.focus(); // Destructive confirmations never default to Yes on a stray Enter.
+    } else if (mode === "notice") ok.focus();
+    else cancel.focus(); // Explicit browser safety policy: destructive Yes/No never defaults to Yes.
     void audio.effect("UI/DlgNotice");
     return true;
   }
@@ -219,13 +237,27 @@ export function itemDialogs({
       event.stopImmediatePropagation();
       if (event.key === "Escape") {
         event.preventDefault();
-        close();
+        if (!event.repeat) close();
+      } else if (
+        current.mode === "confirm" &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        /^[yn]$/i.test(event.key)
+      ) {
+        event.preventDefault();
+        if (!event.repeat) event.key.toLowerCase() === "y" ? accept() : close();
       } else if (event.key === "Enter") {
         event.preventDefault();
         if (!event.repeat) document.activeElement === cancel ? close() : accept();
       } else if (event.key === "Tab") {
         event.preventDefault();
-        const controls = current.mode !== "confirm" ? [input, ok, cancel] : [ok, cancel];
+        const controls =
+          current.mode === "notice"
+            ? [ok]
+            : current.mode === "confirm"
+              ? [ok, cancel]
+              : [input, ok, cancel];
         const index = controls.findIndex((control) => control === document.activeElement);
         controls[(index + (event.shiftKey ? controls.length - 1 : 1)) % controls.length].focus();
       } else if (document.activeElement !== input) event.preventDefault();
@@ -265,6 +297,9 @@ export function itemDialogs({
     text(options: TextDialogOptions) {
       return open({ ...options, mode: "text" });
     },
+    notice(options: ConfirmDialogOptions) {
+      return open({ ...options, mode: "notice" });
+    },
     confirm(options: ConfirmDialogOptions) {
       return open({ ...options, mode: "confirm" });
     },
@@ -274,41 +309,72 @@ export function itemDialogs({
       if (!c) return;
       const { x, y, width: w, height: h } = c;
       ctx.save();
-      if (c.mode !== "confirm") {
-        drawUtilFrame(ctx, image, x, y, w, h);
-        // 532A80: input border at (13,textHeight+35), inner white face (14,+36).
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(x + 13, y + c.textHeight + 35, w - 25, 18);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x + 14, y + c.textHeight + 36, w - 27, 16);
-      } else {
-        stamp("UI/Basic.img/YesNo/backgrnd", x, y);
-      }
-      ctx.font = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
-      ctx.fillStyle = "#000000";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      c.lines.forEach((line, i) =>
-        ctx.fillText(line, x + 14, y + (c.mode !== "confirm" ? 36 : 24) + i * 16),
-      );
-      if (error.textContent) {
-        ctx.fillStyle = "#a00000";
-        ctx.font = "10px 'Dotum', 'KMSCJK', sans-serif";
-        ctx.fillText(error.textContent, x + 14, y + h - 16);
-      }
-      for (const b of [ok, cancel]) {
-        const name = c.mode !== "confirm" ? (b === ok ? "OK" : "Cancel") : b === ok ? "Yes" : "No";
-        const state = pressed === b.id ? "pressed" : hover === b.id ? "mouseOver" : "normal";
-        const path = c.mode !== "confirm" ? "UI/UIWindow.img/UtilDlgEx" : "UI/Basic.img";
-        if (c.mode !== "confirm")
-          stamp(`${path}/Bt${name}/${state}/0`, parseFloat(b.style.left), parseFloat(b.style.top));
-        else {
-          // Basic buttons are 65x24, unlike UtilDlgEx's 50x23.
-          box(b, b === ok ? x + 60 : x + 138, y + 92, 65, 24);
-          stamp(`${path}/Bt${name}/${state}/0`, parseFloat(b.style.left), parseFloat(b.style.top));
+      try {
+        const editing = c.mode === "quantity" || c.mode === "text";
+        if (editing) {
+          drawUtilFrame(ctx, image, x, y, w, h);
+          // 532A80: input border at (13,textHeight+35), inner white face (14,+36).
+          ctx.fillStyle = "#000000";
+          ctx.fillRect(x + 13, y + c.textHeight + 35, w - 25, 18);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(x + 14, y + c.textHeight + 36, w - 27, 16);
+        } else {
+          stamp(`UI/Basic.img/${c.mode === "notice" ? "Notice" : "YesNo"}/backgrnd`, x, y);
         }
+        ctx.font = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
+        ctx.fillStyle = "#000000";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        if (editing) c.lines.forEach((line, i) => ctx.fillText(line, x + 14, y + 36 + i * 16));
+        else {
+          ctx.save();
+          try {
+            ctx.beginPath();
+            ctx.rect(x, y, w, h);
+            ctx.clip();
+            ctx.font = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
+            for (const [index, line] of c.lines.entries()) {
+              const tx =
+                  x +
+                  BASIC_DIALOG.textLeft +
+                  Math.trunc((BASIC_DIALOG.textWidth - ctx.measureText(line).width) / 2),
+                ty = y + basicDialogTextY(c.lines.length) + BASIC_DIALOG.lineHeight * index;
+              ctx.fillStyle = "#ffffff";
+              ctx.fillText(line, tx + 1, ty + 1);
+              ctx.fillStyle = "#000000";
+              ctx.fillText(line, tx, ty);
+            }
+          } finally {
+            ctx.restore();
+          }
+        }
+        if (error.textContent) {
+          ctx.fillStyle = "#a00000";
+          ctx.font = "10px 'Dotum', 'KMSCJK', sans-serif";
+          ctx.fillText(error.textContent, x + 14, y + h - 16);
+        }
+        for (const button of c.mode === "notice" ? [ok] : [ok, cancel]) {
+          const name = editing
+            ? button === ok
+              ? "OK"
+              : "Cancel"
+            : c.mode === "notice"
+              ? "OK"
+              : button === ok
+                ? "Yes"
+                : "No";
+          const state =
+            pressed === button.id ? "pressed" : hover === button.id ? "mouseOver" : "normal";
+          const path = editing ? "UI/UIWindow.img/UtilDlgEx" : "UI/Basic.img";
+          stamp(
+            `${path}/Bt${name}/${state}/0`,
+            parseFloat(button.style.left),
+            parseFloat(button.style.top),
+          );
+        }
+      } finally {
+        ctx.restore();
       }
-      ctx.restore();
     },
   };
 }

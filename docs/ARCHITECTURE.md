@@ -33,14 +33,16 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | 位置 | 責任與界線 |
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 89個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/*.ts` | 93個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
+| `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
 | `client/drop-presentation.ts`／`drop-renderer.ts` | unknown drop/remove守衛、連續動畫、原PNG底部貼地與固定金幣幀；不代替server選fh |
 | `server/src/game/drop-landing.ts` | 所有掉落的有向真地板／下射線／虛空邊緣權威選點，原0x43格式不變 |
 | `client/entity-assets.ts`／`entity-resource-validation.ts`／`avatar-look.ts` | NPC/mob metadata驗證、field ownership／取消、native action量化與local/remote look規則 |
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
 | `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 整數世界像素／原UI兩段合成、四視野、時間轉場、偏好／減少動態；不改物理／協定 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
+| `server/src/net/client-event-json.ts` | 真bridge的純收件JSON projection，保留system-notice.type／field epoch，供合併加密TCP回歸共用 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |

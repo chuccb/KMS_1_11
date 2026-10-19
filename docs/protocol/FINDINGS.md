@@ -540,7 +540,7 @@ u16 ×15    str dex int luk maxHp maxMp pad mad pdd mdd acc eva craft speed jump
 | `0x10` | `sub_55C5E0` | **組隊（파티）系統**：見下表 | `u8 type` + 依 type 的 payload |
 | `0x11` | `sub_55C130` | **獲得提示**（**已解，見 §4.18.3**）| `u8 type`：`1` → `u32` → "메소를 획득했습니다 (+%d)"；`0` → `u32 itemId`(`sub_479D30` 查名)`+ u32 count` → "아이템을 획득했습니다 (%s)"（count ≤ 1 時不印數量）；**其他值 → 2 bytes 的 "아이템을 더 이상 가질 수 없습니다"** |
 | `0x12` | `sub_55C390` | **인기도（人氣）系統** | `u8 type` + `string name`（`sub_432680`）：`0` → `u8 ok`（"'%s'님은 인기도를 …"，成功／失敗兩種訊息）、`2` = "초보자는 인기도를 올리거나 내리지 못합니다."、`3` = 等級不足、`4` … |
-| `0x13` | `sub_55CDE0` | **系統訊息／公告** | `u8 type` + `string text`：`0` → "[시스템] %s"（聊天視窗）、`1` → `sub_52BBE0(text)`（畫面中央公告）|
+| `0x13` | `sub_55CDE0` | **系統訊息／公告** | `u8 type` + `string text`：`0` → "[공지사항] %s"（StatusBar font5）、`1` → `sub_52BBE0(text)`（CUtilDlg1000單OK modal）；其他type仍先讀string再忽略|
 
 `0x10` 的 type 對照（`sub_55C5E0` 的 switch，訊息字串就是語意）：
 
@@ -2751,7 +2751,7 @@ Alt 離線       : Hero 收到 0x1D
   含說話者、同場地、保留原CP949 bytes。這是依接收路徑重建的server政策，不是假稱取得原server程式。
 - `0x1A/0x12` 則是**收到的密語**，`name>> text`綠字，不產生頭頂氣泡，見§4.31。
 - browser把事件標示 `channel=field|whisper`；不能用名字／文字內容猜來源，也不能把server提示冒充System密語。
-- `55CDE0`：`[13][00][string text]` → `[공지사항] text`，StatusBar font5淡黃；type1中央公告未接。
+- `55CDE0`：`[13][00][string text]` → `[공지사항] text`，StatusBar font5淡黃；type1→52BBE0 CUtilDlg1000單OK提示窗，ADR-088已補完整收件鏈；其他type讀完string忽略。
 
 `field.test.ts`保留兩種不同codec的golden來源；`serve.test.ts`一般聊天fixture改期待0x1F／id；
 `native-chat-gameoptions.test.ts`新增channel／unknown id／notice／refusal／wrap來源。**全部未執行。**
@@ -3757,7 +3757,7 @@ ASCII），所以 codec 直接沿用 `chardata.ts` 的 `nameFieldBytes`／`nameF
 |---|---|---|---|
 | 沒有對話框 | `1` | `sub_481910` | **交易請求**：`str 對方名字` ＋ `u32`，跳模態「'%s'님께서 1:1 교환을 요청하였습니다…」；按「是」送出 c2s `0x25` **type 3** |
 | 沒有對話框 | `2` | `sub_481B20` | **請求失敗**：`u8 code`（0 ＝ 靜默、1 ＝ 캐릭터를 찾을 수 없습니다、2 ＝ `str name` ＋ '%s'님은 다른 일을 하는 중입니다）|
-| 沒有對話框 | `4` | `sub_481790` | 進房間：`u8 roomKind`（0 →「방에 들어갈 수 없습니다.」走 `sub_52BBE0` 的畫面中央公告；**只有 `1` 會開出交易視窗**，其他值 `sub_481570` 回 null ⇒ 斷線）|
+| 沒有對話框 | `4` | `sub_481790` | 進房間：`u8 roomKind`（0 →「방에 들어갈 수 없습니다.」走 `sub_52BBE0` 的CUtilDlg1000單OK提示窗；**只有 `1` 會開出交易視窗**，其他值 `sub_481570` 回 null ⇒ 斷線）|
 | 沒有對話框 | 其他 | — | **丟 `AVCDisconnectException`**（client 會斷線！）|
 | 有對話框 | `3` | `sub_481E00` | 房間裡多一格：`u8 index` ＋ 參與者 |
 | 有對話框 | `5` | vtable 第 15 槽 | 系統訊息 |
@@ -4473,3 +4473,11 @@ GameEntry共用純規則亦驗反向swap；clone／預encode再commit，0x17尾�
 
 原公式、常數表、封包／bridge／remote／消費／生命週期與重建政策詳
 [NATIVE_MAGIC_SKILLS](../NATIVE_MAGIC_SKILLS.md)／ADR-073。所有本輪回歸來源均未執行，不援用歷史PASS。
+
+
+## 0x13／0x11呈現續作（2026-10-19，ADR-088）
+
+- 55CDE0不是只支援type0：所有type讀同一個CP949 string，0→font5公告、1→52BBE0→52C320→461C50置中264×132 Notice/OK modal；2..255忽略。codec、ClientSession與真bridge JSON保留type，本輪已接browser。
+- 55C130的金幣／道具／拒絕與55BEB0同級EXP改走原4EB440六列池，不是聊天訊息；沒有多發獎勵、沒有notice到ledger的假ack。
+- Shape2D 10019160+98→10011030→10010AD0→10010C40確認6000ms整數RelMove，半程128/255；4A95B0本機taken才播PickUpItem。
+- 全部原證、byte/truncation／加密合包／真JSON／原WZ Chromium與生命週期回歸及剩餘差異，集中見[原訊息呈現](../NATIVE_FEEDBACK.md)。不是完整交易／miniroom／所有52BBE0 caller都已實作。

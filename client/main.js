@@ -70,6 +70,9 @@ import {
   projectileLeg,
 } from "./basiccombat.ts";
 import { itemDialogs } from "./itemdialogs.ts";
+import { gameFeedback } from "./feedback.ts";
+import { itemMetadataCache } from "./item-metadata.ts";
+import { drawScreenMessages } from "./feedback-renderer.ts";
 import { equipmentWindow, bodyPart, canWear } from "./equipment.ts";
 import { miniMapWindow } from "./minimap.ts";
 import { displayControls } from "./display-controls.ts";
@@ -169,7 +172,7 @@ const loginScreens = loginScreen({
     motionSettings.dismiss();
     lensSettings.dismiss();
   },
-  labOpen: () => motionSettings.open || lensSettings.open,
+  labOpen: () => motionSettings.open || lensSettings.open || itemDialog.open,
   creation: () => creationDialogs,
 });
 
@@ -232,10 +235,12 @@ function effectiveMovement(now) {
   const totals=nativeBasis && statTotals(nativeBasis,buffs.values(now));
   return totals ? {speedPercent:totals.speed,jumpPercent:totals.jump} : {speedPercent:100,jumpPercent:100};
 }
-/** `itemId -> { id, name, price, desc }` from `/api/item/<id>`. */
-const itemInfo = new Map();
-/** Ids a lookup is already in flight for, so a re-render does not ask twice. */
-const itemInfoPending = new Map();
+/** Shared archive facts for tooltips, requirements, sounds, shops and reward names. Not instances. */
+const itemMetadata = itemMetadataCache({
+  read: (id, signal) => fetch(`/api/item/${id}`, {signal}), now: () => performance.now(),
+  onError: error => logLine(`item metadata: ${String(error)}`),
+});
+const itemInfo = itemMetadata.entries;
 /** The shop `0x4A` opened, or undefined when no NPC's window is up. */
 let shop;
 /** Modal sentinel for a 0x47 dialog or explicitly marked local UI example; otherwise undefined. */
@@ -279,6 +284,7 @@ function send(message) {
 function connect() {
   if (!clientStartupReady(document.documentElement) || loginScreens.loginPending) return;
   quitToTitle=false;
+  feedback.reset();
   buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
   loginScreens.showPanel(ui.connect);
   loginScreens.setLoginPending(true);
@@ -308,6 +314,7 @@ function connect() {
   connection.addEventListener("close", () => {
     if (socket !== connection) return;
     loginScreens.setLoginPending(false);
+    feedback.reset();
     systemPanel.close(false, false);
     itemDialog.close(false);
     quickDrag = undefined;
@@ -365,6 +372,8 @@ function connect() {
 
 /** @param {any} message */
 function handle(message) {
+  try { if (feedback.receive(message)) return; }
+  catch (error) { logLine(`invalid feedback: ${error.message}`); return; }
   recovery.receive(message);
   revivePanel.receive(message);
   if (testToolsPanel.receive(message)) return;
@@ -758,8 +767,6 @@ function handle(message) {
     case "whisper-refused":
       chatHistoryPanel.append(`'${message.name}'님은 현재 귓속말이 거부되어 있습니다.`, 'whisper');
       return;
-    case "system-notice":
-      chatHistoryPanel.append(`[공지사항] ${message.text}`, 'notice');return;
 
     case "whisper-answer": {
       // The text is not on the wire: the 2003 client prints its own kept line as "name<< text".
@@ -882,47 +889,6 @@ function handle(message) {
       dying.delete(String(message.mobId));
       return;
 
-    case "loot": {
-      // `0x11`: the 2003 client prints the pickup itself (`sub_55C130`), in Korean, from its own
-      // archive. The page has the same archive behind `/api/item/<id>`, so it prints the same line.
-      const notice = message.notice;
-      if (notice?.kind === "mesos" || notice?.kind === "item")
-        void audio.effect("Game/PickUpItem");
-      if (notice?.kind === "mesos") {
-        chatLine("系統", `메소를 얻었습니다 (+${notice.amount})`);
-        return;
-      }
-      if (notice?.kind !== "item") {
-        if (notice?.kind === "rejected")
-          chatLine("系統", "아이템을 더 이상 가질 수 없습니다");
-        return;
-      }
-      const itemId = Number(notice.itemId);
-      const count = Number(notice.count ?? 1);
-      const sentence = (label) =>
-        count >= 2
-          ? `아이템을 얻었습니다 (${label} ${count}개)`
-          : `아이템을 얻었습니다 (${label})`;
-      // The name is an archive lookup, so a first-time item shows its id for a frame and the line
-      // is rewritten when the name lands. `icon.png`/`iconRaw` only exist if the id does, so a
-      // failed lookup leaves the id in place, which is what the client prints for an unnamed item.
-      const known = itemInfo.get(itemId);
-      const line = chatLine("系統", sentence(known?.name ?? String(itemId)));
-      describeItem(itemId);
-      if (known === undefined) {
-        void (async () => {
-          for (let i = 0; i < 40 && itemInfo.get(itemId) === undefined; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
-          const facts = itemInfo.get(itemId);
-          if (typeof facts?.name === "string") {
-            line.update(sentence(facts.name));
-          }
-        })();
-      }
-      return;
-    }
-
     case "hit": {
       if(message.contactField!==contactField||!(selfView?.hp>0))return;
       lastAttackTrace=message.trace;
@@ -963,7 +929,9 @@ function handle(message) {
         drops.delete(key);
         return;
       }
-      beginDropPickup(record, performance.now(), removal.characterId);
+      // 4A95B0: native pool removal kind2 sounds only for the local taker, once per drop.
+      if (beginDropPickup(record, performance.now(), removal.characterId) &&
+          removal.characterId === selfView?.characterId) void audio.effect("Game/PickUpItem");
       return;
     }
 
@@ -2390,6 +2358,7 @@ function movementBlocked() {
 }
 function frame() {
   displayController.refresh();
+  feedback.tick();
   const enabled = !!canSendEmotion();
   if (enabled !== emoteAvailable) {
     emoteAvailable = enabled;
@@ -2398,6 +2367,7 @@ function frame() {
   if (loginScreens.stage !== "game") {
     renderSurface.beginUi(true);
     loginScreens.draw(performance.now());
+    itemDialog.draw();
     renderSurface.presentUi();
     requestAnimationFrame(frame);
     return;
@@ -2672,6 +2642,7 @@ function frame() {
   drawDraggedItem();
   drawQuickDrag();
   systemPanel.draw();
+  drawScreenMessages(ctx, feedback.rows(now));
   itemDialog.draw();
   npcDialog.draw();
   tooltipViewer.draw();
@@ -4030,21 +4001,8 @@ function drawItemTooltip(x, y, item, source) {
     {template: source === 'shop' && shopWindowAt(x, y)?.kind === 'buy-row'});
 }
 
-/** Asks `/api/item/<id>` once per id; a failure is remembered as "no facts" so it is not retried. */
-function describeItem(itemId) {
-  if (itemInfo.has(itemId)) return Promise.resolve(itemInfo.get(itemId));
-  if (itemInfoPending.has(itemId)) return itemInfoPending.get(itemId);
-  const task = fetch(`/api/item/${itemId}`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((facts) => {
-      itemInfo.set(itemId, facts);
-      itemInfoPending.delete(itemId);
-      return facts;
-    });
-  itemInfoPending.set(itemId, task);
-  return task;
-}
+/** Coalesced archive metadata:404 is absent; transient failures retry, never poison facts forever. */
+function describeItem(itemId) { return itemMetadata.load(itemId); }
 
 // ---------------------------------------------------------------- shop window
 //
@@ -5288,6 +5246,13 @@ const itemDialog = itemDialogs({
     shopDrag = shopScrollDrag = undefined;
     inventoryPick = inventoryHover = equipHover = undefined;
   },
+});
+
+const feedback = gameFeedback({
+  dialog: itemDialog, item: describeItem, now: () => performance.now(),
+  chat: text => chatHistoryPanel.append(text, "notice"),
+  blocked: () => creationDialogs.open || revivePanel.open || talkingNpc !== undefined || systemPanel.visible || browserLabOpen(),
+  onError: error => logLine(`feedback resource: ${String(error)}`),
 });
 
 
