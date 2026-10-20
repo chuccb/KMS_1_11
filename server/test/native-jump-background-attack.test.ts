@@ -356,7 +356,15 @@ test("browser wiring shares field clock and action selection, awaits selected at
     "native group0 rejects instead of fabricated 480ms attack",
   );
   const bridge = readFileSync(new URL("../src/net/webclient.ts", import.meta.url), "utf8");
-  assert.ok(bridge.includes("if (!profile || !action) return;"));
+  // Prettier rewrapped the guard when the posture gate joined it (512F90/427F60 reject instead
+  // of translate); pin the whitespace-normalized whole clause so formatting cannot stale the contract.
+  assert.ok(
+    bridge
+      .replace(/\s+/g, " ")
+      .includes(
+        "if ( !profile || !action || !basicAttackPostureAllows(actionId, shoot, session.selfMovement.action) ) return;",
+      ),
+  );
   const html = readFileSync(new URL("../../client/index.html", import.meta.url), "utf8");
   assert.ok(html.includes('id="qa-jump-cloud"'));
   assert.ok(html.includes('maxlength="70"'));

@@ -41,7 +41,7 @@ const facts = new Map([
 const resolve = (run: { kind: string; id: number }) => facts.get(dialogueAssetKey(run));
 const response = (id: number) => new Response(JSON.stringify({ id, ...facts.get(`item:${id}`) }));
 
-test("534FA0: ## escapes, native item/skill records inherit selection, unknown macros remain literal", () => {
+test("534FA0/5338A0: ## escapes, icon records inherit selection, `#l` closes even mid-word, unknown macros remain literal", () => {
   const message = "##L99#literal #L42##r#i2000000##s1000000# text#l #h #t1302000#";
   const runs = dialogueRuns(message);
   const icons = runs.filter((r: { kind?: string }) => r.kind);
@@ -53,9 +53,20 @@ test("534FA0: ## escapes, native item/skill records inherit selection, unknown m
     ],
   );
   assert.deepEqual([...dialogueSelections(message)], [42]);
-  assert.match(dialoguePlainText(runs, resolve), /^#L99#literal /);
+  // The native lexer (534A80 emits '#', 534FA0's default emits the macro char) turns `#literal`
+  // into the record "#l" + text "iteral", and the walker's dispatch (sub_5338A0) strcmps WHOLE
+  // records: "#k"/"#r"/"#g"/"#b"/"#e"/"#n"/"#l" are exact-match commands - "#l" sets selection
+  // -1 unconditionally, mid-word or not, open selection or not - and renders nothing. Only
+  // records that match no dispatch ("#h", "#t", the lone "#" of an escape) paint literally.
+  assert.match(dialoguePlainText(runs, resolve), /^#L99iteral /);
   assert.match(dialoguePlainText(runs, resolve), /빨간 포션HP 회복력 향상/);
   assert.match(dialoguePlainText(runs, resolve), /#h #t1302000#/);
+  // The closing `#l` after " text" strips selection inheritance from everything after it.
+  assert.equal(
+    runs.find((r) => r.text.includes("#h"))?.selection,
+    undefined,
+    "records after the closing #l no longer inherit selection 42",
+  );
   assert.deepEqual([...dialogueSelections("#L12##l")], [], "no materialized selectable record");
   assert.deepEqual([...dialogueSelections("#L12#\r\n#l")], [], "newline is not a clickable record");
 });

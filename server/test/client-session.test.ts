@@ -91,7 +91,10 @@ test(
     });
     assert.deepEqual(
       received.map((e) => e.kind),
-      ["field", "inventory", "mob-enter", "npc-enter", "self"],
+      // `skills` joined the initial batch with the native skill books round: the browser's skill
+      // window needs the learned list at entry, and session.ts emits it right after inventory in
+      // the same 0x16 record handler (map32 travels in the CharacterData the inventory came from).
+      ["field", "inventory", "skills", "mob-enter", "npc-enter", "self"],
     );
     assert.equal(
       session.mob(77)?.templateId,

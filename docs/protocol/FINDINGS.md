@@ -918,8 +918,24 @@ count × {
   `Character/Weapon/0<id>.img → info/afterImage` 指名用哪一張（`01302000.img`＝검 → `swordOL`、
   `01402000.img`＝양손검 → `swordTS`、`01372000.img`＝페어리 완드 → `mace`）；每張圖都有 `0`…`10` 十一個子節點
   （`hit.img` 例外：子節點是 `sword1`／`sword2`／`mace1`／`mace2`／`maceF`／`swordF`），每個子節點底下才是
-  `swingO1`／`stabO1`／`proneStab`… 的動畫。**選子節點編號的是 client 的 `sub_4BE270`（未定位）**，
-  但 `0` 每一張都有，所以轉播送 0。
+  `swingO1`／`stabO1`／`proneStab`… 的動畫。**選子節點編號的是 client 的 `sub_4BE270`（已定位，
+  ADR-107 讀完，見下方 bullet）**，但 `0` 每一張都有，所以轉播送 0。
+- **`sub_4BE270`＝mastery被動選擇器（ADR-107讀完，`.c:198214`）**：第一層switch只收
+  `a2/100000 ∈ {13,14}`（武器道具id）的 `a2/10000%100` ∈ {30,31,32,33,37,38,40..47}；第二層：
+  30/40（`n2==0`，n2＝射擊模式）→ `4BDD20(1100000)` 不中再 `4BDD20(1200000)`（**有序fallback**）、
+  31/41→1100001、32/42→1200001、33→`4BE730(4200000)`、43→1300000、44→1300001、
+  45（`n2==1`）→3100000、46→3200000、47→`4BE730(4100000)`；**37/38過了第一層但第二層沒有case→0**。
+  我們的 `weaponMasterySkills`（client/attack-presentation.ts）與這張表逐case相符。
+- **`sub_4BDD20`＝「WZ資料表先於learned紀錄」（ADR-107讀完，`.c:197928`；§4.21.6那行OPEN的loader
+  機制部分結案）**：`sub_4BAC80(CSkillInfo單例, skillId)` 解析／載入該技能的WZ資料表並cache進
+  global slot（`dword_5C2108`＝3100000、`5C2120`＝1100000…）——**表不在就直接回0，根本不走
+  character +386 的learned hash（ROR(id,5)%nbuckets鏈）**；表在才查learned level並回
+  `min(learned, maxLevel)`。mastery值＝表列（120-byte stride）的 `120*level−32`、x值＝`−28`；
+  `4BDDC0`（主動技能付代價）另讀 `−48`（MP扣）、`−52`（HP扣）、`−56`/`−60`（需求道具id/數量，
+  經 `sub_465710` 庫存tab計數）、`skillId/1000%10==0` 的被動直接拒付。**本Data.wz的Skill書只有
+  100/110/120/130/200/300/400 七本（manifest確認）——310/320/410/420不存在**，所以弓/弩/爪的
+  mastery在原版client也永遠是0：fabricated learned紀錄（3100000:20）不能無中生有。
+  native-attack-effects.test 已按此改釘（公式側/表現側同為0、mode閘門改由selection表釘）。
 - **伺服器端（本回合實作）**：`net/loginserver.ts` 的 `relayAttack`（原 `relaySwing`）把一次 c2s 攻擊轉播出去
   （`0x0F`→`0x23`；另外兩對見 §4.11.7c）：
   只給**同場地的其他人**（攻擊者自己的 client 在送包前已經播過同一組特效，跟 `0x27`／`0x29` 同一個理由）、
@@ -1473,7 +1489,10 @@ foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
 2. 巡邏範圍 = 該折線的 x 範圍 ∩ `life.rx0/rx1`（範圍只有一個點 → 不走路）。
 3. 每一段（leg）送一個 `0x33`：`originX/Y` = 現在位置，一個元素 `(x, y, foothold, duration)`
    = 這一段的終點與時間，`action` = move（0）＋面向。**duration 就是視覺速度**，因為 client
-   只是照著播；元素一律 `vx = vy = 0`（`sub_495880` 認為路徑元素是位置快照）。
+   只是照著播；元素一律 `vx = vy = 0`（`sub_495880` 認為路徑元素是位置快照；比對表見 §4.11.5
+   的 `+6`/`+8` 必須為 0）。**ADR-107 修掉實作 bug**：walk/air 元素建構原本把 `vx:0, vy:0` 寫在
+   `...point` spread 之前，被 planner 的內部取樣速度蓋掉（0x33 wire 上漏出 vx=100）；zeros 已移到
+   spread 之後，`motion.points` 內部仍保留 vx/vy 供伺服器取樣，兩條路（walk＋air）一致。
 4. 走到範圍端點就折返（下一段換方向）；一段最長 3 秒（長距離拆成小步，順便把封包量壓低）。
 5. 速度 = `PATROL_SPEED_PX_PER_SEC`（**60 px/s，伺服器自己的選擇**）× 怪物的 `info.speed` 百分比。
    `info.speed` 是**相對值**：`sub_48D080` 讀 WZ 的 `speed` 後算 `clamp(0, speed + 100, 130)`
@@ -2505,6 +2524,16 @@ client 在本地用到這些 kind 的地方就是語意的直接證據（行號�
   對話窗範例為明示本地唯讀工具，不發任務封包或角色寫入。
 - 40C730的NPC預設delay180，已修掉1000ms。49A0C0 idle4–12秒抽選與499C00 speech5000ms已定位，
   但0x2F/0x3D action index疑點與controller／移動同步仍未完成，不臆造wire。
+- **`5338A0`＝record walker的dispatch（ADR-107交叉）**：lexer（534A80/534FA0）只認`#`/`L`/`i`/`s`
+  ——534FA0的switch：`#`→escape（534A80已先把`#`本身入record，534FA0 case '#'不再emit）、
+  L/i/s→收數字到NUL/CR/`#`（結尾`#`被消耗）、default→macro字元照字面emit；**語意在walker**：
+  5338A0對整條record做`strcmp`（sub_416B00）：`#k`/`#r`/`#g`/`#b`＝色0/1/2/3、`#e`/`#n`＝bold 1/0、
+  **`#l`精確匹配→selection（v163）設−1、不畫**——mid-word也成立：`#literal`被lex成record`"#l"`＋
+  text`"iteral"`，原版真的吃掉那個l（selection開沒開都照關）；record長度>2且`#L`/`#i`/`#s`開頭→
+  atoi（534990）：`#L`開selection、`#i`/`#s`查圖示（479D30/479B10 raw旗標）存進48-byte列
+  （+32＝selection繼承、+36列值，kind-4的 dlg+164 由5333D0從+36收）；**沒匹配任何dispatch的
+  record（`#h`、`#t`、單`#`）照字面畫**。舊測試期望`/^#L99#literal /`釘的是猜測的非原生語意，
+  已按證據改回`/^#L99iteral /`並補釘「`#l`之後的record不再繼承selection」。
 - 完整表格、原色、操作入口、markup／browser字型限制與保存見[原NPC對話](../NATIVE_NPC_DIALOGUE.md)。
   **沒有執行測試、typecheck或browser/probe。**
 
@@ -3204,6 +3233,14 @@ LONG *sub_4E9E70()                                    // 0x4E9E70
    `*(this+90) = 1500`（1.5 秒受擊冷卻）→ `sub_509790(this, 1, 1500)`（受擊動作）→
    `sub_508450(this, -damage)`（傷害數字）。`sub_542F10`（`CVecCtrlUser` vtable **offset 0xC4**
    ＝ slot 49）走同一條路。
+3b. **`sub_537B00`＝外力施放瞬間的「clamp式合併」（ADR-107讀完，`.c:315762`）**：把pending的
+   兩個double（`+176` x／`+184` y——就是5114A0寫的`v6[22]`/`v6[23]`槽）合併進當前速度
+   （`+48` vx／`+56` vy）：**同向且|velocity|已≥|force|→原封不動**（y分支`force<0 && vy<=force`
+   →LABEL_23直接跳過store；x分支同型）；否則`v += force`、結果越過force就**clamp在force**。
+   `mergeImpulse`（client/contact.ts；累積5114A0／施放537B00兩處同型）與它逐分支相符——
+   **不是加總堆疊**：跳躍升力−495（−555 lift＋一格重力60）碰上同時的−270擊退，原生答案是
+   −495不動；弱外力既不能抹掉也不能疊上launch。native-locomotion舊釘−765是猜測的堆疊模型，
+   已按537B00改回−495（x側0→270照合併，因為那邊velocity較弱）。
 4. ⚠️ **這一整條路都不寫玩家紀錄的 HP**。紀錄的 `+53`／`+55`（HP 的 XOR 對）只有這些寫入者：
    `sub_45E0D0`（s2c `0x0D` 差異包，§4.21）、`sub_45D840`（`sub_45FCC0` 讀 `CharacterData`，
    `0x16` 進場時）、`sub_4BDDC0` 與 `sub_518BF0`（道具效果；使用道具／快捷鍵那條路）、
@@ -4637,6 +4674,11 @@ server排程／安全界線、canvas碰撞與暫定終點、ammo incPAD加入現
 - 509AF0 tomb(-1)也overlay主層，不能當worldRootZ-1。47D110 name child5、腳下(-width/2,+2)。
 - 513C80讀515C70(main layer z)→41B630 record[7]→41BF60 bullet create；damage41E610／41F200為-1073471524。
 - 46BDA0 back依1000*index-1073869824，未讀現代front旗標。原tile／obj公式未變，obj pointer arithmetic不是4*z。
+  **ADR-107結案實作bug**：index的來源是`sub_46BD54`的`for(i=0..count-1)`用`itow(i)`**按名字**抓子節點、
+  把位置`i`傳進46BDA0——所以entry的key就是index（實資料key恆等位置；非數字key原loader根本抓不到，跳過）。
+  舊實作`asNumber(entry.name)`只收number、property key是string→恆fallback 0→**所有back同z、index從未參與**
+  （順序只剩sort穩定性兜著）；已改`Number(entry.name)`＋整數/非負閘，`1000*index−147990`
+  （−147990＝−1073869824相對tile base −1073721834）。
 - HTTP僅新增MapBack.z與avatar planes=1/header；本輪沒有更改原版封包版型，也未宣稱NPC行走／全controller已完成。
 
 ### 後續原版本機UI接線：Menu／SysOpt／StatusBar（2026-10-18，未測試，ADR-058）

@@ -202,7 +202,8 @@ test("field wiring keeps avatar children atomic, damage fixed-plane and bullets 
   );
   assert.match(client, /kind:'damage',mark,z:ATTACK_EFFECT_Z/);
   assert.match(client, /kind: "projectile", shot, z: shot\.z/);
-  assert.match(client, /const z = actorDepth\(local \? \(playerBody \?\? at\)/);
+  // b5bda6d (hit clocks) added the explicit plane override; the actorDepth base is still pinned.
+  assert.match(client, /const z = options\.z\?\?actorDepth\(local \? \(playerBody \?\? at\)/);
   assert.doesNotMatch(client, /z: z - 1/);
   assert.doesNotMatch(client, /if \(back\.front\)/);
   assert.match(web, /z: back\.z/);

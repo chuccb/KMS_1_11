@@ -73,6 +73,9 @@ export function dialogueRuns(message: string | undefined): DialogueRun[] {
         continue;
       }
       if (code === "l") {
+        // sub_5338A0 dispatches whole records by strcmp; the exact record "#l" sets the walker's
+        // selection to -1 and paints nothing - unconditionally, even mid-word (`#literal` lexes
+        // to "#l" + "iteral", so the original client really does eat the 'l' there).
         flush();
         selection = undefined;
         i += 2;

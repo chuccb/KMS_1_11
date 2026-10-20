@@ -258,7 +258,9 @@ test("UI examples are local/read-only and real packets supersede them; source is
     assert.match(dialogueExample(kind)!.message, /UI PREVIEW - not an NPC quest/);
   const main = source("../../client/main.js"),
     dialogue = source("../../client/npcdialogue.ts");
-  assert.match(main, /if \(npcDialog\.preview\) closeDialogue\(false\)/);
+  // f4e0f57 (tooltip restoration) widened the supersede guard to the tooltip example as well;
+  // a real server dialog still always closes the local example first.
+  assert.match(main, /if \(npcDialog\.preview \|\| tooltipViewer\.open\) closeDialogue\(false\)/);
   assert.match(main, /context\?\.preview/);
   assert.match(main, /onReply\(reply, context\)/);
   assert.match(dialogue, /event\.stopImmediatePropagation\(\)/);

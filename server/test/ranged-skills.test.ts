@@ -201,7 +201,17 @@ test("0x10 carries skill/hits and USE slot; 0x24 carries skill level/id, full mu
 });
 test("Lucky Seven case47 draws LUK1.3..0.5 *5, no STR/DEX/mastery term, before level/PD/skill factor", () => {
   const c = character(4001344, 1472000, 2070000),
-    basis = statBasis(c.stats, [{ slot: 11, itemId: 1472000, stats: { pad: 50 } }]);
+    // Real WZ reqs of 01472000 (가니어): reqLevel 10, reqJob 8 (the thief branch bit), four zero
+    // primary reqs. A worn fact WITHOUT requirements is never admitted by effectiveWorn - that is
+    // the established policy, not a bug - and Lucky Seven would compute off weaponId 0.
+    basis = statBasis(c.stats, [
+      {
+        slot: 11,
+        itemId: 1472000,
+        stats: { pad: 50 },
+        requirements: { level: 10, job: 8, str: 0, dex: 0, int: 0, luk: 0 },
+      },
+    ]);
   const totals = statTotals(basis);
   totals.acc = 999;
   let trace: PhysicalAttackTrace | undefined,

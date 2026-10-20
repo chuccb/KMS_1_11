@@ -145,6 +145,12 @@ export function portalFrames(reader: ArtReader): MapFrame[] {
 export function mapBacks(root: unknown, reader: ArtReader): MapBack[] {
   const out: MapBack[] = [];
   for (const entry of entriesOf(propertyOf(root, "back"))) {
+    // sub_46BD54 fetches the i-th background BY NAME itow(i) and hands that positional i to
+    // sub_46BDA0, which stamps z = 1000*i - 1073869824 (-147990 against the tile base
+    // -1073721834): the entry's key IS the index. A non-numeric key is a back the original
+    // loader never fetches, so it never becomes a back here either.
+    const index = Number(entry.name);
+    if (!Number.isInteger(index) || index < 0) continue;
     const fields = nodeRecord(entry.value as WzNode);
     const bS = asText(fields.bS);
     if (bS === "") continue;
@@ -163,7 +169,7 @@ export function mapBacks(root: unknown, reader: ArtReader): MapBack[] {
       cx: asNumber(fields.cx),
       cy: asNumber(fields.cy),
       a: asNumber(fields.a, 255),
-      z: 1000 * asNumber(entry.name) - 147990,
+      z: 1000 * index - 147990,
       front: false,
       flip: asNumber(fields.f) !== 0,
     });

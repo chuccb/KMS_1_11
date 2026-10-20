@@ -114,10 +114,22 @@ test(
     );
     assert.equal(nativeWeaponMastery(c, catalog, 1302000), 10);
     assert.equal(attackMasteryTier(provider(1302000)!, levelOf), 10);
+    // The mode gates stay observable through the selection table itself: 4BE270's switch admits
+    // case 45 only with n2==1 and names 3100000; case 30/40 only with n2==0.
+    assert.deepEqual(weaponMasterySkills(1452002, true), [3100000]);
+    assert.deepEqual(weaponMasterySkills(1452002), []);
+    assert.deepEqual(weaponMasterySkills(1302000, true), []);
     assert.equal(nativeWeaponMastery(c, catalog, 1452002, false), 0);
-    assert.equal(nativeWeaponMastery(c, catalog, 1452002, true), 10);
-    assert.equal(attackMasteryTier(provider(1452002)!, levelOf, true), 10);
+    // This Data.wz ships only Skill books 100/110/120/130/200/300/400 - there is no 310.img for
+    // 3100000 to read level rows from. sub_4BDD20 resolves the WZ data table FIRST (sub_4BAC80,
+    // cached in dword_5C2108) and returns 0 when it is missing, BEFORE walking the character's
+    // learned records - so the fabricated learned row cannot conjure a tier, in the original
+    // client or here. The presentation side (masteryLevels rows from the same missing path)
+    // agrees at 0; both sides select the same learned WZ passive, and both stay honest.
+    assert.equal(nativeWeaponMastery(c, catalog, 1452002, true), 0);
+    assert.equal(attackMasteryTier(provider(1452002)!, levelOf, true), 0);
     assert.equal(attackMasteryTier(provider(1452002)!, levelOf, false), 0);
+    // 37 passes 4BE270's first switch but has no case in the second: no mastery skills at all.
     assert.deepEqual(weaponMasterySkills(1372005, true), []);
   },
 );

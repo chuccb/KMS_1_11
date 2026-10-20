@@ -3581,3 +3581,53 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   coalesced、wz），errors＝browser-closed/late-test()的probe負債；**零fail可歸因本輪**。
 - **LIVE**：重啟於本HEAD；新世界新save（既有政策）。사이다（02022002）現在有真實效果：PAD+20／ACC−5／3분；
   負座標地圖的攻擊記錄不再被unsigned錯讀。
+
+## ADR-107：art/WZ×4＋wiring／coalesced／UI-examples釘＋physics×2——十筆長期fail以原生證據結案：兩個實作bug、八個诚实重钉（2026-10-20）
+
+- **背景**：ADR-106收尾的18筆長期fail中，本輪清掉10筆。逐一按「先讀原生、再判歸屬」triage，分兩類：
+  **兩個真產品bug**（46BDA0背景index從未參與z、0x33 wire漏出內部vx），**八個測試/fixture/源碼釘
+  過期或釘著非原生語意**（按證據重钉，不動實作）。剩8筆＝probe/typed/canvas家族（沙箱內瀏覽器
+  Target closed／5000ms timeout，17-test harness遷移負債，需獨立輪），2 errors同家族。
+- **證據與實作（逐項）**：
+  1. **534FA0/5338A0 richtext（重钉）**：lexer只切record（534A80先把`#`入record；534FA0 switch只認
+     `#`/`L`/`i`/`s`：`#`→escape、L/i/s→收數字到NUL/CR/`#`、default→字元照emit），**語意在walker**：
+     5338A0對整條record strcmp（sub_416B00）——`#k/#r/#g/#b`＝色0..3、`#e/#n`＝bold、**`#l`精確匹配→
+     selection設−1、不畫、mid-word也成立**、`#L/#i/#s`且長度>2→atoi(534990)＋icon(479D30/479B10，
+     48-byte列+32＝selection繼承)。`#literal`被lex成record`"#l"`＋text`"iteral"`→**原版真的吃掉l**。
+     舊釘`/^#L99#literal /`是猜測的非原生語意→改`/^#L99iteral /`＋補釘「`#l`後不再繼承selection」。
+  2. **4BE270/4BDD20 mastery（重钉＋OPEN loader機制部分結案）**：4BE270兩層switch與我們的
+     `weaponMasterySkills`逐case相符（30/40→1100000不中再1200000有序fallback；45需n2==1→3100000；
+     37/38過第一層但第二層無case→0）。**4BDD20＝WZ資料表先於learned紀錄**：4BAC80解析表cache進
+     global slot（5C2108等），表缺→回0不看learned；表在→character+386 hash鏈查learned、回
+     min(learned,maxLevel)；120-byte列：−32＝mastery、−28＝x。**本Data.wz的Skill書只有
+     100/110/120/130/200/300/400七本（manifest）**→3100000無資料→弓mastery在原版恆0；舊釘10
+     是缺書檔案不容許的值→改钉誠實零、mode閘門改由selection表钉。4BDDC0＝主動技能付代價
+     （−48 MP/−52 HP/−56+−60需求道具、`id/1000%10==0`被動拒付）。
+  3. **46BDA0背景z（實作bug）**：46BD54以`itow(i)`**按名字**抓第i個back子節點、把位置i傳進46BDA0→
+     `z=1000*i−1073869824`（＝tile base−1073721834相對−147990）。舊實作`asNumber(entry.name)`
+     只收number而property key是string→**恆0、所有back同z**。mapBacks改`Number(entry.name)`＋
+     整數/非負閘（非數字key原loader抓不到→跳過）。
+  4. **Lucky Seven case47（fixture缺欄）**：公式分支已在（`uniform(LUK×1.3,LUK×0.5)×5×pad×0.01`）；
+     測試worn item沒帶requirements→effectiveWorn拒載（既有政策）→weaponId 0→raw 0。補真實WZ req
+     （01472000 가니어：reqLevel 10、reqJob 8＝賊branch bit、四圍0）。
+  5. **源碼釘×4（重钉）**：browser wiring守衛被prettier拆行＋posture閘加入→改钉空白正規化全句；
+     field wiring `actorDepth`前多了b5bda6d的`options.z??`（damage plane機制）→pin更新；
+     UI examples `if (npcDialog.preview)`被f4e0f57扩成`|| tooltipViewer.open`→pin更新；
+     coalesced初始批被78a9aae加入skills事件（0x16初始record、inventory後emit）→順序釘更新。
+  6. **0x33 wire vx（實作bug）**：495880視路徑元素為位置快照（§4.11.5：+6/+8必須為0；§4.26：一律
+     vx=vy=0）。mobs.ts walk元素把`vx:0,vy:0`寫在`...point`**之前**→被planLeg內部取樣速度蓋掉
+     （wire漏vx=100）；air包根本沒寫零。zeros移到spread之後（walk＋air一致），`motion.points`
+     內部保留vx/vy供伺服器取樣。
+  7. **linked floor跳躍+擊退vy（重钉）**：537B00＝**clamp式合併**：同向且|v|已≥|force|→原封不動
+     （y分支`force<0 && vy<=force`→LABEL_23跳過store）；否則`v+=force`再clamp在force。5114A0寫
+     +176/+184兩個pending double。跳躍升力−495（−555 lift＋一格重力60）碰上同帧−270→原生保持
+     −495，**不是加總−765**；mergeImpulse與537B00逐分支相符，舊釘是猜測的堆疊模型。§4.33.2加3b。
+- **驗證**：十筆fail清零；受影響檔單獨跑全綠（richtext 15/15、attack-effects 10/10、layer-priority
+  7/7、ranged 9/9、jump 12/12、client-session 1/1、npc-dialogue 11/11、mobs+jump 41/41、
+  locomotion 15/15、motion/contact/camera家族 46/46）；typecheck/format/build全綠；
+  完整suite兩跑**1205 pass/8 fail**（errors 2與0抖動）＝ADR-106已知18減去本輪清掉的10筆，
+  八筆全在probe/typed/canvas瀏覽器家族（含歷輪被tail截斷漏記名的第八筆：pixel compositor
+  drop PNG——本次以鬆grep確認全名單；errors＝browser-closed隨跑抖動0..2）；
+  **零fail可歸因本輪**。
+- **LIVE**：重啟於本HEAD；新世界新save（既有政策）。可見變化：背景層真正依index堆疊、mob路徑
+  wire元素不再漏vx；對話`#l`行為與原版一致（mid-word照吃）。

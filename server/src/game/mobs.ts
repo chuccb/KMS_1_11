@@ -841,11 +841,14 @@ export class MobField {
           path: {
             originX: leg.fromX,
             originY: leg.fromY,
+            // sub_495880 validates every mob path element as a position snapshot: +6/+8 (vx/vy)
+            // must be 0 on the wire. The zeros go AFTER the spread so the planner's internal
+            // sampling velocity (motion.points keeps it) can never leak onto the wire.
             elements: leg.points.map((point) => ({
               attr: 0,
+              ...point,
               vx: 0,
               vy: 0,
-              ...point,
               action: mobActionByte(MOB_ACTION.move, leg.facing),
             })),
           },
@@ -901,7 +904,9 @@ export class MobField {
       path: {
         originX: Math.round(mob.x),
         originY: Math.round(mob.y),
-        elements: points.map((point) => ({ attr: 0, ...point })),
+        // Same 495880 snapshot rule as the walk legs: air elements travel with vx/vy zeroed;
+        // the trajectory velocity stays inside motion.points for server sampling only.
+        elements: points.map((point) => ({ attr: 0, ...point, vx: 0, vy: 0 })),
       },
     });
   }

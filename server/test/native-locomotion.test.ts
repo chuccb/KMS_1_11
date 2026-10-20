@@ -148,7 +148,11 @@ test("linked floor transition preserves tangent speed and changes world velocity
   advancePlayer(jumped, { jump: true }, flat(), 30);
   assert.equal(jumped.groundJumps, 1);
   close(jumped.vx, 267);
-  close(jumped.vy, -765);
+  // 537B00 applies the staged force with a CLAMPED merge, not a sum: force y = -270 against the
+  // jump lift vy = -495 (-555 lift + one 60 gravity tick) takes `vy <= force && force <= 0` ->
+  // LABEL_23, leaving vy untouched. The weaker coincident force neither erases nor stacks onto
+  // the launch; x still merges (0 -> 270, dragged to 267) because there the velocity is weaker.
+  close(jumped.vy, -495);
   assert.equal(
     drainPlayerPath(jumped).elements.filter((e: { attr: number }) => e.attr & 2).length,
     1,
