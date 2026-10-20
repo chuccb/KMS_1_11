@@ -880,6 +880,73 @@ test(
 );
 
 test(
+  "the coin button over the bridge: drop-mesos moves the wallet, the pile lands, and every gate answers",
+  { timeout: 20000 },
+  async (t) => {
+    const world = await startWorld(t, { shop: true });
+    const { browser } = await enterGame(world.webPort, "admin", "admin");
+    const npc = (await browser.nextKind("npc-enter")).npc as { npcId: number; templateId: number };
+    // The entry `0x16` carries the items; take that view now so the drop's own events are next.
+    await browser.nextKind("inventory");
+
+    // A success: the ack1 that releases the page's pending gate arrives as the wallet's own event
+    // (self, mesos 100 -> 90), then the result flag, and the field's `0x43` puts the pile on the
+    // page - player money is a placed money pile, not a fake item (drops.ts, FINDINGS 4.18).
+    browser.send({ t: "drop-mesos", amount: 10 });
+    assert.equal(((await browser.nextKind("self")).self as { mesos: number }).mesos, 90);
+    assert.equal((await browser.nextKind("meso-drop-result")).changed, true);
+    const pile = (await browser.nextKind("drop-enter")).drop as { money: boolean; value: number };
+    assert.equal(pile.money, true);
+    assert.equal(pile.value, 10);
+
+    // The ack re-armed the session's own 200ms window (`sub_55D5F0`'s sender-side rate): a second
+    // ask inside it throws before the wire - a page error, and the ground does not move.
+    browser.send({ t: "drop-mesos", amount: 10 });
+    assert.match(String((await browser.nextKind("error")).message), /pending or too soon/);
+    assert.deepEqual(
+      (await browser.quiet(250)).filter((message) => message.t === "drop-enter"),
+      [],
+    );
+
+    // Bad amounts are the encoder's bounds (the native dialog's 10..50000) and the wallet's, both
+    // thrown before any packet: page errors, never a wire request. The quiet above let the rate
+    // window pass, so each refusal below is about its own reason.
+    browser.send({ t: "drop-mesos", amount: 5 });
+    assert.match(
+      String((await browser.nextKind("error")).message),
+      /integer from 10 through 50000/,
+    );
+    browser.send({ t: "drop-mesos", amount: 91 });
+    assert.match(String((await browser.nextKind("error")).message), /not enough mesos/);
+
+    // An open shop window excludes the coin button on the SERVER (the session keeps no shop-open
+    // state of its own): the ask goes out, and the server's refusal comes back as the same ack1 -
+    // changed:false, wallet intact (self still says 90), and nothing lands for anybody.
+    browser.send({ t: "click", objectId: npc.npcId });
+    await browser.nextKind("shop-open");
+    browser.send({ t: "drop-mesos", amount: 10 });
+    assert.equal((await browser.nextKind("meso-drop-result")).changed, false);
+    assert.equal(((await browser.nextKind("self")).self as { mesos: number }).mesos, 90);
+    assert.deepEqual(
+      (await browser.quiet(300)).filter((message) => message.t === "drop-enter"),
+      [],
+      "a refused drop puts nothing on the ground",
+    );
+    browser.send({ t: "shop", action: "close" });
+    await browser.quiet(250);
+
+    // Close the window and the button works again - which also proves the refusal never touched
+    // the wallet: 90 - 10 = 80.
+    browser.send({ t: "drop-mesos", amount: 10 });
+    assert.equal(((await browser.nextKind("self")).self as { mesos: number }).mesos, 80);
+    assert.equal((await browser.nextKind("meso-drop-result")).changed, true);
+    await browser.nextKind("drop-enter");
+
+    browser.close();
+  },
+);
+
+test(
   "clicking a talking NPC walks its lines, and 0x15 ends the conversation",
   { timeout: 20000 },
   async (t) => {

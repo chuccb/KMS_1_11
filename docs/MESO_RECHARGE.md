@@ -8,8 +8,15 @@
 > （成功三事件、壞slot頁面錯、已滿code255、賣0發組count0放行到server）為 `webclient.test.ts`。同輪修復
 > 該static交付 silently 弄壞的四支既有測試（兩支shops列斷言、serve商店開門列數、webclient舊錯誤訊息regex；
 > USE-tab測試並在a1a1d9e的use閘後首次走到use相位——補「先關商店窗再喝藥」的玩家流程）。
-> **仍未測**：本頁楓幣丟棄的 `0x1F` wire請求鏈（codec本身有 `mesodrop.test.ts` golden測試、
-> 落點／呈現鏈已由 DROP_FOOTHOLD_LANDING 驗證）、BASIC_ATTACKS 的射擊扣彈。
+> 2026-10-20 再續（ADR-102）：**楓幣丟棄 `0x1F` wire請求鏈已測**——`serve.test.ts` 真socket整合
+> （成功＝`0x0D ack1`＋錢包diff＋全圖 `0x43` kind2 15bytes無怪物塊、連發管道化的200ms速率閘、
+> 手工raw字節越界9/50001、超錢包、開商店窗互斥、`0x1C` 致死後死亡閘，每個拒絕恰一個空diff
+> ack1）＋ `webclient.test.ts` 頁面橋（self／meso-drop-result changed:true/false、drop-enter pile、
+> session端三個throw成為頁面error）。同輪修復三支基準欠帳：兩支 throw-away（`0x17` toSlot0丟物）
+> 與 spawn-walk 測試的結構性陷阱（`zeroStats()` hp=0 撞死亡閘 ×2；測試中段 `client.close()`
+> 把後加的 mob-walk 相位擱死在已關socket上；修好close後該相位的 `vx===0` 斷言又被發現從未跑綠——
+> roam首腿隨`Math.random` intent是站定或walk腿，斷言已改為對兩者皆成立的不变量）。
+> **仍未測**：BASIC_ATTACKS 的射擊扣彈。
 
 > 2026-10-18 ADR-083續作：玩家丟物／丟金幣的權威落點已接真fh，focused73/0、原100圖與真browser component已跑。
 > 只認證掉落落點／呈現鏈，不把本頁原UI／扣帳歷史場景全部改列PASS；見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。

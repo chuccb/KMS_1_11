@@ -3,8 +3,9 @@
  *
  * Added 2026-10-17 under the then-standing "do not run" instruction; that era is over - the suite
  * runs this file like every other, and it passes. The wire chains are covered elsewhere: the 207
- * shop chain by shops/serve/webclient tests (ADR-101), the `0x1F` drop handler's *field* effects
- * by drop-landing; the drop's wire request path itself remains untested (MESO_RECHARGE.md).
+ * shop chain by shops/serve/webclient tests (ADR-101); the `0x1F` drop handler end to end by the
+ * serve integration "meso drop over the wire" and the webclient "coin button over the bridge"
+ * (ADR-102), with the *field* landing effects in drop-landing.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

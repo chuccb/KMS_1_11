@@ -3339,3 +3339,40 @@ an NPC opens its shop」與webclient商店橋全綠（isolate＋in-suite）；ty
 webclient非商店8＋未觸碰檔案舊家族17：node:vm讀TS-import的probe遷移欠帳、Lucky Seven/PAD、
 growth、field router、native-*等）；其餘5〜8為browser/chromium輪間輪替flake（bun-tool-probes兩跑
 2→4、browser-observation run2過run3掛——ADR-100輪已記錄同族輪替）。零fail可歸因本輪改動。
+
+## ADR-102：楓幣丟棄0x1F全鏈測試（wire＋bridge）、三支基準欠帳修復與攻擊測試家族根因診斷（2026-10-20）
+
+- **`0x1F` wire整合測試**（serve真socket，`handleMesoDrop`@loginserver全鏈首測）：成功＝`0x0D ack1`
+  錢包diff＋全圖`0x43` kind2 15bytes（placed/money/amount、無怪物塊）＋同圖alt收到同dropId；
+  拒絕矩陣每個恰一個空diff ack1且全圖無`0x43`——**連發管道化**兩筆drop驗200ms速率閘（第二筆被拒
+  證明閘在server側、不靠測試sleep）、手工raw-LE字節越界9/50001（`encodeMesoDrop`本身會throw，
+  越界字節只能手造）、超錢包851、開商店窗互斥（`0x1C`前click→SHOP_OPEN→drop被拒→close未答→
+  再drop成功）、`0x1C`致死後死亡閘。錢包軌跡1000→900→850→840；world log行斷言。
+- **頁面橋測試**（webclient真chromium）：`{t:"drop-mesos"}`→self{mesos}／meso-drop-result
+  changed:true／drop-enter{money,value}；立即第二筆→頁面error /pending or too soon/（session端
+  速率閘先於wire）；amount 5→error /integer from 10 through 50000/（session端界線閘）；91→
+  /not enough mesos/；商店窗開著→changed:false＋self不動＋無drop-enter（server拒、ack1空diff仍
+  釋放頁面閘）；關窗後成功且錢包只扣一次——證明被拒請求從未觸錢包。
+- **三支基準欠帳修復**（測試欠帳，非放寬伺服器）：
+  1. 兩支throw-away（`0x17` toSlot0丟物）：fixture `zeroStats()` hp=0撞ADR-100死亡閘——同hp陷阱
+     家族第三、四犯；補`hp:50, maxHp:50`。
+  2. spawn測試結構性陷阱：`take(4)`後立即`client.close()`，但其後新加的mob-walk相位
+     （`take(1)`迴圈）在已關socket上等死→保證超時。修為`t.after(() => client.close())`。
+     **模式記錄**：基準fail若在早期take都過之後出現「expected N packet(s), got 0」，先查中段close。
+  3. walk斷言roam隨機性：修好close後發現該斷言**從未跑綠過**——world固定`behavior:"roam"`、
+     roam intent抽`Math.random`（`sub_53D980`），首腿1/3是站定計時路徑（vx/vy 0）、2/3是walk腿
+     （planLeg自算mm/s；水平foothold上dx整數、duration=|dx|·8 → |vx|恰為`PATROL_SPEED_PX_PER_SEC`
+     =125）。斷言改為對兩種合法首腿都成立的不變量（vy===0、vx===0或±PATROL_SPEED），isolate六連
+     跑全綠。
+- **攻擊測試家族根因診斷**（serve剩餘8支：swing-kill／kill-exp／drop-walk／unknown-mob／
+  two-players／shot-0x24／level-up-0x29／session-save）：全部送舊式攻擊payload（`skillId:1`、
+  fixture無`skills:`/`basicAttack:` provider）——攻擊驗证实装（BASIC_ATTACKS／active-skills輪）後
+  `skillId!==0`走`validatedActiveMelee`（需skills provider＋已學技能＋安全包絡位置）、basic走
+  `skillId 0`＋weapon profile，舊payload被**靜默丟棄**→所有take超時。修復＝完整的戰鬥測試重建輪
+  （provider fixtures＋payload改寫＋位置stamps），刻意不併入本輪；此診斷為下一輪的指定起點。
+
+**驗證**：新測試两支isolate首跑即綠（wire 4.18s／bridge 2.16s）；throw-away×2、spawn修復後
+isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。完整suite 1216 tests（+2）：
+40 fail中**確定性核心33＝上輪36−3支逐名修復**（serve攻擊家族8＋webclient 8＋未觸碰檔案舊家族17）；
+其餘7為browser/chromium負載flake輪替（bun-tool-probes 4、browser-startup 2、camera-lens 1——
+同族輪替ADR-100/101已記錄）。零fail可歸因本輪改動。LIVE無需重啟（純測試輪）。

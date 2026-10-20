@@ -117,6 +117,8 @@ import {
   shopRechargeUnitPrice,
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
+import { PATROL_SPEED_PX_PER_SEC } from "../src/game/mobs.ts";
+import { MESO_DROP_OPCODE, encodeMesoDrop } from "../src/protocol/mesodrop.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
 import { scrollSpecProvider } from "../src/game/scrolls.ts";
@@ -1037,15 +1039,18 @@ test(
     });
 
     const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
     const characterId = handoffs.issue({
       username: "admin",
       characterId: 7,
       characterName: "Hero",
     });
     client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-    // 0x16, then the map's two mobs, then its one NPC - all four in the same TCP stream.
+    // 0x16, then the map's two mobs, then its one NPC - all four in the same TCP stream. The socket
+    // stays open: the walk phase below listens for the field's own `0x33` ticks on this same stream
+    // (a `client.close()` that once sat here stranded that phase - the test could never hear a mob
+    // walk, so it timed out on a dead socket instead of asserting anything).
     const packets = await client.take(4);
-    client.close();
 
     assert.equal(packets[0]![0], FIELD_OPCODE.setField, "0x16 comes first: the field has to exist");
     assert.equal(packets[1]![0], MOB_OPCODE.enterField, "then one 0x2F per mob, in WZ order");
@@ -1109,8 +1114,18 @@ test(
       `the leg ends inside the range, at ${element.x}`,
     );
     assert.equal(move.body.path.originX, 509, "and starts where the mob spawned");
-    assert.equal(element.vx, 0);
-    assert.equal(element.vy, 0);
+    // The world's fields roam (world.ts's fixed policy) and a roam decision is `Math.random`'s
+    // intent (`sub_53D980`): the first leg is either a stationary timed path (the mob stands at
+    // its spawn for decisionMs, vx/vy 0) or a walk leg along this horizontal foothold, whose
+    // elements carry planLeg's own mm/s - exactly ±PATROL_SPEED at speedPercent 100, because dx
+    // is an integer and duration is |dx|·8 ms. Both are a legal first `0x33`, and this assertion
+    // never ran before the stranded-close fix (ADR-102), so it now holds for both shapes instead
+    // of betting on the random draw.
+    assert.equal(element.vy, 0, "the foothold is horizontal: no leg may carry a vy");
+    assert.ok(
+      element.vx === 0 || Math.abs(element.vx) === PATROL_SPEED_PX_PER_SEC,
+      `the first roam leg stands (vx 0) or walks at patrol speed, got vx ${element.vx}`,
+    );
     assert.equal(client.headersOk, true, "the movement packets survive the cipher too");
   },
 );
@@ -2601,8 +2616,11 @@ test(
     });
 
     // A pile of ten potions in consume slot 4: enough to throw some away and keep the rest.
+    // hp/maxHp are set because a dead character cannot discard: `handleChangeSlot` answers the
+    // `0x17` with an empty refusal at hp<=0 (the gate f5d7924 introduced, ADR-100's map), and
+    // `zeroStats()` is a corpse - the same fixture trap the cap and shop tests hit.
     const heroRecord = characterDataOf(
-      { ...zeroStats(), id: 9, name: "Hero" },
+      { ...zeroStats(), id: 9, name: "Hero", hp: 50, maxHp: 50 },
       startingCharacterItems(),
     );
     heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
@@ -4766,6 +4784,201 @@ test(
 );
 
 /**
+ * The coin button's wire chain (`0x1F`, `sub_55D5F0`; MESO_RECHARGE.md, ADR-101 follow-up).
+ *
+ * One LE u32 amount is the whole request, and every number in it is the server's: the native input
+ * dialog's bounds (10‥50000, `sub_4DAF70`), the wallet, the 200ms sender-side rate, and the mutual
+ * exclusion with an open shop, conversation or trade. A success is `0x0D ack1` with the wallet - the
+ * ack1 is what releases the client's pending gate - plus the field's own `0x43` for the whole map,
+ * because player money is a placed reward like any drop (real-fh landing is drop-landing's subject).
+ * A refusal is the SAME `0x0D ack1` with an empty diff: a gate that never answers would lock the
+ * button, and an unsolicited ack0 wallet update would not release it either.
+ */
+test(
+  "meso drop over the wire (0x1F): ack1 wallet, a kind-2 0x43 for the whole map, one empty ack1 per gate",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 500,
+        maxMP: 0,
+        exp: 1,
+        speedPercent: 0,
+        dieMs: 40,
+      }),
+      npcTemplate: (templateId: number) => ({ templateId, name: "stub npc" }),
+      shops: shopKeeper(archive!),
+      dropPolicy: () => [],
+      // The drops of this test are asserted while they lie on the ground: no field tick may walk one
+      // back into anybody's pocket mid-test (taking a drop by tick is the throw-away test's subject).
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x1f1f1f1f, clientRecvSeed: 0x2e2e2e2e },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    const settle = (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        setTimeout(resolve, ms);
+      });
+
+    // Alive and holding 1000: `zeroStats()` hp=0 would trip the death gate this test asserts *last*.
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 9, name: "Hero", hp: 50, maxHp: 50, mesos: 1000 },
+      startingCharacterItems(),
+    );
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 9,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.take(4); // 0x16 + the two mobs + the NPC
+
+    const alt = await FakeClient.connect(gameInfo.port);
+    t.after(() => alt.close());
+    alt.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({ username: "admin", characterId: 10, characterName: "Alt" }),
+    });
+    await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+
+    /** The `0x1F`: one LE u32 after the opcode byte - exactly what `sub_55D5F0` writes. */
+    const drop = (amount: number): void => {
+      hero.send({
+        kind: "unknown",
+        opcode: MESO_DROP_OPCODE,
+        body: encodeMesoDrop(amount).slice(1),
+      });
+    };
+    /** A raw amount the page's own encoder would refuse - the server's gate is its own. */
+    const dropRaw = (le32: number[]): void => {
+      hero.send({ kind: "unknown", opcode: MESO_DROP_OPCODE, body: new Uint8Array(le32) });
+    };
+    /** One refusal: a single `0x0D` ack1 with an EMPTY diff, and no `0x43` for anybody. */
+    const refused = async (): Promise<void> => {
+      const answer = await hero.take(1);
+      assert.equal(answer[0]![0], STAT_OPCODE);
+      assert.deepEqual(readStatUpdate(new PacketReader(answer[0]!, 1)), { ack: true, diff: {} });
+      assert.deepEqual(
+        (await hero.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+        [],
+      );
+      assert.deepEqual(
+        (await alt.drainOpcodes(150)).filter((opcode) => opcode === DROP_OPCODE.appear),
+        [],
+        "a refused drop puts nothing on the ground for anybody",
+      );
+    };
+    /** One success: `0x0D` ack1 with the wallet, then the `0x43` the whole map sees. */
+    const dropped = async (amount: number, mesosLeft: number): Promise<void> => {
+      const answer = await hero.take(2);
+      assert.deepEqual(
+        answer.map((bytes) => bytes[0]),
+        [STAT_OPCODE, DROP_OPCODE.appear],
+      );
+      assert.deepEqual(readStatUpdate(new PacketReader(answer[0]!, 1)), {
+        ack: true,
+        diff: { mesos: mesosLeft },
+      });
+      assert.equal(answer[1]!.length, 15, "kind 2 is 15 bytes on the wire - no monster block");
+      const appear = readDropAppear(new PacketReader(answer[1]!, 1));
+      assert.deepEqual(
+        [appear.kind, appear.money, appear.value, appear.mobId],
+        [DROP_KIND.placed, true, amount, undefined],
+        "player money is a placed reward: the amount, no item id, no monster",
+      );
+      const fromAlt = await alt.takeOpcode(DROP_OPCODE.appear);
+      assert.equal(
+        readDropAppear(new PacketReader(fromAlt[fromAlt.length - 1]!, 1)).dropId,
+        appear.dropId,
+        "the same drop, one id, for the whole map",
+      );
+    };
+
+    // 100 of the 1000 go on the ground - and the second ask is pipelined back-to-back so it lands
+    // inside the server's 200ms no matter how loaded the suite is: one empty ack1, wallet intact.
+    drop(100);
+    drop(50);
+    await dropped(100, 900);
+    await refused();
+    assert.ok(
+      log.some((line) => line.includes("dropped 100 mesos in map 1000000")),
+      log.join("\n"),
+    );
+
+    // Past the window the very same ask succeeds.
+    await settle(260);
+    drop(50);
+    await dropped(50, 850);
+
+    // The input dialog's bounds are the encoder's AND the server's: 9 and 50001 never reach the
+    // ground even hand-crafted past the client-side check, and 851 is more than the wallet holds.
+    dropRaw([9, 0, 0, 0]);
+    await refused();
+    dropRaw([0x51, 0xc3, 0, 0]); // 50001, LE
+    await refused();
+    drop(851);
+    await refused();
+
+    // An open shop window excludes the coin button (MESO_RECHARGE.md's mutual exclusion): the
+    // refusal is the same empty ack1. The settles above keep the rate gate out of this phase.
+    await settle(260);
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const opened = await hero.take(2);
+    assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+    drop(10);
+    await refused();
+    // Close (deliberately unanswered), and once the rate allows, the button works again.
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "close" }).slice(1),
+    });
+    assert.deepEqual(await hero.drainOpcodes(150), [], "a close is not answered");
+    await settle(260);
+    drop(10);
+    await dropped(10, 840);
+
+    // A dead character cannot drop: the client reports the killing hit itself (`0x1C`), the bar
+    // goes to 0, and the ask after it is one empty ack1 - wallet and ground untouched.
+    await settle(260);
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.statReport,
+      body: encodeClientStatReport({ hpDelta: -50, mpDelta: 0, flag: 0 }).slice(1),
+    });
+    const killed = await hero.take(1);
+    assert.deepEqual(readStatUpdate(new PacketReader(killed[0]!, 1)).diff, { hp: 0 });
+    drop(10);
+    await refused();
+  },
+);
+
+/**
  * Throwing something away: the same `0x17` with `toSlot = 0` (`sub_463BE0`), and the field's own `0x43`.
  *
  * Two packets have to come back for one throw: the `0x0B` that takes the item out of the window (the
@@ -4808,7 +5021,11 @@ test(
     // Ten potions in the USE tab: enough to throw some away and keep the rest.
     const heroItems = startingCharacterItems();
     heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(4, nonEquipSlot(2000000, 10));
-    const heroRecord = characterDataOf({ ...zeroStats(), id: 9, name: "Hero" }, heroItems);
+    // Alive, like the first pass: `zeroStats()` hp=0 would trip the 0x17 death gate (ADR-100 map).
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 9, name: "Hero", hp: 50, maxHp: 50 },
+      heroItems,
+    );
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
     hero.send({
