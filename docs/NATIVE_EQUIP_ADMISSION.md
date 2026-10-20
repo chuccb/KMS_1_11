@@ -64,7 +64,11 @@ GameEntry於結構性applyChangeSlot之前用equipAdmission檢查：
 
 - bag→worn，以及worn→已占用bag的**反向swap**（bag裡的物品也會穿回原部位）。
 - empty bag unequip／一般bag move／drop不受無關requirement攔阻；不符合部位等仍由既有結構檢查拒絕。
-- 真WZ需求、性別、職業、等級、有效既有裝備的實例主屬性、排除部位／兩手盾／套服褲；cash仍未開放，不偷偷混正常裝備。
+- 真WZ需求、性別、職業、等級、有效既有裝備的實例主屬性、排除部位／兩手盾／套服褲。
+  ADR-105 起**現金旗標裝備照普通裝備准入**（穿戴鏈上沒有原生 cash 閘門：`sub_47A420` 的三個呼叫點都在
+  丟棄／交換／清單路徑，FINDINGS §4.36.6）；`wornCash` 是伺服器專屬回聲組，玩家動作到不了它；
+  戒指 `111xxxx` 的格子 12／13 由 `partFitsItem` 照 `sub_463490` 的 case 'o' 收（這一版 Data.wz 沒有戒指內容，
+  需求層自然拒絕未知 id）。
 - WZ缺席不能以無需求放行；`--data off`可移動／脫下，不能穿上未確認需求的物品。
 - trade／死亡／shop／talk拒絕；0x17尾隨垃圾拒絕，解析失敗或拒絕仍回空0x0B解開等待，不靜默卡背包。
 - clone上處理全部衝突搬移、預encode inventory與上限裁切的stat packet後才替換原items。

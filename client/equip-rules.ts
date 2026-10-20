@@ -9,6 +9,17 @@ export interface EquipInventory {
 }
 /** Pure native equipment admission, shared by browser and server safety policy. No DOM. */
 import { effectiveWorn, signedEquipStat } from "./characterstats.ts";
+/**
+ * The body part an item id names on its own - the double-click sender's switch (`sub_463490`, the
+ * `sub_4636B0` caller): `switch (itemId / 10000)` with cases 'd'..'n' = 100..110 -> 1,2,3,4,5,5,
+ * 6,7,8,10,9, the `default` branch taking `itemId / 100000` 13/14 (weapons) -> 11, and everything
+ * else (a pendant 112xxxx, a face, a consumable) refused outright.
+ *
+ * The one code the switch treats differently is 111 (rings, case 'o'): it accepts the *clicked
+ * cell* being 12 **or** 13 - the id alone does not name a single part, so `bodyPart` stays 0 for
+ * it and `partFitsItem` carries the two-cell rule. (Data.wz ships no `Character/011*.img`, so the
+ * ring cells have no content in this version; the sender exists anyway.)
+ */
 export function bodyPart(id: number): number {
   const p = Math.floor(id / 10000);
   return (
@@ -26,6 +37,17 @@ export function bodyPart(id: number): number {
       110: 9,
     }[p] ?? ([13, 14].includes(Math.floor(id / 100000)) ? 11 : 0)
   );
+}
+/**
+ * Whether `part` (a worn slot 1..14, i.e. a negative `0x17` slot negated) can hold `id` - the
+ * double-click switch's own test, which for every code but 111 is `part === bodyPart(id)` and for
+ * 111 (rings) is `part === 12 || part === 13` (case 'o': cell 12 goes to `LABEL_36` with the
+ * clicked cell, cell 13 to a hardcoded `sub_4636B0(this, item, 13)`, any other cell returns 0).
+ */
+export function partFitsItem(part: number, id: number): boolean {
+  if (!Number.isInteger(part) || part < 1 || part > 14) return false;
+  if (Math.floor(id / 10000) === 111) return part === 12 || part === 13;
+  return part === bodyPart(id);
 }
 export function equipConflict(id: number, worn: { slot: number; itemId: number }[] = []): number {
   const has = (n: number) => worn.find((i) => i.slot === n);
@@ -58,8 +80,14 @@ export function canWear(
   wornFacts: StatItem[] = inventory?.worn ?? [],
 ): string | undefined {
   if (!self || self.hp <= 0) return "角色死亡時不能穿戴裝備。";
-  if (!part || part !== bodyPart(item.itemId) || facts?.cash || item.cash)
-    return "此裝備部位或現金裝備尚不支援。";
+  // The native wear path has NO cash gate: `sub_47A420` (the WZ `info/cash` reader) has exactly
+  // three call sites - the throw-away refusal (`sub_463BE0`), the CUIItem trade/move refusal and a
+  // list builder that excludes cash items (`sub_4B4AD0`) - none of them on the double-click/drag
+  // wear chain, and `sub_4C5020` reads the worn group with no cash test either. A cash-flagged
+  // equip (1002000) wears into the ordinary worn slot of its part; `wornCash` is server-owned
+  // storage no client sender can address (`sub_465710` maps negative slots -1..-14 into the
+  // ordinary worn group only). The part gate is the switch's own: `partFitsItem`.
+  if (!partFitsItem(part, item.itemId)) return "此裝備部位尚不支援。";
   const req = facts?.requirements;
   if (!req) return "正在讀取原始裝備需求，請稍後再試。";
   const gender = Math.floor(item.itemId / 1000) % 10;

@@ -262,9 +262,20 @@ export interface Inventory {
 export interface CharacterItems {
   /** Slots 1..14 of the worn equipment (the client array at +134, `sub_45F610`). */
   worn: Map<number, ItemSlot>;
-  /** Slots 1..14 of the worn cash equipment (client array at +254). */
+  /**
+   * Slots 1..14 of the worn cash equipment (client array at +254, the second `{u8 slot, item}`
+   * group of `sub_45F610`'s flag-0x02 block).
+   *
+   * Server-owned storage: `sub_465710` - the one accessor every sender goes through - maps negative
+   * equip-tab slots `-1..-14` into `this + 126 + 8k`, the **ordinary** worn group at +134, so no
+   * `0x17` can address this array, and nothing else in the EXE reads or writes +254 outside the
+   * CharacterData encode/decode pair. The client echoes it back verbatim; the server's look list
+   * appends it after the worn ids (`avatarItemsOf`), which is where a cash equip would become
+   * visible - `sub_45F340` files the last id of a part.
+   */
   wornCash: Map<number, ItemSlot>;
-  /** [equip tab (category 1 items), consume, install, etc] - client arrays at +366/+370/+374/+378. */
+  /** [equip (category 1), consume (2), etc (3/4), cash (5)] - client arrays at +366/+370/+374/+378;
+   * the `0x0B`/`0x17` wire tab byte names them 1..4 (FINDINGS 4.10). */
   inventories: [Inventory, Inventory, Inventory, Inventory];
   /** The `flags & 0x20` skill map: `u16 count` + `{u32 skillId, u32 level}` each.
    * sub_45FCC0 writes CharacterData+382; sub_4C7450 reads 1000001/2000001 from it. */

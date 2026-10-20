@@ -1761,10 +1761,10 @@ test(
   async (t) => {
     const world = await startWorld(t);
     const character = world.accounts.get("admin")!.characters[0]!;
-    // The real WZ facts pick the fixture: 1002000 (갈색 항공 모자) is a CASH cap the admission
-    // honestly refuses ("此裝備部位或現金裝備尚不支援" - cash wear is its own unimplemented family),
-    // so the wear phase runs on 1002008 (갈색 가죽 모자): cash false, gender 2, req Lv5/job 0 -
-    // wearable by the Lv12 beginner hero, with the instance words a scroll would leave behind.
+    // The real WZ facts pick the fixture: the wear phase runs on 1002008 (갈색 가죽 모자):
+    // gender 2, req Lv5/job 0 - wearable by the Lv12 beginner hero, with the instance words a
+    // scroll would leave behind. (1002000, the cash-flagged twin, is wearable too since ADR-105 -
+    // the wear path has no native cash gate - but this fixture needs the scrolled instance.)
     const cap = equipSlot(1002008);
     cap.str = 3;
     cap.pad = 7;

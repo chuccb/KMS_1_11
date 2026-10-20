@@ -109,3 +109,38 @@ test("server rechecks bag->worn AND reverse swaps without modifying any instance
     /原WZ/,
   );
 });
+test("ADR-105: the real cash cap 1002000 is admitted like any equip, on its own requirements", () => {
+  const catalog = itemCatalogOf(WzArchive.open(resolve(import.meta.dirname, "../../Data.wz")));
+  assert.equal(catalog!.info(1002000)!.cash, true, "the fixture really is the WZ cash flag");
+  // Lv20 / job mask 8 = the magician line; the wearer qualifies and no cash gate stops it.
+  const mage = characterDataOf(
+    { ...person, job: 400, level: 20, str: 100, dex: 100, int: 100, luk: 100 },
+    startingCharacterItems(),
+  );
+  mage.items!.inventories[0]!.items.set(1, equipSlot(1002000));
+  assert.equal(
+    equipAdmission(mage, { tab: 1, fromSlot: 1, toSlot: -1, count: -1 }, catalog),
+    undefined,
+  );
+  // A beginner fails on the cap's own job mask - the refusal is a requirement, not "cash".
+  const beginner = characterDataOf({ ...person, level: 20 }, startingCharacterItems());
+  beginner.items!.inventories[0]!.items.set(1, equipSlot(1002000));
+  assert.match(
+    equipAdmission(beginner, { tab: 1, fromSlot: 1, toSlot: -1, count: -1 }, catalog)!,
+    /職業/,
+  );
+  // Rings: this Data.wz has no 111xxxx entry, so admission stays honest at the requirements gate
+  // (the structural cells 12/13 are inventory.test.ts's business); unequipping needs none.
+  const ring = characterDataOf(person, startingCharacterItems());
+  ring.items!.inventories[0]!.items.set(1, equipSlot(1112000));
+  assert.match(
+    equipAdmission(ring, { tab: 1, fromSlot: 1, toSlot: -12, count: -1 }, catalog)!,
+    /讀取|原WZ/,
+  );
+  ring.items!.worn.set(12, equipSlot(1112000));
+  assert.equal(
+    equipAdmission(ring, { tab: 1, fromSlot: -12, toSlot: 2, count: -1 }, catalog),
+    undefined,
+    "taking the ring off goes to an empty bag slot with no requirements",
+  );
+});

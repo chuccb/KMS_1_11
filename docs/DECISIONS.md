@@ -3480,3 +3480,57 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **LIVE**：重啟於HEAD＋`--test-tools admin --map-command admin`（give/repair/warp的方便
   入口；dev-only面板、不發明原生opcode、預設off是產品政策，這裡是operator明示開啟）；
   新世界新save，新創角色起始裝備**出生即真模板實例**（PAD真值；空白劍在新世界不再出現）。
+
+## ADR-105：現金裝備／戒指格12・13／寵物家族——binary證據結案：穿戴路無cash閘門、wornCash＝伺服器回聲組（2026-10-20）
+
+- **背景**：ADR-029以來現金裝備一律拒絕（「此裝備部位或現金裝備尚不支援」）、§4.36.5把穿戴格12/13列為
+  硬問題（「畫不出來，要先知道原伺服器怎麼用它」）。本輪把整個家族從EXE/listing/Data.wz讀完——
+  **問題本身問錯了方向**：12/13是普通worn組的戒指格（有原生sender、無內容），`wornCash`是另一個
+  玩家動作根本到不了的伺服器回聲組。完整證據記在FINDINGS §4.36.6。
+- **證據**：
+  1. **`sub_463490`＝雙擊穿戴的部位switch**（`.c` 107258；先前各輪只讀過下游`sub_4636B0`）：
+     `sub_4D9110(x,y)`先把點擊座標映到裝備窗格子（32×32命中框——`EQUIP_SLOTS`/`equipSlotAt`的來源表），
+     `switch(itemId/10000)`：case 'd'..'n'＝100..110→格子1,2,3,4,5,5,6,7,8,**10**,**9**；default收
+     `itemId/100000`∈{13,14}（武器）→11；**case 'o'（111戒指）→點到的格子12或13**（13是hardcoded
+     `sub_4636B0(this,item,13)`），其他格子拒絕；其餘id（含墜飾112）一律`return 0`。switch前的性別檢查
+     `(id/1000)%10 ∈ {2, 自身}`與canWear既有規則逐字相同。
+  2. **穿戴鏈沒有cash閘門**：`sub_47A420`（WZ `info/cash`讀取者）全EXE僅三個呼叫點——`sub_463BE0`丟棄拒絕
+     （`info/cash!=0 || 序號!=0`）、CUIItem交換/移動拒絕（前兩條＋`id/1000==4031`）、`sub_4B4AD0`清單建造
+     （只收三者皆非）。沒有一個在雙擊/拖放穿戴鏈上；`sub_463490`/`sub_4636B0`/`sub_4C5020`都不讀info/cash。
+     現金旗標裝備（1002000）在原生client就是照普通裝備穿進部位格。
+  3. **`sub_465710`＝唯一的道具存取器**：tab1負槽-1..-14→`this+126+8k`＝**普通worn組(+134..246)**，
+     `a4<-14`夾住；tab≠1正槽→`+4*tab+362`四個分頁陣列(+366/370/374/378)。`wornCash`(+254)全EXE只有
+     `sub_45F610`(encode)讀、`sub_45FCC0`(decode)寫——**零UI/渲染/狀態取用者**⇒伺服器專屬回聲組，
+     沒有任何`0x17`能指到它（tab4負槽照舊slotOutOfRange——那不是限制，是原樣）。`sub_4C5020`的統計迴圈
+     也只經`sub_465710`負槽迭代普通組。
+  4. **內容盤點（Data.wz）**：`Character/`九個目錄（Accessory/Cap/Clothes/Face/Glove/Hair/Shield/Shoes/Weapon）
+     **沒有任何011*/012*.img**——戒指/墜飾零內容（sender存在、道具不存在）；`Item/`只有Book/Consume/Etc/Special
+     ——**沒有Item/Pet**，05000000..3＝Book（id類別5在`sub_4D3950`串流類別表叫cash；`inventoryTabOfItemId`
+     把它們收進第4分頁✓）。寵物家族在這一版**零內容**，無從實作。
+  5. **111xxxx外觀本來就畫不出來**：`sub_45F340` case 'o'直接break（§4.11.3b）——戒指穿在12/13也不進
+     15-slot外觀陣列。這不是缺口，是這一版client的原樣。
+- **實作**：
+  1. `client/equip-rules.ts`：新`partFitsItem(part,id)`＝switch自己的格子檢查（111→12|13、其餘→bodyPart、
+     part限1..14）；`canWear`部位閘改用它並**移除`facts?.cash || item.cash`拒絕**（訊息縮回「此裝備部位
+     尚不支援。」只擋部位）；`bodyPart`對111/112維持0（id推不出戒指要哪格——由點擊的格子決定）。
+  2. `server/game/inventory.ts`：`fits`負槽分支`wornSlotOfItem`→`partFitsItem`——戒指-12/-13穿/脫兩向結構
+     受理（先前wrongPart會拒掉原生sender的合法請求）；choice 5改寫為本輪結論。
+  3. `protocol/chardata.ts`：`wornCash`註解補`sub_465710`證據；**修正過時註解**：inventories四陣列舊寫
+     「[equip, consume, install, etc]」→「[equip(1), consume(2), etc(3/4), cash(5)]」（與INVENTORY_TAB、
+     `inventoryTabOfItemId`、FINDINGS wire tab 4＝cash一致——install類別併入etc分頁）。
+  4. `avatarItemsOf`早已把wornCash接在worn之後（`sub_45F340`同部位最後一個贏＝現金外觀蓋過普通外觀；
+     機制原生，「原伺服器有沒有這樣填」不可觀測＝已記錄的選擇）——不需改。
+  5. 文件：FINDINGS新§4.36.6＋§4.36.3「現金裝備不動」句／§4.36.5／§6-21改写；NATIVE_EQUIP_ADMISSION
+     「cash仍未開放」邊界移除。
+- **測試**：`inventory.test`＋2（戒指12/13穿脫兩向、其他格與他物拒入、112→-14拒、wornCash零寫入；cash序號
+  裝備照穿且序號隨記錄進worn、cash分頁內移動、tab4負槽slotOutOfRange）；`presentation-equipment`
+  （partFitsItem全表＋cell14無映射、cash翻轉為受理含記錄序號、戒指canWear 12/13受理・11/預設拒、112全拒）；
+  `equip-admission`（**真WZ** 1002000：cash旗標確認、job400/Lv20准入、初心者被**職業**拒而非cash、
+  戒指在需求閘誠實拒絕（無WZ條目）、脫下空袋槽無需求）；`webclient.test` fixture註解更新（1002000自
+  ADR-105可穿；fixture續用1002008因其卷軸實例欄位）。
+- **驗證**：typecheck/format/build全綠；三個受影響檔＋format後重跑27/27；完整suite兩跑1188/24與1189/23
+  （＋2 errors）——fail集合與ADR-104已知負債家族逐一相符（field×4、physics×4、probe/typed/canvas×7、
+  art/WZ×5、UI examples/coalesced/wz），errors＝browser-closed/late-test()的probe負債，計數抖動＝timing
+  flake；**零fail可歸因本輪**。
+- **LIVE**：重啟於本HEAD；新世界新save（舊save不可攜，既有政策）。現金旗標裝備（如1002000）現在可穿；
+  戒指格因無WZ內容維持不可達（需求閘誠實拒絕）；丟棄現金道具的拒絕（序號＋WZ info/cash）不變。

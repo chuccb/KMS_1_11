@@ -40,8 +40,19 @@
  *    reads the archive's `info/cash` and `sub_463BE0` also refuses an item whose own cash serial is
  *    set - and a drop on the ground can only carry an item id and a count, so the serial would be
  *    lost.
- * 5. **Cash equips are not handled**: `sub_4636B0`'s table sends `111xxxx` to part 12/13, and the
- *    client's second worn group (`wornCash`) is a different array. Neither is touched here.
+ * 5. **Cash equips wear like any equip, and `wornCash` stays server-owned.** The wear path has no
+ *    native cash gate: `sub_47A420` (the WZ `info/cash` reader) has exactly three call sites - the
+ *    throw-away refusal, the CUIItem trade/move refusal and a list builder (`sub_4B4AD0`) - none of
+ *    them on the double-click/drag wear chain, so a cash-flagged equip goes into the ordinary worn
+ *    slot of its part. The second worn group (`wornCash`, client +254) no sender can address:
+ *    `sub_465710` maps negative equip-tab slots `-1..-14` into the ordinary worn group only, and
+ *    nothing in the EXE reads +254 outside CharacterData's own encode/decode - so the only thing a
+ *    `0x17` can do to it is nothing, which is what this module does. Where it does surface is the
+ *    look: the server's `0x1C`/`0x28` id list appends `wornCash` after the worn ids
+ *    (`avatarItemsOf`), and `sub_45F340` files the last id of a part. Rings: the double-click
+ *    switch (`sub_463490`) admits `111xxxx` into cell 12 or 13, so `fits` does too (`partFitsItem`)
+ *    even though this Data.wz ships no ring content; a pendant `112xxxx` hits the switch's
+ *    `default` refusal.
  * 6. **Two stacks of the same item merge; the destination fills first.** The three move senders all
  *    pass the whole slot (`count = -1`), so the client never asks to split a stack by dragging -
  *    the only split a `0x17` carries is the throw-away's answered count. What the 2003 server did
@@ -56,7 +67,8 @@
  * returns.
  */
 import { INVENTORY_OP, INVENTORY_TAB, type InventoryChange } from "../protocol/inventory.ts";
-import { WORN_SLOT_LIMIT, wornSlotOfItem, type CharacterItems } from "../protocol/chardata.ts";
+import { WORN_SLOT_LIMIT, type CharacterItems } from "../protocol/chardata.ts";
+import { partFitsItem } from "../../../client/equip-rules.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { ClientChangeSlot } from "../protocol/field.ts";
 import { inventoryTabOfItemId, MAX_ITEM_STACK } from "./rewards.ts";
@@ -124,7 +136,7 @@ export function applyChangeSlot(
   const read = (slot: number): ItemSlot | undefined =>
     slot < 0 ? items.worn.get(-slot) : tabItems.items.get(slot);
   const fits = (item: ItemSlot, slot: number): boolean =>
-    slot < 0 ? wornSlotOfItem(item.itemId) === -slot : inventoryTabOfItemId(item.itemId) === tab;
+    slot < 0 ? partFitsItem(-slot, item.itemId) : inventoryTabOfItemId(item.itemId) === tab;
   const write = (slot: number, item: ItemSlot): void => {
     if (slot < 0) items.worn.set(-slot, item);
     else tabItems.items.set(slot, item);
@@ -186,8 +198,8 @@ export function applyChangeSlot(
 
   if (toSlot > tabItems.capacity) return fail("slotOutOfRange");
   // The destination has to hold it too. For a worn slot that one test *is* "it is an equip and it
-  // belongs to that body part" - `wornSlotOfItem` answers `null` for anything else, so no separate
-  // "is this even an equip" branch exists.
+  // belongs to that body part" - `partFitsItem` (the double-click switch's own table, rings 12/13
+  // included) is false for anything else, so no separate "is this even an equip" branch exists.
   if (!fits(source, toSlot)) return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
   const displaced = read(toSlot);
   // Choice 6: a stack dropped on its own kind merges instead of swapping. Only non-equips stack,

@@ -286,6 +286,55 @@ test("a worn part the item does not belong to is refused, not guessed", () => {
   assert.equal(itemIdAt(ok, -11), SWORD);
 });
 
+test("ADR-105 rings: cells 12/13 take 111xxxx by the clicked cell, and nothing else takes them", () => {
+  const RING = 1112000; // part code 111 - sub_463490's case 'o' sends it to the cell clicked, 12 or 13
+  const ok = items([[1, RING]]);
+  assert.equal(applyChangeSlot(ok, equip(1, -12)).kind, "done");
+  assert.equal(itemIdAt(ok, -12), RING);
+  assert.equal(applyChangeSlot(ok, equip(-12, 1)).kind, "done", "and drags back out");
+  assert.equal(itemIdAt(ok, 1), RING);
+  const ok13 = items([[1, RING]]);
+  assert.equal(applyChangeSlot(ok13, equip(1, -13)).kind, "done", "cell 13 is the hardcoded twin");
+  assert.equal(itemIdAt(ok13, -13), RING);
+  // Any other cell refuses the ring, and no other item fits the ring cells.
+  assert.equal(refusal(items([[1, RING]]), equip(1, -11)), "wrongPart");
+  assert.equal(refusal(items([[1, CAP]]), equip(1, -12)), "wrongPart");
+  // A pendant 112xxxx hits the switch's default refusal - cell 14 names no id at all.
+  assert.equal(refusal(items([[1, 1122000]]), equip(1, -14)), "wrongPart");
+  assert.equal(ok.wornCash.size, 0, "no 0x17 ever writes the server-owned wornCash group");
+});
+
+test("ADR-105 cash: a serial rides the ordinary wear path, and the cash tab only moves inside itself", () => {
+  // The wear path has no cash gate: sub_47A420's three call sites are the throw-away refusal, the
+  // CUIItem trade/move refusal and sub_4B4AD0's list builder - none of them here.
+  const block = items([[2, CAP]]);
+  const cashCap = block.inventories[0]!.items.get(2)!;
+  assert.equal(cashCap.kind, "equip");
+  if (cashCap.kind === "equip") cashCap.cash = { sn: 99n, unknown18: 0, unknown1A: 0n };
+  const worn = applyChangeSlot(block, equip(2, -1));
+  assert.equal(worn.kind, "done");
+  const onBody = block.worn.get(1)!;
+  assert.equal(
+    onBody.kind === "equip" && onBody.cash?.sn,
+    99n,
+    "the record's own serial rides into the worn slot",
+  );
+  assert.equal(worn.kind === "done" && worn.lookChanged, true);
+  // The cash tab (category 5 - this Data.wz's Item/Book) moves inside itself like any bag...
+  const cashTab = startingCharacterItems();
+  cashTab.inventories[INVENTORY_TAB.cash - 1]!.items.set(1, nonEquipSlot(5000000, 1));
+  assert.equal(
+    applyChangeSlot(cashTab, { tab: INVENTORY_TAB.cash, fromSlot: 1, toSlot: 2, count: -1 }).kind,
+    "done",
+  );
+  // ...but a negative slot on it is not addressable - sub_465710 maps -1..-14 into the ordinary
+  // worn group only, so no sender can equip "into" wornCash.
+  assert.equal(
+    refusal(cashTab, { tab: INVENTORY_TAB.cash, fromSlot: -1, toSlot: 1, count: -1 }),
+    "slotOutOfRange",
+  );
+});
+
 test("the destination has to be able to hold what is being displaced", () => {
   // Unequipping the sword into a slot that holds a cap: the cap would have to go to the sword's worn
   // part (11), which no cap can be worn at.
