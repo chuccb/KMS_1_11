@@ -44,6 +44,17 @@ import {
   inventorySlotAt as inventorySlotAtLayout,
   inventoryWindowAt as inventoryHitAt,
 } from "./inventory-window.ts";
+import {
+  SHOP,
+  SHOP_SIDES,
+  clampShopScroll,
+  drawShopScrollbar as paintShopScrollbar,
+  drawShopTabs as paintShopTabs,
+  shopListOf,
+  shopScrollbarGeometry as shopScrollGeometry,
+  shopVisibleRows,
+  shopWindowAt as shopHitAt,
+} from "./shop-window.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
 import { createCamera, updateCamera, reframeCamera } from "./camera.ts";
@@ -4489,53 +4500,6 @@ function describeItem(itemId) { return itemMetadata.load(itemId); }
 // The `buy` and `sell` canvases are the selected-row faces (188x34 with an icon slot at the left);
 // `sub_4B5B10` paints one under the row the player picked, and the page does the same.
 
-const SHOP = {
-  path: "UI/UIWindow.img/Shop/backgrnd",
-  width: 407,
-  height: 291,
-  /** `sub_461C50`: the window is centred, `((800 - w) >> 1, (600 - h) >> 1)`. */
-  home: { x: 196, y: 154 },
-  close: { x: 188, y: 9, width: 32, height: 15 },
-  buy: { x: 78, y: 31, width: 46, height: 19 },
-  sell: { x: 283, y: 31, width: 46, height: 19 },
-  recharge: { x: 225, y: 29, width: 50, height: 23 },
-  tabs: { x: 206, y: 65, width: 198, height: 24 },
-  buyList: {
-    x: 6,
-    y: 68,
-    rows: 6,
-    pitch: 35,
-    slot: 32,
-    nameX: 42,
-    nameRight: 184,
-  },
-  sellList: {
-    x: 209,
-    y: 91,
-    rows: 5,
-    pitch: 35,
-    slot: 32,
-    nameX: 245,
-    nameRight: 388,
-  },
-  /**
-   * The two selected-row faces, 188x34 - two pixels wider and taller than the 32-px row, so the
-   * raised frame shows. The sheet's row has its slot at x=6/y=68 (left) and x=209/y=91 (right);
-   * the sprite's slot interior sits one pixel inside its own edge, which is what puts the stamps
-   * at (1,67) and (204,90).
-   */
-  face: {
-    buy: { path: "UI/UIWindow.img/Shop/buy", x: 1, y: 67 },
-    sell: { path: "UI/UIWindow.img/Shop/sell", x: 204, y: 90 },
-  },
-  /** The dark field left of the sheet's own `메소` label. */
-  mesos: { right: 368, y: 272 },
-  /** `sub_4AC3A0`-style 12-px scrollbars, drawn only when a list overflows. */
-  scrollbar: {
-    buy: { x: 189, y: 68, height: 207 },
-    sell: { x: 390, y: 89, height: 174 },
-  },
-};
 
 /** Where the sheet sits, what is picked in each list, and the two scroll offsets. */
 let shopAt = { ...SHOP.home };
@@ -4574,48 +4538,8 @@ function shopRowsOf(side) {
   return inventory?.tabs.find((entry) => entry.tab === shopTab)?.items ?? [];
 }
 
-/** How many rows a list shows at once (6 on the left, 5 under the tabs). */
-function shopVisibleRows(side) {
-  return side === "buy" ? SHOP.buyList.rows : SHOP.sellList.rows;
-}
-
-/** The list geometry for one side. */
-function shopListOf(side) {
-  return side === "buy" ? SHOP.buyList : SHOP.sellList;
-}
-
-/** The row index under a window-local point, or undefined. */
-function shopRowAt(side, localX, localY) {
-  const list = shopListOf(side);
-  const row = Math.floor((localY - list.y) / list.pitch);
-  if (row < 0 || row >= list.rows) return undefined;
-  // Inside the 32-px row face, not the 3-px gap below it.
-  if (localY - list.y - row * list.pitch >= list.slot) return undefined;
-  if (localX < list.x || localX >= SHOP.scrollbar[side].x) return undefined;
-  return row + shopScroll[side];
-}
-
-/** Which tab of the strip is under a window-local point, or -1. */
-function shopTabAt(localX, localY) {
-  const { tabs } = SHOP;
-  if (localY < tabs.y || localY >= tabs.y + tabs.height) return -1;
-  if (localX < tabs.x || localX >= tabs.x + tabs.width) return -1;
-  const inner = tabs.width - 4 - 12;
-  return Math.max(
-    0,
-    Math.min(3, Math.floor(((localX - tabs.x - 4) * 4) / inner)),
-  );
-}
-
-/** Whether a window-local point is inside one of the sheet's controls. */
-function insideBox(box, localX, localY) {
-  return (
-    localX >= box.x &&
-    localX < box.x + box.width &&
-    localY >= box.y &&
-    localY < box.y + box.height
-  );
-}
+// shopVisibleRows / shopListOf / shopRowAt / shopTabAt now live in shop-window.ts (pure geometry),
+// injected with the rows and scroll offsets the page owns.
 
 /**
  * What of the shop is at a surface point. `kind` is `close`, `button` (with `button`), `tab` (with
@@ -4624,42 +4548,15 @@ function insideBox(box, localX, localY) {
  * one - exactly the order the desktop client stacks its modeless windows in.
  */
 function shopWindowAt(x, y) {
+  // The sheet is pure geometry; whether a shop is open is the caller's state.
   if (shop === undefined || selfView === undefined) return undefined;
-  const localX = x - shopAt.x;
-  const localY = y - shopAt.y;
-  if (localX < 0 || localY < 0 || localX >= SHOP.width || localY >= SHOP.height)
-    return undefined;
-  if (insideBox(SHOP.close, localX, localY)) return { kind: "close" };
-  for (const button of ["buy", "sell", "recharge"]) {
-    if (insideBox(SHOP[button], localX, localY))
-      return { kind: "button", button };
-  }
-  const tab = shopTabAt(localX, localY);
-  if (tab >= 0)
-    return { kind: "tab", index: tab, tab: INVENTORY_TABS[tab].tab };
-  for (const side of ["buy", "sell"]) {
-    const geometry = shopScrollbarGeometry(side);
-    const bar = SHOP.scrollbar[side];
-    if (
-      geometry !== undefined &&
-      insideBox({ ...bar, width: 12 }, localX, localY)
-    ) {
-      const y = localY - bar.y;
-      const part =
-        y < 12
-          ? "prev"
-          : y >= bar.height - 12
-            ? "next"
-            : y >= 12 + geometry.offset && y < 24 + geometry.offset
-              ? "thumb"
-              : "track";
-      return { kind: "scrollbar", side, part };
-    }
-    const row = shopRowAt(side, localX, localY);
-    if (row !== undefined && row < shopRowsOf(side).length)
-      return { kind: `${side}-row`, index: row, row: shopRowsOf(side)[row] };
-  }
-  return { kind: "body" };
+  return shopHitAt({
+    position: shopAt,
+    x,
+    y,
+    rows: { buy: shopRowsOf("buy"), sell: shopRowsOf("sell") },
+    scroll: { ...shopScroll },
+  });
 }
 
 /**
@@ -4761,8 +4658,7 @@ function drawShopList(side, originX, originY) {
 
 /** Clamp scrolling after wheel/arrow/track/drag input, including a shrinking inventory. */
 function setShopScroll(side, position) {
-  const max = Math.max(0, shopRowsOf(side).length - shopVisibleRows(side));
-  shopScroll[side] = Math.max(0, Math.min(max, position));
+  shopScroll[side] = clampShopScroll(side, shopRowsOf(side).length, position);
   shopHover = undefined;
 }
 
@@ -4778,39 +4674,15 @@ function reconcileShopInventory() {
   setShopScroll("sell", shopScroll.sell);
 }
 
-/** VScr's thumb is a fixed 12px sprite; only its position changes, not its painted size. */
 function shopScrollbarGeometry(side) {
-  const max = shopRowsOf(side).length - shopVisibleRows(side);
-  if (max <= 0) return undefined;
-  const travel = SHOP.scrollbar[side].height - 36;
-  return {
-    max,
-    travel,
-    offset: Math.round((travel * Math.min(max, shopScroll[side])) / max),
-  };
+  return shopScrollGeometry(side, shopRowsOf(side).length, shopScroll[side]);
 }
 
 /** The 12-px `UI/Basic.img/VScr` strip: arrows, a clipped tiled trough and a fixed-size thumb. */
 function drawShopScrollbar(side, originX, originY) {
-  const bar = SHOP.scrollbar[side];
   const geometry = shopScrollbarGeometry(side);
   if (geometry === undefined) return;
-  const x = originX + bar.x;
-  const y = originY + bar.y;
-  const stamp = (piece, at) => {
-    const entry = artImage(`UI/Basic.img/VScr/enabled/${piece}`);
-    if (entry.ready) ctx.drawImage(entry.img, x, at);
-  };
-  stamp("prev0", y);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y + 12, 12, bar.height - 24);
-  ctx.clip();
-  for (let tile = 12; tile < bar.height - 12; tile += 12)
-    stamp("base", y + tile);
-  ctx.restore();
-  stamp("next0", y + bar.height - 12);
-  stamp("thumb0", y + 12 + geometry.offset);
+  paintShopScrollbar(ctx, artImage, side, originX, originY, geometry);
 }
 
 /**
@@ -4821,53 +4693,7 @@ function drawShopScrollbar(side, originX, originY) {
  * runs light-blue to white).
  */
 function drawShopTabs(originX, originY) {
-  const { tabs } = SHOP;
-  const count = INVENTORY_TABS.length;
-  const open = Math.max(
-    0,
-    INVENTORY_TABS.findIndex((entry) => entry.tab === shopTab),
-  );
-  const x0 = originX + tabs.x;
-  const y = originY + tabs.y;
-  const cap = 4;
-  const right = 12;
-  const inner = tabs.width - cap - right;
-  const stamp = (piece, x) => {
-    const entry = artImage(`UI/Basic.img/Tab/${piece}`);
-    if (entry.ready) ctx.drawImage(entry.img, x, y);
-  };
-  stamp(`left${open === 0 ? 1 : 0}`, x0);
-  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  let start = x0 + cap;
-  for (let index = 0; index < count; index++) {
-    const end = x0 + cap + Math.round((inner * (index + 1)) / count);
-    const lit = index === open;
-    // The crease belongs to this tab's right edge, so the last one sits under the right cap.
-    if (index < count - 1) {
-      const piece = lit
-        ? "middle1"
-        : index + 1 === open
-          ? "middle2"
-          : "middle0";
-      stamp(piece, end - 14);
-    }
-    const state = lit ? 1 : 0;
-    for (let fill = start; fill < end - (index < count - 1 ? 14 : 0); fill++)
-      stamp(`fill${state}`, fill);
-    // `sub_4582A0` drops an unselected label one pixel, which is what makes the lit tab stand out.
-    ctx.fillStyle = "#000000";
-    ctx.fillText(
-      INVENTORY_TABS[index].label,
-      (start + end) / 2,
-      y + (lit ? 12 : 13),
-    );
-    start = end;
-  }
-  stamp(`right${open === count - 1 ? 1 : 0}`, x0 + tabs.width - right);
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
+  paintShopTabs(ctx, artImage, originX, originY, shopTab);
 }
 
 /** One of the three sheet buttons, in the state the pointer gives it. */

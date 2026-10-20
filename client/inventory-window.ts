@@ -1,6 +1,23 @@
-/** Native inventory sheet layout, hit-testing and scroll math (sub_43D750 / sub_43E340 / 4DA440).
+/**
+ * Native inventory sheet layout, hit-testing and scroll math.
+ *
  * Extracted from client/main.js: the geometry is pure, so it can be unit-tested instead of only
  * being reachable through the page. main.js keeps the mutable state and calls these helpers.
+ *
+ * Native anchors, all re-read against this checkout's own evidence in ADR-110:
+ *  - `sub_43D750` loads the window positions out of the registry: for i in 0..5 it reads
+ *    `uiWndX%d` / `uiWndY%d` / `uiOpt%d`, with defaults `8 * (3 * i + 3)` for windows 0..3
+ *    (window 0 = the inventory, so 24, 24), 8/8 for window 4, 500/50 for window 5, and it clamps
+ *    an X above 784. `uiOpt0` defaults to 0, so the sheet starts hidden.
+ *  - `sub_4DA440` (the inventory window) creates its controls by id:
+ *    `CCtrlScrollBar id2001 at (147, 80) height 208`, then `*(*(this + 218) + 44) = 142`, and
+ *    `CCtrlButton id2002 at (8, 294)` - the meso button exactly as `sub_4D4960` paints it.
+ *  - `sub_4DA810`, the scroll notification handler, is where the per-tab row lives:
+ *    `if (n2001 == 2001 && n500 >= 0x12C && n500 <= 0x130 && dword_5C2684[*(this + 222)] != a4)
+ *       { sub_500EE0(this + 22); dword_5C2684[*(this + 222)] = a4; *(this + 221) = 4 * a4 + 1; }`
+ *    - one row per tab, stored in an array, and the first slot is `4 * row + 1`.
+ *  - `sub_4581F0` (the CCtrlTab creator) rejects `n4 >= 4`: the strip is four tabs.
+ *  - `UI/UIWindow.img` `BtCoin/normal/0` is a 17x17 canvas, which is the button's drawn size.
  */
 import type { CanvasImage, ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
@@ -26,12 +43,12 @@ export interface InventoryLayout {
   path: string;
   width: number;
   height: number;
-  /** sub_43D750 / sub_43E340: window type0, (24,24), hidden by default. */
+  /** `sub_43D750`: `uiWndX0`/`uiWndY0` default to `8 * (3 * 0 + 3)` = 24, `uiOpt0` defaults to 0. */
   home: UiPoint;
   grid: InventoryGrid;
-  /** 4DA440: CCtrlScrollBar id2001, (147,80), height208. */
+  /** `sub_4DA440`: `CCtrlScrollBar id2001` created at (147, 80) with height 208. */
   scrollbar: InventoryBox;
-  /** 4DA440: button2002 at (8,294); WZ BtCoin canvases are 17x17. */
+  /** `sub_4DA440`: `CCtrlButton id2002` at (8, 294); `BtCoin/normal/0` is a 17x17 canvas. */
   coin: InventoryBox;
   /** The meso field, ending where the sheet's own `메소` label starts. */
   mesos: InventoryBox;
