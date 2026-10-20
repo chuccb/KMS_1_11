@@ -1,11 +1,13 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-19（ADR-090 社交指令鏈）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-20（ADR-109：探針嚴格 TS 化、背包視窗幾何抽出）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
-既有44項失敗仍阻擋驗收；未登入或操作LIVE角色。全案TS／ESNext／Bun整理也未完成，
-main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+**ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
+全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
+並自 main.js 抽出 `client/inventory-window.ts`；靜態耦合普查證明 main.js 無可機械切開的純區塊，採門面分層），
+歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 
@@ -38,7 +40,9 @@ main.js／client_probe.mjs與歷史native工具情境仍待完成，見 [BUN_MIG
 
 ## 優先序 1：繼續真正的嚴格 TypeScript 遷移
 
-- 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。main.js與client_probe仍需實作型別及合理拆分，不只改名。
+- 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。**ADR-109 已處理 client_probe（→ `.ts`）並從 main.js
+  抽出背包視窗幾何**；main.js（5836 行）仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
+  靜態耦合普查（321 個 top-level 宣告中僅 3 個零耦合）已列為分層順序的依據，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 - frame／play已strict TS實作遷移，真RAF／畫布來源與有界keyboard計畫見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；不對玩家執行手動工具。
 - 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。
 - 逐項追查44失敗及typed whisper歷史native admission情境；不能改skip、刪斷言或降低strict掩蓋問題。

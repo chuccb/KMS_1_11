@@ -10,14 +10,14 @@
 名冊解码改为固定六格，空格不再被当成队长。邀请确认窗有自己的所有权：第一个 offer 拥有 modal、
 真入队会关掉自己这张并本地拒绝、场地／死亡换 owner 时按「是」降级为拒绝，旧 callback 不能回答新 offer。
 编辑框（IME Enter 不送、Shift+Enter 留焦点、Escape 退出）抽成 strict TS。
-main5394→5370行，client101支TS；`main.js`／`client_probe.mjs` 仍未完成迁移。
+main5394→5370行，client101支TS；`main.js`／`client_probe.mjs` 仍未完成迁移（ADR-109 更新：`client_probe` 已遷為 `.ts` 並納入檢查，僅餘 `main.js`）。
 这版 GameMenu 的 Quest／Party／Community 停用是**原况**（PE `00559EF5` 只有 index3/4/5 分支、
 `UI/UIWindow.img` 无 `Party` 子树），不补后期样式 party 窗。原证、界线与验证见
 [NATIVE_SOCIAL_COMMANDS](NATIVE_SOCIAL_COMMANDS.md)。附接 LIVE 的邀请／接受仍停用（旧原生进程无身份闸門）；交易房（교환）瀏覽器鏈與 goExchange 閘門見 [NATIVE_TRADE](NATIVE_TRADE.md)。
 
 ## 前輪2026-10-19：frame／play手動工具strict TS整理
 
-本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 尚未完成實作型別遷移（`client_probe` 已於 ADR-109 遷為 `.ts`）；歷史數字／PID不代表當前 LIVE。
 
 ## 前輪2026-10-19：標題／登入／世界與選角整條鏈 strict TS 整理
 
@@ -659,9 +659,9 @@ found」之外的另一種空白。
 
 ### 歷史離線 UI 回歸（尚未完成遷移）
 
-> client_probe的舊DOM/VM shim已不符合完整main；其wrapper仍是44個失敗之一。本段只保留歷史意圖，不是目前PASS。
+> client_probe的舊DOM/VM shim已不符合完整main；其wrapper仍是44個失敗之一（ADR-108 已復活、ADR-109 已遷為 strict TS 並通過，此句僅保留歷史意圖）。
 
-`node server/scripts/client_probe.mjs` 不需要伺服器、瀏覽器或外部套件：用 DOM／canvas shim 執行真正的
+`bun server/scripts/client_probe.ts` 不需要伺服器、瀏覽器或外部套件：用 DOM／canvas shim 執行真正的
 `client/main.js`，注入與 WebSocket 相同的事件，驗證登入面板與按鈕的素材路徑／座標／狀態、登入
 取消／重試／防重送與密碼清理，以及原版商店座標的買／賣／雙擊、箭頭／軌道／滾輪／
 拖曳滑塊、背包減少後捲動與選取清理、視窗拖曳在畫布外放開、位置儲存，以及 WZ 說明的字面 `\n`

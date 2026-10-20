@@ -71,7 +71,7 @@ HTML 僅供透明點擊區、名稱輸入與焦點，不再疊灰色表單；建
    - 測後真 JSON 兩帳號角色數皆 0，女性 `gender:1` 保留。
 3. 舊功能回歸：真 Chromium 世界／角色選擇與左右朝向通過（758 個 mob move packets，無 JS／素材錯誤）；
    繩索走到 x718、爬升、停止 500ms 不滑、跳離通過；BGM／SE 真解碼／播放通過；frame smoke 通過。
-4. `server/scripts/client_probe.mjs`：SMOKE／SHOP／TITLE／SELECTION／**NATIVE CREATION/DELETION** 五組通過。
+4. `server/scripts/client_probe.mjs`（ADR-109 起改名 `server/scripts/client_probe.ts`，執行當時為 `.mjs`）：SMOKE／SHOP／TITLE／SELECTION／**NATIVE CREATION/DELETION** 五組通過。
 
 暫存紀錄：`/tmp/creation-full-545-release.log`、`/tmp/browser-creation-release2.log`、
 `/tmp/browser-creation-selection-regression.log`、`/tmp/browser-creation-climb-release.log`、`/tmp/creation-frame-release.log`。

@@ -33,22 +33,25 @@
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
 - **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-2026-10-19 重新核對 latest 並鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**。
+2026-10-20 重新核對 latest 並鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**
+（playwright-core 1.64.1／Chromium 153.0.0 同輪核對，只作隔離瀏覽器驗證）。
 根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
-**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`，但主瀏覽器入口及剩餘1支 `server/scripts/client_probe.mjs` 尚未完成型別化；
-不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)。
+**全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），
+唯一尚未型別化的 authored 來源是主瀏覽器入口 `client/main.js`（5836 行，仍為 JS／TS 混用）；
+不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)
+與 [嚴格TS遷移](docs/BUN_MIGRATION.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；89支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；107支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
 server/src/game/        世界、物品、規則、資源呈現資料與保存
 server/src/wz/          產品 WZ 解碼與 PNG 輸出
 server/test/            回歸來源；有來源不等於已執行通過
-server/scripts/         歷史 probe 與輔助腳本，不自動執行
+server/scripts/         嚴格TS probe 與輔助腳本，不自動執行
 tools/                 靜態分析、Bun 工具鏈安裝／靜態分析、明示新隔離體驗建立腳本
 analysis/               已保存的 manifest、RTTI 與靜態分析結果
 docs/                   現行規劃、原版證據、ADR 與歷史驗證

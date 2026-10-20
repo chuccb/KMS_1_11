@@ -1,6 +1,6 @@
 # 顯示／影像快取與診斷工具整理（2026-10-18，ADR-080）
 
-本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。ADR-108 起 client_probe.mjs 已復活為真 typed 呼叫鏈探針並通過（仍為 `.mjs`）；僅餘 main.js 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。ADR-109 起 `client_probe.mjs` 已遷為 **`client_probe.ts`**（strict TS、納入 tsc 檢查、輸出與舊版逐行相同）；**僅餘 main.js 尚未完成實作型別遷移**（ADR-109 已抽出背包視窗幾何並補 9 項單元測試）；歷史數字／PID不代表當前 LIVE。
 
 > 現行尺寸／遠近／轉場與游標DPR政策已由ADR-084更新，見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
 > 下文舊fit／native／降採樣、固定backing或CSS游標縮圖的敘述保留歷史時點，不是目前可用選項。
@@ -63,4 +63,4 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 - 初次完整 suite 暴露2個因抽離而過時的 source assertions（cursor layout、face-frame query）。已改為追完整 `main → controller/cache → cursor/query` 關聯鏈，保留其餘原斷言；不是移除案例或加 skip。最終全套數字見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 - 本機日誌在 ignored `generated/cleanup-round4/`；原 EXE／C／listing／WZ／analysis／歷史 ADR 均保留。
 
-仍須完成 main 的大型整合責任、其餘十個工具、歷史 whisper 情境與既有44項失敗調查。strict 成功只涵蓋已納入的 TS，不能代表剩餘 JS 也已型別化或全遊戲驗收完成。
+仍須完成 main 的大型整合責任、其餘工具與歷史 whisper 情境（44 項既有失敗已於 ADR-108 全數結案）。strict 成功只涵蓋已納入的 TS，不能代表 `client/main.js` 也已型別化或全遊戲驗收完成。

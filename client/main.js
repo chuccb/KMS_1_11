@@ -34,6 +34,16 @@ import {
 import { dropRenderer } from "./drop-renderer.ts";
 import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
+import {
+  INVENTORY,
+  INVENTORY_TABS,
+  clampInventoryScroll,
+  drawInventoryLabel as paintInventoryLabel,
+  drawInventoryScrollbar as paintInventoryScrollbar,
+  inventoryScrollbarGeometry as inventoryScrollGeometry,
+  inventorySlotAt as inventorySlotAtLayout,
+  inventoryWindowAt as inventoryHitAt,
+} from "./inventory-window.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
 import { createCamera, updateCamera, reframeCamera } from "./camera.ts";
@@ -271,12 +281,6 @@ let shop;
 let talkingNpc;
 
 /** The four tabs of the sheet, in the order `sub_4DA440` adds them to its `CCtrlTab`. */
-const INVENTORY_TABS = [
-  { tab: 1, label: "장비" },
-  { tab: 2, label: "소비" },
-  { tab: 3, label: "설치" },
-  { tab: 4, label: "기타" },
-];
 
 /** A tab slot, or a worn slot when `slot` is negative (`-1` is the first of the group). */
 function slotName(slot) {
@@ -3957,33 +3961,6 @@ function drawDraggedItem() {
 // `CCtrlTab` (`UI/Basic.img/Tab/*`), so this page lifts the two states out of the same sheet - the
 // lit tab from x=2 and an idle one from x=36 - and stamps them back over whichever tab is open.
 
-const INVENTORY = {
-  path: "UI/UIWindow.img/Item/backgrnd",
-  width: 162,
-  height: 315,
-  /** sub_43D750 / sub_43E340: window type0, (24,24), hidden by default. */
-  home: { x: 24, y: 24 },
-  /** The slot grid: 32 px cells at a 35 px pitch, four across and six down (24 slots). */
-  grid: { x: 6, y: 80, columns: 4, rows: 6, size: 32, pitch: 35 },
-  /** 4DA440: CCtrlScrollBar id2001, (147,80), height208. */
-  scrollbar: { x: 147, y: 80, width: 12, height: 208 },
-  /** 4DA440: button2002 at (8,294); WZ BtCoin canvases are 17x17. */
-  coin: { x: 8, y: 294, width: 17, height: 17 },
-  /** The meso field, ending where the sheet's own `메소` label starts. */
-  mesos: { x: 9, y: 296, width: 116, height: 13 },
-  /** Tab boxes, measured from the separators the sheet draws at x=35/69/104/139. */
-  tabs: [
-    { x: 2, y: 52, width: 34 },
-    { x: 36, y: 52, width: 34 },
-    { x: 70, y: 52, width: 34 },
-    { x: 104, y: 52, width: 36 },
-  ],
-  /** The CLOSE button's pentagon, top right of the sheet. */
-  close: { x: 114, y: 9, width: 32, height: 15 },
-  /** The lit and idle tab faces, both taken out of the sheet's own strip. */
-  litTab: { x: 2, y: 52, width: 34, height: 24 },
-  idleTab: { x: 36, y: 52, width: 34, height: 24 },
-};
 
 /** Whether the inventory is up, and its CConfig position (not the CLOSE control coordinate). */
 let inventoryOpen = false;
@@ -4007,20 +3984,17 @@ let tradeHoverOffer;
 let tradeSuppressClick = false;
 let tradeEnabled = false;
 function inventoryScrollbarGeometry() {
-  const capacity = inventoryTabView()?.capacity ?? 0;
-  const max = Math.max(0, Math.ceil(capacity / 4) - 6);
-  const row = Math.max(0, Math.min(max, inventoryScroll[inventoryTab] ?? 0));
-  const travel = INVENTORY.scrollbar.height - 36;
-  return {
-    max,
-    row,
-    travel,
-    offset: max ? Math.round((travel * row) / max) : 0,
-  };
+  // The tab's own row position (4DA810/4DA8B0); the geometry lives in inventory-window.ts.
+  return inventoryScrollGeometry(
+    inventoryTabView()?.capacity ?? 0,
+    inventoryScroll[inventoryTab] ?? 0,
+  );
 }
 function setInventoryScroll(row) {
-  const g = inventoryScrollbarGeometry();
-  inventoryScroll[inventoryTab] = Math.max(0, Math.min(g.max, Math.round(row)));
+  inventoryScroll[inventoryTab] = clampInventoryScroll(
+    inventoryTabView()?.capacity ?? 0,
+    row,
+  );
   inventoryPick = inventoryHover = undefined;
 }
 window.addEventListener("mousemove", (event) => {
@@ -4046,23 +4020,14 @@ window.addEventListener("blur", () => {
   inventoryScrollDrag = undefined;
 });
 function drawInventoryScrollbar(x, y) {
-  const g = inventoryScrollbarGeometry(),
-    bar = INVENTORY.scrollbar;
-  const stamp = (piece, offset) => {
-    const a = artImage(
-      `UI/Basic.img/VScr/${g.max ? "enabled" : "disabled"}/${piece}`,
-    );
-    if (a.ready) ctx.drawImage(a.img, x + bar.x, y + bar.y + offset);
-  };
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x + bar.x, y + bar.y, 12, bar.height);
-  ctx.clip();
-  for (let py = 12; py < bar.height - 12; py += 12) stamp("base", py);
-  stamp(g.max ? "prev0" : "prev", 0);
-  stamp(g.max ? "next0" : "next", bar.height - 12);
-  if (g.max) stamp(inventoryScrollDrag ? "thumb1" : "thumb0", 12 + g.offset);
-  ctx.restore();
+  paintInventoryScrollbar(
+    ctx,
+    artImage,
+    x,
+    y,
+    inventoryScrollbarGeometry(),
+    inventoryScrollDrag !== undefined,
+  );
 }
 
 // The 2003 client keeps a window's place in the registry; a page can only keep it locally.
@@ -4285,15 +4250,7 @@ function inventoryTabView() {
 
 /** The slot number under a grid point, or 0 when the point is not on a cell. */
 function inventorySlotAt(localX, localY) {
-  const { grid } = INVENTORY;
-  const column = Math.floor((localX - grid.x) / grid.pitch);
-  const row = Math.floor((localY - grid.y) / grid.pitch);
-  if (column < 0 || column >= grid.columns || row < 0 || row >= grid.rows)
-    return 0;
-  // Inside the 32-px face, not the 3-px gap between cells.
-  if (localX - grid.x - column * grid.pitch >= grid.size) return 0;
-  if (localY - grid.y - row * grid.pitch >= grid.size) return 0;
-  return (row + inventoryScrollbarGeometry().row) * grid.columns + column + 1;
+  return inventorySlotAtLayout(localX, localY, inventoryScrollbarGeometry().row);
 }
 
 /**
@@ -4301,71 +4258,20 @@ function inventorySlotAt(localX, localY) {
  * `body`; a point outside is `undefined`.
  */
 function inventoryWindowAt(x, y) {
+  // The sheet owns only geometry; whether it is on screen is the caller's state.
   if (!inventoryOpen || !selfView) return undefined;
-  const localX = x - inventoryAt.x;
-  const localY = y - inventoryAt.y;
-  if (
-    localX < 0 ||
-    localY < 0 ||
-    localX >= INVENTORY.width ||
-    localY >= INVENTORY.height
-  )
-    return undefined;
-  if (insideBox(INVENTORY.coin, localX, localY)) return { kind: "coin" };
-  const { close } = INVENTORY;
-  if (
-    localX >= close.x &&
-    localX < close.x + close.width &&
-    localY >= close.y &&
-    localY < close.y + close.height
-  ) {
-    return { kind: "close" };
-  }
-  const tab = INVENTORY.tabs.findIndex(
-    (box) =>
-      localX >= box.x &&
-      localX < box.x + box.width &&
-      localY >= box.y &&
-      localY < box.y + 24,
-  );
-  if (tab >= 0)
-    return { kind: "tab", index: tab, tab: INVENTORY_TABS[tab].tab };
-  const bar = INVENTORY.scrollbar;
-  if (
-    localX >= bar.x &&
-    localX < bar.x + bar.width &&
-    localY >= bar.y &&
-    localY < bar.y + bar.height
-  ) {
-    const g = inventoryScrollbarGeometry();
-    const y = localY - bar.y;
-    return {
-      kind: "scrollbar",
-      part:
-        y < 12
-          ? "prev"
-          : y >= bar.height - 12
-            ? "next"
-            : g.max && y >= 12 + g.offset && y < 24 + g.offset
-              ? "thumb"
-              : "track",
-    };
-  }
-  const slot = inventorySlotAt(localX, localY);
-  if (slot > 0 && slot <= (inventoryTabView()?.capacity ?? 0)) {
-    const item = inventoryTabView()?.items.find((entry) => entry.slot === slot);
-    return { kind: "slot", slot, item };
-  }
-  return { kind: "body" };
+  return inventoryHitAt({
+    position: inventoryAt,
+    x,
+    y,
+    tabView: inventoryTabView(),
+    scroll: inventoryScrollbarGeometry(),
+  });
 }
 
 /** One tab label, in the sheet's own colours: black on the lit tab, slate on the idle ones. */
 function drawInventoryLabel(label, centerX, baselineY, lit) {
-  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = lit ? "#000000" : "#44586e";
-  ctx.fillText(label, centerX, baselineY);
+  paintInventoryLabel(ctx, label, centerX, baselineY, lit);
 }
 
 /**

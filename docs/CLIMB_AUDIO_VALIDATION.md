@@ -71,7 +71,7 @@
 - `cd server && npm run check`：**530/530 PASS**，TypeScript typecheck 通過。
 - 其中 browser module wrapper 執行 **21 項 motion + 9 項 audio engine** 純模組測試：抓繩／退出／jump regrab／freeze frame、遠端動作、autoplay、BGM race、同曲不重播、mute、獨立 SE bus、cache、缺檔與位置音量。
 - 原始音訊／HTTP／avatar／中間 UOL suffix 均有持久回歸。
-- `client_probe.mjs`：SMOKE / SHOP REGRESSIONS / TITLE REGRESSIONS OK。
+- `client_probe.mjs`（ADR-109 起改名 `client_probe.ts`，執行當時為 `.mjs`）：SMOKE / SHOP REGRESSIONS / TITLE REGRESSIONS OK。
 - `frame_probe.mjs 8495`：FRAME SMOKE OK。
 - 真 Chromium `browser_motion_probe.mjs 8495 --climb`：實際登入 alt 測試帳號、行走／跳過 x=591 的真實 60px 牆，再抓 x=718 的原版繩索；停止於 `(718,193)`、`action=75`（rope + facing）、`vy=0`，等待後 y 不滑動，再跳離。**未注入或傳送角色座標**。攀爬 screenshot 已檢視，衣服／背面／無站立劍均正常。
 - 同一真瀏覽器抓到 AudioContext running 中的原始 Title、WCSelect、175.151s map BGM loop 與非靜音 UI／Jump BufferSource.start。

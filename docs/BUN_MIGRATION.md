@@ -2,7 +2,26 @@
 
 2026-10-20。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：probe/typed/canvas 家族清零與 client_probe 全鏈復活（ADR-108）
+## 最新增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
+
+`server/scripts/client_probe.mjs`（941 行）重寫為 **`client_probe.ts`（1749 行，納入 tsc 檢查）**：`ShimElement`
+全欄位宣告（DOM 預設 `hidden/disabled/checked = false`）、`DomEvent`/`ShimDocument`/`ShimWindow`/`ClientProbe`
+等介面、`el(id)` 取代 `elements.get(id)`、`fire()`（冒泡＋`stopPropagation`）與 `emitWindow()`（原樣交付），
+並因型別化而能安全移除 ADR-069 留下的 21 行 `Object.assign(globalThis, await import(...))` 死 preload
+（ADR-108 通用 import shim 已覆蓋 main.js 全部 79 條 static import；main.js 無 dynamic `import()`）。
+**輸出與舊 `.mjs` 逐行完全相同**、退出碼 0，證明重寫沒有改行為。
+
+同輪自 `client/main.js` 抽出第一個可單元化的領域 **`client/inventory-window.ts`（220 行）**：native 版面常數
+（sub_43D750／sub_43E340／4DA440／4DA810）與 `inventoryScrollbarGeometry`/`clampInventoryScroll`/
+`inventorySlotAt`/`inventoryWindowAt`/`drawInventoryScrollbar`/`drawInventoryLabel`，main.js 六個同名函式退化為
+一行委派，**呼叫點與既有 source pin 一字未動**（main.js 5930→5836 行、client 106→107 支 TS），並新增
+`server/test/inventory-window.test.ts` **9 pass / 0 fail**。主入口健診採靜態耦合普查（321 個 top-level 宣告中
+僅 3 個零耦合、≥25 行且耦合 ≤4 者僅 6 個）：**main.js 是彼此糾結的單體，沒有可機械切開的純區塊**，
+因此採門面分層逐領域搬移，不以改名或 `any` 冒充遷移。六項工具 pins 重新以 registry metadata 核對仍為
+`latest` 且不變（Bun 1.4.3／TypeScript 7.0.2／@types/bun 1.4.3／Prettier 3.9.10／playwright-core 1.64.1／
+@sparticuz/chromium 153.0.0）。本輪結果、等價驗證與文件同步見 ADR-109。
+
+## 前輪增量：probe/typed/canvas 家族清零與 client_probe 全鏈復活（ADR-108）
 
 `server/scripts/client_probe.mjs` 自 typed 模組化後已死（hardcode 11 個 `.mjs` strip，與 ~90 TS 現況脫節；自稱 Historical NOT executed）。本輪以**通用 import shim**（逐條 `import {a} from "./mod.ts"` 真 import 並掛 `globalThis`）使其評估**真實 typed main.js**，並補足 `Element.localName`/`ownerDocument`/`closest`/`matches`/`before`/`documentElement`/`hasFocus`/`dispatchEvent` 與事件 bubbling 等 DOM 最小契約；同時修復 **`client/main.js:834` 真產品 bug**（`case "user-move"` 用裸 `now` 而未宣告，bebb3009 引入，遠端路徑 ReferenceError）與八項真 Chromium 超時（`{ timeout: 60000 }`）及 `server/scripts/browser.ts` 啟動期 SIGSEGV 有界重試。**完整 1213 pass / 0 fail**（142 files），對 ADR-107 1205/8/2 清掉最後 8 fail/2 errors，43 項歷史失敗全數結案。`client_probe.mjs` 仍為 `.mjs`（node:vm），但其覆蓋的 login→field→portal→shop→dialogue→inventory→stat→creation 全鏈現已與 typed client 一致並通過；**main.js 仍未完成 TS 遷移**。本輪結果、每步中間失敗與政策見 ADR-108。
 
@@ -215,15 +234,17 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 ## 尚未完成的原目標
 
 1. client/main.js 的真正實作型別與合理分層，不能只 rename 或用 any 包住。
-2. `server/scripts/client_probe.mjs` 本輪已復活為真實 typed 呼叫鏈的離線 VM 探針（ADR-108），但仍為 `.mjs` node:vm 形式；其歷史 `709 行` 標籤不再代表現況，見 ADR-108。
+2. ~~`server/scripts/client_probe.mjs` 的形式遷移~~ **已完成（ADR-109）**：現為 `server/scripts/client_probe.ts`，納入 strict 檢查並由 `server/test/client-ui.test.ts` spawn 執行。**剩餘唯一未完成項是 client/main.js**。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. **44 項失敗已於 ADR-108 全數結案（1213 pass / 0 fail）**；本節保留歷史清單供追溯，不再代表現況失敗。
 5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
 
-### 尚未遷移的工具（現僅餘 main.js 與 client_probe.mjs 的形式遷移）
+### 尚未遷移的來源（ADR-109 起僅餘 main.js）
 
-- client/main.js（仍為 JS/TS 混合入口，未完成分層與型別化）
-- server/scripts/client_probe.mjs（ADR-108 已復活並通過全鏈，仍為 `.mjs`；`709 行`為歷史標籤）
+- **client/main.js（5836 行）**：仍為 JS/TS 混合入口，未完成分層與型別化。ADR-109 已完成靜態耦合普查並抽出
+  背包視窗幾何（`client/inventory-window.ts`）作為第一個門面分層示範；其餘領域（shop、transport、rendering、
+  pointer/UI 狀態）仍與檔案層級狀態互相糾結，需逐領域重構，不是一次改名能完成。
+- ~~server/scripts/client_probe.mjs~~ → 已於 ADR-109 遷為 `client_probe.ts`。
 
 ### 已通過的 44 個案例（ADR-108 結案，保留歷史標題供追溯）
 

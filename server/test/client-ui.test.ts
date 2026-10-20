@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 test("browser canvas UI: title login, shop buy/sell, scroll, drag, inventory updates and tooltips", () => {
   const result = spawnSync(
     process.execPath,
-    [fileURLToPath(new URL("../scripts/client_probe.mjs", import.meta.url))],
+    [fileURLToPath(new URL("../scripts/client_probe.ts", import.meta.url))],
     {
       encoding: "utf8",
       timeout: 30_000,
