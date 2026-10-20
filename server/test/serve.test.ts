@@ -113,6 +113,8 @@ import {
   encodeClientObjectClick,
   encodeClientShopRequest,
   readShopOpen,
+  readShopResult,
+  shopRechargeUnitPrice,
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
@@ -1692,8 +1694,11 @@ test(
     });
 
     const client = await FakeClient.connect(gameInfo.port);
-    // The wallet starts at 100 mesos, which is enough for two red potions (25 each) and nothing else.
-    const stats = { ...zeroStats(), level: 1, mesos: 100 };
+    // The wallet starts at 100 mesos, which is enough for two red potions (25 each) and nothing
+    // else. hp/maxHp are set because a dead character cannot trade: `handleShopRequest` answers
+    // every request with the error code at hp<=0 (ADR-100's gate map), and `zeroStats()` is a
+    // corpse - the same fixture trap the cap tests hit.
+    const stats = { ...zeroStats(), level: 1, hp: 50, maxHp: 50, mesos: 100 };
     const characterId = handoffs.issue({
       username: "admin",
       characterId: 21,
@@ -1724,6 +1729,17 @@ test(
         [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
         [2000003, 100], // 파란 포션
         [2030000, 75], // 마을 귀환 주문서, out of Item/Consume/0203.img
+        // 4B3780: the eight rechargeable star rows ride along at price 0 in every WZ shop;
+        // the client files them into its recharge list, and the buy rows below are indexed
+        // against the price-nonzero filter of this very list.
+        [2070000, 0],
+        [2070001, 0],
+        [2070002, 0],
+        [2070003, 0],
+        [2070004, 0],
+        [2070005, 0],
+        [2070006, 0],
+        [2070007, 0],
       ],
     );
     assert.equal(client.headersOk, true);
@@ -4322,6 +4338,17 @@ test(
         [2000000, 25], // 빨간 포션, Item/Consume/0200.img/02000000/info/price
         [2000003, 100], // 파란 포션
         [2030000, 75], // 마을 귀환 주문서, Item/Consume/0203.img/02030000/info/price
+        // 4B3780: every WZ shop also carries the eight rechargeable star rows at price 0 - the
+        // client files them into its recharge list, never into the buy list (the buy handler
+        // below validates its row against the price-nonzero filter of the very same rows).
+        [2070000, 0],
+        [2070001, 0],
+        [2070002, 0],
+        [2070003, 0],
+        [2070004, 0],
+        [2070005, 0],
+        [2070006, 0],
+        [2070007, 0],
       ],
     );
 
@@ -4345,6 +4372,17 @@ test(
     assert.equal(await buy(0, 2000000), potionSlot, "the second potion stacks into the same slot");
     const scrollSlot = await buy(2, 2030000);
     assert.notEqual(scrollSlot, potionSlot);
+
+    // The use gate refuses while a shop is open ("never consume a stack that is being offered in
+    // a trade" - the speed-potion round's server safety policy, same family as the drag/scroll
+    // gates), and a close is deliberately unanswered - so drain, then drink: this is the player's
+    // own flow, shopping first, closing the window, hotkeying the potion.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "close" }).slice(1),
+    });
+    assert.deepEqual(await client.drainOpcodes(120), [], "a close is not answered");
 
     /** What `sub_55B2C0` / `sub_55B4B0` send: two fields, and the item id is what picked the opcode. */
     const use = (slot: number, itemId: number, opcode: number): void => {
@@ -4450,6 +4488,132 @@ test(
       0,
     );
     assert.deepEqual(await client.drainOpcodes(120), [], "no second 0x16");
+  },
+);
+
+/**
+ * The shop's recharge service over real sockets (`0x16` action 2 → `sub_4B7130`'s packet).
+ *
+ * A partial star set in the USE tab is what the page's 충전 button sends: the server re-reads the
+ * real slot, charges ceil(missing × WZ unitPrice) and answers the way every successful trade does -
+ * `0x4B` silent, `0x0B` put with the full set, `0x0D` for the wallet - then persists. A refusal is
+ * exactly one `0x4B` and nothing else, which is what keeps the client's in-flight gate honest.
+ */
+test(
+  "recharge over the wire: a partial star set fills to slotMax, and every ask gets its 0x4B",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      shops: shopKeeper(archive!),
+      consumeSpec: consumeSpecProvider(archive!),
+      mobTickMs: 10_000,
+      handshake: { clientSendSeed: 0x55aa55aa, clientRecvSeed: 0xaa55aa55 },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    const stats = zeroStats();
+    stats.id = 52;
+    stats.name = "Thrower";
+    stats.level = 1;
+    stats.hp = 50;
+    stats.maxHp = 50;
+    stats.mesos = 500;
+    const items = startingCharacterItems();
+    items.inventories[1]!.items.set(1, nonEquipSlot(2070000, 100)); // a partial 수비 표창 set
+
+    const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    client.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 52,
+        characterName: "Thrower",
+        character: characterDataOf(stats, items),
+      }),
+    });
+    await client.drain();
+
+    // 로빈's shop (STUB_MAP objectId 1): the 0x4A rows carry the eight recharge rows, and the
+    // 2070000 one carries its per-charge float in the 8 bytes where a cash serial would sit.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_OBJECT_CLICK_OPCODE,
+      body: encodeClientObjectClick({ objectId: 1 }).slice(1),
+    });
+    const opened = await client.take(2);
+    assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+    const starRow = readShopOpen(new PacketReader(opened[1]!, 1)).items.find(
+      (line) => line.itemId === 2070000,
+    )!;
+    assert.equal(starRow.price, 0, "a price-0 row is recharge-only");
+    assert.equal(starRow.maxCount, 500, "the WZ slotMax is the row's cap");
+    assert.equal(
+      shopRechargeUnitPrice(starRow),
+      0.3,
+      "the 8 extra bytes are the unit-price double",
+    );
+
+    // The recharge itself: slot 1 of the USE tab, 400 charges missing, ceil(400 × 0.3) = 120.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "recharge", slot: 1 }).slice(1),
+    });
+    const trade = await client.take(3);
+    assert.deepEqual(
+      trade.map((bytes) => bytes[0]),
+      [SHOP_RESULT_OPCODE, INVENTORY_OPCODE, STAT_OPCODE],
+      "the silent result, the full set, the wallet",
+    );
+    assert.equal(readShopResult(new PacketReader(trade[0]!, 1)), SHOP_RESULT.silent);
+    const change = readInventoryChange(new PacketReader(trade[1]!, 1)).changes[0]!;
+    assert.equal(change.op, INVENTORY_OP.put);
+    assert.equal(change.inventory, 2, "the USE tab");
+    assert.equal(change.slot, 1);
+    assert.ok(
+      change.op === INVENTORY_OP.put && change.item.kind === "nonequip",
+      "the set is still a plain nonequip - no cash block was involved",
+    );
+    assert.equal(change.item.itemId, 2070000);
+    assert.equal(change.item.quantity, 500);
+    assert.deepEqual(readStatUpdate(new PacketReader(trade[2]!, 1)).diff, { mesos: 380 });
+    assert.ok(
+      log.some((line) => line.includes("shop 2003 recharged 2070000 x400 at 0.3 (total 120")),
+      log.join("\n"),
+    );
+
+    // The set is full now: recharging again is badRequest, and the refusal is one 0x4B (the
+    // client's default "오류가 발생해 거래를 하지 못했습니다") with no inventory or stat packet.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "recharge", slot: 1 }).slice(1),
+    });
+    const refused = await client.take(1);
+    assert.equal(refused[0]![0], SHOP_RESULT_OPCODE);
+    assert.equal(readShopResult(new PacketReader(refused[0]!, 1)), SHOP_RESULT.error);
+    assert.equal((await client.drainOpcodes(120)).length, 0, "a refusal is a single packet");
+
+    // A slot that holds nothing: notEnoughItems ("물품이 부족합니다"), also a single packet.
+    client.send({
+      kind: "unknown",
+      opcode: CLIENT_SHOP_OPCODE,
+      body: encodeClientShopRequest({ kind: "recharge", slot: 7 }).slice(1),
+    });
+    const missing = await client.take(1);
+    assert.equal(readShopResult(new PacketReader(missing[0]!, 1)), SHOP_RESULT.notEnoughItems);
+    assert.equal((await client.drainOpcodes(120)).length, 0);
   },
 );
 

@@ -1,4 +1,15 @@
-# 楓幣丟棄與飛鏢整組操作（2026-10-17，未測試）
+# 楓幣丟棄與飛鏢整組操作（2026-10-17；207商店鏈已測2026-10-20）
+
+> 2026-10-20 後續（ADR-101）：**207飛鏢商店鏈已補齊行為測試**——補充列（4B3780八列price0＋每發單價
+> float64隨`0x4A`上線）、整組購買（wire count1、發數=slotMax、不合併）、recharge成功／ceil計價／拒絕矩陣
+> （已滿badRequest、非207 notInShop、空格／現金序號notEnoughItems、錢不足notEnoughMesos不動組）、整組出售
+> 與0發組（`floor((price+ceil(qty×unit))×0.5)`、部分出售拒絕）為 `shops.test.ts` 五支unit；`0x16` action2
+> 真socket整合（`0x4B` silent＋`0x0B` put 500＋`0x0D`、拒絕恰一個`0x4B`）為 `serve.test.ts`；頁面충전橋
+> （成功三事件、壞slot頁面錯、已滿code255、賣0發組count0放行到server）為 `webclient.test.ts`。同輪修復
+> 該static交付 silently 弄壞的四支既有測試（兩支shops列斷言、serve商店開門列數、webclient舊錯誤訊息regex；
+> USE-tab測試並在a1a1d9e的use閘後首次走到use相位——補「先關商店窗再喝藥」的玩家流程）。
+> **仍未測**：本頁楓幣丟棄的 `0x1F` wire請求鏈（codec本身有 `mesodrop.test.ts` golden測試、
+> 落點／呈現鏈已由 DROP_FOOTHOLD_LANDING 驗證）、BASIC_ATTACKS 的射擊扣彈。
 
 > 2026-10-18 ADR-083續作：玩家丟物／丟金幣的權威落點已接真fh，focused73/0、原100圖與真browser component已跑。
 > 只認證掉落落點／呈現鏈，不把本頁原UI／扣帳歷史場景全部改列PASS；見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。

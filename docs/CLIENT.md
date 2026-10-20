@@ -422,7 +422,7 @@ bun server/src/cli.ts serve \
 拼出來（亮起的分頁白、隔壁那片用 `middle2` 的漸層），切換只影響右欄。按鈕是同一張圖的
 `BtBuy`／`BtSell`／`BtRecharge`（hover 換 `mouseOver`、按下換 `pressed`），右上 `CLOSE` 是圖上的
 章。**點右欄一列**選取要賣的東西（`sell` 188×34 的選取臉貼在原列上），**팔기** 開數量框（預設整疊）、
-**충전** 對未滿的207飛鏢先原Yes/No確認再送recharge；費率／容量取WZ，0發組保留，詳見 `MESO_RECHARGE.md`（未測試）。**사기** 或**雙擊左列**開購買數量框（預設1、最大該列maxCount）。列數超過可視行時
+**충전** 對未滿的207飛鏢先原Yes/No確認再送recharge；費率／容量取WZ，0發組保留，詳見 `MESO_RECHARGE.md`（recharge鏈2026-10-20已測：unit＋真socket整合＋頁面橋，ADR-101）。**사기** 或**雙擊左列**開購買數量框（預設1、最大該列maxCount）。列數超過可視行時
 左右各出現一條 `UI/Basic.img/VScr` 的捲軸，滾輪也能捲。視窗可拖曳（位置記在 `localStorage` 的
 `kms111.shopAt`）。對話框的「確定」是主要按鈕（下一句），「關閉」是次要按鈕（結束）——跟 2003
 client 的兩個按鈕一樣。

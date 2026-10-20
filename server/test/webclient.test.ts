@@ -23,6 +23,7 @@ import { GameEntryServer } from "../src/net/loginserver.ts";
 import { OnlineAccounts } from "../src/net/online.ts";
 import { characterDataOf, startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 import { equipSlot } from "../src/protocol/itemslot.ts";
+import { INVENTORY_OP } from "../src/protocol/inventory.ts";
 import type { MapData } from "../src/game/map.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import { mobLeaveEvent } from "../src/client/session.ts";
@@ -231,6 +232,37 @@ const STUB_SHOP: ShopKeeper = {
       inventory: granted.inventory,
       slot: granted.slot,
       change: granted.change,
+      mesos: wallet.balance,
+    };
+  },
+  // The stub world's rechargeable is the potion itself, topped up to the stub's own cap of 200 at
+  // 0.1 per unit: the bridge does not care *which* item the keeper recharges - the real keeper
+  // takes the eight 207 star sets and their floats from the WZ (shops.ts, MESO_RECHARGE.md).
+  recharge: (items, wallet, _shop, slot) => {
+    const item = items.inventories[1]?.items.get(slot);
+    if (
+      !Number.isInteger(slot) ||
+      slot <= 0 ||
+      !item ||
+      item.kind !== "nonequip" ||
+      item.cash !== null
+    )
+      return { kind: "failed", reason: "notEnoughItems" };
+    const missing = 200 - item.quantity;
+    if (missing <= 0) return { kind: "failed", reason: "badRequest" };
+    const total = Math.ceil(missing * 0.1);
+    if (!wallet.spend(total)) return { kind: "failed", reason: "notEnoughMesos" };
+    const next = { ...item, quantity: 200 };
+    items.inventories[1]!.items.set(slot, next);
+    return {
+      kind: "recharged",
+      itemId: item.itemId,
+      count: missing,
+      unitPrice: 0.1,
+      total,
+      inventory: 2,
+      slot,
+      change: { op: INVENTORY_OP.put, inventory: 2, slot, item: next },
       mesos: wallet.balance,
     };
   },
@@ -799,6 +831,30 @@ test(
     assert.deepEqual(after.tabs[1]!.items, [{ slot: 1, itemId: 2000000, quantity: 2 }]);
     assert.equal(((await browser.nextKind("self")).self as { mesos: number }).mesos, 50);
 
+    // Recharge (충전): the same button the star sets use, bridged to `0x16` action 2 with the slot.
+    // The stub keeper tops the potion slot up to its own cap of 200 for ceil(198 × 0.1) = 20.
+    browser.send({ t: "shop", action: "recharge", slot: 1 });
+    assert.equal((await browser.nextKind("shop-result")).code, 0);
+    const topped = (await browser.nextKind("inventory")).inventory as {
+      tabs: { tab: number; items: { slot: number; itemId: number; quantity?: number }[] }[];
+    };
+    assert.deepEqual(topped.tabs[1]!.items, [{ slot: 1, itemId: 2000000, quantity: 200 }]);
+    assert.equal(((await browser.nextKind("self")).self as { mesos: number }).mesos, 30);
+
+    // A slot that cannot exist is a page error - the server is never asked.
+    browser.send({ t: "shop", action: "recharge", slot: 0 });
+    assert.match(String((await browser.nextKind("error")).message), /shop recharge needs a slot/);
+
+    // The slot is at its cap now: the keeper's badRequest comes back as the client's default
+    // error code (255), one event and nothing else - the gate re-arms on the 0x4B alone.
+    browser.send({ t: "shop", action: "recharge", slot: 1 });
+    assert.equal((await browser.nextKind("shop-result")).code, 255);
+
+    // Count 0 is legal for the page exactly when it is a depleted 207 set sale (4D5C80): the
+    // request *reaches* the server, whose keeper answers - here the stub's blanket refusal (1).
+    browser.send({ t: "shop", action: "sell", slot: 1, itemId: 2070000, count: 0 });
+    assert.equal((await browser.nextKind("shop-result")).code, 1);
+
     // A close is deliberately unanswered (the client's close does not arm its in-flight flag).
     browser.send({ t: "shop", action: "close" });
     const quiet = await browser.quiet(200);
@@ -809,7 +865,10 @@ test(
 
     // Bad arguments never reach the server, so they come back as page errors instead of a packet.
     browser.send({ t: "shop", action: "buy", row: 0, itemId: 2000000, count: 0 });
-    assert.match(String((await browser.nextKind("error")).message), /shop needs a count above 0/);
+    assert.match(
+      String((await browser.nextKind("error")).message),
+      /shop needs a positive quantity/,
+    );
     browser.send({ t: "shop", action: "steal", itemId: 2000000, count: 1 });
     assert.match(
       String((await browser.nextKind("error")).message),

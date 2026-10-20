@@ -51,7 +51,9 @@ status panel上方(y<392)，這是防誤丟的瀏覽器邊界政策，不是宣�
 - 賣出前讀取**當前真tab**的快照，不用itemId百萬位猜tab。既有server／save政策將etc放tab3、cash放tab4，
   與原UI的설치／기타標籤並未完全對齊；本輪不私自搬移舊存檔物品，該映射與資料遷移仍待專項處理。
 - shop stock、售價比例、maxCount仍是已有重建伺服器政策；沒有宣稱找到了2003年伺服器腳本。
-- **後續更新**：207補充成功分支、整組購買／零發組與楓幣丟棄已寫入，仍未測試；見 `MESO_RECHARGE.md`。
+- **後續更新**：207補充成功分支、整組購買／零發組已寫入，**2026-10-20 已補齊行為測試（ADR-101）**；
+  楓幣丟棄的codec（`mesodrop.test.ts`）與落點／呈現鏈（ADR-083續作）已驗證，其 `0x1F` wire請求鏈
+  仍未測；見 `MESO_RECHARGE.md`。
 
 ### 4. 共用原數量視窗與過期操作保護
 
@@ -99,10 +101,12 @@ status panel上方(y<392)，這是防誤丟的瀏覽器邊界政策，不是宣�
 
 ## 尚未實作
 
-cash穿戴／寵物、補充飛鏢成功路徑、裝備／buff總值與Detail、自然升級AP/SP與HPMP成長仍未完成。
+cash穿戴／寵物、裝備／buff總值與Detail、自然升級AP/SP與HPMP成長仍未完成。
 本輪是四組操作的實作交付，不是全遊戲1:1完成或已驗證可正式運營的聲明。
 （清單更正，ADR-100 複核：**meso丟棄按鈕已接**——`dropMesosDialog`／`dropMesos` 鏈在
-client/main.js 與 webclient/session；**背包內拆疊／合併已收斂**——見下節。）
+client/main.js 與 webclient/session；**背包內拆疊／合併已收斂**——見下節。
+ADR-101 複核：**補充飛鏢成功路徑已實作且已測**——unit×5＋真socket整合＋頁面충전橋，
+自本清單移除；見 `MESO_RECHARGE.md`。）
 
 ## 同種疊加合併（c2s `0x17` 第六條，2026-10-20，ADR-100）
 

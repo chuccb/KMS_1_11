@@ -1,4 +1,11 @@
-/** Golden-source coverage for the new codec. Added but NOT RUN at the user's request. */
+/**
+ * Golden-source coverage for the meso-drop and recharge-double codecs.
+ *
+ * Added 2026-10-17 under the then-standing "do not run" instruction; that era is over - the suite
+ * runs this file like every other, and it passes. The wire chains are covered elsewhere: the 207
+ * shop chain by shops/serve/webclient tests (ADR-101), the `0x1F` drop handler's *field* effects
+ * by drop-landing; the drop's wire request path itself remains untested (MESO_RECHARGE.md).
+ */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeMesoDrop, readMesoDrop } from "../src/protocol/mesodrop.ts";

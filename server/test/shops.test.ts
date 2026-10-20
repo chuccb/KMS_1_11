@@ -30,6 +30,7 @@ import {
   readClientShopRequest,
   readShopOpen,
   readShopResult,
+  shopRechargeUnitPrice,
 } from "../src/protocol/shop.ts";
 import {
   FIELD_OPCODE,
@@ -48,6 +49,7 @@ import {
 import { MesoWallet, grantItem } from "../src/game/rewards.ts";
 import { consumeSpecOf, healsVitals } from "../src/game/items.ts";
 import { INVENTORY_OP } from "../src/protocol/inventory.ts";
+import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import { startingCharacterItems, zeroStats } from "../src/protocol/chardata.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
@@ -277,11 +279,40 @@ test(
         [2000003, 100, DEFAULT_SHOP_MAX_COUNT],
         [2000004, 1000, DEFAULT_SHOP_MAX_COUNT],
         [2030000, 75, DEFAULT_SHOP_MAX_COUNT],
+        // 4B3780: every WZ shop also carries the eight rechargeable 207 rows at price 0 - the
+        // client files a price-0 row into its recharge list, never into the buy list. Slot caps
+        // and unit floats are the archive's own (Item/Consume/0207.img, MESO_RECHARGE.md table).
+        [2070000, 0, 500], // 수비 표창
+        [2070001, 0, 500], // 월비 표창
+        [2070002, 0, 700], // 목비 표창
+        [2070003, 0, 500], // 금비 표창
+        [2070004, 0, 400], // 토비 표창
+        [2070005, 0, 600], // 뇌전 수리검
+        [2070006, 0, 800], // 일비 표창
+        [2070007, 0, 600], // 화비 표창
       ],
     );
-    // A row without a price is skipped rather than sent as 0 - the client would print the 0.
+    // The 8 extra bytes on a 207 row are the per-charge price as an LE float64 (`sub_47A1D0`),
+    // not a cash serial - the recharge total is what the UI multiplies this with.
+    const starRow = lines.find((line) => line.itemId === 2070000)!;
+    assert.equal(shopRechargeUnitPrice(starRow), 0.3);
+    // A row without a price is skipped rather than sent as 0 - the client would print the 0. The
+    // 207 rows are the documented exception: there, price 0 *is* the mark of a recharge-only row,
+    // so even a shop with nothing sellable still offers the eight star sets (4B3780).
     const unpriced = { shopId: 1, npcTemplateId: 1, items: [{ itemId: 5000000 }] };
-    assert.deepEqual(keeper.linesOf(unpriced), []);
+    assert.deepEqual(
+      keeper.linesOf(unpriced).map((line) => [line.itemId, line.price]),
+      [
+        [2070000, 0],
+        [2070001, 0],
+        [2070002, 0],
+        [2070003, 0],
+        [2070004, 0],
+        [2070005, 0],
+        [2070006, 0],
+        [2070007, 0],
+      ],
+    );
     assert.deepEqual(unpricedShopItems(unpriced, keeper.priceOf), [5000000]);
   },
 );
@@ -395,6 +426,194 @@ test("selling what is not there, or what cannot be priced, is refused", needsArc
   assert.equal(items.inventories[1]!.items.get(granted.slot)?.itemId, 2000000); // and nothing taken
 });
 
+// ---------------------------------------------------------------------------
+// the 207 star set: bought whole, recharged by the missing charges, sold whole
+// ---------------------------------------------------------------------------
+
+test(
+  "a star set bought from the shelf is one complete set in its own slot, never a merge",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const items = startingCharacterItems();
+    const stats = zeroStats();
+    stats.mesos = 1000;
+    const wallet = new MesoWallet(stats);
+    // The shelf sells a *set*: the wire count is fixed at 1 (the original whole-set confirmation),
+    // the money is the set's WZ `info/price`, and what lands in the bag is a full slotMax stack.
+    const outcome = keeper.buy(items, wallet, SHOPS[2]!, 2070000, 1);
+    assert.equal(outcome.kind, "bought");
+    if (outcome.kind !== "bought") return;
+    assert.equal(outcome.unitPrice, 250);
+    assert.equal(outcome.total, 250);
+    assert.equal(outcome.count, 500, "granted at the WZ slotMax - a complete set, not one charge");
+    const set = items.inventories[1]!.items.get(outcome.slot)!;
+    assert.ok(set.kind === "nonequip" && set.quantity === 500);
+    // A second set does not stack into the first: every set is its own object, in its own slot.
+    const second = keeper.buy(items, wallet, SHOPS[2]!, 2070000, 1);
+    assert.equal(second.kind, "bought");
+    if (second.kind !== "bought") return;
+    assert.notEqual(second.slot, outcome.slot);
+    assert.equal(wallet.balance, 500);
+    // Two sets in one transaction is not a shape the shelf sells: the row's cap is 1.
+    assert.deepEqual(keeper.buy(items, wallet, SHOPS[2]!, 2070000, 2), {
+      kind: "failed",
+      reason: "badRequest",
+    });
+  },
+);
+
+test(
+  "recharge fills a partial star set to its WZ slotMax for ceil(missing × unitPrice)",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const items = startingCharacterItems();
+    items.inventories[1]!.items.set(2, nonEquipSlot(2070000, 100));
+    const stats = zeroStats();
+    stats.mesos = 1000;
+    const wallet = new MesoWallet(stats);
+    // Any WZ shop offers the service: the eight 207 rows are appended to every shelf (4B3780), so
+    // 리나's potion shop recharges stars exactly like 마이's does.
+    const outcome = keeper.recharge!(items, wallet, SHOPS[0]!, 2);
+    assert.equal(outcome.kind, "recharged");
+    if (outcome.kind !== "recharged") return;
+    assert.equal(outcome.itemId, 2070000);
+    assert.equal(outcome.count, 400, "the missing charges are what the trade is about");
+    assert.equal(outcome.unitPrice, 0.3, "the WZ `info/unitPrice` double");
+    assert.equal(outcome.total, 120, "ceil(400 × 0.3)");
+    assert.equal(outcome.inventory, 2);
+    assert.equal(outcome.slot, 2);
+    assert.equal(outcome.mesos, 880);
+    assert.deepEqual(outcome.change, {
+      op: INVENTORY_OP.put,
+      inventory: 2,
+      slot: 2,
+      item: nonEquipSlot(2070000, 500),
+    });
+    const held = items.inventories[1]!.items.get(2)!;
+    assert.ok(held.kind === "nonequip" && held.quantity === 500 && held.cash === null);
+    assert.equal(wallet.balance, 880);
+    assert.equal(stats.mesos, 880, "the wallet writes through to the character record");
+  },
+);
+
+test("recharge rounds the raw double up: the wallet pays ceil, never floor", needsArchive, () => {
+  const keeper = shopKeeper(archive!);
+  const items = startingCharacterItems();
+  items.inventories[1]!.items.set(1, nonEquipSlot(2070001, 497));
+  const stats = zeroStats();
+  stats.mesos = 2;
+  const wallet = new MesoWallet(stats);
+  // 3 missing × 0.4 = 1.2000000000000002 in raw IEEE754. The native UI calculates with the raw
+  // double (`sub_4B4AD0`); charging ceil() is this server's explicit reconstruction policy, and 2
+  // mesos - not 1 - is the price of those three charges.
+  const outcome = keeper.recharge!(items, wallet, SHOPS[0]!, 1);
+  assert.equal(outcome.kind, "recharged");
+  if (outcome.kind !== "recharged") return;
+  assert.equal(outcome.total, 2);
+  assert.equal(wallet.balance, 0);
+  // One meso short: notEnoughMesos, and the refusal touches neither the set nor the wallet.
+  const poor = startingCharacterItems();
+  poor.inventories[1]!.items.set(1, nonEquipSlot(2070001, 497));
+  const poorStats = zeroStats();
+  poorStats.mesos = 1;
+  const poorWallet = new MesoWallet(poorStats);
+  assert.deepEqual(keeper.recharge!(poor, poorWallet, SHOPS[0]!, 1), {
+    kind: "failed",
+    reason: "notEnoughMesos",
+  });
+  const held = poor.inventories[1]!.items.get(1)!;
+  assert.ok(held.kind === "nonequip" && held.quantity === 497, "the set stays partial");
+  assert.equal(poorWallet.balance, 1);
+});
+
+test(
+  "what recharge refuses: a full set, a slot that is not stars, a slot that is not there",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const items = startingCharacterItems();
+    const stats = zeroStats();
+    stats.mesos = 10000;
+    const wallet = new MesoWallet(stats);
+    // A full set has nothing missing: badRequest before any money moves (`sub_4B7130` only sends
+    // when the client's own computed value is nonzero, and the server re-checks the real slot).
+    items.inventories[1]!.items.set(1, nonEquipSlot(2070000, 500));
+    assert.deepEqual(keeper.recharge!(items, wallet, SHOPS[0]!, 1), {
+      kind: "failed",
+      reason: "badRequest",
+    });
+    // A potion is not rechargeable: no WZ 207 info for it, so notInShop.
+    items.inventories[1]!.items.set(2, nonEquipSlot(2000000, 5));
+    assert.deepEqual(keeper.recharge!(items, wallet, SHOPS[0]!, 2), {
+      kind: "failed",
+      reason: "notInShop",
+    });
+    // An empty slot, and a slot number that cannot exist: notEnoughItems.
+    assert.deepEqual(keeper.recharge!(items, wallet, SHOPS[0]!, 3), {
+      kind: "failed",
+      reason: "notEnoughItems",
+    });
+    assert.deepEqual(keeper.recharge!(items, wallet, SHOPS[0]!, 0), {
+      kind: "failed",
+      reason: "notEnoughItems",
+    });
+    // A cash-serial set is a cash object, not a WZ star set: notEnoughItems (the page's 충전 button
+    // is disabled for exactly these, main.js).
+    items.inventories[1]!.items.set(
+      4,
+      nonEquipSlot(2070000, 100, { cash: { sn: 1n, unknown18: 0, unknown1A: 0n } }),
+    );
+    assert.deepEqual(keeper.recharge!(items, wallet, SHOPS[0]!, 4), {
+      kind: "failed",
+      reason: "notEnoughItems",
+    });
+    // Nothing moved anywhere.
+    assert.equal(wallet.balance, 10000);
+    const full = items.inventories[1]!.items.get(1)!;
+    assert.ok(full.kind === "nonequip" && full.quantity === 500);
+  },
+);
+
+test(
+  "a star set sells whole - full or depleted - for floor((setPrice + ceil(count × unitPrice)) × 0.5)",
+  needsArchive,
+  () => {
+    const keeper = shopKeeper(archive!);
+    const items = startingCharacterItems();
+    items.inventories[1]!.items.set(1, nonEquipSlot(2070000, 100));
+    items.inventories[1]!.items.set(2, nonEquipSlot(2070000, 0)); // a depleted set is still one object
+    const stats = zeroStats();
+    const wallet = new MesoWallet(stats);
+    // `sub_4B4AD0`: the sold value's base is info/price + ceil(quantity × unitPrice) = 250 + 30;
+    // the server's existing sell ratio halves that. The count must *be* the whole set.
+    const sold = keeper.sell(items, wallet, 1, 2070000, 100);
+    assert.equal(sold.kind, "sold");
+    if (sold.kind !== "sold") return;
+    assert.equal(sold.total, 140);
+    assert.equal(sold.unitPrice, 125, "the per-unit basis; for a set the total is authoritative");
+    assert.equal(sold.mesos, 140);
+    assert.deepEqual(sold.change, { op: INVENTORY_OP.clear, inventory: 2, slot: 1 });
+    assert.equal(items.inventories[1]!.items.has(1), false, "the set is gone, not left at 0");
+    // The depleted set sells for its base alone: count 0 is the legal shape for it (4D5C80), and
+    // floor(250 × 0.5) = 125 is what a bag of nothing-but-the-pouch is worth.
+    const empty = keeper.sell(items, wallet, 2, 2070000, 0);
+    assert.equal(empty.kind, "sold");
+    if (empty.kind !== "sold") return;
+    assert.equal(empty.total, 125);
+    assert.equal(wallet.balance, 265);
+    // A partial sale would create charges (or money) out of nothing: refused, set untouched.
+    items.inventories[1]!.items.set(3, nonEquipSlot(2070000, 100));
+    assert.deepEqual(keeper.sell(items, wallet, 3, 2070000, 50), {
+      kind: "failed",
+      reason: "badRequest",
+    });
+    const held = items.inventories[1]!.items.get(3)!;
+    assert.ok(held.kind === "nonequip" && held.quantity === 100);
+  },
+);
+
 test("a failure code is one of the messages the client can print", () => {
   assert.equal(shopResultCode("notEnoughMesos"), SHOP_RESULT.notEnoughMesos);
   assert.equal(shopResultCode("notEnoughSlots"), SHOP_RESULT.notEnoughSlots);
@@ -442,6 +661,10 @@ test("what a shop sells is something the use path understands", needsArchive, ()
   // restores a vital (the `0x18` families) or names a map (the `0x19` one), out of its own `spec`.
   for (const shop of SHOPS) {
     for (const entry of shop.items) {
+      // Stars are ammunition, not a use item: a 207 has no `spec` and `0x18` would refuse it. Its
+      // shop-side path is the recharge service (`sub_4B7130` → `0x16` action 2), validated by the
+      // WZ `info` (slotMax/unitPrice) instead - asserted right below and in the recharge tests.
+      if (Math.floor(entry.itemId / 10000) === 207) continue;
       const spec = consumeSpecOf(archive!, entry.itemId);
       assert.ok(spec !== undefined, `${entry.itemId} has no spec`);
       const family = Math.floor(entry.itemId / 10000);
@@ -452,6 +675,15 @@ test("what a shop sells is something the use path understands", needsArchive, ()
       );
     }
   }
+  // The star set on the reconstructed 마이 shelf is something the *recharge* path understands: a
+  // priced row (250) capped by its WZ slotMax (500), carrying the per-charge float, and no use
+  // spec at all - drinking a throwing star is not a thing the client has.
+  const keeper = shopKeeper(archive!);
+  const starLine = keeper.linesOf(SHOPS[2]!).find((line) => line.itemId === 2070000);
+  assert.equal(starLine?.price, 250);
+  assert.equal(starLine?.maxCount, 500);
+  assert.equal(shopRechargeUnitPrice(starLine!), 0.3);
+  assert.equal(consumeSpecOf(archive!, 2070000), undefined);
   // The two scrolls, specifically: -1 is the town `reviveMapId` answers with, and 100000000 is
   // 헤네시스 named outright - the one that makes a map change observable in a test.
   assert.equal(consumeSpecOf(archive!, 2030000)?.moveTo, -1);

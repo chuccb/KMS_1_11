@@ -3294,3 +3294,48 @@ record 原地升級；錯 category（單手劍卷投頭盔）⇒ 空 `0x0B`、ha
 互換且各隨其格）；`serve.test.ts` 新增整合 1/1（兩疊十瓶 → `0x0B`＝put(5,20)＋clear(2)、record 原地
 合併、relog 讀回同一疊）；cap first/second pass 由基準 fail 轉 PASS；scroll 整合（含新死亡閘與 hp
 fixture）與 `scrolls.test.ts` 4/4 全過。完整欄位與政策詳 FINDINGS §4.36.1／§4.36.3 第六條／§4.50.2。
+
+## ADR-101：207飛鏢商店鏈測試補完（recharge／整組買／整組賣）、五支基準欠帳測試修復與use閘流程釐清（2026-10-20）
+
+**來源**（MapleStory.exe `.c`、shipped Data.wz、既有文件）：
+- MESO_RECHARGE.md 輪（2026-10-17）依使用者指示以**靜態交付**（未跑任何測試），其商店列改動
+  （`sub_4B3780`：全部八種207以price0列附加到**每一間**WZ商店、8 bytes＝每發單價float64）與
+  webclient驗證訊息改動（count0放行限「賣空207組」）**silently弄壞五支既有測試**，被吸收進
+  43→41基準而未被診斷：`shops.test.ts` 兩支（列清單＋unpriced店、use-spec全掃）、`serve.test.ts`
+  兩支（USE-tab測試與1664商店測試的`0x4A`列斷言）、`webclient.test.ts` 商店橋測試（舊regex）。
+- USE-tab測試另有**第二層**：`handleUseItem` 的 shop/talk/trade 拒絕閘（a1a1d9e速度藥水輪的
+  伺服器安全政策「never consume a stack that is being offered in a trade」）在買完不關窗就喝的
+  舊流程前拒絕——該測試自a1a1d9e起從未走到過use相位。1664商店測試另有**第三層**：ADR-100的
+  `handleShopRequest` hp≤0死亡閘 × `zeroStats()`英雄（hp=0）——與cap測試同型的fixture陷阱。
+- 本輪Data.wz實測dump（`Item/Consume/0207.img`全八筆）與MESO_RECHARGE.md表**逐值一致**：
+  slotMax 500/500/700/500/400/600/800/600、unitPrice 0.3/0.4/0.5/0.6/0.6/0.7/0.8/1、price 250〜25000。
+
+**決定**：
+- **ceil計價政策維持**並用測試釘死：伺服器收 `Math.ceil(missing × unitPrice)`（原生UI以raw
+  double計算，`sub_4B4AD0`；ceil是文件化的重建政策）。釘法：3×0.4=1.2000000000000002→收2不是1；
+  錢恰夠2過、只有1則notEnoughMesos且組與錢包都不動。
+- **五支欠帳測試修復＝把斷言對齊已文件化的原生行為**（測試欠帳，不是放寬伺服器）：商店列斷言
+  +八條price0列（WZ slotMax為cap、cash block解回unitPrice）；unpriced店從`[]`改為仍有八條207列
+  （4B3780：無貨可賣的店也提供補充服務）；use-spec全掃跳過207家族（彈藥無spec、0x18拒用——
+  其路徑是recharge，另斷言마이 2070000列price250/maxCount500/unit0.3且consumeSpec為undefined）；
+  webclient regex跟上新訊息（count0放行文案）。
+- **USE-tab測試補「先關商店窗再喝藥」**：use閘照舊不動（政策正確且與0x17/0x1A閘同族）；close
+  deliberately unanswered → 測試drain同步。這是玩家真實流程（買完關窗、hotkey喝藥）。
+- **1664商店測試fixture補hp=50/maxHp=50**（ADR-100死亡閘的既有例外政策；zeroStats是屍體）。
+- **新測試六支**：shops unit×5（買整組＝count1發slotMax、二組不合併各占一格、三組cap1拒絕；
+  recharge成功全欄位＋put change＋錢包寫穿；ceil釘法；拒絕矩陣＝已滿badRequest／非207 notInShop／
+  空格與slot0 notEnoughItems／現金序號notEnoughItems／錢不足notEnoughMesos組不動；賣整組
+  `floor((250+ceil(100×0.3))×0.5)=140`、賣0發組count0=125、部分出售badRequest組不動）；
+  serve真socket整合×1（`0x4A`上線驗cash block=0.3、`0x16` action2→`0x4B` silent+`0x0B` put(2,1,500)+
+  `0x0D` mesos380+log行；已滿再充＝恰一個`0x4B` error且無後續；空格＝恰一個notEnoughItems）；
+  webclient橋phases（recharge成功三事件、壞slot頁面錯、已滿code255、**賣0發組count0放行到server**
+  得code1證明carve-out穿過橋）。STUB_SHOP補stub recharge（cap200@0.1）——橋本身item-agnostic，
+  真207鏈由keeper unit＋wire整合覆蓋。
+- `mesodrop.test.ts` 檔案頭「Added but NOT RUN」過時註記更正（該檔每輪都隨suite執行且通過）。
+
+**驗證**：`shops.test.ts` 22/22；serve「recharge over the wire」「using a USE-tab item」「clicking
+an NPC opens its shop」與webclient商店橋全綠（isolate＋in-suite）；typecheck/build/format全綠。
+完整suite 1214 tests（+6）：44 fail中**確定性核心36＝基準41−5支逐名修復**（serve非商店11＋
+webclient非商店8＋未觸碰檔案舊家族17：node:vm讀TS-import的probe遷移欠帳、Lucky Seven/PAD、
+growth、field router、native-*等）；其餘5〜8為browser/chromium輪間輪替flake（bun-tool-probes兩跑
+2→4、browser-observation run2過run3掛——ADR-100輪已記錄同族輪替）。零fail可歸因本輪改動。
