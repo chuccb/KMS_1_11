@@ -935,8 +935,10 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
 **證據**（全部是呼叫鏈，見 FINDINGS §4.8.1a／§4.11.3c）：
 
 - `0x1C` 的第一個 u32 → `sub_507A20` → `sub_508260` → `CUser+68`，而 `+68` 正是表情／動畫播放器
-  `sub_509070` 拿給 `sub_408400` 去 `Character/Face/*.img` 找情緒節點的那個**臉**（`sub_45D500` 讀
-  `"0"`..`"8"`）。第二個 u32 的孿生路徑是 `0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）。
+  `sub_509070` 拿給 `sub_408400` 去 `Character/Face/*.img` 找情緒節點的那個**臉**（原記 `sub_45D500` 讀
+  `"0"`..`"8"`；**ADR-110 回讀更正**：`sub_45D500` 在本 checkout 的 `.c`/`.lst` 皆非函式符號，
+  `.text:0045D500` 是 `sub_45D2E0`（外觀解碼器）體內的一條指令，與 `"0"`..`"8"` 情緒讀取無關；
+  真正讀情緒節點的函式**尚未定位**，此條證據列為未決，不再當成已驗證）。第二個 u32 的孿生路徑是 `0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）。
 - 紀錄的兩個字：`sub_42E2C0` 把 `+18`（`appearanceA`）餵 `sub_424590`（與 `sub_508260` 同形，寫的是
   同一格臉），把 `+22`（`appearanceB`）放進外觀第 0 格 —— 第 0 格是 `sub_45F340` 給 `3xxxx`
   （`Character/Hair`）的那一格（§4.11.3b）。
@@ -1658,7 +1660,8 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
 **理由**：
 
 1. **表情的觸發在 client：F1–F7。** `sub_511E20` 的 case 10 就是「按鍵 → 表情 → 送 `0x13`」，而
-   `sub_511FD8`／`sub_511FDF` 的順序證明 client **先套用到自己身上**再送，伺服器的 `0x27` 也刻意
+   `.text:00511FD8`（`call sub_509790`）／`.text:00511FDF`（`push 13h`）的順序證明 client **先套用
+   到自己身上**再送（ADR-110 回讀：兩者是 `sub_511E20` 內的指令位址，不是函式符號），伺服器的 `0x27` 也刻意
    排除送的人（`GameEntryServer.handleEmotion`）。頁面照這個順序做：送出去的同時自己套用一張臉。
    瀏覽器不能拿 F1–F7（F1 是說明、F5 是重新整理、F11 是全螢幕），所以同樣的七張臉做成按鈕——
    **按鈕與 F 鍵送的是同一個 `0x13`**，差別只在輸入裝置。0（中性眨眼）與 8 沒有對應的鍵，頁面就
@@ -3698,7 +3701,14 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **驗證**：
   - **新單元測試 `server/test/shop-window.test.ts` 10 pass / 0 fail**：置中與兩列 pitch；32px 面／3px 間隙／捲軸留白；strip 四等分與左右端蓋；`shopScrollbarGeometry` 的 max/travel/offset 與不溢出時無捲軸；`clampShopScroll` 不取整（列是整數）；`shopWindowAt` 命中順序（scrollbar 優先於列且回傳自己那一側、溢出外落到 body）；捲動後回傳玩家實際看到的列；`drawShopScrollbar` 的 clip 與 thumb（自製 fake 2D context，無瀏覽器）；`drawShopTabs` 的四個標籤、亮起者上移 1px、right1/middle1/middle2 折線與 left1/right1 狀態。撰寫期間三次失敗皆為**測試期望值寫錯**（捲動狀態未代入、7 列捲 1 仍落在合法列、折線計數），逐一對照原碼與 WZ 修正後全綠，未為通過而改動實作。
   - **離線探針等價（`bun server/scripts/client_probe.ts`）**：因 `/tmp` 與 `generated/` 不跨沙箱存活，本輪以 `git show HEAD:client/main.js` 重建舊版跑出 `/tmp/probe-old.log`（exit 0），再以新版跑 `/tmp/probe-new.log`（exit 0），`diff` **完全空白** ⇒ 抽出前後探針輸出逐位元組相同（10 個 banner 全 OK、`handled 21 messages; sent 13`、`rendered 3 frames; drawImage calls: 159`）。
-  - **閘**：`bun run typecheck` ✓、`bun run format:check` ✓（`All matched files use Prettier code style!`）、`bun run build` ✓。CI 完整指令 `bun test --timeout 30000 ./server/test ./tools/tests` → **1239 pass / 0 fail、5315 expect() calls、148 files、332.34s**（ADR-109 基線 1229/0，本輪 +10 全為新測試，0 新失敗）。
+  - **閘**：`bun run typecheck` ✓、`bun run format:check` ✓（`All matched files use Prettier code style!`）、`bun run build` ✓。CI 完整指令 `bun test --timeout 30000 ./server/test ./tools/tests` 於最終 HEAD 重跑 → **1239 pass / 0 fail、5315 expect() calls、148 files、327.05s**（ADR-109 基線 1229/0，本輪 +10 全為新測試，0 新失敗）；`mapart.ts` 改正後另跑 6 個相關檔 54 pass / 0 fail。
   - **工具鏈 pins 未動**：Bun 1.4.3／TypeScript 7.0.2／@types/bun 1.4.3／Prettier 3.9.10／playwright-core 1.64.1／@sparticuz/chromium 153.0.0，仍為 registry 最新，本輪無升版。
 - **文件同步（僅改現況句，歷史增量逐輪保留）**：README 第 40 行、`docs/ARCHITECTURE.md`、`docs/BUN_MIGRATION.md`（第 17／244 行）、`docs/TOOLCHAIN.md`（第 7／69 行）、`docs/ROADMAP.md`（第 44 行）、`docs/STRICT_FRAME_PLAY_TOOLS.md`（第 108 行）的 `main.js` 行數（5836 → 5662）與 client TS 支數（107 → 108）同步。
+- **補：全倉 `sub_` 錨點總清查（本輪追加，不侷限於碰到的兩個模組）**：既然發現 `sub_4AC3A0` 是歷輪沿用的未查證錨點，本輪就以「符號宇宙 = 本 checkout 全部 `.c` + `.lst`（14 個檔）」對 `client/**`／`server/**`／`tools/**`／`docs/*.md` 引用的 **530 個 `sub_` 錨點**做一次存在性比對，結果 **8 個不在符號宇宙內**，逐個判定：
+  1. `tools/tests/decompile.test.ts` 的 `sub_500010`／`sub_500020`／`sub_FFFFFF` = **測試自造的字面值**（splitter fixture），不是原版位址，屬正確用途。
+  2. `server/src/game/mapart.ts` 的 `sub_46BD54` = **錯的**：全資料庫 0 命中。實際「依 `itow(i)` 取第 i 個 back、再把位置 i 交給 `sub_46BDA0`」的函式是 **`sub_46BB70`**（`for (i = 0; i < i_1; ++i) { pv = itow_w(i, &Buffer_); ... sub_46BDA0(this_1, v22, i, v24); }`）。**已改正**。
+  3. `docs/DECISIONS.md` 的 `sub_511FD8`／`sub_511FDF` = **寫法誤導但證據成立**：兩者不是函式而是 `sub_511E20` 體內的指令位址 `.text:00511FD8`（`call sub_509790`）與 `.text:00511FDF`（`push 13h`），先 call 後 push 的順序**確實**證明 client 先自用再送 `0x13`。**已改寫標記**。
+  4. `docs/DECISIONS.md` 的 `sub_45D500`（讀表情 `"0"`..`"8"`）= **未決，已如實標註**：`.text:0045D500` 落在 `sub_45D2E0`（外觀解碼器，以 `sub_45D640`／`sub_45D740` 逐部件寫入）體內，與情緒節點讀取無關；本輪**未找到**真正讀 `"0"`..`"8"` 的函式，不臆測替代位址，列為未決證據。
+  5. `sub_4AC3A0` 見上，**已自程式碼刪除**；`docs/DECISIONS.md`（ADR-109 歷史紀錄）與 `docs/ROADMAP.md`（本輪現況說明）保留原句並於本 ADR 記載更正，不重寫歷史。
+  - 其餘 **522 個錨點全部存在**。另外澄清：`server/src/game/exp.ts` 的 `sub_4C7100` 與 `server/src/wz/*.ts` 的 `sub_1000C9A0` 等一度被判為「缺失」，實為**只查 `.c` 的偽陽性**——前者是列在 `.data:005AD228` 指標表、只在 `.lst` 出現的 thunk（`sub_4C7110` 的本體確實存在），後者屬 `PCOM.dll`／`Shape2D.dll` 等其他模組；納入全部 `.lst` 與其他 DLL 後兩者皆已確認存在。
 - **LIVE**：重啟於本 HEAD；新世界新 save（既有政策）。可見變化：無遊戲行為改變（探針輸出逐位元組相同、委派為同值計算）；可讀性變化為商店幾何與版面常數取得型別與 10 項單元測試，且兩個模組引用的原版錨點全部回到 `MapleStory.exe.c`／`Data.wz` 查證過。
