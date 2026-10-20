@@ -177,8 +177,7 @@ test("native lower clamps and unsupported job/mask/death refusal", () => {
 });
 
 test("two HP/MP allocations use real c2s/s2c codecs and survive an unchanged save format", () => {
-  const stats = fixture(),
-    character = characterDataOf(stats, emptyCharacterItems());
+  const stats = fixture();
   for (const field of ["maxHp", "maxMp"] as const) {
     const mask = readAbilityRequest(new PacketReader(encodeAbilityRequest(field), 1));
     const diff = spendAbility(stats, mask, { rand15: () => 0 });
@@ -187,6 +186,10 @@ test("two HP/MP allocations use real c2s/s2c codecs and survive an unchanged sav
     assert.deepEqual(decoded.diff, diff);
   }
   assert.deepEqual([stats.maxHp, stats.maxMp, stats.hp, stats.mp, stats.ap], [65, 57, 20, 5, 1]);
+  // characterDataOf COPIES stats into the record, so the record must be built from the
+  // post-allocation stats - built before, the save round trip verifies the stale fixture instead
+  // of the allocations (the session-save trap family).
+  const character = characterDataOf(stats, emptyCharacterItems());
   const accounts = new Map([["growth", { password: "growth", characters: [character] }]]);
   const saved = readSave(saveJson(accounts)).get("growth")!.characters[0]!.stats;
   assert.deepEqual(saved, stats);

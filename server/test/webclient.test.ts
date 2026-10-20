@@ -47,7 +47,9 @@ const STUB_MAP: MapData = {
   name: "stub-field",
   streetName: "stub",
   bgm: "",
-  returnMapId: 1010000,
+  // The revive branch a field takes when its `info/returnMap` IS readable: this world's provider
+  // knows the town (2000000), so a revive is a real map change with a fresh contact field.
+  returnMapId: 2000000,
   mobs: [
     { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 },
   ],
@@ -275,6 +277,8 @@ interface World {
   loginPort: number;
   gamePort: number;
   webPort: number;
+  /** Every line the three servers logged, in arrival order - refusals are only visible here. */
+  log: string[];
 }
 
 /** What a test world may change about its characters; everything else is the shared fixture. */
@@ -376,17 +380,23 @@ async function startWorld(
     speedPercent: 0,
     dieMs: 40,
   });
-  const nativeCatalog =
-    options.nativeEquipment && ART_ARCHIVE ? itemCatalogOf(ART_ARCHIVE) : undefined;
+  // The LIVE serve wiring hands the real WZ catalog to all three servers whenever Data.wz is
+  // readable (cli.ts), and admission/effectiveWorn refuse to act without it ("尚未載入原WZ裝備
+  // 需求"). Test worlds run the same contract: with the archive, every world gets the catalog -
+  // wear, stat basis and creation all see the real requirements and template stats.
+  const nativeCatalog = ART_ARCHIVE ? itemCatalogOf(ART_ARCHIVE) : undefined;
   const nativeCreation =
     options.nativeEquipment && ART_ARCHIVE
       ? creationCatalogOf(artProviderOf(ART_ARCHIVE).reader)
       : undefined;
+  const worldLog: string[] = [],
+    log = (line: string) => worldLog.push(line);
   const game = new GameEntryServer({
     ...(nativeCatalog
       ? { itemCatalog: nativeCatalog, starterEquipmentIds: starterEquipmentIds(nativeCreation) }
       : {}),
     persist: () => store.save(accounts),
+    log,
     ...(options.testTools ? { allowTestTools: (username: string) => username === "admin" } : {}),
     ...(options.skills && ART_ARCHIVE ? { skills: skillCatalogOf(ART_ARCHIVE) } : {}),
     handoffs,
@@ -420,6 +430,7 @@ async function startWorld(
     ...(nativeCatalog ? { itemCatalog: nativeCatalog } : {}),
     accounts,
     persist: () => store.save(accounts),
+    log,
     ...(ART_ARCHIVE
       ? { creationCatalog: creationCatalogOf(artProviderOf(ART_ARCHIVE).reader)! }
       : {}),
@@ -436,6 +447,7 @@ async function startWorld(
     loginPort: loginInfo.port,
     gamePort: gameInfo.port,
     gameHost: "127.0.0.1",
+    log,
     mapProvider,
     mapCatalog: () =>
       [STUB_MAP, TOWN_MAP].map(({ id, name, streetName }) => ({ id, name, streetName })),
@@ -480,7 +492,14 @@ async function startWorld(
     await login.close();
     await game.close();
   });
-  return { accounts, store, loginPort: loginInfo.port, gamePort: gameInfo.port, webPort: web.port };
+  return {
+    accounts,
+    store,
+    loginPort: loginInfo.port,
+    gamePort: gameInfo.port,
+    webPort: web.port,
+    log: worldLog,
+  };
 }
 
 /** Logs in, picks the world and the character, and returns the browser plus the field event. */
@@ -755,26 +774,47 @@ test(
     assert.deepEqual(view.worn, []);
 
     // The name, the price and the description are not on the wire: they are the archive's, read by the
-    // server from the same `Data.wz` the 2003 client loaded.
+    // server from the same `Data.wz` the 2003 client loaded - the whole info block: both desc lines
+    // (the WZ escapes the break as a literal \n), the cash flag, and both icon facts with their
+    // native origin offsets.
     const item = await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000000`);
     assert.equal(item.status, 200);
     assert.deepEqual(await item.json(), {
       id: 2000000,
+      cash: false,
       name: "빨간 포션",
       price: 25,
-      desc: "HP를 약 50 회복시킨다.",
+      desc: "붉은 약초로 만든 물약이다.\\nHP를 약 50 회복시킨다.",
+      iconRaw: {
+        path: "Item/Consume/0200.img/02000000/info/iconRaw",
+        width: 27,
+        height: 27,
+        ox: -3,
+        oy: 30,
+      },
+      icon: {
+        path: "Item/Consume/0200.img/02000000/info/icon",
+        width: 27,
+        height: 30,
+        ox: -3,
+        oy: 30,
+      },
     });
 
     const icon = await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000000/icon.png`);
     assert.equal(icon.status, 200);
     assert.equal(icon.headers.get("content-type"), "image/png");
-    assert.deepEqual(new Uint8Array(await icon.arrayBuffer()), STUB_PNG);
+    // The bytes are the archive's own canvas re-encoded: PNG magic and a real image body.
+    const png = new Uint8Array(await icon.arrayBuffer());
+    assert.deepEqual([...png.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.ok(png.length > 100, `a decoded WZ icon, got ${png.length} byte(s)`);
 
-    // No canvas is a 404, so the page draws the slot without an icon instead of re-requesting a broken
-    // image; an id the archive does not carry and a non-id are both "nothing here".
+    // The archive's orange potion carries its own icon; an id the archive does not carry and a
+    // non-id are both "nothing here" - a 404, so the page draws the slot without an icon instead of
+    // re-requesting a broken image.
     assert.equal(
       (await fetch(`http://127.0.0.1:${world.webPort}/api/item/2000001/icon.png`)).status,
-      404,
+      200,
     );
     assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/item/999999`)).status, 404);
     assert.equal((await fetch(`http://127.0.0.1:${world.webPort}/api/item/abc`)).status, 404);
@@ -1486,12 +1526,14 @@ test(
       t: "chat",
       name: "Hero",
       text: "안녕하세요",
+      channel: "whisper",
     });
     female.send({ t: "whisper", name: "Hero", text: "반갑습니다" });
     assert.deepEqual(await admin.nextKind("chat"), {
       t: "chat",
       name: "한글용사",
       text: "반갑습니다",
+      channel: "whisper",
     });
     admin.send({ t: "find", name: "한글용사" });
     assert.equal((await admin.nextKind("find-answer")).name, "한글용사");
@@ -1674,7 +1716,8 @@ test(
     );
     alt.send({ t: "warp-map", mapId: 2000000 });
     await alt.nextKind("request-release");
-    assert.match(String((await alt.nextKind("chat")).text), /disabled/);
+    // Denials answer as the native 0x21 notice (system-notice), not a chat line.
+    assert.match(String((await alt.nextKind("system-notice")).text), /disabled/);
     admin.send({ t: "warp-map", mapId: 2000000 });
     await admin.nextKind("request-release");
     const moved = await admin.nextKind("field");
@@ -1682,7 +1725,7 @@ test(
     assert.equal((moved.self as { spawnPortal: number }).spawnPortal, 0);
     admin.send({ t: "warp-map", mapId: 123456789 });
     await admin.nextKind("request-release");
-    assert.match(String((await admin.nextKind("chat")).text), /does not exist/);
+    assert.match(String((await admin.nextKind("system-notice")).text), /does not exist/);
     for (const mapId of [-1, 1.5, 999999999, 2147483648]) {
       admin.send({ t: "warp-map", mapId });
       assert.match(String((await admin.nextKind("error")).message), /invalid map id/);
@@ -1705,7 +1748,10 @@ test(
     t.after(() => browser.close());
     browser.send({ t: "warp-map", mapId: 2000000 });
     await browser.nextKind("request-release");
-    assert.match(String((await browser.nextKind("chat")).text), /disabled/);
+    // The refusal travels the native notice path (0x21 -> system-notice), not a chat line.
+    const notice = await browser.nextKind("system-notice");
+    assert.equal(notice.type, 0);
+    assert.match(String(notice.text), /disabled/);
   },
 );
 
@@ -1715,7 +1761,11 @@ test(
   async (t) => {
     const world = await startWorld(t);
     const character = world.accounts.get("admin")!.characters[0]!;
-    const cap = equipSlot(1002000);
+    // The real WZ facts pick the fixture: 1002000 (갈색 항공 모자) is a CASH cap the admission
+    // honestly refuses ("此裝備部位或現金裝備尚不支援" - cash wear is its own unimplemented family),
+    // so the wear phase runs on 1002008 (갈색 가죽 모자): cash false, gender 2, req Lv5/job 0 -
+    // wearable by the Lv12 beginner hero, with the instance words a scroll would leave behind.
+    const cap = equipSlot(1002008);
     cap.str = 3;
     cap.pad = 7;
     cap.cuc = 2;
@@ -1735,7 +1785,13 @@ test(
     request(1, 2);
     const swapped = await browser.nextKind("inventory");
     assert.equal(swapped.ack, true);
-    assert.equal(character.items!.inventories[0]!.items.get(2), cap);
+    // The handler is clone-first/commit-after (atomicity), so the swap does not preserve the JS
+    // reference - the native contract it does preserve is every scrolled word of the instance.
+    assert.deepEqual(
+      character.items!.inventories[0]!.items.get(2),
+      cap,
+      "the swap keeps the instance's own values",
+    );
     request(2, -1);
     assert.match(String((await browser.nextKind("error")).message), /500ms/);
     await new Promise((r) => setTimeout(r, 510));
@@ -1745,14 +1801,14 @@ test(
     assert.equal(
       (
         worn.inventory as { worn: { itemId: number; stats: { str: number }; cuc: number }[] }
-      ).worn.find((x) => x.itemId === 1002000)!.stats.str,
+      ).worn.find((x) => x.itemId === 1002008)!.stats.str,
       3,
     );
-    assert.equal((own.self as { avatarItems: number[] }).avatarItems.includes(1002000), true);
+    assert.equal((own.self as { avatarItems: number[] }).avatarItems.includes(1002008), true);
     const look = await observer.nextKind("user-look");
     assert.equal(
-      (look.user as { avatarItems: number[] } | undefined)?.avatarItems.includes(1002000) ??
-        (look.avatarItems as number[] | undefined)?.includes(1002000),
+      (look.user as { avatarItems: number[] } | undefined)?.avatarItems.includes(1002008) ??
+        (look.avatarItems as number[] | undefined)?.includes(1002008),
       true,
     );
     await new Promise((r) => setTimeout(r, 510));
@@ -1762,12 +1818,12 @@ test(
     request(-1, 3);
     await browser.nextKind("inventory");
     await browser.nextKind("self");
-    assert.equal(character.items!.inventories[0]!.items.get(3)!.itemId, 1002000);
+    assert.equal(character.items!.inventories[0]!.items.get(3)!.itemId, 1002008);
     assert.equal(character.items!.worn.has(1), false);
     const saved = world.store.load()!;
     assert.equal(
       saved.get("admin")!.characters[0]!.items!.inventories[0]!.items.get(3)!.itemId,
-      1002000,
+      1002008,
     );
     for (const bad of [
       { tab: 0, fromSlot: 1, toSlot: 2, count: -1 },
@@ -2149,14 +2205,17 @@ test(
   async (t) => {
     const world = await startWorld(t, { nativeEquipment: true, testTools: true, combat: true });
     const character = world.accounts.get("admin")!.characters[0]!;
-    const { browser, field } = await enterGame(world.webPort, "admin", "admin");
+    const { browser } = await enterGame(world.webPort, "admin", "admin");
     t.after(() => browser.close());
-    const mob = (field.mobs as { mobId: number }[])[0]!;
+    // The stub monster arrives in the spawn burst after entry - the enter snapshot itself is empty.
+    const mob = (await browser.nextKind("mob-enter")).mob as { mobId: number };
     const initial = await browser.nextKind("stat-basis");
     assert.equal((initial.basis as { secondary: { pad: number } }).secondary.pad, 0);
     browser.send({ t: "move", x: 480, y: 300, foothold: 32, action: 4 });
     await browser.nextKind("user-move");
-    browser.send({ t: "attack", mobId: mob.mobId, action: 5 });
+    // The bridge contract: the page names the monster, the profile action and a unique attack
+    // token; the damage is rolled server-side and the `hit` event carries the native trace.
+    browser.send({ t: "attack", mobId: mob.mobId, facingLeft: false, action: 5, attackToken: 1 });
     const blank = await browser.nextKind("hit");
     assert.equal(blank.damage, 1);
     assert.equal((blank.trace as { reason: string }).reason, "zero-pad");
@@ -2182,7 +2241,7 @@ test(
       (world.store.load()!.get("admin")!.characters[0]!.items!.worn.get(11) as { pad: number }).pad,
       17,
     );
-    browser.send({ t: "attack", mobId: mob.mobId, action: 5 });
+    browser.send({ t: "attack", mobId: mob.mobId, facingLeft: false, action: 5, attackToken: 2 });
     const restored = await browser.nextKind("hit");
     assert.ok(Number(restored.damage) > 1);
     assert.equal((restored.trace as { pad: number }).pad, 17);

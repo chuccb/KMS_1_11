@@ -3431,3 +3431,52 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   本地objects）——`git fetch origin <branch>`＋`git reset --mixed 507b59e`恢復，status確認dirty
   僅預期三檔。**模式記錄**：還原後git狀態異常先fetch自己branch再mixed reset；絕不把現存工作樹
   當新樹重新commit。
+
+## ADR-104：PAD／裝備／stats全鏈輪——webclient.test 40/40清零、growth存檔陷阱、測試世界catalog接線對齊LIVE（2026-10-20）
+
+- **「面板29打1」血統結案**：鏈條每一環都是原版語義——detailRows的攻擊力行＝PAD＋主能力
+  （native 4F13B0，**不是**傷害範圍）；傷害＝rollNativePhysical只看PAD；空白instance（零PAD）
+  →native min clamp＝1。「面板29（0 PAD＋29 STR）＋傷害1」＝**空白實例的正確原生呈現**。
+  問題在實例來源：裝備進世界必經478270→47A740模板實例化（equipmentFromTemplate——
+  creation／drop／reward入口本輪逐一確認已接線✓）；舊存檔空白實例走opt-in repair-starters
+  （不回填doctrine）。**斷的是鏈上的測試債，不是產品**——本輪產品代碼零改動。
+- **webclient七支負債全修（整檔40/40首次全綠×3連跑）**：
+  1. blank-sword repair：mob來源改mob-enter事件（enter快照不再含mobs）＋attack訊息補
+     facingLeft/attackToken（ADR-103契約）——首跑即全鏈綠（zero-PAD trace reason、修復後
+     pad 17/weaponId 1302000、save持久化、stats不動、alt拒絕）。
+  2. bridge contact（touch傷害）：STUB_MAP returnMapId 1010000→**2000000**——該世界provider
+     只認1000000/2000000，revive的「returnMap可讀→真換圖」分支需要可讀地圖；MISS支零漣漪。
+  3. slot requests三層：(a) 0x17 handler clone-first/commit-after（原子性doctrine）不保JS
+     reference→斷言改deepEqual（真契約＝instance值逐字保存）；(b) startWorld只給
+     nativeEquipment世界接itemCatalog→wear被canEquipItem拒；(c) **真WZ事實：1002000
+     （갈색 항공 모자）是CASH裝備**（req Lv20/job8）——canWear拒絕「此裝備部位或現金裝備
+     尚不支援」是正確原生行為（cash穿戴＝獨立未實作家族）→fixture改**1002008**（갈색
+     가죽 모자：cash false、gender 2、Lv5、job0）＝Lv12初心者可穿的真帽子。
+  4. **startWorld catalog接線對齊LIVE**：cli.ts serve對login/game/web三者都給真
+     itemCatalogOf(archive)；測試世界現在同契約（nativeCatalog＝ART_ARCHIVE即接，去掉
+     nativeEquipment條件）。「尚未載入原WZ裝備需求」只剩無archive bootstrap會出現。
+  5. 漣漪＝STUB形態斷言自身：0x0B inventory測試的/api/item段改真WZ事實（desc兩行＋字面
+     \n、cash:false、icon/iconRaw尺寸與原生ox/oy；icon.png改斷言PNG magic＋真實大小；
+     2000001橘藥有真icon→404斷言改200）。inline dialogue catalogue因接線自動轉綠。
+  6. Korean names：chat事件已加channel:"field"|"whisper"（產品演進）→strict deepEqual補欄。
+  7. map-cmd×2：拒絕答復自chat行遷到**native 0x21→system-notice**（type 0）→斷言改
+     nextKind("system-notice")；invalid map id仍是bridge端error（session.ts throw）。
+- **growth.test「two HP/MP allocations」**：characterDataOf複製陷阱家族第五犯——record建在
+  兩次AP花費**之前**→save round-trip驗到舊fixture（maxHp 50/ap3 vs 65/57/ap1）→改為花費後
+  建record。整檔9/9。
+- **測試基建**：startWorld收集三個server的log到`world.log`（拒絕理由只在這裡看得見——slot
+  診斷即靠「此裝備部位或現金裝備尚不支援」log行定位）；診斷用臨時WSRECV/WORLDLOG probe
+  定位後全拆（grep清零）。
+- **驗證**：webclient 40/40×3＋serve 44/44無漣漪＋growth六連綠；typecheck/format/build全綠。
+  完整suite 1216：**1192 pass/24 fail**——對ADR-103的1184/32淨差恰為本輪8支（webclient 7＋
+  growth 1）；剩餘23唯名全為未觸碰檔案已知負債（field codec/router×4、physics抽動×4、
+  probe/typed/canvas×7、art/WZ×5、UI examples/coalesced/wz commands）；pixel compositor本輪
+  綠（負載flake確認）。零fail可歸因本輪。
+- **沙箱第二次回捲與恢復**：工作樹回捲（HEAD退99ff07b、node_modules/generated全失、LIVE死）
+  ——照ADR-103模式：fetch自己branch（833126e在origin完好）→`git reset --mixed FETCH_HEAD`→
+  status**完全乾淨**→toolchain照LIVE registry中繼資料重建（bun 1.4.3 tarball sha1+sha512+size
+  三驗）→bun install→閘門綠→LIVE重啟。**模式補充**：`git diff <commit>`只看index——舊index下
+  「484檔刪除」是幻象，工作樹完好；先reset再diff才是真相。
+- **LIVE**：重啟於HEAD＋`--test-tools admin --map-command admin`（give/repair/warp的方便
+  入口；dev-only面板、不發明原生opcode、預設off是產品政策，這裡是operator明示開啟）；
+  新世界新save，新創角色起始裝備**出生即真模板實例**（PAD真值；空白劍在新世界不再出現）。
