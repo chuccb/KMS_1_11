@@ -3482,7 +3482,9 @@ GameOpt、64換行record、五秒reader自動追尾、字體與完整Gr2D限制�
 - `count`：三個搬移送出者都送**字面上的 `-1`**（整格）；只有丟棄帶數量，而那個數量是**問出來的**
   （`sub_4643F0(asc_5B578C, 堆疊數)`，`몇 개나 버리시겠습니까?`）——除了兩種例外：`tab == 1`（裝備分頁）
   時它直接用 `1`，`itemId / 10000 == 207` 時直接送**整疊**（家族未查）。所以「丟幾個」是客戶端的選擇，
-  伺服器只把它跟堆疊數比對（§4.36.3）。
+  伺服器只把它跟堆疊數比對（§4.36.3）。**ADR-100 複核：`sub_55ACB0` 全 EXE 只有這四個呼叫點**
+  （`.c:107253`／`107530`／`107603`／`107698`）⇒ 這版 client **沒有**「把一疊拆到另一格」的搬移送出者；
+  背包內唯一的拆分就是丟棄（帶數量）與合併溢出的餘量（§4.36.3 第六條）。
 - ⚠️ **能力需求不在這裡**：`sub_4636B0` 用 `sub_4C5020`／`sub_4C5420` 算出的角色總和，比對 `sub_465A30(itemId)`
   的 `reqSTR/DEX/INT/LUK/level` 與職業位元（`sub_4657F0(itemId) ∈ {0,30,31,32,33,37,38}`）以及性別位
   （`itemId / 1000 % 10` 對 `record + 17`）。這是客戶端自己的規則，伺服器照抄只會多一份沒人能驗的第二份規則。
@@ -3517,8 +3519,14 @@ GameOpt、64換行record、五秒reader自動追尾、字體與完整Gr2D限制�
 | `toSlot == 0` 而來源是現金道具（`cash != null`）| `cashItem` |
 
 成功時的 `changes` 就是 `0x0B` 的內容（目的格 `put`、來源格 `clear`；兩格都有東西就是兩個 `put`），
-`lookChanged` ＝「動到了負格」，呼叫者據此送 `0x28`（§4.11.8）。五個決策記在 ADR-029：**只驗結構不驗需求**、
+`lookChanged` ＝「動到了負格」，呼叫者據此送 `0x28`（§4.11.8）。決策記在 ADR-029：**只驗結構不驗需求**、
 **兩格都有東西 ＝ 互換**、**丟到地上有落地規則**、**現金裝備不動**（第 4 點的追加見 ADR-029 追記）。
+**第六條：同種可疊道具拖到同一種上 ＝ 合併，不是互換（ADR-100）**。client 從不自己搬（§4.36.2），
+2003 server 對「一疊丢到同一種上」的處置因此不可證，是伺服器政策：目的格先補滿到 `MAX_ITEM_STACK`
+（＝`grantItem` 撿拾／購買疊加用的同一個上限，`game/rewards.ts`），來源格留剩餘——總和 ≤ 上限時是
+`put(目的格, 總和)`＋`clear(來源格)`，超過時是兩個 `put`（目的格＝上限、來源格＝餘量）；一個拖放
+**絕不銷毀道具、也不需要拒絕**。現金道具（各帶序號，合併會少一個）與裝備（不可疊，同 id 也是兩件）
+維持原互換分支；合併只發生在兩正格之間，`lookChanged` 恆為 false。
 
 **丟到地上那一條路**（`toSlot = 0`，`sub_463BE0`）多一個答案而不是一個拒絕：`applyChangeSlot` 回
 `{kind: "drop", slot, count, changes, lookChanged}` —— `changes` 是 `0x0B`（整疊丟掉是 `clear`、丟一部分是
@@ -4654,7 +4662,8 @@ Codec：`protocol/field.ts` 的 `ClientScrollUpgrade{scrollSlot,equipSlot}`／`r
 
 `sub_55B0E0` 自己在送出前有三道閘（與 §4.36 `sub_55ACB0` 同型）：
 - `if (*(this+6)) return;`——**busy**：上一封還沒被回答就不送第二封；
-- `(*(this+9))` 的 `+53 ^ +55` 兩個 word `> 0`——狀態檢查（alive／可操作）；
+- `(*(this+9))` 的 `+53 ^ +55` 兩個 word `> 0`——狀態檢查（語意未解：不是 HP 直讀，XOR 是「兩 word
+  不相等」；伺服器以 hp≤0 拒絕對齊 `0x17`／`0x18` 的死亡閘，ADR-100 補）；
 - `timeGetTime() - *(this+7) >= 0x1F4`——**500ms 冷卻**（0x1F4 = 500）。
 
 caller（拖放到裝備的那支分支，`.c:107957`）先決定「這是不是一張合法卷軸」：
@@ -4709,7 +4718,8 @@ Reader：`scrollSpecOf(archive,itemId)`／`scrollSpecProvider(archive)`（`game/
   `scrollRandom` 是可注入的 `RandomSource`（預設 `ClientRandom`，seed 0x5c07/0x1a0f/0x2e3c），測試注入定值。
 - **slot 會計＝政策**：一次使用必耗一格 `ruc-=1`／`cuc+=1`（`ruc+cuc` 不變）；增量**只在成功時加**。
 - 全部 client 閘由伺服器重驗：`scrollSlot>0`、USE 格有卷軸、equip 格有裝備、`scrollMatchesEquip`、
-  `ruc>0`、`scrollSpec` 讀得到、非 busy（shop／talk／trade）；任一不過 ⇒ **空 `0x0B`**
+  `ruc>0`、`scrollSpec` 讀得到、非 busy（shop／talk／trade）、**非死亡（hp≤0，ADR-100 補齊與
+  `0x17`／`0x18` 同一安全政策）**；任一不過 ⇒ **空 `0x0B`**
   （`encodeInventoryChange([])`，與 §4.36 的拒絕同型——client 的 busy 閘非收到 `0x0B` 不會解）。
 - 成功 ⇒ 一個 `0x0B`：`[takeItem 卷軸的 change][put 升級後的裝備回原格（負 worn 格在 tab1 合法）]`；
   **不广播 `0x28` look**（升級不改外觀 id，只是同一格換內容）。之後 `persist()` ＋ log。

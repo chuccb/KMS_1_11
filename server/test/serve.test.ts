@@ -115,6 +115,7 @@ import {
   readShopOpen,
 } from "../src/protocol/shop.ts";
 import { shopKeeper } from "../src/game/shops.ts";
+import { itemCatalogOf } from "../src/game/iteminfo.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
 import { scrollSpecProvider } from "../src/game/scrolls.ts";
 import { equipSlot, nonEquipSlot, type ItemSlotEquip } from "../src/protocol/itemslot.ts";
@@ -2180,7 +2181,7 @@ test(
  */
 test(
   "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map (first pass)",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -2188,6 +2189,10 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // The trust-boundary admission (canEquipItem) reads the archive's own requirements: without a
+      // catalog every wear is refused. The cap is the level-0, job-0, non-cash 위젯 무적 모자 (1002140),
+      // which the bare fixture hero can wear - the shipped 1002000 is a cash Lv20 thief hat.
+      itemCatalog: itemCatalogOf(archive!),
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -2211,10 +2216,11 @@ test(
 
     // The cap is in the bag, not on the head: both the window and the avatar have something to change.
     const heroRecord = characterDataOf(
-      { ...zeroStats(), id: 7, name: "Hero" },
+      // hp: a dead character's bags are closed to every 0x17/0x1A (the native HP > 0 sender gate).
+      { ...zeroStats(), id: 7, name: "Hero", hp: 50, maxHp: 50 },
       startingCharacterItems(),
     );
-    heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
+    heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002140));
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
     hero.send({
@@ -2246,7 +2252,7 @@ test(
     await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
     // A double-click on the cap: the four fields of `sub_4636B0` - tab 1, slot 2, the part its caller
-    // derived from the item id (1002000 -> cap -> 1, written the way a worn slot is written: negative).
+    // derived from the item id (1002140 -> cap -> 1, written the way a worn slot is written: negative).
     const doubleClick = encodeClientChangeSlot({
       tab: INVENTORY_TAB.equip,
       fromSlot: 2,
@@ -2273,7 +2279,7 @@ test(
     );
     assert.equal(
       change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
-      1002000,
+      1002140,
       "the put carries the item that was moved",
     );
     assert.equal(
@@ -2288,7 +2294,7 @@ test(
     const look = readUserLook(new PacketReader(altSaw[altSaw.length - 1]!, 1));
     assert.deepEqual(
       [look.characterId, look.face, look.avatarItems],
-      [7, undefined, [DEFAULT_HAIR_ID, 1002000]],
+      [7, undefined, [DEFAULT_HAIR_ID, 1002140]],
       "0x28 names the user, leaves the face and replaces the id list",
     );
     assert.ok(
@@ -2309,7 +2315,7 @@ test(
     // worn cap is what a relog reads back (ADR-017).
     assert.equal(
       heroRecord.items!.worn.get(1)?.itemId,
-      1002000,
+      1002140,
       "part 1 of the worn group is the cap",
     );
     assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
@@ -2342,6 +2348,88 @@ test(
 );
 
 test(
+  "a stack dropped on its own kind answers 0x0B with the merged slot and the emptied source (0x17)",
+  { timeout: 20000 },
+  async (t) => {
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mobTickMs: 10_000,
+      dropPolicy: () => [],
+      handshake: { clientSendSeed: 0x22334455, clientRecvSeed: 0x66778899 },
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
+
+    // Two ten-stacks of one potion: the drag is the ordinary 0x17 the native client sends (whole
+    // slot, count -1), and the merge is the server's own answer (ADR-029 choice 6). The hero needs
+    // hp: a dead character's bags are closed to every 0x17 (the gate handleChangeSlot shares with
+    // use-item).
+    const heroRecord = characterDataOf(
+      { ...zeroStats(), id: 7, name: "Hero", hp: 50, maxHp: 50 },
+      startingCharacterItems(),
+    );
+    heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
+      2,
+      nonEquipSlot(2000000, 10),
+    );
+    heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!.items.set(
+      5,
+      nonEquipSlot(2000000, 10),
+    );
+    const hero = await FakeClient.connect(gameInfo.port);
+    t.after(() => hero.close());
+    hero.send({
+      kind: "handshake-reply",
+      opcode: 0x04,
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: heroRecord,
+      }),
+    });
+    await hero.drain();
+
+    hero.send({
+      kind: "unknown",
+      opcode: CLIENT_FIELD_OPCODE.changeSlot,
+      body: encodeClientChangeSlot({
+        tab: INVENTORY_TAB.consume,
+        fromSlot: 2,
+        toSlot: 5,
+        count: -1,
+      }).slice(1),
+    });
+
+    const saw = await hero.takeOpcode(INVENTORY_OPCODE);
+    const change = readInventoryChange(new PacketReader(saw[saw.length - 1]!, 1));
+    assert.deepEqual(
+      change.changes.map((entry) => [entry.op, entry.inventory, entry.slot]),
+      [
+        [INVENTORY_OP.put, INVENTORY_TAB.consume, 5],
+        [INVENTORY_OP.clear, INVENTORY_TAB.consume, 2],
+      ],
+      "the destination is put with the sum and the source is cleared",
+    );
+    const put = change.changes[0]!;
+    const merged = put.op === INVENTORY_OP.put ? put.item : undefined;
+    assert.ok(merged, "the first change carries the merged item");
+    assert.equal("quantity" in merged ? merged.quantity : 0, 20);
+
+    // The record itself merged: a relog reads back one stack of twenty and an empty slot 2.
+    const consume = heroRecord.items!.inventories[INVENTORY_TAB.consume - 1]!;
+    const recorded = consume.items.get(5);
+    assert.equal(recorded && "quantity" in recorded ? recorded.quantity : 0, 20);
+    assert.equal(consume.items.has(2), false);
+  },
+);
+
+test(
   "a 204 scroll on a worn equip answers 0x0B with the upgraded item and the consumed scroll (c2s 0x1A)",
   { skip: archive === null, timeout: 20000 },
   async (t) => {
@@ -2368,7 +2456,8 @@ test(
     // The hat is on the head (worn part 1), not in the bag: this is the browser's drag-onto-avatar
     // path, where the equip slot the client names is negative (FINDINGS 4.34.6).
     const heroRecord = characterDataOf(
-      { ...zeroStats(), id: 7, name: "Hero" },
+      // hp: a dead character's bags are closed to every 0x17/0x1A (the native HP > 0 sender gate).
+      { ...zeroStats(), id: 7, name: "Hero", hp: 50, maxHp: 50 },
       startingCharacterItems(),
     );
     heroRecord.items!.worn.set(1, equipSlot(1002000, { ruc: 3, pdd: 10, mdd: 5 }));
@@ -4375,7 +4464,7 @@ test(
  */
 test(
   "equipping a cap answers 0x0B for the wearer and 0x28 for the rest of the map (second pass, ADR-029 real sockets)",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -4383,6 +4472,10 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      // The trust-boundary admission (canEquipItem) reads the archive's own requirements: without a
+      // catalog every wear is refused. The cap is the level-0, job-0, non-cash 위젯 무적 모자 (1002140),
+      // which the bare fixture hero can wear - the shipped 1002000 is a cash Lv20 thief hat.
+      itemCatalog: itemCatalogOf(archive!),
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -4409,8 +4502,12 @@ test(
       startingCharacterItems(),
       wornOfLook([20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10]),
     );
-    heroItems.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002000));
-    const heroRecord = characterDataOf({ ...zeroStats(), id: 7, name: "Hero" }, heroItems);
+    heroItems.inventories[INVENTORY_TAB.equip - 1]!.items.set(2, equipSlot(1002140));
+    const heroRecord = characterDataOf(
+      // hp: a dead character's bags are closed to every 0x17 (the native HP > 0 sender gate).
+      { ...zeroStats(), id: 7, name: "Hero", hp: 50, maxHp: 50 },
+      heroItems,
+    );
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
     hero.send({
@@ -4435,14 +4532,14 @@ test(
     const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
     const aboutHero = readUserEnterField(new PacketReader(altBurst[altBurst.length - 1]!, 1));
     assert.equal(
-      aboutHero.avatarItems?.includes(1002000),
+      aboutHero.avatarItems?.includes(1002140),
       false,
       "the cap is in the bag, not on the head",
     );
     await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
     // Double-clicking the cap: `sub_4636B0` sends tab 1, the bag slot, the part its caller read off the
-    // item id (1002000 -> a hat -> part 1, written the way a worn slot is: negative) and -1 for "all of it".
+    // item id (1002140 -> a hat -> part 1, written the way a worn slot is: negative) and -1 for "all of it".
     const equip = encodeClientChangeSlot({ tab: 1, fromSlot: 2, toSlot: -1, count: -1 });
     hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.changeSlot, body: equip.slice(1) });
 
@@ -4458,7 +4555,7 @@ test(
     );
     assert.equal(
       change.changes[0]!.op === INVENTORY_OP.put ? change.changes[0]!.item.itemId : 0,
-      1002000,
+      1002140,
       "the put carries the item that moved",
     );
     assert.equal(change.result, 1, "the result byte is the client's own timing flag, not a status");
@@ -4469,7 +4566,7 @@ test(
     const look = readUserLook(new PacketReader(lookPacket[lookPacket.length - 1]!, 1));
     assert.deepEqual(
       [look.characterId, look.face, look.avatarItems],
-      [7, undefined, [30000, 1040001, 1060001, 1071000, 1302000, 1002000]],
+      [7, undefined, [30000, 1040001, 1060001, 1071000, 1302000, 1002140]],
       "the list is the avatarItems a 0x1C would have carried",
     );
     assert.deepEqual(
@@ -4480,7 +4577,7 @@ test(
 
     // The record itself moved (this is the object the account table holds, ADR-017): the worn part is the
     // cap now, and the bag slot it came from is empty.
-    assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002000);
+    assert.equal(heroRecord.items!.worn.get(1)?.itemId, 1002140);
     assert.equal(heroRecord.items!.inventories[INVENTORY_TAB.equip - 1]!.items.has(2), false);
 
     // The same drag again, now that slot 2 is empty: nothing moves, and the answer is still a `0x0B` -

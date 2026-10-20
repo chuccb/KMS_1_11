@@ -3258,3 +3258,39 @@ wire round-trip markers 2/2/0、滿房全 fill、空房全 clear）。
 只在成功加增量／不改 input、SCROLL_INC_TO_STAT 全對應真 stat、scrollSpecOf 讀真 WZ success＋inc 與各種 undefined）；
 `serve.test.ts` 整合 1/1（真 archive＋注入定值成功 roll：對 worn hat 卷 ⇒ `0x0B`＝[clear 卷軸][put hat pdd12/mdd6/ruc2/cuc1]、
 record 原地升級；錯 category（單手劍卷投頭盔）⇒ 空 `0x0B`、hat 不動、卷軸留袋）。完整原證與欄位詳 FINDINGS §4.50。
+
+## ADR-100：背包拖放的同種疊加合併政策（`0x17` 第六條）、原生拆分送出者複核、cap 測試基準修復與 scroll 死亡閘補齊（2026-10-20）
+
+**來源**（MapleStory.exe `.c` 與 shipped Data.wz）：
+- **`sub_55ACB0` 全 EXE 只有四個呼叫點，逐一複核**（`.c:107253` `sub_4636B0` 雙擊裝備／`107530`
+  `sub_4630A0` 裝備頁拖放／`107603` `sub_463A50` 任意頁拖放／`107698` `sub_463BE0` 丟棄）：三個搬移
+  送出者都傳字面 `-1`（整格）、只有丟棄帶問出來的數量 ⇒ **這版 client 沒有「把一疊拆到另一格」的
+  搬移送出者**；背包內唯一的拆分是丟棄（ADR-029 已實作）與合併溢出的餘量（本 ADR）。
+- client 從不自己搬道具欄（§4.36.2：能改窗的只有 `0x0B`），所以「一疊拖到同一種上會發生什麼事」
+  **不在任何 binary 裡**——合併是伺服器政策，不是原證。
+- shipped Data.wz 的 `1002000`（갈색 항공 모자）實際是 **`cash:true`、reqLevel 20、reqJob 8（盜賊位）**；
+  `canWear`（client/equip-rules.ts，ADR-076 系政策）對 cash 候選直接拒。兩支 cap 整合測試的舊 fixture
+  （1002000、伺服器沒給 `itemCatalog`）自 admission 接通後就注定收空 `0x0B`——它們在 43-fail 基準裡，
+  且 `zeroStats().hp=0` 撞 `0x17` 的死亡閘是同一支測試的第一層原因。
+
+**決定**：
+- `game/inventory.ts` `applyChangeSlot` 新增第六條：**同種可疊（nonequip、同 itemId、雙方 cash 均 null）
+  拖到同種 ＝ 合併，不是互換**——目的格先補滿到 `MAX_ITEM_STACK`（`game/rewards.ts` 的 200，與
+  `grantItem` 撿拾／購買疊加同一上限，全伺服一個數字），來源格留剩餘：總和 ≤ 上限 ⇒ `put(目的,總和)`
+  ＋`clear(來源)`；超過 ⇒ 兩個 `put`（目的＝上限、來源＝餘量）。**絕不銷毀道具、絕不因此拒絕**；
+  只發生在兩正格之間（worn 格必是裝備），`lookChanged` 恆 false。現金道具（各帶序號，合併會少一個）
+  與裝備（不可疊，同 id 兩件仍是兩件）維持原互換分支。
+- `handleScrollUpgrade` 補 **hp≤0 拒絕**（與 `0x17`／`0x18` 同一安全政策；原生 `0x1A` 閘的
+  `+53^+55` XOR 語意未解，不引為原證——ADR-099 的閘清單就此補齊）。
+- 兩支 cap 整合測試 fixture 修復（這是**測試欠帳**，不是放寬伺服器）：hp=50、伺服器給
+  `itemCatalog: itemCatalogOf(archive!)`、無 archive 則 skip、帽子改 **1002140**（위젯 무적 모자：
+  Lv0、job 0、四圍 0、cash:false、性別位 2 中性，zeroStats 英雄穿得動）。**43-fail 基準因此少兩個
+  （43→41）**，是逐名翻綠，不是環境噪音。
+- 浏览器**零改動**：`client/main.js` 的拖放對占用格照樣送 `0x17`（只有「已穿→占用格」在 client 擋），
+  合併結果由 `0x0B` 回來——與原生 client 行為同型。
+
+**驗證**：typecheck／build／format 全綠；`inventory.test.ts` 15/15（新增：整併 `put(目的,20)`＋`clear(來源)`
+與 record 總和、上限溢出 150+100→200+50 兩個 `put`、異種疊加仍互換、**同 id 裝備仍互換**、cash 序號仍
+互換且各隨其格）；`serve.test.ts` 新增整合 1/1（兩疊十瓶 → `0x0B`＝put(5,20)＋clear(2)、record 原地
+合併、relog 讀回同一疊）；cap first/second pass 由基準 fail 轉 PASS；scroll 整合（含新死亡閘與 hp
+fixture）與 `scrolls.test.ts` 4/4 全過。完整欄位與政策詳 FINDINGS §4.36.1／§4.36.3 第六條／§4.50.2。

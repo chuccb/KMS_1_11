@@ -20,6 +20,7 @@ import {
   type Inventory,
 } from "../src/protocol/chardata.ts";
 import { equipSlot, nonEquipSlot, type ItemSlot } from "../src/protocol/itemslot.ts";
+import { MAX_ITEM_STACK } from "../src/game/rewards.ts";
 
 const CAP = 1002000; // part code 100 -> body part 1
 const TOP = 1040001; // part code 104 -> body part 5
@@ -157,6 +158,121 @@ test("a non-equip tab moves stacks the same way, with no look at all", () => {
     [INVENTORY_OP.clear, 2, 0],
   ]);
   assert.equal(outcome.kind === "done" && outcome.lookChanged, false);
+});
+
+test("a stack dropped on its own kind merges: the sum lands in the destination, the source empties", () => {
+  const block = items(
+    [],
+    [
+      [2, POTION],
+      [5, POTION],
+    ],
+  ); // two stacks of ten (the helper's quantity)
+  const outcome = applyChangeSlot(block, {
+    tab: INVENTORY_TAB.consume,
+    fromSlot: 2,
+    toSlot: 5,
+    count: -1,
+  });
+  assert.deepEqual(shape(outcome), [
+    [INVENTORY_OP.put, 5, POTION],
+    [INVENTORY_OP.clear, 2, 0],
+  ]);
+  assert.equal(
+    outcome.kind === "done" && outcome.lookChanged,
+    false,
+    "a bag merge changes no look",
+  );
+  const consume = tab(block, INVENTORY_TAB.consume);
+  const dest = consume.items.get(5);
+  assert.equal(dest && "quantity" in dest ? dest.quantity : 0, 20, "the record holds the sum");
+  assert.equal(consume.items.has(2), false, "the source slot is gone, not zero");
+});
+
+test("a merge past the ceiling fills the destination and leaves the rest in the source", () => {
+  const block = items([], [[2, POTION]]);
+  const consume = tab(block, INVENTORY_TAB.consume);
+  consume.items.set(2, nonEquipSlot(POTION, 150));
+  consume.items.set(5, nonEquipSlot(POTION, 100));
+  const outcome = applyChangeSlot(block, {
+    tab: INVENTORY_TAB.consume,
+    fromSlot: 2,
+    toSlot: 5,
+    count: -1,
+  });
+  // Two puts: nothing is destroyed, and the wire total is the record total.
+  assert.deepEqual(shape(outcome), [
+    [INVENTORY_OP.put, 5, POTION],
+    [INVENTORY_OP.put, 2, POTION],
+  ]);
+  const quantityAt = (slot: number): number => {
+    const item = consume.items.get(slot);
+    return item && "quantity" in item ? item.quantity : 0;
+  };
+  assert.equal(quantityAt(5), MAX_ITEM_STACK, "the destination fills to grantItem's own ceiling");
+  assert.equal(quantityAt(2), 250 - MAX_ITEM_STACK, "the source keeps the rest");
+});
+
+test("different stacks still swap, identical equips still swap, cash serials still swap", () => {
+  // Two different potions: a swap, exactly like before the merge branch existed.
+  const blue = 2000003;
+  const mixed = items(
+    [],
+    [
+      [2, POTION],
+      [5, blue],
+    ],
+  );
+  assert.deepEqual(
+    shape(
+      applyChangeSlot(mixed, {
+        tab: INVENTORY_TAB.consume,
+        fromSlot: 2,
+        toSlot: 5,
+        count: -1,
+      }),
+    ),
+    [
+      [INVENTORY_OP.put, 5, POTION],
+      [INVENTORY_OP.put, 2, blue],
+    ],
+  );
+
+  // Two caps with the *same* id: equips never stack, so this is a swap of two distinct objects.
+  const twins = items([
+    [1, CAP],
+    [2, CAP],
+  ]);
+  assert.deepEqual(shape(applyChangeSlot(twins, equip(1, 2))), [
+    [INVENTORY_OP.put, 2, CAP],
+    [INVENTORY_OP.put, 1, CAP],
+  ]);
+  assert.deepEqual([itemIdAt(twins, 1), itemIdAt(twins, 2)], [CAP, CAP], "both caps still exist");
+
+  // Two cash stacks of one id: each carries its own serial, and a merge would lose one - so they
+  // swap, serials riding along with their slots.
+  const CASH = 5000000; // family 5 -> the cash tab
+  const wallet = startingCharacterItems();
+  const serial = (sn: number) => ({ sn: BigInt(sn), unknown18: 0, unknown1A: 0n });
+  tab(wallet, INVENTORY_TAB.cash).items.set(1, nonEquipSlot(CASH, 10, { cash: serial(111) }));
+  tab(wallet, INVENTORY_TAB.cash).items.set(2, nonEquipSlot(CASH, 10, { cash: serial(222) }));
+  assert.deepEqual(
+    shape(
+      applyChangeSlot(wallet, {
+        tab: INVENTORY_TAB.cash,
+        fromSlot: 1,
+        toSlot: 2,
+        count: -1,
+      }),
+    ),
+    [
+      [INVENTORY_OP.put, 2, CASH],
+      [INVENTORY_OP.put, 1, CASH],
+    ],
+  );
+  const cash = tab(wallet, INVENTORY_TAB.cash);
+  assert.equal(cash.items.get(2)!.cash?.sn, 111n, "the moved stack keeps its serial");
+  assert.equal(cash.items.get(1)!.cash?.sn, 222n, "and so does the displaced one");
 });
 
 test("a worn part the item does not belong to is refused, not guessed", () => {

@@ -2184,9 +2184,16 @@ export class GameEntryServer {
           `"${session.name}" refused (${reason})`,
       );
     };
-    // Server safety policy, same as use-item: never mutate the bags behind an open window.
-    if (session.shop || session.talk || this.trades.roomOf(session.characterId)) {
-      refuse("close the shop, conversation or trade before scrolling");
+    // Server safety policy, same as use-item and change-slot: never mutate the bags behind an open
+    // window, and never while dead (both 0x17 and 0x18 refuse at hp <= 0; the native 0x1A gate
+    // XORs two state words of `*(this+9)` whose meaning is unresolved - FINDINGS 4.50.2).
+    if (
+      session.character.stats.hp <= 0 ||
+      session.shop ||
+      session.talk ||
+      this.trades.roomOf(session.characterId)
+    ) {
+      refuse("dead, or close the shop, conversation or trade before scrolling");
       return;
     }
     if (scrollSlot <= 0) {

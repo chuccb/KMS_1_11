@@ -27,7 +27,8 @@
  *    pre-encodes and then commits. --data off cannot equip without an archive requirement.
  * 2. **Both slots holding an item means a swap**, in both directions (equip over an occupied part
  *    puts the old item in the slot the new one came from, which is what "wearing" means in this
- *    game). A swap is only accepted while the displaced item can sit where it is being put.
+ *    game). A swap is only accepted while the displaced item can sit where it is being put. The one
+ *    exception is two stacks of the *same* item: they merge instead (choice 6).
  * 3. **`count` has to be `-1` for anything but a throw-away.** All three move senders pass the
  *    literal -1; a positive count only appears with `toSlot = 0`, which is the ground.
  * 4. **A throw-away leaves the inventory here and the ground is the caller's** (`kind: "drop"`): the
@@ -41,6 +42,14 @@
  *    lost.
  * 5. **Cash equips are not handled**: `sub_4636B0`'s table sends `111xxxx` to part 12/13, and the
  *    client's second worn group (`wornCash`) is a different array. Neither is touched here.
+ * 6. **Two stacks of the same item merge; the destination fills first.** The three move senders all
+ *    pass the whole slot (`count = -1`), so the client never asks to split a stack by dragging -
+ *    the only split a `0x17` carries is the throw-away's answered count. What the 2003 server did
+ *    with a stack dropped on its own kind is therefore not observable and is a server choice: fill
+ *    the destination up to `MAX_ITEM_STACK` (the same ceiling `grantItem` already stacks loot and
+ *    shop buys under) and leave the rest where it was, so a drag never destroys an item and never
+ *    needs a refusal. Cash items keep their serial and so keep the swap branch (merging would drop
+ *    one serial); equips never stack, so two of the same equip id still swap.
  *
  * The caller owns everything else: the `0x0B` for `changes`, the `0x28` for `lookChanged` (FINDINGS
  * 4.11.8), and the log line for a refusal. This module knows no packets beyond the two shapes it
@@ -50,7 +59,7 @@ import { INVENTORY_OP, INVENTORY_TAB, type InventoryChange } from "../protocol/i
 import { WORN_SLOT_LIMIT, wornSlotOfItem, type CharacterItems } from "../protocol/chardata.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { ClientChangeSlot } from "../protocol/field.ts";
-import { inventoryTabOfItemId } from "./rewards.ts";
+import { inventoryTabOfItemId, MAX_ITEM_STACK } from "./rewards.ts";
 
 /** Why a `0x17` did nothing. Named for the log line, not for the client (there is no result byte). */
 export type ChangeSlotFailure =
@@ -181,6 +190,41 @@ export function applyChangeSlot(
   // "is this even an equip" branch exists.
   if (!fits(source, toSlot)) return fail(toSlot < 0 ? "wrongPart" : "itemNotInTab");
   const displaced = read(toSlot);
+  // Choice 6: a stack dropped on its own kind merges instead of swapping. Only non-equips stack,
+  // only bag slots can hold them (a worn slot's item is an equip, and `fits` above already refused
+  // a non-equip there), and each cash item carries its own serial - so both cash guards are here.
+  if (
+    displaced !== undefined &&
+    source.kind === "nonequip" &&
+    displaced.kind === "nonequip" &&
+    source.itemId === displaced.itemId &&
+    source.cash === null &&
+    displaced.cash === null
+  ) {
+    const sum = source.quantity + displaced.quantity;
+    const changes: InventoryChange[] = [];
+    if (sum <= MAX_ITEM_STACK) {
+      const merged: ItemSlot = { ...displaced, quantity: sum };
+      write(toSlot, merged);
+      clear(fromSlot);
+      changes.push(
+        { op: INVENTORY_OP.put, inventory: tab, slot: toSlot, item: merged },
+        { op: INVENTORY_OP.clear, inventory: tab, slot: fromSlot },
+      );
+    } else {
+      // The destination fills to the ceiling and the source keeps the rest: two `put`s, and the
+      // total on the wire is the total in the record.
+      const filled: ItemSlot = { ...displaced, quantity: MAX_ITEM_STACK };
+      const left: ItemSlot = { ...source, quantity: sum - MAX_ITEM_STACK };
+      write(toSlot, filled);
+      write(fromSlot, left);
+      changes.push(
+        { op: INVENTORY_OP.put, inventory: tab, slot: toSlot, item: filled },
+        { op: INVENTORY_OP.put, inventory: tab, slot: fromSlot, item: left },
+      );
+    }
+    return { kind: "done", changes, lookChanged: false };
+  }
   if (displaced !== undefined && !fits(displaced, fromSlot)) return fail("displacedItemDoesNotFit");
 
   // Native sub_465B50/sub_465C60: two-hand/shield and overall/pants cannot coexist.
