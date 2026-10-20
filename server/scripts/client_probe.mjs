@@ -1,7 +1,8 @@
-// Historical VM/DOM shim: NOT executed or certified against the current full client.
-// ADR-059 only updates the field-chat fixture/row text below; current feature regression sources
-// live in server/test/native-chat-gameoptions.test.ts.
+// Offline VM/DOM shim that evaluates the REAL client/main.js (ADR-108 revived it onto the typed
+// module generation with a generic import shim). Feature-level native regressions additionally
+// live in server/test/native-chat-gameoptions.test.ts and the typed browser probes.
 import assert from "node:assert/strict";
+const { readFileSync } = await import("node:fs");
 // Offline DOM/canvas shim: does client/main.js run, and do its handlers survive real event shapes?
 class El {
   constructor(tag = "div") {
@@ -22,10 +23,44 @@ class El {
     };
   }
   addEventListener(type, fn) { (this.listeners ??= {}); (this.listeners[type] ??= []).push(fn); }
-  fire(type, event = {}) { event.preventDefault ??= () => {}; event.stopPropagation ??= () => {}; for (const fn of this.listeners?.[type] ?? []) fn(event); }
+  fire(type, event = {}) {
+    event.preventDefault ??= () => {};
+    let stopped = false;
+    event.stopPropagation ??= () => { stopped = true; };
+    // Delegated handlers (login-screen world/character rows, player-menu) read event.target and
+    // closest("button"), so events carry the browser's target and bubble up the shim parent chain
+    // exactly like the DOM; stopPropagation really stops the walk.
+    event.target ??= this;
+    // A real MouseEvent defaults to the primary button; typed handlers (e.g. login-screen.ts)
+    // gate on event.button === 0, so the shim must deliver the browser's default event shape.
+    if (/^(?:click|auxclick|mousedown|mouseup|mouseenter|mouseleave|mousemove|pointerdown|pointerup|pointermove|pointercancel)$/.test(type))
+      event.button ??= 0;
+    let node = this;
+    while (node && !stopped) {
+      for (const fn of node.listeners?.[type] ?? []) {
+        fn(event);
+        if (stopped) break;
+      }
+      node = node.parent;
+    }
+  }
   append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
-  replaceChildren(...nodes) { this.children = [...nodes]; }
+  replaceChildren(...nodes) {
+    // Detached children lose the parent link; kept ones gain it - delegated handlers and the
+    // bubbling fire() walk this chain (login-screen.ts rebuilds rows with replaceChildren).
+    for (const child of this.children) if (child.parent === this) child.parent = undefined;
+    for (const node of nodes) node.parent = this;
+    this.children = [...nodes];
+  }
   appendChild(node) { node.parent = this; this.children.push(node); return node; }
+  // ChildNode.before: chatlog.ts re-renders a message group in place with old[0].before(...rows).
+  before(...nodes) {
+    const parent = this.parent;
+    if (!parent) return;
+    let index = parent.children.indexOf(this);
+    if (index < 0) return;
+    for (const node of nodes) { node.parent = parent; parent.children.splice(index++, 0, node); }
+  }
   remove() {
     const parent = this.parent;
     if (!parent) return;
@@ -33,20 +68,77 @@ class El {
     if (index >= 0) parent.children.splice(index, 1);
     this.parent = undefined;
   }
-  focus() {}
-  blur() {}
+  focus() { document.activeElement = this; }
+  blur() { if (document.activeElement === this) document.activeElement = null; }
   select() {}
   setCustomValidity(value) { this.validationMessage = value; }
   setAttribute(name, value) { (this.attributes ??= {})[name] = value; }
+  getAttribute(name) { return this.attributes?.[name] ?? null; }
+  hasAttribute(name) { return this.attributes ? name in this.attributes : false; }
   removeAttribute(name) { if (this.attributes) delete this.attributes[name]; }
+  get parentElement() { return this.parent ?? null; }
+  // Zeroed box metrics: chatlog.ts clamps with scrollHeight-clientHeight and display-controls.ts
+  // falls back to window.innerWidth/Height when clientWidth is 0 - both real-browser behaviors.
+  clientWidth = 0;
+  clientHeight = 0;
+  // The tag/id/attribute/class selectors the client's delegated handlers actually use
+  // (closest("button") in login-screen/player-menu/skills, [data-x] in chatlog/lens-controls).
+  matches(selector) {
+    return selector.split(",").some((part) => {
+      const sel = part.trim();
+      if (sel.startsWith("#")) return this.id === sel.slice(1);
+      if (sel.startsWith("[")) return this.hasAttribute(sel.slice(1, -1).split("=")[0]);
+      if (sel.startsWith(".")) return this.classList.contains(sel.slice(1));
+      return this.tag === sel;
+    });
+  }
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches?.(selector)) return node;
+      node = node.parent;
+    }
+    return null;
+  }
   contains(node) { return node === this || this.children.some((child) => child.contains?.(node)); }
   set innerHTML(v) { this._html = v; }
   get innerHTML() { return this._html ?? ""; }
   get firstElementChild() { return this.children[0] ?? null; }
   getContext() { return ctxStub; }
   getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 600 }; }
+  get localName() { return this.tag; }
+  // scene-surface.ts builds its render buffer through canvas.ownerDocument.createElement.
+  get ownerDocument() { return document; }
+  // client/dom.ts requireQuery validates localName, so selector hits must carry the REAL tag the
+  // selector has in index.html; per-element caching keeps repeated queries referentially stable.
+  querySelector(selector) {
+    const cached = (this._queries ??= new Map());
+    if (!cached.has(selector)) cached.set(selector, new El(shimTagFor(selector)));
+    return cached.get(selector);
+  }
+}
+// The real index.html schema drives shim tags: requireElement/requireQuery (client/dom.ts) check
+// localName against the tag each id/data-selector actually has in the shipped document. Parsing
+// the document keeps this shim from rotting into another hardcoded allowlist.
+const indexHtml = readFileSync(new URL("../../client/index.html", import.meta.url), "utf8");
+const shimTagById = new Map();
+const shimTagByData = new Map();
+for (const chunk of indexHtml.split("<").slice(1)) {
+  const tagSource = chunk.split(">")[0];
+  const tag = /^[a-z0-9]+/.exec(tagSource)?.[0];
+  if (!tag) continue;
+  const id = /\bid="([^"]+)"/.exec(tagSource)?.[1];
+  if (id) shimTagById.set(id, tag);
+  for (const data of tagSource.matchAll(/\b(data-[a-z0-9-]+)/g)) shimTagByData.set(data[1], tag);
+}
+function shimTagFor(selector) {
+  if (selector.startsWith("#")) return shimTagById.get(selector.slice(1)) ?? "div";
+  const data = /^\[(data-[a-z0-9-]+)(?:=[^\]]*)?\]$/.exec(selector)?.[1];
+  if (data) return shimTagByData.get(data) ?? "div";
+  return "div";
 }
 const canvasEl = new El("canvas");
+canvasEl.id = "view";
 let drawImageCalls = 0;
 const drawn = [];
 const ctxStub = new Proxy({}, {
@@ -61,12 +153,37 @@ const ctxStub = new Proxy({}, {
 });
 const elements = new Map();
 globalThis.HTMLInputElement = El;
+// login-screen/player-menu guard delegated clicks with instanceof Element/HTMLButtonElement.
+globalThis.Element = El;
+globalThis.HTMLElement = El;
+globalThis.HTMLButtonElement = El;
+const documentListeners = {};
 globalThis.document = {
+  documentElement: new El("html"),
   getElementById(id) {
-    if (!elements.has(id)) elements.set(id, id === "view" ? canvasEl : new El());
+    if (!elements.has(id)) {
+      const element = id === "view" ? canvasEl : new El(shimTagById.get(id) ?? "div");
+      element.id ??= id;
+      elements.set(id, element);
+    }
     return elements.get(id);
   },
   activeElement: null,
+  // client/pointer.ts releases pressed pointers on visibilitychange through these.
+  // movementBlocked() (main.js) gates input on the page being visible AND focused; the probe
+  // drives a foreground page, so hasFocus mirrors a focused document.
+  hidden: false,
+  hasFocus: () => true,
+  addEventListener(type, fn) { (documentListeners[type] ??= []).push(fn); },
+  removeEventListener(type, fn) {
+    const list = documentListeners[type];
+    const index = list?.indexOf(fn) ?? -1;
+    if (index >= 0) list.splice(index, 1);
+  },
+  dispatchEvent(event) {
+    for (const fn of documentListeners[event.type] ?? []) fn(event);
+    return true;
+  },
   createElement(tag) { return new El(tag); },
   createTextNode(text) { return { textContent: text }; },
 };
@@ -74,6 +191,38 @@ const windowListeners = {};
 globalThis.window = {
   devicePixelRatio: 1, innerWidth: 800, innerHeight: 600,
   addEventListener(type, fn) { (windowListeners[type] ??= []).push(fn); },
+  removeEventListener(type, fn) {
+    const list = windowListeners[type];
+    const index = list?.indexOf(fn) ?? -1;
+    if (index >= 0) list.splice(index, 1);
+  },
+  // main.js's last statement dispatches CLIENT_READY_EVENT; the startup guard (startup-guard.ts)
+  // flips documentElement.dataset.clientState to "ready" through this synchronous delivery.
+  dispatchEvent(event) {
+    for (const fn of windowListeners[event.type] ?? []) fn(event);
+    return true;
+  },
+};
+globalThis.Event = class {
+  constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+};
+// Real browser delivery for canvas interaction (ADR-108): a mouseup/mousemove over the canvas
+// bubbles to the WINDOW listeners main.js uses for sprite-button activation and window drags, and
+// native CCtrlButton controls (shop buy/sell/close, inventory close, status, trade) activate only
+// when the full mousedown -> mouseup -> click trio lands on the same control. Rows, tabs and
+// scrollbars are not controls and stay bare clicks.
+const windowMouseUp = (point = {}) => {
+  for (const fn of windowListeners.mouseup ?? [])
+    fn({ button: 0, target: canvasEl, preventDefault() {}, stopPropagation() {}, ...point });
+};
+const canvasMouseMove = (point) => {
+  canvasEl.fire("mousemove", { ...point });
+  for (const fn of windowListeners.mousemove ?? []) fn({ ...point, target: canvasEl });
+};
+const clickControl = (point) => {
+  canvasEl.fire("mousedown", { ...point });
+  windowMouseUp(point);
+  canvasEl.fire("click", { ...point });
 };
 globalThis.performance = { now: () => Date.now() };
 const storage = new Map();
@@ -94,7 +243,9 @@ const STUB_MAP = {
     { name: "door", type: 2, x: 200, y: 181, toMapId: 1010000 },
   ],
   footholds: [{ id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, next: 0, prev: 0 }],
-  mobs: [], npcs: [],
+  // The real /api/map JSON lists its NPCs (webclient.ts mapPayload), and loadMap preloads their
+  // metadata from exactly this list; the stub carries the one template the NPC battery clicks.
+  mobs: [], npcs: [{ templateId: 2003, x: 300, y: 420, foothold: 32 }],
 };
 const STUB_ART = {
   backs: [{ path: "Map/Back/x.img/back/0", ox: 128, oy: 128, x: 0, y: 0, rx: 0, ry: 0, type: 0, cx: 0, cy: 0, a: 255, front: 0, flip: 0 }],
@@ -111,9 +262,12 @@ globalThis.fetch = async (url) => {
   let body = STUB_MAP;
   if (path === '/api/creation') {
     const make = (sets) => sets.map((set) => set.map((id) => ({ id, name: `option ${id}` })));
-    body = { male: make([[20000,20001,20002],[30030,30020,30000],[1040002,1040006,1040010],[1060002,1060006],[1072001,1072005],[1302000,1322005,1312004]]), female: make([[21000,21001,21002],[31000,31040,31054],[1041002,1041006,1041010,1041011],[1061002,1061008],[1072001,1072005],[1302000,1322005,1312004]]) };
+    // isCreationCatalog (ui-resource-validation.ts) also requires the WZ ForbiddenName list.
+    body = { forbidden: [], male: make([[20000,20001,20002],[30030,30020,30000],[1040002,1040006,1040010],[1060002,1060006],[1072001,1072005],[1302000,1322005,1312004]]), female: make([[21000,21001,21002],[31000,31040,31054],[1041002,1041006,1041010,1041011],[1061002,1061008],[1072001,1072005],[1302000,1322005,1312004]]) };
   } else if (path.endsWith("/art")) body = STUB_ART;
-  else if (path.startsWith("/api/npc/")) body = { templateId: 2003, actions: { stand: [{ path: "Npc/0002003.img/stand/0", delay: 1000, ox: 20, oy: 40 }] } };
+  // isNpcMetadata (entity-resource-validation.ts) requires the full record; the click rectangle is
+  // the server's own native dc* fallback (npcClickBounds, sprites.ts), not an invented hit box.
+  else if (path.startsWith("/api/npc/")) body = { templateId: 2003, name: "NPC", behavior: { movable: false, speak: [], extraActions: [] }, clickBounds: { left: -22, top: -65, right: 22, bottom: 0 }, actions: { stand: [{ path: "Npc/0002003.img/stand/0", delay: 1000, ox: 20, oy: 40 }] } };
   else if (path.startsWith("/api/mob/")) body = { templateId: 1210100, actions: { move: [{ path: "Mob/0121010.img/move/0", delay: 180, ox: 20, oy: 40 }] } };
   return { ok: true, status: 200, json: async () => body };
 };
@@ -131,7 +285,6 @@ globalThis.WebSocket = class {
 const intervals = [];
 globalThis.setInterval = (fn) => { intervals.push(fn); return intervals.length; };
 
-const { readFileSync } = await import("node:fs");
 const { runInThisContext } = await import("node:vm");
 Object.assign(globalThis, await import("../../client/motion.ts"));
 Object.assign(globalThis, await import("../../client/portals.ts"));
@@ -158,7 +311,40 @@ Object.assign(globalThis, await import("../../client/avatar-motion.ts"));
 Object.assign(globalThis, await import("../../client/posture.ts"));
 Object.assign(globalThis, await import("../../client/attack-timing.ts"));
 Object.assign(globalThis, await import("../../client/combat-assets.ts"));
-runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), "utf8").replace(/^import[\s\S]*?from "\.\/(?:combat-assets|posture|attack-timing|avatar-motion|faces|motion|audio|selection|creation|scene|statwindow|skills|jobs|recovery|testtools|temporarystats|basiccombat|portals|display|minimap|equipment|itemdialogs)\.mjs";\n/gm, "") + `
+// ADR-108 generic import shim: main.js's own top-level `import {a, b} from "./mod.ts"` lines are
+// stripped and each requested binding is exposed as a global from the REAL module - exactly the
+// free-identifier contract classic-script evaluation needs, for every module main.js actually
+// imports. The former hardcoded strip list only knew the .mjs generation and rotted with every
+// module split, which is why this probe was stuck while main.js moved on to ~90 typed modules.
+const mainUrl = new URL("../../client/main.js", import.meta.url);
+let mainSource = readFileSync(mainUrl, "utf8");
+const mainImports = [];
+mainSource = mainSource.replace(
+  /^import\s*\{([^}]*)\}\s*from\s*["'](\.\/[^"']+)["'];?[ \t]*\r?\n/gm,
+  (statement, names, specifier) => {
+    mainImports.push([names, specifier]);
+    // Blank the statement but keep its newlines so vm stack traces match client/main.js lines.
+    return statement.replace(/[^\n]/g, "");
+  },
+);
+if (/^import[\s{*]/m.test(mainSource))
+  throw new Error("client_probe: unrecognized import form in client/main.js");
+for (const [names, specifier] of mainImports) {
+  const module = await import(new URL(specifier, mainUrl).href);
+  for (const entry of names.split(",")) {
+    const name = entry.trim();
+    if (!name) continue;
+    const [exported, local = exported] = name.split(/\s+as\s+/).map((part) => part.trim());
+    if (!(exported in module))
+      throw new Error(`client_probe: ${specifier} does not export ${exported}`);
+    globalThis[local] = module[exported];
+  }
+}
+// index.html loads two ordered module entries: ./startup.ts (installs the startup guard, which
+// gates every login attempt through documentElement.dataset.clientState) and then ./main.js.
+// The probe reproduces that order; main.js's final dispatchEvent flips the guard to "ready".
+await import("../../client/startup.ts");
+runInThisContext(mainSource + `
 ;globalThis.clientProbe = {
   testToolsPanel, skillPanel, itemDialog, inventoryScrollbarGeometry, inventoryWindowAt, setInventoryScroll,
   wearItem, sourceItem, get inventory(){return inventory;}, get remoteUsers(){return users;},
@@ -168,8 +354,10 @@ runInThisContext(readFileSync(new URL("../../client/main.js", import.meta.url), 
   get picked() { return shopSellPick; },
   get dragging() { return shopDrag !== undefined || shopScrollDrag !== undefined; },
   get pressed() { return shopPressed; },
-  get stage() { return loginStage; },
-  get dialog() { return titleDialogOpen; },
+  // The typed login UI (login-screen.ts) owns title/selection state since its module round;
+  // main.js holds it as loginScreens, whose getters are the probe's observation points.
+  get stage() { return loginScreens.stage; },
+  get dialog() { return loginScreens.titleDialogOpen; },
   get inventoryOpen() { return inventoryOpen; },
   setFacts(id, facts) { itemInfo.set(id, facts); },
 };`, { filename: "client/main.js" });
@@ -224,7 +412,7 @@ if (!ws) throw new Error("main.js did not open a socket");
 
 const messages = [
   { t: "login", result: 0, worlds: [{ name: "Scania", unknownId: 0 }] },
-  { t: "characters", result: 0, characters: [{ id: 21, name: "Hero", level: 12, job: 0, hp: 50, maxHp: 50, mapId: 1000000 }] },
+  { t: "characters", result: 0, characters: [{ id: 21, name: "Hero", level: 12, job: 0, face: 20000, hair: 30000, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 200, mapId: 1000000, str: 4, dex: 4, int: 4, luk: 4, items: [] }] },
   { t: "field", mapId: 1000000, self: { characterId: 21, name: "Hero", level: 12, job: 0, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 200, mapId: 1000000, face: 20000 }, users: [], mobs: [], npcs: [] },
   { t: "user-enter", user: { characterId: 22, name: "Alt", face: 20000, avatarItems: [], x: 10, y: 20, action: 0, foothold: 0 } },
   { t: "user-move", characterId: 22, x: 30, y: 40, action: 0, foothold: 0 },
@@ -293,22 +481,32 @@ await new Promise((r) => setTimeout(r, 10));
 const later = elements.get("chat-lines").children.map((li) => li.textContent);
 console.log("find lines:", JSON.stringify(later.slice(-2)));
 
+// The transport battery above ends with disconnect/created/error on purpose, and every one of
+// those bumps mapGeneration (main.js's stale-map guard), which voids the first field's async
+// loadMap. A real reconnect re-enters the field, so the gameplay batteries do the same and wait
+// for the map JSON before clicking portals.
+ws.push({ t: "field", mapId: 1000000, self: { characterId: 21, name: "Hero", level: 12, job: 0, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 200, mapId: 1000000, face: 20000 }, users: [], mobs: [], npcs: [] });
+await new Promise((r) => setTimeout(r, 20));
+
 // The portal hit test, with the camera where main.js puts it: self at the centre of 800x600, then
 // clamped to the map's rectangle (the stub map is 1000x692, so x is clamped and y is too).
 const cameraX = Math.max(0, Math.min(1000 - 800, 0 - 800 / 2));
 const cameraY = Math.max(0, Math.min(692 - 600, 0 - 600 / 2));
 const doorX = 200 - cameraX;
 const doorY = 181 - cameraY;
-canvasEl.fire("mousemove", { clientX: doorX, clientY: doorY });
-console.log("cursor over door:", canvasEl.style.cursor, `(clicked ${doorX},${doorY})`);
+canvasMouseMove({ clientX: doorX, clientY: doorY });
 canvasEl.fire("click", { clientX: doorX, clientY: doorY });
-canvasEl.fire("mousemove", { clientX: 5, clientY: 5 });
-console.log("cursor off door:", canvasEl.style.cursor);
+canvasMouseMove({ clientX: 5, clientY: 5 });
 const last = sent[sent.length - 1];
 if (JSON.stringify(last) !== JSON.stringify({ t: "portal", name: "door" })) throw new Error(`no portal sent: ${JSON.stringify(last)}`);
 canvasEl.fire("click", { clientX: doorX, clientY: doorY });  // inside the 600 ms gate: must not send twice
 if (sent.filter((m) => m.t === "portal").length !== 1) throw new Error("the portal guard did not hold");
 console.log("portal click ok:", JSON.stringify(last));
+// A real server answers the portal request with the destination field, and portalPending (which
+// gates item use, attacks and further portals) only clears on that map change. Answer it the way
+// the wire does before the gameplay batteries continue.
+ws.push({ t: "field", mapId: 1010000, self: { characterId: 21, name: "Hero", level: 12, job: 0, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 200, mapId: 1010000, face: 20000 }, users: [], mobs: [], npcs: [] });
+await new Promise((r) => setTimeout(r, 20));
 if (elements.get("status").textContent === "" && !elements.get("status").innerHTML) console.log("note: status empty");
 console.log("status:", JSON.stringify(elements.get("status").textContent || elements.get("status").innerHTML));
 console.log("chat input placeholder:", JSON.stringify(elements.get("say").placeholder));
@@ -326,8 +524,11 @@ ws.push({ t: "user-move", characterId: 21, x: 0, y: 0, action: 0, foothold: 0 })
 const npcCameraX = Math.max(0, Math.min(1000 - 800, 0 - 400));
 const npcCameraY = Math.max(0, Math.min(692 - 600, 0 - 300));
 ws.push({ t: "npc-enter", npc: { npcId: 7, templateId: 2003, x: npcScreenX + npcCameraX, y: npcScreenY + npcCameraY, facing: 0 } });
-canvasEl.fire("mousemove", { clientX: npcScreenX, clientY: npcScreenY - 20 });
-if (canvasEl.style.cursor !== "pointer") throw new Error("the cursor should point at an NPC");
+// The hit rectangle comes from the NPC's OWN metadata (info.dc*): wait for the async load, then
+// hit-test through the click packet. 70f9405 restored the native arrow cursor, so hovering an NPC
+// no longer repaints a CSS pointer; the sent packet is the observable contract.
+await new Promise((r) => setTimeout(r, 20));
+canvasMouseMove({ clientX: npcScreenX, clientY: npcScreenY - 20 });
 canvasEl.fire("click", { clientX: npcScreenX, clientY: npcScreenY - 20 });
 const clickSent = sent[sent.length - 1];
 console.log("npc click:", JSON.stringify(clickSent));
@@ -354,7 +555,7 @@ await new Promise((r) => setTimeout(r, 10));
 // CLOSE stamp (188,9)-(220,24). The test clicks those exact window-local points.
 const shopPoint = (x, y) => ({ clientX: 196 + x, clientY: 154 + y, preventDefault() {} });
 canvasEl.fire("click", shopPoint(40, 80));                   // pick the first row
-canvasEl.fire("click", shopPoint(100, 40));                  // 사기 opens quantity
+clickControl(shopPoint(100, 40));                            // 사기 opens quantity
 assert.equal(clientProbe.itemDialog.open, true);
 elements.get("item-dialog-ok").fire("click");
 let lastShop = sent[sent.length - 1];
@@ -374,7 +575,7 @@ ws.push({ t: "shop-result", code: 0, message: "silent" });
 // The right pane starts on 장비; switch it to 소비 (second tab) to reach the potion in `inventory`.
 canvasEl.fire("click", shopPoint(279, 77));
 canvasEl.fire("click", shopPoint(280, 100));                 // first row of the sell pane
-canvasEl.fire("click", shopPoint(306, 40));                  // 팔기 opens total/1/total
+clickControl(shopPoint(306, 40));                            // 팔기 opens total/1/total
 elements.get("item-dialog-ok").fire("click");
 lastShop = sent[sent.length - 1];
 console.log("sell:", JSON.stringify(lastShop));
@@ -383,7 +584,7 @@ if (lastShop.t !== "shop" || lastShop.action !== "sell" || lastShop.itemId !== 2
 }
 ws.push({ t: "shop-result", code: 2, message: "shop result 2 (notEnoughMesos)" });
 await new Promise((r) => setTimeout(r, 10));
-canvasEl.fire("click", shopPoint(204, 16));                  // CLOSE stamp
+clickControl(shopPoint(204, 16));                            // CLOSE stamp
 lastShop = sent[sent.length - 1];
 console.log("shop close:", JSON.stringify(lastShop));
 if (lastShop.t !== "shop" || lastShop.action !== "close") throw new Error("CLOSE must send shop close");
@@ -391,7 +592,13 @@ if (lastShop.t !== "shop" || lastShop.action !== "close") throw new Error("CLOSE
 ws.push({ t: "npc-say", npcId: 7, message: "안녕하세요" });
 await new Promise((r) => setTimeout(r, 10));
 console.log("dialogue:", JSON.stringify(elements.get("dialogue-text").textContent), "hidden:", elements.get("dialogue").classList.contains("hidden"));
-elements.get("dialogue-ok").fire("click");
+// npcdialogue.ts builds the answer buttons into #dialogue-controls (no static ids) and clears
+// them per dialogue; for a plain say the spec list is [close=255, primary OK=1] (the native
+// 0xFF close vs the answer-1 OK, npcdialogue-layout.ts dialogueButtons). A programmatic click
+// carries detail 0 - the browser's own element.click() semantics the released-gate accepts.
+elements.get("dialogue-controls").children
+  .find((b) => b.dataset.dialogueKey === "primary")
+  .fire("click");
 console.log("talk ok:", JSON.stringify(sent[sent.length - 1]));
 if (sent[sent.length - 1].t !== "talk" || sent[sent.length - 1].answer !== 1) throw new Error("確定 must send answer 1");
 if (!elements.get("dialogue").classList.contains("hidden")) throw new Error("the dialogue should close on 確定");
@@ -424,13 +631,19 @@ canvasEl.fire("dblclick", surface(46, 120));
 const use = sent[sent.length - 1];
 console.log("use sent:", JSON.stringify(use));
 if (use.t !== "use" || use.slot !== 1 || use.itemId !== 2000000) throw new Error(`bad use: ${JSON.stringify(use)}`);
-// Slot 4 holds the map-item sender (2030004), also usable from the USE tab.
+// Slot 4 holds the map-item sender (2030004), also usable from the USE tab. useBagItem keeps the
+// native 200ms consecutive-use gate (nextBagUseAt), so the battery waits it out and then asserts
+// the second use really is slot 4 - the old bare log silently showed the stale slot-1 packet.
+await new Promise((r) => setTimeout(r, 210));
 canvasEl.fire("dblclick", surface(24 + 6 + 3 * 35 + 16, 120));
-console.log("map item sent:", JSON.stringify(sent[sent.length - 1]));
+const mapItemUse = sent[sent.length - 1];
+console.log("map item sent:", JSON.stringify(mapItemUse));
+if (mapItemUse.t !== "use" || mapItemUse.slot !== 4 || mapItemUse.itemId !== 2030004)
+  throw new Error(`bad map item use: ${JSON.stringify(mapItemUse)}`);
 // Tab 2 (소비) is the second box: x 36..70, y 52..76.
 canvasEl.fire("click", surface(24 + 53, 24 + 64));
 // The CLOSE pentagon at the top right closes it again.
-canvasEl.fire("click", surface(24 + 130, 24 + 14));
+clickControl(surface(24 + 130, 24 + 14));
 console.log("closed:", (elements.get("inventory")) === undefined ? "no DOM panel" : "unexpected");
 // The window was closed by the CLOSE click above; open it again so the frames draw it.
 for (const fn of windowListeners.keydown) fn({ key: "i", preventDefault() {} });
@@ -450,7 +663,10 @@ const statSelf = { ...messages.findLast(m => m.t === "self").self, str:12,dex:5,
 ws.push({t:"self",self:statSelf});
 for(const fn of windowListeners.keydown)fn({key:"s",preventDefault(){}});
 await render();assert.equal(elements.get("stat-window").classList.contains("hidden"),false);
-assert.equal(elements.get("ap-maxHp").disabled,true);assert.equal(elements.get("ap-maxMp").disabled,true);assert.equal(elements.get("stat-detail").disabled,true);
+// sub_4F3210 enables the SIX AP buttons (ids 2000..2005: STR/DEX/INT/LUK/HP/MP) by AP!=0; the
+// pending/500ms gates live in the sender (sub_55CF60), never in the button art (FINDINGS §4.42).
+// stat-detail stays disabled until the native basis (character-stats) arrives.
+assert.equal(elements.get("ap-maxHp").disabled,false);assert.equal(elements.get("ap-maxMp").disabled,false);assert.equal(elements.get("stat-detail").disabled,true);
 assert.equal(elements.get("ap-str").disabled,false);
 for(const fn of windowListeners.keydown)fn({key:"s",repeat:true,preventDefault(){}});
 assert.equal(elements.get("stat-window").classList.contains("hidden"),false,"key repeat must not flap the window");
@@ -469,6 +685,12 @@ elements.get("stat-body").fire("mousedown",surface(100,90));
 for(const fn of windowListeners.mousemove??[])fn(surface(1000,1000));
 for(const fn of windowListeners.mouseup??[])fn({});
 assert.deepEqual(JSON.parse(storage.get("kms111.statAt")),{x:624,y:285});
+// The frame section above left the inventory open, and main.js's Escape walks the native cascade
+// (drag -> inventory -> equip -> stat -> skill -> shop -> dialogue -> system), one window a press.
+assert.equal(clientProbe.inventoryOpen,true,"the frame battery leaves the bag open");
+for(const fn of windowListeners.keydown)fn({key:"Escape",preventDefault(){}});
+assert.equal(clientProbe.inventoryOpen,false,"the first Escape closes the bag, not the stat sheet");
+assert.equal(elements.get("stat-window").classList.contains("hidden"),false);
 for(const fn of windowListeners.keydown)fn({key:"Escape",preventDefault(){}});
 assert.equal(elements.get("stat-window").classList.contains("hidden"),true);
 console.log("STAT/AP REGRESSIONS OK");
@@ -499,12 +721,12 @@ assert.equal(clientProbe.scroll.buy, 5);
 canvasEl.fire("click", shopPoint(195, 74));
 const thumbY = 68 + 12 + clientProbe.shopScrollbarGeometry("buy").offset + 6;
 canvasEl.fire("mousedown", shopPoint(195, thumbY));
-canvasEl.fire("mousemove", shopPoint(195, 268));
-canvasEl.fire("mouseup", shopPoint(195, 268));
+canvasMouseMove(shopPoint(195, 268));
+windowMouseUp(shopPoint(195, 268));
 canvasEl.fire("click", shopPoint(195, 268)); // native click following a drag is suppressed
 assert.equal(clientProbe.scroll.buy, 6);
 canvasEl.fire("click", shopPoint(40, 80));
-canvasEl.fire("click", shopPoint(100, 40));
+clickControl(shopPoint(100, 40));
 elements.get("item-dialog-ok").fire("click");
 ws.push({ t: "shop-result", code: 0, message: "silent" });
 assert.equal(sent.at(-1).row, 6); // visible row zero refers to stock row six
@@ -517,12 +739,12 @@ ws.push(inventoryMessage([items[0]]));
 assert.equal(clientProbe.scroll.sell, 0);
 assert.equal(clientProbe.picked, undefined);
 const before = sent.length;
-canvasEl.fire("click", shopPoint(306, 40));
+clickControl(shopPoint(306, 40));
 assert.equal(sent.length, before);
 // A drag released outside the canvas must finish, persist and never leave the button depressed.
 canvasEl.fire("mousedown", shopPoint(20, 20));
-canvasEl.fire("mousemove", shopPoint(30, 30));
-for (const handler of windowListeners.mouseup) handler({});
+canvasMouseMove(shopPoint(30, 30));
+windowMouseUp(shopPoint(30, 30));
 assert.equal(clientProbe.dragging, false);
 assert.deepEqual(JSON.parse(storage.get("kms111.shopAt")), { x: 206, y: 164 });
 // ADR-064 SOURCE ONLY: native tooltip parsing is separate from dialogue/legacy compact wrapping.
@@ -573,8 +795,12 @@ elements.get("world-connect").fire("click");
 assert.deepEqual(sent.at(-1), { t: "world", index: 0 });
 elements.get("world-connect").fire("click");
 assert.equal(sent.length, sentAt + 1, "pending double-submit is ignored");
+// readLoginCharacters (login-data.ts) validates the FULL CharacterSummary the server sends
+// (webclient.ts summaryOf): str/dex/int/luk/face/hair are required, and a malformed entry blocks
+// the whole list, so the fixture carries the real wire shape.
 activeSocket.push({ t: "characters", result: 0, characters: [
-  { id: 21, name: "Hero", level: 2, job: 0, items: [] }, { id: 22, name: "Alt", level: 1, job: 0, items: [] },
+  { id: 21, name: "Hero", level: 2, job: 0, face: 20000, hair: 30000, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },
+  { id: 22, name: "Alt", level: 1, job: 0, face: 21000, hair: 31000, hp: 40, maxHp: 40, mp: 20, maxMp: 20, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },
 ] });
 await render();
 assert.ok(stamp("UI/Login.img/CharSelect/menu", 161, 85));
@@ -593,7 +819,10 @@ console.log("SELECTION REGRESSIONS OK");
 
 const tick = (ms=0) => new Promise((resolve)=>setTimeout(resolve,ms));
 // Real page/controller, native canvas and hit targets; no socket/network stub may create implicitly.
-activeSocket.push({ t: 'characters', result: 0, characters: [{id:21,name:'Hero',items:[]},{id:22,name:'Alt',items:[]}] });
+activeSocket.push({ t: 'characters', result: 0, characters: [
+  { id: 21, name: 'Hero', level: 2, job: 0, face: 20000, hair: 30000, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },
+  { id: 22, name: 'Alt', level: 1, job: 0, face: 21000, hair: 31000, hp: 40, maxHp: 40, mp: 20, maxMp: 20, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },
+] });
 elements.get('character-new').fire('click'); await tick(); await tick();
 assert.equal(elements.get('character-dialogs').classList.contains('hidden'), false);
 assert.equal(elements.get('new-character').classList.contains('hidden'), true, 'native naming notice precedes the dialog');
@@ -618,7 +847,7 @@ elements.get('roll-dice').fire('click'); await tick(400); await render();
 elements.get('create').fire('click'); elements.get('create').fire('click');
 assert.equal(sent.at(-1).t,'create'); assert.equal(sent.at(-1).name,'ChangedHero'); assert.equal(sent.at(-1).appearance[0],20002);
 assert.equal(sent.at(-1).appearance.slice(6).reduce((a,b)=>a+b,0),25);
-activeSocket.push({t:'characters',result:0,characters:[{id:21,name:'Hero',items:[]},{id:22,name:'Alt',items:[]},{id:23,name:'ChangedHero',items:[]}]});
+activeSocket.push({t:'characters',result:0,characters:[{ id: 21, name: 'Hero', level: 2, job: 0, face: 20000, hair: 30000, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },{ id: 22, name: 'Alt', level: 1, job: 0, face: 21000, hair: 31000, hp: 40, maxHp: 40, mp: 20, maxMp: 20, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },{ id: 23, name: 'ChangedHero', level: 1, job: 0, face: 20002, hair: 30000, hp: 40, maxHp: 40, mp: 20, maxMp: 20, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] }]});
 activeSocket.push({t:'created',ok:true,name:'ChangedHero',id:23});
 assert.equal(elements.get('character-dialogs').classList.contains('hidden'),true);
 assert.equal(elements.get('character-new').disabled,true,'three slots are full');
@@ -628,7 +857,7 @@ elements.get('character-delete').fire('click'); await render();
 assert.ok(stamp('UI/Basic.img/YesNo/backgrnd',268,234));
 elements.get('native-yes').fire('click'); elements.get('native-yes').fire('click');
 assert.equal(sent.length,sentAt+1); assert.deepEqual(sent.at(-1),{t:'delete-character',id:23,confirmed:true});
-activeSocket.push({t:'characters',result:0,characters:[{id:21,name:'Hero',items:[]},{id:22,name:'Alt',items:[]}]}); activeSocket.push({t:'deleted',id:23,ok:true});
+activeSocket.push({t:'characters',result:0,characters:[{ id: 21, name: 'Hero', level: 2, job: 0, face: 20000, hair: 30000, hp: 50, maxHp: 50, mp: 30, maxMp: 30, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] },{ id: 22, name: 'Alt', level: 1, job: 0, face: 21000, hair: 31000, hp: 40, maxHp: 40, mp: 20, maxMp: 20, exp: 0, mesos: 0, mapId: 0, str: 4, dex: 4, int: 4, luk: 4, items: [] }]}); activeSocket.push({t:'deleted',id:23,ok:true});
 assert.equal(elements.get('character-dialogs').classList.contains('hidden'),true); assert.equal(elements.get('character-new').disabled,false);
 console.log('NATIVE CREATION/DELETION REGRESSIONS OK');
 
@@ -707,3 +936,6 @@ elements.get("qa-confirm").checked=true;elements.get("qa-confirm").fire("change"
 assert.equal(elements.get("qa-apply").disabled,false);
 clientProbe.testToolsPanel.close();
 console.log("RECOVERY / EXPLICIT TEST TOOL REGRESSION SOURCES OK");
+// The startup guard arms a real 15s timeout timer; every regression above has already run
+// synchronously, so exit explicitly instead of idling until that timer fires.
+process.exit(0);

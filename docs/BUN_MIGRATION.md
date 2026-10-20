@@ -1,8 +1,12 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-2026-10-19。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+2026-10-20。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：原社交指令鏈與名冊六格（ADR-090）
+## 最新增量：probe/typed/canvas 家族清零與 client_probe 全鏈復活（ADR-108）
+
+`server/scripts/client_probe.mjs` 自 typed 模組化後已死（hardcode 11 個 `.mjs` strip，與 ~90 TS 現況脫節；自稱 Historical NOT executed）。本輪以**通用 import shim**（逐條 `import {a} from "./mod.ts"` 真 import 並掛 `globalThis`）使其評估**真實 typed main.js**，並補足 `Element.localName`/`ownerDocument`/`closest`/`matches`/`before`/`documentElement`/`hasFocus`/`dispatchEvent` 與事件 bubbling 等 DOM 最小契約；同時修復 **`client/main.js:834` 真產品 bug**（`case "user-move"` 用裸 `now` 而未宣告，bebb3009 引入，遠端路徑 ReferenceError）與八項真 Chromium 超時（`{ timeout: 60000 }`）及 `server/scripts/browser.ts` 啟動期 SIGSEGV 有界重試。**完整 1213 pass / 0 fail**（142 files），對 ADR-107 1205/8/2 清掉最後 8 fail/2 errors，43 項歷史失敗全數結案。`client_probe.mjs` 仍為 `.mjs`（node:vm），但其覆蓋的 login→field→portal→shop→dialogue→inventory→stat→creation 全鏈現已與 typed client 一致並通過；**main.js 仍未完成 TS 遷移**。本輪結果、每步中間失敗與政策見 ADR-108。
+
+## 前輪增量：原社交指令鏈與名冊六格（ADR-090）
 
 新增strict `social-commands`／`party-state`／`party-invitation`／`chat-entry`及`server/src/net/chat-input.ts`，browser與bridge共用同一指令路由；
 `readPartyTable`改為固定六格，`PARTY_MAX_MEMBERS`移到client純模块由protocol再匯出。未關strict／erasableSyntaxOnly，未新增依賴，未把JS只更名冒充遷移。
@@ -211,16 +215,17 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 ## 尚未完成的原目標
 
 1. client/main.js 的真正實作型別與合理分層，不能只 rename 或用 any 包住。
-2. 剩餘 **1 支 server/scripts/client_probe.mjs** 的 Bun runner、型別與呼叫鏈遷移；其歷史場景不能因其他工具通過而宣稱已完成。
+2. `server/scripts/client_probe.mjs` 本輪已復活為真實 typed 呼叫鏈的離線 VM 探針（ADR-108），但仍為 `.mjs` node:vm 形式；其歷史 `709 行` 標籤不再代表現況，見 ADR-108。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
-4. 追查全部 **44 項失敗**，分清 fixture、Bun 相容差異與真實行為，按原證修正；不能只讓 CI 表面變綠。
+4. **44 項失敗已於 ADR-108 全數結案（1213 pass / 0 fail）**；本節保留歷史清單供追溯，不再代表現況失敗。
 5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
 
-### 尚未遷移的工具（現僅餘這一支）
+### 尚未遷移的工具（現僅餘 main.js 與 client_probe.mjs 的形式遷移）
 
-- server/scripts/client_probe.mjs（709行；歷史用途，勿按預設帳密／port執行）
+- client/main.js（仍為 JS/TS 混合入口，未完成分層與型別化）
+- server/scripts/client_probe.mjs（ADR-108 已復活並通過全鏈，仍為 `.mjs`；`709 行`為歷史標籤）
 
-### 尚未通過的 44 個案例（保留同檔重複標題）
+### 已通過的 44 個案例（ADR-108 結案，保留歷史標題供追溯）
 
 - server/test/client-session.test.ts — coalesced initial field/pool/stat packets preserve wire order, mobs and current EXP denominator
 - server/test/client-ui.test.ts — browser canvas UI: title login, shop buy/sell, scroll, drag, inventory updates and tooltips

@@ -481,6 +481,9 @@ export function loginScreen(options: LoginScreenOptions) {
     get stage() {
       return stage;
     },
+    get titleDialogOpen() {
+      return dialogOpen;
+    },
     get loginPending() {
       return loginPending;
     },

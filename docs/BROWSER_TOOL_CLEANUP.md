@@ -1,6 +1,6 @@
 # 顯示／影像快取與診斷工具整理（2026-10-18，ADR-080）
 
-本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。目前僅餘 main.js 與 client_probe.mjs 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
+本輪續作：frame／play 已真正遷為 strict TS／Bun，刪除舊 shim／直接封包工具，詳 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。ADR-108 起 client_probe.mjs 已復活為真 typed 呼叫鏈探針並通過（仍為 `.mjs`）；僅餘 main.js 尚未完成實作型別遷移；歷史數字／PID不代表當前 LIVE。
 
 > 現行尺寸／遠近／轉場與游標DPR政策已由ADR-084更新，見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
 > 下文舊fit／native／降採樣、固定backing或CSS游標縮圖的敘述保留歷史時點，不是目前可用選項。

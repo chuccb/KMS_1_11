@@ -825,6 +825,10 @@ function handle(message) {
         }
         return;
       }
+      // bebb3009 switched this beginPath to the per-message `now` (the pattern mob-move uses) but
+      // never declared it in this case block: a ReferenceError broke remote user paths in the
+      // browser. The revived client_probe REMOTE PATH battery caught it (ADR-108).
+      const now = performance.now();
       const user = users.get(String(message.characterId));
       if (user) {
         // The path's action bit is authoritative: moving backwards under force must not turn the face.

@@ -75,230 +75,252 @@ async function withBrowser(
   }
 }
 
-test("actual HTML and the complete source and bundled module graphs finish startup without a game connection", async () => {
-  const build = Bun.spawn([process.execPath, "tools/build-client.ts"], {
-    cwd: resolve(import.meta.dirname, "../.."),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [status, output, error] = await Promise.all([
-    build.exited,
-    new Response(build.stdout).text(),
-    new Response(build.stderr).text(),
-  ]);
-  assert.equal(status, 0, output + error);
-  for (const root of [
-    resolve(import.meta.dirname, "../../client"),
-    resolve(import.meta.dirname, "../../dist/client"),
-  ]) {
-    await withBrowser({ root }, async (page, errors, messages) => {
-      // Readiness alone is insufficient: exercise the first real rendering callbacks as well.
-      await page.evaluate(
-        () =>
-          new Promise<void>((done) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => done())),
-          ),
-      );
-      assert.equal(
-        await page.locator("#stat-body").evaluate((element) => element.localName),
-        "button",
-      );
-      assert.equal(await page.locator("#startup-error").isVisible(), false);
-      assert.equal(await page.locator("#login").isDisabled(), false);
-      const modes = page.locator("#camera-mode");
-      assert.equal(await modes.getAttribute("aria-label"), "鏡頭模式（瀏覽器自訂）");
-      assert.deepEqual(
-        await modes
-          .locator("option")
-          .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
-        CAMERA_MODES.map((mode) => mode.id),
-      );
-      assert.equal(
-        await modes.evaluate((select) => getComputedStyle(select).pointerEvents),
-        "auto",
-        "header pointer-events:none must not make the camera select unclickable",
-      );
-      for (const { id } of CAMERA_MODES) {
-        await modes.selectOption(id, { force: true });
-        assert.equal(await modes.inputValue(), id);
-        assert.equal(
-          await page.evaluate((key) => localStorage.getItem(key), CAMERA_STORAGE_KEY),
-          id,
-        );
-        assert.ok((await modes.getAttribute("title"))?.length);
-      }
-      assert.equal(
-        await page.locator("#inv-toggle").count(),
-        0,
-        "no duplicate header inventory button",
-      );
-      // Header is intentionally hidden at title. Reveal ONLY this DOM component for interaction
-      // tests, not a field/login/actor state. Production shows the identical header in game.
-      await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
-      await page.locator("#motion-lab summary").click();
-      const step = page.locator("#physics-step"),
-        presentation = page.locator("#presentation-mode");
-      assert.deepEqual(
-        await step
-          .locator("option")
-          .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
-        PHYSICS_STEPS.map(String),
-      );
-      for (const ms of PHYSICS_STEPS) {
-        await step.selectOption(String(ms));
-        assert.equal(
-          await page.evaluate((key) => localStorage.getItem(key), MOTION_STEP_STORAGE_KEY),
-          String(ms),
-        );
-      }
-      await step.selectOption("8");
-      await presentation.selectOption("direct");
-      assert.match(await page.locator("#motion-status").innerText(), /8ms.*不加插值延遲/);
-      assert.equal(
-        await page.evaluate((key) => localStorage.getItem(key), MOTION_PRESENTATION_STORAGE_KEY),
-        "direct",
-      );
-      // The popup must remain within the viewport on the 800px game-sized window as well.
-      await page.setViewportSize({ width: 800, height: 600 });
-      const popup = await page.locator(".motion-lab-panel").boundingBox();
-      assert.ok(popup && popup.x >= 0 && popup.x + popup.width <= 800);
-      // A page-only preference reload, not login/field entry/character input.
-      await page.reload({ waitUntil: "load" });
-      await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
-      assert.equal(await modes.inputValue(), "fixed");
-      assert.equal(await step.inputValue(), "8");
-      assert.equal(await presentation.inputValue(), "direct");
-      await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
-      await page.locator("#motion-lab summary").click();
-      await page.locator("#motion-reset").click();
-      assert.equal(await step.inputValue(), "30");
-      assert.equal(await presentation.inputValue(), "interpolate");
-      assert.equal(
-        await modes.inputValue(),
-        "fixed",
-        "resetting motion must not overwrite camera preference",
-      );
-      await step.press("Escape");
-      assert.equal(
-        await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
-        false,
-      );
-      assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
-      await page.locator("#motion-lab summary").click();
-      await page.locator("#camera-recenter").click();
-      assert.equal(
-        await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
-        false,
-        "outside pointer closes settings without leaking a stale input lock",
-      );
-      await page.locator("#camera-recenter").evaluate((button) => {
-        if (!(button instanceof HTMLButtonElement)) throw new Error("Expected camera button");
-        button.click();
-      });
-      assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
-      await page.evaluate((key) => localStorage.setItem(key, "corrupt-mode"), CAMERA_STORAGE_KEY);
-      await page.reload({ waitUntil: "load" });
-      await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
-      assert.equal(await modes.inputValue(), "smooth");
-      assert.deepEqual(messages, []);
-      assert.deepEqual(errors, []);
+test(
+  "actual HTML and the complete source and bundled module graphs finish startup without a game connection",
+  // A real client build plus real Chromium startup: bun's 5s unit-test default does not fit,
+  // and an abort mid-launch cascades "Target closed" into neighboring browser tests.
+  { timeout: 60000 },
+  async () => {
+    const build = Bun.spawn([process.execPath, "tools/build-client.ts"], {
+      cwd: resolve(import.meta.dirname, "../.."),
+      stdout: "pipe",
+      stderr: "pipe",
     });
-  }
-});
+    const [status, output, error] = await Promise.all([
+      build.exited,
+      new Response(build.stdout).text(),
+      new Response(build.stderr).text(),
+    ]);
+    assert.equal(status, 0, output + error);
+    for (const root of [
+      resolve(import.meta.dirname, "../../client"),
+      resolve(import.meta.dirname, "../../dist/client"),
+    ]) {
+      await withBrowser({ root }, async (page, errors, messages) => {
+        // Readiness alone is insufficient: exercise the first real rendering callbacks as well.
+        await page.evaluate(
+          () =>
+            new Promise<void>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done())),
+            ),
+        );
+        assert.equal(
+          await page.locator("#stat-body").evaluate((element) => element.localName),
+          "button",
+        );
+        assert.equal(await page.locator("#startup-error").isVisible(), false);
+        assert.equal(await page.locator("#login").isDisabled(), false);
+        const modes = page.locator("#camera-mode");
+        assert.equal(await modes.getAttribute("aria-label"), "鏡頭模式（瀏覽器自訂）");
+        assert.deepEqual(
+          await modes
+            .locator("option")
+            .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
+          CAMERA_MODES.map((mode) => mode.id),
+        );
+        assert.equal(
+          await modes.evaluate((select) => getComputedStyle(select).pointerEvents),
+          "auto",
+          "header pointer-events:none must not make the camera select unclickable",
+        );
+        for (const { id } of CAMERA_MODES) {
+          await modes.selectOption(id, { force: true });
+          assert.equal(await modes.inputValue(), id);
+          assert.equal(
+            await page.evaluate((key) => localStorage.getItem(key), CAMERA_STORAGE_KEY),
+            id,
+          );
+          assert.ok((await modes.getAttribute("title"))?.length);
+        }
+        assert.equal(
+          await page.locator("#inv-toggle").count(),
+          0,
+          "no duplicate header inventory button",
+        );
+        // Header is intentionally hidden at title. Reveal ONLY this DOM component for interaction
+        // tests, not a field/login/actor state. Production shows the identical header in game.
+        await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
+        await page.locator("#motion-lab summary").click();
+        const step = page.locator("#physics-step"),
+          presentation = page.locator("#presentation-mode");
+        assert.deepEqual(
+          await step
+            .locator("option")
+            .evaluateAll((options) => options.map((option) => option.getAttribute("value"))),
+          PHYSICS_STEPS.map(String),
+        );
+        for (const ms of PHYSICS_STEPS) {
+          await step.selectOption(String(ms));
+          assert.equal(
+            await page.evaluate((key) => localStorage.getItem(key), MOTION_STEP_STORAGE_KEY),
+            String(ms),
+          );
+        }
+        await step.selectOption("8");
+        await presentation.selectOption("direct");
+        assert.match(await page.locator("#motion-status").innerText(), /8ms.*不加插值延遲/);
+        assert.equal(
+          await page.evaluate((key) => localStorage.getItem(key), MOTION_PRESENTATION_STORAGE_KEY),
+          "direct",
+        );
+        // The popup must remain within the viewport on the 800px game-sized window as well.
+        await page.setViewportSize({ width: 800, height: 600 });
+        const popup = await page.locator(".motion-lab-panel").boundingBox();
+        assert.ok(popup && popup.x >= 0 && popup.x + popup.width <= 800);
+        // A page-only preference reload, not login/field entry/character input.
+        await page.reload({ waitUntil: "load" });
+        await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
+        assert.equal(await modes.inputValue(), "fixed");
+        assert.equal(await step.inputValue(), "8");
+        assert.equal(await presentation.inputValue(), "direct");
+        await page.addStyleTag({ content: "#bar.hidden { display: flex !important; }" });
+        await page.locator("#motion-lab summary").click();
+        await page.locator("#motion-reset").click();
+        assert.equal(await step.inputValue(), "30");
+        assert.equal(await presentation.inputValue(), "interpolate");
+        assert.equal(
+          await modes.inputValue(),
+          "fixed",
+          "resetting motion must not overwrite camera preference",
+        );
+        await step.press("Escape");
+        assert.equal(
+          await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
+          false,
+        );
+        assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
+        await page.locator("#motion-lab summary").click();
+        await page.locator("#camera-recenter").click();
+        assert.equal(
+          await page.locator("#motion-lab").evaluate((el) => el.hasAttribute("open")),
+          false,
+          "outside pointer closes settings without leaking a stale input lock",
+        );
+        await page.locator("#camera-recenter").evaluate((button) => {
+          if (!(button instanceof HTMLButtonElement)) throw new Error("Expected camera button");
+          button.click();
+        });
+        assert.equal(await page.evaluate(() => document.activeElement?.id), "view");
+        await page.evaluate((key) => localStorage.setItem(key, "corrupt-mode"), CAMERA_STORAGE_KEY);
+        await page.reload({ waitUntil: "load" });
+        await page.waitForFunction(() => document.documentElement.dataset.clientState === "ready");
+        assert.equal(await modes.inputValue(), "smooth");
+        assert.deepEqual(messages, []);
+        assert.deepEqual(errors, []);
+      });
+    }
+  },
+);
 
-test("login click and Enter reach only an intercepted mock transport, show refusal and allow retry", async () => {
-  await withBrowser({}, async (page, errors, messages) => {
-    await page.locator("#title-continue").click();
-    await page.locator("#user").fill("browser-fixture-only");
-    await page.locator("#pass").fill("mock-only");
-    await page.locator("#login").click();
-    await page.waitForFunction(() =>
-      document.getElementById("status")?.textContent?.includes("結果 5"),
-    );
-    assert.equal(messages.length, 1);
-    assert.equal(await page.locator("#login").isDisabled(), false);
-    assert.equal(await page.locator("#pass").isDisabled(), false);
-    await page.locator("#pass").press("Enter");
-    await page.waitForFunction(
-      () =>
-        document.getElementById("login") instanceof HTMLButtonElement &&
-        !(document.getElementById("login") as HTMLButtonElement).disabled,
-    );
-    assert.equal(messages.length, 2);
-    assert.deepEqual(errors, []);
-    assert.equal(await page.locator("#startup-error").isVisible(), false);
-  });
-});
+test(
+  "login click and Enter reach only an intercepted mock transport, show refusal and allow retry",
+  { timeout: 60000 },
+  async () => {
+    await withBrowser({}, async (page, errors, messages) => {
+      await page.locator("#title-continue").click();
+      await page.locator("#user").fill("browser-fixture-only");
+      await page.locator("#pass").fill("mock-only");
+      await page.locator("#login").click();
+      await page.waitForFunction(() =>
+        document.getElementById("status")?.textContent?.includes("結果 5"),
+      );
+      assert.equal(messages.length, 1);
+      assert.equal(await page.locator("#login").isDisabled(), false);
+      assert.equal(await page.locator("#pass").isDisabled(), false);
+      await page.locator("#pass").press("Enter");
+      await page.waitForFunction(
+        () =>
+          document.getElementById("login") instanceof HTMLButtonElement &&
+          !(document.getElementById("login") as HTMLButtonElement).disabled,
+      );
+      assert.equal(messages.length, 2);
+      assert.deepEqual(errors, []);
+      assert.equal(await page.locator("#startup-error").isVisible(), false);
+    });
+  },
+);
 
-test("the original stat-body tag regression is caught during actual module evaluation, not hidden by parser success", async () => {
-  await withBrowser(
-    {
-      state: "failed",
-      async beforeLoad(page) {
-        await page.addInitScript(() => {
-          let attempts = 0;
-          Object.defineProperty(window, "startupSocketAttempts", { get: () => attempts });
-          window.WebSocket = new Proxy(window.WebSocket, {
-            construct(target, args) {
-              attempts++;
-              return Reflect.construct(target, args);
-            },
+test(
+  "the original stat-body tag regression is caught during actual module evaluation, not hidden by parser success",
+  { timeout: 60000 },
+  async () => {
+    await withBrowser(
+      {
+        state: "failed",
+        async beforeLoad(page) {
+          await page.addInitScript(() => {
+            let attempts = 0;
+            Object.defineProperty(window, "startupSocketAttempts", { get: () => attempts });
+            window.WebSocket = new Proxy(window.WebSocket, {
+              construct(target, args) {
+                attempts++;
+                return Reflect.construct(target, args);
+              },
+            });
           });
-        });
-        await page.route("**/statwindow.ts", async (route) => {
-          const response = await route.fetch();
-          const original = await response.text();
-          const mutant = original.replaceAll(
-            'requireElement("stat-body", "button")',
-            'requireElement("stat-body", "div")',
-          );
-          assert.notEqual(
-            mutant,
-            original,
-            "fault injection must really restore the erroneous tag contract",
-          );
-          await route.fulfill({ response, body: mutant });
-        });
+          await page.route("**/statwindow.ts", async (route) => {
+            const response = await route.fetch();
+            const original = await response.text();
+            const mutant = original.replaceAll(
+              'requireElement("stat-body", "button")',
+              'requireElement("stat-body", "div")',
+            );
+            assert.notEqual(
+              mutant,
+              original,
+              "fault injection must really restore the erroneous tag contract",
+            );
+            await route.fulfill({ response, body: mutant });
+          });
+        },
       },
-    },
-    async (page, errors, messages) => {
-      assert.ok(errors.some((message) => message.includes("Expected <div> for #stat-body")));
-      assert.match(
-        await page.locator("#startup-error-message").innerText(),
-        /Expected <div> for #stat-body/,
-      );
-      assert.equal(await page.locator("#startup-error").isVisible(), true);
-      assert.equal(await page.locator("#login").isDisabled(), true);
-      await page
-        .locator("#pass")
-        .evaluate((input) =>
-          input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+      async (page, errors, messages) => {
+        assert.ok(errors.some((message) => message.includes("Expected <div> for #stat-body")));
+        assert.match(
+          await page.locator("#startup-error-message").innerText(),
+          /Expected <div> for #stat-body/,
         );
-      assert.equal(
-        await page.evaluate(() => Reflect.get(window, "startupSocketAttempts")),
-        0,
-        "Enter must not bypass the failed-startup authentication guard",
-      );
-      assert.deepEqual(messages, []);
-    },
-  );
-});
+        assert.equal(await page.locator("#startup-error").isVisible(), true);
+        assert.equal(await page.locator("#login").isDisabled(), true);
+        await page
+          .locator("#pass")
+          .evaluate((input) =>
+            input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+          );
+        assert.equal(
+          await page.evaluate(() => Reflect.get(window, "startupSocketAttempts")),
+          0,
+          "Enter must not bypass the failed-startup authentication guard",
+        );
+        assert.deepEqual(messages, []);
+      },
+    );
+  },
+);
 
-test("a missing entry module displays an actionable startup error without attempting authentication", async () => {
-  await withBrowser(
-    {
-      state: "failed",
-      async beforeLoad(page) {
-        await page.route("**/main.js", (route) =>
-          route.fulfill({ status: 404, contentType: "text/plain", body: "fixture missing entry" }),
-        );
+test(
+  "a missing entry module displays an actionable startup error without attempting authentication",
+  { timeout: 60000 },
+  async () => {
+    await withBrowser(
+      {
+        state: "failed",
+        async beforeLoad(page) {
+          await page.route("**/main.js", (route) =>
+            route.fulfill({
+              status: 404,
+              contentType: "text/plain",
+              body: "fixture missing entry",
+            }),
+          );
+        },
       },
-    },
-    async (page, _errors, messages) => {
-      assert.equal(await page.locator("#startup-error").isVisible(), true);
-      assert.match(await page.locator("#startup-error-message").innerText(), /啟動模組載入失敗/);
-      assert.equal(await page.locator("#login").isDisabled(), true);
-      assert.deepEqual(messages, []);
-    },
-  );
-});
+      async (page, _errors, messages) => {
+        assert.equal(await page.locator("#startup-error").isVisible(), true);
+        assert.match(await page.locator("#startup-error-message").innerText(), /啟動模組載入失敗/);
+        assert.equal(await page.locator("#login").isDisabled(), true);
+        assert.deepEqual(messages, []);
+      },
+    );
+  },
+);

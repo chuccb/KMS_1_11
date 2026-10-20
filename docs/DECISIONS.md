@@ -3631,3 +3631,30 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   **零fail可歸因本輪**。
 - **LIVE**：重啟於本HEAD；新世界新save（既有政策）。可見變化：背景層真正依index堆疊、mob路徑
   wire元素不再漏vx；對話`#l`行為與原版一致（mid-word照吃）。
+## ADR-108：probe/typed/canvas 家族 8+2 全清零——client_probe 死 shim 復活、八項瀏覽器超時與真產品 bug（2026-10-20）
+
+- **背景**：ADR-107 收尾 1205 pass / 8 fail / 2 errors，八筆全被歸為「probe/typed/canvas 瀏覽器家族環境債、需獨立輪」。本輪逐一重現後發現**全可修**：不是環境債務，而是三類可修債務——(a) 八項真 Chromium 測試超時（b) 一支 node:vm 死 shim (c) 一處 Chromium 啟動期 SIGSEGV。本輪清零，完整 **1213 pass / 0 fail**。
+- **證據與實作（逐項）**：
+  1. **八項超時（重釘 timeout）**：bun 預設 5s。audio（150 Sound 解碼 12.1s）、title-profiler（120 幀 13.6s）、display 七 DPR 29.4s、avatar-cache 1.5s、browser-startup 四項（build+Chromium 11.9s/3.3s）皆為真 Chromium 行為，5s 從未合適。改釘 `{ timeout: 60000 }`，abort 級聯 Target closed 消失。**不是放寬斷言**。
+  2. **client_probe 死 shim 復活（實作鏈修復）**：`server/scripts/client_probe.mjs` 自稱 Historical NOT executed、hardcode 僅 strip 11 個 `.mjs`，自 typed 模組化後 main.js 已增至 ~90 個 TS 模組即腐化。改為**通用 import shim**：解析 `import {a,b} from "./mod.ts"` 逐條 `await import` 真模組再 `globalThis[local]=module[exported]`，空出語句保留換行以維持 vm stack 行號。並補足 DOM 最小契約使 typed main.js 能跑：
+     - `Element.localName` / `ownerDocument` / `id` / `parentElement` / `closest` / `matches` / `getAttribute` / `hasAttribute` / `clientWidth/Height`（前者供 `client/dom.ts requireTag`，後者供 chatlog/display-controls）
+     - `document.documentElement` / `hidden` / `hasFocus()` / `addEventListener` / `dispatchEvent`；`window.dispatchEvent` / `removeEventListener`（startup-guard 的 `CLIENT_READY_EVENT` 與登台 detach）
+     - 事件 bubbling：`fire()` 自 `this` 沿 `parent` 冒泡、支援 `stopPropagation`、預設 `target` 與 `button:0`；`replaceChildren` 維護 parent 鏈（login-screen 行列委派）
+     - `before()` / `focus→activeElement` / `blur`；scene-surface 的 `canvas.ownerDocument.createElement`
+     - `startup.ts` 守衛重現：index.html 載入順序 `startup.ts → main.js`，探針先 `await import("../../client/startup.ts")` 再 eval main.js，最後 main.js 一句 `dispatchEvent(CLIENT_READY_EVENT)` 將 guard 翻成 ready
+  3. **main.js 真產品 bug（實作修復）**：`case "user-move"` 的 `beginPath(user, ..., now)` 用裸 `now`，而 `now` 僅在 `mob-move`/`mob-enter` 等 case 內宣告。系 `bebb3009` 把 `performance.now()` 改 `now` 時漏宣告，導致遠端玩家路徑 `ReferenceError`。探針 battery 捕獲，改補 `const now = performance.now()`。
+  4. **fixture 補齊（誠實重釘）**：
+     - STUB_MAP.npcs 缺 → login 不載入 NPC metadata → `npcContains` 恆 null → 探針改補與 webclient.ts 同形的 `map.npcs`
+     - /api/npc fixture 缺 `name/behavior/clickBounds` → `isNpcMetadata` 拒收 → 補原生 `dc*` fallback（-22,-65,22,0）
+     - /api/creation 缺 `forbidden` → `isCreationCatalog` 拒收 → 補 `forbidden: []`
+     - 三處 characters fixture 缺 `str/dex/int/luk/face/hair` → `readLoginCharacters` 全表 blocked → 補完整 CharacterSummary
+     - 對話按鈕舊 `dialogue-ok` 靜態 id 不存，現為 `dialogue-controls` 動態生成 `[close=255, primary=1]`（0xFF close 見 npcdialogue-layout.ts），改取 `primary`
+     - stat 段 `ap-maxHp/maxMp disabled:true` 與現行 `sub_4F3210` 六鍵皆 AP!=0 enable 相反（500ms gate 在 sender，不在按鈕 art），改釘 false
+     - Escape 單按關 stat 的期望與原生 cascade（inventory→equip→stat…）相反，補兩步斷言
+     - 控制鍵需 `mousedown→mouseup→click` 三連（CCtrlButton），探針補 `clickControl`/`canvasMouseMove`/`windowMouseUp`
+     - 次段 `useBagItem` 200ms 門控，探針補等待並斷言 `slot:4` 而非舊 stale `slot:1` 日誌
+     - portal 第二個 field 需重進才清 `portalPending`，補 field 回應等待
+     - NPC cursor 改點 packet 斷言（70f9405 已改原生游標不再 CSS pointer）
+  5. **Chromium 啟動 SIGSEGV（實作加固）**：全套間歇 `pid SIGSEGV` 在 launch 層（未建 page），獨跑正常。`server/scripts/browser.ts` 加**有界一次重試**（500ms 後重 launch），page 層錯誤不受影響。
+- **驗證**：`server/scripts/client_probe.mjs` 全 10 banner 通過（SMOKE/TITLE/SELECTION/CREATION/…/RECOVERY 全 OK，11 步獨立驗證）；修復前 `runInThisContext` 即拋 `SyntaxError: import`→ `Expected <canvas>`→ `ownerDocument`→ `button:0`→ `now`→ `before`→ `portalPending`→ `ap-maxHp`→ `Escape`→ `world-connect`→ `BtSelect disabled`→ `native-ok`→ `characters blocked`→ `hasFocus` 鏈逐一打通。`client-ui.test.ts` 1/1；`bun-tool-probes` 7/7；`browser-startup` 4/4；`camera-lens` 1/1；三檔聯跑 12/12。typecheck/format/build 全綠。**完整兩跑 1213 pass / 0 fail**（142 files，~282s），對 ADR-107 的 1205/8/2 增 8 pass、清 8 fail、0 error；**零 fail 可歸因本輪**，43 項歷史失敗全數結案。
+- **LIVE**：重啟於本 HEAD；新世界新 save（既有政策）。可見變化：遠端玩家受擊後退路徑不再 ReferenceError 斷裂；探針覆蓋的 login→field→portal→shop→dialogue→inventory→stat→creation 全鏈與現行 typed client 一致。

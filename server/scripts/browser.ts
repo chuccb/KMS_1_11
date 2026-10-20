@@ -39,7 +39,7 @@ export async function launchBrowser(): Promise<Browser> {
     libraryPath = [join(tmpdir(), "al2023/lib"), libraryPath].filter(Boolean).join(":");
     executablePath = await chromium.executablePath();
   }
-  return playwright.launch({
+  const options = {
     executablePath,
     headless: true,
     timeout: 20_000,
@@ -56,7 +56,19 @@ export async function launchBrowser(): Promise<Browser> {
           "--single-process",
         ].includes(arg),
     ),
-  });
+  };
+  // The sandboxed Chromium intermittently SIGSEGVs during launch itself (the browser process
+  // exits before any page exists; observed under repeated back-to-back launches). One bounded
+  // retry absorbs that launch-level flake without weakening any assertion: a persistently
+  // broken browser still fails the second attempt, and page-level errors never pass through
+  // here because they happen after launch resolves.
+  try {
+    return await playwright.launch(options);
+  } catch (error) {
+    console.error(`launchBrowser: one retry after launch failure: ${String(error)}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return playwright.launch(options);
+  }
 }
 
 /** Same-origin GET only, with all WebSockets intercepted before page navigation. */

@@ -84,25 +84,31 @@ test("Bun-native PNG compression instrumentation counts actual work and cache re
   assert.ok(typeof report.sprites === "number" && report.sprites > 0);
 });
 
-test("typed read-only audio probe decodes all 150 original Sound leaves and aliases without authentication", async () => {
-  const archive = WzArchive.open(resolve(root, "Data.wz"));
-  const paths = originalSoundPaths(archive);
-  assert.equal(paths.length, 150);
-  const server = await startWebClient({
-    host: "127.0.0.1",
-    port: 0,
-    loginPort: 0,
-    audio: audioProviderOf(archive),
-  });
-  try {
-    const result = await decodeOriginalSounds(`http://127.0.0.1:${server.port}`, paths);
-    assert.equal(result.decoded, 150);
-    assert.equal(result.silent, 0);
-    assert.deepEqual(result.errors, []);
-  } finally {
-    await server.close();
-  }
-});
+test(
+  "typed read-only audio probe decodes all 150 original Sound leaves and aliases without authentication",
+  // Real Chromium + 150 real WZ Sound decodes: bun's 5s unit-test default was never sized for
+  // this (an abort here also cascades "Target closed" into the next browser test's launch).
+  { timeout: 60000 },
+  async () => {
+    const archive = WzArchive.open(resolve(root, "Data.wz"));
+    const paths = originalSoundPaths(archive);
+    assert.equal(paths.length, 150);
+    const server = await startWebClient({
+      host: "127.0.0.1",
+      port: 0,
+      loginPort: 0,
+      audio: audioProviderOf(archive),
+    });
+    try {
+      const result = await decodeOriginalSounds(`http://127.0.0.1:${server.port}`, paths);
+      assert.equal(result.decoded, 150);
+      assert.equal(result.silent, 0);
+      assert.deepEqual(result.errors, []);
+    } finally {
+      await server.close();
+    }
+  },
+);
 
 test(
   "typed display probe verifies seven real DPRs, equal-width pixels, UI alignment, mode persistence and same-page DPR changes without login",
@@ -128,71 +134,81 @@ test(
   },
 );
 
-test("typed title profiler counts actual canvas blits over 120 real frames with all WebSockets blocked", async () => {
-  const archive = WzArchive.open(resolve(root, "Data.wz"));
-  const server = await startWebClient({
-    host: "127.0.0.1",
-    port: 0,
-    loginPort: 0,
-    art: artProviderOf(archive),
-  });
-  try {
-    const result = await profileRender(`http://127.0.0.1:${server.port}`);
-    assert.equal(result.stage, "read-only-title");
-    assert.equal(result.samples, 120);
-    assert.ok(result.draws.mean > 0);
-    assert.deepEqual(result.errors, []);
-  } finally {
-    await server.close();
-  }
-});
-
-test("typed avatar image cache decodes real packed WZ PNG and preserves pixels after blob URL revocation", async () => {
-  const build = await Bun.build({
-    entrypoints: [resolve(import.meta.dirname, "helpers/image-cache-browser.ts")],
-    target: "browser",
-    format: "esm",
-  });
-  assert.equal(build.success, true, build.logs.join("\n"));
-  const js = await build.outputs[0].text();
-  const archive = WzArchive.open(resolve(root, "Data.wz"));
-  const server = await startWebClient({
-    host: "127.0.0.1",
-    port: 0,
-    loginPort: 0,
-    art: artProviderOf(archive),
-  });
-  try {
-    const browser = await launchBrowser();
+test(
+  "typed title profiler counts actual canvas blits over 120 real frames with all WebSockets blocked",
+  { timeout: 60000 },
+  async () => {
+    const archive = WzArchive.open(resolve(root, "Data.wz"));
+    const server = await startWebClient({
+      host: "127.0.0.1",
+      port: 0,
+      loginPort: 0,
+      art: artProviderOf(archive),
+    });
     try {
-      const origin = `http://127.0.0.1:${server.port}`,
-        page = await browser.newPage(),
-        errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      const traffic = await readOnlyBrowserPage(page, origin);
-      await page.route(`${origin}/`, (route) =>
-        route.fulfill({
-          contentType: "text/html",
-          body: '<!doctype html><body><script type="module" src="/fixture-image.js"></script>',
-        }),
-      );
-      await page.route(`${origin}/fixture-image.js`, (route) =>
-        route.fulfill({ contentType: "application/javascript", body: js }),
-      );
-      await page.goto(origin);
-      await page.waitForFunction(() => document.documentElement.dataset.fixtureState !== undefined);
-      assert.equal(
-        await page.locator("html").getAttribute("data-fixture-state"),
-        "ready",
-        await page.locator("body").innerText(),
-      );
-      assert.equal(traffic.socketAttempts, 0);
-      assert.deepEqual(errors, []);
+      const result = await profileRender(`http://127.0.0.1:${server.port}`);
+      assert.equal(result.stage, "read-only-title");
+      assert.equal(result.samples, 120);
+      assert.ok(result.draws.mean > 0);
+      assert.deepEqual(result.errors, []);
     } finally {
-      await browser.close();
+      await server.close();
     }
-  } finally {
-    // Launch failures or a rejecting browser.close must still release the independent HTTP fixture.
-    await server.close();
-  }
-});
+  },
+);
+
+test(
+  "typed avatar image cache decodes real packed WZ PNG and preserves pixels after blob URL revocation",
+  { timeout: 60000 },
+  async () => {
+    const build = await Bun.build({
+      entrypoints: [resolve(import.meta.dirname, "helpers/image-cache-browser.ts")],
+      target: "browser",
+      format: "esm",
+    });
+    assert.equal(build.success, true, build.logs.join("\n"));
+    const js = await build.outputs[0].text();
+    const archive = WzArchive.open(resolve(root, "Data.wz"));
+    const server = await startWebClient({
+      host: "127.0.0.1",
+      port: 0,
+      loginPort: 0,
+      art: artProviderOf(archive),
+    });
+    try {
+      const browser = await launchBrowser();
+      try {
+        const origin = `http://127.0.0.1:${server.port}`,
+          page = await browser.newPage(),
+          errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        const traffic = await readOnlyBrowserPage(page, origin);
+        await page.route(`${origin}/`, (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: '<!doctype html><body><script type="module" src="/fixture-image.js"></script>',
+          }),
+        );
+        await page.route(`${origin}/fixture-image.js`, (route) =>
+          route.fulfill({ contentType: "application/javascript", body: js }),
+        );
+        await page.goto(origin);
+        await page.waitForFunction(
+          () => document.documentElement.dataset.fixtureState !== undefined,
+        );
+        assert.equal(
+          await page.locator("html").getAttribute("data-fixture-state"),
+          "ready",
+          await page.locator("body").innerText(),
+        );
+        assert.equal(traffic.socketAttempts, 0);
+        assert.deepEqual(errors, []);
+      } finally {
+        await browser.close();
+      }
+    } finally {
+      // Launch failures or a rejecting browser.close must still release the independent HTTP fixture.
+      await server.close();
+    }
+  },
+);
