@@ -14,6 +14,7 @@ import {
   consumeDeltas,
   consumeSpecProvider,
   consumeSpecOf,
+  consumeTemporary,
   healsVitals,
 } from "../src/game/items.ts";
 import { applyVitalReport } from "../src/game/vitals.ts";
@@ -236,6 +237,32 @@ test("PAD and ACC timed specs are accepted; a mixed unimplemented mechanic still
     )!;
     assert.deepEqual(mixed.unapplied, ["mdd"]);
   }
+});
+
+test("02022002 사이다: `pda` is that item's own spelling of PAD, and both spellings at once refuse", () => {
+  // The real shape: pda 20 + acc -5 + time 180000; the desc names it 물리 공격력 +20 / 명중률 -5.
+  const cider = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0202.img",
+      image({ "02022002": { spec: { pda: 20, acc: -5, time: 180000 } } }),
+    ),
+    2022002,
+  )!;
+  assert.equal(cider.pad, 20, "the alias lands on the pad field the wire mask already carries");
+  assert.equal(cider.acc, -5);
+  assert.equal(cider.time, 180000);
+  assert.deepEqual(cider.unapplied, []);
+  assert.ok(consumeTemporary(cider, 2022002), "and the whole item reaches the 0x0D tail");
+  // An item carrying BOTH spellings is a shape this Data.wz does not have: refuse rather than pick.
+  const both = consumeSpecOf(
+    fakeArchive(
+      "Item/Consume/0202.img",
+      image({ "02022002": { spec: { pad: 5, pda: 20, time: 180000 } } }),
+    ),
+    2022002,
+  )!;
+  assert.equal(both.pad, 5);
+  assert.deepEqual(both.unapplied, ["pda"]);
 });
 
 // Unexecuted source: defensive specs are accepted only now that 4C8ED0 consumes PDD/EVA.

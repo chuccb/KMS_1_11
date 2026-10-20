@@ -124,10 +124,18 @@ export function consumeSpecOf(
   const timed: Pick<ConsumeSpec, (typeof TIMED_CONSUME_FIELDS)[number] | "time"> = {};
   if (time !== undefined && Number.isInteger(time) && time > 0 && time <= 0x7fffffff) {
     for (const key of TIMED_CONSUME_FIELDS) {
-      const n = read(key);
+      const own = read(key);
+      // `pda` is the one item 02022002 (사이다) spells its PAD field with: its own `info/desc`
+      // names the effect - "5분간 물리 공격력이 20 증가한다…명중률은 5 감소한다" beside
+      // `pda 20, acc -5` - and the desc names effects while the spec values them (§4.34.3 rule 1).
+      // No other item in this Data.wz carries the name; if one ever carries BOTH spellings, the
+      // alias stays unapplied and the item is refused rather than guessed.
+      const alias = key === "pad" && own === undefined ? read("pda") : undefined;
+      const n = own ?? alias;
       if (n !== undefined && Number.isInteger(n) && n !== 0 && n >= -32768 && n <= 32767) {
         timed[key] = n;
         applied.add(key);
+        if (alias !== undefined) applied.add("pda");
       }
     }
     if (Object.keys(timed).length) {

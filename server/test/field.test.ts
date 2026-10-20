@@ -276,7 +276,10 @@ test("every opcode range of the CField router maps to its subsystem", () => {
   assert.equal(describeFieldOpcode(0x3a), "0x3a CNpcPool(npc leave)");
   assert.equal(describeFieldOpcode(0x3b), "0x3b CNpcPool(npc controller)");
   assert.equal(describeFieldOpcode(0x3c), "0x3c CNpcPool(id only)");
-  assert.equal(describeFieldOpcode(0x3d), "0x3d CNpcPool(action + move path)");
+  assert.equal(
+    describeFieldOpcode(0x3d),
+    "0x3d CNpcPool(signed action/speech + optional move path)",
+  );
   assert.equal(describeFieldOpcode(0x3e), "0x3e CNpcPool(id only)");
   assert.equal(describeFieldOpcode(0x40), "0x40 CNpcPool(id only)");
   assert.equal(describeFieldOpcode(0x41), "0x41 CNpcPool(no handler)");
@@ -343,9 +346,11 @@ test("attack (0x0F) is byte exact, header and per-target records", () => {
 });
 
 test("attack round trips several targets and keeps the signed hit animation", () => {
+  // x/y/sequence/damages are s16 on the wire (sub_514D30 fills them from __int16 locals): -1 and
+  // -32768 carry the same bytes 0xffff/0x8000 an unsigned reading would, and round-trip exactly.
   const targets = [
     { mobId: 0x10, hitAnimation: -1, x: 0, y: 0, sequence: 0x1234, damages: [1] },
-    { mobId: 0x11, hitAnimation: 0x7f, x: 0xffff, y: 0x8000, sequence: 0x1234, damages: [1] },
+    { mobId: 0x11, hitAnimation: 0x7f, x: -1, y: -32768, sequence: 0x1234, damages: [1] },
   ];
   const attack: ClientAttack = {
     hits: 1,
@@ -579,15 +584,24 @@ test("chat: 0x12 out is one string, 0x1a back is the speaker's name and the same
 });
 
 test("0x1a's other sub-ops are refused instead of read as chat", () => {
-  // `sub_472910` has four cases, all of them two-strings-or-fewer display messages, and only 0x12 is
-  // chat. 0x22 is the whisper refusal: one name, and the client's line is "'name' refuses whispers".
+  // `sub_472910` has four cases (ADR-059): 0x09 find answer, 0x0A whisper answer, 0x12 chat and
+  // 0x22 whisper refusal - one name, and the client's line is "'name' refuses whispers". Only
+  // 0x12 is chat; 0x22 has its own reader the describer routes to.
   const refusal = Uint8Array.from([0x1a, 0x22, 0x03, 0x00, 0x41, 0x42, 0x43]);
   assert.throws(
     () => readUserChat(new PacketReader(refusal, 1)),
     /sub-op 0x22 is not chat \(0x12\)/,
   );
+  assert.equal(describeFieldPacket(refusal), '0x1a CField(user message): whisper refused "ABC"');
+  // A sub-op outside the jump table is nothing at all: the chat reader refuses it and the describer
+  // says unreadable rather than silently parsing it as one of the four.
+  const unknown = Uint8Array.from([0x1a, 0x33, 0x03, 0x00, 0x41, 0x42, 0x43]);
+  assert.throws(
+    () => readUserChat(new PacketReader(unknown, 1)),
+    /sub-op 0x33 is not chat \(0x12\)/,
+  );
   assert.match(
-    describeFieldPacket(refusal)!,
+    describeFieldPacket(unknown)!,
     /^0x1a CField\(user message\): \(unreadable: .*not chat/,
   );
   // A chat packet that runs out mid-string is still an error, not a short line.
@@ -717,14 +731,24 @@ test("the level-up effect (0x29) names a user, and one byte says which effect", 
     describeFieldPacket(bytes),
     "0x29 CUserPool(user effect): level-up effect for characterId=7",
   );
-  // The second branch of `sub_522300` reads another u32; what it plays is not located, so a packet
-  // that says 1 is refused rather than half-read (`0x1A`'s non-chat sub-ops get the same treatment).
-  const unlocated = Uint8Array.from([0x29, 0x07, 0x00, 0x00, 0x00, 0x01, 0x2a, 0x00, 0x00, 0x00]);
+  // The second branch of `sub_522300` is located: u32 skillId + u8 learned level -> `sub_4BAC80`
+  // -> `sub_50C460`, the native skill effect - so an effect-1 packet round-trips with its two
+  // fields instead of being refused.
+  const skill = { characterId: 7, effect: 1, skillId: 2001004, skillLevel: 3 };
+  const skillBytes = encodeUserEffect(skill);
+  assert.equal(toHex(skillBytes), "29" + "07000000" + "01" + "6c881e00" + "03");
+  assert.deepEqual(readUserEffect(new PacketReader(skillBytes, 1)), skill);
+  assert.equal(describeUserEffect(skill), "skill 2001004/3 effect for characterId=7");
+  assert.throws(() => encodeUserEffect({ characterId: 7, effect: 1, skillId: 2001004 }), /invalid/);
+  // Anything past the two located branches is refused rather than half-read (`0x1A`'s non-chat
+  // sub-ops get the same treatment).
+  const unlocated = Uint8Array.from([0x29, 0x07, 0x00, 0x00, 0x00, 0x02, 0x2a, 0x00, 0x00, 0x00]);
   assert.throws(
     () => readUserEffect(new PacketReader(unlocated, 1)),
-    /effect 1 is not the located one/,
+    /effect 2 is not the located one/,
   );
   assert.match(describeFieldPacket(unlocated)!, /not the located one/);
+  assert.throws(() => encodeUserEffect({ characterId: 7, effect: 2 }), /invalid/);
 });
 
 test("the player's own HP/MP change (0x1c) travels as a signed delta of the record", () => {

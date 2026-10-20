@@ -98,7 +98,8 @@ reader 對未知 mask／截斷尾段直接拒絕。這是 codec 的安全限制�
 
 `time` **已經是毫秒**，不是180000秒，也不再乘1000。
 `game/items.ts` 僅把有效 speed＋time 列為已支援 timed mechanic。
-當輪只接受speed；後續已補PAD／ACC／EVA／PDD的實際消費者。包含MAD／MDD／未知未實作效果的混合道具仍拒絕整筆，不先耗道具再說沒有作用。
+當輪只接受speed；後續已補PAD／ACC／EVA／PDD與MAD的實際消費者（ADR-106起 `02022002` 사이다的 `pda`
+以PAD別名接入——desc自證「물리 공격력 20 증가」，FINDINGS §6-20）。剩下只有MDD／未知欄位的混合道具仍拒絕整筆，不先耗道具再說沒有作用。
 只有 time 沒有實作效果、無效時間／speed、空 spec，也不放行。
 伺服器安全政策也拒絕商店／對話／交易中的使用，避免消耗正在交易的堆疊；不聲稱這是已取得的原server限制。
 

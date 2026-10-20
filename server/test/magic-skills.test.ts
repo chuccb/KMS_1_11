@@ -141,7 +141,7 @@ test("both WZ skills keep prerequisite, actual mad/mastery/cost and distinct bal
   assert.equal(c.balls.length, 0);
   assert.equal(c.effects.length, 4);
   assert.equal(c.hitVariants.length, 1);
-  assert.ok(b.balls.every((f) => f.delay === 120 && f.path.includes("/2001004/ball/")));
+  assert.ok(b.balls.every((f) => f.delay === 80 && f.path.includes("/2001004/ball/")));
 });
 test("magic admission is learned/cost/action/speed/posture/ground/hit-domain complete; physical guards stay closed", () => {
   const a = archive(),
@@ -299,7 +299,7 @@ test("0x11 has no ammo slot or shot-only u16; 0x25 relay reads as magic without 
     bytes = encodeClientAttack(packet, CLIENT_FIELD_OPCODE.magicAttack);
   assert.equal(bytes[0], 0x11);
   assert.deepEqual(readClientAttack(new PacketReader(bytes, 1), 0x11), packet);
-  assert.equal(bytes.length, 8 + 11 + 4 * 2);
+  assert.equal(bytes.length, 8 + 11 + packet.hits * 2);
   assert.equal(ATTACK_RELAY_OPCODE[0x11], 0x25);
   const relay = {
     characterId: 123,

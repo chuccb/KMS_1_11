@@ -3534,3 +3534,50 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   flake；**零fail可歸因本輪**。
 - **LIVE**：重啟於本HEAD；新世界新save（舊save不可攜，既有政策）。現金旗標裝備（如1002000）現在可穿；
   戒指格因無WZ內容維持不可達（需求閘誠實拒絕）；丟棄現金道具的拒絕（序號＋WZ info/cash）不變。
+
+## ADR-106：攻擊目標記錄s16符號性＋5筆長期測試負債歸零＋`pda`＝PAD別名（사이다）——原EXE／WZ證據結案（2026-10-20）
+
+- **背景**：負債清單上五個長期fail（field.test×3：0x3d describe字串、0x1a sub-op契約、0x29 effect codec；
+  magic-skills×2：balls delay、0x11長度常數）。逐一triage發現三個釘的是舊語意、兩個釘的是舊常數；而重讀
+  c2s 0x11的writer顺手結案了一個**真實產品bug**：攻擊目標記錄的x/y/sequence/damages一直按unsigned解。
+  WZ側只剩`02022002`的`pda`欄位沒有消費者（130件consume道具census中唯一一件用這個名字）。
+- **證據**：
+  1. **`sub_514D30`＝原client c2s 0x11 writer**（`.c` 280322–280893）：`__int16` local x（mob WORD+360）、
+     y（+364）、sequence（兩來源加總）、damages是`__int16*`陣列每次+2——四欄都是**signed**，負座標地圖
+     （mob WORD+360可為負）本來就會送負值。s2c relay `sub_5209C0`是另一個包形（mobId+anim+damages共5B、
+     unsigned bit-preserving、無座標欄），不受影響、未動。
+  2. **0x1a sub-op表**（`sub_472910`四個display case＋`describeClientChat`路由）：0x09 find answer、
+     0x0A whisper answer、0x12 incoming whisper、**0x22＝whisper refused（只有名字）**；未知sub-op→
+     `(unreadable: …not chat)`；mid-string截斷→throw。
+  3. **0x29**（`sub_522300` branches）：effect 0＝level-up；**effect 1＝u32 skillId（1..0xffffffff）＋
+     u8 skillLevel（1..255）**；effect ≥2 encode/read雙向拒絕。
+  4. **balls delay**：WZ raw值80（舊測試的120是render-scaled值，非spec值）。
+  5. **`02022002` 사이다**：`info/desc`＝「시원한 탄산 음료이다. 5분간 **물리 공격력**이 20 증가한다.
+     5분간 **명중률**은 5 감소한다.」，spec＝`{pda:20, acc:-5, time:180000}`——`pda`就是這件道具自己對
+     PAD欄位的拼法（§4.34.3規則1：desc提名、spec定值；acc −5與명중률−5逐字對上）。duration以spec為準
+     （desc說5분、spec給180000ms＝3분——desc說謊規則的又一實例）。鄰居`02022001` 팥죽 spec為空`{}`，
+     `02022003` 장어 구이 `{hp:1000}`已接。
+- **實作**：
+  1. `protocol/field.ts` `readClientAttack`：x/y/sequence/damages改走既有`toS16` helper（產品修復）。
+     消費者全部核過：bridge（session.ts:1282–1285）forward signed值✓；damage gate `d<0||d>9999`語意不變✓；
+     loginserver座標slop檢查對負座標地圖現在才正確。FINDINGS §4.13.1b表u16→s16＋ADR-106 bullet。
+  2. `game/items.ts` `consumeSpecOf`：`pda`以**別名**接入pad欄（僅在`pad`缺席時；兩種拼法同時出現＝這版WZ
+     沒有的形狀→`pda`留在unapplied→整筆拒絕，不猜）。`items.test`加真實形狀案例（pad 20/acc −5/time
+     180000、unapplied []、consumeTemporary達0x0D tail）＋雙拼法拒絕案例。
+  3. **負債歸零×5**：0x3d describe字串、0x1a測試改寫（0x22 located refusal＋0x33未知sub-op fixture＋截斷
+     throw）、0x29測試改寫（effect-1 round-trip `29`+`07000000`+`01`+`6c881e00`+`03`＋effect-2雙向拒絕）、
+     balls delay 120→80、0x11長度常數`4*2`→`packet.hits*2`（跟著fixture走）。順帶修兩個**釘錯語意的
+     fixture**：multi-target x/y `0xffff`/`0x8000`→`−1`/`−32768`（同樣的wire bits，誠實的signed round-trip）；
+     規則是改fixture不是回退codec。
+  4. **文件同步**：FINDINGS §6-20重寫（buff家族全接通、整份WZ只剩`mdd`沒消費者）、§4.34.3表三行
+     （02002/02012/02022→「0x18→0x0D暫時能力（已接）」）、§4.21.2／§4.21.6／拒絕表措辭、
+     TEMPORARY_STATS的MAD行（MAD已接、pda別名入冊）。
+- **明確不做**：art/WZ×4（`4BE270`被動選擇`0!==10`、`534FA0` escape吃字、`46BDA0`背景z＝−147990、
+  Lucky Seven case47公式）與client-session coalesced、native-npc-dialogue UI examples是**真功能缺口**而非
+  stale test——各自需要獨立的native-evidence輪，本輪不動它們的測試。
+- **驗證**：field.test 39/39＋magic-skills 10/10（49/49）、items.test 10/10、shops＋items 32/32；
+  typecheck/format/build全綠；完整suite 1195 pass/18 fail（+2 errors）＝ADR-105已知23 fail減去本輪清掉的
+  5筆，fail集合與已知負債家族逐一相符（probe/typed/canvas×7、physics、art/WZ＋wiring、UI examples、
+  coalesced、wz），errors＝browser-closed/late-test()的probe負債；**零fail可歸因本輪**。
+- **LIVE**：重啟於本HEAD；新世界新save（既有政策）。사이다（02022002）現在有真實效果：PAD+20／ACC−5／3분；
+  負座標地圖的攻擊記錄不再被unsigned錯讀。

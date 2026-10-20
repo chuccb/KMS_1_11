@@ -1495,11 +1495,16 @@ export function readClientAttack(
     const mobId = reader.readU32();
     const rawAnimation = reader.readByte();
     const hitAnimation = (rawAnimation << 24) >> 24; // the client writes a `_BYTE` here
-    const x = reader.readU16();
-    const y = reader.readU16();
-    const sequence = reader.readU16();
+    // x, y, sequence and the damage words are signed on the wire: the writer `sub_514D30` fills
+    // them from `__int16` locals (x from `+360`, y from `+364` of the mob's own position pair,
+    // `.c` ~280766), the same s16 the drop/spawn coordinate fields use. Reading them unsigned
+    // turns a mob (or a shot) at a negative map coordinate into a ~65000 that fails every
+    // position check.
+    const x = toS16(reader.readU16());
+    const y = toS16(reader.readU16());
+    const sequence = toS16(reader.readU16());
     const damages: number[] = [];
-    for (let hit = 0; hit < hits; hit++) damages.push(reader.readU16());
+    for (let hit = 0; hit < hits; hit++) damages.push(toS16(reader.readU16()));
     targets.push({ mobId, hitAnimation, x, y, sequence, damages });
   }
   const attack: ClientAttack = {
