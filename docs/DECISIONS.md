@@ -3376,3 +3376,58 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 40 fail中**確定性核心33＝上輪36−3支逐名修復**（serve攻擊家族8＋webclient 8＋未觸碰檔案舊家族17）；
 其餘7為browser/chromium負載flake輪替（bun-tool-probes 4、browser-startup 2、camera-lens 1——
 同族輪替ADR-100/101已記錄）。零fail可歸因本輪改動。LIVE無需重啟（純測試輪）。
+
+## ADR-103：戰鬥測試家族全量重建——serve攻擊八支＋瀏覽器Ctrl揮擊（2026-10-20）
+
+起點＝ADR-102根因診斷：八支serve攻擊測試全送舊式payload（`skillId:1`、fixture無provider），
+攻擊驗证实装後被**靜默丟棄**→take超時。本輪照診斷全量重建，除一處觀測性產品修復外純測試輪。
+
+- **共通重建模式**（serve八支）：
+  1. fixture掛`basicAttack: combatArt!.attackProfile`（`artProviderOf(archive)`；skip守衛
+     `{skip: archive === null}`）；劍1302000 profile＝group1 speed2、melee[0] action5
+     release393ms；弓1452000＝action22 release500ms（延遲表實算，不手寫）。
+  2. 角色record把劍穿在**worn slot 11**（`items.worn.set(11, equipSlot(1302000))`）——
+     admission讀`worn.get(11)?.itemId ?? 0`；slot 1是CAP部位碼，穿錯槽＝無武器。
+  3. payload由profile導出：skillId 0＋action/speed取自melee[0]，位置stamps對齊STUB_MAP
+     （mob 120100@(509,300)、fh32 y=300）。
+  4. `takeOpcode` burst中0x33（roam）是唯一合法noise——過濾/末索引idiom。
+  5. 成長斷言讀`record.stats`——**`characterDataOf`會複製stats**（`{...zeroStats(), ...stats}`），
+     測試區域literal與mutated object脫鉤（session-save第六跑才定位的最後根因；kill-exp/
+     level-up同型）。
+- **各支要點**：swing-kill＝0x0F→0x34→0x30（delayMs）→0x31＋drop 0x43 money25；kill-exp＝
+  0x0D diff {level:2, exp:15, maxHp∈[70,75], maxMp∈[40,42], hp===maxHp, mp===maxMp}（row0原生
+  成長範圍）；drop-walk＝0x44 kind2＋錢包+25＋notice；two-players＝他方收relay 0x23、己方不收；
+  shot-0x24＝弓＋箭2060000（USE slot3）record、走近、relay [7,false,22,1,3,2060000,3]、
+  settle≥950ms（travel=dist×1.5）、cast 2001004 lv20→0x25 [7,28,2,0]、impact y=275
+  （clipMagicRay擋地面端點、MAGIC_HEIGHT 25）；level-up-0x29＝alt過濾0x33後恰見
+  [0x23,0x34,0x30,0x29(effect0,id7)]、hero收0x0D不收0x29＋log 'sent to 1 other player(s)'；
+  session-save＝payout burst序[0x34,0x30,0x0D(last)]、save round-trip帶slot 11劍。
+- **unknown-mob＋產品修復**：`queueActiveHits`的unknown-mob分支原本`continue`**靜默丟棄**——
+  legacy immediate resolve有log、queued路徑沒有。補同款log（"hit mob N, but this field has no
+  such mob - the hit is dropped, not invented"）。行為不變：不發明傷害、不灑到別的mob；測試釘
+  空答復＋欄位無波動。
+- **瀏覽器Ctrl揮擊**（webclient.test）三重根因：
+  1. `combat:true`的startWorld把劍放worn slot **1**（CAP碼）→改11（admission、webclient.ts
+     profile查找、statBasis全讀11）。
+  2. 舊訊息`{t:"attack",mobId,facingLeft}`不符現行bridge契約——需`action`＋整數
+     `attackToken`（1..0x7fffffff、每揮唯一），缺則private attack()**靜默return**（無error
+     事件）→測試5s超時。改送profile action＋token；targetX/Y可省（NaN→退回頁面mob位置）。
+  3. 空劍零PAD→傷害恆為native min clamp的**1**——斷言收緊為`damage===1`（"a swing always
+     hurts, for exactly the clamp"）。combat世界未接itemCatalog時effectiveWorn因requirements
+     缺失丟棄全部裝備→stat basis weaponId 0→`no-effective-weapon`＋min-1：與blank-sword
+     zero-PAD負債家族同源，本輪刻意不動該接線（保留零PAD新手基準；接catalog會改寫touch/
+     blank-sword家族的reason斷言，屬PAD輪）。
+  4. unknown-mob相位照現行契約重寫：**靜默空揮**（native 513C80無目標也出招消耗）——無hit/
+     error事件；`quiet(300)`釘靜默＋隨後drop-mesos 10→self{mesos:90}完整往返證明socket活著
+     （舊斷言error /999999/是舊bridge契約的陳跡）。
+- **驗證**：serve.test.ts整檔**44/44首次全綠**；八支rebuild各自isolate六連跑綠（swing-kill
+  8/8）；Ctrl swing isolate六連綠（1.65s）；webclient.test 33/40（剩7＝names/touch/slots/
+  dialogue/blank-sword/map-cmd×2已知負債）；field.test 36/39（3＝router/0x1a/0x29-codec既有
+  負債）；typecheck/format/build全綠。完整suite 1216：1184 pass/32 fail——對ADR-102的
+  1178/38淨差恰為九支重建；剩餘32全為未觸碰檔案既有負債（physics抽動家族mobs/native-
+  locomotion/native-layer-priority/native-jump-background-attack隔離亦再現、本輪未碰其產品面；
+  probe/art家族；growth）＋負載flake（pixel compositor隔離綠）。零fail可歸因本輪。
+- **沙箱還原附損與恢復**：本輪沙箱還原後branch指標被退回基點99ff07b（工作樹完好、507b59e不在
+  本地objects）——`git fetch origin <branch>`＋`git reset --mixed 507b59e`恢復，status確認dirty
+  僅預期三檔。**模式記錄**：還原後git狀態異常先fetch自己branch再mixed reset；絕不把現存工作樹
+  當新樹重新commit。

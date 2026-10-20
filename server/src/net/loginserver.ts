@@ -2898,7 +2898,15 @@ export class GameEntryServer {
   ): void {
     for (const target of attack.targets) {
       const mob = session.instance.mobs.mob(target.mobId);
-      if (!mob) continue;
+      if (!mob) {
+        // The queued path owes the same diagnostic the legacy immediate resolve logs: a hit on a
+        // mob this field does not have is dropped, not invented (and never touches another mob).
+        this.options.log?.(
+          `game: 0x${hex(opcode)} hit mob ${target.mobId}, but this field has no such mob - ` +
+            `the hit is dropped, not invented`,
+        );
+        continue;
+      }
       target.damages.forEach((damage, ordinal) =>
         this.pendingShots.push({
           session,

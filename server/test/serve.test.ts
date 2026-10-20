@@ -122,6 +122,10 @@ import { MESO_DROP_OPCODE, encodeMesoDrop } from "../src/protocol/mesodrop.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
 import { consumeSpecProvider } from "../src/game/items.ts";
 import { scrollSpecProvider } from "../src/game/scrolls.ts";
+import { artProviderOf } from "../src/game/art.ts";
+import { skillCatalogOf } from "../src/game/skills.ts";
+import { activeArt } from "../src/game/activeskills.ts";
+import { activeMagicSpeed } from "../../client/active-skills.ts";
 import { equipSlot, nonEquipSlot, type ItemSlotEquip } from "../src/protocol/itemslot.ts";
 import {
   QUEST_REPLY_OPCODE,
@@ -144,6 +148,16 @@ import { MemorySaveStore, loadAccounts } from "../src/game/save.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
 const archive: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
+/**
+ * The LIVE attack contract: cli.ts wires `art.attackProfile` as the game server's `basicAttack`
+ * provider, and with a provider present an admitted swing resolves on the motion's release clock
+ * (`queueActiveHits`) instead of the legacy immediate path a provider-less fixture falls back to.
+ * The combat tests below validate against the same provider, so they exercise what a real client
+ * of a real server hits: a swing is only admitted when it matches the worn weapon's own profile
+ * (skillId 0, hits 1, one target, one integer damage 0..9999, an action of the weapon group's
+ * melee table, and exactly the profile's speed tier).
+ */
+const combatArt = archive ? artProviderOf(archive) : null;
 
 /** A fake 2003 client: reads the handshake, then speaks the session protocol. */
 class FakeClient {
@@ -1229,10 +1243,16 @@ test(
  * three packets of FINDINGS 4.17 - `0x34` (the mob's stat/flash), `0x30` (the die animation starts
  * now) and, once that animation is over, `0x31 flag=0` (the corpse goes). A stub template is used so
  * the die animation is 40 ms instead of the real 720: the timing logic is the same code.
+ *
+ * The swing itself goes through the LIVE admission contract: the killer wears sword 1302000 (worn
+ * slot 11, what the handler reads the weapon id from), the server validates against that weapon's
+ * own archive profile, and the hit resolves on the motion's release clock (~393 ms for swingO1) -
+ * so the packets below arrive after the swing, not inside it. The legacy `skillId:1` payload this
+ * test used to send is silently refused by the attack-validation rewire (ADR-102 diagnosis).
  */
 test(
   "a swing that kills a mob answers 0x34, 0x30, and then 0x31 when the corpse is over",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -1240,6 +1260,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -1274,10 +1295,21 @@ test(
 
     const killer = await FakeClient.connect(gameInfo.port);
     t.after(() => killer.close());
+    // The killer's own record: alive (hp 50 - the handler refuses dead attackers) and WEARING the
+    // sword the profile is looked up by (worn slot 11). No record means no weapon, and a weaponless
+    // swing has no profile to be admitted against.
+    const killerStats = zeroStats();
+    killerStats.id = 12;
+    killerStats.name = "Fighter2";
+    killerStats.hp = 50;
+    killerStats.maxHp = 50;
+    const killerItems = startingCharacterItems();
+    killerItems.worn.set(11, equipSlot(1302000));
     const otherId = handoffs.issue({
       username: "admin",
       characterId: 12,
       characterName: "Fighter2",
+      character: characterDataOf(killerStats, killerItems),
     });
     killer.send({ kind: "handshake-reply", opcode: 0x04, value: otherId });
     await killer.take(4);
@@ -1288,30 +1320,41 @@ test(
       "the NPC spawn rides along with the mob burst",
     );
 
-    // One swing, one target, 10 damage - exactly the mob's HP, so it dies.
+    // One swing, one target, 10 damage - exactly the mob's HP, so it dies. The action and speed
+    // are the weapon profile's own (sword 1302000: group 1, speed tier 2, melee[0] = action 5
+    // swingO1); anything else is refused without an answer, exactly as a mismatched real packet is.
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swing.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     killer.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-    const hit = await killer.take(2);
-    assert.equal(
-      hit[0]![0],
-      MOB_OPCODE.stat,
-      "0x34 first: the mob's stat, which is its flash state",
+    // The kill burst comes out of one synchronous resolve: `0x34` (the mob's stat/flash) with
+    // `0x30` (the die animation starts now) right behind it. A roam decision may legally drop a
+    // stand `0x33` into the stream BEFORE the burst (mobTickMs 20 and the intent is Math.random's,
+    // so a stationary leg - which speedPercent 0 cannot suppress - arrives in ~1/3 of the runs),
+    // so the burst is located by its first opcode instead of being assumed to start the stream.
+    const toStat = await killer.takeOpcode(MOB_OPCODE.stat);
+    assert.ok(
+      toStat.slice(0, -1).every((bytes) => bytes[0] === MOB_OPCODE.move),
+      `only the mob's own roam 0x33 may precede the kill burst, saw ` +
+        toStat.map((bytes) => bytes[0]).join(","),
     );
-    assert.deepEqual(readMobStat(new PacketReader(hit[0]!, 1)), { mobId: 1, mp: 0 });
-    assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed, "then 0x30: the die animation starts now");
-    assert.deepEqual(readMobLeaveDelayed(new PacketReader(hit[1]!, 1)), { mobId: 1, delayMs: 0 });
+    const flash = toStat[toStat.length - 1]!;
+    assert.deepEqual(readMobStat(new PacketReader(flash, 1)), { mobId: 1, mp: 0 });
+    const leave = (await killer.take(1))[0]!;
+    assert.equal(leave[0], MOB_OPCODE.leaveDelayed, "0x30 rides right behind 0x34");
+    assert.deepEqual(readMobLeaveDelayed(new PacketReader(leave, 1)), { mobId: 1, delayMs: 0 });
     assert.equal(killer.headersOk, true, "both survive the cipher/header check");
 
     // The kill pays the monster's own `info.exp` (stub: 1) as a 0x0D stat diff - exp only, because the
@@ -1352,93 +1395,124 @@ test(
  * level 2 / exp 15 plus native HP/MP growth/refill - the client computes the level-up
  * message and the effect from the level it sees (sub_55BEB0).
  */
-test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, async (t) => {
-  const log: string[] = [];
-  const handoffs = new HandoffRegistry();
-  const game = new GameEntryServer({
-    handoffs,
-    mapId: 1000000,
-    mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-    mobTemplate: () => ({
-      templateId: 120100,
-      name: "stub",
-      level: 1,
-      maxHP: 10,
-      maxMP: 0,
-      exp: 20,
-      speedPercent: 0,
-      dieMs: 0,
-    }),
-    mobTickMs: 20,
-    mobRespawnMs: 60_000,
-    // No loot, so the only packets after the death are the corpse going and the stat diff.
-    dropPolicy: () => [],
-    handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
-    log: (line) => log.push(line),
-  });
-  const gameInfo = await game.listen(0);
-  t.after(async () => {
-    await game.close();
-  });
+test(
+  "a kill awards the monster's exp as a 0x0D stat diff",
+  { skip: archive === null, timeout: 20000 },
+  async (t) => {
+    const log: string[] = [];
+    const handoffs = new HandoffRegistry();
+    const game = new GameEntryServer({
+      handoffs,
+      mapId: 1000000,
+      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
+      mobTemplate: () => ({
+        templateId: 120100,
+        name: "stub",
+        level: 1,
+        maxHP: 10,
+        maxMP: 0,
+        exp: 20,
+        speedPercent: 0,
+        dieMs: 0,
+      }),
+      mobTickMs: 20,
+      mobRespawnMs: 60_000,
+      // No loot, so the only packets after the death are the corpse going and the stat diff.
+      dropPolicy: () => [],
+      handshake: { clientSendSeed: 0x0badc0de, clientRecvSeed: 0x0feedbac },
+      log: (line) => log.push(line),
+    });
+    const gameInfo = await game.listen(0);
+    t.after(async () => {
+      await game.close();
+    });
 
-  const stats = zeroStats();
-  stats.id = 21;
-  stats.name = "Fighter";
-  stats.level = 1;
-  stats.exp = 10;
-  stats.hp = 20;
-  stats.maxHp = 50;
-  stats.mp = 5;
-  stats.maxMp = 30;
+    const stats = zeroStats();
+    stats.id = 21;
+    stats.name = "Fighter";
+    stats.level = 1;
+    stats.exp = 10;
+    stats.hp = 20;
+    stats.maxHp = 50;
+    stats.mp = 5;
+    stats.maxMp = 30;
 
-  const client = await FakeClient.connect(gameInfo.port);
-  const characterId = handoffs.issue({
-    username: "admin",
-    characterId: 21,
-    characterName: "Fighter",
-    character: characterDataOf(stats, startingCharacterItems()),
-  });
-  client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
-  await client.take(4); // 0x16 + the two mobs + the NPC
-  t.after(() => client.close());
+    const client = await FakeClient.connect(gameInfo.port);
+    // The swing only gets admitted with the LIVE contract: the record wears the sword (worn slot 11)
+    // the profile is looked up by, and the packet carries that profile's own action/speed (ADR-103).
+    const items = startingCharacterItems();
+    items.worn.set(11, equipSlot(1302000));
+    const characterId = handoffs.issue({
+      username: "admin",
+      characterId: 21,
+      characterName: "Fighter",
+      character: characterDataOf(stats, items),
+    });
+    client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
+    await client.take(4); // 0x16 + the two mobs + the NPC
+    t.after(() => client.close());
 
-  const attack = encodeClientAttack(
-    {
-      hits: 1,
-      targetCount: 1,
-      skillId: 1,
-      facingLeft: false,
-      action: 0,
-      speed: 1,
-      targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
-    },
-    CLIENT_FIELD_OPCODE.attack,
-  );
-  client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
+    const attack = encodeClientAttack(
+      {
+        hits: 1,
+        targetCount: 1,
+        skillId: 0,
+        facingLeft: false,
+        action: swing.action,
+        speed: swordProfile.speed,
+        targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
+      },
+      CLIENT_FIELD_OPCODE.attack,
+    );
+    client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-  const hit = await client.take(2);
-  assert.equal(hit[0]![0], MOB_OPCODE.stat);
-  assert.equal(hit[1]![0], MOB_OPCODE.leaveDelayed);
-  const stat = (await client.take(1))[0]!;
-  assert.equal(stat[0], STAT_OPCODE, "the kill pays out as 0x0D");
-  assert.deepEqual(readStatUpdate(new PacketReader(stat, 1)), {
-    ack: false,
-    diff: {
-      exp: 15,
-      level: 2,
-      hp: stats.maxHp,
-      maxHp: stats.maxHp,
-      mp: stats.maxMp,
-      maxMp: stats.maxMp,
-    },
-  });
-  assert.ok(
-    log.some(
-      (line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2"),
-    ),
-    log.join("\n"),
-  );
-});
+    // The kill burst resolves on the motion's release clock; a roam stand 0x33 may legally precede it
+    // (see the swing-kill test), so locate 0x34 by opcode and take 0x30 as its synchronous neighbor.
+    const toStat = await client.takeOpcode(MOB_OPCODE.stat);
+    assert.ok(
+      toStat.slice(0, -1).every((bytes) => bytes[0] === MOB_OPCODE.move),
+      `only the mob's own roam 0x33 may precede the kill burst, saw ` +
+        toStat.map((bytes) => bytes[0]).join(","),
+    );
+    const leave = (await client.take(1))[0]!;
+    assert.equal(leave[0], MOB_OPCODE.leaveDelayed);
+    const stat = (await client.take(1))[0]!;
+    assert.equal(stat[0], STAT_OPCODE, "the kill pays out as 0x0D");
+    const payout = readStatUpdate(new PacketReader(stat, 1));
+    assert.equal(payout.ack, false);
+    const diff = payout.diff!;
+    assert.equal(diff.level, 2);
+    assert.equal(diff.exp, 15);
+    // Level-up growth is server-owned RNG (growth.ts reproduces rand()%width over the job's own row;
+    // job 0 grows maxHp by 20..25 and maxMp by 10..12 - VITAL_GROWTH_ROWS row 0), and the serve path
+    // deliberately exposes no injection seam, so the maxima are asserted inside the native range and
+    // the refill exactly: hp/mp come back at whatever the maxima grew to.
+    assert.ok(
+      diff.maxHp! >= 50 + 20 && diff.maxHp! <= 50 + 25,
+      `maxHp grew inside the beginner row's 20..25, got ${diff.maxHp}`,
+    );
+    assert.ok(
+      diff.maxMp! >= 30 + 10 && diff.maxMp! <= 30 + 12,
+      `maxMp grew inside the beginner row's 10..12, got ${diff.maxMp}`,
+    );
+    assert.equal(diff.hp, diff.maxHp, "the refill lands on the grown maximum");
+    assert.equal(diff.mp, diff.maxMp);
+    assert.deepEqual(
+      Object.keys(diff).sort(),
+      ["exp", "hp", "level", "maxHp", "maxMp", "mp"],
+      "the diff is exactly what changed: the bar, the level, the grown maxima and the refill",
+    );
+    assert.ok(
+      log.some(
+        (line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2"),
+      ),
+      log.join("\n"),
+    );
+  },
+);
 
 /**
  * The whole reward loop over a real socket, which is the only place it can be checked end to end:
@@ -1452,7 +1526,7 @@ test("a kill awards the monster's exp as a 0x0D stat diff", { timeout: 20000 }, 
  */
 test(
   "a drop is taken by walking onto it: 0x44 kind 2, the gain, and the notice",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -1460,6 +1534,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -1483,31 +1558,50 @@ test(
     });
 
     const client = await FakeClient.connect(gameInfo.port);
+    // The LIVE admission contract: the record wears the sword the profile is looked up by, and the
+    // packet carries that profile's own action/speed (ADR-103; see the swing-kill test).
+    const killerStats = zeroStats();
+    killerStats.id = 11;
+    killerStats.name = "Fighter";
+    killerStats.hp = 50;
+    killerStats.maxHp = 50;
+    const killerItems = startingCharacterItems();
+    killerItems.worn.set(11, equipSlot(1302000));
     const characterId = handoffs.issue({
       username: "admin",
       characterId: 11,
       characterName: "Fighter",
+      character: characterDataOf(killerStats, killerItems),
     });
     client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
     await client.take(4); // 0x16 + the two mobs + the NPC
     t.after(() => client.close());
 
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swing.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-    // 0x34, 0x30, the kill's exp (0x0D), then the two drops.
-    const burst = await client.take(5);
+    // 0x34, 0x30, the kill's exp (0x0D), then the two drops - one synchronous batch, located by its
+    // first opcode because a roam stand 0x33 may legally precede it (see the swing-kill test).
+    const toStat = await client.takeOpcode(MOB_OPCODE.stat);
+    assert.ok(
+      toStat.slice(0, -1).every((bytes) => bytes[0] === MOB_OPCODE.move),
+      `only the mob's own roam 0x33 may precede the kill burst, saw ` +
+        toStat.map((bytes) => bytes[0]).join(","),
+    );
+    const burst = [toStat[toStat.length - 1]!, ...(await client.take(4))];
     assert.equal(burst[0]![0], MOB_OPCODE.stat);
     assert.equal(burst[1]![0], MOB_OPCODE.leaveDelayed);
     assert.equal(burst[2]![0], STAT_OPCODE);
@@ -1610,10 +1704,15 @@ test(
  * A swing at a mob this field does not have is logged, not invented: the server answers nothing and
  * the mob it does have stays up. (A 2003 client only sends ids it got from the server, so this is the
  * malformed case - and it must not desync the HP of a different mob.)
+ *
+ * The swing is a fully ADMISSIBLE one (worn sword, the profile's own action/speed - the LIVE
+ * contract of the swing-kill test), so what is under test is the target lookup and nothing else:
+ * an unknown mob id must fall out at the queue with a log line, past the release clock, without a
+ * single kill-chain packet.
  */
 test(
   "a swing at an unknown mob id answers nothing and leaves the field alone",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -1621,6 +1720,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -1641,32 +1741,45 @@ test(
     });
 
     const client = await FakeClient.connect(gameInfo.port);
+    t.after(() => client.close());
+    const sloppyStats = zeroStats();
+    sloppyStats.id = 13;
+    sloppyStats.name = "Sloppy";
+    sloppyStats.hp = 50;
+    sloppyStats.maxHp = 50;
+    const sloppyItems = startingCharacterItems();
+    sloppyItems.worn.set(11, equipSlot(1302000));
     const characterId = handoffs.issue({
       username: "admin",
       characterId: 13,
       characterName: "Sloppy",
+      character: characterDataOf(sloppyStats, sloppyItems),
     });
     client.send({ kind: "handshake-reply", opcode: 0x04, value: characterId });
     await client.take(4); // 0x16 + the two mobs + the NPC
 
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 99,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swing.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 99, hitAnimation: 7, x: 0, y: 0, sequence: 1, damages: [9999] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-    const answered = await client.drainOpcodes();
+    // Drain past the motion's release clock (~393 ms): if the unknown id were invented, its packets
+    // would resolve there. A roam stand 0x33 is legal field noise; kill-chain packets are not.
+    const answered = await client.drainOpcodes(600);
     assert.equal(
-      answered.includes(MOB_OPCODE.stat),
+      answered.some((op) => op !== MOB_OPCODE.move),
       false,
-      `no mob stat answers for a mob that is not there (saw [${answered.map((op) => op.toString(16)).join(",")}])`,
+      `nothing but the mob's own roam answers for a mob that is not there (saw [${answered.map((op) => op.toString(16)).join(",")}])`,
     );
     assert.ok(
       log.some((line) => line.includes("no such mob")),
@@ -1986,12 +2099,18 @@ test(
  * The field is the server's, not the connection's (`game/world.ts`), so the second socket sees the
  * first player enter (`0x1C`), their walk (`0x22`), a monster dying under their swing, and their
  * departure (`0x1D`) - while the packets that belong to one player (the exp of that kill, in `0x0D`)
- * go to that player alone. Nothing moves on its own here (`speedPercent: 0`), so every packet in the
- * test is one the test itself caused.
+ * go to that player alone. `speedPercent: 0` keeps every WALK leg away; the only field noise left is
+ * the roam decision's stationary `0x33` (~1/s per mobile mob, `Math.random`'s intent), which the
+ * burst assertions filter out by opcode so the deep-equals stay exact about everything else.
+ *
+ * The swing goes through the LIVE admission contract (ADR-103): the hero wears sword 1302000 - the
+ * server reads the weapon id from worn slot 11 - and the packet carries that profile's own
+ * action/speed, so the kill resolves on the motion's release clock and the `0x23` the alt sees is
+ * the real relay, not the legacy immediate path.
  */
 test(
   "two players in one map see each other: 0x1C, 0x22, the same kill, and 0x1D",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -1999,6 +2118,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -2020,10 +2140,25 @@ test(
 
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
+    // The hero's own record: alive, and wearing the sword the swing's admission reads (worn slot
+    // 11). The look stays the starter one - the record has no face/hair of its own, so the server
+    // fills the starters in, and the sword rides along in the 0x1C's clothes list.
+    const heroStats = zeroStats();
+    heroStats.id = 7;
+    heroStats.name = "Hero";
+    heroStats.hp = 50;
+    heroStats.maxHp = 50;
+    const heroItems = startingCharacterItems();
+    heroItems.worn.set(11, equipSlot(1302000));
     hero.send({
       kind: "handshake-reply",
       opcode: 0x04,
-      value: handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" }),
+      value: handoffs.issue({
+        username: "admin",
+        characterId: 7,
+        characterName: "Hero",
+        character: characterDataOf(heroStats, heroItems),
+      }),
     });
     const heroBurst = await hero.take(4);
     assert.deepEqual(
@@ -2056,7 +2191,11 @@ test(
         character: altRecord,
       }),
     });
-    const altBurst = await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+    // The roam decision's stationary 0x33 is the field's own noise (its intent is Math.random's,
+    // ~1/s per mobile mob): every strict burst below filters it out and stays exact about the rest.
+    const altBurst = (await alt.takeOpcode(FIELD_OPCODE.userEnterField)).filter(
+      (bytes) => bytes[0] !== MOB_OPCODE.move,
+    );
     assert.deepEqual(
       altBurst.map((bytes) => bytes[0]),
       [
@@ -2082,12 +2221,15 @@ test(
     );
     assert.deepEqual(
       [aboutHero.face, aboutHero.avatarItems],
-      [DEFAULT_FACE_ID, [DEFAULT_HAIR_ID]],
-      "and with a face and hair - a hand-built handoff record has no look of its own, so the " +
-        "server fills the starter one in rather than sending a user with no face at all",
+      [DEFAULT_FACE_ID, [DEFAULT_HAIR_ID, 1302000]],
+      "and with a face and hair - a hand-built record has no look of its own, so the server fills " +
+        "the starter one in rather than sending a user with no face at all - while the sword the " +
+        "swing's admission needs rides along in the clothes list like any other worn equip",
     );
 
-    const heroSaw = await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+    const heroSaw = (await hero.takeOpcode(FIELD_OPCODE.userEnterField)).filter(
+      (bytes) => bytes[0] !== MOB_OPCODE.move,
+    );
     assert.deepEqual(
       heroSaw.map((bytes) => bytes[0]),
       [FIELD_OPCODE.userEnterField],
@@ -2129,22 +2271,27 @@ test(
     const echoedMoves = (await hero.drain()).filter((bytes) => bytes[0] === FIELD_OPCODE.userMove);
     assert.deepEqual(echoedMoves, [], "the mover is not told about their own walk");
 
-    // One swing kills a monster: the death is the field's, the exp is the attacker's.
+    // One swing kills a monster: the death is the field's, the exp is the attacker's. The action and
+    // speed are the worn sword's own profile values - the LIVE admission contract (ADR-103).
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swingMotion = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swingMotion.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-    const altSawKill = await alt.takeOpcode(DROP_OPCODE.appear);
+    const altSawKill = (await alt.takeOpcode(DROP_OPCODE.appear)).filter(
+      (bytes) => bytes[0] !== MOB_OPCODE.move,
+    );
     assert.deepEqual(
       altSawKill.map((bytes) => bytes[0]),
       [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, DROP_OPCODE.appear],
@@ -2154,7 +2301,14 @@ test(
     const swing = readUserAttack(new PacketReader(altSawKill[0]!, 1));
     assert.deepEqual(
       [swing.characterId, swing.facingLeft, swing.action, swing.hits, swing.speed, swing.targets],
-      [7, false, 0, 1, 1, [{ mobId: 1, hitAnimation: 7, damages: [10] }]],
+      [
+        7,
+        false,
+        swingMotion.action,
+        1,
+        swordProfile.speed,
+        [{ mobId: 1, hitAnimation: 7, damages: [10] }],
+      ],
       "0x23 carries the swing the attacker reported, under the attacker's own character id",
     );
     assert.deepEqual(
@@ -2168,7 +2322,9 @@ test(
       "the loot flies out of the monster that died",
     );
 
-    const heroSawKill = await hero.takeOpcode(DROP_OPCODE.appear);
+    const heroSawKill = (await hero.takeOpcode(DROP_OPCODE.appear)).filter(
+      (bytes) => bytes[0] !== MOB_OPCODE.move,
+    );
     assert.deepEqual(
       heroSawKill.map((bytes) => bytes[0]),
       [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, STAT_OPCODE, DROP_OPCODE.appear],
@@ -2786,7 +2942,7 @@ test(
 
 test(
   "a shot goes out as 0x24 with the projectile id, and a cast as 0x25",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -2806,7 +2962,13 @@ test(
         dieMs: 40,
       }),
       dropPolicy: () => [],
-      mobTickMs: 10_000,
+      // Queued shot/cast hits settle on the field's own clock, so the tick stays fast; the roam
+      // decision's stationary 0x33 that this brings along is legal field noise, and the bursts
+      // below are asserted last-index (everything before the target packet must be noise).
+      mobTickMs: 20,
+      basicAttack: combatArt!.attackProfile,
+      skills: skillCatalogOf(archive!),
+      activeSkillArt: (id: number, level: number) => activeArt(combatArt!.reader!, id, level),
       handshake: { clientSendSeed: 0x11223344, clientRecvSeed: 0x55667788 },
       log: (line) => log.push(line),
     });
@@ -2815,9 +2977,13 @@ test(
       await game.close();
     });
 
-    // The attacker owns a pile of arrows in consume slot 3, which is what a shot's extra `u16` names.
+    // The attacker owns a pile of arrows in consume slot 3 (which is what a shot's extra `u16`
+    // names) and WEARS the bow the shot's admission looks the profile up by (worn slot 11 =
+    // 1452000: group 3, speed tier 3, shoot action 22). hp/mp 50: the attack gate wants a living
+    // character, and the cast phase's Energy Bolt (level 20) costs 14 mp.
     const heroItems = startingCharacterItems();
     heroItems.inventories[INVENTORY_TAB.consume - 1]!.items.set(3, nonEquipSlot(2060000, 100));
+    heroItems.worn.set(11, equipSlot(1452000));
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
     hero.send({
@@ -2827,7 +2993,10 @@ test(
         username: "admin",
         characterId: 7,
         characterName: "Archer",
-        character: characterDataOf({ ...zeroStats(), id: 7, name: "Archer" }, heroItems),
+        character: characterDataOf(
+          { ...zeroStats(), id: 7, name: "Archer", hp: 50, maxHp: 50, mp: 50, maxMp: 50 },
+          heroItems,
+        ),
       }),
     });
     await hero.take(4); // 0x16 + the two mobs + the NPC
@@ -2841,15 +3010,34 @@ test(
     });
     await alt.takeOpcode(FIELD_OPCODE.userEnterField);
 
-    // A shot: `0x10` carries the pile it used, `1` arrow's worth of damage, facing left.
+    // The shot's selection geometry is a bounded server policy: the mob must sit inside the
+    // weapon's own range (200 px with no archer skill learned) plus slop, and within 100 px
+    // vertically of the shooter - so the hero first walks down onto the mob's own flat, from the
+    // spawn's (100,190) to (400,300), instead of shooting across the map from the spawn.
+    const approach = encodeClientUserMove({
+      stageByte: 0,
+      path: {
+        originX: 0,
+        originY: 0,
+        elements: [
+          { attr: 0, x: 400, y: 300, vx: 0, vy: 0, action: 0, foothold: 32, duration: 60 },
+        ],
+      },
+    });
+    hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.userMove, body: approach.slice(1) });
+
+    // A shot: `0x10` carries the pile it used and 10 damage, facing right toward the mob, with the
+    // bow profile's own action 22 and speed tier - the LIVE admission contract (ADR-103).
+    const bowProfile = combatArt!.attackProfile!(1452000)!;
+    const shotMotion = bowProfile.shoot[0]!;
     const shot = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
-        facingLeft: true,
-        action: 0x2e,
-        speed: 2,
+        skillId: 0,
+        facingLeft: false,
+        action: shotMotion.action,
+        speed: bowProfile.speed,
         projectileSlot: 3,
         targets: [{ mobId: 1, hitAnimation: -1, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
@@ -2858,10 +3046,13 @@ test(
     hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.shootAttack, body: shot.slice(1) });
 
     const altShot = await alt.takeOpcode(FIELD_OPCODE.userShootAttack);
-    assert.equal(
-      altShot[0]![0],
-      FIELD_OPCODE.userShootAttack,
-      "the observer sees the shot before the monster's reaction - and nothing of someone else's reward",
+    assert.ok(
+      altShot
+        .slice(0, -1)
+        .every((bytes) => bytes[0] === MOB_OPCODE.move || bytes[0] === FIELD_OPCODE.userMove),
+      "takeOpcode stops AT the first 0x24, so the observer sees the shot before the monster's " +
+        `reaction and nothing of someone else's reward; only field noise may precede it, saw ` +
+        `[${altShot.map((bytes) => bytes[0]).join(",")}]`,
     );
     const altSawHit = await alt.takeOpcode(MOB_OPCODE.stat);
     assert.equal(
@@ -2869,7 +3060,7 @@ test(
       MOB_OPCODE.stat,
       "the monster's reaction follows the shot",
     );
-    const relayedShot = readUserAttack(new PacketReader(altShot[0]!, 1));
+    const relayedShot = readUserAttack(new PacketReader(altShot[altShot.length - 1]!, 1));
     assert.deepEqual(
       [
         relayedShot.characterId,
@@ -2878,7 +3069,7 @@ test(
         relayedShot.hits,
         relayedShot.speed,
       ],
-      [7, true, 0x2e, 1, 2],
+      [7, false, shotMotion.action, 1, bowProfile.speed],
       "0x24 is the shot the attacker reported: their id, their action, their speed (FINDINGS 4.11.7c)",
     );
     assert.equal(
@@ -2904,28 +3095,44 @@ test(
       "and nothing of its own attack back - it played that locally",
     );
 
-    // A cast: same record, `0x11`'s header has no slot, so the projectile field goes out as 0.
+    // The bow's own motion gates the next admitted attack for its duration (870 ms), so the cast
+    // waits the gate out instead of being silently refused by it.
+    await new Promise((resolve) => setTimeout(resolve, 950));
+
+    // A cast: Energy Bolt (2001004) at level 20 - the magic path validates against the CASTER's
+    // weapon profile (only groups 1/6 carry the magic actions 28/29 - the sword's), needs the
+    // learned skill in the record's map32, exact hits (attackCount 1) and the profile's own magic
+    // speed. The session mutates this very record object in place, so dressing the hero in the
+    // sword and writing the learned skill into map32 is the test's equip/skill-up seam - what a
+    // real player would reach through the inventory and SP windows. `0x11`'s header has no slot, so
+    // the projectile field goes out as the neutral 0. The reported y is the IMPACT point at the
+    // mob's body height (ground 300 - MAGIC_HEIGHT 25), not its foot root: a ray that ends exactly
+    // on the foothold line clips the very ground the mob stands on (`clipMagicRay` fraction 1).
+    heroItems.worn.set(11, equipSlot(1302000));
+    heroItems.map32 = [{ key: 2001004, value: 20 }];
+    const castProfile = combatArt!.attackProfile!(1302000)!;
+    const castMotion = castProfile.magic!.find((motion) => motion.action === 28)!;
     const cast = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 2001004,
         facingLeft: false,
-        action: 0x20,
-        speed: 3,
-        targets: [{ mobId: 1, hitAnimation: 3, x: 509, y: 300, sequence: 2, damages: [9] }],
+        action: castMotion.action,
+        speed: activeMagicSpeed(castProfile),
+        targets: [{ mobId: 1, hitAnimation: 3, x: 509, y: 275, sequence: 2, damages: [9] }],
       },
       CLIENT_FIELD_OPCODE.magicAttack,
     );
     hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.magicAttack, body: cast.slice(1) });
 
     const altCast = await alt.takeOpcode(FIELD_OPCODE.userMagicAttack);
-    assert.equal(
-      altCast[0]![0],
-      FIELD_OPCODE.userMagicAttack,
-      "a cast never goes out as the shot's opcode",
+    assert.ok(
+      altCast.slice(0, -1).every((bytes) => bytes[0] === MOB_OPCODE.move),
+      "takeOpcode stops AT the first 0x25 - a cast never goes out as the shot's opcode, and only " +
+        `the field's own roam noise may precede it, saw [${altCast.map((bytes) => bytes[0]).join(",")}]`,
     );
-    const relayedCast = readUserAttack(new PacketReader(altCast[0]!, 1));
+    const relayedCast = readUserAttack(new PacketReader(altCast[altCast.length - 1]!, 1));
     assert.deepEqual(
       [
         relayedCast.characterId,
@@ -2933,7 +3140,7 @@ test(
         relayedCast.speed,
         relayedCast.projectileItemId,
       ],
-      [7, 0x20, 3, 0],
+      [7, castMotion.action, activeMagicSpeed(castProfile), 0],
       "and its projectile field is the neutral 0: there is no slot in the packet to look up",
     );
     assert.deepEqual(relayedCast.targets, [{ mobId: 1, hitAnimation: 3, damages: [9] }]);
@@ -3634,7 +3841,7 @@ test(
  */
 test(
   "a level-up plays the effect for the other players (0x29), not for the one who levelled",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -3642,6 +3849,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -3676,6 +3884,9 @@ test(
 
     const hero = await FakeClient.connect(gameInfo.port);
     t.after(() => hero.close());
+    // The LIVE admission contract: the record wears the sword the profile is looked up by.
+    const heroItems = startingCharacterItems();
+    heroItems.worn.set(11, equipSlot(1302000));
     hero.send({
       kind: "handshake-reply",
       opcode: 0x04,
@@ -3683,7 +3894,7 @@ test(
         username: "admin",
         characterId: 7,
         characterName: "Hero",
-        character: characterDataOf(stats, startingCharacterItems()),
+        character: characterDataOf(stats, heroItems),
       }),
     });
     await hero.take(4); // 0x16 + the two mobs + the NPC
@@ -3698,21 +3909,27 @@ test(
     await alt.takeOpcode(FIELD_OPCODE.userEnterField);
     await hero.takeOpcode(FIELD_OPCODE.userEnterField);
 
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swing.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     hero.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
 
-    const altSaw = await alt.takeOpcode(FIELD_OPCODE.userEffect);
+    // The relay, the kill burst and the effect are one synchronous answer to the swing; the only
+    // packet that may legally sit between them is the roam decision's own stationary 0x33.
+    const altSaw = (await alt.takeOpcode(FIELD_OPCODE.userEffect)).filter(
+      (bytes) => bytes[0] !== MOB_OPCODE.move,
+    );
     assert.deepEqual(
       altSaw.map((bytes) => bytes[0]),
       [FIELD_OPCODE.userAttack, MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed, FIELD_OPCODE.userEffect],
@@ -3724,19 +3941,30 @@ test(
       effect: USER_EFFECT_LEVEL_UP,
     });
 
-    // The attacker: their own 0x0D (level 2, and the refill that comes with it), and no 0x29.
+    // The attacker: their own 0x0D (level 2, and the refill that comes with it), and no 0x29. The
+    // level-up growth is server-owned RNG (job 0's row: maxHp +20..25, maxMp +10..12 - see the
+    // kill-exp test), so the maxima are asserted inside the native range and the refill exactly.
     const heroSaw = await hero.takeOpcode(STAT_OPCODE);
-    assert.deepEqual(readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1)), {
-      ack: false,
-      diff: {
-        exp: 5,
-        level: 2,
-        hp: stats.maxHp,
-        maxHp: stats.maxHp,
-        mp: stats.maxMp,
-        maxMp: stats.maxMp,
-      },
-    });
+    const payout = readStatUpdate(new PacketReader(heroSaw[heroSaw.length - 1]!, 1));
+    assert.equal(payout.ack, false);
+    const diff = payout.diff!;
+    assert.equal(diff.level, 2);
+    assert.equal(diff.exp, 5);
+    assert.ok(
+      diff.maxHp! >= 50 + 20 && diff.maxHp! <= 50 + 25,
+      `maxHp grew inside the beginner row's 20..25, got ${diff.maxHp}`,
+    );
+    assert.ok(
+      diff.maxMp! >= 50 + 10 && diff.maxMp! <= 50 + 12,
+      `maxMp grew inside the beginner row's 10..12, got ${diff.maxMp}`,
+    );
+    assert.equal(diff.hp, diff.maxHp, "the refill lands on the grown maximum");
+    assert.equal(diff.mp, diff.maxMp);
+    assert.deepEqual(
+      Object.keys(diff).sort(),
+      ["exp", "hp", "level", "maxHp", "maxMp", "mp"],
+      "the diff is exactly the bar, the level, the grown maxima and the refill",
+    );
     const effectsForHero = (await hero.drain()).filter(
       (bytes) => bytes[0] === FIELD_OPCODE.userEffect,
     );
@@ -3848,7 +4076,7 @@ test(
  */
 test(
   "a session that ends leaves the character's progress in the save",
-  { timeout: 20000 },
+  { skip: archive === null, timeout: 20000 },
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
@@ -3863,6 +4091,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      basicAttack: combatArt!.attackProfile,
       mobTemplate: () => ({
         templateId: 120100,
         name: "stub",
@@ -3898,7 +4127,11 @@ test(
     stats.mp = 5;
     stats.maxMp = 30;
     stats.mesos = 500;
-    const record = characterDataOf(stats, startingCharacterItems());
+    // The LIVE admission contract: the saved record wears the sword the swing is validated against,
+    // and the save round-trip below carries that worn equip like any other.
+    const items = startingCharacterItems();
+    items.worn.set(11, equipSlot(1302000));
+    const record = characterDataOf(stats, items);
     accounts.get("admin")!.characters.push(record);
 
     const client = await FakeClient.connect(gameInfo.port);
@@ -3912,33 +4145,50 @@ test(
     await client.take(4); // 0x16 + the two mobs + the NPC
     t.after(() => client.close());
 
+    const swordProfile = combatArt!.attackProfile!(1302000)!;
+    const swing = swordProfile.melee[0]!;
     const attack = encodeClientAttack(
       {
         hits: 1,
         targetCount: 1,
-        skillId: 1,
+        skillId: 0,
         facingLeft: false,
-        action: 0,
-        speed: 1,
+        action: swing.action,
+        speed: swordProfile.speed,
         targets: [{ mobId: 1, hitAnimation: 7, x: 509, y: 300, sequence: 1, damages: [10] }],
       },
       CLIENT_FIELD_OPCODE.attack,
     );
     client.send({ kind: "unknown", opcode: CLIENT_FIELD_OPCODE.attack, body: attack.slice(1) });
-    await client.take(2); // the mob's stat + the corpse
-    const stat = (await client.take(1))[0]!;
+    // The kill burst resolves on the motion's release clock and is one synchronous batch (the mob's
+    // stat, the death, the payout); the roam decision's stationary 0x33 is the only legal noise in
+    // front of it, so the payout is located by opcode and the burst is asserted inside what led up
+    // to it. The corpse (dieMs 0) walks on the NEXT tick and cannot slip into the batch.
+    const payout = await client.takeOpcode(STAT_OPCODE);
+    assert.deepEqual(
+      payout
+        .slice(0, -1)
+        .filter((bytes) => bytes[0] !== MOB_OPCODE.move)
+        .map((bytes) => bytes[0]),
+      [MOB_OPCODE.stat, MOB_OPCODE.leaveDelayed],
+      "the mob's stat and the death ride right before the payout",
+    );
+    const stat = payout[payout.length - 1]!;
     const told = readStatUpdate(new PacketReader(stat, 1));
-    assert.ok(stats.maxHp >= 70 && stats.maxHp <= 75);
-    assert.ok(stats.maxMp >= 40 && stats.maxMp <= 42);
+    // characterDataOf COPIES the stat block into the record, so the object the field mutates in
+    // place is `record.stats` - the very one the account table holds and the save writes - not the
+    // local literal the record was built from.
+    assert.ok(record.stats.maxHp >= 70 && record.stats.maxHp <= 75);
+    assert.ok(record.stats.maxMp >= 40 && record.stats.maxMp <= 42);
     assert.deepEqual(
       told.diff,
       {
         exp: 15,
         level: 2,
-        hp: stats.maxHp,
-        maxHp: stats.maxHp,
-        mp: stats.maxMp,
-        maxMp: stats.maxMp,
+        hp: record.stats.maxHp,
+        maxHp: record.stats.maxHp,
+        mp: record.stats.maxMp,
+        maxMp: record.stats.maxMp,
       },
       "the growth diff is persisted immediately",
     );

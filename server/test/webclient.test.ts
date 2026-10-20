@@ -335,7 +335,10 @@ async function startWorld(
     stats.mapId = 1000000;
     stats.mesos = 100;
     const items = startingCharacterItems();
-    if (options.combat === true && user === "admin") items.worn.set(1, equipSlot(1302000));
+    // Worn slot 11 is the weapon slot both the server's admission (`worn.get(11)` in applyAttack)
+    // and the page's own stat basis read; slot 1 is the CAP part code, and a sword worn there left
+    // the swing with weaponId 0 - no profile, no attack (the same convention nativeEquipment uses).
+    if (options.combat === true && user === "admin") items.worn.set(11, equipSlot(1302000));
     if (options.nativeEquipment && user === "admin") {
       items.worn.clear();
       items.worn.set(11, equipSlot(1302000));
@@ -1167,23 +1170,39 @@ test(
 
 test(
   "a browser's Ctrl swing kills a mob: the hit, the death and the drop",
-  { timeout: 25000 },
+  { timeout: 25000, skip: !ART_ARCHIVE },
   async (t) => {
     const world = await startWorld(t, { combat: true });
     const { browser } = await enterGame(world.webPort, "admin", "admin");
     // The field's own spawn burst puts the stub monster on the ground; `mob-enter` is its id.
     const mob = (await browser.nextKind("mob-enter")).mob as { mobId: number };
 
-    // The stub monster has 10 HP and the beginner's range is 1..9, so this may take a few swings -
-    // which is the point: every swing is a real 0x1B, and the field answers each one.
+    // The bridge contract: the page names the monster and the direction and supplies its own
+    // SELECTION snapshot - the worn sword's profile action and a unique attack token - never the
+    // damage. The number is rolled server-side off the effective equipment: the blank starter
+    // sword has zero PAD, so the native minimum clamp makes every swing exactly 1, and the stub
+    // monster's 10 HP takes ten swings - which is the point: every swing is a real 0x0F, and the
+    // field answers each one.
+    const sword = artProviderOf(ART_ARCHIVE!).attackProfile!(1302000)!;
+    const action = sword.melee[0]!.action;
     let damage = 0;
     for (let swing = 0; swing < 20; swing++) {
-      browser.send({ t: "attack", mobId: mob.mobId, facingLeft: false });
+      browser.send({
+        t: "attack",
+        mobId: mob.mobId,
+        facingLeft: false,
+        action,
+        attackToken: swing + 1,
+      });
       const hit = await browser.next(
         (message) => message.t === "hit" && message.mobId === mob.mobId,
       );
       damage = Number(hit.damage);
-      assert.ok(damage >= 1, "a swing always hurts");
+      assert.equal(
+        damage,
+        1,
+        "zero PAD means the native minimum: a swing always hurts, for exactly the clamp",
+      );
       if (browser.saw((message) => message.t === "mob-die")) break;
     }
     const die = await browser.next(
@@ -1205,10 +1224,22 @@ test(
     assert.equal(body.mobId, mob.mobId, "a mobile drop names the monster it came from");
 
     // Nothing is in reach of a character standing on the spawn portal, so the pile stays on the
-    // ground; asking to hit a monster the field does not have is an answer, not a crash.
-    browser.send({ t: "attack", mobId: 999999, facingLeft: false });
-    const refusal = await browser.next((message) => message.t === "error");
-    assert.match(String(refusal.message), /999999/);
+    // ground. A swing at a monster the field does not have is a SILENT EMPTY SWING in the current
+    // bridge contract - the native client fires even without a target (513C80), so the page gets
+    // no hit number and no error, and the socket stays healthy: pin the silence, then a full
+    // round trip after it.
+    browser.send({ t: "attack", mobId: 999999, facingLeft: false, action, attackToken: 999999 });
+    const quiet = await browser.quiet(300);
+    assert.equal(
+      quiet.some((message) => message.t === "hit" || message.t === "error"),
+      false,
+      `an unknown mob is a silent empty swing, saw [${quiet.map((message) => message.t).join(",")}]`,
+    );
+    browser.send({ t: "drop-mesos", amount: 10 });
+    const alive = await browser.next(
+      (message) => message.t === "self" && (message.self as { mesos: number }).mesos === 90,
+    );
+    assert.ok(alive, "and the socket still answers a full round trip afterwards");
 
     browser.close();
   },
