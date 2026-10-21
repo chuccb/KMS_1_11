@@ -105,4 +105,4 @@ strict型別／format／build／diff檢查通過；focused **25 pass／0 fail（
 - 獨立程序禁止網路／啟動瀏覽器時，35個工具／元件 import 保持0 I/O attempts；兩支新增 runner 的無參數／無帳密／protected-origin admission 亦實際被呼叫。
 - 完整回歸以本輪整理前的 **1054 pass／44 fail／1098 tests／122 files** 為基準，比對包含同名重複案例的失敗 multiset，而非只看失敗數。
 
-**全案尚未遷移完成**：`client/main.js`（ADR-109 時點 5836 行，ADR-110 後 5662 行，ADR-112 後 5616 行，ADR-113 後 5597 行，ADR-114 後 5567 行）仍待真正實作型別與分層；`server/scripts/client_probe.mjs` 已於 ADR-109 遷為 `client_probe.ts`（strict TS、納入 tsc 檢查），舊 client_probe 不可按預設帳密執行。44 項既有失敗已於 ADR-108 全數結案；其餘深 schema 債務沒有因此消失。手動 field／keyboard 場景本輪未對任何玩家／遊戲帳號執行。
+**全案尚未遷移完成**：`client/main.js`（ADR-109 時點 5836 行，ADR-110 後 5662 行，ADR-112 後 5616 行，ADR-113 後 5597 行，ADR-114 後 5567 行，ADR-115 後 5551 行）仍待真正實作型別與分層；`server/scripts/client_probe.mjs` 已於 ADR-109 遷為 `client_probe.ts`（strict TS、納入 tsc 檢查），舊 client_probe 不可按預設帳密執行。44 項既有失敗已於 ADR-108 全數結案；其餘深 schema 債務沒有因此消失。手動 field／keyboard 場景本輪未對任何玩家／遊戲帳號執行。

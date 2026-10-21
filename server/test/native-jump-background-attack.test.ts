@@ -16,7 +16,7 @@ import {
 import { PacketReader } from "../src/protocol/packet.ts";
 import { readMobMove } from "../src/protocol/mob.ts";
 import { planMobAirPath, mobLocomotion } from "../../client/mobmotion.ts";
-import { backgroundDrift, backgroundLayout } from "../../client/background.ts";
+import { backgroundDrift, backgroundLayout, backgroundCopies } from "../../client/background.ts";
 
 import {
   beginPath,
@@ -429,4 +429,52 @@ test("508FC0 movement states are not doubled avatar-action ids; mob hit1 is NOT 
   const user = { ...mob };
   assert.equal(actorDepth(mob, world, "mob"), 70002);
   assert.equal(actorDepth(user, world, "user"), 160008);
+});
+
+test("a tiled sheet becomes one blit per visible cell, and a mirror keeps the footprint it has unflipped", () => {
+  const back = { x: -16, y: -184, rx: 0, ry: 0, type: 3, cx: 0, cy: 0, ox: 0, oy: 0 };
+  const width = 500,
+    height = 200;
+  const layout = backgroundLayout(back, width, height, 0, 0, 0);
+  assert.ok(layout.columns > 1 && layout.rows > 1, "type 3 tiles both ways");
+  const copies = backgroundCopies(back, width, height, 0, 0, 0);
+  assert.equal(copies.length, layout.columns * layout.rows, "one entry per cell of the grid");
+  // Row-major, and the pitch is the sheet's own size because cx/cy are 0.
+  assert.deepEqual(copies[0], { x: Math.round(layout.x), y: Math.round(layout.y) });
+  assert.deepEqual(copies[1], { x: Math.round(layout.x + width), y: Math.round(layout.y) });
+  assert.deepEqual(copies[layout.columns], {
+    x: Math.round(layout.x),
+    y: Math.round(layout.y + height),
+  });
+  // cx/cy override the pitch when the map sets its own spacing.
+  const spaced = backgroundLayout({ ...back, cx: 120, cy: 60 }, width, height, 0, 0, 0);
+  const spacedCopies = backgroundCopies({ ...back, cx: 120, cy: 60 }, width, height, 0, 0, 0);
+  assert.equal(spacedCopies[1].x - spacedCopies[0].x, 120);
+  assert.equal(spacedCopies[spaced.columns].y - spacedCopies[0].y, 60);
+  // Only the directions the type asks for are tiled; type 0 is one copy however big the view is.
+  assert.equal(backgroundCopies({ ...back, type: 0 }, width, height, 0, 0, 0).length, 1);
+  assert.equal(
+    backgroundCopies({ ...back, type: 1 }, width, height, 0, 0, 0).length,
+    layout.columns,
+    "type 1 is horizontal only",
+  );
+  assert.equal(
+    backgroundCopies({ ...back, type: 2 }, width, height, 0, 0, 0).length,
+    layout.rows,
+    "type 2 is vertical only",
+  );
+
+  // The mirror pivots on the sheet's origin, so the anchor slides by `w - 2*ox` (less the one pixel
+  // the field has always used) to leave the footprint exactly where it was.
+  const ox = 30;
+  const plain = backgroundCopies({ ...back, ox, type: 0 }, width, height, 0, 0, 0);
+  const mirrored = backgroundCopies({ ...back, ox, flip: true, type: 0 }, width, height, 0, 0, 0);
+  assert.equal(mirrored.length, plain.length, "a mirror does not change how many copies there are");
+  assert.equal(mirrored[0].y, plain[0].y, "only x moves");
+  assert.equal(mirrored[0].x, plain[0].x - 2 * ox + width - 1);
+  assert.equal(
+    backgroundCopies({ ...back, flip: true, type: 0 }, width, height, 0, 0, 0)[0].x,
+    plain[0].x + width - 1,
+    "with the origin at 0 the whole shift is the canvas width",
+  );
 });

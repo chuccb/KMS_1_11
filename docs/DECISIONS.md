@@ -3792,3 +3792,18 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **驗證**：`client_probe.ts` 抽出前後的輸出**逐位元組相同**（`diff` 0 行，兩次 exit 0，10 個 banner）；與 ADR-113 之後的輸出也相同。新測試 **8 項全過**（`server/test/inventory-window.test.ts` 8 → 13：格子往返共 4×24 組、堆疊數量的 207 特例、描邊不外洩、楓幣鈕四態、頁籤臉；`server/test/native-hud.test.ts` 14 → 17：收件人欄的裁切與 모두에게、BtChat 三態與矩形（含重疊）、快捷格 origin）。撰寫時三次失敗全是**我的測試資料算錯**：不知道 BtStat 的矩形本來就蓋住 BtChat 左上角、假 context 的 `save`/`restore` 只記 log 不還原狀態、`HtmlImageLookup` 要的是 `HTMLImageElement` 不是 `CanvasImageSource`。全部對照原碼／型別改正，未反過來改實作。
   - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1256 pass / 0 fail、5315 expect() calls、148 files、317.55s**（ADR-113 基線 1248/0，本輪 +8 全為新測試，0 新失敗）。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。
+
+## ADR-115：背景平鋪的複本計算收回 `background.ts`；`modalOpen()` 命名那三重 modal 閘
+
+- **背景**：ADR-112～114 一直在做「鄰居已經住在別的模組裡就搬過去」，本輪換個角度——main.js 裡最長、最容易被讀錯的那類東西**不是函式長度，而是重複了 26 次的一段布林運算式**。所以本輪做兩件事：一件是搬純計算，一件是**把一個沒有名字的條件命名**。
+- **（一）`client/background.ts` 新增 `backgroundCopies`**：`drawBack` 原本自己跑 `backgroundLayout` 然後寫兩層 `for` 去算每一格複本的錨點、自己做剔除、自己處理鏡像偏移。現在「哪些複本、錨點在哪」是純函式回傳的陣列，`drawBack` 只剩「取圖 → 設 alpha → 逐個交給 `drawArchiveImage`」，**34 行變 14 行**。
+  - **鏡像那段原樣搬，一個字都沒改**：鏡像是以圖自己的 `origin` 為軸翻的（`drawArchiveImage` 的 `translate/scale(-1,1)`），所以翻過去之後整塊足跡會位移 `w - 2*ox`，錨點得往回補同樣的量才留在原位。原本的式子是 `anchorX - 2*ox + w - 1`——**那個 `-1` 是 `w - 2*ox` 的整數化，我不知道它是量出來的還是當初的手誤，所以我沒有「修正」它**，整條式子照抄進純函式，並在註解與測試裡寫死它是既有行為。
+  - **剔除交給 sprite painter**：原本的外層剔除（`sx > width` 那四個條件）跟 `drawArchiveImage` 裡的 `visibleSprite` 是同一個測試，只差 `Math.round`，而且原版外層剔除**沒有考慮鏡像**——所以拿掉它之後，真正決定要不要畫的是 `visibleSprite`，而它是唯一知道鏡像怎麼移動邊界的那一個。輸出不變（見下方驗證）。
+  - `BackgroundLayer` 補上 `flip?: boolean`：`server/src/game/mapart.ts` 的 `MapBack` 本來就有這個欄位（`f = 1`），只是 client 端這個介面漏了。
+  - 新測試 1 項：列數×行數、列優先順序、`cx/cy` 覆寫間距、只有 `type` 指定的方向才平鋪（`type 1` 只橫、`type 2` 只直、`type 0` 單張）、鏡像只動 x 且位移恰為 `-2*ox + w - 1`。
+- **（二）`modalOpen()`**：`(itemDialog.open || systemPanel.visible || playerContext.open)` 在 main.js 出現 **26 次**（另有 3 次是它的德摩根否定形）。這三個是原版一次只開一個的 modal（道具對話框、系統選單、玩家右鍵選單），整段條件現在叫 `modalOpen()`，**29 個呼叫點**。
+  - **不是所有「看起來像」的都改**：`quickHoverItem` 只擋 `systemPanel.visible || itemDialog.open`（**沒有** `playerContext.open`），另外兩處只擋 `!itemDialog.open && !systemPanel.visible && !browserLabOpen()`。**補上 `playerContext` 會改變行為，所以那三處維持原樣**——命名不能順手把語意改寬。
+  - **驗證方式**：把 `modalOpen()` 機械展開回原式（含德摩根否定形）、移除定義、跑 prettier，再跟 HEAD 的 `main.js` 逐行比對。結果**只剩 `drawBack` 那一處差異**，其餘的差異行只是加括號造成的折行與 `playerContext.open ||` 換行位置（`||` 鏈上三個純屬性讀取，順序不變、無副作用、短路語意相同）。所以這是**可證明的零行為改變**，不是「看起來一樣」。
+- **驗證**：`client_probe.ts` 抽出前後輸出**逐位元組相同**（`diff` 0 行，兩次 exit 0，10 個 banner），且與 ADR-114 之後的輸出也相同。閘：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1257 pass / 0 fail、5315 expect() calls、148 files、301.25s**（ADR-114 基線 1256/0，本輪 +1 為 `backgroundCopies` 的新測試，0 新失敗）。撰寫測試時失敗一次，是**我記錯 `type` 的位元**：`type 6` 是 `6 & 2`＝**只有垂直**平鋪，不是「兩種都平鋪」；改用 `type 3` 才對。對照 `backgroundLayout` 原碼改正，未改實作。
+- **沙箱重置（本輪第四次）**：`generated/`、`node_modules/` 連同 git index 一起消失，HEAD 退回 `99ff07b`，整個工作樹變成 untracked。工作樹內容是完整的，所以用 **`git reset --mixed origin/arena/…`（不動工作樹）** 把分支指回已推送的 `2e4ced4`，`git status` 隨即全淨；再用 `npm install -g bun@1.4.3` 把 1.4.3 放回 `generated/toolchain/bin/` 並 `bun install --frozen-lockfile --ignore-scripts`。**不用 `--hard` 就不會丟東西**。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。

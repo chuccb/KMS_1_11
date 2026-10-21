@@ -8,6 +8,8 @@ export interface BackgroundLayer {
   cy: number;
   ox?: number;
   oy?: number;
+  /** Mirrored (`f = 1`); no shipped map in `Data.wz` uses it, but the wire carries the field. */
+  flip?: boolean;
 }
 /** KMS 1.11 46BDA0/46D220, not a later client's 4..7 auto-scroll table.
  * Type 4: a repeating horizontal 100px relative move, duration abs(trunc(20000/rx)) ms,
@@ -66,4 +68,56 @@ export function backgroundLayout(
     columns: horizontal ? Math.ceil(viewW / stepX) + 3 : 1,
     rows: vertical ? Math.ceil(viewH / stepY) + 3 : 1,
   };
+}
+
+/** One blit of a tiled sheet: the anchor the page hands to its sprite painter. */
+export interface BackgroundCopy {
+  /** Already flip-adjusted, so a mirrored sheet keeps the footprint it has unflipped. */
+  x: number;
+  y: number;
+}
+
+/**
+ * Every copy of one sheet the viewport needs, in row-major order.
+ *
+ * A copy is anchored at the sheet's own `origin`, so an unflipped sheet's top-left lands on
+ * `(x - ox, y - oy)`. A mirrored one pivots around that same origin instead, which shifts its
+ * footprint by `w - 2 * ox`; the anchor therefore has to move back by that much to stay put. The
+ * `- 1` is the page's own rounding of that pivot and is kept exactly: it is what the field has
+ * always drawn.
+ *
+ * Nothing is culled here - the sprite painter already rejects copies outside the viewport, and it
+ * is the one that knows how a mirror moves the edges.
+ */
+export function backgroundCopies(
+  back: BackgroundLayer,
+  width: number,
+  height: number,
+  cameraX: number,
+  cameraY: number,
+  elapsedMs: number,
+  viewW = 800,
+  viewH = 600,
+): BackgroundCopy[] {
+  const { x, y, stepX, stepY, columns, rows } = backgroundLayout(
+    back,
+    width,
+    height,
+    cameraX,
+    cameraY,
+    elapsedMs,
+    viewW,
+    viewH,
+  );
+  const ox = back.ox ?? 0;
+  const copies: BackgroundCopy[] = [];
+  for (let row = 0; row < rows; row++)
+    for (let column = 0; column < columns; column++) {
+      const anchorX = Math.round(x + column * stepX);
+      copies.push({
+        x: back.flip ? anchorX - 2 * ox + width - 1 : anchorX,
+        y: Math.round(y + row * stepY),
+      });
+    }
+  return copies;
 }

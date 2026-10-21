@@ -84,7 +84,7 @@ import {npcDialogue} from "./npcdialogue.ts";
 import {nativeCursor} from "./cursor.ts";
 import {npcContains, releaseOnInterrupt} from "./pointer.ts";
 import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.ts";
-import { backgroundLayout } from "./background.ts";
+import { backgroundCopies } from "./background.ts";
 import { mobLocomotion } from "./mobmotion.ts";
 import { systemMenu } from "./systemmenu.ts";
 import { whisperNameError } from "./whisper.ts";
@@ -677,7 +677,7 @@ function handle(message) {
           // sub_481910: CConfig goExchange plus one modal at a time; a blocked offer is a no.
           const canAsk = tradeEnabled && systemPanel.gameSettings.exchange &&
             loginScreens.stage==='game' && visualFieldActive && selfView?.hp>0 && !portalPending &&
-            !itemDialog.open && !systemPanel.visible && !playerContext.open &&
+            !modalOpen() &&
             talkingNpc===undefined && !browserLabOpen() && !tradeOpen;
           if (!canAsk) { send({t:'trade-response', inviterId:event.inviterId, accepted:false}); continue; }
           const answered = itemDialog.confirm({
@@ -715,7 +715,7 @@ function handle(message) {
           // modal, an open one only prints a row (the model did that already).
           const canAsk = systemPanel.gameSettings.messenger &&
             loginScreens.stage === 'game' && visualFieldActive && selfView?.hp > 0 && !portalPending &&
-            !itemDialog.open && !systemPanel.visible && !playerContext.open &&
+            !modalOpen() &&
             talkingNpc === undefined && !browserLabOpen() && !messengerOpen;
           if (!canAsk) { messengerModel.dismissInvite(event.roomId); continue; }
           itemDialog.confirm({
@@ -1304,7 +1304,7 @@ function portalAt(clientX, clientY) {
 /** Both original movement activation and optional pointer activation share one sender guard. */
 function requestPortal(portal, now) {
   if (
-    itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() || talkingNpc !== undefined ||
+    modalOpen() || browserLabOpen() || talkingNpc !== undefined ||
     portalPending ||
     now - lastPortalAt < PORTAL_GUARD_MS ||
     !selfView ||
@@ -1395,7 +1395,7 @@ let pointerAt;
 canvas.addEventListener("mousemove", (event) => {
   const point = viewPoint(event);
   pointerAt = point;
-  if ((itemDialog.open || systemPanel.visible || playerContext.open) || itemDrag || quickDrag) return;
+  if (modalOpen() || itemDrag || quickDrag) return;
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
   if (shopScrollDrag !== undefined) {
@@ -1535,7 +1535,7 @@ canvas.addEventListener("mousemove", (event) => {
 });
 
 canvas.addEventListener("mousedown", (event) => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || event.button > 0) return;
+  if (revivePanel.open || modalOpen() || event.button > 0) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1729,7 +1729,7 @@ for (const surface of [canvas, ui.gameUi])
 let inventorySuppressClick = false;
 
 canvas.addEventListener("dblclick", (event) => {
-  if ((itemDialog.open || systemPanel.visible || playerContext.open) || shopPending || slotPending || mesoPending) return;
+  if (modalOpen() || shopPending || slotPending || mesoPending) return;
   const point = viewPoint(event);
   if (equipPanel.hit(point.x, point.y) && !shopWindowAt(point.x, point.y))
     return;
@@ -1776,7 +1776,7 @@ canvas.addEventListener("dblclick", (event) => {
 
 canvas.addEventListener("click", (event) => {
   if (event.button !== 0) return;
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
+  if (revivePanel.open || modalOpen()) return;
   // The status bar is drawn over the world, so its buttons win over anything behind them - and the
   // inventory window is above both.
   const point = viewPoint(event);
@@ -1911,7 +1911,7 @@ canvas.addEventListener("click", (event) => {
 canvas.addEventListener(
   "wheel",
   (event) => {
-    if ((itemDialog.open || systemPanel.visible || playerContext.open) || itemDrag || quickDrag) return;
+    if (modalOpen() || itemDrag || quickDrag) return;
     const point = viewPoint(event);
     if (
       !shopWindowAt(point.x, point.y) &&
@@ -2306,30 +2306,10 @@ function drawBack(back, cameraX, cameraY, now) {
   const w = entry.img.naturalWidth;
   const h = entry.img.naturalHeight;
   if (w === 0 || h === 0) return;
-  const { x, y, stepX, stepY, columns, rows } = backgroundLayout(
-    back, w, h, cameraX, cameraY, now - mapAnimationStart, renderSurface.width, renderSurface.height);
-  // The sheet's own `origin` is the offset the 2003 client blits from (`TMapBack` takes it from the
-  // canvas): a copy anchored at (x, y) has its top-left at (x - ox, y - oy).
-  const ox = back.ox ?? 0;
-  const oy = back.oy ?? 0;
   ctx.globalAlpha = Math.max(0, Math.min(255, back.a ?? 255)) / 255;
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < columns; column++) {
-      const anchorX = Math.round(x + column * stepX);
-      const anchorY = Math.round(y + row * stepY);
-      const sx = anchorX - ox;
-      const sy = anchorY - oy;
-      if (sx > renderSurface.width || sy > renderSurface.height || sx + w < 0 || sy + h < 0) continue;
-      // A flipped sheet mirrors in place: source column `u` lands on `anchorX + ox - u`, so the same
-      // footprint needs the anchor moved by `w - 2*ox`.
-      drawArchiveImage(
-        { path: back.path, ox, oy },
-        back.flip ? anchorX - 2 * ox + w - 1 : anchorX,
-        anchorY,
-        back.flip,
-      );
-    }
-  }
+  for (const copy of backgroundCopies(
+    back, w, h, cameraX, cameraY, now - mapAnimationStart, renderSurface.width, renderSurface.height))
+    drawArchiveImage({ path: back.path, ox: back.ox ?? 0, oy: back.oy ?? 0 }, copy.x, copy.y, back.flip);
   ctx.globalAlpha = 1;
 }
 
@@ -2542,7 +2522,7 @@ function loadQuickItems() {
 function useBagItem(item) {
   const now = performance.now();
   if (!item || loginScreens.stage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
-      portalPending || itemDrag || quickDrag || (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() || shop !== undefined ||
+      portalPending || itemDrag || quickDrag || modalOpen() || browserLabOpen() || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
   nextBagUseAt = now + 200;
@@ -2636,9 +2616,13 @@ function statusButtonClick(button) {
 function browserLabOpen() {
   return testToolsPanel.open || motionSettings.open || lensSettings.open;
 }
+/** The three native modals that own the screen one at a time: an item dialog, the system menu and
+ * the player context menu. The field takes no input while any of them is up. */
+function modalOpen() {
+  return itemDialog.open || systemPanel.visible || playerContext.open;
+}
 function movementBlocked() {
-  return document.hidden || !document.hasFocus() || portalPending || playerContext.open || itemDialog.open ||
-    systemPanel.visible || browserLabOpen() || selfView?.hp <= 0 || shop !== undefined ||
+  return document.hidden || !document.hasFocus() || portalPending || modalOpen() || browserLabOpen() || selfView?.hp <= 0 || shop !== undefined ||
     talkingNpc !== undefined || isEditingControl(document.activeElement);
 }
 function frame() {
@@ -2911,12 +2895,12 @@ function frame() {
     const bagHit = inventoryWindowAt(pointerAt.x, pointerAt.y);
     const pointed = shopHit ? shopHit.row : equipHit ? equipHit.item : bagHit ? bagHit.item : quickHoverItem();
     const tipSource = shopHit ? 'shop' : equipHit ? 'equip' : bagHit ? 'inventory' : 'quick';
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible || playerContext.open) && !browserLabOpen() &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !modalOpen() && !browserLabOpen() &&
         !statPanel.contains(pointerAt.x, pointerAt.y) && !skillPanel.contains(pointerAt.x, pointerAt.y)) {
       if(pointed?.skill){const at=tooltipAnchor('skill',pointerAt.x,pointerAt.y);nativeTips.skill(at.x,at.y,pointed.skill,pointed.level);}
       else drawItemTooltip(pointerAt.x, pointerAt.y, pointed, tipSource);
     }
-    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !(itemDialog.open || systemPanel.visible || playerContext.open) && !browserLabOpen() && !pointed &&
+    if (talkingNpc === undefined && !portalPending && selfView?.hp > 0 && !itemDrag && !quickDrag && !modalOpen() && !browserLabOpen() && !pointed &&
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
@@ -3310,7 +3294,7 @@ async function swing(skillId=0) {
     shop ||
     shopPending ||
     talkingNpc ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     slotPending ||
     mesoPending ||
     quickDrag || itemDrag ||
@@ -3358,7 +3342,7 @@ async function swing(skillId=0) {
       shop ||
       shopPending ||
       talkingNpc ||
-      (itemDialog.open || systemPanel.visible || playerContext.open) ||
+      modalOpen() ||
       slotPending ||
       mesoPending
     )
@@ -3413,7 +3397,7 @@ async function swing(skillId=0) {
     if (self !== field || entity?.characterId !== characterId || combatEpoch !== epoch || localActionEpoch !== interaction
       || JSON.stringify(lookOf(entity)) !== lookKey || entity.hp <= 0
       || !playerBody || playerBody.ladder || map?.id !== self.mapId || portalPending
-      || shop || shopPending || talkingNpc || (itemDialog.open || systemPanel.visible || playerContext.open) || slotPending || mesoPending
+      || shop || shopPending || talkingNpc || modalOpen() || slotPending || mesoPending
       || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt
       || (magic&&!playerBody.grounded)
       || (locomotion(playerBody) === "prone") !== prone
@@ -3550,7 +3534,7 @@ function drawWhisperRecipient() {
   paintWhisperRecipient(ctx, whisperRecipient);
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() ||
+  if (revivePanel.open || modalOpen() || browserLabOpen() ||
       loginScreens.stage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
   const owner=quickOwner, epoch=itemEpoch;
@@ -3613,7 +3597,7 @@ function beginSkillDrag(skill,p) {
 function beginQuickDrag(p) {
   const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
   if (!itemId || loginScreens.stage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
-      portalPending || itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() || shop!==undefined ||
+      portalPending || modalOpen() || browserLabOpen() || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
   // 4F90F0 StatusBar drag looks for a real matching USE stack first; an exhausted binding stays displayed.
   if (quickSkillAllowed(itemId)?!skillPanel.level(itemId.skillId):!quickItemState(inventory,itemId).item) return false;
@@ -3637,7 +3621,7 @@ window.addEventListener("mouseup",e=>{
   if(e.button!==0 || e.target!==canvas || !Number.isFinite(e.clientX) || !Number.isFinite(e.clientY) ||
       d.owner!==quickOwner || d.profile!==quickProfile || d.epoch!==itemEpoch ||
       (!d.fromSkill && quickProfile.values()[d.index]!==d.itemId) || loginScreens.stage!=="game" || !visualFieldActive ||
-      selfView?.hp<=0 || portalPending || itemDialog.open || systemPanel.visible || playerContext.open || browserLabOpen() ||
+      selfView?.hp<=0 || portalPending || modalOpen() || browserLabOpen() ||
       shop!==undefined || talkingNpc!==undefined || (quickSkillAllowed(d.itemId)?!skillPanel.level(d.itemId.skillId):!quickItemState(inventory,d.itemId).item))return;
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
@@ -3671,7 +3655,7 @@ function beginItemDrag(source, p) {
     slotPending ||
     mesoPending ||
     shopPending ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     shop ||
     talkingNpc !== undefined ||
     !selfView ||
@@ -3857,7 +3841,7 @@ async function dropInventoryItem(d, at) {
     talkingNpc === undefined &&
     JSON.stringify(sourceItem(d.tab, d.slot)) === snapshot;
   const facts = await describeItem(d.item.itemId);
-  if (!valid() || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
+  if (!valid() || modalOpen()) return;
   if (!facts || facts.cash || d.item.cash) {
     chatLine(
       "系統",
@@ -3959,7 +3943,7 @@ function setInventoryScroll(row) {
   inventoryPick = inventoryHover = undefined;
 }
 window.addEventListener("mousemove", (event) => {
-  if (!inventoryScrollDrag || (itemDialog.open || systemPanel.visible || playerContext.open)) return;
+  if (!inventoryScrollDrag || modalOpen()) return;
   const g = inventoryScrollbarGeometry();
   const p = viewPoint(event);
   setInventoryScroll(
@@ -4076,8 +4060,8 @@ let messengerTypingSent = false, messengerTypingAt = 0;
 const messengerSayInput = document.getElementById("messenger-say");
 function messengerButtonAt(p) {
   return (
-    loginScreens.stage === "game" && visualFieldActive && !revivePanel.open && !itemDialog.open &&
-    !systemPanel.visible && !playerContext.open && messengerButtonHit(p.x, p.y)
+    loginScreens.stage === "game" && visualFieldActive && !revivePanel.open && !modalOpen() &&
+    messengerButtonHit(p.x, p.y)
   );
 }
 function drawMessengerButton() {
@@ -4090,8 +4074,8 @@ function positionMessengerInput() {
 }
 /** `sub_4DDF10(roomId)`: create the window first, the wire answer fills the cells. */
 function openMessengerAt(roomId) {
-  if (messengerOpen || !selfView || revivePanel.open || itemDialog.open || systemPanel.visible ||
-      playerContext.open || shop !== undefined || talkingNpc !== undefined) return;
+  if (messengerOpen || !selfView || revivePanel.open || modalOpen() ||
+      shop !== undefined || talkingNpc !== undefined) return;
   messengerAt = { ...MESSENGER_WINDOW.home };
   messengerHover = messengerPressed = messengerDrag = undefined;
   messengerScroll.reset();
@@ -4345,7 +4329,7 @@ function dropMesosDialog(at) {
     !mesoPending;
   if (
     !valid() ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     performance.now() < mesoNextAt ||
     selfView.mesos < 10
   )
@@ -4698,7 +4682,7 @@ function buyShopRow(index) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     selfView?.hp <= 0
   )
     return;
@@ -4781,7 +4765,7 @@ function rechargeShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     selfView?.hp <= 0
   )
     return;
@@ -4814,7 +4798,7 @@ function sellShopItem(item) {
     shopPending ||
     slotPending ||
     mesoPending ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) ||
+    modalOpen() ||
     selfView?.hp <= 0
   )
     return;
@@ -4934,7 +4918,7 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); motionSettings.close(); }
     return;
   }
-  if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
+  if (revivePanel.open || modalOpen() || testToolsPanel.open || npcDialog.open || tooltipViewer.open) return;
   // Input owns Enter, I and WASD as well as arrows; none should leak to the game.
   if (
     isEditingControl(document.activeElement) &&
@@ -5207,7 +5191,7 @@ const skillPanel = skillWindow({
   tooltipRenderer: nativeTips, image: artImage, send, audio, point: viewPoint,
   getSelf: () => selfView, isInGame: () => loginScreens.stage === "game",
   log: logLine, isModal: () => !visualFieldActive || !(selfView?.hp > 0) || portalPending || !!itemDrag || !!quickDrag ||
-    (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() || talkingNpc !== undefined,
+    modalOpen() || browserLabOpen() || talkingNpc !== undefined,
 });
 
 const miniMapPanel = miniMapWindow({
@@ -5473,7 +5457,7 @@ const tooltipViewer = tooltipPreview({renderer:nativeTips, point:viewPoint,
 
 function openTooltipExample(kind) {
   if(loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 || talkingNpc!==undefined ||
-      revivePanel.open || itemDialog.open || systemPanel.visible || playerContext.open || shop!==undefined ||
+      revivePanel.open || modalOpen() || shop!==undefined ||
       shopPending || slotPending || mesoPending || portalPending)return false;
   return tooltipViewer.show(kind);
 }
@@ -5481,7 +5465,7 @@ function openTooltipExample(kind) {
 function openDialogueExample(kind, page = 0) {
   const body=dialogueExample(kind,page);
   if(!body || loginScreens.stage!=="game" || !visualFieldActive || selfView?.hp<=0 ||
-      talkingNpc!==undefined || revivePanel.open || itemDialog.open || systemPanel.visible || playerContext.open ||
+      talkingNpc!==undefined || revivePanel.open || modalOpen() ||
       shop!==undefined || shopPending || slotPending || mesoPending || portalPending)return false;
   return npcDialog.show(0,body,{preview:true,page,exampleKind:kind});
 }
@@ -5513,7 +5497,7 @@ const partyMenuState = playerMenuParty();
 const partyPrompt = partyInvitation({
   modal:itemDialog,
   context:()=>loginScreens.stage==='game' && visualFieldActive && selfView?.hp>0 && !portalPending ? self : undefined,
-  canOpen:()=>!itemDialog.open && !systemPanel.visible && !playerContext.open && talkingNpc===undefined && !browserLabOpen() && !tradeOpen,
+  canOpen:()=>!modalOpen() && talkingNpc===undefined && !browserLabOpen() && !tradeOpen,
   available:()=>partyInviteIdentity,
   reply:(inviterId,accepted)=>send({t:'party-response',inviterId,accepted}),
   unavailable:()=>chatHistoryPanel.append('此附接入口未證實原生server邀請身份保護，已暫停派對邀請／接受；既有世界未重啟。','fame'),
