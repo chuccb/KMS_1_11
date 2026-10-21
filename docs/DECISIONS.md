@@ -3985,3 +3985,68 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` **5482 → 5445 行（−37）**。
   - 撰寫時紅燈一次，是我自己的錯：搬移後 `main.js` 留下一條孤兒註解（`/** One tab label… */` 接在 `inventoryCellPaint` 頭上），已清掉。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——背包外觀、拖曳、頁籤、捲軸都不會與 ADR-120 的 LIVE 有差別。
+
+## ADR-122：把四扇 176×315 窗板的尺寸收回各自的版面常數（本輪無行為改變，main.js 維持 5445 行，2026-10-21）
+
+- **背景**：ADR-121 收掉背包窗之後，剩下最刺眼的一類重複是**窗板尺寸被當裸數字重抄**——`client/statwindow.ts`、`client/equipment.ts`、`client/skills.ts` 三支檔案裡，`176`／`315`／`128`／`9`／`32`／`15` 等數字各自出現在版面宣告、命中測試、DOM 定位、關閉鈕定位、繪製五個地方。改一個數字要改五處，而且**沒有任何東西會擋住漂移**。這一輪把使用點全部改讀常數，並回頭用 `Data.wz` 與 `.c` 反編譯把這批數字**交叉確認一次**。本輪無任何行為改變。
+
+- **（一）`UI/UIWindow.img` 九塊窗板的實測尺寸**（`bun -e` 走一遍 `archive.objects("UI/UIWindow.img")`，全部逐像素讀出）：
+
+  | 窗板 | 實測 | 對應常數 |
+  | --- | --- | --- |
+  | `Item/backgrnd` | **162×315** | `INVENTORY`（ADR-121 已對過） |
+  | `Equip/backgrnd` | **176×315** | `EQUIP_WINDOW` |
+  | `Stat/backgrnd` | **176×315** | `STAT_WINDOW` |
+  | `Skill/backgrnd` | **176×315** | `SKILL_WINDOW` |
+  | `Shop/backgrnd` | **407×291** | `SHOP` |
+  | `Trade/backgrnd` | **367×295** | `TRADE_WINDOW` |
+  | `Messenger/backgrnd` | **200×335** | `MESSENGER_WINDOW` |
+  | `Messenger/charView` | **97×322** | `MESSENGER_WINDOW.charView` |
+  | `Stat/backgrnd2` | **176×192** | `STAT_WINDOW` 的 detail 面板 |
+
+  **陷阱要記住**：裝備窗是 **176×315**，不是背包那個 **162×315**。兩個窗板長得很像，寬度差 14px。
+
+- **（二）三扇窗的使用點改讀常數**：`STAT_WINDOW`、`EQUIP_WINDOW`、`SKILL_WINDOW` 各加一個 `backgrnd` 欄位（直接寫出它畫的是哪一塊 WZ canvas），所有使用點改成 `.width`／`.height`／`.close`／`.detail`。共 16 處替換（statwindow 8、equipment 4、skills 4）。殘留的裸 `176`／`315` 只剩宣告本身與兩條說明用註解。
+  - `statwindow.ts` 的 `contains()` 那條 detail 分支改寫成 `x >= at.x + STAT_WINDOW.width && x < at.x + 2 * STAT_WINDOW.width`，並註明「detail 面板佔的是**第二個** 176px」，把原本藏在 `176 * 2` 裡的意思講出來。
+
+- **（三）`sub_461C50`（`MapleStory.exe.c:105778`）：置中不是我們喬的**。結尾那一行（`:105835`）：
+
+  ```c
+  sub_545450(this, (unsigned int)(800 - v17) >> 1, (unsigned int)(600 - v16) >> 1, v15, (int)pv, 10, a3);
+  ```
+
+  也就是 **`x = (800 - width) >> 1`、`y = (600 - height) >> 1`**，直接對 800×600 client 置中。`SHOP.home`（407×291 → 196,154）與 `TRADE_WINDOW.home`（367×295 → 216,152）兩個都吻合。
+
+- **（四）`sub_43D750`（`MapleStory.exe.c:69546`）：其餘四個家的來源**，讀的是 registry：
+
+  ```c
+  for ( i = 0; i < 6; ++i ) {
+    if ( i == 4 )      { n8 = 8;    n8_1 = 8;  }
+    else if ( i != 5 ) { n8 = 8 * (3 * i + 3); n8_1 = n8; v23 = 0; }   // :69584
+    else               { n8 = 500;  n8_1 = 50; }                        // :69589
+    sprintf(key, "uiWndX%d", i); x[i] = ReadReg(key, n8);              // :69594
+    sprintf(key, "uiWndY%d", i); y[i] = ReadReg(key, n8_1);
+    sprintf(key, "uiOpt%d",  i); opt[i] = ReadReg(key, v23);
+    if ( x[i] > 784 ) x[i] = 784;                                      // :69600
+    if ( y[i] > 584 ) y[i] = 584;                                      // :69602
+  }
+  ```
+
+  `8 * (3i + 3)` 展開就是 **24 / 48 / 72 / 96**——正好是背包（24,24）、裝備（48,48）、能力（72,72）、技能（96,96）四個家；`i = 5` 的 **500,50** 是 messenger。所以我們頁面那四個 `home` **是原碼的預設值**，不是我們自己排的。
+  - 順手實證到一條：**拖曳上限 784／584 也是原碼**（`:69600`／`:69602`），`client/equipment.ts` 的 `Math.min(784, …)`／`Math.min(584, …)` 與它一致。`statwindow.ts` 與 `skills.ts` 用的是 `624`／`285`（＝`800−176`／`600−315`，讓整扇窗留在畫面內）——**那是我們自己的政策，不是原碼**，這輪不改。
+
+- **（五）回歸網**：新增 `server/test/ui-window-sheets.test.ts`（5 條）：
+  1. 六扇窗宣告的尺寸 == 它畫的那塊 `UI/UIWindow.img` 窗板（逐塊比對）。
+  2. messenger 是唯一一片拼出來的：`200 + 97 = 297`，`charView` 從 backgrnd 結束處開始，高度用 backgrnd 自己的 335。
+  3. `Stat/backgrnd2`（176×192）掛在父窗右緣 +(176,123) 時，`123 + 192` 正好落在父窗自己的 315 下緣——這就是 `contains()` 能對兩邊都用 `STAT_WINDOW.height` 的原因。
+  4. shop 與 trade 兩個家符合 `sub_461C50` 的 `(800-w)>>1, (600-h)>>1`（並把 196,154 與 216,152 兩個結果釘住）。
+  5. 其餘四個家符合 `sub_43D750` 的 `8*(3i+3)`，messenger 符合 500,50（連 `i = 4` 的 8,8 也一併斷言「本版沒有那一扇窗」）。
+  - 同時把 `server/test/ui-basic-cells.test.ts` 裡那段 40 行的 WZ 走訪抽成共用的 `server/test/helpers/wz-cells.ts`（`archive`／`needsArchive`／`canvasesUnder`／`cellsOf`／`canvasSize`）。ADR-119 那 7 條測試一行未改、全數仍綠。
+
+- **（六）誠實標記**：`MESSENGER_WINDOW.width = 297` **不是任何一塊 canvas 的尺寸**，它是 `backgrnd`（200）+ `charView`（97）兩塊拼出來的寬度；`charView.y = 13` 是 `335 − 322` 的差，屬我們自己推出的垂直置中，**沒有原碼依據**。`sub_43D750` 的 `i = 4`（8,8）在本版沒有對應的窗。
+
+- **驗證**：本輪無行為改變，所以 `client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner）。**但這支探針對本輪幾乎沒有證據力**——它走協定，而這一輪動的全是版面常數與 DOM 定位；上面的數字是靠 WZ 實測尺寸與 `.c` 行號交叉確認的。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1301 pass / 0 fail、5315 expect() calls、150 files、277.38s**（ADR-121 基線 1296/0，本輪 **+5 全為新測試**、0 新失敗）
+  - `client/main.js` **維持 5445 行**（本輪沒有動它，所以七份文件不必同步行數）。
+  - 撰寫時紅燈兩次，都是我自己的錯、不是產品碼錯：`server/test/helpers/wz-cells.ts` 的 `WzNode` 建構子引數與 `WzTree` 型別要先單獨 typecheck 過才能讓別的測試匯入；`ui-basic-cells.test.ts` 換成共用 helper 時，原本的 `DATA_WZ`／`needsArchive` 區塊要整段換掉，只改 import 會留下重複宣告。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——能力窗／裝備窗／技能窗的外觀、拖曳、按鈕都不會與 ADR-121 的 LIVE 有差別。

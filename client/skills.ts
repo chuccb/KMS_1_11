@@ -25,8 +25,14 @@ import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 import { vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 import { tooltipAnchor } from "./tooltip.ts";
-/** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
+/**
+ * CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI.
+ *
+ * 176x315 is `UI/UIWindow.img/Skill/backgrnd` - a 176x315 canvas in Data.wz, the same plate the
+ * stat and equip windows use.
+ */
 export const SKILL_WINDOW = {
+  backgrnd: "UI/UIWindow.img/Skill/backgrnd",
   width: 176,
   height: 315,
   home: { x: 96, y: 96 },
@@ -129,7 +135,7 @@ export function skillWindow({
     if (signature === key) return;
     signature = key;
     root.classList.toggle("hidden", !opened || !isInGame());
-    position(root, at.x, at.y, 176, 315);
+    position(root, at.x, at.y, SKILL_WINDOW.width, SKILL_WINDOW.height);
     for (let i = 0; i < 4; i++) {
       const skill = active(i),
         button = el(`sp-up-${i}`);
@@ -425,7 +431,14 @@ export function skillWindow({
     },
     toggle,
     contains(x: number, y: number) {
-      return opened && isInGame() && x >= at.x && x < at.x + 176 && y >= at.y && y < at.y + 315;
+      return (
+        opened &&
+        isInGame() &&
+        x >= at.x &&
+        x < at.x + SKILL_WINDOW.width &&
+        y >= at.y &&
+        y < at.y + SKILL_WINDOW.height
+      );
     },
     receive(message: {
       t: string;
@@ -474,7 +487,7 @@ export function skillWindow({
       // repeats the pressed arrow/page through the 50 ms gate (the thumb never repeats).
       if (scrollBar.pressed && scrollBar.pressed !== "thumb" && pointer)
         scrollBar.tick(performance.now(), pointer.x, pointer.y);
-      stamp("UI/UIWindow.img/Skill/backgrnd", 0, 0);
+      stamp(SKILL_WINDOW.backgrnd, 0, 0);
       ctx.save();
       ctx.font = "11px 'Dotum','돋움','KMSCJK',sans-serif";
       ctx.textBaseline = "top";

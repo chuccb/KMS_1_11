@@ -21,8 +21,14 @@ interface EquipmentOptions {
 import { releaseOnInterrupt } from "./pointer.ts";
 import { bodyPart, partFitsItem, equipConflict, firstBagSlot, canWear } from "./equip-rules.ts";
 export { bodyPart, partFitsItem, equipConflict, firstBagSlot, canWear };
-/** CUIEquip: 4D89F0 / 4D9110. Coordinates read from PE VA 005BC368, fourteen (s32 x,s32 y). */
+/**
+ * CUIEquip: 4D89F0 / 4D9110. Coordinates read from PE VA 005BC368, fourteen (s32 x,s32 y).
+ *
+ * 176x315 is `UI/UIWindow.img/Equip/backgrnd` - a 176x315 canvas in Data.wz, the same plate the
+ * stat and skill windows use.
+ */
 export const EQUIP_WINDOW = {
+  backgrnd: "UI/UIWindow.img/Equip/backgrnd",
   width: 176,
   height: 315,
   home: { x: 48, y: 48 },
@@ -81,7 +87,7 @@ export function equipmentWindow({
     if (!opened || !isInGame()) return;
     const lx = x - at.x,
       ly = y - at.y;
-    if (lx < 0 || ly < 0 || lx >= 176 || ly >= 315) return;
+    if (lx < 0 || ly < 0 || lx >= EQUIP_WINDOW.width || ly >= EQUIP_WINDOW.height) return;
     const c = EQUIP_WINDOW.close;
     if (lx >= c.x && lx < c.x + c.w && ly >= c.y && ly < c.y + c.h) return { kind: "close" };
     const slot = equipSlotAt(lx, ly);
@@ -182,12 +188,13 @@ export function equipmentWindow({
     draw() {
       sync();
       if (!opened || !isInGame() || !getSelf()) return;
-      const b = image("UI/UIWindow.img/Equip/backgrnd");
+      const b = image(EQUIP_WINDOW.backgrnd);
       if (b.ready) ctx.drawImage(b.img, at.x, at.y);
       const close = image(
         `UI/UIWindow.img/BtUIClose/${pressed ? "pressed" : pointer && hit(pointer.x, pointer.y)?.kind === "close" ? "mouseOver" : "normal"}/0`,
       );
-      if (close.ready) ctx.drawImage(close.img, at.x + 128, at.y + 9);
+      if (close.ready)
+        ctx.drawImage(close.img, at.x + EQUIP_WINDOW.close.x, at.y + EQUIP_WINDOW.close.y);
       for (const item of getInventory()?.worn ?? []) {
         const xy = EQUIP_SLOTS[item.slot - 1];
         if (!xy) continue;

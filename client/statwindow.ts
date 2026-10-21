@@ -20,8 +20,15 @@ interface StatWindowOptions {
 }
 import { releaseOnInterrupt } from "./pointer.ts";
 import { detailRows } from "./characterstats.ts";
-/** CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D. */
+/**
+ * CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D.
+ *
+ * 176x315 is the plate itself - `UI/UIWindow.img/Stat/backgrnd` is a 176x315 canvas in Data.wz, the
+ * same size `Equip/backgrnd` and `Skill/backgrnd` are - so every place that used to spell those two
+ * numbers out now reads them off here.
+ */
 export const STAT_WINDOW = {
+  backgrnd: "UI/UIWindow.img/Stat/backgrnd",
   width: 176,
   height: 315,
   home: { x: 72, y: 72 },
@@ -110,7 +117,7 @@ export function statWindow({
     if (key === signature) return;
     signature = key;
     root.classList.toggle("hidden", !opened);
-    box(root, at.x, at.y, 176, 315);
+    box(root, at.x, at.y, STAT_WINDOW.width, STAT_WINDOW.height);
     for (const b of AP_BUTTONS) el(`ap-${b.field}`).disabled = disabled(b);
     el("stat-detail").disabled = !getBasis();
     el("stat-detail").setAttribute("aria-expanded", String(detail));
@@ -125,9 +132,21 @@ export function statWindow({
       el("stat-close").focus();
     } else requireElement("view", "canvas").focus();
   }
-  box(requireElement("stat-body", "button"), 0, 0, 176, 315);
-  box(el("stat-close"), 128, 9, 32, 15);
-  box(el("stat-detail"), 122, 280, 47, 18);
+  box(requireElement("stat-body", "button"), 0, 0, STAT_WINDOW.width, STAT_WINDOW.height);
+  box(
+    el("stat-close"),
+    STAT_WINDOW.close.x,
+    STAT_WINDOW.close.y,
+    STAT_WINDOW.close.w,
+    STAT_WINDOW.close.h,
+  );
+  box(
+    el("stat-detail"),
+    STAT_WINDOW.detail.x,
+    STAT_WINDOW.detail.y,
+    STAT_WINDOW.detail.w,
+    STAT_WINDOW.detail.h,
+  );
   for (const b of AP_BUTTONS) {
     const node = el(`ap-${b.field}`);
     box(node, b.x, b.y, 17, 16);
@@ -179,7 +198,7 @@ export function statWindow({
       x: Math.max(0, Math.min(624, Math.round(p.x - drag.dx))),
       y: Math.max(0, Math.min(285, Math.round(p.y - drag.dy))),
     };
-    box(root, at.x, at.y, 176, 315);
+    box(root, at.x, at.y, STAT_WINDOW.width, STAT_WINDOW.height);
   });
   const release = () => {
     if (!drag) return;
@@ -205,14 +224,16 @@ export function statWindow({
     toggle,
     contains(x: number, y: number) {
       if (!opened || !isInGame()) return false;
-      if (x >= at.x && x < at.x + 176 && y >= at.y && y < at.y + 315) return true;
+      if (x >= at.x && x < at.x + STAT_WINDOW.width && y >= at.y && y < at.y + STAT_WINDOW.height)
+        return true;
+      // The detail pane hangs off the parent's right edge, so it spans the *second* 176 px.
       return (
         detail &&
         !!getBasis() &&
-        x >= at.x + 176 &&
-        x < at.x + 352 &&
+        x >= at.x + STAT_WINDOW.width &&
+        x < at.x + 2 * STAT_WINDOW.width &&
         y >= at.y + 123 &&
-        y < at.y + 315
+        y < at.y + STAT_WINDOW.height
       );
     },
     receive(message: { t: string; changed?: boolean }) {
@@ -244,7 +265,7 @@ export function statWindow({
       sync();
       const self = getSelf();
       if (!self) return;
-      stamp("UI/UIWindow.img/Stat/backgrnd", at.x, at.y);
+      stamp(STAT_WINDOW.backgrnd, at.x, at.y);
       ctx.save();
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -297,18 +318,26 @@ export function statWindow({
           : hover === "stat-detail"
             ? "mouseOver"
             : "normal";
-      stamp(`UI/UIWindow.img/Stat/BtDetail/${detailState}/0`, at.x + 122, at.y + 280);
+      stamp(
+        `UI/UIWindow.img/Stat/BtDetail/${detailState}/0`,
+        at.x + STAT_WINDOW.detail.x,
+        at.y + STAT_WINDOW.detail.y,
+      );
       const rows = detail && basis ? detailRows(basis, getTemporary(), getAmmoPad()) : [];
       if (rows.length) {
         // CUIStatDetail is attached at parent +(176,123), 176x192; no invented title/close art.
-        stamp("UI/UIWindow.img/Stat/backgrnd2", at.x + 176, at.y + 123);
+        stamp("UI/UIWindow.img/Stat/backgrnd2", at.x + STAT_WINDOW.width, at.y + 123);
         ctx.save();
         ctx.font = "12px 'Dotum','돋움','KMSCJK',sans-serif";
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillStyle = "#000";
         rows.forEach((value, i) =>
-          ctx.fillText(value, Math.round(at.x + 176 + 80), Math.round(at.y + 123 + 12 + 18 * i)),
+          ctx.fillText(
+            value,
+            Math.round(at.x + STAT_WINDOW.width + 80),
+            Math.round(at.y + 123 + 12 + 18 * i),
+          ),
         );
         ctx.restore();
       }

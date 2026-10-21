@@ -23,11 +23,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
-import { WzArchive } from "../src/wz/archive.ts";
-import { WzCanvas, WzNode, type WzEntry, type WzTree } from "../src/wz/img.ts";
+import { cellsOf, needsArchive } from "./helpers/wz-cells.ts";
 import { VSCR_CELL, vScrollTravel } from "../../client/vscroll.ts";
 import {
   INVENTORY,
@@ -49,51 +46,8 @@ import {
 import { TRADE_WINDOW } from "../../client/trade-state.ts";
 import { MESSENGER_WINDOW } from "../../client/messenger-state.ts";
 
-const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
-/** One archive instance for the whole file: opening it scans the tail and reads tens of MB. */
-const archive: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
-const needsArchive = { skip: archive === null };
-
-function isEntry(value: unknown): value is WzEntry {
-  return typeof value === "object" && value !== null && "name" in value && "value" in value;
-}
-
-/**
- * Depth-first walk that keeps each canvas's own path. A canvas arrives as a `WzNode` wrapping a
- * `WzCanvas`, which is why the node arm has to look one level down before it recurses.
- */
-function canvasesUnder(value: WzTree, prefix: string, out: Map<string, string>): void {
-  if (value instanceof WzCanvas) {
-    out.set(prefix, `${value.width}x${value.height}`);
-    return;
-  }
-  if (value instanceof WzNode) {
-    const inner = value.value;
-    if (inner instanceof WzCanvas) out.set(prefix, `${inner.width}x${inner.height}`);
-    else canvasesUnder(inner, prefix, out);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      if (isEntry(entry))
-        canvasesUnder(entry.value, prefix ? `${prefix}/${entry.name}` : entry.name, out);
-    }
-  }
-}
-
-/** Every canvas under `UI/Basic.img/<strip>`, keyed by its path below the strip. */
-function cellsOf(strip: string): Map<string, string> {
-  const out = new Map<string, string>();
-  if (archive === null) return out;
-  for (const object of archive.objects("UI/Basic.img")) {
-    const found = object.props.find((entry) => entry.name === strip);
-    if (found !== undefined) canvasesUnder(found.value, "", out);
-  }
-  return out;
-}
-
-const VSCR = cellsOf("VScr");
-const TAB = cellsOf("Tab");
+const VSCR = cellsOf("UI/Basic.img", "VScr");
+const TAB = cellsOf("UI/Basic.img", "Tab");
 
 // ---------------------------------------------------------------------------
 // UI/Basic.img/VScr - one 12x12 cell behind every scrollbar in the client

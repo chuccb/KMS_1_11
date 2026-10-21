@@ -4918,3 +4918,19 @@ typecheck／build／format 全綠。
 - `INVENTORY_TAB_LABEL`（left 6 / top 5 / width 22 / height 13 / baseline 12）＝蓋住 sheet 自帶韓文標籤的底板，**無原證**。
 - 關閉鈕座標 (114, 9) 已改用 `INVENTORY.close`（原本在 main.js 寫死一份）。
 - 繪製順序（與原頁一致）：sheet → 關閉鈕 → 頁籤面 → 項目格（圖示置中、堆疊數）→ hover 框 → 捲軸 → 金幣鈕 → 楓幣。
+
+### 窗板尺寸、置中與 registry 預設值（2026-10-21，ADR-122）
+
+- **`UI/UIWindow.img` 九塊窗板實測**（`archive.objects("UI/UIWindow.img")` 逐塊讀出，全部像素級）：
+  `Item/backgrnd` **162×315**、`Equip/backgrnd` **176×315**、`Stat/backgrnd` **176×315**、`Skill/backgrnd` **176×315**、`Shop/backgrnd` **407×291**、`Trade/backgrnd` **367×295**、`Messenger/backgrnd` **200×335**、`Messenger/charView` **97×322**、`Stat/backgrnd2` **176×192**。
+  陷阱：裝備窗 176×315 ≠ 背包窗 162×315。
+- **`sub_461C50`（`MapleStory.exe.c:105778`）＝視窗置中**，收尾一行在 `:105835`：
+  `sub_545450(this, (unsigned int)(800 - v17) >> 1, (unsigned int)(600 - v16) >> 1, v15, (int)pv, 10, a3);`
+  → `x = (800 - width) >> 1`、`y = (600 - height) >> 1`，對 800×600 client。shop（407×291→196,154）與 trade（367×295→216,152）皆吻合。
+- **`sub_43D750`（`MapleStory.exe.c:69546`）＝ registry 的 `uiWndX%d`／`uiWndY%d`／`uiOpt%d` 預設值**，`i = 0..5`：
+  - `i != 4 && i != 5`：`n8 = 8 * (3 * i + 3)`（`:69584`），x 與 y 同值 → **24 / 48 / 72 / 96**（背包／裝備／能力／技能）。
+  - `i == 4`：`8, 8`（本版無對應視窗）。
+  - `i == 5`：`n8 = 500; n8_1 = 50;`（`:69589`）→ **messenger 的 (500,50)**。
+  - 讀入後的夾限：**`x > 784 → 784`、`y > 584 → 584`**（`:69600`／`:69602`）。`client/equipment.ts` 的拖曳夾限與此一致；`statwindow.ts`／`skills.ts` 的 `624`／`285`（＝800−176／600−315）是我們自己的「整扇窗留在畫面內」政策。
+- **`Stat/backgrnd2`（176×192）**：`statwindow.ts` 把它掛在父窗 +(176,123)，`123 + 192 = 315`，正好收在父窗下緣——故 `contains()` 的 detail 分支可以對兩邊都用 `STAT_WINDOW.height`。
+- **無原碼依據**：`MESSENGER_WINDOW.width = 297` 是 `backgrnd`(200) + `charView`(97) 拼出來的，不是單一 canvas；`charView.y = 13` 是 `335 − 322` 的差，屬我們自己推出的置中。
