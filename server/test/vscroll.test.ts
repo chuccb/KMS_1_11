@@ -1,11 +1,46 @@
 /** The shared CCtrlScrollBar state machine, cross-checked against sub_4521E0/4523D0/4524C0/4522B0. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { REPEAT_MS, vScrollPage, vScrollScroller } from "../../client/vscroll.ts";
+import { INVENTORY } from "../../client/inventory-window.ts";
+import { MESSENGER_WINDOW } from "../../client/messenger-state.ts";
+import { SHOP } from "../../client/shop-window.ts";
+import { SKILL_SCROLLBAR } from "../../client/skills.ts";
+import { TRADE_WINDOW } from "../../client/trade-state.ts";
+import {
+  paintVScrollbar,
+  REPEAT_MS,
+  vScrollPage,
+  vScrollScroller,
+  type VScrollBarGeometry,
+  type VScrollPaint,
+} from "../../client/vscroll.ts";
 
 /** The messenger log's bar: 12px arrows, 218px track (sub_4E0FF0's Create at {179,58,12,218}). */
 const bar = () => vScrollScroller({ x: 179, y: 58, width: 12, height: 218, arrow: 12 });
 const local = (y: number) => ({ x: 184, y: 58 + y });
+
+/** Every CCtrlScrollBar in the client, named by the window that creates it. */
+const BARS: [string, VScrollBarGeometry][] = [
+  ["trade", TRADE_WINDOW.scrollbar],
+  ["messenger", MESSENGER_WINDOW.scrollbar],
+  ["skill", SKILL_SCROLLBAR],
+  ["shop buy", SHOP.scrollbar.buy],
+  ["shop sell", SHOP.scrollbar.sell],
+  ["inventory", INVENTORY.scrollbar],
+];
+
+/** Paint a bar and report the bare cell names, in the order they hit the canvas. */
+function cells(bar: VScrollBarGeometry, paint: VScrollPaint): string[] {
+  const drawn: string[] = [];
+  const ctx = {
+    drawImage(image: unknown) {
+      drawn.push(String(image));
+    },
+  } as unknown as CanvasRenderingContext2D;
+  const image = (path: string) => ({ ready: true, img: path as unknown as CanvasImageSource });
+  paintVScrollbar(ctx, image, { x: 0, y: 0 }, bar, paint);
+  return drawn.map((path) => path.replace("UI/Basic.img/VScr/", ""));
+}
 
 test("a held arrow repeats once per 50 ms while the cursor stays in the zone", () => {
   const scroll = bar();
@@ -87,4 +122,46 @@ test("a bar with max <= 1 neither acts nor repeats", () => {
   assert.equal(scroll.pressed, undefined);
   scroll.tick(1000, 184, 58 + 210);
   assert.equal(scroll.pos, 0);
+});
+
+test("a scroller carries exactly the two numbers the painter reads (VScrollPaint)", () => {
+  const scroll = bar();
+  scroll.sync(60); // max = 60 - 15 = 45, and a fresh list is pinned at the bottom
+  // Structural: the shop and the inventory keep a row index instead of a CCtrlScrollBar, so the
+  // painter takes the two numbers rather than the scroller, and a live one satisfies it as-is.
+  const paint: VScrollPaint = scroll;
+  assert.equal(paint.max, scroll.max);
+  assert.equal(paint.offset, scroll.thumbTop() - 12);
+  assert.equal(paint.offset, 182, "pinned at the bottom, the thumb has run the whole 218 - 36");
+  scroll.by(-(scroll.max - 1));
+  assert.equal(paint.offset, 0, "and at the top it is flush under the prev cap");
+  assert.equal(paint.pressed, undefined);
+  assert.equal(paint.dragging, false);
+});
+
+test("one painter draws all six CCtrlScrollBars, and every one of them declares its cap", () => {
+  for (const [name, bar] of BARS) {
+    assert.equal(bar.arrow, 12, `${name}'s cap is the 12px VScr cell`);
+    assert.ok(Number.isFinite(bar.arrow), `${name} has an arrow: without one the thumb is NaN`);
+    let tiles = 0;
+    for (let y = bar.arrow; y < bar.height - bar.arrow; y += bar.arrow) tiles += 1;
+    const trough = (prefix: string) => Array.from({ length: tiles }, () => `${prefix}/base`);
+    assert.deepEqual(
+      cells(bar, { max: 45, offset: 30, dragging: true }),
+      ["enabled/prev0", ...trough("enabled"), "enabled/next0", "enabled/thumb1"],
+      `${name}: an overflowing list, dragged`,
+    );
+    // `max <= 1` is a list that fits: the plain caps and no thumb at all.
+    assert.deepEqual(
+      cells(bar, { max: 1, offset: 0 }),
+      ["disabled/prev", ...trough("disabled"), "disabled/next"],
+      `${name}: a list that fits`,
+    );
+    // sub_4521E0's held face, which the trade window is the only one to reach.
+    assert.deepEqual(
+      cells(bar, { max: 45, offset: 0, pressed: "next" }),
+      ["enabled/prev0", ...trough("enabled"), "enabled/next1", "enabled/thumb0"],
+      `${name}: the next arrow held down`,
+    );
+  }
 });

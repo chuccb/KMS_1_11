@@ -4970,4 +4970,16 @@ typecheck／build／format 全綠。
   - `sub_4D89F0`（CUIEquip 建構式，`:223384`）另證：`sub_545450(this, v5[0], v4, 176, 315, 10, 0)` → 裝備窗 **176×315**；`sub_506440(this, 1, 128, 9, 1)` → 關閉鈕 (128,9)。
 - **`UI/Basic.img/Tab`（ADR-119 實測）**：`left` 4×24、`middle` 14×24、`right` 12×24、`fill` 1×24。已從 `shop-window.ts` 搬到共用 `client/tabstrip.ts`（商店、技能書、背包三條頁籤條都用它）。
 - **無原碼依據**：技能窗的 `SKILL_ROW_TOP = 119`、`SKILL_ROW = { x: 5, width: 154 }`、`SKILL_ROW_LIVE = 38`（列畫家 `sub_4ED8E0` 埋在 `VARIANTARG` union 讀不出來）。
-- **未做（下輪）**：技能窗的捲軸底圖仍是手刻的 `for (let y = 128; y < 266; y += 12)`，交易窗與 messenger 已走共用 `paintVScrollbar`。
+- **已做（ADR-126）**：技能窗的捲軸底圖不再是手刻的 `for (let y = 128; y < 266; y += 12)`；六條捲軸全部走共用 `paintVScrollbar`（見下面 ADR-127 那條）。
+
+- **`UI/Basic.img/VScr` / `CCtrlScrollBar`（ADR-126、ADR-127，2026-10-21）**：六條捲軸（交易、messenger、技能、
+  商店買、商店賣、背包）現在**全部**由 `client/vscroll.ts` 的 `paintVScrollbar` 畫。第 5 個參數是
+  `VScrollPaint { max, offset, pressed?, dragging? }`，其中 `max` 用原版 `SetMax = rows - (capacity - 1)`
+  （`<= 1` 就是 disabled 且無 thumb）、`offset = sub_452500` 的 `floor(pos * travel / (max - 1))`。
+  `VScroll` 結構上直接滿足它，所以持有 scroller 的視窗把整顆傳進去即可；商店與背包只存列號，就手動傳這兩個數字。
+- **`sub_452500` 的 thumb 是 `floor` 不是 `round`（ADR-127 修正）**：商店與背包原本用 `Math.round`，與原版差 1px。
+  實例：12 列購買清單 `171 * 3 / 6 = 85.5` → **85**；100 格背包 `172 * 10 / 19 = 90.53` → **90**。已改。
+- **已完成（原 ADR-125 的待辦）**：技能窗的捲軸底圖不再是手刻的 `for (let y = 128; y < 266; y += 12)`。
+- **無原碼依據**：商店與背包**沒有** per-arrow 的按住狀態，所以 `prev1`/`next1` 只有交易窗會出現。
+  這是我們「還沒把那兩個視窗接到 `sub_4521E0` 的按住狀態」的實況，不是原版證明——原版 `CCtrlScrollBar`
+  一定有，只是那兩個視窗的持有人還沒被讀出來。

@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { canvasSize, needsArchive } from "./helpers/wz-cells.ts";
-import { VSCR_CELL } from "../../client/vscroll.ts";
+import { VSCR_CELL, paintVScrollbar } from "../../client/vscroll.ts";
 import { TAB_FILL, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "../../client/tabstrip.ts";
 import {
   SKILL_ROW,
@@ -30,7 +30,6 @@ import {
   SKILL_ROW_TOP,
   SKILL_ROWS,
   SKILL_SCROLLBAR,
-  SKILL_SCROLLBAR_NEXT_Y,
   SKILL_TABS,
   SKILL_TAB_INNER,
   SKILL_UP_BUTTON,
@@ -81,8 +80,50 @@ test("sub_4ECD40's CCtrlScrollBar id2001 at (161, 116) height 162", () => {
   });
   // The pointer zone ends at the bar's own bottom, and the `next` arrow sits one cell above it.
   assert.equal(SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height, 278);
-  assert.equal(SKILL_SCROLLBAR_NEXT_Y, 266);
-  assert.equal(SKILL_SCROLLBAR_NEXT_Y + VSCR_CELL, 278);
+  assert.equal(SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height - VSCR_CELL, 266);
+});
+
+test("the bar is painted by the shared painter, not a hand-rolled copy", () => {
+  // What the skill window used to inline, and what `client/vscroll.ts` now does for it: `prev` at
+  // the top, `base` one cell at a time from 128 while < 266, `next` at 266, and the thumb.
+  const drawn: { image: unknown; x: number; y: number }[] = [];
+  const ctx = {
+    drawImage(image: unknown, x: number, y: number) {
+      drawn.push({ image, x, y });
+    },
+  } as unknown as CanvasRenderingContext2D;
+  const image = (path: string) => ({ ready: true, img: path as unknown as CanvasImageSource });
+  const scroll = {
+    max: 8,
+    pos: 0,
+    pressed: undefined,
+    dragging: false,
+    offset: 0,
+  } as unknown as Parameters<typeof paintVScrollbar>[4];
+  paintVScrollbar(ctx, image, { x: 0, y: 0 }, SKILL_SCROLLBAR, scroll);
+  assert.deepEqual(
+    drawn.map((entry) => [
+      String(entry.image).replace("UI/Basic.img/VScr/enabled/", ""),
+      entry.x,
+      entry.y,
+    ]),
+    [
+      ["prev0", 161, 116],
+      ...Array.from({ length: Math.ceil(138 / VSCR_CELL) }, (_, i) => [
+        "base",
+        161,
+        128 + i * VSCR_CELL,
+      ]),
+      ["next0", 161, 266],
+      // A zero offset parks the thumb one cap down: `bar.y + arrow + offset`, not `bar.y`.
+      ["thumb0", 161, 128],
+    ],
+  );
+  // Every `base` tile is inside the trough: the first is one cell below the top, the last ends
+  // before the `next` cap.
+  const bases = drawn.filter((entry) => String(entry.image).endsWith("/base"));
+  assert.equal(bases[0]?.y, SKILL_SCROLLBAR.y + VSCR_CELL);
+  assert.ok((bases.at(-1)?.y ?? 0) < 266);
 });
 
 test("sub_4ECD40's four CCtrlButtons: (139, 137 + 40i) while n137 < 297", () => {

@@ -4158,3 +4158,63 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` 維持 **5445 行**（本輪沒動它），七份文件不必同步行數。
   - 撰寫時紅燈兩次，都是我自己的錯：第一次忘了宣告 `SKILL_SCROLLBAR`／`SKILL_SCROLLBAR_NEXT_Y`（assert 沒擋到，是 typecheck 抓的）；第二次把 `y += 12` 誤寫成 `y += SLOT_PITCH - 23`（想省一個 import，反而弄出一個意義不明的算式），已改回 `VSCR_CELL`。另外一條測試自己寫錯：`skillRowAt(..., 2, 5)` 的 count 守門會回 `-1`，我原本期待 `5`。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何行為改變——技能窗的外觀、頁籤、捲軸、SP 升級鈕都不會與 ADR-124 的 LIVE 有差別。
+
+
+## ADR-126：技能窗的捲軸改用共用 `paintVScrollbar`（本輪無行為改變，main.js 維持 5445 行，2026-10-21）
+
+- **問題**：ADR-125 留下的待辦。`client/skills.ts` 自己手刻了一整份捲軸（`enabled`/`disabled` 前綴、一段
+  `for (let y = 128; y < 266; y += VSCR_CELL)` 的 `base` 平鋪、三次 `stamp`），而交易窗與 messenger 走的是
+  `client/vscroll.ts` 的 `paintVScrollbar`。三份程式碼在畫同一條 `UI/Basic.img/VScr`。
+- **逐行比對後才換**：`paintVScrollbar`（`client/vscroll.ts`）的 `enabled = max > 1`、前綴規則、`prev` 在
+  `bar.y`、`base` 從 `bar.y + arrow` 每 `arrow` 一片直到 `< bar.y + height - arrow`、`next` 在
+  `bar.y + height - arrow`、thumb 只在 enabled 時畫在 `bar.y + thumbTop()`——與被刪掉的那段**逐條相同**。
+- **唯一差異（已實測）**：技能窗自己的 `stamp` 是 `Math.round(at.x + x)`，`paintVScrollbar` 不取整。理論上只有
+  視窗被拖到非整數座標時才會差 1px。probe（`bun server/scripts/client_probe.ts`）與 ADR-123 基線
+  `/tmp/probe-adr123.txt` **逐位元組相同**：`diff` 0 行、10 個 banner、`drawImage calls: 161`。
+- **連帶刪除**：`SKILL_SCROLLBAR_NEXT_Y`（最後一個讀者就是被換掉的那段；全域 `grep` 已確認 0 引用）。
+  舊測試的 266 斷言改寫成 `SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height - VSCR_CELL === 266`，意義不變。
+- **新增測試**：`server/test/skill-window.test.ts` 第 7 條。把 `ctx.drawImage` 與 `image()` 都 stub 掉，**直接斷言整張蓋章清單**
+  （cell 名 + x + y），所以將來誰把手刻版加回來、或誰動了平鋪起點，這條會立刻紅。
+- **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → 見 ADR-127 那節的合併數字（本輪 **+1** 新測試、0 新失敗）。
+- **紅燈**：無。
+
+## ADR-127：六條 `CCtrlScrollBar` 共用同一個畫家，thumb 改用 `sub_452500` 的 `floor`（2026-10-21）
+
+- **問題**：ADR-126 之後 `client/` 還剩兩份手刻捲軸——`drawShopScrollbar`（硬寫 `enabled/`、`prev0`、`next0`、
+  `thumb0`，還 clip 了水槽）與 `drawInventoryScrollbar`（有 enable/disable 前綴與 `thumb1`，也 clip）。兩者畫的
+  依然都是同一條 `UI/Basic.img/VScr`。
+- **順手修掉一個真的 fidelity bug**：`sub_452500` 的
+  `thumbTop = arrow + floor(pos * (len - 3*arrow) / (max - 1))` 是**截尾**，而商店與背包用的是 `Math.round`。
+  實例：12 列的購買清單 `171 * 3 / 6 = 85.5` → 原版 **85**，我們 86（thumb 低 1px）；100 格背包
+  `172 * 10 / 19 = 90.53` → 原版 **90**，我們 91。本輪兩處都改成 `Math.floor`。
+  （`clampShopScroll` 故意不取整是另一件事：那是「列號」的四捨五入，與 thumb 的像素位置無關。）
+- **單位換算**：商店的 `max = rows - capacity`、背包的 `max = ceil(capacity/4) - 6`，語意是「能往下捲幾列」；
+  原版 `SetMax = rows - (capacity - 1)` 正好多 1，而 `max <= 1` 就是畫 disabled。所以兩個 adapter 都傳
+  `geometry.max + 1`，並在註解裡寫清楚為什麼要 +1。
+- **介面放寬**：`paintVScrollbar` 的第 5 個參數從 `VScroll` 改成新的
+  `VScrollPaint { max, offset, pressed?, dragging? }`，同時替 scroller 加 `offset` getter（`= thumbTop() - arrow`）。
+  因為 `VScroll` 結構上直接滿足 `VScrollPaint`，**交易／messenger／技能三個呼叫點一行都沒改**。
+- **`SHOP.scrollbar.buy/sell` 與 `INVENTORY.scrollbar` 補上 `arrow: VSCR_CELL`**：舊的 inline 版把 12 寫死在算式裡，
+  `paintVScrollbar` 則讀 `bar.arrow`。少了它 thumb 的 y 會變成 `NaN`——這是本輪唯一會真的炸掉的東西，
+  也是新的「六條 bar 都宣告 `arrow === 12`」測試存在的理由。
+- **clip 去掉**：水槽從 `arrow` 平鋪到 `< height - arrow`，本來就不會超出 bar 的矩形。207 與 174 都不是 12 的
+  整數倍，多出來的幾畫素是 `next` 底下露出底板——跟原版的平鋪行為一樣，不需要剪掉。
+  順帶一提：thumb 的 y 從 `bar.y + thumbTop()` 改成 `bar.y + arrow + offset`，兩者恆等。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、`bun test --timeout 30000 ./server/test ./tools/tests`
+  → **1321 pass / 0 fail**、5315 `expect()` calls、**153 files**、286.21s（ADR-124+125 基線 1318，本輪連 ADR-126 共 **+3** 全為新測試）。
+  probe 與 ADR-123 基線**逐位元組相同**（`diff` 0 行、10 banner、`drawImage calls: 161`）。
+- **新測試**：`server/test/vscroll.test.ts` +2 條——(1) 一個 live scroller 結構上就是 `VScrollPaint`
+  （`offset === thumbTop() - arrow`：底部 182、頂部 0）；(2) **六條 bar（交易／messenger／技能／商店買／
+  商店賣／背包）用同一個畫家畫出同一組 cell**——enabled 拖曳（`thumb1`）、disabled 無 thumb、按住 `next`
+  （`next1`），且每一條都宣告 `arrow === 12`。
+- **改寫的測試**：`server/test/shop-window.test.ts` 與 `server/test/inventory-window.test.ts` 的捲軸畫圖測試不再斷言
+  `save`/`rect`/`clip`/`restore`（那些已經不存在），改斷言 cell 順序與 prev/next/thumb 的 y，並各加一個
+  **能區分 `floor` 與 `round` 的案例**（商店 85、背包 90）。背包版面測試的 `scrollbar` 斷言補上 `arrow: 12`。
+- **紅燈**：兩次，都是我自己寫錯。第一次 `server/test/vscroll.test.ts` 的 `trough` 陣列把前綴寫死成
+  `enabled/base`，結果 disabled 那例的 17 格全被期待成 enabled；改成 `trough(prefix)` 函式。
+  第二次是 typecheck 抓的：`client/inventory-window.ts` 的 `CanvasImage` import 在換掉 inline 版之後就沒人用了。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。
+  - 可看見的差別：幾乎沒有。技能窗、交易窗、messenger 的捲軸外觀完全不變。
+  - 商店與背包的 thumb 在「清單剛好捲到一半」時會比上一版**低 1px 變回原版的 85/90**——這正是本輪要修的。
+    LIVE 請自己開一個超過 6 列的商店，把捲軸拉到中間，對照原版截圖。
+  - probe 看不到這個差異（它的商店清單沒有溢出），所以上面那句請以 LIVE 實測為準。

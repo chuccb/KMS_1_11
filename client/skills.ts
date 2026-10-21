@@ -23,7 +23,7 @@ interface SkillWindowOptions {
 }
 import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
-import { vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 import { tooltipAnchor } from "./tooltip.ts";
 import { TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 /**
@@ -59,8 +59,6 @@ export const SKILL_TAB_INNER = {
   width: SKILL_TABS.width - TAB_LEFT - TAB_RIGHT,
 };
 export const SKILL_SCROLLBAR = { x: 161, y: 116, width: VSCR_CELL, height: 162, arrow: VSCR_CELL };
-/** Where the bar's `next` arrow goes: its own bottom edge less one cell. */
-export const SKILL_SCROLLBAR_NEXT_Y = SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height - VSCR_CELL;
 export const SKILL_ROWS = 4;
 export const SKILL_ROW_TOP = 119;
 export const SKILL_ROW_PITCH = 40;
@@ -599,32 +597,10 @@ export function skillWindow({
             SKILL_UP_BUTTON.firstY + SKILL_UP_BUTTON.pitch * i,
           );
         }
-        const enabled = scrollBar.max > 1,
-          prefix = `UI/Basic.img/VScr/${enabled ? "enabled" : "disabled"}`;
-        for (let y = SKILL_SCROLLBAR.y + VSCR_CELL; y < SKILL_SCROLLBAR_NEXT_Y; y += VSCR_CELL)
-          stamp(`${prefix}/base`, SKILL_SCROLLBAR.x, y);
-        // The pressed arrow cells light up while held, exactly like paintVScrollbar.
-        stamp(
-          `${prefix}/${
-            enabled && scrollBar.pressed === "prev" ? "prev1" : enabled ? "prev0" : "prev"
-          }`,
-          SKILL_SCROLLBAR.x,
-          SKILL_SCROLLBAR.y,
-        );
-        stamp(
-          `${prefix}/${
-            enabled && scrollBar.pressed === "next" ? "next1" : enabled ? "next0" : "next"
-          }`,
-          SKILL_SCROLLBAR.x,
-          SKILL_SCROLLBAR_NEXT_Y,
-        );
-        // sub_452500's thumbTop: arrow + floor(pos * (len - 3*arrow) / (max - 1)).
-        if (enabled)
-          stamp(
-            `${prefix}/${scrollBar.dragging ? "thumb1" : "thumb0"}`,
-            SKILL_SCROLLBAR.x,
-            SKILL_SCROLLBAR.y + scrollBar.thumbTop(),
-          );
+        // The shared CCtrlScrollBar painter (`sub_452500`), identical to the trade log's and the
+        // messenger's: `prev` at the bar's top, `base` tiled one cell at a time between the two
+        // caps, `next` one cell above the bottom, and the thumb at `arrow + thumbTop()`.
+        paintVScrollbar(ctx, image, at, SKILL_SCROLLBAR, scrollBar);
       }
       stamp(
         `UI/UIWindow.img/BtUIClose/${pressed === "skill-close" ? "pressed" : hover === "skill-close" ? "mouseOver" : "normal"}/0`,

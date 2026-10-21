@@ -19,9 +19,9 @@
  *  - `sub_4581F0` (the CCtrlTab creator) rejects `n4 >= 4`: the strip is four tabs.
  *  - `UI/UIWindow.img` `BtCoin/normal/0` is a 17x17 canvas, which is the button's drawn size.
  */
-import type { CanvasImage, ImageLookup } from "./render-types.ts";
+import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
-import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 
@@ -49,8 +49,12 @@ export interface InventoryLayout {
   /** `sub_43D750`: `uiWndX0`/`uiWndY0` default to `8 * (3 * 0 + 3)` = 24, `uiOpt0` defaults to 0. */
   home: UiPoint;
   grid: InventoryGrid;
-  /** `sub_4DA440`: `CCtrlScrollBar id2001` created at (147, 80) with height 208. */
-  scrollbar: InventoryBox;
+  /**
+   * `sub_4DA440`: `CCtrlScrollBar id2001` created at (147, 80) with height 208. `arrow` is the cap
+   * cell's own size: the tiling pitch down the trough, and the distance `sub_452500` keeps the
+   * thumb from each end.
+   */
+  scrollbar: InventoryBox & { readonly arrow: number };
   /** `sub_4DA440`: `CCtrlButton id2002` at (8, 294); `BtCoin/normal/0` is a 17x17 canvas. */
   coin: InventoryBox;
   /** The meso field, ending where the sheet's own `메소` label starts. */
@@ -70,7 +74,7 @@ export const INVENTORY: InventoryLayout = {
   height: 315,
   home: { x: 24, y: 24 },
   grid: { x: 6, y: 80, columns: 4, rows: 6, size: SLOT_SIZE, pitch: SLOT_PITCH },
-  scrollbar: { x: 147, y: 80, width: VSCR_CELL, height: 208 },
+  scrollbar: { x: 147, y: 80, width: VSCR_CELL, height: 208, arrow: VSCR_CELL },
   coin: { x: 8, y: 294, width: 17, height: 17 },
   mesos: { x: 9, y: 296, width: 116, height: 13 },
   tabs: [
@@ -105,6 +109,7 @@ export interface InventoryScrollGeometry {
   row: number;
   /** Thumb travel: the bar minus both 12 px end caps and the thumb itself. */
   travel: number;
+  /** `sub_452500`: `floor(row * travel / max)` - the native truncates, it does not round. */
   offset: number;
 }
 
@@ -119,7 +124,7 @@ export function inventoryScrollbarGeometry(capacity: number, row: number): Inven
     max,
     row: clamped,
     travel,
-    offset: max ? Math.round((travel * clamped) / max) : 0,
+    offset: max ? Math.floor((travel * clamped) / max) : 0,
   };
 }
 
@@ -327,7 +332,14 @@ export function inventoryWindowAt(query: InventoryWindowQuery): InventoryHit | u
   return { kind: "body" };
 }
 
-/** The CCtrlScrollBar strip, clipped to the bar's own rectangle. */
+/**
+ * The `CCtrlScrollBar` strip, painted by the shared {@link paintVScrollbar}.
+ *
+ * `sub_4DA810`/`sub_4DA8B0` keep the row index per tab themselves - the inventory's four tabs
+ * scroll independently, and `sub_4DA440` only ever creates the one control - so the painter is
+ * handed the two numbers rather than a scroller. `dragging` is the sheet's own thumb capture;
+ * there is no per-arrow held state, so the caps keep their `prev0`/`next0` face.
+ */
 export function drawInventoryScrollbar(
   ctx: CanvasRenderingContext2D,
   image: ImageLookup,
@@ -336,22 +348,12 @@ export function drawInventoryScrollbar(
   geometry: InventoryScrollGeometry,
   dragging: boolean,
 ): void {
-  const bar = INVENTORY.scrollbar;
-  const stamp = (piece: string, offset: number): void => {
-    const art: CanvasImage = image(
-      `UI/Basic.img/VScr/${geometry.max ? "enabled" : "disabled"}/${piece}`,
-    );
-    if (art.ready) ctx.drawImage(art.img, x + bar.x, y + bar.y + offset);
-  };
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x + bar.x, y + bar.y, VSCR_CELL, bar.height);
-  ctx.clip();
-  for (let py = VSCR_CELL; py < bar.height - VSCR_CELL; py += VSCR_CELL) stamp("base", py);
-  stamp(geometry.max ? "prev0" : "prev", 0);
-  stamp(geometry.max ? "next0" : "next", bar.height - VSCR_CELL);
-  if (geometry.max) stamp(dragging ? "thumb1" : "thumb0", VSCR_CELL + geometry.offset);
-  ctx.restore();
+  paintVScrollbar(ctx, image, { x, y }, INVENTORY.scrollbar, {
+    // `geometry.max` counts rows past the six that fit; the painter wants the native `SetMax`.
+    max: geometry.max + 1,
+    offset: geometry.offset,
+    dragging,
+  });
 }
 
 /** One tab label, in the sheet's own colours: black on the lit tab, slate on the idle ones. */

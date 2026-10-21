@@ -103,7 +103,10 @@ test("a list that fits has no scrollbar; an overflowing one maps its rows onto t
   assert.equal(buy.travel, SHOP.scrollbar.buy.height - 36);
   assert.equal(buy.offset, 0);
   assert.equal(shopScrollbarGeometry("buy", 12, 6)?.offset, buy.travel);
-  assert.equal(shopScrollbarGeometry("buy", 12, 3)?.offset, Math.round(buy.travel / 2));
+  // `sub_452500` truncates: halfway of a 12-row buy list is 171 * 3 / 6 = 85.5, so the thumb sits
+  // 85 px down the trough. Rounding instead (the old code) put it one pixel too far.
+  assert.equal(shopScrollbarGeometry("buy", 12, 3)?.offset, Math.floor((buy.travel * 3) / 6));
+  assert.equal(shopScrollbarGeometry("buy", 12, 3)?.offset, 85, "85.5 truncates to 85");
   assert.equal(
     shopScrollbarGeometry("buy", 12, 999)?.offset,
     buy.travel,
@@ -301,29 +304,37 @@ function fakeContext() {
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, drawn, texts, asked, image };
 }
 
-test("the scrollbar clips its trough between the two caps and drops a fixed-size thumb", () => {
+test("the scrollbar is the shared VScr strip: two caps, a tiled trough, a fixed thumb", () => {
   const geometry = shopScrollbarGeometry("buy", 12, 3);
   assert.ok(geometry);
   const { ctx, calls, drawn, asked, image } = fakeContext();
   drawShopScrollbar(ctx, image, "buy", 196, 154, geometry);
   const bar = SHOP.scrollbar.buy;
-  assert.deepEqual([calls[0], calls.at(-1)], ["save", "restore"]);
-  assert.ok(calls.includes(`rect:385,${154 + bar.y + 12},12,${bar.height - 24}`), calls.join(" "));
-  assert.ok(calls.includes("clip"));
+  // ADR-127: the trough is tiled the way `sub_452500` tiles it - from `arrow` while
+  // `< height - arrow` - so no cell ever leaves the bar's rectangle and the old clip is gone.
+  assert.deepEqual(
+    calls.filter(
+      (call) => call === "save" || call === "restore" || call === "clip" || call.startsWith("rect"),
+    ),
+    [],
+    `the painter pushes no canvas state: ${calls.join(" ")}`,
+  );
+  let tiles = 0;
+  for (let y = bar.arrow; y < bar.height - bar.arrow; y += bar.arrow) tiles += 1;
   assert.deepEqual(
     drawn.map((entry) => String(entry.image).replace("UI/Basic.img/VScr/enabled/", "")),
-    [
-      "prev0",
-      ...Array.from({ length: Math.ceil((bar.height - 24) / 12) }, () => "base"),
-      "next0",
-      "thumb0",
-    ],
+    ["prev0", ...Array.from({ length: tiles }, () => "base"), "next0", "thumb0"],
   );
+  assert.equal(drawn[0]?.x, 196 + bar.x, "the bar hangs off the sheet's own x");
+  assert.equal(drawn[0]?.y, 154 + bar.y, "the prev cap tops the bar");
+  const next = drawn.find((entry) => String(entry.image).endsWith("next0"));
+  assert.equal(next?.y, 154 + bar.y + bar.height - bar.arrow, "the next cap ends it");
   const thumb = drawn.at(-1);
-  assert.equal(thumb?.y, 154 + bar.y + 12 + geometry.offset);
+  assert.equal(thumb?.y, 154 + bar.y + bar.arrow + geometry.offset, "the thumb rides the travel");
   assert.equal(
     asked.every((path) => path.startsWith("UI/Basic.img/VScr/enabled/")),
     true,
+    "the buy list overflows, so the bar is drawn enabled",
   );
 });
 

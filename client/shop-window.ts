@@ -30,7 +30,7 @@ import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 import { TAB_FILL, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
-import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 
 export type ShopSide = "buy" | "sell";
 export const SHOP_SIDES: readonly ShopSide[] = ["buy", "sell"];
@@ -74,8 +74,15 @@ export interface ShopLayout {
   face: Record<ShopSide, { path: string; x: number; y: number }>;
   /** The dark field left of the sheet's own `메소` label. */
   mesos: { right: number; y: number };
-  /** 12-px scrollbars (`UI/Basic.img/VScr` canvases are 12x12), drawn only when a list overflows. */
-  scrollbar: Record<ShopSide, { x: number; y: number; width: number; height: number }>;
+  /**
+   * 12-px scrollbars (`UI/Basic.img/VScr` canvases are 12x12), drawn only when a list overflows.
+   * `arrow` is the cap cell's own size, which is the tiling pitch down the trough and the distance
+   * the thumb keeps from each end - `sub_452500`'s `3 * arrow`.
+   */
+  scrollbar: Record<
+    ShopSide,
+    { x: number; y: number; width: number; height: number; arrow: number }
+  >;
 }
 
 export const SHOP: ShopLayout = {
@@ -104,8 +111,8 @@ export const SHOP: ShopLayout = {
   },
   mesos: { right: 368, y: 272 },
   scrollbar: {
-    buy: { x: 189, y: 68, width: VSCR_CELL, height: 207 },
-    sell: { x: 390, y: 89, width: VSCR_CELL, height: 174 },
+    buy: { x: 189, y: 68, width: VSCR_CELL, height: 207, arrow: VSCR_CELL },
+    sell: { x: 390, y: 89, width: VSCR_CELL, height: 174, arrow: VSCR_CELL },
   },
 };
 
@@ -152,9 +159,15 @@ export function shopTabAt(localX: number, localY: number): number {
 }
 
 export interface ShopScrollGeometry {
+  /**
+   * Rows past the ones that fit: `rows - capacity`, so a list that fits has none. This is one less
+   * than the native `SetMax` (`rows - (capacity - 1)`), which is what {@link paintVScrollbar}
+   * compares to 1 to pick the enabled or the disabled cells.
+   */
   max: number;
   /** Thumb travel: the bar minus both 12 px caps and the thumb itself. */
   travel: number;
+  /** `sub_452500`: `floor(pos * travel / max)` - the native truncates, it does not round. */
   offset: number;
 }
 
@@ -171,7 +184,7 @@ export function shopScrollbarGeometry(
   return {
     max,
     travel,
-    offset: Math.round((travel * Math.min(max, scrollRow)) / max),
+    offset: Math.floor((travel * Math.min(max, scrollRow)) / max),
   };
 }
 
@@ -248,7 +261,15 @@ export function shopWindowAt(query: ShopWindowQuery): ShopHit | undefined {
   return { kind: "body" };
 }
 
-/** The 12-px `UI/Basic.img/VScr` strip: arrows, a clipped tiled trough and a fixed-size thumb. */
+/**
+ * The 12-px `UI/Basic.img/VScr` strip, painted by the shared {@link paintVScrollbar}.
+ *
+ * The shop keeps its scroll position as a plain row index per side (`sub_4B6EC0`'s `m_nCurPos`,
+ * clamped by `sub_4B6EC0`'s own setter rather than by a `CCtrlScrollBar`), so it hands the painter
+ * the two numbers directly. The cap is never drawn pressed: unlike the trade window the shop has
+ * no per-arrow held state, and `sub_4521E0`'s `+56/+60` stamps belong to the control, not to
+ * whichever window happens to own one.
+ */
 export function drawShopScrollbar(
   ctx: CanvasRenderingContext2D,
   image: ImageLookup,
@@ -257,23 +278,11 @@ export function drawShopScrollbar(
   originY: number,
   geometry: ShopScrollGeometry,
 ): void {
-  const bar = SHOP.scrollbar[side];
-  const x = originX + bar.x;
-  const y = originY + bar.y;
-  const stamp = (piece: string, at: number): void => {
-    const entry = image(`UI/Basic.img/VScr/enabled/${piece}`);
-    if (entry.ready) ctx.drawImage(entry.img, x, at);
-  };
-  stamp("prev0", y);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y + VSCR_CELL, VSCR_CELL, bar.height - 2 * VSCR_CELL);
-  ctx.clip();
-  for (let tile = VSCR_CELL; tile < bar.height - VSCR_CELL; tile += VSCR_CELL)
-    stamp("base", y + tile);
-  ctx.restore();
-  stamp("next0", y + bar.height - VSCR_CELL);
-  stamp("thumb0", y + VSCR_CELL + geometry.offset);
+  paintVScrollbar(ctx, image, { x: originX, y: originY }, SHOP.scrollbar[side], {
+    // `geometry.max` counts rows past the visible ones; the painter wants the native `SetMax`.
+    max: geometry.max + 1,
+    offset: geometry.offset,
+  });
 }
 
 /**

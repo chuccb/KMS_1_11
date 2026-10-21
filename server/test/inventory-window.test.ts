@@ -47,7 +47,8 @@ test("the sheet keeps the native layout: 162x315 at (24,24), 4x6 grid of 32px ce
   assert.equal(INVENTORY.grid.rows, 6);
   assert.equal(INVENTORY.grid.size, 32);
   assert.equal(INVENTORY.grid.pitch, 35);
-  assert.deepEqual(INVENTORY.scrollbar, { x: 147, y: 80, width: 12, height: 208 });
+  // `arrow` is the VScr cap cell: the trough's tiling pitch and the thumb's margin at each end.
+  assert.deepEqual(INVENTORY.scrollbar, { x: 147, y: 80, width: 12, height: 208, arrow: 12 });
   assert.deepEqual(INVENTORY.coin, { x: 8, y: 294, width: 17, height: 17 });
   assert.deepEqual(INVENTORY.close, { x: 114, y: 9, width: 32, height: 15 });
   assert.deepEqual(
@@ -77,6 +78,10 @@ test("the scrollbar only travels past the 24 slots a full sheet shows (six rows 
   assert.equal(inventoryScrollbarGeometry(100, -5).row, 0);
   assert.equal(inventoryScrollbarGeometry(100, long.max).offset, long.travel);
   assert.equal(inventoryScrollbarGeometry(100, long.max / 2).offset, Math.round(long.travel / 2));
+  // `sub_452500` truncates: 172 * 10 / 19 is 90.53, so the thumb sits at 90, not the 91 that
+  // rounding gives. Halfway above happens to land on a whole pixel either way.
+  assert.equal(inventoryScrollbarGeometry(100, 10).offset, Math.floor((172 * 10) / 19));
+  assert.equal(inventoryScrollbarGeometry(100, 10).offset, 90, "90.53 truncates to 90");
 });
 
 test("setInventoryScroll rounds like the native sender and stays inside the tab", () => {
@@ -261,20 +266,26 @@ function fakeContext() {
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, drawn, asked, image };
 }
 
-test("the scrollbar is clipped to its bar, tiles its base and only shows a thumb on a long tab", () => {
+test("the scrollbar is the shared VScr strip and only shows a thumb on a long tab", () => {
   const { ctx, calls, drawn, asked, image } = fakeContext();
   drawInventoryScrollbar(ctx, image, 24, 24, inventoryScrollbarGeometry(24, 0), false);
-  assert.deepEqual([calls[0], calls.at(-1)], ["save", "restore"]);
-  assert.ok(calls.includes("rect:171,104,12,208"), `clip rectangle: ${calls.join(" ")}`);
-  assert.ok(calls.includes("clip"));
+  // ADR-127: the trough tiles from `arrow` while `< height - arrow` and nothing is ever stamped
+  // outside the bar, so the sheet no longer pushes a clip to hide an overflow that cannot happen.
+  assert.deepEqual(
+    calls.filter(
+      (call) => call === "save" || call === "restore" || call === "clip" || call.startsWith("rect"),
+    ),
+    [],
+    `the painter pushes no canvas state: ${calls.join(" ")}`,
+  );
+  const bar = INVENTORY.scrollbar;
+  let tiles = 0;
+  for (let y = bar.arrow; y < bar.height - bar.arrow; y += bar.arrow) tiles += 1;
   assert.deepEqual(
     drawn.map((entry) => entry.image),
     [
-      ...Array.from(
-        { length: Math.ceil((208 - 12) / 12) - 1 },
-        () => "UI/Basic.img/VScr/disabled/base",
-      ),
       "UI/Basic.img/VScr/disabled/prev",
+      ...Array.from({ length: tiles }, () => "UI/Basic.img/VScr/disabled/base"),
       "UI/Basic.img/VScr/disabled/next",
     ],
   );
@@ -317,7 +328,10 @@ test("the scrollbar is clipped to its bar, tiles its base and only shows a thumb
   const thumb = dragging.drawn.find((entry) => String(entry.image).endsWith("thumb1"));
   assert.equal(
     thumb?.y,
-    24 + INVENTORY.scrollbar.y + 12 + inventoryScrollbarGeometry(100, 3).offset,
+    24 +
+      INVENTORY.scrollbar.y +
+      INVENTORY.scrollbar.arrow +
+      inventoryScrollbarGeometry(100, 3).offset,
   );
 });
 

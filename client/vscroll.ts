@@ -125,6 +125,14 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
       if (max <= 1) return bar.arrow;
       return bar.arrow + Math.floor((here() * vScrollTravel(bar.height, bar.arrow)) / (max - 1));
     },
+    /**
+     * `sub_452500`'s travel term alone: how far the thumb has moved down the trough, so that
+     * `paintVScrollbar` never has to know what an arrow is. This is the one number a caller that
+     * keeps its own row state (the shop, the inventory) has to hand over.
+     */
+    get offset(): number {
+      return self.thumbTop() - bar.arrow;
+    },
     reset() {
       rows = 0;
       max = 1;
@@ -206,29 +214,58 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
 export type VScroll = ReturnType<typeof vScrollScroller>;
 
 /**
+ * The two numbers plus the two bits of state {@link paintVScrollbar} reads.
+ *
+ * A {@link VScroll} satisfies this as it stands, which is why the trade, messenger and skill
+ * windows can hand their scroller straight over. The shop and the inventory do not use a
+ * {@link VScroll} at all - they keep the row index themselves, because `sub_4DA810`/`sub_4DA8B0`
+ * and `sub_4B6EC0` store one integer per side and per tab, not a `CCtrlScrollBar` - so they
+ * hand the same two numbers over by hand instead.
+ *
+ * `max` is the native `SetMax`, `rows - (capacity - 1)`, so at most 1 means a list that fits and
+ * the bar is drawn from the `disabled` cells. Callers that count "rows past the visible ones"
+ * instead (`rows - capacity`) have to add the one back.
+ */
+export interface VScrollPaint {
+  /** The native `SetMax`; at most 1 draws the disabled cells and no thumb. */
+  readonly max: number;
+  /** `sub_452500`'s `floor(pos * travel / (max - 1))`: how far the thumb has slid. */
+  readonly offset: number;
+  /** `sub_4521E0`: the zone the pointer is holding down, for the `prev1`/`next1` art. */
+  readonly pressed?: VScrollZone | undefined;
+  /** `sub_4526A0`: the thumb is being dragged, for `thumb1`. */
+  readonly dragging?: boolean;
+}
+
+/**
  * The `UI/Basic.img/VScr` cells at the control's rect: `prev` on top, `base` tiles down
  * the track, `next` at the bottom and - while `max = rows - (capacity - 1) > 1` - the
  * thumb at `sub_452500`'s position. `prev1`/`next1`/`thumb1` are the pressed/drag cells.
+ *
+ * The trough is tiled from `arrow` while `< height - arrow`, so the three windows whose bar
+ * height is not a whole number of cells (the shop's 207 and 174) leave a few pixels of sheet
+ * under the `next` cap - the same thing `sub_452500`'s own loop does, which is why no clip is
+ * set: the cells never leave the bar's rectangle in the first place.
  */
 export function paintVScrollbar(
   ctx: CanvasRenderingContext2D,
   image: ImageLookup,
   at: { x: number; y: number },
   bar: VScrollBarGeometry,
-  scroll: VScroll,
+  paint: VScrollPaint,
 ) {
-  const enabled = scroll.max > 1,
+  const enabled = paint.max > 1,
     prefix = `UI/Basic.img/VScr/${enabled ? "enabled" : "disabled"}`;
   const stamp = (name: string, y: number) => {
     const art = image(`${prefix}/${name}`);
     if (art.ready) ctx.drawImage(art.img, at.x + bar.x, at.y + y);
   };
-  stamp(enabled && scroll.pressed === "prev" ? "prev1" : enabled ? "prev0" : "prev", bar.y);
+  stamp(enabled && paint.pressed === "prev" ? "prev1" : enabled ? "prev0" : "prev", bar.y);
   for (let y = bar.y + bar.arrow; y < bar.y + bar.height - bar.arrow; y += bar.arrow)
     stamp("base", y);
   stamp(
-    enabled && scroll.pressed === "next" ? "next1" : enabled ? "next0" : "next",
+    enabled && paint.pressed === "next" ? "next1" : enabled ? "next0" : "next",
     bar.y + bar.height - bar.arrow,
   );
-  if (enabled) stamp(scroll.dragging ? "thumb1" : "thumb0", bar.y + scroll.thumbTop());
+  if (enabled) stamp(paint.dragging ? "thumb1" : "thumb0", bar.y + bar.arrow + paint.offset);
 }
