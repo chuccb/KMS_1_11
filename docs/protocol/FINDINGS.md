@@ -4895,3 +4895,17 @@ typecheck／build／format 全綠。
 - `Tab`：**九個 cell，`left{0,1}` 4×24、`middle{0,1,2}` 14×24、`right{0,1}` 12×24、`fill{0,1}` 1×24**（`sub_4582A0` 經 `sub_4591A0` 取這四種 piece 名）。已命名 `TAB_HEIGHT/TAB_LEFT/TAB_MIDDLE/TAB_RIGHT/TAB_FILL`（`client/shop-window.ts`）；`SHOP.tabs.height` 與 `INVENTORY.tabs[*].height` 都是 24。
 - NPC 對話捲軸的拖拉用 **18**（＝帽 + 半個拇指，抓中心），背包／商店用 **12**（拇指上緣）。兩者不一致但**皆保留原行為**，已註明。
 - 三個捲軸幾何模型**刻意不合併**：`CCtrlScrollBar` 用 `floor(pos*travel/(max-1))`，背包／商店用 `round(travel*pos/max)`——兩條不同的原碼公式。
+
+### 商店列的繪製：sub_4B5B10 / sub_4B5FA0 的座標（2026-10-21，ADR-120）
+
+- `sub_4B5B10`（買方列，`MapleStory.exe.c:190169`）：文字 x = **42**（＝`SHOP.buyList.nameX`）；兩行是 `n71_2` 與 `n71_1 + 16`；列間距 `n71 += 35`。
+- `sub_4B5FA0`（賣方列，`MapleStory.exe.c:190388`）：
+  - `n245 = 245`（＝`SHOP.sellList.nameX`）為兩行文字的 x；兩行是 `n110_1 - 16` 與 `n110`。
+  - **`n110` 起手 = 110**。賣方第一列 y = 91，故 `SHOP_ROW_NAME_TOP = 3` → 94（`n110 - 16`）、`SHOP_ROW_PRICE_TOP = 19` → 110（`n110`）。兩行相距 **16**。
+  - 選取面：`n245 = n110_1 - 20` → 90（＝`SHOP.face.sell.y = 90`，列在 91）。
+  - 堆疊數：`n110_2 = 209`（＝`SHOP.sellList.x`）、y = `n110 + 1` = **111** → `SHOP_STACK_TOP = 20`；由 `sub_525AE0` 逐位數畫出。
+  - 列間距 `n110 += 35`；`while ( n110 < 285 )` → `110 + 5×35 = 285`，**五列**（`SHOP.sellList.rows = 5`）。
+- `UI/Basic.img/ItemNo`：十個 glyph 皆 11px 高；`0,2..9` 為 **8px** 寬，`1` 為 **5px**（窄字）。故 `ITEM_NO_ADVANCE = 8`（固定推進）不重疊、不留縫。
+- **未決**：`sub_525AE0` 在本 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行）、無函式本體**，因此原版究竟是「固定 8」還是「各 glyph 寬＋間距」推進，此版證據無法判定。現況：商店列用固定 8，status bar 的 `drawItemCount` 用逐 glyph 寬。
+- **無原碼依據**：`SHOP_ROW_TEXT_CLIP = 14`（一行文字的裁切高度）是我們自己的裁切框。
+- 買／賣／補充三個入口的守門（`shopPending || slotPending || mesoPending || modalOpen() || selfView?.hp <= 0`）已收回 `shopActionBlocked()`；注意 `hp === undefined` 時原式 `undefined <= 0` 為 **false**（玩家未知時不擋），已由測試釘住。

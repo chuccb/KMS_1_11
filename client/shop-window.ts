@@ -136,8 +136,8 @@ export function shopTabAt(localX: number, localY: number): number {
   const { tabs } = SHOP;
   if (localY < tabs.y || localY >= tabs.y + tabs.height) return -1;
   if (localX < tabs.x || localX >= tabs.x + tabs.width) return -1;
-  const inner = tabs.width - 4 - 12;
-  return Math.max(0, Math.min(3, Math.floor(((localX - tabs.x - 4) * 4) / inner)));
+  const inner = tabs.width - TAB_LEFT - TAB_RIGHT;
+  return Math.max(0, Math.min(3, Math.floor(((localX - tabs.x - TAB_LEFT) * 4) / inner)));
 }
 
 export interface ShopScrollGeometry {
@@ -381,6 +381,146 @@ export function shopPickedRowVisible(picked: number, scroll: number, list: ShopL
 }
 
 /**
+ * Where a row's two text lines sit, relative to the row's own top edge.
+ *
+ * `sub_4B5B10` (the buy pane) puts the name at `n71_2` and the price at `n71_1 + 16`;
+ * `sub_4B5FA0` (the sell pane) puts them at `n110_1 - 16` and `n110`, and `n110` starts at 110 -
+ * which is the sell list's first row (y=91) plus 19. So the 16 px gap between the lines is the
+ * native one, and 3/19 are just that pair anchored to the row's top edge instead of its price.
+ */
+export const SHOP_ROW_NAME_TOP = 3;
+export const SHOP_ROW_PRICE_TOP = 19;
+/** Our own clipping box: one line of the 11 px row font. No native constant found for it. */
+export const SHOP_ROW_TEXT_CLIP = 14;
+
+/**
+ * `sub_4B5FA0`'s stack count, relative to the row's top edge: it is drawn at `n110 + 1` = 111,
+ * against the 91 the sell row starts at, and from the list's own `x` (`n110_2 = 209`).
+ */
+export const SHOP_STACK_TOP = 20;
+
+/**
+ * `UI/Basic.img/ItemNo`: ten 11 px glyphs, nine of them 8 px wide and `1` a narrow 5 px one, so a
+ * flat 8 px advance never overlaps and never leaves a gap.
+ *
+ * `sub_525AE0` - the per-digit painter `sub_4B5FA0` calls - has no body in this checkout's
+ * `MapleStory.exe.c`, only an `idb` declaration at line 5343, so whether the original steps by a
+ * flat 8 or by each glyph's own width cannot be settled from the evidence here. The status bar's
+ * count painter does advance per glyph; this one does not.
+ */
+export const ITEM_NO_ADVANCE = 8;
+
+/** One line of row text, clipped to the column it belongs in. */
+export function drawShopRowText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+): void {
+  ctx.save();
+  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.beginPath();
+  ctx.rect(x, y - 1, width, SHOP_ROW_TEXT_CLIP);
+  ctx.clip();
+  ctx.fillStyle = "#000000";
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** The item's icon, as far as the row painter cares: loaded or not, how big, and its WZ origin. */
+export interface ShopRowIcon {
+  img: CanvasImageSource;
+  ready: boolean;
+  width: number;
+  height: number;
+  /** The icon's own origin; `sub_4B5FA0` anchors by the origin, not by the icon's centre. */
+  raw?: { ox: number; oy: number };
+}
+
+/** One row's painted content. Icons and names live outside this module, so the caller resolves them. */
+export interface ShopRowPaint {
+  icon?: ShopRowIcon;
+  /** The sell pane's stack count; `undefined` on the buy pane and for equipment (`1xxxxxx`). */
+  stack?: number;
+  name: string;
+  /** Mesos, already resolved by `shopRowPrice`. */
+  price?: number;
+}
+
+/** What {@link drawShopList} needs: one entry per visible row, in painting order. */
+export interface ShopListPaint {
+  /** Index into the full row list of the picked row, or -1 when nothing is picked. */
+  picked: number;
+  scroll: number;
+  /** The whole list's length - it is what decides whether a scrollbar appears at all. */
+  total: number;
+  /** `shopVisibleRows(side)` entries; `undefined` where the list has run out. */
+  rows: (ShopRowPaint | undefined)[];
+}
+
+/**
+ * One list: the picked row's face, then each visible row's icon, stack count, name and price, then
+ * the scrollbar when the list overflows. `sub_4B5B10` (buy) and `sub_4B5FA0` (sell) are the same
+ * loop - `n71 += 35` and `n110 += 35` - with the count drawn only on the sell side.
+ */
+export function drawShopList(
+  ctx: CanvasRenderingContext2D,
+  image: ImageLookup,
+  side: ShopSide,
+  originX: number,
+  originY: number,
+  paint: ShopListPaint,
+): void {
+  const list = shopListOf(side);
+  if (shopPickedRowVisible(paint.picked, paint.scroll, list)) {
+    const face = image(SHOP.face[side].path);
+    if (face.ready)
+      ctx.drawImage(
+        face.img,
+        originX + SHOP.face[side].x,
+        originY + SHOP.face[side].y + (paint.picked - paint.scroll) * list.pitch,
+      );
+  }
+  for (let row = 0; row < list.rows; row++) {
+    const entry = paint.rows[row];
+    if (entry === undefined) continue;
+    const cellY = originY + list.y + row * list.pitch;
+    const icon = entry.icon;
+    if (icon?.ready) {
+      const at = shopRowIconOrigin(list, icon.width, icon.height, icon.raw);
+      ctx.drawImage(icon.img, originX + at.left, cellY + at.top);
+    }
+    if (entry.stack !== undefined) {
+      const digits = String(entry.stack);
+      for (let digit = 0; digit < digits.length; digit++) {
+        const glyph = image(`UI/Basic.img/ItemNo/${digits[digit]}`);
+        if (glyph.ready)
+          ctx.drawImage(
+            glyph.img,
+            originX + list.x + digit * ITEM_NO_ADVANCE,
+            cellY + SHOP_STACK_TOP,
+          );
+      }
+    }
+    const nameWidth = list.nameRight - list.nameX;
+    drawShopRowText(ctx, entry.name, originX + list.nameX, cellY + SHOP_ROW_NAME_TOP, nameWidth);
+    if (entry.price !== undefined)
+      drawShopRowText(
+        ctx,
+        `${entry.price} 메소`,
+        originX + list.nameX,
+        cellY + SHOP_ROW_PRICE_TOP,
+        nameWidth,
+      );
+  }
+  const geometry = shopScrollbarGeometry(side, paint.total, paint.scroll);
+  if (geometry !== undefined) drawShopScrollbar(ctx, image, side, originX, originY, geometry);
+}
+
+/**
  * How the shop asks for a count when you buy (`sub_4B6B40`, FINDINGS 4.19).
  *
  * A rechargeable stack is confirmed whole and forced to one - "정말로 사시겠습니까?" - because its
@@ -400,6 +540,33 @@ export function shopBuyCount(itemId: number): ShopBuyCount {
 /** Equipment: the leading 1 of `1xxxxxx`. `sub_4B5FA0` prints no stack count for these. */
 export function isEquipmentItem(itemId: number): boolean {
   return Math.floor(itemId / 1_000_000) === 1;
+}
+
+/**
+ * Whether a shop request is allowed out at all - the five gates `buy`, `sell` and `recharge` all
+ * pass in the same order, before either looks at the row it was asked about.
+ */
+export interface ShopActionState {
+  /** A shop request is already in flight. */
+  shopPending: boolean;
+  /** An inventory slot request is already in flight. */
+  slotPending: boolean;
+  /** A meso request is already in flight. */
+  mesoPending: boolean;
+  /** A modal dialog owns the input. */
+  modalOpen: boolean;
+  /** The player's own HP; `undefined` before the view arrives, and then nothing is blocked. */
+  hp: number | undefined;
+}
+
+export function shopActionBlocked(state: ShopActionState): boolean {
+  return (
+    state.shopPending ||
+    state.slotPending ||
+    state.mesoPending ||
+    state.modalOpen ||
+    (state.hp !== undefined && state.hp <= 0)
+  );
 }
 
 /**

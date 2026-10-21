@@ -3927,3 +3927,37 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` 5547 → **5548** 行（只多一行 `import { VSCR_CELL }`）。
   - 撰寫時沒有紅燈，但有兩次自己的烏龍：第一次 patch script 因為冪等判斷寫得太鬆，把 `vscroll.ts` 的 doc block 與四個檔案的 import 行**各重複插入了一次**，是 `git checkout` 掉 `vscroll.ts` 重跑、再去重 import 收掉的；`npcdialogue.ts` 的 WZ 走訪一開始也因為 `WzNode` 包著 `WzCanvas`（不是直接是 `WzCanvas`）而 `{} is not iterable`，照實際結構改走訪才對。兩個都是我的工具錯，不是產品碼錯。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——畫面、手感、捲軸拖動都不會與 ADR-118 的 LIVE 有差別。
+
+## ADR-120：把商店列的繪製與交易前置守門收回 `client/shop-window.ts`（本輪無行為改變，main.js 5548→5482 行，2026-10-21）
+
+- **背景**：接續「全部東西達到最乾淨易讀」。這一輪回到商店——ADR-110 抽出幾何、ADR-116／117 抽出列的規則，但 **main.js 還留著 79 行的商店繪製**（`drawShopText` 11 行 + `drawShopList` 68 行）與**三份一字不差的交易前置守門**。趁搬移的機會把 `sub_4B5B10`／`sub_4B5FA0` 兩個列畫家**逐行讀回來**，結果比預期好：我們畫的那些偏移量**全部對得上原碼**。本輪無任何行為改變——`client_probe.ts` 前後輸出逐位元組相同。
+
+- **（一）`sub_4B5B10`（買方列，`MapleStory.exe.c:190169`）與 `sub_4B5FA0`（賣方列，`:190388`）**：
+  - **兩列 x**：買方 `sub_4B7CE0(v23, 42, …)`、賣方 `n245 = 245` 後 `sub_4B7CE0(v23, 245, …)`——正是 `SHOP.buyList.nameX = 42` 與 `SHOP.sellList.nameX = 245`。
+  - **兩行文字相距 16px**：買方是 `n71_2` 與 `n71_1 + 16`；賣方是 `n110_1 - 16` 與 `n110`。
+  - **而 `n110` 起手就是 110**：賣方第一列的 y 是 91，`91 + 19 = 110`。所以 **`SHOP_ROW_NAME_TOP = 3`（→94）與 `SHOP_ROW_PRICE_TOP = 19`（→110）是原碼的數字**，不是我們自己喬的；我們只是把錨點從「價格那行」改成「列的頂邊」。
+  - **堆疊數的位置**：`n110_2 = 209`（＝`SHOP.sellList.x`）、y = `n110 + 1` = **111** → `SHOP_STACK_TOP = 20`。也是原碼。
+  - **35px pitch 與 5 列**：賣方 `n110 += 35`…`while ( n110 < 285 )`，`110 + 5 × 35 = 285`，正好收在 5 列（`sellList.rows = 5`）。買方同樣是 `n71 += 35`。
+  - 搬過去的是 `drawShopList(ctx, image, side, originX, originY, paint)` 與 `drawShopRowText(ctx, text, x, y, width)`；`main.js` 只剩 `shopRowPaint`（把 icon／數量／名字／價錢查好）與 `shopListPaint`（組出可見列）。
+
+- **（二）`ITEM_NO_ADVANCE = 8` 與一個我查不到底的東西**：
+  - WZ 實證：`UI/Basic.img/ItemNo` 十個 glyph 都是 11px 高，其中九個（0、2…9）**正好 8px 寬**，`1` 是窄的 5px。所以「每格固定推進 8px」既不會重疊也不會留縫。
+  - **但原碼是不是這樣推進，這一版證據查不出來**：`sub_4B5FA0` 呼叫的逐位數畫家 `sub_525AE0` 在 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行），沒有函式本體**，所以「固定 8」與「按各自 glyph 寬＋間距」兩種寫法無法在此區分。我們頁面用的是固定 8，而 status bar 的 `drawItemCount` 是逐 glyph 推進——**這個差異保留原狀，註解已寫明**。
+
+- **（三）兩個誠實標記**：
+  - `SHOP_ROW_TEXT_CLIP = 14`（一行文字的裁切高度）**沒有原碼依據**，是我們自己的裁切框，註解照實寫。
+  - 原本 `drawShopText(text, x, y, width, colour = "#000000")` 的 `colour` **兩處呼叫都沒傳**，搬移時直接拿掉了（不是行為改變，是去掉死參數）。
+
+- **（四）三份一字不差的守門收回 `shopActionBlocked(state)`**：買（`sub_4B6B40`）、賣（`sub_4B6E90`）、補充（`sub_4B7130`）三個入口原本各寫一次 `shopPending || slotPending || mesoPending || modalOpen() || selfView?.hp <= 0`。現在共用一個述詞，main.js 各留一行 `if (!row || shopBlocked()) return;`。
+  - **「`selfView?.hp <= 0`」這一句的語意我原樣保留**：`selfView` 還沒到時它是 `undefined <= 0` → **false**，也就是「玩家未知時不擋」。述詞裡寫成 `state.hp !== undefined && state.hp <= 0`，並有一條測試釘住 `hp: undefined` 必須回 `false`。
+  - 短路順序也保留：`!row || shopBlocked()` 只在 `row` 存在時才去讀那五個狀態（五個都是純粹的 boolean／純函式 `modalOpen()`，無副作用，所以其內部的求值先後不影響結果）。
+
+- **（五）補 ADR-119 漏掉的一處**：`shopTabAt` 裡的 `tabs.width - 4 - 12` 與 `localX - tabs.x - 4` 還留著 Tab 的裸寬度，這輪改用 `TAB_LEFT`／`TAB_RIGHT`。
+
+- **（六）刪掉 `main.js` 的 `drawShopScrollbar` 包覆**：它只被 `drawShopList` 呼叫；搬移後 `drawShopList` 直接用 `shop-window.ts` 自己的 `drawShopScrollbar`。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner）。**這個探針對本輪是有限度的證據**：它走的是商店協定的送出與回應路徑，畫布繪製它碰不到，所以第（一）節那些偏移量是靠上面那一串 `.c` 行號交叉確認的，不是靠探針。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1294 pass / 0 fail、5315 expect() calls、149 files、280.47s**（ADR-119 基線 1291/0，本輪 **+3 全為新測試**、0 新失敗）。新測試在 `server/test/shop-window.test.ts`（16→21）：一列的名字／價錢／堆疊數座標、picked face 與捲軸的出現條件、五道守門。
+  - `client/main.js` **5548 → 5482 行（−66）**。
+  - 撰寫時紅燈三次，都是我自己的錯、不是產品碼錯：改 import 區塊時漏抄了 `shopRowAt`／`shopSellBounds`、多抄了一次 `shopVisibleRows`、多匯入了沒用到的 `ShopListPaint`；另外我用 Python 寫韓文常數時先寫成 `\uXXXX` 跳脫，落地後已換回字面字元。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——商店畫面、購買／販售／補充流程都不會與 ADR-119 的 LIVE 有差別。

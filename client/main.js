@@ -62,9 +62,11 @@ import {
   SHOP,
   SHOP_SIDES,
   clampShopScroll,
+  drawShopList as paintShopList,
   drawShopScrollbar as paintShopScrollbar,
   drawShopTabs as paintShopTabs,
   rechargeableRefillCost,
+  shopActionBlocked,
   shopBuyBounds,
   shopBuyCount,
   shopListOf,
@@ -4467,26 +4469,30 @@ function shopWindowAt(x, y) {
   });
 }
 
-/**
- * One line of row text, clipped to the plate it belongs on. The 2003 window draws both the name and
- * the `메소` line from the plate's left edge (`sub_4B5B10` passes x=42 for both, `sub_4B5FA0`
- * x=245), three pixels below the row's top edge and sixteen pixels apart.
- */
-function drawShopText(text, x, y, width, colour = "#000000") {
-  ctx.save();
-  ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.beginPath();
-  ctx.rect(x, y - 1, width, 14);
-  ctx.clip();
-  ctx.fillStyle = colour;
-  ctx.fillText(text, x, y);
-  ctx.restore();
+/** One row's painted content: the icon, the stack count, the name and the price. */
+function shopRowPaint(side, item) {
+  const facts = itemInfo.get(item.itemId);
+  if (facts === undefined) describeItem(item.itemId);
+  const icon = itemIcon(item.itemId);
+  return {
+    icon: {
+      img: icon.img,
+      ready: icon.ready,
+      width: icon.img.naturalWidth,
+      height: icon.img.naturalHeight,
+      raw: facts?.iconRaw,
+    },
+    stack: side === "sell" ? shopRowStackCount(item) : undefined,
+    name: facts?.name ?? `Item ${item.itemId}`,
+    // The shelf price on the left, the stack's value on the right (`info/price +
+    // ceil(count x info/unitPrice)`, 4B4AD0). This is the native display basis, not a promise of
+    // the reconstructed server's 50% resale policy.
+    price: shopRowPrice(side, item, facts),
+  };
 }
 
-/** Paints one list: the picked row's face, then its icon, name and price, then a scrollbar. */
-function drawShopList(side, originX, originY) {
+/** What `paintShopList` needs for one side: the visible rows, the pick and the scroll offset. */
+function shopListPaint(side) {
   const list = shopListOf(side);
   const rows = shopRowsOf(side);
   const scroll = shopScroll[side];
@@ -4494,63 +4500,12 @@ function drawShopList(side, originX, originY) {
     side === "buy"
       ? shopBuyRow
       : rows.findIndex((entry) => entry.slot === shopSellPick?.slot);
-  if (shopPickedRowVisible(picked, scroll, list)) {
-    const face = artImage(SHOP.face[side].path);
-    if (face.ready)
-      ctx.drawImage(
-        face.img,
-        originX + SHOP.face[side].x,
-        originY + SHOP.face[side].y + (picked - scroll) * list.pitch,
-      );
-  }
+  const visible = [];
   for (let row = 0; row < list.rows; row++) {
-    const index = row + scroll;
-    const item = rows[index];
-    if (item === undefined) continue;
-    const cellY = originY + list.y + row * list.pitch;
-    const facts = itemInfo.get(item.itemId);
-    if (facts === undefined) describeItem(item.itemId);
-    const icon = itemIcon(item.itemId);
-    if (icon.ready) {
-      const at = shopRowIconOrigin(
-        list,
-        icon.img.naturalWidth,
-        icon.img.naturalHeight,
-        facts?.iconRaw,
-      );
-      ctx.drawImage(icon.img, originX + at.left, cellY + at.top);
-    }
-    // `sub_4B5FA0` draws a non-equipment stack with Basic/ItemNo; the advance is a flat 8px here,
-    // unlike the status bar's `drawItemCount`, which advances by each glyph's own width.
-    const stack = side === "sell" ? shopRowStackCount(item) : undefined;
-    if (stack !== undefined) {
-      const digits = String(stack);
-      for (let digit = 0; digit < digits.length; digit++) {
-        const glyph = artImage(`UI/Basic.img/ItemNo/${digits[digit]}`);
-        if (glyph.ready)
-          ctx.drawImage(glyph.img, originX + list.x + digit * 8, cellY + 20);
-      }
-    }
-    const nameWidth = list.nameRight - list.nameX;
-    drawShopText(
-      facts?.name ?? `Item ${item.itemId}`,
-      originX + list.nameX,
-      cellY + 3,
-      nameWidth,
-    );
-    // The second line is mesos in both panes: the shelf price on the left, the stack's value on the
-    // right (`info/price + ceil(count x info/unitPrice)`, 4B4AD0). This is the native display basis,
-    // not a promise of the reconstructed server's 50% resale policy.
-    const price = shopRowPrice(side, item, facts);
-    if (price !== undefined)
-      drawShopText(
-        `${price} 메소`,
-        originX + list.nameX,
-        cellY + 19,
-        nameWidth,
-      );
+    const item = rows[row + scroll];
+    visible.push(item === undefined ? undefined : shopRowPaint(side, item));
   }
-  if (rows.length > list.rows) drawShopScrollbar(side, originX, originY);
+  return { picked, scroll, total: rows.length, rows: visible };
 }
 
 /** Clamp scrolling after wheel/arrow/track/drag input, including a shrinking inventory. */
@@ -4573,13 +4528,6 @@ function reconcileShopInventory() {
 
 function shopScrollbarGeometry(side) {
   return shopScrollGeometry(side, shopRowsOf(side).length, shopScroll[side]);
-}
-
-/** The 12-px `UI/Basic.img/VScr` strip: arrows, a clipped tiled trough and a fixed-size thumb. */
-function drawShopScrollbar(side, originX, originY) {
-  const geometry = shopScrollbarGeometry(side);
-  if (geometry === undefined) return;
-  paintShopScrollbar(ctx, artImage, side, originX, originY, geometry);
 }
 
 /**
@@ -4624,8 +4572,8 @@ function drawShopWindow() {
   const x = Math.round(shopAt.x);
   const y = Math.round(shopAt.y);
   ctx.drawImage(entry.img, x, y);
-  drawShopList("buy", x, y);
-  drawShopList("sell", x, y);
+  paintShopList(ctx, artImage, "buy", x, y, shopListPaint("buy"));
+  paintShopList(ctx, artImage, "sell", x, y, shopListPaint("sell"));
   drawShopTabs(x, y);
   drawShopButton("buy", x, y);
   drawShopButton("sell", x, y);
@@ -4685,15 +4633,7 @@ function buyShopRow(index) {
   const opened = shop,
     row = opened?.items[index],
     epoch = itemEpoch;
-  if (
-    !row ||
-    shopPending ||
-    slotPending ||
-    mesoPending ||
-    modalOpen() ||
-    selfView?.hp <= 0
-  )
-    return;
+  if (!row || shopBlocked()) return;
   const commit = (count) => {
     if (shop !== opened || epoch !== itemEpoch || opened.items[index] !== row)
       return;
@@ -4758,15 +4698,7 @@ function rechargeShopItem(item) {
   const quote = rechargeQuote(item),
     opened = shop,
     epoch = itemEpoch;
-  if (
-    !quote ||
-    shopPending ||
-    slotPending ||
-    mesoPending ||
-    modalOpen() ||
-    selfView?.hp <= 0
-  )
-    return;
+  if (!quote || shopBlocked()) return;
   const snapshot = JSON.stringify(sourceItem(2, item.slot));
   itemDialog.confirm({
     text: "정말로 충전하시겠습니까?",
@@ -4790,16 +4722,7 @@ function rechargeShopItem(item) {
 
 /** 4B6E90: sale defaults to the whole stack, then revalidates the actual slot after dialog. */
 function sellShopItem(item) {
-  if (
-    !item ||
-    !shop ||
-    shopPending ||
-    slotPending ||
-    mesoPending ||
-    modalOpen() ||
-    selfView?.hp <= 0
-  )
-    return;
+  if (!item || !shop || shopBlocked()) return;
   const opened = shop,
     epoch = itemEpoch;
   // Use the actual authoritative pane, not the id's millions digit: legacy saves/server
@@ -4835,6 +4758,17 @@ function sellShopItem(item) {
       ...shopSellBounds(quantity),
       accept: commit,
     });
+}
+
+/** The five gates a buy, sell or recharge request passes before it can go out. */
+function shopBlocked() {
+  return shopActionBlocked({
+    shopPending,
+    slotPending,
+    mesoPending,
+    modalOpen: modalOpen(),
+    hp: selfView?.hp,
+  });
 }
 
 /** Closes the window; `notify` is false when the server already dropped it (a map change did). */

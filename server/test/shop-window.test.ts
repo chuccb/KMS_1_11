@@ -6,28 +6,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ITEM_NO_ADVANCE,
   SHOP,
   SHOP_COUNT_WIRE_MAX,
+  SHOP_ROW_NAME_TOP,
+  SHOP_ROW_PRICE_TOP,
   SHOP_SIDES,
+  SHOP_STACK_TOP,
   clampShopScroll,
   rechargeableRefillCost,
+  shopActionBlocked,
   shopBuyBounds,
-  shopSellBounds,
+  shopBuyCount,
+  shopListOf,
+  shopPickedRowVisible,
+  shopRowIconOrigin,
+  shopRowPrice,
+  shopRowStackCount,
+  drawShopList,
   drawShopScrollbar,
   drawShopTabs,
   type ShopRow,
   isEquipmentItem,
-  shopBuyCount,
-  shopListOf,
-  shopPickedRowVisible,
-  shopRowAt,
-  shopRowIconOrigin,
-  shopRowPrice,
-  shopRowStackCount,
   shopScrollbarGeometry,
+  shopRowAt,
+  shopSellBounds,
   shopTabAt,
   shopVisibleRows,
   shopWindowAt,
+  type ShopRowPaint,
 } from "../../client/shop-window.ts";
 import { INVENTORY_TABS, isRechargeableItem } from "../../client/inventory-window.ts";
 
@@ -509,4 +516,93 @@ test("sub_4B4AD0's refill fee is ceil((capacity - rounds) * unitPrice), the rate
   assert.equal(rechargeableRefillCost(500, 0, 0), undefined);
   // Fractional doubles survive: 0.1 is not exact in binary, and the ceil is what the client pays.
   assert.equal(rechargeableRefillCost(700, 0.1, 0), 70);
+});
+
+/**
+ * The row painter, against `sub_4B5B10` (the buy pane) and `sub_4B5FA0` (the sell pane).
+ *
+ * Those two are the same loop - `n71 += 35` and `n110 += 35` - and the sell pane's `n110` starts at
+ * 110, which is its first row (y=91) plus the 19 the price line sits at. So a paint at the origin
+ * puts the two text lines on 94 and 110 and the stack count on `n110 + 1` = 111, from `n110_2` =
+ * 209, the list's own x.
+ */
+test("one row paints its name and price on sub_4B5FA0's two lines and its count at the list's x", () => {
+  const { ctx, drawn, texts, image } = fakeContext();
+  const list = SHOP.sellList;
+  assert.equal(list.y, 91);
+  assert.equal(list.x, 209, "sub_4B5FA0's n110_2");
+  assert.equal(list.nameX, 245, "sub_4B5FA0's n245");
+  drawShopList(ctx, image, "sell", 0, 0, {
+    picked: -1,
+    scroll: 0,
+    total: 1,
+    rows: [{ stack: 123, name: "빨간 포션", price: 310 }],
+  });
+  assert.equal(list.y + SHOP_ROW_NAME_TOP, 94, "sub_4B5FA0's n110 - 16");
+  assert.equal(list.y + SHOP_ROW_PRICE_TOP, 110, "sub_4B5FA0's n110");
+  assert.equal(list.y + SHOP_STACK_TOP, 111, "sub_4B5FA0's n110 + 1");
+  assert.deepEqual(
+    texts.map((entry) => [entry.text, entry.x, entry.y]),
+    [
+      ["빨간 포션", list.nameX, list.y + SHOP_ROW_NAME_TOP],
+      ["310 메소", list.nameX, list.y + SHOP_ROW_PRICE_TOP],
+    ],
+  );
+  // One ItemNo glyph per digit, a flat ITEM_NO_ADVANCE apart, from the list's own x.
+  assert.deepEqual(
+    drawn
+      .filter((entry) => String(entry.image).startsWith("UI/Basic.img/ItemNo/"))
+      .map((entry) => [String(entry.image).replace("UI/Basic.img/ItemNo/", ""), entry.x, entry.y]),
+    [
+      ["1", list.x, list.y + SHOP_STACK_TOP],
+      ["2", list.x + ITEM_NO_ADVANCE, list.y + SHOP_STACK_TOP],
+      ["3", list.x + 2 * ITEM_NO_ADVANCE, list.y + SHOP_STACK_TOP],
+    ],
+  );
+});
+
+test("the picked face shows only while the pick is on the page; the bar only when the list overflows", () => {
+  const row: ShopRowPaint = { name: "x", price: 1 };
+  const build = (picked: number, scroll: number, total: number) => {
+    const context = fakeContext();
+    drawShopList(context.ctx, context.image, "buy", 196, 154, {
+      picked,
+      scroll,
+      total,
+      rows: Array.from({ length: SHOP.buyList.rows }, () => row),
+    });
+    return context.drawn;
+  };
+  const parts = (drawn: { image: unknown; x: number; y: number }[], needle: string) =>
+    drawn.filter((entry) => String(entry.image).includes(needle));
+  const short = build(2, 0, 3);
+  assert.equal(parts(short, "VScr").length, 0, "three rows fit in six, so there is no bar");
+  assert.equal(parts(short, "Shop/buy").length, 1, "the picked row's face");
+  assert.equal(
+    parts(short, "Shop/buy")[0]?.y,
+    154 + SHOP.face.buy.y + 2 * SHOP.buyList.pitch,
+    "the third row's face, two pitches down the page",
+  );
+  const long = build(0, 4, 40);
+  assert.equal(parts(long, "Shop/buy").length, 0, "row 0 is scrolled off the top");
+  assert.equal(parts(long, "VScr").length > 0, true, "forty rows in six, so there is a bar");
+});
+
+test("a shop request is blocked by any of the five gates, and by nothing else", () => {
+  const clear = {
+    shopPending: false,
+    slotPending: false,
+    mesoPending: false,
+    modalOpen: false,
+    hp: 100,
+  };
+  assert.equal(shopActionBlocked(clear), false);
+  for (const gate of ["shopPending", "slotPending", "mesoPending", "modalOpen"] as const)
+    assert.equal(shopActionBlocked({ ...clear, [gate]: true }), true, gate);
+  assert.equal(shopActionBlocked({ ...clear, hp: 0 }), true, "dead");
+  assert.equal(shopActionBlocked({ ...clear, hp: -1 }), true);
+  assert.equal(shopActionBlocked({ ...clear, hp: 1 }), false, "1 hp is alive");
+  // Before the view arrives there is no hp to test, and the original `selfView?.hp <= 0` is false
+  // then as well - so the guard must not block just because the player is unknown.
+  assert.equal(shopActionBlocked({ ...clear, hp: undefined }), false);
 });
