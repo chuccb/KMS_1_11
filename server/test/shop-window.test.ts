@@ -12,14 +12,20 @@ import {
   drawShopScrollbar,
   drawShopTabs,
   type ShopRow,
+  isEquipmentItem,
+  shopBuyCount,
   shopListOf,
+  shopPickedRowVisible,
   shopRowAt,
+  shopRowIconOrigin,
+  shopRowPrice,
+  shopRowStackCount,
   shopScrollbarGeometry,
   shopTabAt,
   shopVisibleRows,
   shopWindowAt,
 } from "../../client/shop-window.ts";
-import { INVENTORY_TABS } from "../../client/inventory-window.ts";
+import { INVENTORY_TABS, isRechargeableItem } from "../../client/inventory-window.ts";
 
 const rows = (count: number, from = 0): ShopRow[] =>
   Array.from({ length: count }, (_, index) => ({
@@ -343,4 +349,122 @@ test("the tab strip paints four labels, lifts the lit one one pixel and marks bo
   const last = fakeContext();
   drawShopTabs(last.ctx, last.image, 196, 154, 4);
   assert.equal(String(last.drawn.at(-1)?.image).endsWith("Tab/right1"), true);
+});
+
+test("sub_4B5B10: a raw icon is anchored by its own origin, a plain one is centred in the slot", () => {
+  const buy = shopListOf("buy");
+  const sell = shopListOf("sell");
+  assert.equal(sell.x, 209, "this is the 209 sub_4B5FA0 asks for");
+  assert.equal(sell.slot, 32, "and the 32px row face the same call adds");
+  // With a raw icon the sheet does NOT centre: x = 209 - ox and y = slot - oy, so the icon hangs
+  // off the row's bottom edge rather than sitting inside it.
+  assert.deepEqual(shopRowIconOrigin(sell, 32, 32, { ox: 8, oy: 40 }), { left: 201, top: -8 });
+  assert.deepEqual(shopRowIconOrigin(sell, 32, 32, { ox: 0, oy: 32 }), { left: 209, top: 0 });
+  // Without one the icon is centred in the 32x32 slot, on both axes.
+  assert.deepEqual(shopRowIconOrigin(sell, 32, 32, undefined), { left: 209, top: 0 });
+  assert.deepEqual(shopRowIconOrigin(sell, 24, 18, undefined), {
+    left: 209 + Math.floor(8 / 2),
+    top: Math.floor(14 / 2),
+  });
+  // The same rule on the buy pane, whose list starts at x=6.
+  assert.deepEqual(shopRowIconOrigin(buy, 32, 32, { ox: 8, oy: 40 }), { left: -2, top: -8 });
+  assert.deepEqual(shopRowIconOrigin(buy, 30, 30, undefined), { left: 7, top: 1 });
+});
+
+test("sub_4B5FA0 prints a stack count for everything except equipment, and only what it has", () => {
+  assert.equal(shopRowStackCount({ itemId: 2000002, quantity: 50 }), 50);
+  assert.equal(shopRowStackCount({ itemId: 2000002, quantity: 1 }), 1);
+  assert.equal(
+    shopRowStackCount({ itemId: 1302000, quantity: 1 }),
+    undefined,
+    "equipment (1xxxxxx) has no count",
+  );
+  assert.equal(shopRowStackCount({ itemId: 2000002 }), undefined, "nothing to print");
+  assert.equal(
+    shopRowStackCount({ itemId: 1000000, quantity: 3 }),
+    undefined,
+    "the boundary of the 1xxxxxx family is equipment too",
+  );
+  assert.equal(shopRowStackCount({ itemId: 2000000, quantity: 3 }), 3);
+});
+
+test("sub_4B4AD0: the shelf shows its own price, the sell pane adds ceil(count x unitPrice)", () => {
+  assert.equal(shopRowPrice("buy", { price: 1200 }, undefined), 1200);
+  assert.equal(shopRowPrice("buy", { price: 0 }, undefined), 0, "a free item still prints 0");
+  assert.equal(shopRowPrice("buy", {}, undefined), undefined);
+  // The buy side never asks for item info, so a stack's own count cannot change what it shows.
+  assert.equal(shopRowPrice("buy", { price: 1200, quantity: 99 }, { price: 7 }), 1200);
+  const potion = { price: 100, unitPrice: 50 };
+  assert.equal(shopRowPrice("sell", { quantity: 1 }, potion), 150);
+  assert.equal(shopRowPrice("sell", { quantity: 2 }, potion), 200);
+  assert.equal(shopRowPrice("sell", { quantity: 3 }, potion), 250);
+  assert.equal(
+    shopRowPrice("sell", {}, potion),
+    150,
+    "a row with no count is treated as one, not zero",
+  );
+  assert.equal(
+    shopRowPrice("sell", { quantity: 3 }, { price: 100 }),
+    100,
+    "unitPrice defaults to 0",
+  );
+  assert.equal(
+    shopRowPrice("sell", { quantity: 3 }, undefined),
+    undefined,
+    "no info, no figure - the page falls back to the name line alone",
+  );
+  assert.equal(
+    shopRowPrice("sell", { quantity: 3 }, { unitPrice: 50 }),
+    undefined,
+    "unitPrice alone is not a price",
+  );
+  // The ceiling is the native one: 1.5 rounds up, not down.
+  assert.equal(shopRowPrice("sell", { quantity: 3 }, { price: 10, unitPrice: 0.5 }), 12);
+});
+
+test("the picked row's highlighted face is only drawn while that row is on the page", () => {
+  const buy = shopListOf("buy");
+  assert.equal(buy.rows, 6);
+  assert.equal(shopPickedRowVisible(3, 0, buy), true);
+  assert.equal(shopPickedRowVisible(5, 0, buy), true);
+  assert.equal(shopPickedRowVisible(6, 0, buy), false, "the sixth row is off the six-row page");
+  // Scrolled down one the page shows rows 1..6, so 0 has gone and 6 has come in.
+  assert.equal(shopPickedRowVisible(6, 1, buy), true, "scrolled down one, it is the last visible");
+  assert.equal(shopPickedRowVisible(5, 1, buy), true);
+  assert.equal(shopPickedRowVisible(0, 1, buy), false, "scrolled past");
+  assert.equal(shopPickedRowVisible(7, 1, buy), false, "one past the page");
+  // -1 is the buy pane's "nothing picked" before a row is chosen. It falls outside the range for
+  // every scroll the pane can actually reach - clampShopScroll keeps the scroll at 0 or above.
+  assert.equal(shopPickedRowVisible(-1, 0, buy), false);
+  assert.equal(shopPickedRowVisible(-1, 3, buy), false);
+  assert.equal(clampShopScroll("buy", 20, -5), 0, "so the -1 case cannot be reached");
+});
+
+test("sub_4B6B40 asks for a count three different ways: confirm, exactly one, or how many", () => {
+  // A rechargeable stack is confirmed whole and forced to one.
+  assert.equal(shopBuyCount(2070000), "confirm");
+  assert.equal(shopBuyCount(2070016), "confirm");
+  // Equipment is always exactly one, with no dialog at all.
+  assert.equal(shopBuyCount(1302000), "one");
+  assert.equal(shopBuyCount(1000000), "one");
+  assert.equal(isEquipmentItem(1302000), true);
+  assert.equal(isEquipmentItem(2000002), false);
+  // Everything else asks.
+  assert.equal(shopBuyCount(2000002), "quantity");
+  assert.equal(shopBuyCount(4000000), "quantity");
+  // The rechargeable check wins over the equipment one: 207xxxx is never category 1 anyway, but
+  // the order is what the native compares first.
+  assert.equal(shopBuyCount(2070000), "confirm");
+  // The sell pane only special-cases the rechargeable confirm; equipment goes through the dialog.
+  assert.equal(isRechargeableItem(2070000), true);
+  assert.equal(isRechargeableItem(1302000), false);
+});
+
+test("sub_4B5FA0 prints no stack count on equipment, whatever quantity the row carries", () => {
+  assert.equal(shopRowStackCount({ itemId: 1302000, quantity: 1 }), undefined);
+  assert.equal(shopRowStackCount({ itemId: 1302000 }), undefined);
+  assert.equal(shopRowStackCount({ itemId: 1999999, quantity: 7 }), undefined);
+  assert.equal(shopRowStackCount({ itemId: 2000000, quantity: 7 }), 7);
+  // 207xxxx is not equipment, so its rounds do print.
+  assert.equal(shopRowStackCount({ itemId: 2070000, quantity: 200 }), 200);
 });

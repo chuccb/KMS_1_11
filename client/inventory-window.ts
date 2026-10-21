@@ -142,20 +142,31 @@ export function inventoryCellOrigin(slot: number, firstRow: number): UiPoint | u
   return { x: grid.x + column * grid.pitch, y: grid.y + row * grid.pitch };
 }
 
+/**
+ * The rechargeable family: `207xxxx`, the throwing stars and bullets.
+ *
+ * `sub_463BE0` and `sub_464000` single it out by `itemId / 10000 == 207` - those are dropped whole,
+ * with none of the "how many?" dialog a stack gets, because their "quantity" is a round count
+ * rather than a stack. The rule is needed by the stack count below, by the shop's buy and sell
+ * prompts, by the recharge quote and by the projectile layout, so it lives here once.
+ */
+export function isRechargeableItem(itemId: number): boolean {
+  return Math.floor(itemId / 10000) === 207;
+}
+
 /** The number the sheet prints in a cell's bottom-right corner, or `undefined` for none.
  *
- * A stack shows its quantity once it holds more than one - except the `207xxxx` throwing-star and
- * bullet family, the rechargeable one: `sub_463BE0`/`sub_464000` drop it whole with no count dialog
- * (`*(_DWORD *)(v6 + 12) / 10000 == 207`), and its "quantity" is the round count, which the page has
- * always printed even at one. A stack with no printed quantity falls back to the rechargeable
- * `ruc` (remaining uses) when that is positive.
+ * A stack shows its quantity once it holds more than one - except the rechargeable family
+ * (`isRechargeableItem`), whose quantity is a round count and which the page has always printed
+ * even at one. A stack with no printed quantity falls back to the rechargeable `ruc` (remaining
+ * uses) when that is positive.
  */
 export function inventoryStackCount(item: {
   itemId: number;
   quantity?: number;
   ruc?: number;
 }): number | undefined {
-  if (item.quantity !== undefined && (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207))
+  if (item.quantity !== undefined && (item.quantity > 1 || isRechargeableItem(item.itemId)))
     return item.quantity;
   if (item.ruc !== undefined && item.ruc > 0) return item.ruc;
   return undefined;
@@ -178,6 +189,28 @@ export function drawInventoryStackCount(
   ctx.fillStyle = "#ffffff";
   ctx.fillText(String(value), right, bottom);
   ctx.restore();
+}
+
+/**
+ * The tab an item belongs to, in the numbers the wire carries.
+ *
+ * `sub_4B6B40` flips the inventory to the item it just bought (`this[31][11] != cat - 1` ->
+ * `sub_459160(cat - 1)`), and `sub_459160` only accepts `0 <= index < *(this + 14)` - so the index
+ * the native hands around is `CCtrlTab`'s own 0-based position. That is ONE LAYER BELOW the number
+ * this page stores: `server/src/game/inventory.ts` rejects a tab outside 1..4 and indexes
+ * `items.inventories[tab - 1]`, and `INVENTORY_TABS` numbers the four tabs 1..4. The page
+ * therefore wants `cat`, not `cat - 1`.
+ *
+ * This build has no install tab (`Item/Install/*.img` does not exist in Data.wz), so category 3
+ * shares "etc" with category 4; category 5 is cash. `server/src/game/rewards.ts` carries the same
+ * rule for where a reward lands, and a test pins the two together.
+ */
+export function inventoryTabOfItem(itemId: number): number {
+  const category = Math.floor(itemId / 1_000_000);
+  if (category === 1) return 1; // 장비 equip
+  if (category === 2) return 2; // 소비 consume
+  if (category === 5) return 4; // 캐시 cash
+  return 3; // 기타 etc (and 설치 install, for which this build has no tab)
 }
 
 /** `UI/UIWindow.img/Item/BtCoin/<state>/0` (`sub_4D4960`). */

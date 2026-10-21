@@ -4,7 +4,7 @@
 
 本輪續作：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
-（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源只剩 `client/main.js`（5551 行）**；
+（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源只剩 `client/main.js`（5547 行）**；
 靜態耦合普查顯示它是彼此糾結的單體（321 個 top-level 宣告中僅 3 個零耦合），沒有可機械切開的純區塊，
 故採門面分層逐領域搬移，不以改名冒充遷移。frame／play 已於前輪遷為 strict TS，詳
 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。歷史數字／PID不代表當前 LIVE。
@@ -66,7 +66,7 @@ bun run build
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
   client 的 61 個原有 leaf 已完成真正實作型別，現有 **107 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
-  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5551 行，JS／TS 混用），必須繼續實際遷移；
+  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5547 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。

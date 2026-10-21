@@ -42,6 +42,8 @@ import {
   drawInventoryScrollbar as paintInventoryScrollbar,
   drawInventoryStackCount as paintStackCount,
   inventoryCellOrigin,
+  inventoryTabOfItem,
+  isRechargeableItem,
   inventoryCoinState,
   inventoryScrollbarGeometry as inventoryScrollGeometry,
   inventorySlotAt as inventorySlotAtLayout,
@@ -56,6 +58,11 @@ import {
   drawShopScrollbar as paintShopScrollbar,
   drawShopTabs as paintShopTabs,
   shopListOf,
+  shopPickedRowVisible,
+  shopBuyCount,
+  shopRowIconOrigin,
+  shopRowPrice,
+  shopRowStackCount,
   shopScrollbarGeometry as shopScrollGeometry,
   shopVisibleRows,
   shopWindowAt as shopHitAt,
@@ -1807,7 +1814,7 @@ canvas.addEventListener("click", (event) => {
       if (
         shopHit.button === "recharge" &&
         shopSellPick !== undefined &&
-        Math.floor(shopSellPick.itemId / 10000) === 207
+        isRechargeableItem(shopSellPick.itemId)
       ) {
         rechargeShopItem(shopSellPick);
       }
@@ -3135,7 +3142,7 @@ function launchProjectile(entity, itemId, motion, mob, now, near, options={}) {
 }
 /** 513C80: same source/root z and common travel time; only endpoints/launch clocks fan out. */
 function launchActiveProjectiles(entity,itemId,motion,mob,now,near,values,frames,options={}){
-  for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(itemId/10000)===207))
+  for(const layout of activeProjectileLayout(activeSkillAmmo(values),isRechargeableItem(itemId)))
     launchProjectile(entity,itemId,motion,mob,now,near,{...options,...layout,frames});
 }
 /** Native magic has its own 50px launch, hit point and one ball, never arrow/star fanout. */
@@ -3231,7 +3238,7 @@ async function receiveUserAttack(message, now) {
       const balls=skillData.arts?.[message.skillLevel]?.balls;
       // Keep the original start/root even if an ammo image arrives late.
       if(balls?.length)launchActiveProjectiles(user,message.projectileItemId,motion,target,now,near,values,balls,{source,z});
-      else for(const layout of activeProjectileLayout(activeSkillAmmo(values),Math.trunc(message.projectileItemId/10000)===207))
+      else for(const layout of activeProjectileLayout(activeSkillAmmo(values),isRechargeableItem(message.projectileItemId)))
         launchProjectile(user,message.projectileItemId,motion,target,now,near,{...layout,source,z});
     }else if(!skillId)launchProjectile(user,message.projectileItemId,motion,target,now,near,{source,z});
   }
@@ -3859,7 +3866,7 @@ async function dropInventoryItem(d, at) {
     if (!valid()) return;
     if (
       d.tab !== 1 &&
-      Math.floor(d.item.itemId / 10000) !== 207 &&
+      !isRechargeableItem(d.item.itemId) &&
       quantity > 1
     )
       itemDialog.quantity({
@@ -3871,7 +3878,7 @@ async function dropInventoryItem(d, at) {
       });
     else if (
       (quantity >= 1 ||
-        (quantity === 0 && Math.floor(d.item.itemId / 10000) === 207)) &&
+        (quantity === 0 && isRechargeableItem(d.item.itemId))) &&
       quantity <= 32767
     )
       sendDrop(quantity);
@@ -4475,7 +4482,7 @@ function drawShopList(side, originX, originY) {
     side === "buy"
       ? shopBuyRow
       : rows.findIndex((entry) => entry.slot === shopSellPick?.slot);
-  if (picked >= scroll && picked < scroll + list.rows) {
+  if (shopPickedRowVisible(picked, scroll, list)) {
     const face = artImage(SHOP.face[side].path);
     if (face.ready)
       ctx.drawImage(
@@ -4493,27 +4500,19 @@ function drawShopList(side, originX, originY) {
     if (facts === undefined) describeItem(item.itemId);
     const icon = itemIcon(item.itemId);
     if (icon.ready) {
-      const width = icon.img.naturalWidth;
-      const height = icon.img.naturalHeight;
-      // `sub_4B5B10` anchors the icon by its own origin: `x = slot - ox`, `y = rowBottom - oy`.
-      const origin = facts?.iconRaw;
-      const left =
-        origin !== undefined
-          ? list.x - origin.ox
-          : list.x + Math.floor((list.slot - width) / 2);
-      const top =
-        origin !== undefined
-          ? list.slot - origin.oy
-          : Math.floor((list.slot - height) / 2);
-      ctx.drawImage(icon.img, originX + left, cellY + top);
+      const at = shopRowIconOrigin(
+        list,
+        icon.img.naturalWidth,
+        icon.img.naturalHeight,
+        facts?.iconRaw,
+      );
+      ctx.drawImage(icon.img, originX + at.left, cellY + at.top);
     }
-    // `sub_4B5FA0` draws a non-equipment stack with Basic/ItemNo at (209, row+20).
-    if (
-      side === "sell" &&
-      Math.floor(item.itemId / 1_000_000) !== 1 &&
-      item.quantity !== undefined
-    ) {
-      const digits = String(item.quantity);
+    // `sub_4B5FA0` draws a non-equipment stack with Basic/ItemNo; the advance is a flat 8px here,
+    // unlike the status bar's `drawItemCount`, which advances by each glyph's own width.
+    const stack = side === "sell" ? shopRowStackCount(item) : undefined;
+    if (stack !== undefined) {
+      const digits = String(stack);
       for (let digit = 0; digit < digits.length; digit++) {
         const glyph = artImage(`UI/Basic.img/ItemNo/${digits[digit]}`);
         if (glyph.ready)
@@ -4530,10 +4529,7 @@ function drawShopList(side, originX, originY) {
     // The second line is mesos in both panes: the shelf price on the left, the stack's value on the
     // right (`info/price + ceil(count x info/unitPrice)`, 4B4AD0). This is the native display basis,
     // not a promise of the reconstructed server's 50% resale policy.
-    let price = side === "buy" ? item.price : undefined;
-    if (side === "sell" && facts?.price !== undefined)
-      price =
-        facts.price + Math.ceil((item.quantity ?? 1) * (facts.unitPrice ?? 0));
+    const price = shopRowPrice(side, item, facts);
     if (price !== undefined)
       drawShopText(
         `${price} 메소`,
@@ -4706,10 +4702,9 @@ function buyShopRow(index) {
       itemId: row.itemId,
       count,
     });
-    // 4B6B40's tail: once the buy goes out, the inventory flips to the item's own tab
-    // (v12[11] != itemId/1000000 - 1 -> sub_459160(v12, cat-1)).
-    const tab = Math.floor(row.itemId / 1000000) - 1;
-    if (tab >= 0 && tab <= 4 && inventoryTab !== tab) {
+    // 4B6B40's tail: once the buy goes out, the inventory flips to the item's own tab.
+    const tab = inventoryTabOfItem(row.itemId);
+    if (inventoryTab !== tab) {
       inventoryTab = tab;
       try {
         localStorage.setItem("kms111.inventoryTab", String(inventoryTab));
@@ -4717,12 +4712,13 @@ function buyShopRow(index) {
       inventoryPick = undefined;
     }
   };
-  if (Math.floor(row.itemId / 10000) === 207)
+  const ask = shopBuyCount(row.itemId);
+  if (ask === "confirm")
     itemDialog.confirm({
       text: "정말로 사시겠습니까?",
       accept: () => commit(1),
     });
-  else if (Math.floor(row.itemId / 1000000) === 1) commit(1);
+  else if (ask === "one") commit(1);
   else
     itemDialog.quantity({
       text: "몇 개를 사시겠습니까?",
@@ -4738,7 +4734,7 @@ function rechargeQuote(item) {
     !shop ||
     shopTab !== 2 ||
     !item ||
-    Math.floor(item.itemId / 10000) !== 207 ||
+    !isRechargeableItem(item.itemId) ||
     item.cash
   )
     return undefined;
@@ -4826,7 +4822,7 @@ function sellShopItem(item) {
       count,
     });
   };
-  if (Math.floor(item.itemId / 10000) === 207)
+  if (isRechargeableItem(item.itemId))
     itemDialog.confirm({
       text: "정말로 파시겠습니까?",
       accept: () => commit(quantity),

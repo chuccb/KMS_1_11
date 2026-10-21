@@ -15,8 +15,10 @@ import {
   inventoryScrollbarGeometry,
   inventorySlotAt,
   inventoryStackCount,
+  isRechargeableItem,
   inventoryTabFaces,
   inventoryTabIndex,
+  inventoryTabOfItem,
   inventoryWindowAt,
   type InventoryTabView,
 } from "../../client/inventory-window.ts";
@@ -428,4 +430,49 @@ test("the tab strip lights the open tab and always re-stamps cell 0, which the s
     inventoryTabFaces(1).map((face) => face.stamped),
     [true, false, false, false],
   );
+});
+
+test("the bought item's tab is the wire's 1-based number, and agrees with where rewards land", async () => {
+  // The page stores the wire tab (1..4): server/src/game/inventory.ts rejects anything else and
+  // indexes items.inventories[tab - 1]. The `- 1` in sub_4B6B40's tail is CCtrlTab's own 0-based
+  // position, one layer below that, and must not be copied into inventoryTab.
+  assert.equal(inventoryTabOfItem(1302000), 1, "equipment -> 장비");
+  assert.equal(inventoryTabOfItem(2000002), 2, "potion -> 소비");
+  assert.equal(inventoryTabOfItem(4000000), 3, "etc -> 기타");
+  assert.equal(inventoryTabOfItem(3010000), 3, "install has no tab of its own in this build");
+  assert.equal(inventoryTabOfItem(5000000), 4, "cash");
+  assert.equal(inventoryTabOfItem(999999), 3, "an id below the first category lands in etc");
+  for (const tab of [inventoryTabOfItem(1000000), inventoryTabOfItem(5999999)])
+    assert.ok(tab >= 1 && tab <= 4, `every id maps into the four tabs, got ${tab}`);
+  for (const tab of INVENTORY_TABS)
+    assert.ok(
+      [1000000, 2000000, 4000000, 5000000].some((id) => inventoryTabOfItem(id) === tab.tab),
+      `tab ${tab.tab} (${tab.label}) is reachable`,
+    );
+  // The same rule decides where the server puts a reward; if either side moves, this fails.
+  const { inventoryTabOfItemId } = await import("../src/game/rewards.ts");
+  for (const category of [0, 1, 2, 3, 4, 5, 6, 9]) {
+    assert.equal(
+      inventoryTabOfItem(category * 1_000_000),
+      inventoryTabOfItemId(category * 1_000_000),
+      `category ${category} must land the client and the server on the same tab`,
+    );
+  }
+  for (const itemId of [1302000, 2000002, 2070000, 3010000, 4001000, 5000000])
+    assert.equal(inventoryTabOfItem(itemId), inventoryTabOfItemId(itemId), `item ${itemId}`);
+});
+
+test("207xxxx is the rechargeable family, the one whose count is rounds rather than a stack", () => {
+  assert.equal(isRechargeableItem(2070000), true);
+  assert.equal(isRechargeableItem(2070016), true);
+  assert.equal(isRechargeableItem(2079999), true, "the whole 207 block");
+  assert.equal(isRechargeableItem(2069999), false, "arrows are 206, not 207");
+  assert.equal(isRechargeableItem(2080000), false);
+  assert.equal(isRechargeableItem(2000002), false);
+  // sub_463BE0 reads it as itemId / 10000 == 207, so the boundary is the block, not the item.
+  assert.equal(isRechargeableItem(2069999), false);
+  assert.equal(isRechargeableItem(2070000 - 1), false);
+  // The stack count leans on it: a rechargeable prints its quantity even at one.
+  assert.equal(inventoryStackCount({ itemId: 2070000, quantity: 1 }), 1);
+  assert.equal(inventoryStackCount({ itemId: 2060000, quantity: 1 }), undefined);
 });

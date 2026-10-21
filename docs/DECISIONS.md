@@ -3807,3 +3807,26 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **驗證**：`client_probe.ts` 抽出前後輸出**逐位元組相同**（`diff` 0 行，兩次 exit 0，10 個 banner），且與 ADR-114 之後的輸出也相同。閘：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1257 pass / 0 fail、5315 expect() calls、148 files、301.25s**（ADR-114 基線 1256/0，本輪 +1 為 `backgroundCopies` 的新測試，0 新失敗）。撰寫測試時失敗一次，是**我記錯 `type` 的位元**：`type 6` 是 `6 & 2`＝**只有垂直**平鋪，不是「兩種都平鋪」；改用 `type 3` 才對。對照 `backgroundLayout` 原碼改正，未改實作。
 - **沙箱重置（本輪第四次）**：`generated/`、`node_modules/` 連同 git index 一起消失，HEAD 退回 `99ff07b`，整個工作樹變成 untracked。工作樹內容是完整的，所以用 **`git reset --mixed origin/arena/…`（不動工作樹）** 把分支指回已推送的 `2e4ced4`，`git status` 隨即全淨；再用 `npm install -g bun@1.4.3` 把 1.4.3 放回 `generated/toolchain/bin/` 並 `bun install --frozen-lockfile --ignore-scripts`。**不用 `--hard` 就不會丟東西**。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。
+
+## ADR-116：商店列的純規則收回 `shop-window.ts`，並修掉買物後翻頁籤的 off-by-one
+
+- **背景**：繼續「鄰居已經住在別的模組裡就搬過去」。`drawShopList`／`buyShopRow`／`sellShopItem` 裡的數字都是商店這張 sheet 的規則，而 `client/shop-window.ts` 早就擁有它的幾何與 hit test。**搬的過程中翻出一個真正的 bug（下面第三節），那是本輪最有價值的東西。**
+- **（一）`client/shop-window.ts` 新增六個純函式**：
+  - `shopRowIconOrigin(list, w, h, raw)`：`sub_4B5B10`／`sub_4B5FA0` 的圖示錨定。有 raw icon 時以它自己的 origin 錨（`sub_4B5FA0` 送的是 `209 - v53` 和 `v50 - v54 + 32`，正好是 `sellList.x = 209` 與 32px 的列高）；沒有時才在 32×32 的格子裡置中。**兩條分支的 y 錨本來就不同**（raw 那條是掛在列的**下緣** `slot - oy`，置中那條是從上緣算），這個差異現在寫在註解和測試裡。
+  - `shopRowStackCount(row)`：`sub_4B5FA0` 只有非裝備才印數量。
+  - `shopRowPrice(side, row, info)`：`sub_4B4AD0` 的價錢。貨架印商店自己的 `price`；賣出欄印 `info/price + ceil(count * info/unitPrice)`（`ceil` 是原版的行為，3 個 ×0.5 進位）。
+  - `shopPickedRowVisible(picked, scroll, list)`：半開區間 `[scroll, scroll + rows)`。
+  - `shopBuyCount(itemId)`：`sub_4B6B40` 的三種問法——207 飛鏢／子彈族是**確認窗且強制 1**、裝備是**直接 1 不問**、其他才問「몇 개를 사시겠습니까?」。
+  - `isEquipmentItem(itemId)`：`1xxxxxx`。
+- **（二）`207xxxx` 這條規則現在只有一個家**。它原本散在 8 個地方（`inventory-window.ts`、`basiccombat.ts`、`main.js` 的買／賣／充值／丟棄／兩處飛行道具），每一處都是一個沒名字的 `Math.floor(id / 10000) === 207`。現在統一叫 `isRechargeableItem(itemId)`，放在 `client/inventory-window.ts`（`inventoryStackCount` 那裡本來就帶著 `sub_463BE0`／`sub_464000` 的原碼證據），`shop-window.ts` 與 main.js 都從那邊取。兩處原本用 `Math.trunc`，改成 `Math.floor`——**非負的 itemId 兩者等價**（`item-metadata.ts` 也把 id 限在 `0..0xffffffff`）。`basiccombat.ts` 那一處本輪未動，留待下一輪（它是彈藥配對的另一個語境）。
+- **（三）修掉一個真正的 bug：買東西之後翻到錯的頁籤**（本輪唯一的行為改變）。
+  - 原本：`const tab = Math.floor(row.itemId / 1000000) - 1;` 直接指派給 `inventoryTab`。
+  - **但 `inventoryTab` 是 1..4**：`server/src/game/inventory.ts:129` 寫著 `if (tab < 1 || tab > 4) return fail("unknownTab")`，而且用 `items.inventories[tab - 1]` 取值；`client/inventory-window.ts` 的 `INVENTORY_TABS` 也是 1..4；`ensureInventoryTab()` 把 0 當成「尚未初始化」並重設成 1。
+  - 所以買裝備（`1xxxxxx`）會把 `inventoryTab` 設成 **0**——也就是「未初始化」那個哨兵值，下一幀就被 `ensureInventoryTab()` 洗掉，翻頁籤**完全失效**；買水（`2xxxxxx`）翻成 1（장비）而不是 2（소비），買安裝類翻成 2 而不是 3。
+  - **為什麼原碼的 `- 1` 不能直接照抄**：`sub_4B6B40` 尾端是 `this[31][11] != 大類-1 -> sub_459160(大類-1)`，而 `sub_459160` 的守衛是 `a2 >= 0 && a2 < *(this + 14)`——**那是 `CCtrlTab` 自己的 0-based 位置，比 wire 上的頁籤編號低一層**。我們這個頁面存的是 wire 的 1-based 編號，所以要用 `大類` 而不是 `大類 - 1`。
+  - 新的 `inventoryTabOfItem(itemId)` 與 server 端 `rewards.ts` 的 `inventoryTabOfItemId` **同一條規則**（`1→1`、`2→2`、`5→4`、其餘 `3`；本版沒有 설치 頁籤，`Item/Install/*.img` 不存在），並**用一條測試把兩邊釘在一起**：每一個大類與六個實例 id 都斷言兩邊相同，任何一邊改了都會亮紅。
+- **（四）一條沒有結論的觀察，只記錄不動手**：`sub_4B5FA0` 在 `MapleStory.exe.c` 190553 附近呼叫數字列印 `sub_4B7CE0(v23, 245, 94, ...)`（x=245 正好是 `sellList.nameX`，y = `110 - 16`），而頁面把賣出欄的數量畫在 `list.x + digit*8, cellY + 20`（`list.x` 是 209）。`sub_4B7CE0` 是 COM 分派（vtable slot 52），本輪讀不出它實際畫在哪、也讀不出它的字距，所以**一個字都沒改**。順帶一提：狀態列的 `drawItemCount` 是**依每張字形自己的寬度**前進（`1` 是 5px，其餘 8px），商店這裡是固定 8px——兩者不同，本輪一樣不動。
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner），也與 ADR-115 之後相同；但**探針不會買東西，所以它無法證明第三節那個修正**——那一條是靠上面那串原碼與 server 端不變量交叉確認，加上一條與 `rewards.ts` 對齊的測試。新測試 **8 項全過**（`shop-window` 10→14、`inventory-window` 13→15）。撰寫時失敗三次，全是**我自己算錯**：`type 6` 只有垂直（那是上一輪）、scroll=1 時可見列是 1..6 不是 0..5、`picked = -1` 配上 `scroll = -1` 其實會成立（而 `clampShopScroll` 保證 scroll ≥ 0，所以摸不到）。全部對照原碼改正，未改實作去遷就測試。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1265 pass / 0 fail、5315 expect() calls、148 files、271.48s**（ADR-115 基線 1257/0，本輪 +8 全為新測試，0 新失敗）。
+- **沙箱重置（本輪第五次）**：`generated/`、`node_modules/` 與 git index 一起消失、HEAD 退回 `99ff07b`。工作樹完整，故用 `git reset --mixed`（不動工作樹）指回 `ecdb8cd`，`git status` 全淨；再裝 bun 1.4.3 與 `bun install --frozen-lockfile --ignore-scripts`。**不用 `--hard`**。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。除第三節的頁籤修正外無遊戲行為改變。

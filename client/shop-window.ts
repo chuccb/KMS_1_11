@@ -24,7 +24,7 @@
  *    pixels, which is where the scrollbar's width and the 12-px offsets above and below the
  *    thumb's travel come from.
  */
-import { INVENTORY_TABS } from "./inventory-window.ts";
+import { INVENTORY_TABS, isRechargeableItem } from "./inventory-window.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 
@@ -313,4 +313,77 @@ export function drawShopTabs(
   stamp(`right${open === count - 1 ? 1 : 0}`, x0 + tabs.width - right);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+}
+
+/**
+ * `sub_4B5B10`: where a row's icon goes, inside the row's own box.
+ *
+ * With a raw icon the sheet anchors it by that icon's origin - `sub_4B5FA0` asks for `209 - v53`
+ * and `v50 - v54 + 32`, which is this list's `x` (209 on the sell pane) and its 32px row face.
+ * Without one the icon is centred in the slot instead. The two branches do not agree on the y
+ * anchor on purpose: the raw form hangs the icon off the row's BOTTOM (`slot - oy`), the centred
+ * one off its top.
+ */
+export function shopRowIconOrigin(
+  list: ShopList,
+  width: number,
+  height: number,
+  raw: { ox: number; oy: number } | undefined,
+): { left: number; top: number } {
+  return raw !== undefined
+    ? { left: list.x - raw.ox, top: list.slot - raw.oy }
+    : {
+        left: list.x + Math.floor((list.slot - width) / 2),
+        top: Math.floor((list.slot - height) / 2),
+      };
+}
+
+/** `sub_4B5FA0` prints a stack count on the sell pane for everything except equipment (1xxxxxx). */
+export function shopRowStackCount(row: { itemId: number; quantity?: number }): number | undefined {
+  if (isEquipmentItem(row.itemId)) return undefined;
+  return row.quantity;
+}
+
+/**
+ * The meso figure under a row's name (`sub_4B4AD0`).
+ *
+ * The shelf shows the shop's own price; the sell pane shows the item's `info/price` plus
+ * `ceil(count * info/unitPrice)`. That sum is the native display basis - it is not a promise about
+ * the reconstructed server's resale policy, which is a separate rule.
+ */
+export function shopRowPrice(
+  side: ShopSide,
+  row: { price?: number; quantity?: number },
+  info: { price?: number; unitPrice?: number } | undefined,
+): number | undefined {
+  if (side === "buy") return row.price;
+  if (info?.price === undefined) return undefined;
+  return info.price + Math.ceil((row.quantity ?? 1) * (info.unitPrice ?? 0));
+}
+
+/** Whether the picked row is on the page the pane is showing, so its highlighted face is drawn. */
+export function shopPickedRowVisible(picked: number, scroll: number, list: ShopList): boolean {
+  return picked >= scroll && picked < scroll + list.rows;
+}
+
+/**
+ * How the shop asks for a count when you buy (`sub_4B6B40`, FINDINGS 4.19).
+ *
+ * A rechargeable stack is confirmed whole and forced to one - "정말로 사시겠습니까?" - because its
+ * count is rounds, not items. Equipment is always exactly one, with no dialog at all. Everything
+ * else gets "몇 개를 사시겠습니까?" with the row's own maximum.
+ *
+ * Selling is a different pair of branches: there the rechargeable confirm is the only special
+ * case, and equipment goes through the count dialog like anything else.
+ */
+export type ShopBuyCount = "confirm" | "one" | "quantity";
+
+export function shopBuyCount(itemId: number): ShopBuyCount {
+  if (isRechargeableItem(itemId)) return "confirm";
+  return isEquipmentItem(itemId) ? "one" : "quantity";
+}
+
+/** Equipment: the leading 1 of `1xxxxxx`. `sub_4B5FA0` prints no stack count for these. */
+export function isEquipmentItem(itemId: number): boolean {
+  return Math.floor(itemId / 1_000_000) === 1;
 }
