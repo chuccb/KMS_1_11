@@ -4285,3 +4285,56 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
     埋在 VARIANTARG union 裡讀不出來，只有「裝備窗與能力值窗在同一張 176x315 底板上都用 (128,9)」
     這個交互佐證。32x15 那一半則有（就是 `BtUIClose` 的片寬）。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。
+
+
+## ADR-129：第七條捲軸收進共用畫家，並把每一個按鈕框都對上它自己的 sprite（2026-10-21）
+
+### 一、NPC 對話的捲軸（ADR-126/127 漏掉的第七條）
+
+- `client/npcdialogue.ts` 還手刻著第七份 `UI/Basic.img/VScr` 的畫法：`ctx.save()` + `clip()` +
+  `for (let py = VSCR_CELL; py < c.visibleHeight - VSCR_CELL; py += VSCR_CELL)` + `prev0`/`next0`
+  + thumb。現在改用共用 `paintVScrollbar`，並抽出 `drawDialogueScrollbar` —— 與
+  `drawShopScrollbar`、`drawInventoryScrollbar` 同一個形狀：一個轉接頭，把視窗自己的狀態翻成畫家
+  要的兩個數字。
+- **順手修掉同一個 bug**：這份也用 `Math.round`，ADR-127 只在商店與背包改過，**這裡漏了**。
+  實例：`visibleHeight = 240` → `travel = 204`，`maxScroll = 8`、`scroll = 3` →
+  `204 * 3 / 8 = 76.5` → 原版 `sub_452500` 是 **76**，我們原本畫 77。
+- 單位換算：`maxScroll` 是「8px 步數」，比原生 `SetMax` 少 1，所以傳 `maxScroll + 1`（與商店、
+  背包同一套講法，註解已寫）。
+- `clip` 去掉，理由與 ADR-127 相同：平鋪從 `arrow` 到 `< height - arrow`，本來就不會超出 bar。
+- 新測試 `server/test/vscroll.test.ts` 第 8 條：直接對 `drawDialogueScrollbar` 斷言**整張蓋章清單**
+  與 thumb 的 y（`bar.y + 12 + 76`），並斷言 `204 * 3 / 8 === 76.5` 讓「為什麼是 76」自己說話。
+
+### 二、每一個按鈕框都等於它自己那張 sprite 的尺寸
+
+- **原碼依據（沿用 ADR-128）**：`sub_4E0FF0`（`MapleStory.exe.c:231327`）的
+  `CCtrlButton::Create(this, 1000, 152, 9, 2, &path)` 只給位置和型別、**沒有給矩形**；型別 2 的
+  按鈕矩形取自它自己那張 sprite。所以視窗 hit test 的框就是 WZ 裡那張圖的尺寸。
+- ADR-128 只收了「多於一個視窗共用」的片子。剩下的各自只屬於一個視窗，所以**留在各自的版面常數裡**
+  （為它們各建一個只用一次的常數只是多一層間接）——但它們仍然是「量出來的」，不是「選出來的」，
+  而且原本沒有任何東西在守著。新測試 `server/test/button-boxes.test.ts` 就是那個守門的。
+- **新測試（4 條）把 15 個按鈕框逐個重新實測 Data.wz**：
+  `Item/BtCoin` 17x17、`Stat/BtDetail` 47x18、`Skill/BtSpUp` 17x16、`Shop/BtBuy` 46x19、
+  `Shop/BtSell` 46x19、`Shop/BtRecharge` 50x23、`BtUIClose` 32x15、`Trade/BtTrade` 50x23、
+  `Trade/BtCoin` **14x14**、`StatusBar` 四顆 36x35 與 `BtMenu` 38x17、`BtChat` 38x17、
+  `CharSelect/BtCheckId` 43x16。
+  **全部相符**——本輪沒有找出任何寫錯的數字。差別是：從現在起它們是被量過的，不是被相信的。
+- `TRADE_WINDOW.close` 改用 `BT_UI_CLOSE`（共用常數的第六個使用者）。
+- **兩個數字會撞的地方，特意寫成測試擋住**
+  - `SHOP.recharge` 是 50x23，與 `UTIL_DLG_BUTTON` **一模一樣**，但它來自 `Shop/BtRecharge`
+    （不同條片子），所以**故意不**借用那個常數。這條測試就是用來擋住將來有人「順手整理」成同一個。
+  - `Trade/BtCoin` 是 **14x14**，而 `Item/BtCoin` 是 **17x17**。兩個幣、兩張片、兩個尺寸，
+    不能互換（測試裡有 `notEqual`）。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、
+  `bun test --timeout 30000 ./server/test ./tools/tests` → **1336 pass / 0 fail**、**155 files**、
+  287.36s（ADR-128 基線 1331，本輪 **+5** 全為新測試）。
+  probe 與 ADR-128 **完全相同**（`drawImage` 162、10 個 banner）—— 對話窗的清單在 probe 裡沒有溢出，
+  所以那 1px 的 thumb 位移在 probe 看不到。
+  `client/main.js` 維持 **5445 行**，七份文件不必同步行數。
+- **紅燈（兩次，都是 typecheck 抓到的）**：(1) `dragging` 在 npcdialogue 裡是
+  `boolean | undefined`，我抽出來的函式宣告成 `boolean`；已改成 `dragging?: boolean`。
+  (2) 我在 button-boxes 測試裡寫了 `SHOP.recharge.art?.toString()`，但 `ShopBox` 根本沒有 `art`
+  欄位 —— 那是一條**永遠成立、什麼也沒測到的斷言**。已刪除，改成一句註解。
+- **故意沒動**：`dialogueLayout` 的 `scrolling` 門檻（`textHeight > 240 &&
+  Math.floor((textHeight - 240) / 8) + 1 > 2`）與 `setScroll` 的取整都**沒有原碼依據**，本輪沒碰。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。

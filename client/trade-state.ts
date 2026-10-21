@@ -1,6 +1,7 @@
 import type { MiniRoomEvent } from "../server/src/protocol/miniroom.ts";
 import type { ItemSlot } from "../server/src/protocol/itemslot.ts";
 import { vScrollScroller, VSCR_CELL } from "./vscroll.ts";
+import { BT_UI_CLOSE } from "./uicontrols.ts";
 import { ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 
@@ -50,7 +51,8 @@ export const TRADE_WINDOW = {
   width: 367,
   height: 295,
   home: { x: 216, y: 152 },
-  close: { x: 319, y: 9, width: 32, height: 15 },
+  /** `BtUIClose` id2 at (319,9): the shared 32x15 close cell, not a size of our own. */
+  close: { x: 319, y: 9, width: BT_UI_CLOSE.width, height: BT_UI_CLOSE.height },
   trade: { x: 222, y: 267, width: 50, height: 23 },
   coin: { x: 285, y: 275, width: 14, height: 14 },
   edit: { x: 96, y: 248, width: 176, height: 12 },

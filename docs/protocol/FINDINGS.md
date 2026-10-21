@@ -5001,3 +5001,16 @@ typecheck／build／format 全綠。
 - **無原碼依據**：技能窗關閉鈕的位置 `SKILL_CLOSE = { x: 128, y: 9 }`。`sub_4ECD40` 那顆
   `CCtrlButton` 的 Create 埋在 VARIANTARG union 裡；只有「同一張 176x315 底板上裝備窗與能力值窗
   都用 (128,9)」這個交互佐證。
+
+- **七條 `CCtrlScrollBar` 全部走同一個畫家（ADR-129 完成）**：交易、messenger、技能、商店買、
+  商店賣、背包、**NPC 對話**。NPC 對話那份是最後一份手刻的 `UI/Basic.img/VScr` 畫法，已經改用
+  共用 `paintVScrollbar`（抽出 `drawDialogueScrollbar` 當轉接頭），並且把它的 `Math.round` 也改成
+  `sub_452500` 的 `floor`（ADR-127 當初漏了這裡）。
+- **`sub_452500` 的 thumb 是 `floor`（再補一例）**：NPC 對話窗 `visibleHeight = 240` →
+  `travel = 204`；`maxScroll = 8`、`scroll = 3` → `204 * 3 / 8 = 76.5` → 原版 **76**（原本畫 77）。
+- **每個按鈕框 = 它自己那張 sprite 的尺寸（ADR-129 實測並上鎖）**：
+  `Item/BtCoin` 17x17、`Stat/BtDetail` 47x18、`Skill/BtSpUp` 17x16、`Shop/BtBuy` 46x19、
+  `Shop/BtSell` 46x19、`Shop/BtRecharge` 50x23、`BtUIClose`/`BtUIClose2` 32x15、
+  `Trade/BtTrade` 50x23、`Trade/BtCoin` **14x14**（注意與 `Item/BtCoin` 的 17x17 不同）、
+  `StatusBar` 四顆 36x35 與 `BtMenu`/`BtChat` 38x17、`CharSelect/BtCheckId` 43x16。
+  守門測試在 `server/test/button-boxes.test.ts`。

@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { INVENTORY } from "../../client/inventory-window.ts";
+import { drawDialogueScrollbar } from "../../client/npcdialogue.ts";
 import { MESSENGER_WINDOW } from "../../client/messenger-state.ts";
 import { SHOP } from "../../client/shop-window.ts";
 import { SKILL_SCROLLBAR } from "../../client/skills.ts";
@@ -164,4 +165,49 @@ test("one painter draws all six CCtrlScrollBars, and every one of them declares 
       `${name}: the next arrow held down`,
     );
   }
+});
+
+test("the NPC dialogue's bar is the seventh CCtrlScrollBar, drawn by the same painter", () => {
+  // The dialogue keeps its position as a count of 8px steps, not as a scroller, so it hands the
+  // painter the two numbers: `max` is one more than `maxScroll` (the native `SetMax`), and `offset`
+  // is `sub_452500`'s `floor(pos * travel / (max - 1))` - the dialogue used to round it.
+  const layout = {
+    textX: 11,
+    textY: 36,
+    textWidth: 254,
+    visibleHeight: 240,
+    maxScroll: 8,
+    scroll: 3,
+  };
+  const drawn: { image: string; x: number; y: number }[] = [];
+  const ctx = {
+    drawImage(image: unknown, x: number, y: number) {
+      drawn.push({ image: String(image), x, y });
+    },
+  } as unknown as CanvasRenderingContext2D;
+  const image = (path: string) => ({ ready: true, img: path as unknown as CanvasImageSource });
+  drawDialogueScrollbar(ctx, image, { x: 100, y: 50 }, layout, true);
+
+  const bar = { x: 100 + layout.textX + layout.textWidth, y: 50 + layout.textY };
+  const travel = layout.visibleHeight - 36;
+  assert.equal(bar.x, 365, "the bar hangs off the text field's right edge");
+  let tiles = 0;
+  for (let y = 12; y < layout.visibleHeight - 12; y += 12) tiles += 1;
+  const trough = Array.from({ length: tiles }, () => "UI/Basic.img/VScr/enabled/base");
+  assert.deepEqual(
+    drawn.map((entry) => entry.image),
+    [
+      "UI/Basic.img/VScr/enabled/prev0",
+      ...trough,
+      "UI/Basic.img/VScr/enabled/next0",
+      "UI/Basic.img/VScr/enabled/thumb1",
+    ],
+    "prev, a tiled trough, next, and the dragged thumb",
+  );
+  assert.equal(drawn[0]?.y, bar.y);
+  assert.equal(drawn.at(-2)?.y, bar.y + layout.visibleHeight - 12);
+  // 204 * 3 / 8 = 76.5 -> the native truncates to 76; rounding gave 77.
+  assert.equal((travel * 3) / 8, 76.5);
+  assert.equal(drawn.at(-1)?.y, bar.y + 12 + 76);
+  for (const entry of drawn) assert.equal(entry.x, bar.x, "the bar is one cell wide");
 });

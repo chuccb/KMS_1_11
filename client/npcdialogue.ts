@@ -30,6 +30,52 @@ function dialogueButtonStrip(spec: { key: string; name: string }): string {
     ? "UI/UIWindow.img/BtUIClose2"
     : `UI/UIWindow.img/UtilDlgEx2/Bt${spec.name}`;
 }
+/**
+ * The NPC dialogue's `CCtrlScrollBar`, painted by the shared {@link paintVScrollbar}.
+ *
+ * The bar hangs off the text field's right edge and is as tall as the field is - 240px once a body
+ * is long enough to scroll - and the dialogue keeps its position as a plain count of 8px steps
+ * (`dialogueLayout`'s `maxScroll`), not as a `CCtrlScrollBar`, so it hands the painter the two
+ * numbers directly. There is no per-arrow held state here, so the caps keep their `prev0`/`next0`
+ * face; `dragging` is the sheet's own thumb capture, which is what picks `thumb1`.
+ */
+export function drawDialogueScrollbar(
+  ctx: CanvasRenderingContext2D,
+  image: ImageLookup,
+  at: { x: number; y: number },
+  layout: {
+    readonly textX: number;
+    readonly textY: number;
+    readonly textWidth: number;
+    readonly visibleHeight: number;
+    readonly maxScroll: number;
+    readonly scroll: number;
+  },
+  dragging?: boolean,
+): void {
+  paintVScrollbar(
+    ctx,
+    image,
+    at,
+    {
+      x: layout.textX + layout.textWidth,
+      y: layout.textY,
+      width: VSCR_CELL,
+      height: layout.visibleHeight,
+      arrow: VSCR_CELL,
+    },
+    {
+      // `maxScroll` counts how many steps there are past the first, so it is one less than the
+      // native `SetMax`, which is what the painter compares to 1 to pick the enabled cells.
+      max: layout.maxScroll + 1,
+      // `sub_452500` truncates. This copy used to round, which put the thumb up to half a pixel
+      // low - the same one-pixel bug ADR-127 fixed in the shop and in the inventory.
+      offset: Math.floor((vScrollTravel(layout.visibleHeight) * layout.scroll) / layout.maxScroll),
+      dragging,
+    },
+  );
+}
+
 type ButtonTarget = ReturnType<typeof dialogueButtons>[number] & {
   element: HTMLButtonElement;
   piece?: undefined;
@@ -59,7 +105,7 @@ import { dialogueAssets } from "./dialogue-assets.ts";
 import { drawSimpleTooltip } from "./tooltip.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 import { drawUtilFrame, drawUtilTextFrame } from "./utildialog.ts";
-import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 import {
   DIALOGUE_FONT,
   DIALOGUE_COLORS,
@@ -597,25 +643,7 @@ export function npcDialogue({ ctx, image, audio, point, onOpen, onReply }: Dialo
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(x + 14, y + editorHeight + 36, w - 27, 16);
       }
-      if (c.scrolling) {
-        const sx = x + c.textX + c.textWidth,
-          sy = y + c.textY,
-          base = "UI/Basic.img/VScr/enabled";
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(sx, sy, VSCR_CELL, c.visibleHeight);
-        ctx.clip();
-        for (let py = VSCR_CELL; py < c.visibleHeight - VSCR_CELL; py += VSCR_CELL)
-          stamp(`${base}/base`, sx, sy + py);
-        stamp(`${base}/prev0`, sx, sy);
-        stamp(`${base}/next0`, sx, sy + c.visibleHeight - VSCR_CELL);
-        stamp(
-          `${base}/${dragging ? "thumb1" : "thumb0"}`,
-          sx,
-          sy + VSCR_CELL + Math.round((vScrollTravel(c.visibleHeight) * c.scroll) / c.maxScroll),
-        );
-        ctx.restore();
-      }
+      if (c.scrolling) drawDialogueScrollbar(ctx, image, { x, y }, c, dragging);
       for (const spec of c.buttons) {
         const face = uiButtonFace({ pressed: pressed === spec.key, hover: hover === spec.key });
         stamp(buttonSprite(dialogueButtonStrip(spec), face), x + spec.x, y + spec.y);
