@@ -4338,3 +4338,40 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **故意沒動**：`dialogueLayout` 的 `scrolling` 門檻（`textHeight > 240 &&
   Math.floor((textHeight - 240) / 8) + 1 > 2`）與 `setScroll` 的取整都**沒有原碼依據**，本輪沒碰。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。
+
+
+## ADR-130：把 `UtilDlgEx` 的窗框八格收回 `client/uiframe.ts`（2026-10-21）
+
+- **問題**：`drawUtilFrame`（`client/utildialog.ts`）手刻了 `UI/UIWindow.img/UtilDlgEx{,2}/Border`
+  的八格，把 **13、7、54、8、4、18、31、49** 全部寫死在算式裡。那是 `CUtilDlgEx`（`sub_531110`）
+  畫每一個對話框 —— NPC 對話、數量框、丟棄框 —— 用的同一套八格，而那八個數字**每一個都來自格子本身**：
+
+  | 常數 | 來源 |
+  |---|---|
+  | **13** | `topRight.height - topLeft.height`（31 - 18）：頂帶高 31 是因為右上角 31 高，兩個 18 高的角在裡面**下緣對齊** |
+  | **7 / 54 / 8** | 左上角的寬 / 右上角的寬 / 右邊框的寬 |
+  | **4** | 邊填充自己的寬（上、下）與高（左、右） |
+  | **18** | 底部三件共同的高度 |
+  | **49** | 31 + 18（頂帶 + 下邊框） |
+
+- **新模組 `client/uiframe.ts`**：八件各帶自己在 WZ 裡的 `index`（`Border/<n>`）與實測尺寸，
+  加上 `frameBodyTop()`（`topRight.height - topLeft.height`）、`frameBottomInset()`（底部共同高度）、
+  `frameSprite(server, piece)`。`drawUtilFrame` 現在全部讀它。
+- **輸出逐 stamp 相同**：新測試直接斷言 `drawUtilFrame` 的**整張蓋章清單**（72 格上填充＋72 格下填充
+  ＋38 格左邊＋38 格右邊＋四個角）與兩個 clip 矩形，所以這是一次純重構，不是「差不多」。
+- **新測試 `server/test/ui-frame.test.ts`（6 條）**：八格在**兩個調色盤**（`UtilDlgEx` 與
+  `UtilDlgEx2`）都重新實測；四個偏移重新從格子推導；`drawUtilFrame` 的完整蓋章清單與 clip 矩形；
+  短於上下邊框的框會把側邊帶 clamp 成 0；以及 clip 真的有用（下一點）。
+- **紅燈（一次，我自己寫錯，而且是「斷言寫反」這種最糟的）**：我原本寫了一條
+  「填充不會超出右邊框，所以四個角剛好接在兩端」的斷言。**它是錯的** —— 4px 的填充最後一格
+  **會超出最多 3px**（寬 300 時最後一格從 291 開始、到 295 結束，而右邊框從 292 開始）。
+  也就是說這裡的 **`clip` 是有作用的、不能刪**，跟 ADR-127 捲軸水槽那個**確實多餘**的 clip 不同。
+  已把斷言改成真實情況，並在程式碼裡加註說明，免得將來有人照 ADR-127 的先例把它刪掉。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、
+  `bun test --timeout 30000 ./server/test ./tools/tests` → **1342 pass / 0 fail**、**156 files**、
+  288.83s（ADR-129 基線 1336，本輪 **+6** 全為新測試）。
+  probe 與 ADR-129 **逐位元組相同**（`drawImage` 162、10 個 banner）。
+  `client/main.js` 維持 **5445 行**，七份文件不必同步行數。
+- **故意沒動**：`utilTextFrameRects` 那七個 `fillRect` 來自 `sub_531FB0` 的堆疊參數（FINDINGS 已記），
+  不是 WZ 格子，所以沒有套任何常數。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪是純重構，畫面不該有任何變化。

@@ -1,6 +1,18 @@
 import type { ImageLookup } from "./render-types.ts";
+import {
+  frameBodyTop,
+  frameBottomInset,
+  frameSprite,
+  UTIL_DLG_FRAME,
+  type UiFramePiece,
+} from "./uiframe.ts";
 /** 531110: shared CUtilDlgEx outer frame, server dialogs use the Ex2 palette (5309B0).
  * Images are direct WZ canvases, not resized CSS boxes. Clip repeats before placing corners.
+ *
+ * Every offset below is read off the eight `Border` cells rather than written out: the 13 is
+ * `topRight.height - topLeft.height`, the 7/54/8 are the corners' and the right border's widths,
+ * the 4 is the edge fills' own size and the 18 is what the three bottom pieces share.
+ * (`client/uiframe.ts` carries the measurements; `server/test/ui-frame.test.ts` re-measures them.)
  */
 export function drawUtilFrame(
   ctx: CanvasRenderingContext2D,
@@ -11,36 +23,49 @@ export function drawUtilFrame(
   height: number,
   server = false,
 ) {
-  const base = `UI/UIWindow.img/UtilDlgEx${server ? "2" : ""}/Border`;
-  const stamp = (part: number, px: number, py: number) => {
-    const art = image(`${base}/${part}`);
+  const frame = UTIL_DLG_FRAME;
+  const body = frameBodyTop(frame),
+    inset = frame.topRight.height,
+    bottom = frameBottomInset(frame);
+  const stamp = (piece: UiFramePiece, px: number, py: number) => {
+    const art = image(frameSprite(server, piece));
     if (art.ready) ctx.drawImage(art.img, px, py);
   };
   ctx.save();
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x, y + 13, width, height - 13);
+  ctx.fillRect(x, y + body, width, height - body);
+  // This clip is load-bearing: the fill tiles run until their own 4px cell would cross the right
+  // border, so on most widths the last one hangs over it by up to three pixels.
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x + 7, y + 13, width - 15, height - 13);
+  ctx.rect(
+    x + frame.topLeft.width,
+    y + body,
+    width - frame.topLeft.width - frame.right.width,
+    height - body,
+  );
   ctx.clip();
-  for (let px = 7; px < width - 8; px += 4) {
-    stamp(1, x + px, y + 13);
-    stamp(6, x + px, y + height - 18);
+  // The top and the bottom edge fill together, from the left corner to where the right border is.
+  for (let px = frame.topLeft.width; px < width - frame.right.width; px += frame.top.width) {
+    stamp(frame.top, x + px, y + body);
+    stamp(frame.bottom, x + px, y + height - bottom);
   }
   ctx.restore();
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x, y + 31, width, Math.max(0, height - 49));
+  ctx.rect(x, y + inset, width, Math.max(0, height - inset - bottom));
   ctx.clip();
-  for (let py = 31; py < height - 18; py += 4) {
-    stamp(3, x, y + py);
-    stamp(4, x + width - 8, y + py);
+  // The two side edges, from under the top strip to where the bottom border starts.
+  for (let py = inset; py < height - bottom; py += frame.left.height) {
+    stamp(frame.left, x, y + py);
+    stamp(frame.right, x + width - frame.right.width, y + py);
   }
   ctx.restore();
-  stamp(0, x, y + 13);
-  stamp(2, x + width - 54, y);
-  stamp(5, x, y + height - 18);
-  stamp(7, x + width - 8, y + height - 18);
+  // The four corners last, so they cover the ends of the fills they meet.
+  stamp(frame.topLeft, x, y + body);
+  stamp(frame.topRight, x + width - frame.topRight.width, y);
+  stamp(frame.bottomLeft, x, y + height - bottom);
+  stamp(frame.bottomRight, x + width - frame.bottomRight.width, y + height - bottom);
   ctx.restore();
 }
 

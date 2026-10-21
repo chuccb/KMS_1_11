@@ -5014,3 +5014,11 @@ typecheck／build／format 全綠。
   `Trade/BtTrade` 50x23、`Trade/BtCoin` **14x14**（注意與 `Item/BtCoin` 的 17x17 不同）、
   `StatusBar` 四顆 36x35 與 `BtMenu`/`BtChat` 38x17、`CharSelect/BtCheckId` 43x16。
   守門測試在 `server/test/button-boxes.test.ts`。
+
+- **`UI/UIWindow.img/UtilDlgEx{,2}/Border` 八格（ADR-130 實測，兩個調色盤同尺寸）**：
+  `0` 左上角 7x18、`1` 上填充 4x18、`2` 右上角 54x31、`3` 左填充 7x4、`4` 右填充 8x4、
+  `5` 左下角 7x18、`6` 下填充 4x18、`7` 右下角 8x18。已收回 `client/uiframe.ts`；
+  `drawUtilFrame` 寫死的 13（= 31-18）、7、54、8、4、18、31、49（= 31+18）全部由這八格推出。
+- **`drawUtilFrame` 的 clip 是有作用的（ADR-130）**：4px 的上下填充會一路貼到「自己的格子跨過右邊框」
+  為止，所以大多數寬度下最後一格會**超出最多 3px**（寬 300：291+4=295 > 292）。這與 ADR-127
+  「捲軸水槽的 clip 是多餘的」是**相反**的結論，兩處都不要照抄對方的做法。
