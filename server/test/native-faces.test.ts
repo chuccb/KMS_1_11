@@ -8,7 +8,7 @@ import { artReaderOf } from "../src/game/wzart.ts";
 import { faceAnimationOf, faceFramePath } from "../src/game/face.ts";
 import { composeAvatarBitmap } from "../src/game/avatar.ts";
 import { artProviderOf } from "../src/game/art.ts";
-import { EMOTION_NAMES } from "../src/protocol/field.ts";
+import { EMOTION_HIT, EMOTION_MAX, EMOTION_NAMES, EMOTION_NEUTRAL } from "../src/protocol/field.ts";
 
 import type { FaceActor } from "../../client/faces.ts";
 import {
@@ -282,4 +282,23 @@ test("integration source: native F1..F7, no local echo reset, shared creation/se
   assert.match(web, /\/api\/face\//);
   assert.match(web, /faceFrame: faceIndex/);
   assert.match(source("../src/net/loginserver.ts"), /plain\.length !== 5.*exactly one u32 emotion/);
+});
+
+test("the nine faces and the F1..F7 mapping are the original's table, not a local convention", () => {
+  // .data:005B20D8 is nine wchar_t* in this order; .data:005B20FC then starts the avatar-action
+  // table (move, stand, jump, ...), which is a different list entirely.
+  assert.deepEqual(
+    [...EMOTION_NAMES],
+    ["blink", "hit", "smile", "troubled", "cry", "angry", "bewildered", "stunned", "vomit"],
+  );
+  assert.deepEqual(FACE_NAMES, [...EMOTION_NAMES]);
+  assert.equal(EMOTION_MAX, 8);
+  assert.equal(EMOTION_NEUTRAL, 0, "sub_408400 clamps n8 > 8 back to the neutral blink");
+  assert.equal(EMOTION_HIT, 1, "sub_5114A0 shows the hurt face on its own when hit");
+  // sub_511E20 case 10 tests (unsigned int)(n119 - 111) <= 8 with VK_F1 = 112, so F1..F7 carry
+  // 1..7 and the two ends - 0 (blink) and 8 (vomit) - have no key at all; F8 (119) returns
+  // before the range test. The page must not shift that mapping by one.
+  const main = source("../../client/main.js");
+  assert.match(main, /const EMOTE_KEYS = \[1, 2, 3, 4, 5, 6, 7\];/);
+  assert.match(main, /requestEmotion\(Number\(event\.key\.slice\(1\)\)\)/);
 });

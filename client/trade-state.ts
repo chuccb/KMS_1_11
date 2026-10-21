@@ -36,6 +36,12 @@ export const TRADE_SLOTS = 8;
  *     other player at (36,103).
  *   - controls are `sub_4D3EF0`: BtTrade id1001 at (222,267), BtCoin id1002 at (285,275), the
  *     unused CCtrlEdit id1004 at (96,248,176,12), BtUIClose id2 at (319,9).
+ *
+ * Re-read in ADR-111: the two button coordinates above are exactly what `sub_4D3EF0` creates, and
+ * `UI/UIWindow.img/Trade/backgrnd` is 367x295 in Data.wz, so `home` (216,152) is the same centring
+ * as every other sheet. The same constructor also creates **id1003 at (262,21) with height 216**
+ * (`*(*(this + 58) + 44) = 166`) - the offer list's own scrollbar, which the browser window does
+ * not model because its list never overflows. Noted, not invented.
  */
 export const TRADE_WINDOW = {
   path: "UI/UIWindow.img/Trade/backgrnd",

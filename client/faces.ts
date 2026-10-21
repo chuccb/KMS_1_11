@@ -72,9 +72,16 @@ function isFaceAnimation(value: unknown): value is FaceAnimation {
     actions.blink.frames.length > 0
   );
 }
-/** Native face clock: 408400/509070/509560/50B590. Pure presentation, never combat RNG/save.
+/**
+ * Native face clock: 408400/509070/509560/50B590. Pure presentation, never combat RNG/save.
  * The clock is carried by the visual actor, so spreading a self snapshot preserves it. Assets
  * are immutable face-keyed data; a late fetch never applies an emotion to an actor or old field.
+ *
+ * The names below are the original's own table, re-read in ADR-110: `.data:005B20D8` holds nine
+ * dwords of `wchar_t *` - blink, hit, smile, troubled, cry, angry, bewildered, stunned, vomit -
+ * and `.data:005B20FC` then starts the unrelated avatar-action table (move, stand, jump, ...).
+ * `sub_408400` indexes that table with `n8_1 = n8; if (n8 > 8) n8_1 = 0;` (so an out-of-range
+ * index draws the neutral blink) and then walks the `face`/`delay` nodes under it.
  */
 export const FACE_NAMES = [
   "blink",

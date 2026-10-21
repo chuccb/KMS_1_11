@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { recoveryTick, recoveryBonuses, type RecoveryInput } from "../../client/recovery.ts";
+import { encodeClientStatReport } from "../src/protocol/field.ts";
 import type { SkillInfo } from "../src/game/skills.ts";
 
 const standing: RecoveryInput = {
@@ -88,4 +89,41 @@ test("passive bonuses use numeric WZ values and clamped learned levels, not hs t
       { mpDelta: 4, flag: 0 },
     ],
   );
+});
+
+test("the tick's own flag reaches the wire as sub_55B870 wrote it, flags word 0x1400 included", () => {
+  // sub_55B870 writes `5120` (0x1400) unconditionally - hp (0x400) | mp (0x1000) - then both s16
+  // deltas and the trailing byte. `recoveryTick` names only the field that moved; it is the
+  // bridge's `?? 0` fill (client/session.ts `recover`) that restores the native layout, which is
+  // why the flags word here is 0x1400 and not 0x400.
+  const hex = (bytes: Uint8Array) =>
+    [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const onTheWire = (report: { hpDelta?: number; mpDelta?: number; flag: number }) =>
+    hex(
+      encodeClientStatReport({
+        hpDelta: report.hpDelta ?? 0,
+        mpDelta: report.mpDelta ?? 0,
+        flag: report.flag,
+      }),
+    );
+  // Action 36 without a learned interval never heals (the map's own rate is the gate), so the
+  // only report in that tick is MP - flag 0. With `climbMs` the HP arm fires and carries the
+  // map's-own-interval mark, which is the one place the trailing byte is 1.
+  const climb: RecoveryInput = { ...standing, action: 36, climbMs: 3000 };
+  const clock = { hp: 0, mp: 0 };
+  for (let i = 0; i < 99; i++) recoveryTick(clock, climb);
+  const climbed = recoveryTick(clock, climb);
+  assert.deepEqual(climbed, [{ hpDelta: 10, flag: 1 }]);
+  assert.equal(onTheWire(climbed[0]!), "1c" + "00140000" + "0a00" + "0000" + "01");
+  assert.deepEqual(recoveryTick({ hp: 9990, mp: 9990 }, { ...standing, action: 36 }), [
+    { mpDelta: 3, flag: 0 },
+  ]);
+  const plain = { hp: 9990, mp: 9990 };
+  const plainTick = recoveryTick(plain, standing);
+  assert.deepEqual(plainTick, [
+    { hpDelta: 10, flag: 0 },
+    { mpDelta: 3, flag: 0 },
+  ]);
+  assert.equal(onTheWire(plainTick[0]!), "1c" + "00140000" + "0a00" + "0000" + "00");
+  assert.equal(onTheWire(plainTick[1]!), "1c" + "00140000" + "0000" + "0300" + "00");
 });

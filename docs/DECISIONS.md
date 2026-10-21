@@ -938,7 +938,8 @@ c2s 送包裡沒有任何一封帶角色資料（FINDINGS §4.29）。也就是�
   `sub_509070` 拿給 `sub_408400` 去 `Character/Face/*.img` 找情緒節點的那個**臉**（原記 `sub_45D500` 讀
   `"0"`..`"8"`；**ADR-110 回讀更正**：`sub_45D500` 在本 checkout 的 `.c`/`.lst` 皆非函式符號，
   `.text:0045D500` 是 `sub_45D2E0`（外觀解碼器）體內的一條指令，與 `"0"`..`"8"` 情緒讀取無關；
-  真正讀情緒節點的函式**尚未定位**，此條證據列為未決，不再當成已驗證）。第二個 u32 的孿生路徑是 `0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）。
+  真正讀情緒節點的函式**已於 ADR-111 定位**（`sub_408400` 夾持 + `.data:005B20D8` 九筆表），
+  原判「未決」到此結案）。第二個 u32 的孿生路徑是 `0x28` 的 flag bit 0（`sub_5221A0`：`this[17] = u32`）。
 - 紀錄的兩個字：`sub_42E2C0` 把 `+18`（`appearanceA`）餵 `sub_424590`（與 `sub_508260` 同形，寫的是
   同一格臉），把 `+22`（`appearanceB`）放進外觀第 0 格 —— 第 0 格是 `sub_45F340` 給 `3xxxx`
   （`Character/Hair`）的那一格（§4.11.3b）。
@@ -3708,7 +3709,26 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   1. `tools/tests/decompile.test.ts` 的 `sub_500010`／`sub_500020`／`sub_FFFFFF` = **測試自造的字面值**（splitter fixture），不是原版位址，屬正確用途。
   2. `server/src/game/mapart.ts` 的 `sub_46BD54` = **錯的**：全資料庫 0 命中。實際「依 `itow(i)` 取第 i 個 back、再把位置 i 交給 `sub_46BDA0`」的函式是 **`sub_46BB70`**（`for (i = 0; i < i_1; ++i) { pv = itow_w(i, &Buffer_); ... sub_46BDA0(this_1, v22, i, v24); }`）。**已改正**。
   3. `docs/DECISIONS.md` 的 `sub_511FD8`／`sub_511FDF` = **寫法誤導但證據成立**：兩者不是函式而是 `sub_511E20` 體內的指令位址 `.text:00511FD8`（`call sub_509790`）與 `.text:00511FDF`（`push 13h`），先 call 後 push 的順序**確實**證明 client 先自用再送 `0x13`。**已改寫標記**。
-  4. `docs/DECISIONS.md` 的 `sub_45D500`（讀表情 `"0"`..`"8"`）= **未決，已如實標註**：`.text:0045D500` 落在 `sub_45D2E0`（外觀解碼器，以 `sub_45D640`／`sub_45D740` 逐部件寫入）體內，與情緒節點讀取無關；本輪**未找到**真正讀 `"0"`..`"8"` 的函式，不臆測替代位址，列為未決證據。
+  4. `docs/DECISIONS.md` 的 `sub_45D500`（讀表情 `"0"`..`"8"`）= **錯的，已於 ADR-111 結案**：`.text:0045D500` 落在 `sub_45D2E0`（外觀解碼器）體內，與情緒節點讀取無關；真正讀 `"0"`..`"8"` 的是 `sub_408400`（`n8_1 = n8; if (n8 > 8) n8_1 = 0;`，索引 `.data:005B20D8` 的九筆 `blink`..`vomit`）。
   5. `sub_4AC3A0` 見上，**已自程式碼刪除**；`docs/DECISIONS.md`（ADR-109 歷史紀錄）與 `docs/ROADMAP.md`（本輪現況說明）保留原句並於本 ADR 記載更正，不重寫歷史。
   - 其餘 **522 個錨點全部存在**。另外澄清：`server/src/game/exp.ts` 的 `sub_4C7100` 與 `server/src/wz/*.ts` 的 `sub_1000C9A0` 等一度被判為「缺失」，實為**只查 `.c` 的偽陽性**——前者是列在 `.data:005AD228` 指標表、只在 `.lst` 出現的 thunk（`sub_4C7110` 的本體確實存在），後者屬 `PCOM.dll`／`Shape2D.dll` 等其他模組；納入全部 `.lst` 與其他 DLL 後兩者皆已確認存在。
 - **LIVE**：重啟於本 HEAD；新世界新 save（既有政策）。可見變化：無遊戲行為改變（探針輸出逐位元組相同、委派為同值計算）；可讀性變化為商店幾何與版面常數取得型別與 10 項單元測試，且兩個模組引用的原版錨點全部回到 `MapleStory.exe.c`／`Data.wz` 查證過。
+
+## ADR-111：繼續 ADR-110 的證據清查——表情表、`0x1C` 三欄位、交易視窗座標逐一回讀結案（2026-10-21）
+
+- **背景**：ADR-110 只證實了商店／背包兩個模組引用的錨點，並把全倉 530 個 `sub_` 引用做過一次**存在性**清查；存在性不等於意義，本輪繼續把三組「號碼已寫進程式、但意義未回讀」的東西讀回原版交叉確認：**（一）九個表情與 F1–F7 的對應**、**（二）c2s `0x1C` 的三個欄位**（ADR-021 起掛著「語意未解」的債）、**（三）交易視窗的控制座標**。三組都不改遊戲行為，只把「我們以為的」換成「原版真正的」，並把結論固化成回歸測試。
+- **（一）表情：從「未決」到逐 byte 對齊**：
+  - `sub_408400` 是讀情緒節點的那一支：`n8_1 = n8; if (n8 > 8) n8_1 = 0;` 後以 `(&off_5B20D8)[n8_1]` 取名字，再往下走 `face`／`delay` 節點 —— 所以 **0..8 之外一律畫成 0（中性眨眼）**。
+  - 名字表 `.data:005B20D8` 正好九個 dword：`blink, hit, smile, troubled, cry, angry, bewildered, stunned, vomit`；下一個符號 `.data:005B20FC` 起是**毫不相干的**角色動作表（move/stand/jump/…），兩張表不能被混成一張。
+  - `sub_509790` 是套用端：`if ((n35 != 33 && n35 != 32 || n8 != 8) && n8 <= 8)`——`n8 <= 8` 之外，**趴地（32/33）時不給吐（8）**；`n35` 由 `*(this + 45) >> 1` 的 switch 與 `*(this + 46)` 覆寫決定。
+  - `sub_511E20` case 10：`(a3 & 0x100) == 0 && (unsigned int)(n119 - 111) <= 8`，VK_F1 = 112 ⇒ **F1..F7 帶 1..7**；`n119 == 119`（F8）在範圍判斷**之前**就 `return 1`；索引 0（blink）對應 n119 = 111，沒有任何 F 鍵產生它 ⇒ **0 與 8 沒有按鍵**，與本專案長年文件一致。
+  - **比對我們**：`client/faces.ts` 的 `FACE_NAMES`、`server/src/protocol/field.ts` 的 `EMOTION_NAMES` 與那九筆**同序同值**；`main.js` 的 `EMOTE_KEYS = [1,2,3,4,5,6,7]` 與 `requestEmotion(Number(event.key.slice(1)))` 正是 F1→1..F7→7（沒有 off-by-one）；`setFace` 的 `value === 8 && ["prone","proneStab"].includes(stance)` 正是原版的 32/33 攔截。**全部吻合，無需改碼**；新增一條回歸測試把這四件事釘住（`server/test/native-faces.test.ts`：九個名字、`EMOTION_MAX === 8`、`EMOTION_NEUTRAL === 0`、`EMOTION_HIT === 1`、main.js 的按鍵與 `EMOTE_KEYS`）。
+- **（二）`0x1C` 三個欄位全部解開（ADR-021 / DECISIONS「三欄位語意未解」的債結案）**：
+  - `sub_55B870(__int16 ArgList, __int16 a2, char a3)` 是唯一寫入端，且把每個寬度都給了：`sub_4A1EA0(..., 28, ...)`（28 = 0x1C）、`*(_DWORD*) = 5120`、**常數 0x1400**、兩個 `*(WORD*)`（s16 hpΔ、s16 mpΔ）、一個 `*(_BYTE*)`（u8）。所以 u32 **不是**每次算出的遮罩，而是**永遠的 0x1400**。
+  - 位元意義與 `0x0D` 同一套 mask，且可直接對到欄位：`& 0x400` → `*(this+53) ^ *(this+55)`（HP）、`& 0x800` → `+57/+59`、`& 0x1000` → `*(this+61) ^ *(this+63)`（MP）、`& 0x2000` → 下一欄；記憶體值是 **XOR 編碼**。`0x1400 = HP(0x400) | MP(0x1000)`。
+  - 尾端 u8 = `sub_558950` 的區域變數 `v21`：`if (x == 36 || x == 37) { n10000 = sub_4BE790(v3); if (n10000 <= 0) goto LABEL_23; v21 = 1; }` —— **只有當這個 HP 增量來自「地圖自己的回復間隔」（繩梯／繩子地圖）時才是 1**；傷害路徑 `sub_55B870(-damage, 0, 0)` 與 MP 路徑 `sub_55B870(0, v19, 0)` 都是 0。它不是「這是補血」的標記，是「這個 tick 用的是地圖自己的間隔」的標記。
+  - 同一支也把回復的完整條件給了：30 ms 累加器 `*(this+168) + 30` 達到 `n10000`（預設 10000，或地圖自己的值）、HP 未滿、**位置沒變**（`this_1[50].x != this_1[51].x` 就跳過）、action ∈ [2,3] 或攀爬地圖、基礎值 HP **10**／MP **3**（各加 `sub_4BDD20` 的道具／技能加成，群組 `1000000`／`2000000`）、乘上 rate、**夾到不超過上限**（`if (ArgList >= max - cur) ArgList = max - cur`）、且 `> 0` 才送。
+  - **比對我們**：`client/recovery.ts` 的 `recoveryTick` 逐條吻合（30 ms 時鐘、10000/地圖間隔、站定、未滿、10/3 + bonus、乘 rate、`Math.min(max - cur, …)`、`> 0` 才送、`flag: climb ? 1 : 0`）。橋接層 `server/src/client/session.ts` 的 `recover()` 用 `?? 0` 補齊兩個 delta，所以線上**恆為 0x1400**（與 `sub_55B870` 一致）；傷害橋接 `reportTouchDamage` 同樣送 `{hpDelta: -damage, mpDelta: 0, flag: 0}`。**無需改碼**，只把註解從「角色未定位」改寫成已定位的結論，並保留「**任何伺服器拿這個 byte 做什麼在本 checkout 沒有 2003 server 可證，仍然未知**」這句實話。新增一條端到端測試（`server/test/presentation-recovery.test.ts`）：攀爬 tick → `{hpDelta:10, flag:1}` → 補齊後線上是 `1c 00140000 0a00 0000 01`，平地是 `…00`，MP 是 `1c 00140000 0000 0300 00`。
+- **（三）交易視窗座標回讀**：`sub_4D3EF0` 建立的 `CCtrlButton id1001` 在 **(222,267)**、`id1002` 在 **(285,275)**，與 `client/trade-state.ts` 記載**完全一致**；`UI/UIWindow.img/Trade/backgrnd` 實測 **367x295**，故 `home` (216,152) 同樣是 `(800-w)>>1, (600-h)>>1` 的閉環。同一支還建了 **id1003 於 (262,21)、高 216**（`*(*(this+58)+44) = 166`）——原版交易視窗**自己有一個清單捲軸**，而瀏覽器版沒建模（清單不會溢出）。**已記載為未做，不假稱完成。**
+- **驗證**：`bun run typecheck` ✓、`bun run format:check` ✓（`All matched files use Prettier code style!`）、`bun run build` ✓；CI 完整指令 `bun test --timeout 30000 ./server/test ./tools/tests` → **1241 pass / 0 fail、5315 expect() calls、148 files、317.29s**（ADR-110 基線 1239/0，本輪 +2 全為新測試，0 新失敗）。本輪無任何遊戲行為改動：三組都是「註解與測試」的收斂，唯一動到的程式碼是註解。
+- **LIVE**：沙箱於本輪中途重置（`generated/` 整包消失，含 ADR-110 的 `preview-20261021-adr110.json` 與工具鏈），已重新以 npm 安裝 `@oven/bun-linux-x64@1.4.3` 重建 `generated/toolchain/bin/bun`（與 ADR-110 同版），並重開 LIVE 於本 HEAD；**save 是另一個全新隔離世界**（既有政策：找不到存檔就開新的，不用新 fixture 假裝舊角色）。

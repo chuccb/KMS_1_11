@@ -25,7 +25,17 @@ interface RecoveryOptions {
   send(report: ClientStatReport & { t: "recovery" }): unknown;
   log(error: string): void;
 }
-/** CWvsApp::558950: 30ms simulation, independent HP/MP clocks. No local vital mutation. */
+/**
+ * CWvsApp::558950: 30ms simulation, independent HP/MP clocks. No local vital mutation.
+ *
+ * Re-read in ADR-111, field by field: the accumulator is `*(this + 168) + 30` against `n10000`
+ * (10000, or the map's own interval from `sub_4BE790` on action 36/37); the HP arm is skipped
+ * when hp >= maxHp, when the position changed (`this_1[50].x != this_1[51].x`), or when the action
+ * is neither 2/3 nor a climbing map; the amounts are `10 + hpBonus` and `3 + mpBonus` scaled by a
+ * rate, **clamped so they cannot pass the maximum** (`if (ArgList >= max - cur) ArgList = max -
+ * cur`), and only sent `if (ArgList > 0)`. The trailing byte is that function's `v21`: 1 exactly
+ * when the interval was the map's own, which is what `flag: climb ? 1 : 0` below reproduces.
+ */
 export function recoveryTick(
   clock: { hp: number; mp: number },
   input: RecoveryInput,

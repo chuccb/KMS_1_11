@@ -1234,9 +1234,14 @@ export interface ClientStatReport {
   /** MP change; negative is MP spent, positive is the field's regeneration. */
   mpDelta?: number;
   /**
-   * The trailing byte, which the client writes unconditionally. Its role is not located: the damage
-   * path sends 0 and the HP regeneration path sends 1 for ladder/rope ACTION 36/37 and the recovery is
-   * passive-enabled (`sub_558950`, `sub_4BE790`). The server keeps it so the field is not lost.
+   * The trailing byte, which the client writes unconditionally. ADR-110/111 located it on the
+   * client side: it is `sub_558950`'s local `v21`, set to 1 **only** when the HP delta came from a
+   * tick whose interval was the map's own (`x == 36 || x == 37` -> `n10000 = sub_4BE790(v3)`, and
+   * `v21 = 1`), and 0 for every other report - the damage path (`sub_55B870(-damage, 0, 0)`) and
+   * the MP tick (`sub_55B870(0, v19, 0)`) alike. So it marks "this recovery used the ladder/rope
+   * map's own rate", not "this is a heal". **What any server did with it is still unknown** - no
+   * 2003 server is in this checkout - so the server keeps it on the wire instead of inventing a
+   * meaning for it.
    */
   flag: number;
 }
@@ -2163,7 +2168,11 @@ export const EMOTION_NEUTRAL = 0;
 /** The hurt face, which the client shows on its own when the character is hit (`sub_5114A0`). */
 export const EMOTION_HIT = 1;
 
-/** The largest index the client accepts (`sub_509790` tests `n8 <= 8` and the drawer clamps to 0). */
+/**
+ * The largest index the client accepts. `sub_509790` guards `n8 <= 8` (and refuses `n8 == 8`
+ * while the stance is prone, ids 32/33), and the drawer `sub_408400` clamps `n8 > 8` back to 0.
+ * The nine names themselves live in `.data:005B20D8`, re-read in ADR-110.
+ */
 export const EMOTION_MAX = EMOTION_NAMES.length - 1;
 
 /** The name of an index, or `undefined` for one that is not a face at all (`-1`, `> 8`). */
