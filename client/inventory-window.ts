@@ -22,6 +22,7 @@
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { BT_UI_CLOSE } from "./uicontrols.ts";
 import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 
@@ -83,7 +84,7 @@ export const INVENTORY: InventoryLayout = {
     { x: 70, y: 52, width: 34, height: 24 },
     { x: 104, y: 52, width: 36, height: 24 },
   ],
-  close: { x: 114, y: 9, width: 32, height: 15 },
+  close: { x: 114, y: 9, width: BT_UI_CLOSE.width, height: BT_UI_CLOSE.height },
   litTab: { x: 2, y: 52, width: 34, height: 24 },
   idleTab: { x: 36, y: 52, width: 34, height: 24 },
 };

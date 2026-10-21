@@ -1,5 +1,6 @@
 import { requireElement, blurWithin } from "./dom.ts";
 import type { ImageLookup } from "./render-types.ts";
+import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
 interface ReviveOptions {
   ctx: CanvasRenderingContext2D;
   image: ImageLookup;
@@ -121,14 +122,18 @@ export function reviveWindow({ ctx, image, send, isInGame, onOpen }: ReviveOptio
         ctx.fillStyle = "#000";
         ctx.fillText(REVIVE_TEXT[i], 400, y);
       }
-      const state = pending
-        ? "disabled"
-        : pressed
-          ? "pressed"
-          : hover || document.activeElement === ok
-            ? "mouseOver"
-            : "normal";
-      stamp(`UI/Basic.img/BtOK/${state}/0`, 368, 196);
+      stamp(
+        buttonSprite(
+          "UI/Basic.img/BtOK",
+          uiButtonFace({
+            disabled: pending,
+            pressed,
+            hover: hover || document.activeElement === ok,
+          }),
+        ),
+        368,
+        196,
+      );
       ctx.restore();
     },
   };

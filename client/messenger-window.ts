@@ -25,6 +25,7 @@ import {
 } from "./messenger-state.ts";
 import type { MessengerLogScroll } from "./messenger-state.ts";
 import { paintVScrollbar } from "./vscroll.ts";
+import { buttonSprite, buttonSprites, uiButtonFace } from "./uicontrols.ts";
 import type { VScrollZone } from "./vscroll.ts";
 import { HUD_FONT } from "./hud.ts";
 import type { AvatarImage, BrowserLook } from "./image-cache.ts";
@@ -162,9 +163,12 @@ export function messengerRenderer(options: MessengerRendererOptions) {
     }
     // BtUIClose id 1000.
     const close = MESSENGER_WINDOW.close;
-    const state =
-      ui.pressed === "close" ? "pressed" : ui.hover === "close" ? "mouseOver" : "normal";
-    const closeArt = image(`UI/UIWindow.img/BtUIClose/${state}/0`);
+    const closeArt = image(
+      buttonSprite(
+        "UI/UIWindow.img/BtUIClose",
+        uiButtonFace({ pressed: ui.pressed === "close", hover: ui.hover === "close" }),
+      ),
+    );
     if (closeArt.ready) ctx.drawImage(closeArt.img, at.x + close.x, at.y + close.y);
     ctx.restore();
   }
@@ -173,9 +177,7 @@ export function messengerRenderer(options: MessengerRendererOptions) {
     for (const path of [
       MESSENGER_WINDOW.backgrnd,
       MESSENGER_WINDOW.charView.path,
-      "UI/UIWindow.img/BtUIClose/normal/0",
-      "UI/UIWindow.img/BtUIClose/mouseOver/0",
-      "UI/UIWindow.img/BtUIClose/pressed/0",
+      ...buttonSprites("UI/UIWindow.img/BtUIClose"),
       ...["prev0", "prev1", "next0", "next1", "base", "thumb0", "thumb1"].map(
         (cell) => `UI/Basic.img/VScr/enabled/${cell}`,
       ),

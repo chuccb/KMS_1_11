@@ -1,4 +1,5 @@
 import type { ImageLookup } from "./render-types.ts";
+import { buttonSprite, UI_BUTTON_FACES, uiButtonFace } from "./uicontrols.ts";
 import type { QuestTalkBody, QuestReply } from "../server/src/protocol/quest.ts";
 import type { DialogueRun, DialoguePiece, DialogueAsset } from "./npcdialogue-layout.ts";
 import type { UiPoint, UiAudio } from "./ui-types.ts";
@@ -17,6 +18,18 @@ interface DialogueOptions {
   onReply(reply: QuestReply, context?: DialoguePreviewContext): void;
 }
 type DialogueLayout = ReturnType<typeof dialogueLayout>;
+
+/**
+ * The strip one dialogue button is drawn from.
+ *
+ * The close button wears `BtUIClose2`; every other button wears `UtilDlgEx2/Bt<Name>`. Both are
+ * the shared four-state strips, so the only thing this decides is which of the two a spec names.
+ */
+function dialogueButtonStrip(spec: { key: string; name: string }): string {
+  return spec.key === "close"
+    ? "UI/UIWindow.img/BtUIClose2"
+    : `UI/UIWindow.img/UtilDlgEx2/Bt${spec.name}`;
+}
 type ButtonTarget = ReturnType<typeof dialogueButtons>[number] & {
   element: HTMLButtonElement;
   piece?: undefined;
@@ -288,12 +301,7 @@ export function npcDialogue({ ctx, image, audio, point, onOpen, onReply }: Dialo
     ])
       image(`UI/UIWindow.img/UtilDlgEx2/${name}`);
     for (const spec of c.buttons)
-      for (const state of ["normal", "mouseOver", "pressed"])
-        image(
-          spec.key === "close"
-            ? `UI/UIWindow.img/BtUIClose2/${state}/0`
-            : `UI/UIWindow.img/UtilDlgEx2/Bt${spec.name}/${state}/0`,
-        );
+      for (const face of UI_BUTTON_FACES) image(buttonSprite(dialogueButtonStrip(spec), face));
     if (c.scrolling)
       for (const name of ["base", "prev0", "next0", "thumb0", "thumb1"])
         image(`UI/Basic.img/VScr/enabled/${name}`);
@@ -609,13 +617,8 @@ export function npcDialogue({ ctx, image, audio, point, onOpen, onReply }: Dialo
         ctx.restore();
       }
       for (const spec of c.buttons) {
-        const state =
-          pressed === spec.key ? "pressed" : hover === spec.key ? "mouseOver" : "normal";
-        const path =
-          spec.key === "close"
-            ? `UI/UIWindow.img/BtUIClose2/${state}/0`
-            : `UI/UIWindow.img/UtilDlgEx2/Bt${spec.name}/${state}/0`;
-        stamp(path, x + spec.x, y + spec.y);
+        const face = uiButtonFace({ pressed: pressed === spec.key, hover: hover === spec.key });
+        stamp(buttonSprite(dialogueButtonStrip(spec), face), x + spec.x, y + spec.y);
       }
       ctx.restore();
       if (c.iconHover)

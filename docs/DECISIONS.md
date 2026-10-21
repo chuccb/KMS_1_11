@@ -4218,3 +4218,70 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - 商店與背包的 thumb 在「清單剛好捲到一半」時會比上一版**低 1px 變回原版的 85/90**——這正是本輪要修的。
     LIVE 請自己開一個超過 6 列的商店，把捲軸拉到中間，對照原版截圖。
   - probe 看不到這個差異（它的商店清單沒有溢出），所以上面那句請以 LIVE 實測為準。
+
+
+## ADR-128：把共用的四態按鈕與控制項片寬收回 `client/uicontrols.ts`（2026-10-21）
+
+- **問題（兩件，都被抄了很多份）**
+  1. **四態臉。** 每個 `CCtrlButton` 的 sprite 在 WZ 裡都是 `<path>/<face>/0`，四張臉是
+     `normal` / `mouseOver` / `pressed` / `disabled`。選哪一張的三元式在 client 裡被手抄了
+     **11 份以上**（creation 3、login-presentation 3、statwindow 3、skills 2、messenger、equipment、
+     revive、npcdialogue、itemdialogs、trade、hud 各 1），而且**其中兩份不一致**：
+     statwindow 的關閉鈕沒有 `disabled` 那一臂；login 的標題鈕用兩個 `!dialogOpen &&` 而不是
+     `disabled`。
+  2. **片寬。** 五個視窗各寫一次 `32x15`、兩處寫 `65x24`、一處 `50x23`、一處 `136x23`、一處 `17x16`、
+     三處 `12x12`、滑桿的 `3`/`c.w-3`/`8`。這些不是各自獨立的選擇。
+- **原碼依據（這是本輪唯一一條 C 證據，其餘都是實測 WZ）**：`sub_4E0FF0`
+  （`MapleStory.exe.c:231327`，參數在 `:231330-231334`）建 messenger 的關閉鈕是
+  `CCtrlButton::Create(this, 1000, 152, 9, 2, &path)` —— **只給位置和型別，沒有給矩形**。
+  型別 2 的按鈕矩形是自己那張 sprite 決定的，所以「視窗拿來做 hit test 的框」就是 WZ 裡那張圖的大小。
+  這就是為什麼 `32x15` 是 `BtUIClose` 的片寬，而不是五個視窗各自決定的數字。
+- **新模組 `client/uicontrols.ts`**
+  - `UiButtonFace` / `UI_BUTTON_FACES`：四張臉，順序照 WZ。
+  - `uiButtonFace({ disabled, pressed, hover })`：**`disabled` > `pressed` > `hover` > `normal`**
+    （灰掉的按鈕不管指標在不在上面都還是灰的）。
+  - `buttonSprite(base, face)` / `buttonSprites(base, faces?)`：`<base>/<face>/0`，順便給 warm 用。
+  - 實測片寬（全部四張臉同尺寸）：`BT_UI_CLOSE` 32x15（`BtUIClose`＋`BtUIClose2`）、
+    `BT_DIALOG` 65x24（`UI/Basic.img` 的 `BtOK`＋`BtCancel`）、`BT_COMBO_BOX` 17x16、
+    `UTIL_DLG_BUTTON` 50x23（`UtilDlgEx`／`UtilDlgEx2` 的七顆 `Bt*`）、`BT_GAME_MENU` 136x23
+    （`GameMenu` 的六顆 `Bt*`）、`CHECK_BOX` 12x12（cell 0..3）、
+    `SLIDER` = cap 3x4 / mid 1x2 / thumb 17x16。
+- **順便把三個「看不出意義的數字」還原成可以由片寬算出來的算式**
+  - 滑桿的 `y + 6` / `y + 7` → `(c.h - SLIDER.cap.height) / 2` 與 `(c.h - SLIDER.mid.height) / 2`。
+    （控制框高 16，4px 的端帽得 6、2px 的填充得 7 —— 兩者在同一條中心線上。）
+  - thumb 的 `- 8` → `- Math.floor(SLIDER.thumb.width / 2)`（17 的一半取整）。
+  - 填充的 `dx = 3; dx < c.w - 3` → `SLIDER.cap.width`，並且新的測試證明了
+    `2*3 + 116*1 = 122`，也就是兩頂端帽＋填充剛好鋪滿整個框，沒有重疊也沒有縫。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、
+  `bun test --timeout 30000 ./server/test ./tools/tests` → **1331 pass / 0 fail**、**154 files**、
+  264.56s（ADR-126+127 基線 1321，本輪 **+10** 全為新測試）。
+  `client/main.js` 維持 **5445 行**（本輪沒動它），七份文件不必同步行數。
+- **新測試 `server/test/ui-controls.test.ts`（10 條）**：四張臉的順序與路徑；`uiButtonFace` 的
+  優先序（含「灰掉時指標在上面也還是灰的」這條，正是 statwindow 缺的那一臂）；**每個常數都重新實測
+  Data.wz**（`BtUIClose`/`BtUIClose2` 四態皆 32x15、`BtOK`/`BtCancel` 皆 65x24、`BtComboBox` 17x16、
+  `UtilDlgEx`/`UtilDlgEx2` 七顆皆 50x23、`GameMenu` 六顆皆 136x23、`CheckBox` 0..3 皆 12x12、
+  Slider 的三件與四個 thumb 面）；五個視窗的關閉框都指向同一個常數；滑桿三件的算式。
+- **紅燈（一次，我自己寫錯，已修）**：我第一次把 login 標題鈕寫成
+  `uiButtonFace({ disabled: dialogOpen, ... })`。這是**我自己发明的語意**——原來的程式只是
+  「dialog 開著時按不到」，按鈕仍然畫 `normal`；而且那幾張 `disabled/0` 從來沒有被 warm，
+  所以按鈕會**整個消失**。probe 立刻抓到了：`drawImage` 從 161 掉到 157。已改回與原來完全等價的
+  `pressed: !dialogOpen && ...` / `hover: !dialogOpen && ...`。
+- **本輪唯二的實際行為改變（都不是偷偷改的）**
+  1. **messenger 的關閉框 26x26 → 32x15。** 原來的 26x26 沒有任何註解或依據，且與原版矛盾
+     （型別 2 的按鈕矩形就是 sprite）：右邊 6px 按不到、下方 11px 卻可以按。改完後可點面積
+     676 → 480。**如果你覺得變難按，我可以只把它改成「以 32x15 為準、往外多留幾 px」而不是改回 26x26。**
+  2. **系統選單的 warm 現在包含 `disabled` 那張臉。** 原本它 warm `normal/pressed/mouseOver`，
+     但前三列 GameMenu 鈕與 disabled 的滑桿畫的卻是 `disabled`，所以那張臉永遠沒被預熱。
+     probe 的 `drawImage` 因此 **161 → 162**（多畫出來的正是那張以前永遠來不及 ready 的臉）。
+- **故意沒動的地方（都有寫進註解）**
+  - `inventory-window.ts` 的 meso 鈕狀態是 `pressed && hover` 才算 pressed，**刻意不同於**
+    通用優先序，所以沒套用 `uiButtonFace`。
+  - `systemmenu.ts` 的 combo 箭頭畫在 `x + c.w - 16`，但片子是 17 寬（右緣會超出 1px）。
+    沒有任何證據支持哪一邊，所以**留著不動**，只在 FINDINGS 記一筆。
+  - `SHOP.recharge` 的 50x23 是 `UI/UIWindow.img/Shop/BtRecharge` 自己的片寬，
+    **不是** `UTIL_DLG_BUTTON`（剛好同尺寸、不同條片子），所以沒有套用。
+  - `UI/StatusBar.img/<name>` 只有三張臉，所以 hud 的 preload 維持三張。
+  - `SKILL_CLOSE = { x: 128, y: 9 }` **沒有原碼依據**：`sub_4ECD40` 那顆 `CCtrlButton` 的 Create
+    埋在 VARIANTARG union 裡讀不出來，只有「裝備窗與能力值窗在同一張 176x315 底板上都用 (128,9)」
+    這個交互佐證。32x15 那一半則有（就是 `BtUIClose` 的片寬）。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。

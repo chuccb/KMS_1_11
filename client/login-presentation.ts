@@ -2,6 +2,7 @@
 import type { CanvasImage, ImageLookup } from "./render-types.ts";
 import type { LoginCharacter, LoginLook, LoginSelection } from "./login-data.ts";
 import { facingFlip } from "./motion.ts";
+import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
 import {
   WORLD_UI,
   CHARACTER_UI,
@@ -107,13 +108,19 @@ export function drawTitleScreen(
   stamp("UI/Login.img/Title/menu", 302, 358);
   // Modal login sits above the still-visible title menu, centred by sub_461C50.
   for (const button of TITLE_BUTTONS.filter((entry) => !entry.dialog)) {
-    const state =
-      !dialogOpen && pressed === button.id
-        ? "pressed"
-        : !dialogOpen && hover === button.id
-          ? "mouseOver"
-          : "normal";
-    stamp(`${button.path}/${state}/0`, button.x, button.y);
+    // An open dialog does not grey these out - it only makes them unreachable, which is why the
+    // two guards sit on `pressed` and `hover` rather than on a `disabled` arm.
+    stamp(
+      buttonSprite(
+        button.path,
+        uiButtonFace({
+          pressed: !dialogOpen && pressed === button.id,
+          hover: !dialogOpen && hover === button.id,
+        }),
+      ),
+      button.x,
+      button.y,
+    );
   }
   if (dialogOpen) {
     stamp("UI/Login.img/Title/loginDlg", 247, 215);
@@ -124,15 +131,18 @@ export function drawTitleScreen(
     ctx.fillStyle = "#000000";
     ctx.fillText("메일주소 저장", 347, 299);
     for (const button of TITLE_BUTTONS.filter((entry) => entry.dialog)) {
-      const isDisabled = disabled(button.id);
-      const state = isDisabled
-        ? "disabled"
-        : pressed === button.id
-          ? "pressed"
-          : hover === button.id
-            ? "mouseOver"
-            : "normal";
-      stamp(`${button.path}/${state}/0`, button.x, button.y);
+      stamp(
+        buttonSprite(
+          button.path,
+          uiButtonFace({
+            disabled: disabled(button.id),
+            pressed: pressed === button.id,
+            hover: hover === button.id,
+          }),
+        ),
+        button.x,
+        button.y,
+      );
     }
   }
   // CTitle/sub_4D0000 prints Ver. 1.11 at right=796, top=584.
@@ -236,15 +246,18 @@ export function drawSelectionScreen(
     }
   }
   for (const button of SELECTION_BUTTONS.filter((b) => b.stage === stage)) {
-    const isDisabled = disabled(button.id);
-    const state = isDisabled
-      ? "disabled"
-      : pressed === button.id
-        ? "pressed"
-        : hover === button.id
-          ? "mouseOver"
-          : "normal";
-    stamp(`${button.path}/${state}/0`, button.x, button.y);
+    stamp(
+      buttonSprite(
+        button.path,
+        uiButtonFace({
+          disabled: disabled(button.id),
+          pressed: pressed === button.id,
+          hover: hover === button.id,
+        }),
+      ),
+      button.x,
+      button.y,
+    );
   }
   ctx.globalAlpha = 1;
   ctx.textAlign = "left";

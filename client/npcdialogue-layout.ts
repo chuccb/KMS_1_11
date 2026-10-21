@@ -1,4 +1,5 @@
 import type { QuestTalkBody } from "../server/src/protocol/quest.ts";
+import { BT_UI_CLOSE, UTIL_DLG_BUTTON } from "./uicontrols.ts";
 export type DialogueColor = "k" | "r" | "g" | "b";
 interface DialogueStyle {
   text: string;
@@ -238,8 +239,8 @@ export function dialogueButtons(body: QuestTalkBody, width: number, height: numb
     name,
     x,
     y,
-    width: 50,
-    height: 23,
+    width: UTIL_DLG_BUTTON.width,
+    height: UTIL_DLG_BUTTON.height,
     answer,
   });
   const result = [
@@ -248,8 +249,8 @@ export function dialogueButtons(body: QuestTalkBody, width: number, height: numb
       name: "Close",
       x: width - 48,
       y: 9,
-      width: 32,
-      height: 15,
+      width: BT_UI_CLOSE.width,
+      height: BT_UI_CLOSE.height,
       answer: body.kind === "say" || body.kind === "confirm" ? 255 : 0,
     },
   ];

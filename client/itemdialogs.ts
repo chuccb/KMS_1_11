@@ -1,5 +1,6 @@
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint, UiAudio } from "./ui-types.ts";
+import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
 import { requireElement, focusTarget, blurWithin } from "./dom.ts";
 interface DialogOptions {
   text: string;
@@ -363,11 +364,12 @@ export function itemDialogs({
               : button === ok
                 ? "Yes"
                 : "No";
-          const state =
-            pressed === button.id ? "pressed" : hover === button.id ? "mouseOver" : "normal";
           const path = editing ? "UI/UIWindow.img/UtilDlgEx" : "UI/Basic.img";
           stamp(
-            `${path}/Bt${name}/${state}/0`,
+            buttonSprite(
+              `${path}/Bt${name}`,
+              uiButtonFace({ pressed: pressed === button.id, hover: hover === button.id }),
+            ),
             parseFloat(button.style.left),
             parseFloat(button.style.top),
           );

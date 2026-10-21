@@ -1,5 +1,6 @@
 import type { MapTitleArt } from "../server/src/game/mapart.ts";
 import type { HtmlImageLookup } from "./ui-types.ts";
+import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
 /** CUIStatusBar 4FA5E0/4FB440 and CField 46DA30, KMS 1.11 (not modern UI). */
 export const HUD_FONT: string = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
 export const STATUS_GAUGES: Readonly<
@@ -78,9 +79,11 @@ export function statusBarButtonAt(x: number, y: number): StatusBarButton | undef
 
 /** Every face the bar can show, so a hover or a press never has to wait for a fetch. */
 export function preloadStatusBar(image: (path: string) => unknown): void {
+  // `UI/StatusBar.img/<name>` carries three faces, not the four `UI/Basic.img` buttons do, so
+  // this pass asks for three - the bars have no disabled arm to show.
   for (const name of [...STATUS_BAR.buttons.map((button) => button.name), "BtChat"])
-    for (const state of ["normal", "mouseOver", "pressed"])
-      image(`UI/StatusBar.img/${name}/${state}/0`);
+    for (const face of ["normal", "mouseOver", "pressed"] as const)
+      image(buttonSprite(`UI/StatusBar.img/${name}`, face));
 }
 
 /** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
@@ -195,8 +198,7 @@ export function drawMessengerButton(
   pressed: boolean,
   hover: boolean,
 ): void {
-  const state = pressed ? "pressed" : hover ? "mouseOver" : "normal";
-  const art = image(`UI/StatusBar.img/BtChat/${state}/0`);
+  const art = image(buttonSprite("UI/StatusBar.img/BtChat", uiButtonFace({ pressed, hover })));
   if (art.ready) ctx.drawImage(art.img, MESSENGER_BUTTON.x, MESSENGER_BUTTON.y);
 }
 

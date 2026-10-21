@@ -20,6 +20,7 @@ interface StatWindowOptions {
 }
 import { releaseOnInterrupt } from "./pointer.ts";
 import { detailRows } from "./characterstats.ts";
+import { buttonSprite, BT_UI_CLOSE, uiButtonFace } from "./uicontrols.ts";
 /**
  * CUIStat: sub_4F2450/4F2820/4F32D0. Base values come only from authoritative CharacterData / 0x0D.
  *
@@ -32,7 +33,7 @@ export const STAT_WINDOW = {
   width: 176,
   height: 315,
   home: { x: 72, y: 72 },
-  close: { x: 128, y: 9, w: 32, h: 15 },
+  close: { x: 128, y: 9, w: BT_UI_CLOSE.width, h: BT_UI_CLOSE.height },
   detail: { x: 122, y: 280, w: 47, h: 18 },
 };
 export const AP_BUTTONS = [
@@ -298,28 +299,33 @@ export function statWindow({
       text(self.ap, 77, 282);
       ctx.restore();
       for (const b of AP_BUTTONS) {
-        const id = `ap-${b.field}`,
-          state = disabled(b)
-            ? "disabled"
-            : pressed === id
-              ? "pressed"
-              : hover === id
-                ? "mouseOver"
-                : "normal";
-        stamp(`UI/UIWindow.img/Stat/BtApUp/${state}/0`, at.x + b.x, at.y + b.y);
+        const id = `ap-${b.field}`;
+        stamp(
+          buttonSprite(
+            "UI/UIWindow.img/Stat/BtApUp",
+            uiButtonFace({ disabled: disabled(b), pressed: pressed === id, hover: hover === id }),
+          ),
+          at.x + b.x,
+          at.y + b.y,
+        );
       }
-      const state =
-        pressed === "stat-close" ? "pressed" : hover === "stat-close" ? "mouseOver" : "normal";
-      stamp(`UI/UIWindow.img/BtUIClose/${state}/0`, at.x + 128, at.y + 9);
-      const detailState = !basis
-        ? "disabled"
-        : pressed === "stat-detail"
-          ? "pressed"
-          : hover === "stat-detail"
-            ? "mouseOver"
-            : "normal";
       stamp(
-        `UI/UIWindow.img/Stat/BtDetail/${detailState}/0`,
+        buttonSprite(
+          "UI/UIWindow.img/BtUIClose",
+          uiButtonFace({ pressed: pressed === "stat-close", hover: hover === "stat-close" }),
+        ),
+        at.x + STAT_WINDOW.close.x,
+        at.y + STAT_WINDOW.close.y,
+      );
+      stamp(
+        buttonSprite(
+          "UI/UIWindow.img/Stat/BtDetail",
+          uiButtonFace({
+            disabled: !basis,
+            pressed: pressed === "stat-detail",
+            hover: hover === "stat-detail",
+          }),
+        ),
         at.x + STAT_WINDOW.detail.x,
         at.y + STAT_WINDOW.detail.y,
       );

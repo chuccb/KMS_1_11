@@ -6,6 +6,7 @@ import type { HtmlImageLookup, UiAudio } from "./ui-types.ts";
 import { requireElement } from "./dom.ts";
 import { isRecord } from "./resource-validation.ts";
 import { isCreationCatalog } from "./ui-resource-validation.ts";
+import { buttonSprite, BT_DIALOG, uiButtonFace } from "./uicontrols.ts";
 type CreationMode = "closed" | "create" | "notice" | "delete";
 type CreationActor = AvatarActor & FaceActor;
 type CreationDice = [number, number, number, number];
@@ -60,8 +61,22 @@ export const CREATION_BUTTONS = [
     width: 43,
     height: 16,
   },
-  { id: "create", path: "UI/Basic.img/BtOK", x: 328, y: 471, width: 65, height: 24 },
-  { id: "create-cancel", path: "UI/Basic.img/BtCancel", x: 409, y: 471, width: 65, height: 24 },
+  {
+    id: "create",
+    path: "UI/Basic.img/BtOK",
+    x: 328,
+    y: 471,
+    width: BT_DIALOG.width,
+    height: BT_DIALOG.height,
+  },
+  {
+    id: "create-cancel",
+    path: "UI/Basic.img/BtCancel",
+    x: 409,
+    y: 471,
+    width: BT_DIALOG.width,
+    height: BT_DIALOG.height,
+  },
 ];
 // Literal CP949 strings recovered from MapleStory.exe .data (VAs in CREATION_VALIDATION.md).
 export const CREATION_TEXT = {
@@ -486,28 +501,36 @@ export function characterDialogs({
           ctx.fillStyle = "#000";
           ctx.fillText(groups[i]?.find((o) => o.id === picks[i])?.name ?? "", 381, y + 2, 104);
           const id = `create-combo-${i}`;
-          const state = el(id).disabled
-            ? "disabled"
-            : dropdown === i || pressed === id
-              ? "pressed"
-              : hover === id
-                ? "mouseOver"
-                : "normal";
-          stamp(`UI/Basic.img/BtComboBox/${state}/0`, 488, y + 1);
+          stamp(
+            buttonSprite(
+              "UI/Basic.img/BtComboBox",
+              uiButtonFace({
+                disabled: el(id).disabled,
+                pressed: dropdown === i || pressed === id,
+                hover: hover === id,
+              }),
+            ),
+            488,
+            y + 1,
+          );
         }
         for (const [index, value] of dice.entries())
           ctx.fillText(String(value), 348, 381 + index * 20);
         const frame = image(`UI/Login.img/CharSelect/dice${Math.floor(diceStep / 3)}`);
         if (frame.ready) ctx.drawImage(frame.img, 464, 453 - frame.img.naturalHeight);
         for (const button of CREATION_BUTTONS) {
-          const state = el(button.id).disabled
-            ? "disabled"
-            : pressed === button.id
-              ? "pressed"
-              : hover === button.id
-                ? "mouseOver"
-                : "normal";
-          stamp(`${button.path}/${state}/0`, button.x, button.y);
+          stamp(
+            buttonSprite(
+              button.path,
+              uiButtonFace({
+                disabled: el(button.id).disabled,
+                pressed: pressed === button.id,
+                hover: hover === button.id,
+              }),
+            ),
+            button.x,
+            button.y,
+          );
         }
         if (dropdown >= 0) {
           groups[dropdown].forEach((option, index) => {
@@ -535,14 +558,18 @@ export function characterDialogs({
         for (const { id, x, path } of CONFIRMATION_BUTTONS.filter(
           (button) => button.mode === mode,
         )) {
-          const state = el(id).disabled
-            ? "disabled"
-            : pressed === id
-              ? "pressed"
-              : hover === id
-                ? "mouseOver"
-                : "normal";
-          stamp(`UI/Basic.img/${path}/${state}/0`, x, 326);
+          stamp(
+            buttonSprite(
+              `UI/Basic.img/${path}`,
+              uiButtonFace({
+                disabled: el(id).disabled,
+                pressed: pressed === id,
+                hover: hover === id,
+              }),
+            ),
+            x,
+            326,
+          );
         }
       }
       ctx.restore();

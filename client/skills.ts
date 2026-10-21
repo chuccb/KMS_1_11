@@ -24,6 +24,7 @@ interface SkillWindowOptions {
 import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 import { paintVScrollbar, vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
+import { buttonSprite, BT_UI_CLOSE, uiButtonFace } from "./uicontrols.ts";
 import { tooltipAnchor } from "./tooltip.ts";
 import { TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 /**
@@ -32,6 +33,21 @@ import { TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
  * 176x315 is `UI/UIWindow.img/Skill/backgrnd` - a 176x315 canvas in Data.wz, the same plate the
  * stat and equip windows use.
  */
+/**
+ * The close button: `BtUIClose` at (128, 9), the same spot the equipment and the stat windows put
+ * theirs on the same 176x315 plate.
+ *
+ * **No native literal.** `sub_4ECD40`'s `CCtrlButton` Create for it is buried in the same
+ * `VARIANTARG` unions that hide the row painter, so the position is agreement between three
+ * windows on one plate, not proof. The 32x15 is: it is `BtUIClose`'s cell size.
+ */
+export const SKILL_CLOSE = {
+  x: 128,
+  y: 9,
+  width: BT_UI_CLOSE.width,
+  height: BT_UI_CLOSE.height,
+};
+
 export const SKILL_WINDOW = {
   backgrnd: "UI/UIWindow.img/Skill/backgrnd",
   width: 176,
@@ -254,7 +270,7 @@ export function skillWindow({
     const p = point(e);
     return { x: p.x - at.x, y: p.y - at.y };
   };
-  position(el("skill-close"), 128, 9, 32, 15);
+  position(el("skill-close"), SKILL_CLOSE.x, SKILL_CLOSE.y, SKILL_CLOSE.width, SKILL_CLOSE.height);
   for (let i = 0; i < SKILL_ROWS; i++) {
     el(`skill-tab-${i}`).addEventListener("click", () => {
       if (isModal() || !books[i]) return;
@@ -583,16 +599,16 @@ export function skillWindow({
           const icon =
             state === 0 ? "iconDisabled" : tooltip?.skill.id === s.id ? "iconMouseOver" : "icon";
           stamp(`${s.path}/${icon}`, 8, y + 3);
-          const id = `sp-up-${i}`,
-            face = !canUp(s)
-              ? "disabled"
-              : pressed === id
-                ? "pressed"
-                : hover === id
-                  ? "mouseOver"
-                  : "normal";
+          const id = `sp-up-${i}`;
           stamp(
-            `UI/UIWindow.img/Skill/BtSpUp/${face}/0`,
+            buttonSprite(
+              "UI/UIWindow.img/Skill/BtSpUp",
+              uiButtonFace({
+                disabled: !canUp(s),
+                pressed: pressed === id,
+                hover: hover === id,
+              }),
+            ),
             SKILL_UP_BUTTON.x,
             SKILL_UP_BUTTON.firstY + SKILL_UP_BUTTON.pitch * i,
           );
@@ -603,9 +619,15 @@ export function skillWindow({
         paintVScrollbar(ctx, image, at, SKILL_SCROLLBAR, scrollBar);
       }
       stamp(
-        `UI/UIWindow.img/BtUIClose/${pressed === "skill-close" ? "pressed" : hover === "skill-close" ? "mouseOver" : "normal"}/0`,
-        128,
-        9,
+        buttonSprite(
+          "UI/UIWindow.img/BtUIClose",
+          uiButtonFace({
+            pressed: pressed === "skill-close",
+            hover: hover === "skill-close",
+          }),
+        ),
+        SKILL_CLOSE.x,
+        SKILL_CLOSE.y,
       );
       drawTooltip();
       ctx.restore();

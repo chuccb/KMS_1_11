@@ -1,6 +1,7 @@
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { paintVScrollbar } from "./vscroll.ts";
+import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
 import { drawItemNo } from "./itemno.ts";
 import { HUD_FONT } from "./hud.ts";
 import type { AvatarImage, BrowserLook } from "./image-cache.ts";
@@ -247,9 +248,14 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
       keyof typeof CONTROL_RECTS,
       (typeof CONTROL_RECTS)[keyof typeof CONTROL_RECTS],
     ][]) {
-      const state = ui.pressed === id ? "pressed" : ui.hover === id ? "mouseOver" : "normal";
+      const strip =
+        id === "close"
+          ? "UI/UIWindow.img/BtUIClose"
+          : id === "trade"
+            ? "UI/UIWindow.img/Trade/BtTrade"
+            : "UI/UIWindow.img/Trade/BtCoin";
       const art = image(
-        `${id === "close" ? "UI/UIWindow.img/BtUIClose" : id === "trade" ? "UI/UIWindow.img/Trade/BtTrade" : "UI/UIWindow.img/Trade/BtCoin"}/${state}/0`,
+        buttonSprite(strip, uiButtonFace({ pressed: ui.pressed === id, hover: ui.hover === id })),
       );
       if (art.ready) ctx.drawImage(art.img, at.x + box.x, at.y + box.y);
     }
@@ -261,12 +267,15 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
     /** Warm every canvas the sheet stamps so opening it does not pop in piece by piece. */
     warm() {
       image(TRADE_WINDOW.path);
+      // Three faces, not four: the trade sheet's own controls have no disabled arm, so nothing
+      // here ever asks for one (`ui.pressed`/`ui.hover` above are the whole state).
       for (const path of [
         "UI/UIWindow.img/BtUIClose",
         "UI/UIWindow.img/Trade/BtTrade",
         "UI/UIWindow.img/Trade/BtCoin",
       ])
-        for (const state of ["normal", "pressed", "mouseOver"]) image(`${path}/${state}/0`);
+        for (const face of ["normal", "pressed", "mouseOver"] as const)
+          image(buttonSprite(path, face));
     },
   };
 }

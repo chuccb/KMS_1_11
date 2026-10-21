@@ -37,6 +37,7 @@
  */
 import type { MessengerEvent } from "../server/src/protocol/messenger.ts";
 import { vScrollScroller, VSCR_CELL, type VScrollBarGeometry } from "./vscroll.ts";
+import { BT_UI_CLOSE } from "./uicontrols.ts";
 
 /** The mode-1 window: backgrnd (200x335) plus the charView column (97x322) at (200,13). */
 export const MESSENGER_WINDOW = {
@@ -46,8 +47,14 @@ export const MESSENGER_WINDOW = {
   height: 335,
   backgrnd: "UI/UIWindow.img/Messenger/backgrnd",
   charView: { path: "UI/UIWindow.img/Messenger/charView", x: 200, y: 13 },
-  /** id 1000, `sub_4E0FF0`. */
-  close: { x: 152, y: 9, width: 26, height: 26 },
+  /**
+   * id 1000, `sub_4E0FF0` (`:231327`): `CCtrlButton::Create(this, 1000, 152, 9, 2, &path)` -
+   * a type-2 button
+   * takes its rectangle from its own sprite, so the box is `BtUIClose`'s 32x15, not a size the
+   * caller invents. This used to be a padded 26x26, which made the right 6 px of the button dead
+   * and the 11 px below it live.
+   */
+  close: { x: 152, y: 9, width: BT_UI_CLOSE.width, height: BT_UI_CLOSE.height },
   /** id 1001, `sub_4E0FF0`; the page overlays a DOM input here. */
   edit: { x: 11, y: 286, width: 176, height: 12 },
   /** id 1002: Create(parent, 1002, 1, 0, 179, 58, 218, 0), `+44 = 172` wrap. */

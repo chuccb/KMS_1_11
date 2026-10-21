@@ -1,4 +1,12 @@
 import { releaseOnInterrupt } from "./pointer.ts";
+import {
+  BT_DIALOG,
+  BT_GAME_MENU,
+  BT_UI_CLOSE,
+  buttonSprites,
+  CHECK_BOX,
+  SLIDER,
+} from "./uicontrols.ts";
 import { gameProfile, gameSettings, type GameSettings } from "./gameoptions.ts";
 import {
   soundProfile,
@@ -87,6 +95,8 @@ export function systemMenu({
   for (const kind of ["GameMenu", "SysOpt", "GameOpt"]) image(`UI/UIWindow.img/${kind}/backgrnd`);
   for (const name of ["Quest", "Party", "Community"])
     image(`UI/UIWindow.img/GameMenu/Bt${name}/disabled/0`);
+  // All four faces: the first three GameMenu rows and a disabled slider draw `disabled`, which
+  // used to be the one face this warm pass skipped - so they popped in a frame late.
   for (const base of [
     "UI/UIWindow.img/GameMenu/BtGameOpt",
     "UI/UIWindow.img/UtilDlgEx/BtOK",
@@ -97,7 +107,7 @@ export function systemMenu({
     "UI/Basic.img/BtOK",
     "UI/Basic.img/BtCancel",
   ])
-    for (const state of ["normal", "pressed", "mouseOver"]) image(`${base}/${state}/0`);
+    for (const sprite of buttonSprites(base)) image(sprite);
   for (const name of [
     "left",
     "mid",
@@ -253,8 +263,8 @@ export function systemMenu({
         labels[i],
         134,
         50 + 26 * i,
-        12,
-        12,
+        CHECK_BOX.width,
+        CHECK_BOX.height,
         () => {
           gameDraft[id] = !gameDraft[id];
           applyGame(gameDraft);
@@ -309,8 +319,8 @@ export function systemMenu({
       "背景音樂靜音",
       320,
       84,
-      12,
-      12,
+      CHECK_BOX.width,
+      CHECK_BOX.height,
       () => {
         soundDraft.bgmMuted = !soundDraft.bgmMuted;
         updateSound();
@@ -323,8 +333,8 @@ export function systemMenu({
       "音效靜音",
       320,
       118,
-      12,
-      12,
+      CHECK_BOX.width,
+      CHECK_BOX.height,
       () => {
         soundDraft.effectsMuted = !soundDraft.effectsMuted;
         updateSound();
@@ -346,8 +356,8 @@ export function systemMenu({
       "確定並保存",
       200,
       183,
-      65,
-      24,
+      BT_DIALOG.width,
+      BT_DIALOG.height,
       () => close(true),
     );
     control(
@@ -355,8 +365,8 @@ export function systemMenu({
       "取消並還原",
       270,
       183,
-      65,
-      24,
+      BT_DIALOG.width,
+      BT_DIALOG.height,
       () => close(),
     );
     updateSound();
@@ -372,8 +382,8 @@ export function systemMenu({
       "關閉選單",
       128,
       9,
-      32,
-      15,
+      BT_UI_CLOSE.width,
+      BT_UI_CLOSE.height,
       () => close(),
     );
     const names = ["Quest", "Party", "Community", "GameOpt", "SysOpt", "Quit"];
@@ -391,8 +401,8 @@ export function systemMenu({
         labels[i],
         20,
         63 + 27 * i,
-        136,
-        23,
+        BT_GAME_MENU.width,
+        BT_GAME_MENU.height,
         () => {
           if (i === 3) openGame();
           else if (i === 4) openSound();
@@ -523,9 +533,14 @@ export function systemMenu({
               : "normal";
         if (c.kind === "button" && c.path) stamp(`${c.path}/${state}/0`, x, y);
         else if (c.kind === "sound-slider" || c.kind === "video") {
-          stamp("UI/Basic.img/Slider/left", x, y + 6);
-          for (let dx = 3; dx < c.w - 3; dx++) stamp("UI/Basic.img/Slider/mid", x + dx, y + 7);
-          stamp("UI/Basic.img/Slider/right", x + c.w - 3, y + 6);
+          // Both pieces are centred in the control's own box: the 4px caps one pixel above the
+          // 2px fill, which is why the fill's top is `(h - 2) / 2` and the caps' `(h - 4) / 2`.
+          const capTop = (c.h - SLIDER.cap.height) / 2,
+            midTop = (c.h - SLIDER.mid.height) / 2;
+          stamp("UI/Basic.img/Slider/left", x, y + capTop);
+          for (let dx = SLIDER.cap.width; dx < c.w - SLIDER.cap.width; dx++)
+            stamp("UI/Basic.img/Slider/mid", x + dx, y + midTop);
+          stamp("UI/Basic.img/Slider/right", x + c.w - SLIDER.cap.width, y + capTop);
           const thumb = c.disabled
             ? "Disabled"
             : sliding === c
@@ -541,7 +556,7 @@ export function systemMenu({
                 c.w,
                 c.disabled ? 4 : 20,
               ) -
-              8,
+              Math.floor(SLIDER.thumb.width / 2),
             y,
           );
         } else if (c.kind === "game-check" || c.kind === "sound-check") {

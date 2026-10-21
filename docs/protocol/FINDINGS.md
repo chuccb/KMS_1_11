@@ -4983,3 +4983,21 @@ typecheck／build／format 全綠。
 - **無原碼依據**：商店與背包**沒有** per-arrow 的按住狀態，所以 `prev1`/`next1` 只有交易窗會出現。
   這是我們「還沒把那兩個視窗接到 `sub_4521E0` 的按住狀態」的實況，不是原版證明——原版 `CCtrlScrollBar`
   一定有，只是那兩個視窗的持有人還沒被讀出來。
+
+- **`UI/UIWindow.img/BtUIClose` / `BtUIClose2` 是 32x15（ADR-128 實測，四態皆同）**：五個視窗
+  （裝備、背包、商店、能力值、技能）＋系統選單＋NPC 對話的關閉鈕共用它。原碼依據是
+  `sub_4E0FF0`（`:231327`）：`CCtrlButton::Create(this, 1000, 152, 9, 2, &path)` —— 型別 2 的按鈕
+  不帶矩形，矩形就是 sprite 自己的大小，所以 hit test 的框等於片寬。已收回 `client/uicontrols.ts`
+  的 `BT_UI_CLOSE`。
+- **共用四態按鈕的臉（ADR-128）**：`<path>/<face>/0`，`normal` / `mouseOver` / `pressed` /
+  `disabled`，優先序是 **disabled > pressed > hover > normal**。原本手抄了 11 份以上，其中
+  statwindow 的關閉鈕缺 `disabled` 臂、login 的標題鈕用 `!dialogOpen &&` 兩次代替 `disabled`。
+  已收回 `uiButtonFace()` / `buttonSprite()`。
+- **其他實測片寬（ADR-128）**：`UI/Basic.img/BtOK`＋`BtCancel` 65x24、`BtComboBox` 17x16、
+  `UI/UIWindow.img/UtilDlgEx{,2}/Bt*` 50x23、`GameMenu/Bt*` 136x23、`UI/Basic.img/CheckBox` 0..3 12x12、
+  `UI/Basic.img/Slider` 端帽 3x4／填充 1x2／thumb 17x16。全部收回 `client/uicontrols.ts`。
+- **未定（ADR-128 記錄，沒有證據所以沒改）**：`client/systemmenu.ts` 的 combo 箭頭畫在
+  `x + c.w - 16`，但 `BtComboBox` 是 17 寬，右緣會超出框 1px。沒有原碼或 WZ 依據支持哪一邊。
+- **無原碼依據**：技能窗關閉鈕的位置 `SKILL_CLOSE = { x: 128, y: 9 }`。`sub_4ECD40` 那顆
+  `CCtrlButton` 的 Create 埋在 VARIANTARG union 裡；只有「同一張 176x315 底板上裝備窗與能力值窗
+  都用 (128,9)」這個交互佐證。

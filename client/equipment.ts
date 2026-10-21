@@ -1,6 +1,7 @@
 import type { InventoryView, ItemView } from "../server/src/client/session.ts";
 import type { HtmlImageLookup, UiPoint, UiAudio } from "./ui-types.ts";
 import { SLOT_SIZE } from "./slot.ts";
+import { buttonSprite, BT_UI_CLOSE, uiButtonFace } from "./uicontrols.ts";
 import { requireElement } from "./dom.ts";
 import { isRecord, isFiniteNumber } from "./resource-validation.ts";
 type EquipmentHit =
@@ -33,7 +34,7 @@ export const EQUIP_WINDOW = {
   width: 176,
   height: 315,
   home: { x: 48, y: 48 },
-  close: { x: 128, y: 9, w: 32, h: 15 },
+  close: { x: 128, y: 9, w: BT_UI_CLOSE.width, h: BT_UI_CLOSE.height },
 };
 export const EQUIP_SLOTS: readonly (readonly [number, number])[] = [
   [39, 55],
@@ -196,7 +197,13 @@ export function equipmentWindow({
       const b = image(EQUIP_WINDOW.backgrnd);
       if (b.ready) ctx.drawImage(b.img, at.x, at.y);
       const close = image(
-        `UI/UIWindow.img/BtUIClose/${pressed ? "pressed" : pointer && hit(pointer.x, pointer.y)?.kind === "close" ? "mouseOver" : "normal"}/0`,
+        buttonSprite(
+          "UI/UIWindow.img/BtUIClose",
+          uiButtonFace({
+            pressed,
+            hover: pointer !== undefined && hit(pointer.x, pointer.y)?.kind === "close",
+          }),
+        ),
       );
       if (close.ready)
         ctx.drawImage(close.img, at.x + EQUIP_WINDOW.close.x, at.y + EQUIP_WINDOW.close.y);

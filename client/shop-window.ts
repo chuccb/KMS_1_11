@@ -31,6 +31,7 @@ import { TAB_FILL, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { BT_UI_CLOSE } from "./uicontrols.ts";
 
 export type ShopSide = "buy" | "sell";
 export const SHOP_SIDES: readonly ShopSide[] = ["buy", "sell"];
@@ -90,7 +91,7 @@ export const SHOP: ShopLayout = {
   width: 407,
   height: 291,
   home: { x: 196, y: 154 },
-  close: { x: 188, y: 9, width: 32, height: 15 },
+  close: { x: 188, y: 9, width: BT_UI_CLOSE.width, height: BT_UI_CLOSE.height },
   buy: { x: 78, y: 31, width: 46, height: 19 },
   sell: { x: 283, y: 31, width: 46, height: 19 },
   recharge: { x: 225, y: 29, width: 50, height: 23 },
