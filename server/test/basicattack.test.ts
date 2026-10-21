@@ -23,6 +23,12 @@ import {
   readUserAttack,
 } from "../src/protocol/field.ts";
 import { WzArchive } from "../src/wz/archive.ts";
+import {
+  AMMUNITION_FAMILY,
+  ammunitionMatch,
+  basicAmmo,
+  isAmmunitionFor,
+} from "../../client/basiccombat.ts";
 import { skillCatalogOf } from "../src/game/skills.ts";
 import { composeAvatarBitmap } from "../src/game/avatar.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
@@ -238,4 +244,85 @@ test("prone attack preserves action32/facing in both 0x0F and 0x23 without a pro
     targets: [],
   };
   assert.deepEqual(readUserAttack(new PacketReader(encodeUserAttack(relay), 1)), relay);
+});
+
+test("sub_4657F0/sub_511630: only a 45/46/47 weapon takes ammunition, and each takes one family", () => {
+  // sub_4657F0 reduces a weapon to `weaponId / 10000 % 100` for a 13xxxxx/14xxxxx weapon only,
+  // and sub_511630 keeps three of those: 45 (bow) -> 2060, 46 (crossbow) -> 2061, 47 (claw) -> 207.
+  assert.deepEqual(AMMUNITION_FAMILY, { arrows: 2060, bolts: 2061 });
+  assert.deepEqual(ammunitionMatch(1450000), { kind: "arrows" });
+  assert.deepEqual(ammunitionMatch(1452999), { kind: "arrows" }, "every bow in the block");
+  assert.deepEqual(ammunitionMatch(1460000), { kind: "bolts" });
+  assert.deepEqual(ammunitionMatch(1470000), { kind: "stars" });
+  // A sword, a wand, a two-hander and bare hands all reach sub_511630's `default:`.
+  for (const weaponId of [0, 1302000, 1322000, 1372000, 1402000, 1442000, 1482000, 1492000])
+    assert.equal(ammunitionMatch(weaponId), undefined, `weapon ${weaponId}`);
+  assert.equal(ammunitionMatch(1480000), undefined, "a knuckler is 48, not 47");
+  assert.equal(ammunitionMatch(11450000), undefined, "not a 13/14 group weapon");
+  assert.equal(ammunitionMatch(2060000), undefined, "an arrow is not a weapon");
+
+  assert.equal(isAmmunitionFor(1450000, 2060000), true, "arrows for a bow");
+  assert.equal(isAmmunitionFor(1450000, 2061000), false, "bolts are not arrows");
+  assert.equal(isAmmunitionFor(1450000, 2070000), false);
+  assert.equal(isAmmunitionFor(1460000, 2061000), true, "bolts for a crossbow");
+  assert.equal(isAmmunitionFor(1460000, 2060000), false);
+  assert.equal(isAmmunitionFor(1470000, 2070000), true, "stars for a claw");
+  assert.equal(isAmmunitionFor(1470000, 2060000), false);
+  assert.equal(isAmmunitionFor(1302000, 2060000), false, "a sword needs none");
+  assert.equal(isAmmunitionFor(0, 2060000), false, "bare hands need none");
+  // The blocks, not the items: 2060999 is still an arrow and 2062000 is not.
+  assert.equal(isAmmunitionFor(1450000, 2060999), true);
+  assert.equal(isAmmunitionFor(1450000, 2062000), false);
+  assert.equal(isAmmunitionFor(1470000, 2079999), true);
+});
+
+test("the client's ammunition test and the server's agree everywhere, so either moving fails loudly", () => {
+  // server/src/game/basicattack.ts keeps its own `isCompatibleAmmo` for the same native rule, and
+  // the two are not allowed to drift: it reads `trunc(weaponId/10000) == 145|146|147`, this one
+  // reads `sub_4657F0`'s group and modulo instead. Same answers, different arithmetic.
+  const weapons = [
+    0, 1302000, 1372000, 1450000, 1452000, 1460000, 1462000, 1470000, 1472000, 1480000, 1492000,
+    11450000,
+  ];
+  const items = [
+    0, 2000002, 2060000, 2060999, 2061000, 2061999, 2062000, 2070000, 2079999, 2080000, 4031000,
+  ];
+  for (const weaponId of weapons)
+    for (const itemId of items)
+      assert.equal(
+        isAmmunitionFor(weaponId, itemId),
+        isCompatibleAmmo(weaponId, itemId),
+        `weapon ${weaponId} item ${itemId}`,
+      );
+});
+
+test("sub_511630 takes the first USE slot that holds enough, in ascending slot order", () => {
+  const inventory = (items: { slot: number; itemId: number; quantity?: number }[]) => ({
+    tabs: [
+      { tab: 1, items: [] },
+      { tab: 2, items },
+      { tab: 3, items: [] },
+    ],
+  });
+  const arrows = { slot: 3, itemId: 2060000, quantity: 100 };
+  const bolts = { slot: 1, itemId: 2061000, quantity: 100 };
+  // Slot order, not array order: the native walks v9 from 1 upwards.
+  assert.deepEqual(basicAmmo(inventory([arrows, bolts]), 1450000), arrows);
+  assert.deepEqual(basicAmmo(inventory([arrows, bolts]), 1460000), bolts);
+  assert.deepEqual(basicAmmo(inventory([arrows, bolts]), 1302000), undefined, "a sword takes none");
+  // A stack that is too small is skipped, which is `if ((u16)quantity < required) continue`.
+  assert.deepEqual(
+    basicAmmo(inventory([{ slot: 1, itemId: 2060000, quantity: 1 }]), 1450000, 2),
+    undefined,
+  );
+  assert.deepEqual(basicAmmo(inventory([{ slot: 1, itemId: 2060000, quantity: 2 }]), 1450000, 2), {
+    slot: 1,
+    itemId: 2060000,
+    quantity: 2,
+  });
+  // A missing quantity counts as none, and an out-of-range requirement is refused outright.
+  assert.deepEqual(basicAmmo(inventory([{ slot: 1, itemId: 2060000 }]), 1450000), undefined);
+  assert.deepEqual(basicAmmo(inventory([arrows]), 1450000, 0), undefined);
+  assert.deepEqual(basicAmmo(inventory([arrows]), 1450000, 16), undefined);
+  assert.deepEqual(basicAmmo(undefined, 1450000), undefined);
 });

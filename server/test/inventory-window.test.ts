@@ -4,22 +4,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CONSUME_FAMILY,
   INVENTORY,
+  INVENTORY_DROP_MAX,
   INVENTORY_TABS,
+  MESO_DROP,
   clampInventoryScroll,
+  consumeUseRoute,
   drawInventoryLabel,
   drawInventoryScrollbar,
   drawInventoryStackCount,
+  hasConsumeUseSound,
   inventoryCellOrigin,
   inventoryCoinState,
+  inventoryDropPlan,
   inventoryScrollbarGeometry,
   inventorySlotAt,
   inventoryStackCount,
+  isIrreplaceableItem,
   isRechargeableItem,
+  mesoDropAllowed,
+  mesoDropBounds,
   inventoryTabFaces,
   inventoryTabIndex,
   inventoryTabOfItem,
   inventoryWindowAt,
+  quickSlotUseRoute,
   type InventoryTabView,
 } from "../../client/inventory-window.ts";
 import type { CanvasImage } from "../../client/render-types.ts";
@@ -475,4 +485,120 @@ test("207xxxx is the rechargeable family, the one whose count is rounds rather t
   // The stack count leans on it: a rechargeable prints its quantity even at one.
   assert.equal(inventoryStackCount({ itemId: 2070000, quantity: 1 }), 1);
   assert.equal(inventoryStackCount({ itemId: 2060000, quantity: 1 }), undefined);
+});
+
+test("sub_535C90's meso box: floor 10, that 10 as the starting figure, ceiling 50000 or the purse", () => {
+  // FINDINGS 4.34: sub_535C90(dlg, 기본값, 하한, 상한) with (10, 10, min(메소, 50000)).
+  assert.deepEqual(MESO_DROP, { min: 10, initial: 10, ceiling: 50000 });
+  assert.deepEqual(mesoDropBounds(0), { min: 10, initial: 10, max: 0 });
+  assert.deepEqual(mesoDropBounds(9), { min: 10, initial: 10, max: 9 });
+  assert.deepEqual(mesoDropBounds(10), { min: 10, initial: 10, max: 10 });
+  assert.deepEqual(mesoDropBounds(49999), { min: 10, initial: 10, max: 49999 });
+  assert.deepEqual(mesoDropBounds(50000), { min: 10, initial: 10, max: 50000 });
+  assert.deepEqual(
+    mesoDropBounds(50001),
+    { min: 10, initial: 10, max: 50000 },
+    "the purse never raises the ceiling",
+  );
+  assert.deepEqual(mesoDropBounds(4_000_000), { min: 10, initial: 10, max: 50000 });
+});
+
+test("mesoDropAllowed holds the same range the box was opened with", () => {
+  assert.equal(mesoDropAllowed(10, 10), true, "exactly the floor");
+  assert.equal(mesoDropAllowed(9, 10), false);
+  assert.equal(mesoDropAllowed(11, 10), false, "above what the purse holds");
+  assert.equal(mesoDropAllowed(50000, 50001), true);
+  assert.equal(mesoDropAllowed(50001, 50001), false, "the ceiling is a ceiling");
+  assert.equal(mesoDropAllowed(10.5, 100), false, "the wire carries an integer");
+  assert.equal(mesoDropAllowed(undefined, 100), false);
+  assert.equal(mesoDropAllowed("10", 100), false);
+  // A purse that grew between the box opening and the answer is the server's to refuse, not here.
+  assert.equal(mesoDropAllowed(40, 30), false);
+});
+
+test("4031xxxx is the family sub_463BE0 confirms before dropping, whatever tab it sits in", () => {
+  assert.equal(isIrreplaceableItem(4031000), true);
+  assert.equal(isIrreplaceableItem(4031999), true, "the whole 4031 block");
+  assert.equal(isIrreplaceableItem(4032000), false);
+  assert.equal(isIrreplaceableItem(4030000), false);
+  assert.equal(isIrreplaceableItem(4001000), false);
+});
+
+test("inventoryDropPlan: equips drop one, other stacks ask, and nothing leaves above a u16-max", () => {
+  assert.equal(INVENTORY_DROP_MAX, 32767);
+  // Tab 1 is 장비: one, and the snapshot guard is the only confirmation.
+  assert.deepEqual(inventoryDropPlan(1, 1302000, 1), { kind: "send", count: 1 });
+  assert.deepEqual(
+    inventoryDropPlan(1, 1302000, 40),
+    { kind: "send", count: 1 },
+    "equips do not stack",
+  );
+  // A single one of anything goes without a word.
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 1), { kind: "send", count: 1 });
+  assert.deepEqual(inventoryDropPlan(4, 4001000, 1), { kind: "send", count: 1 });
+  // Stacks ask, capped at the u16 the 0x17 opcode can carry.
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 2), { kind: "ask", max: 2 });
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 32767), { kind: "ask", max: 32767 });
+  // The box itself is capped, so an over-long stack still asks - just never for more than fits.
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 32768), { kind: "ask", max: 32767 });
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 100000), { kind: "ask", max: 32767 });
+  // A 207 is confirmed whole, so sub_4D5C80's own rule lets a count of 0 through.
+  assert.deepEqual(inventoryDropPlan(2, 2070000, 0), { kind: "send", count: 0 });
+  assert.deepEqual(inventoryDropPlan(2, 2070000, 1), { kind: "send", count: 1 });
+  assert.deepEqual(inventoryDropPlan(2, 2070000, 500), { kind: "send", count: 500 });
+  // A 207 is confirmed whole, so an over-long one has no box to fall back on - it is just refused.
+  assert.deepEqual(inventoryDropPlan(2, 2070000, 32768), { kind: "refuse" });
+  // A plain stack that somehow reads 0 has nothing to drop and nothing to ask.
+  assert.deepEqual(inventoryDropPlan(2, 2000002, 0), { kind: "refuse" });
+  assert.deepEqual(inventoryDropPlan(2, 2000002, -1), { kind: "refuse" });
+  // The 4031 confirm decides nothing here - the page's own guard does that before the box.
+  assert.deepEqual(inventoryDropPlan(4, 4031000, 3), { kind: "ask", max: 3 });
+});
+
+test("the USE tab sends 200/201/202 through 0x18 and 203 through 0x19, each on its own gate", () => {
+  // sub_462DC0: `n200 == 200 || 201 || 202` -> sub_55B2C0 (0xC8 = 200 ms); `203` -> sub_55B4B0
+  // (0x1F4 = 500 ms); anything else, a 204 scroll included, falls through both branches.
+  for (const family of CONSUME_FAMILY.heal) {
+    assert.deepEqual(
+      consumeUseRoute(family * 10000),
+      { kind: "heal", cooldownMs: 200 },
+      `family ${family}`,
+    );
+    assert.deepEqual(consumeUseRoute(family * 10000 + 9999), { kind: "heal", cooldownMs: 200 });
+  }
+  assert.deepEqual(consumeUseRoute(CONSUME_FAMILY.moveTo * 10000), {
+    kind: "map",
+    cooldownMs: 500,
+  });
+  assert.deepEqual(consumeUseRoute(2030000), { kind: "map", cooldownMs: 500 }, "마을 귀환 주문서");
+  assert.deepEqual(consumeUseRoute(2040000), { kind: "none" }, "a scroll: no double-click action");
+  assert.deepEqual(
+    consumeUseRoute(2070000),
+    { kind: "none" },
+    "a rechargeable: not a consumable use",
+  );
+  assert.deepEqual(consumeUseRoute(1302000), { kind: "none" }, "an equip");
+  assert.deepEqual(consumeUseRoute(1999999), { kind: "none" }, "below the family");
+  assert.deepEqual(consumeUseRoute(2050000), { kind: "none" }, "above it");
+});
+
+test("sub_512570's quickslot never reaches the 0x19 sender", () => {
+  for (const family of CONSUME_FAMILY.heal)
+    assert.deepEqual(quickSlotUseRoute(family * 10000), { kind: "heal", cooldownMs: 200 });
+  assert.deepEqual(
+    quickSlotUseRoute(2030000),
+    { kind: "none" },
+    "no 203 branch exists in sub_512570",
+  );
+  assert.deepEqual(quickSlotUseRoute(2040000), { kind: "none" });
+});
+
+test("sub_526F30 has a Use sound for the three healing families and nothing else", () => {
+  // Sound/Item.img carries 0200xxxx / 0201xxxx / 0202xxxx only - no 0203, no 0204.
+  assert.equal(hasConsumeUseSound(2000000), true);
+  assert.equal(hasConsumeUseSound(2010000), true);
+  assert.equal(hasConsumeUseSound(2020000), true);
+  assert.equal(hasConsumeUseSound(2030000), false);
+  assert.equal(hasConsumeUseSound(2040000), false);
+  assert.equal(hasConsumeUseSound(1302000), false);
 });

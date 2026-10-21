@@ -11,16 +11,19 @@ import {
   tradeFinishText,
 } from "../../client/trade-state.ts";
 import {
+  encodeClientMiniRoomRequest,
   encodeMiniRoomEnter,
   encodeMiniRoomItem,
   encodeMiniRoomInvite,
   encodeMiniRoomLock,
   encodeMiniRoomMesos,
   encodeMiniRoomFinish,
+  readClientMiniRoomRequest,
   readMiniRoomResult,
   TRADE_SLOTS,
   type MiniRoomParticipant,
 } from "../src/protocol/miniroom.ts";
+import { tradeOfferCount } from "../../client/trade-window.ts";
 import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
@@ -250,4 +253,36 @@ test("sub_452500 zones, sub_452150 clamps and sub_4D5900's follow rule", () => {
   scroll.reset();
   assert.equal(scroll.max, 1);
   assert.equal(scroll.pos, 0);
+});
+
+test("sub_4D5C80 writes the count only for a tab other than 1, and the codec agrees", () => {
+  // sub_4D5C80 (`MapleStory.exe.c:220282`): `[u8 11][u8 tab][u16 slot]`, then `if (v12 != 1)` -
+  // v12 being the *tab* byte, never the item id - `[u16 count]`, then `[u8 roomSlot]`. Tab 1 is
+  // 장비, which does not stack, so the count would be meaningless there.
+  assert.equal(tradeOfferCount(1, 1), null, "an equip carries no count byte");
+  assert.equal(tradeOfferCount(1, 200), null, "whatever the equip tab claims to hold");
+  assert.equal(tradeOfferCount(1, undefined), null);
+  assert.equal(tradeOfferCount(2, 50), 50);
+  assert.equal(tradeOfferCount(4, undefined), 1, "a missing quantity is one");
+  assert.equal(tradeOfferCount(2, 0), 0, "a spent 207 is offered whole, count and all");
+
+  // Cross-pin against the codec that reads it back: the two have to agree on where the byte goes.
+  for (const tab of [1, 2, 3, 4]) {
+    const quantity = tab === 1 ? 1 : 7;
+    const count = tradeOfferCount(tab, quantity);
+    const bytes = encodeClientMiniRoomRequest({
+      kind: "offerItem",
+      tab,
+      slot: 3,
+      count,
+      roomSlot: 5,
+    });
+    assert.equal(bytes.length, tab === 1 ? 6 : 8, `tab ${tab} packet length`);
+    const read = readClientMiniRoomRequest(new PacketReader(bytes, 1));
+    assert.deepEqual(
+      read,
+      { kind: "offerItem", tab, slot: 3, count: tab === 1 ? null : 7, roomSlot: 5 },
+      `tab ${tab} round trip`,
+    );
+  }
 });

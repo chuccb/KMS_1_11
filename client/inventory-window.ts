@@ -377,3 +377,120 @@ export function drawInventoryLabel(
   ctx.fillStyle = lit ? "#000000" : "#44586e";
   ctx.fillText(label, centerX, baselineY);
 }
+
+/** The most `0x17` can carry for one throw-away (`short`). */
+export const INVENTORY_DROP_MAX = 32767;
+
+/**
+ * `sub_463BE0` warns before one of these leaves: `itemId / 1000 == 4031`
+ * ("이 아이템을 버리시면 다시 회수할 수 없습니다").
+ */
+export function isIrreplaceableItem(itemId: number): boolean {
+  return Math.floor(itemId / 1000) === 4031;
+}
+
+/**
+ * What throwing an item away does, before any dialog or packet is involved (`sub_463BE0`).
+ *
+ * - A stack in a tab other than the equip one, that is not rechargeable and holds more than one,
+ *   asks "몇 개나 버리시겠습니까?" with its own size as the maximum.
+ * - Everything else goes out as it stands: the equip tab is always one, a rechargeable stack goes
+ *   whole even at zero rounds left, and the count has to fit `0x17`'s signed short.
+ */
+export type InventoryDropPlan =
+  { kind: "ask"; max: number } | { kind: "send"; count: number } | { kind: "refuse" };
+
+export function inventoryDropPlan(
+  tab: number,
+  itemId: number,
+  quantity: number,
+): InventoryDropPlan {
+  const count = tab === 1 ? 1 : quantity;
+  if (tab !== 1 && !isRechargeableItem(itemId) && count > 1)
+    return { kind: "ask", max: Math.min(INVENTORY_DROP_MAX, count) };
+  if ((count >= 1 || (count === 0 && isRechargeableItem(itemId))) && count <= INVENTORY_DROP_MAX)
+    return { kind: "send", count };
+  return { kind: "refuse" };
+}
+
+/**
+ * The meso box the coin button raises (`sub_4DAF70` -> `sub_535C90`).
+ *
+ * `sub_535C90` is built with `(10, 10, min(wallet, 50000))` - a floor of 10, that same 10 as the
+ * starting figure, and a ceiling of 50,000 that never exceeds what the purse actually holds. The
+ * button itself greys out below 10 for the same reason (see `inventoryCoinState`).
+ */
+export const MESO_DROP: Readonly<{ min: number; initial: number; ceiling: number }> = Object.freeze(
+  { min: 10, initial: 10, ceiling: 50000 },
+);
+
+/** The range the box offers for a purse of `mesos`. */
+export function mesoDropBounds(mesos: number): { min: number; initial: number; max: number } {
+  return {
+    min: MESO_DROP.min,
+    initial: MESO_DROP.initial,
+    max: Math.min(MESO_DROP.ceiling, mesos),
+  };
+}
+
+/** Whether an amount the box came back with is one `0x1F` may carry. */
+export function mesoDropAllowed(amount: unknown, mesos: number): boolean {
+  const { min, max } = mesoDropBounds(mesos);
+  return Number.isInteger(amount) && (amount as number) >= min && (amount as number) <= max;
+}
+
+/**
+ * The three USE-tab families that heal (`sub_462DC0`: `n200 == 200 || 201 || 202`) and the fourth
+ * that moves you - the 귀환 주문서 line, `203`.
+ *
+ * `Item/Consume/0203.img` is 마을 귀환 주문서 ("a scroll that returns you to the nearest town"), and
+ * where it leads is the item's own `spec/moveTo`, so it is a **map change, not a heal**: that is why
+ * `sub_462DC0` reaches for the other sender for it. A `204` scroll is not here at all - it falls
+ * through both branches and a double click on one does nothing.
+ */
+export const CONSUME_FAMILY = {
+  /** `Item/Consume/0200.img` … `0202.img`: potions and food. */
+  heal: [200, 201, 202],
+  /** `Item/Consume/0203.img`: the return-scroll line. */
+  moveTo: 203,
+} as const;
+
+/**
+ * Which CWvsApp sender a USE-tab item goes to, and the gate that sender keeps.
+ *
+ * Both senders are byte-for-byte the same except for the opcode and the clock:
+ * `sub_55B2C0` writes `0x18` behind `timeGetTime() - *(this + 7) >= 0xC8` (200 ms), `sub_55B4B0`
+ * writes `0x19` behind `>= 0x1F4` (500 ms), and each then appends `[s16 slot][u32 itemId]`.
+ */
+export type ConsumeUseRoute =
+  { kind: "heal"; cooldownMs: 200 } | { kind: "map"; cooldownMs: 500 } | { kind: "none" };
+
+/** `sub_462DC0`, the inventory double click: all four families, two of them acting. */
+export function consumeUseRoute(itemId: number): ConsumeUseRoute {
+  const family = Math.floor(itemId / 10000);
+  if ((CONSUME_FAMILY.heal as readonly number[]).includes(family))
+    return { kind: "heal", cooldownMs: 200 };
+  if (family === CONSUME_FAMILY.moveTo) return { kind: "map", cooldownMs: 500 };
+  return { kind: "none" };
+}
+
+/**
+ * `sub_512570`, the quickslot key: the same 200 ms gate, but the family test is
+ * `n200 == 200 || 201 || 202` with no `203` branch at all - a return scroll bound to a quickslot
+ * simply does nothing.
+ */
+export function quickSlotUseRoute(itemId: number): ConsumeUseRoute {
+  const route = consumeUseRoute(itemId);
+  return route.kind === "heal" ? route : { kind: "none" };
+}
+
+/**
+ * Whether `sub_526F30` has anything to play for this id.
+ *
+ * Both senders call it unconditionally, with `Sound/Item.img/%08d/Use` - but the archive only
+ * carries the `0200`/`0201`/`0202` lines (`bun tools/wz.ts dump Sound/Item.img`), so a return
+ * scroll is silent for the same reason a `204` scroll is: there is no node to play.
+ */
+export function hasConsumeUseSound(itemId: number): boolean {
+  return consumeUseRoute(itemId).kind === "heal";
+}

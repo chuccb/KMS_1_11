@@ -10,7 +10,7 @@ import {
   tradeLogScroller,
   tradeState,
 } from "./trade-state.ts";
-import { tradeRenderer, tradeWindowAt } from "./trade-window.ts";
+import { tradeOfferCount, tradeRenderer, tradeWindowAt } from "./trade-window.ts";
 import {
   MESSENGER_TEXT,
   MESSENGER_WINDOW,
@@ -42,14 +42,21 @@ import {
   drawInventoryScrollbar as paintInventoryScrollbar,
   drawInventoryStackCount as paintStackCount,
   inventoryCellOrigin,
-  inventoryTabOfItem,
-  isRechargeableItem,
   inventoryCoinState,
+  consumeUseRoute,
+  hasConsumeUseSound,
+  inventoryDropPlan,
   inventoryScrollbarGeometry as inventoryScrollGeometry,
   inventorySlotAt as inventorySlotAtLayout,
   inventoryStackCount,
   inventoryTabFaces,
+  inventoryTabOfItem,
   inventoryWindowAt as inventoryHitAt,
+  isIrreplaceableItem,
+  isRechargeableItem,
+  mesoDropAllowed,
+  mesoDropBounds,
+  quickSlotUseRoute,
 } from "./inventory-window.ts";
 import {
   SHOP,
@@ -57,12 +64,15 @@ import {
   clampShopScroll,
   drawShopScrollbar as paintShopScrollbar,
   drawShopTabs as paintShopTabs,
+  rechargeableRefillCost,
+  shopBuyBounds,
+  shopBuyCount,
   shopListOf,
   shopPickedRowVisible,
-  shopBuyCount,
   shopRowIconOrigin,
   shopRowPrice,
   shopRowStackCount,
+  shopSellBounds,
   shopScrollbarGeometry as shopScrollGeometry,
   shopVisibleRows,
   shopWindowAt as shopHitAt,
@@ -792,7 +802,7 @@ function handle(message) {
         if (
           performance.now() - at < 5000 &&
           remaining < quantity &&
-          Math.floor(itemId / 10000) <= 202
+          hasConsumeUseSound(itemId)
         ) {
           void audio.effect(`Item/${String(itemId).padStart(8, "0")}/Use`);
         }
@@ -1776,9 +1786,8 @@ canvas.addEventListener("dblclick", (event) => {
     return;
   }
   // `sub_462DC0` uses a USE-tab item on a double click; the family is the first three digits.
-  const family = Math.floor(hit.item.itemId / 10000);
-  if (inventoryTab !== 2 || family < 200 || family > 203) return;
-  useBagItem(hit.item);
+  if (inventoryTab !== 2) return;
+  useBagItem(hit.item, consumeUseRoute(hit.item.itemId));
 });
 
 canvas.addEventListener("click", (event) => {
@@ -2526,13 +2535,21 @@ function loadQuickItems() {
   try { storage = localStorage; } catch {}
   quickProfile = quickItemProfile(storage, owner);
 }
-function useBagItem(item) {
+/**
+ * `sub_462DC0` / `sub_512570` -> `sub_55B2C0` (`0x18`) or `sub_55B4B0` (`0x19`).
+ *
+ * `route` is the caller's own family test, not a second guess: only the inventory double click
+ * reaches the `203` return-scroll sender, and each sender keeps its own gate (200 ms / 500 ms).
+ * Which opcode goes out is then `ClientSession.useItem`'s business - it is the family that decides.
+ */
+function useBagItem(item, route) {
   const now = performance.now();
-  if (!item || loginScreens.stage !== "game" || !visualFieldActive || !selfView || selfView.hp <= 0 ||
+  if (!item || route.kind === "none" || loginScreens.stage !== "game" || !visualFieldActive ||
+      !selfView || selfView.hp <= 0 ||
       portalPending || itemDrag || quickDrag || modalOpen() || browserLabOpen() || shop !== undefined ||
       talkingNpc !== undefined || shopPending || slotPending || mesoPending ||
       now < nextBagUseAt) return;
-  nextBagUseAt = now + 200;
+  nextBagUseAt = now + route.cooldownMs;
   pendingUse = { slot: item.slot, itemId: item.itemId, quantity: item.quantity ?? 1, at: now };
   send({ t: "use", slot: item.slot, itemId: item.itemId });
 }
@@ -3778,7 +3795,7 @@ window.addEventListener("mouseup", (e) => {
           t: "trade-offer-item",
           tab: d.tab,
           slot: d.slot,
-          count: Math.floor(d.item.itemId / 10000) === 1 ? null : d.item.quantity ?? 1,
+          count: tradeOfferCount(d.tab, d.item.quantity),
           roomSlot: th.roomSlot,
         });
       return;
@@ -3858,33 +3875,24 @@ async function dropInventoryItem(d, at) {
     );
     return;
   }
-  const quantity = d.tab === 1 ? 1 : (d.item.quantity ?? 1);
   const sendDrop = (count) => {
     if (valid()) slotRequest(d.tab, d.slot, 0, count);
   };
   const choose = () => {
     if (!valid()) return;
-    if (
-      d.tab !== 1 &&
-      !isRechargeableItem(d.item.itemId) &&
-      quantity > 1
-    )
+    const plan = inventoryDropPlan(d.tab, d.item.itemId, d.item.quantity ?? 1);
+    if (plan.kind === "ask")
       itemDialog.quantity({
         text: "몇 개나 버리시겠습니까?",
-        initial: Math.min(32767, quantity),
-        max: Math.min(32767, quantity),
+        initial: plan.max,
+        max: plan.max,
         at,
         accept: sendDrop,
       });
-    else if (
-      (quantity >= 1 ||
-        (quantity === 0 && isRechargeableItem(d.item.itemId))) &&
-      quantity <= 32767
-    )
-      sendDrop(quantity);
+    else if (plan.kind === "send") sendDrop(plan.count);
     else chatLine("系統", "此整組數量超出原0x17可傳送範圍，已取消丟棄。");
   };
-  if (Math.floor(d.item.itemId / 1000) === 4031) {
+  if (isIrreplaceableItem(d.item.itemId)) {
     itemDialog.confirm({
       text: "이 아이템을 버리시면 다시 회수할 수\n없습니다. 그래도 버리시겠습니까?",
       at,
@@ -4341,20 +4349,19 @@ function dropMesosDialog(at) {
     selfView.mesos < 10
   )
     return;
+  const bounds = mesoDropBounds(selfView.mesos);
   itemDialog.quantity({
     text: "얼마를 버리시겠습니까?",
-    initial: 10,
-    min: 10,
-    max: Math.min(50000, selfView.mesos),
+    initial: bounds.initial,
+    min: bounds.min,
+    max: bounds.max,
     at,
     accept: (amount) => {
       if (
         !valid() ||
         !socket ||
         socket.readyState !== WebSocket.OPEN ||
-        !Number.isInteger(amount) ||
-        amount < 10 ||
-        amount > Math.min(50000, selfView.mesos) ||
+        !mesoDropAllowed(amount, selfView.mesos) ||
         performance.now() < mesoNextAt
       )
         return;
@@ -4722,8 +4729,7 @@ function buyShopRow(index) {
   else
     itemDialog.quantity({
       text: "몇 개를 사시겠습니까?",
-      initial: 1,
-      max: Math.min(65535, row.maxCount),
+      ...shopBuyBounds(row.maxCount),
       accept: commit,
     });
 }
@@ -4739,18 +4745,9 @@ function rechargeQuote(item) {
   )
     return undefined;
   const row = shop.rechargeables?.find((r) => r.itemId === item.itemId);
-  const quantity = item.quantity ?? 0;
-  if (
-    !row ||
-    !Number.isInteger(quantity) ||
-    quantity < 0 ||
-    quantity >= row.maxCount
-  )
-    return undefined;
-  const total = Math.ceil((row.maxCount - quantity) * row.unitPrice);
-  return Number.isSafeInteger(total) && total > 0
-    ? { total, maxCount: row.maxCount }
-    : undefined;
+  if (!row) return undefined;
+  const total = rechargeableRefillCost(row.maxCount, row.unitPrice, item.quantity ?? 0);
+  return total === undefined ? undefined : { total, maxCount: row.maxCount };
 }
 function rechargeShopItem(item) {
   const quote = rechargeQuote(item),
@@ -4830,8 +4827,7 @@ function sellShopItem(item) {
   else
     itemDialog.quantity({
       text: "몇 개를 파시겠습니까?",
-      initial: Math.min(65535, quantity),
-      max: Math.min(65535, quantity),
+      ...shopSellBounds(quantity),
       accept: commit,
     });
 }
@@ -4952,7 +4948,7 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     const id = quickProfile?.values()[quickIndex];
     if(quickSkillAllowed(id))void swing(id.skillId);
-    else if (id) useBagItem(quickItemState(inventory, id).item);
+    else if (id) useBagItem(quickItemState(inventory, id).item, quickSlotUseRoute(id));
     return;
   }
   if (event.key.toLowerCase() === "e") {

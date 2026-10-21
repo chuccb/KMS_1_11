@@ -7,8 +7,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   SHOP,
+  SHOP_COUNT_WIRE_MAX,
   SHOP_SIDES,
   clampShopScroll,
+  rechargeableRefillCost,
+  shopBuyBounds,
+  shopSellBounds,
   drawShopScrollbar,
   drawShopTabs,
   type ShopRow,
@@ -467,4 +471,42 @@ test("sub_4B5FA0 prints no stack count on equipment, whatever quantity the row c
   assert.equal(shopRowStackCount({ itemId: 2000000, quantity: 7 }), 7);
   // 207xxxx is not equipment, so its rounds do print.
   assert.equal(shopRowStackCount({ itemId: 2070000, quantity: 200 }), 200);
+});
+
+test("sub_4B6B40 buys from 1 up to the row's own maximum; sub_4B6E90 sells the whole stack", () => {
+  // FINDINGS 4.19: sub_4B7960(prompt, 1, row[8]) for a buy, sub_535C90(total, 1, total) for a sell.
+  // The native never clamps - no stack is that long - but the 0x30 count is a u16 that the server
+  // refuses above 65535, so the box tops out there rather than offering an unsendable figure.
+  assert.equal(SHOP_COUNT_WIRE_MAX, 65535);
+  assert.deepEqual(shopBuyBounds(1), { initial: 1, min: 1, max: 1 });
+  assert.deepEqual(shopBuyBounds(100), { initial: 1, min: 1, max: 100 });
+  assert.deepEqual(shopBuyBounds(65535), { initial: 1, min: 1, max: 65535 });
+  assert.deepEqual(shopBuyBounds(65536), { initial: 1, min: 1, max: 65535 });
+  assert.deepEqual(shopSellBounds(1), { initial: 1, min: 1, max: 1 });
+  assert.deepEqual(
+    shopSellBounds(100),
+    { initial: 100, min: 1, max: 100 },
+    "defaulting to the whole stack",
+  );
+  assert.deepEqual(shopSellBounds(65536), { initial: 65535, min: 1, max: 65535 });
+  // A stack that reads 0 is still a stack of one as far as the box is concerned.
+  assert.deepEqual(shopSellBounds(0), { initial: 1, min: 1, max: 1 });
+});
+
+test("sub_4B4AD0's refill fee is ceil((capacity - rounds) * unitPrice), the rate read as a double", () => {
+  // WZ: the eight 207 rows carry base capacities 500/500/700/500/400/600/800/600 and rates
+  // 0.3/0.4/0.5/0.6/0.6/0.7/0.8/1, so the fee is a ceil of a fractional product.
+  assert.equal(rechargeableRefillCost(500, 0.3, 0), 150);
+  assert.equal(rechargeableRefillCost(500, 0.3, 1), 150, "ceil(499 * 0.3) = ceil(149.7)");
+  assert.equal(rechargeableRefillCost(500, 0.3, 499), 1, "ceil(0.3)");
+  assert.equal(rechargeableRefillCost(500, 1, 100), 400);
+  // A stack at or over capacity has nothing left to buy, so there is no quote at all.
+  assert.equal(rechargeableRefillCost(500, 0.3, 500), undefined);
+  assert.equal(rechargeableRefillCost(500, 0.3, 501), undefined);
+  assert.equal(rechargeableRefillCost(500, 0.3, -1), undefined);
+  assert.equal(rechargeableRefillCost(500, 0.3, 1.5), undefined, "rounds are whole");
+  // A zero rate would be a free refill, which the native refuses to quote.
+  assert.equal(rechargeableRefillCost(500, 0, 0), undefined);
+  // Fractional doubles survive: 0.1 is not exact in binary, and the ceil is what the client pays.
+  assert.equal(rechargeableRefillCost(700, 0.1, 0), 70);
 });

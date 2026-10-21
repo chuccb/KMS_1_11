@@ -387,3 +387,58 @@ export function shopBuyCount(itemId: number): ShopBuyCount {
 export function isEquipmentItem(itemId: number): boolean {
   return Math.floor(itemId / 1_000_000) === 1;
 }
+
+/**
+ * The widest count the `0x30` shop request can carry.
+ *
+ * The count is a `u16`, which is why `server/src/client/session.ts` refuses anything above this
+ * (and below 1, or below 0 for a 207 sell). The native boxes never clamp - `sub_4B6B40` asks for
+ * `row[8]` straight - because no real stack comes close; the page clamps so a value the box
+ * produced can always be sent.
+ */
+export const SHOP_COUNT_WIRE_MAX = 65535;
+
+/** What a `sub_535C90`-style count box is opened with (`initial`, `min`, `max`). */
+export interface ShopCountBounds {
+  initial: number;
+  min: number;
+  max: number;
+}
+
+/**
+ * `sub_4B6B40` -> `sub_4B7960(prompt, 1, row[8])`: buying starts at 1 with the row's maximum.
+ */
+export function shopBuyBounds(maxCount: number): ShopCountBounds {
+  return { initial: 1, min: 1, max: Math.min(SHOP_COUNT_WIRE_MAX, maxCount) };
+}
+
+/**
+ * `sub_4B6E90` -> `sub_535C90(total, 1, total)`: selling offers the whole stack, and starts there.
+ *
+ * The `Math.max(1, ...)` is the one place the page does not follow the native through: a stack that
+ * reads zero would give the box `(0, 1, 0)`, which can never be answered. Nothing reaches it in
+ * practice - an empty 207 is the rechargeable confirm's business, not the count dialog's - and a
+ * box that cannot be answered is worse than one that offers a single item.
+ */
+export function shopSellBounds(quantity: number): ShopCountBounds {
+  const total = Math.min(SHOP_COUNT_WIRE_MAX, Math.max(1, quantity));
+  return { initial: total, min: 1, max: total };
+}
+
+/**
+ * `sub_4B7130` -> `sub_4B4AD0`: the refill fee for a 207 stack.
+ *
+ * The rate is the WZ `unitPrice` read as a **double** (`sub_47A1D0` does the same), and the fee is
+ * `ceil((capacity - roundsOnHand) * rate)` - capacity first, which is why `sub_4B3780` copies the
+ * row's own `maxCount` rather than a global. A stack that is already full has nothing to buy, so
+ * there is no quote at all.
+ */
+export function rechargeableRefillCost(
+  maxCount: number,
+  unitPrice: number,
+  quantity: number,
+): number | undefined {
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity >= maxCount) return undefined;
+  const total = Math.ceil((maxCount - quantity) * unitPrice);
+  return Number.isSafeInteger(total) && total > 0 ? total : undefined;
+}

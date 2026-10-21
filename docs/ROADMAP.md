@@ -41,7 +41,7 @@
 ## 優先序 1：繼續真正的嚴格 TypeScript 遷移
 
 - 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。**ADR-109 已處理 client_probe（→ `.ts`）並從 main.js
-  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；main.js（5547 行）仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
+  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；main.js（5543 行）仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
   靜態耦合普查（321 個 top-level 宣告中僅 3 個零耦合）已列為分層順序的依據，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 - frame／play已strict TS實作遷移，真RAF／畫布來源與有界keyboard計畫見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；不對玩家執行手動工具。
 - 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。

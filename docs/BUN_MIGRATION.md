@@ -14,7 +14,7 @@
 同輪自 `client/main.js` 抽出第一個可單元化的領域 **`client/inventory-window.ts`（220 行）**：native 版面常數
 （sub_43D750／sub_43E340／4DA440／4DA810）與 `inventoryScrollbarGeometry`/`clampInventoryScroll`/
 `inventorySlotAt`/`inventoryWindowAt`/`drawInventoryScrollbar`/`drawInventoryLabel`，main.js 六個同名函式退化為
-一行委派，**呼叫點與既有 source pin 一字未動**（main.js 5930→5836 行、client 106→107 支 TS；ADR-110 續抽商店幾何後 5662 行、108 支；ADR-112 收回 status bar 後 5616 行、ADR-113 後 5597 行、ADR-114 後 5567 行、ADR-115 後 5551 行、ADR-116 後 5547 行），並新增
+一行委派，**呼叫點與既有 source pin 一字未動**（main.js 5930→5836 行、client 106→107 支 TS；ADR-110 續抽商店幾何後 5662 行、108 支；ADR-112 收回 status bar 後 5616 行、ADR-113 後 5597 行、ADR-114 後 5567 行、ADR-115 後 5551 行、ADR-116 後 5547 行、ADR-117 後 5543 行），並新增
 `server/test/inventory-window.test.ts` **9 pass / 0 fail**。主入口健診採靜態耦合普查（321 個 top-level 宣告中
 僅 3 個零耦合、≥25 行且耦合 ≤4 者僅 6 個）：**main.js 是彼此糾結的單體，沒有可機械切開的純區塊**，
 因此採門面分層逐領域搬移，不以改名或 `any` 冒充遷移。六項工具 pins 重新以 registry metadata 核對仍為
@@ -241,7 +241,7 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 
 ### 尚未遷移的來源（ADR-109 起僅餘 main.js）
 
-- **client/main.js（5547 行）**：仍為 JS/TS 混合入口，未完成分層與型別化。ADR-109 已完成靜態耦合普查並抽出
+- **client/main.js（5543 行）**：仍為 JS/TS 混合入口，未完成分層與型別化。ADR-109 已完成靜態耦合普查並抽出
   背包視窗幾何（`client/inventory-window.ts`）作為第一個門面分層示範；其餘領域（shop、transport、rendering、
   pointer/UI 狀態）仍與檔案層級狀態互相糾結，需逐領域重構，不是一次改名能完成。
 - ~~server/scripts/client_probe.mjs~~ → 已於 ADR-109 遷為 `client_probe.ts`。

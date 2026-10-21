@@ -3818,7 +3818,7 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `shopPickedRowVisible(picked, scroll, list)`：半開區間 `[scroll, scroll + rows)`。
   - `shopBuyCount(itemId)`：`sub_4B6B40` 的三種問法——207 飛鏢／子彈族是**確認窗且強制 1**、裝備是**直接 1 不問**、其他才問「몇 개를 사시겠습니까?」。
   - `isEquipmentItem(itemId)`：`1xxxxxx`。
-- **（二）`207xxxx` 這條規則現在只有一個家**。它原本散在 8 個地方（`inventory-window.ts`、`basiccombat.ts`、`main.js` 的買／賣／充值／丟棄／兩處飛行道具），每一處都是一個沒名字的 `Math.floor(id / 10000) === 207`。現在統一叫 `isRechargeableItem(itemId)`，放在 `client/inventory-window.ts`（`inventoryStackCount` 那裡本來就帶著 `sub_463BE0`／`sub_464000` 的原碼證據），`shop-window.ts` 與 main.js 都從那邊取。兩處原本用 `Math.trunc`，改成 `Math.floor`——**非負的 itemId 兩者等價**（`item-metadata.ts` 也把 id 限在 `0..0xffffffff`）。`basiccombat.ts` 那一處本輪未動，留待下一輪（它是彈藥配對的另一個語境）。
+- **（二）`207xxxx` 這條規則現在只有一個家**。它原本散在 8 個地方（`inventory-window.ts`、`basiccombat.ts`、`main.js` 的買／賣／充值／丟棄／兩處飛行道具），每一處都是一個沒名字的 `Math.floor(id / 10000) === 207`。現在統一叫 `isRechargeableItem(itemId)`，放在 `client/inventory-window.ts`（`inventoryStackCount` 那裡本來就帶著 `sub_463BE0`／`sub_464000` 的原碼證據），`shop-window.ts` 與 main.js 都從那邊取。兩處原本用 `Math.trunc`，改成 `Math.floor`——**非負的 itemId 兩者等價**（`item-metadata.ts` 也把 id 限在 `0..0xffffffff`）。`basiccombat.ts` 那一處本輪未動，留待下一輪（它是彈藥配對的另一個語境）——**ADR-117 §(四) 已收乾**。
 - **（三）修掉一個真正的 bug：買東西之後翻到錯的頁籤**（本輪唯一的行為改變）。
   - 原本：`const tab = Math.floor(row.itemId / 1000000) - 1;` 直接指派給 `inventoryTab`。
   - **但 `inventoryTab` 是 1..4**：`server/src/game/inventory.ts:129` 寫著 `if (tab < 1 || tab > 4) return fail("unknownTab")`，而且用 `items.inventories[tab - 1]` 取值；`client/inventory-window.ts` 的 `INVENTORY_TABS` 也是 1..4；`ensureInventoryTab()` 把 0 當成「尚未初始化」並重設成 1。
@@ -3830,3 +3830,43 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1265 pass / 0 fail、5315 expect() calls、148 files、271.48s**（ADR-115 基線 1257/0，本輪 +8 全為新測試，0 新失敗）。
 - **沙箱重置（本輪第五次）**：`generated/`、`node_modules/` 與 git index 一起消失、HEAD 退回 `99ff07b`。工作樹完整，故用 `git reset --mixed`（不動工作樹）指回 `ecdb8cd`，`git status` 全淨；再裝 bun 1.4.3 與 `bun install --frozen-lockfile --ignore-scripts`。**不用 `--hard`**。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。除第三節的頁籤修正外無遊戲行為改變。
+
+## ADR-117：背包／商店／交易的「數量與家族」純規則收回既有模組，並修掉交易拖放裝備時多送的 count 位元組
+
+- **背景**：接續「讓全部東西達到最乾淨易讀的狀態」。這一輪專挑**主瀏覽器入口裡那些沒有名字的數量界線與道具家族判斷**——它們是同一類東西：一個 `Math.floor(id / 10000) === N` 或一個 `Math.min(65535, x)`，藏在事件處理器裡，沒人知道它對應原版的哪一段。**搬的過程中翻出兩個真正的 bug（第三、五節）。**
+
+- **（一）`client/inventory-window.ts` 新增三組純規則**：
+  - **丟棄**：`INVENTORY_DROP_MAX = 32767`、`isIrreplaceableItem(itemId)`（`itemId / 1000 == 4031`，`sub_463BE0` 的「이 아이템을 버리시면 다시 회수할 수 없습니다」確認閘）、`InventoryDropPlan`／`inventoryDropPlan(tab, itemId, quantity)`。`choose()` 原本那 20 行的三分支現在是 `plan.kind` 的 switch：`ask`（非裝備頁、非 207、堆疊 > 1，上限 `min(32767, count)`）／`send`（`count >= 1`，或 207 的 `count == 0`——`sub_4D5C80` 允許飛鏢整組為 0）／`refuse`。
+  - **丟楓幣**：`MESO_DROP`／`mesoDropBounds(mesos)`／`mesoDropAllowed(amount, mesos)`。`sub_535C90` 的引數就是 `(10, 10, min(메소, 50000))`（FINDINGS 2489、4531），所以「下限 10、預設 10、上限 50000 且不超過身上有的錢」現在有名字；`inventoryCoinState` 的 10 枚下限本來就是同一條規則的鈕面那一半。
+  - **USE 分頁的「使用」**：`CONSUME_FAMILY`／`ConsumeUseRoute`／`consumeUseRoute`／`quickSlotUseRoute`／`hasConsumeUseSound`。證據在下面第三節。
+
+- **（二）`client/shop-window.ts` 新增**：`SHOP_COUNT_WIRE_MAX = 65535`（`0x30` 的 count 是 u16，`server/src/client/session.ts` 就是這樣拒絕的）、`ShopCountBounds`、`shopBuyBounds(maxCount)`（`sub_4B6B40`→`sub_4B7960(prompt, 1, row[8])`：**預設 1，上限是該列自己的 maxCount**）、`shopSellBounds(quantity)`（`sub_4B6E90`→`sub_535C90(total, 1, total)`：**預設整組**、下限 1）、`rechargeableRefillCost(maxCount, unitPrice, quantity)`（`sub_4B7130`→`sub_4B4AD0`：`ceil((容量 − 實物發數) × unitPrice)`，而 `unitPrice` 是 **`double`**——`sub_47A1D0` 讀 WZ 也是 double，所以 0.3/0.4/…/1 那些費率一定要走 `ceil`，不能取整數乘法）。
+
+- **（三）修掉一個真正的 bug：USE 分頁的 203（마을 귀환 주문서）走錯 sender 的冷卻，且快捷鍵根本不該能觸發它**（本輪兩個行為改變，同一處原碼）。
+  - `sub_462DC0`（`MapleStory.exe.c:106933`）的 `*(this + 3) == 2`（USE 分頁）分支是**兩段**，不是一段：`107025` 先以 `timeGetTime() - v2[7] >= 0xC8`（**200 ms**）試 `n200 == 200 || 201 || 202` → `sub_55B2C0`（`0x18`）；沒中才落到 `107038` 的 `>= 0x1F4`（**500 ms**）與 `Args / 10000 != 203 → return 0` → `sub_55B4B0`（`0x19`）。兩支 sender 除了 opcode 與這個時鐘之外**逐位元組相同**（`sub_55B2C0` 在 351828、`sub_55B4B0` 在 351943，都是 `[u8 op][s16 slot][u32 itemId]`）。
+  - 原頁面把兩者合成一個 `family < 200 || family > 203` 的區間、且**一律用 200 ms**。現在 `consumeUseRoute` 回 `{kind:"heal", cooldownMs:200}`／`{kind:"map", cooldownMs:500}`／`{kind:"none"}`，`useBagItem` 用 `route.cooldownMs`。**哪一個 opcode 出去不是客戶端決定的**——`ClientSession.useItem` 已經在 `family === 203 ? 0x19 : 0x18` 那裡分了，所以 `{t:"use"}` 這一條訊息不拆。
+  - 快捷鍵（`sub_512570`，`MapleStory.exe.c:278061`）只有 `n200 == 200 || 201 || 202` 一支，**完全沒有 203 分支**，最後是 `sub_55B2C0(n3000_1, v11, *p_Args)`。原頁面的快捷鍵會把歸還卷軸也送出去；現在 `quickSlotUseRoute` 只放行前三族。
+  - `hasConsumeUseSound`：`sub_526F30`（`299692`）在**兩支 sender 裡都被無條件呼叫**，播的是 `Sound/Item.img/%08d/Use`——但 `bun tools/wz.ts dump Sound/Item.img` 只有 `0200xxxx`／`0201xxxx`／`0202xxxx`，**沒有 0203**，所以歸還卷軸本來就沒聲音。原頁面的 `Math.floor(itemId / 10000) <= 202` 是對的，只是沒人知道為什麼。
+  - **server 端本來就是完整的**：`loginserver.ts` 的 `useMapItem` 讀 `spec/moveTo`（`-1` 用該地圖的 `info/returnMap`）、扣一格、`enterMap`；`serve.test.ts` 也已有端到端的 0x19 測試。所以這一輪改的是**客戶端這一半的保真度**，不是補一個沒做的功能。
+
+- **（四）`client/basiccombat.ts` 收回彈藥配對，關掉 ADR-116 故意留下的那一處**（ADR-116 §(二) 說「`basiccombat.ts` 那一處本輪未動」）。
+  - 新增 `AMMUNITION_FAMILY`／`AmmunitionMatch`／`ammunitionMatch(weaponId)`／`isAmmunitionFor(weaponId, itemId)`。`sub_4657F0`（`109335`）先把武器化成 `weaponId / 10000 % 100`，**而且只對 `13xxxxx`／`14xxxxx` 成立**（其他一律回 0）；`sub_511630`（`277428`）再只留 45／46／47 三個：45（弓）→ `itemId / 1000 - 2060`、46（弩）→ `- 2061`、47（爪）→ `itemId / 10000 - 207`，其餘落到 `default:`（所以劍、杖、空手都不會要彈藥）。
+  - 飛鏢那一支現在用 `isRechargeableItem`，所以 **`Math.floor/ trunc(id / 10000) === 207` 這條規則終於全案只剩一個家**（ADR-116 說的 8 處已全部收乾）。
+  - 與 server 端 `server/src/game/basicattack.ts` 的 `isCompatibleAmmo`（讀 `trunc(weaponId / 10000) == 145|146|147`）、`rewards.ts` 那一種做法一致：**不讓 server 去 import client**，而是用一條測試把 12 個武器 × 11 個道具的組合逐格對齊，任何一邊改了都會亮紅。
+
+- **（五）修掉第二個真正的 bug：交易拖放裝備時多送了一個 count 位元組**。
+  - 原頁面是 `count: Math.floor(d.item.itemId / 10000) === 1 ? null : d.item.quantity ?? 1`。**`/10000 === 1` 是 id 10000..19999——本版不存在這種道具**（裝備是 `1xxxxxx`，要 `/1000000 === 1`），所以這個條件**永遠不成立**，裝備照樣送了 count。
+  - 原碼 `sub_4D5C80`（`MapleStory.exe.c:220282`）根本**不看 item id**：它寫 `[u8 11][u8 tab][u16 slot]`，然後 `v12 = a4`（**tab 位元組**）`if ( v12 != 1 )` 才補 `[u16 count]`，最後 `[u8 roomSlot]`。tab 1 是 장비，不堆疊，所以 count 沒有意義。我們自己的 codec `server/src/protocol/miniroom.ts:140` 也是 `tab === 1 ? null : reader.readU16()`——**只有頁面不一樣**。
+  - 新的 `tradeOfferCount(tab, quantity)` 放在 `client/trade-window.ts`，並用一條測試把它和 `encodeClientMiniRoomRequest`／`readClientMiniRoomRequest` 釘在一起：tab 1 的封包是 6 bytes、其餘是 8 bytes。
+  - **對我們自己的 server 沒有可見影響**（`loginserver.ts` 的 `item.kind === "equip" ? count !== 1` 會放行 count=1），改的是**線上格式與原版一致**——這是保真度修正，玩家看不到。
+
+- **（六）兩處刻意的行為說明，都寫在程式註解裡**：
+  - `shopSellBounds` 多了一個 `Math.max(1, quantity)`。原碼是 `(total, 1, total)`，數量讀到 0 時會給出一個 `(0, 1, 0)`、**永遠不可能被回答**的方框。實務上摸不到（空掉的 207 走的是確認窗，不是數量窗），但一個答不出來的方框比一個給 1 的方框糟。
+  - `shopBuyBounds`／`shopSellBounds` 現在**明確**帶 `min: 1`。`itemdialogs.ts` 的 `min` 本來就預設 1，所以這是把隱含的東西寫明，不是行為改變。
+
+- **（七）一條本輪查到、但只記錄不動手的觀察**：`sub_4D5C80` 的封包前還有三個原版閘——`n3000[6] != 0`（一次一個請求）、`timeGetTime() - n3000[7] < 0x1F4`（500 ms）、以及 `*(_DWORD *)(a3 + 12) / 10000 != 207 && ArgList == 0`（一般道具 count 0 直接擋，207 的 count 0 放行）。我們這一版是 server 權威 + 由 server 端 `trades` 自己管 pending，所以**客戶端沒有這三個閘，也沒有要加**；記在這裡只是避免日後有人以為漏做了。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner），且與 ADR-116 之後相同。**探針不會拖放交易、不會用道具、不會開商店，所以第三、五節那兩個 bug 它不是證據**——那兩條是靠上面那串 `.c` 行號、我們自己的 codec 與 server 端不變量交叉確認，加上對齊測試（`tradeOfferCount` ↔ `miniroom.ts`、`isAmmunitionFor` ↔ `basicattack.ts`）。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1278 pass / 0 fail、5315 expect() calls、148 files、286.57s**（ADR-116 基線 1265/0，本輪 +13 全為新測試，0 新失敗）。新測試逐檔：`inventory-window` 16→23、`shop-window` 16→18、`trade-state` 5→6、`basicattack` 7→10。
+  - 撰寫時失敗一次，是**我自己算錯**：以為 `inventoryDropPlan(2, 2000002, 32768)` 會 `refuse`，實際上數量窗本來就夾在 32767（`ask`），只有 207 那條沒有窗可退才會 `refuse`。對照原實作的分支改正測試，未改實作去遷就測試。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。玩家看得到的改變只有第三節那兩條（歸還卷軸的 500 ms 冷卻、快捷鍵不再觸發歸還卷軸）；第五節是線上格式修正，我們自己的 server 前後都收得下。

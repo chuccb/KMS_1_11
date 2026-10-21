@@ -49,6 +49,20 @@ export type TradeHit =
   | { kind: "scroll"; zone: TradeScrollZone }
   | { kind: "slot"; side: "mine" | "theirs"; roomSlot: number; occupied: boolean };
 
+/**
+ * The count `sub_4D5C80` writes for a dropped cell, or `null` when it writes no count at all.
+ *
+ * The packet the native builds is `[u8 11][u8 tab][u16 slot]` + `[u16 count]` + `[u8 roomSlot]`,
+ * and that middle `u16` is guarded by `if ( v12 != 1 )` where `v12` is the *tab* byte - never by
+ * the item id. Tab 1 is 장비, which does not stack, so the count would be meaningless there;
+ * every other tab carries `quantity` (`ArgList`) even when it is 0 for a 207 rechargeable, which
+ * is why the bail above it reads `*(_DWORD *)(a3 + 12) / 10000 != 207 && ArgList == 0`.
+ */
+export function tradeOfferCount(tab: number, quantity: number | undefined): number | null {
+  if (tab === 1) return null;
+  return quantity ?? 1;
+}
+
 const CONTROL_RECTS = {
   close: TRADE_WINDOW.close,
   trade: TRADE_WINDOW.trade,
