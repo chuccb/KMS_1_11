@@ -25,6 +25,7 @@
  *    thumb's travel come from.
  */
 import { INVENTORY_TABS, isRechargeableItem } from "./inventory-window.ts";
+import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
@@ -394,21 +395,11 @@ export const SHOP_ROW_PRICE_TOP = 19;
 export const SHOP_ROW_TEXT_CLIP = 14;
 
 /**
- * `sub_4B5FA0`'s stack count, relative to the row's top edge: it is drawn at `n110 + 1` = 111,
- * against the 91 the sell row starts at, and from the list's own `x` (`n110_2 = 209`).
+ * `sub_4B5FA0`'s stack count: x = `n110_2` = 209 (the sell list's own `x`) and y = `n110 + 1` = 111,
+ * against the 91 the sell row starts at - so it is the same `(cell.left, cell.top + 20)` anchor
+ * every other `sub_525AE0` caller uses. The glyphs themselves come out of `client/itemno.ts`.
  */
-export const SHOP_STACK_TOP = 20;
-
-/**
- * `UI/Basic.img/ItemNo`: ten 11 px glyphs, nine of them 8 px wide and `1` a narrow 5 px one, so a
- * flat 8 px advance never overlaps and never leaves a gap.
- *
- * `sub_525AE0` - the per-digit painter `sub_4B5FA0` calls - has no body in this checkout's
- * `MapleStory.exe.c`, only an `idb` declaration at line 5343, so whether the original steps by a
- * flat 8 or by each glyph's own width cannot be settled from the evidence here. The status bar's
- * count painter does advance per glyph; this one does not.
- */
-export const ITEM_NO_ADVANCE = 8;
+export const SHOP_STACK_TOP = ITEM_NO_CELL_TOP;
 
 /** One line of row text, clipped to the column it belongs in. */
 export function drawShopRowText(
@@ -493,18 +484,8 @@ export function drawShopList(
       const at = shopRowIconOrigin(list, icon.width, icon.height, icon.raw);
       ctx.drawImage(icon.img, originX + at.left, cellY + at.top);
     }
-    if (entry.stack !== undefined) {
-      const digits = String(entry.stack);
-      for (let digit = 0; digit < digits.length; digit++) {
-        const glyph = image(`UI/Basic.img/ItemNo/${digits[digit]}`);
-        if (glyph.ready)
-          ctx.drawImage(
-            glyph.img,
-            originX + list.x + digit * ITEM_NO_ADVANCE,
-            cellY + SHOP_STACK_TOP,
-          );
-      }
-    }
+    if (entry.stack !== undefined)
+      drawItemNo(ctx, image, entry.stack, originX + list.x, cellY + SHOP_STACK_TOP);
     const nameWidth = list.nameRight - list.nameX;
     drawShopRowText(ctx, entry.name, originX + list.nameX, cellY + SHOP_ROW_NAME_TOP, nameWidth);
     if (entry.price !== undefined)

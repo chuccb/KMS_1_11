@@ -14,7 +14,6 @@ import {
   drawMessengerButton,
   messengerButtonAt,
   mapTitleLayout,
-  drawItemCount,
   statusBarButtonAt,
   statusText,
   statusVitalText,
@@ -100,38 +99,6 @@ test("4F9AD0 strict vital targets, including EXP label; no permanent numbers ove
   assert.equal(statusVitalText(4, 536, self, totals), undefined);
   assert.equal(statusVitalText(5, 535, self, totals), undefined);
   assert.equal(statusVitalText(11, 590, self, totals), undefined);
-});
-test("525AE0: original ItemNo bitmaps, variable width, zero spacing and loading guard", () => {
-  const draws: unknown[][] = [];
-  const ctx = { drawImage: (...args: unknown[]) => draws.push(args) };
-  const image = (path: string) => ({
-    ready: true,
-    img: { path, naturalWidth: path.endsWith("/1") ? 5 : 8 },
-  });
-  drawItemCount(
-    ctx as unknown as CanvasRenderingContext2D,
-    image as unknown as (path: string) => { ready: boolean; img: HTMLImageElement },
-    101,
-    692,
-    584,
-  );
-  assert.deepEqual(
-    draws.map((d) => [d[1], d[2]]),
-    [
-      [692, 584],
-      [697, 584],
-      [705, 584],
-    ],
-  );
-  draws.length = 0;
-  drawItemCount(
-    ctx as unknown as CanvasRenderingContext2D,
-    () => ({ ready: false, img: {} as HTMLImageElement }),
-    12,
-    692,
-    584,
-  );
-  assert.equal(draws.length, 0);
 });
 test("PE 5BCEC0 / 511E20: seven original positions and VK keys; right/bottom are exclusive", () => {
   assert.deepEqual(

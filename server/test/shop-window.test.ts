@@ -6,7 +6,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ITEM_NO_ADVANCE,
   SHOP,
   SHOP_COUNT_WIRE_MAX,
   SHOP_ROW_NAME_TOP,
@@ -548,15 +547,16 @@ test("one row paints its name and price on sub_4B5FA0's two lines and its count 
       ["310 메소", list.nameX, list.y + SHOP_ROW_PRICE_TOP],
     ],
   );
-  // One ItemNo glyph per digit, a flat ITEM_NO_ADVANCE apart, from the list's own x.
+  // `sub_525AE0`: one ItemNo glyph per digit from the list's own x, each advanced by ITS OWN width.
+  // `1` is the narrow 5 px one, so "123" steps 5 then 8 - not a flat 8 twice.
   assert.deepEqual(
     drawn
       .filter((entry) => String(entry.image).startsWith("UI/Basic.img/ItemNo/"))
       .map((entry) => [String(entry.image).replace("UI/Basic.img/ItemNo/", ""), entry.x, entry.y]),
     [
       ["1", list.x, list.y + SHOP_STACK_TOP],
-      ["2", list.x + ITEM_NO_ADVANCE, list.y + SHOP_STACK_TOP],
-      ["3", list.x + 2 * ITEM_NO_ADVANCE, list.y + SHOP_STACK_TOP],
+      ["2", list.x + 5, list.y + SHOP_STACK_TOP],
+      ["3", list.x + 5 + 8, list.y + SHOP_STACK_TOP],
     ],
   );
 });

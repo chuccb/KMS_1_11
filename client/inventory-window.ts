@@ -22,6 +22,7 @@
 import type { CanvasImage, ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 
 export interface InventoryBox {
   x: number;
@@ -171,25 +172,6 @@ export function inventoryStackCount(item: {
     return item.quantity;
   if (item.ruc !== undefined && item.ruc > 0) return item.ruc;
   return undefined;
-}
-
-/** The stack count, bottom-right inside the cell, with the outline the browser font needs. */
-export function drawInventoryStackCount(
-  ctx: CanvasRenderingContext2D,
-  value: number,
-  right: number,
-  bottom: number,
-): void {
-  ctx.save();
-  ctx.font = "10px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "bottom";
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-  ctx.strokeText(String(value), right, bottom);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(String(value), right, bottom);
-  ctx.restore();
 }
 
 /**
@@ -443,13 +425,12 @@ export function drawInventoryTabStrip(
 }
 
 /**
- * The stack count's anchor, relative to the cell's own bottom-right corner: one pixel inside the
- * right edge and two below the bottom, which lands it in the 3 px gap the 35 px pitch leaves below
- * the 32 px slot. No native constant found - the inventory's own count painter (`sub_4DB240`)
- * decompiles too far into `VARIANTARG` unions to read the numbers off it.
+ * The stack count's anchor, relative to the cell's own top-left corner - the native hangs it off
+ * the cell's LEFT edge, not off its bottom-right corner where we used to put a browser-font copy.
+ * `sub_4DB240` (`:225635`) hands `sub_525AE0` `(rect.left, rect.bottom - 12)` at `:225848`, and the
+ * rect is the one `sub_4DB990` (`:226041`) builds: `35c + 6, 35r + 80, 35c + 38, 35r + 112`.
  */
-export const INVENTORY_COUNT_INSET = 1;
-export const INVENTORY_COUNT_DROP = 2;
+export const INVENTORY_COUNT_TOP = ITEM_NO_CELL_TOP;
 
 /**
  * `UI/UIWindow.img/Item/activeIcon` is a 36x36 canvas (`bun tools/wz.ts dump "UI/UIWindow.img"`),
@@ -496,12 +477,7 @@ export function drawInventoryItems(
         cellY + Math.floor((grid.size - icon.height) / 2),
       );
     if (cell.count !== undefined)
-      drawInventoryStackCount(
-        ctx,
-        cell.count,
-        cellX + grid.size - INVENTORY_COUNT_INSET,
-        cellY + grid.size + INVENTORY_COUNT_DROP,
-      );
+      drawItemNo(ctx, image, cell.count, cellX, cellY + INVENTORY_COUNT_TOP);
   }
   if (paint.hovered !== undefined) {
     const at = inventoryCellOrigin(paint.hovered, paint.firstRow);

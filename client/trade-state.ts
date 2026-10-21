@@ -1,6 +1,7 @@
 import type { MiniRoomEvent } from "../server/src/protocol/miniroom.ts";
 import type { ItemSlot } from "../server/src/protocol/itemslot.ts";
 import { vScrollScroller, VSCR_CELL } from "./vscroll.ts";
+import { ITEM_NO_CELL_TOP } from "./itemno.ts";
 
 /** `sub_4D2DB0` allocates eight 16-byte cells per side; `sub_4D63C0` numbers them 1..8.
  * Lives here (not in the server codec) so browser modules never pull a server runtime import;
@@ -61,10 +62,15 @@ export const TRADE_WINDOW = {
     /** `sub_4D5730`: rows run `for (y = 26; y < 234; y += 13)` at x = 94 -> 16 visible lines. */
     line: { x: 94, firstY: 26, pitch: 13, lastY: 234 },
   },
-  /** `sub_4D5440`: the count glyph anchor relative to the slot cell (`sub_525AE0` = left/top). */
-  count: { dx: -1, dy: 19 },
+  /**
+   * `sub_4D5440`: the count glyph anchor relative to the slot cell (`sub_525AE0` = left/top). The
+   * painter runs the cell rect it builds at `:219870` / `:219871` - `35 * (v2 % 2) + 291` and
+   * `35 * (v2 / 2) + 160`, less 281 for the other side - and hands `sub_525AE0` the rect's own left
+   * edge and `bottom - 12`. That is exactly `slots` below, plus the shared 32px-cell offset.
+   */
+  count: { dx: 0, dy: ITEM_NO_CELL_TOP },
   scrollbar: { x: 262, y: 21, width: VSCR_CELL, height: 216, arrow: VSCR_CELL },
-  slots: { size: 32, pitch: 35, columns: 2, rows: 4, top: 129, left: 11, right: 292 },
+  slots: { size: 32, pitch: 35, columns: 2, rows: 4, top: 128, left: 10, right: 291 },
   names: { left: 44, right: 327, y: 110 },
   mesos: { left: 84, right: 366, y: 277 },
   avatars: { left: 36, right: 330, y: 103 },

@@ -7,8 +7,7 @@ import {
   CONSUME_FAMILY,
   INVENTORY,
   INVENTORY_ACTIVE_ICON_INSET,
-  INVENTORY_COUNT_DROP,
-  INVENTORY_COUNT_INSET,
+  INVENTORY_COUNT_TOP,
   INVENTORY_DROP_MAX,
   INVENTORY_TABS,
   INVENTORY_TAB_LABEL,
@@ -18,7 +17,6 @@ import {
   drawInventoryItems,
   drawInventoryLabel,
   drawInventoryScrollbar,
-  drawInventoryStackCount,
   drawInventoryTabStrip,
   hasConsumeUseSound,
   inventoryCellOrigin,
@@ -38,6 +36,7 @@ import {
   quickSlotUseRoute,
   type InventoryTabView,
 } from "../../client/inventory-window.ts";
+import { ITEM_NO_CELL_TOP } from "../../client/itemno.ts";
 import type { CanvasImage } from "../../client/render-types.ts";
 
 test("the sheet keeps the native layout: 162x315 at (24,24), 4x6 grid of 32px cells on a 35px pitch", () => {
@@ -376,26 +375,6 @@ test("the printed stack count: quantities over one, always for the 207 family, e
   assert.equal(inventoryStackCount({ itemId: 1002000, ruc: 5 }), 5, "equipment can carry a ruc");
 });
 
-test("the stack count prints bottom-right inside the cell, outlined, and leaves the context clean", () => {
-  const { ctx, calls } = fakeContext();
-  ctx.font = "leftover";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
-  drawInventoryStackCount(ctx, 700, 100, 200);
-  assert.deepEqual(
-    calls.filter((call) => call.startsWith("fillText") || call.startsWith("strokeText")),
-    ["strokeText:700,100,200", "fillText:700,100,200"],
-    `the black outline goes down first: ${calls.join(" ")}`,
-  );
-  // `save`/`restore` is the point: the old inline block left lineWidth and the alignment dirty.
-  assert.deepEqual([calls[0], calls.at(-1)], ["save", "restore"]);
-  assert.equal(ctx.strokeStyle, "", "the outline colour does not leak out of the painter");
-  assert.equal(ctx.lineWidth, 0, "nor does the 2px stroke width");
-  assert.equal(ctx.font, "leftover");
-  assert.equal(ctx.textAlign, "left");
-  assert.equal(ctx.textBaseline, "alphabetic");
-});
-
 test("BtCoin greys out for a dead character, a light purse or a request in flight", () => {
   const idle = { dead: false, mesos: 5000, busy: false, pressed: false, hover: false };
   assert.equal(inventoryCoinState(idle), "normal");
@@ -613,15 +592,17 @@ test("sub_526F30 has a Use sound for the three healing families and nothing else
 });
 
 /**
- * The item painter: every icon is centred in its 32 px slot, the count hangs off the cell's
- * bottom-right corner, and the hovered cell wears the 36x36 `activeIcon`.
+ * The item painter: every icon is centred in its 32 px slot, the count hangs off the cell's LEFT
+ * edge 20 px down, and the hovered cell wears the 36x36 `activeIcon`.
  *
  * The frame's 2 px inset is not a guess - `UI/UIWindow.img/Item/activeIcon` really is a 36x36
  * canvas (`bun tools/wz.ts dump "UI/UIWindow.img"`), two pixels larger than the slot on each side.
- * The count's (-1, +2) has no such anchor: the inventory's own count painter (`sub_4DB240`)
- * decompiles into `VARIANTARG` unions too far to read the numbers off it.
+ * The count's (0, +20) is not a guess either: `sub_4DB240` (`:225635`) hands `sub_525AE0`
+ * `(rect.left, rect.bottom - 12)` at `:225848`, and `sub_4DB990` (`:226041`) builds that rect as
+ * `35c + 6, 35r + 80, 35c + 38, 35r + 112`. It used to be a browser-font copy hanging off the
+ * bottom-right corner - that was ours, not the original's.
  */
-test("the grid centres each icon in its slot and anchors the count off the cell's bottom-right", () => {
+test("the grid centres each icon in its slot and hangs the count off the cell's top-left", () => {
   const { ctx, calls, drawn, image } = fakeContext();
   const { grid } = INVENTORY;
   const cell = inventoryCellOrigin(1, 0);
@@ -641,24 +622,34 @@ test("the grid centres each icon in its slot and anchors the count off the cell'
     ],
     hovered: 1,
   });
-  assert.equal(drawn.length, 2, "one icon and one hover frame; the off-page slot draws nothing");
+  assert.equal(
+    drawn.length,
+    2 + 3,
+    "one icon, three count glyphs and one hover frame; the off-page slot draws nothing",
+  );
   // Centred in the slot, whatever the icon measures.
   assert.equal(drawn[0]?.x, cell.x + Math.floor((grid.size - 30) / 2));
   assert.equal(drawn[0]?.y, cell.y + Math.floor((grid.size - 24) / 2));
-  // The count: one pixel inside the cell's right edge, two below its bottom - in the 3 px gap the
-  // 35 px pitch leaves under the 32 px slot.
-  const count = [
-    `strokeText:700,${cell.x + grid.size - INVENTORY_COUNT_INSET},${cell.y + grid.size + INVENTORY_COUNT_DROP}`,
-    `fillText:700,${cell.x + grid.size - INVENTORY_COUNT_INSET},${cell.y + grid.size + INVENTORY_COUNT_DROP}`,
-  ];
+  // `sub_525AE0`: the count starts at the cell's own left edge, 20 px down, and each glyph steps by
+  // its own width - "700" advances 8 then 8, because only `1` is the narrow 5 px one.
+  assert.deepEqual(
+    drawn.slice(1, 4).map((entry) => [entry.image, entry.x, entry.y]),
+    [
+      ["UI/Basic.img/ItemNo/7", cell.x, cell.y + INVENTORY_COUNT_TOP],
+      ["UI/Basic.img/ItemNo/0", cell.x + 8, cell.y + INVENTORY_COUNT_TOP],
+      ["UI/Basic.img/ItemNo/0", cell.x + 16, cell.y + INVENTORY_COUNT_TOP],
+    ],
+  );
+  assert.equal(INVENTORY_COUNT_TOP, ITEM_NO_CELL_TOP);
+  // No browser text left in this painter: the count is stamped, not typed.
   assert.deepEqual(
     calls.filter((call) => call.startsWith("strokeText") || call.startsWith("fillText")),
-    count,
+    [],
   );
   // The hover frame, two pixels outside the cell on every side.
-  assert.equal(drawn[1]?.image, "UI/UIWindow.img/Item/activeIcon");
-  assert.equal(drawn[1]?.x, cell.x - INVENTORY_ACTIVE_ICON_INSET);
-  assert.equal(drawn[1]?.y, cell.y - INVENTORY_ACTIVE_ICON_INSET);
+  assert.equal(drawn[4]?.image, "UI/UIWindow.img/Item/activeIcon");
+  assert.equal(drawn[4]?.x, cell.x - INVENTORY_ACTIVE_ICON_INSET);
+  assert.equal(drawn[4]?.y, cell.y - INVENTORY_ACTIVE_ICON_INSET);
 });
 
 test("the tab strip covers each face's own label and prints the page's four in tab order", () => {

@@ -3943,6 +3943,7 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **（二）`ITEM_NO_ADVANCE = 8` 與一個我查不到底的東西**：
   - WZ 實證：`UI/Basic.img/ItemNo` 十個 glyph 都是 11px 高，其中九個（0、2…9）**正好 8px 寬**，`1` 是窄的 5px。所以「每格固定推進 8px」既不會重疊也不會留縫。
   - **但原碼是不是這樣推進，這一版證據查不出來**：`sub_4B5FA0` 呼叫的逐位數畫家 `sub_525AE0` 在 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行），沒有函式本體**，所以「固定 8」與「按各自 glyph 寬＋間距」兩種寫法無法在此區分。我們頁面用的是固定 8，而 status bar 的 `drawItemCount` 是逐 glyph 推進——**這個差異保留原狀，註解已寫明**。
+  - **【ADR-123 更正】上面那段是錯的**：`sub_525AE0` **有本體**，在 `MapleStory.exe.c:298618`（第 5343 行只是前向宣告，我當年只 grep 到它就結案了）。本體結尾是 `n146 += a6 + v34`，`v34` 是該 glyph 自己的寬度、`a6` 是第六個引數——所以推進是「**各 glyph 自己的寬度＋間距**」，固定 8 是我們自己的、不是原版的。已於 ADR-123 全部收回 `client/itemno.ts`。
 
 - **（三）兩個誠實標記**：
   - `SHOP_ROW_TEXT_CLIP = 14`（一行文字的裁切高度）**沒有原碼依據**，是我們自己的裁切框，註解照實寫。
@@ -3971,6 +3972,7 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **（二）`INVENTORY_ACTIVE_ICON_INSET = 2` 有原證**：`UI/UIWindow.img/Item/activeIcon` 真的是 **36×36** canvas（`bun tools/wz.ts dump "UI/UIWindow.img"`），比 32px 的格子每邊各大 2px——所以 hover 框那個 `-2` 是「36−32 除以二」，不是喬出來的。
 
 - **（三）堆疊數的 `(-1, +2)` 查不到原證，照實說**：它畫在格子右下角內縮 1px、下方再 +2px，也就是落在 35px pitch 留給 32px 格的那 3px 縫裡。背包自己的數量畫家（`sub_4DB240`，`MapleStory.exe.c:225635`，在 `:225848` 呼叫 `sub_525AE0`）**反編譯後整個埋在 `VARIANTARG` union 裡，讀不出這兩個數字**——我只讀到「y 是某個 rect 欄位減 12」，而那個 rect 是哪一組欄位無法斷定。**所以這兩個常數只命名、不宣稱有原碼依據**（同一個 `sub_525AE0` 在商店那邊是讀得出來的，見 ADR-120）。
+  - **【ADR-123 更正】原版不在右下角**：`sub_4DB240` 那段其實讀得出來——`sub_4DB990`（`:226041`）把格子 rect 建成 `SetRect(lprc, 35c + 6, 35r + 80, 35c + 38, 35r + 112)`，而 `:225848` 餵給 `sub_525AE0` 的是 `rect.left`（`*(_DWORD *)&pvargDest.vt`）與 `rect.bottom - 12`（`pvargDest.cyVal.Hi - 12`），也就是**（格子左緣, 格子頂邊 +20）**，靠左不靠右。我們那個「右下角內縮 1、下方 +2」是當年自己喬的，而且是用瀏覽器字型加黑邊畫的，不是原版的 `ItemNo` 點陣字。已在 ADR-123 改回原版錨點。
 
 - **（四）`INVENTORY_TAB_LABEL`（6/5/22/13/12）也沒有原證**：那是蓋住 sheet 自帶韓文標籤的底板，是我們自己的東西，註解照實寫。
 
@@ -4050,3 +4052,62 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` **維持 5445 行**（本輪沒有動它，所以七份文件不必同步行數）。
   - 撰寫時紅燈兩次，都是我自己的錯、不是產品碼錯：`server/test/helpers/wz-cells.ts` 的 `WzNode` 建構子引數與 `WzTree` 型別要先單獨 typecheck 過才能讓別的測試匯入；`ui-basic-cells.test.ts` 換成共用 helper 時，原本的 `DATA_WZ`／`needsArchive` 區塊要整段換掉，只改 import 會留下重複宣告。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——能力窗／裝備窗／技能窗的外觀、拖曳、按鈕都不會與 ADR-121 的 LIVE 有差別。
+
+## ADR-123：把 `sub_525AE0` 收回一個數字畫家，並把堆疊數錨點改回原版（有行為改變，main.js 維持 5445 行，2026-10-21）
+
+- **背景**：ADR-120 與 ADR-121 都留下同一句話——逐位數畫家 `sub_525AE0` 在本 checkout 的 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行）、沒有本體**，所以「固定推進 8px」還是「各 glyph 寬＋間距」無法判定，我們就讓商店用固定 8、status bar 用逐 glyph 寬，把差異寫在註解裡晾著。**那句話是錯的**：第 5343 行只是前向宣告，本體在 **`:298618`**。這一輪把它讀回來，連帶把散在四處的數字繪製收回一個模組。
+
+- **（一）`sub_525AE0` 的本體（`MapleStory.exe.c:298618`）**：
+
+  ```c
+  sub_411E50((void **)&v36, "%d", ArgList);        // 把數量格式化成十進位字串
+  while ( 1 ) {
+    ...
+    lpMultiByteStr = itoa_w(*(char *)(v6 + v36) - 48, (char *)Buffer);   // ASCII digit -> 0..9
+    v12 = (void *)sub_402E20(&lVal);
+    v13 = sub_406EC0(v12, &pvarg, v27);            // ItemNo 這個 property 裡查 "7" / "0" ...
+    ... (*(*n245 + 144))(n245, n146, a3, ...);     // 把該 glyph 畫在 (n146, a3)
+    ...
+    n146 += a6 + v34;                              // 推進 = 這個 glyph 自己的寬度 + 第六個引數
+    ++v6;
+  }
+  ```
+
+  三件事由此定案：
+  1. **錨點是左上，不是右下、也不是 baseline**——glyph 的 top-left 放在推進中的 `n146` 與共用的 `a3`。
+  2. **推進是「各 glyph 自己的寬度＋第六個引數」**（`v34` 來自該 canvas 的 `+80` vtable 呼叫，讀出來是寬度）。所以 `1`（5px）真的會把後面的數字往前拉 3px。
+  3. 第六個引數是**真的、會變的**間距：`sub_504480`（`:265177`）在 `:265265` 傳的是**字面常數 `1`**（`v21 = 1`）。
+
+- **（二）錨點：四個呼叫點都說「格子左緣、格子頂邊 +20」**：
+
+  | 呼叫點 | 原碼 | 錨點 |
+  | --- | --- | --- |
+  | 背包 `sub_4DB240` `:225848` | rect 由 `sub_4DB990`（`:226041`）建成 `SetRect(lprc, 35c+6, 35r+80, 35c+38, 35r+112)` | `(rect.left, rect.bottom - 12)` |
+  | 交易 `sub_4D5440` `:219951` | `n146 = 35*(v2%2) + 291`（`:219870`）、`v26 = 35*(v2/2) + 160`（`:219871`） | `(n146, v26 - 12)` |
+  | 商店 `sub_4B5FA0` `:190691` | `n110_2 = 209`、y = `n110 + 1` = 111（列頂 91） | `(209, 列頂 + 20)` |
+  | `sub_4FC440` `:257831` | `LODWORD(v36) = v41 + 20` | 直接就是 `+20` |
+
+  32px 的格子，`rect.bottom - 12` = `rect.top + 20`。四個獨立呼叫點一致，所以這不是我們喬出來的。
+
+- **（三）新的共用模組 `client/itemno.ts`**：`ITEM_NO_PATH`／`ITEM_NO_WIDTH`／`ITEM_NO_HEIGHT`／`ITEM_NO_CELL_TOP = 20`／`itemNoDigits`／`itemNoAdvance`／`drawItemNo`。之前這個畫家有**四份**：`hud.ts` 的 `drawItemCount`（逐 glyph 寬，用 `naturalWidth`）、`shop-window.ts` 的內嵌迴圈（固定 8）、`inventory-window.ts` 的 `drawInventoryStackCount`（**瀏覽器字型＋黑邊，右下角**）、`trade-window.ts` 的內嵌 `fillText`（**瀏覽器字型，白字**）。現在全部走同一支。
+
+- **（四）本輪的實際行為改變**（三處，全部是朝原版修正）：
+  - **背包堆疊數從「格子右下角」改成「格子左緣、頂邊 +20」**，並且從瀏覽器字型（10px Dotum＋2px 黑邊）改成原版的 `UI/Basic.img/ItemNo` 點陣字。這是 ADR-121 第（三）節那兩個「查不到原證」的常數——現在查到了，我們原來的位置是錯的。
+  - **交易窗的堆疊數**從瀏覽器 `fillText` 改成同一批 `ItemNo` 點陣字。錨點維持在畫面上同一個位置：`sub_4D5440` 的格子 rect 是 `(35c + 291, 35r + 128)`（另一側 `n146 -= 281` → `35c + 10`），所以 `TRADE_WINDOW.slots` 從 `{top: 129, left: 11, right: 292}` 改成原生算術給的 **`{top: 128, left: 10, right: 291}`**（圖示與命中框一起左／上移 1px），而 `count` 從 `{dx: -1, dy: 19}` 改成 **`{dx: 0, dy: ITEM_NO_CELL_TOP}`**——兩者在畫面上的絕對位置**完全不變**，只是表達方式換成原版的那一組。
+  - **商店的堆疊數推進**從固定 8 改成各 glyph 自己的寬度：含 `1` 的數量（例如 100、111、21）後面的數字會往前靠 3px。
+
+- **（五）誠實標記**：
+  - **`sub_473990` 在本 checkout 沒有本體**（只有 `:2288` 的 `idb` 宣告）。在背包／交易／商店三個呼叫點，第六個引數（間距）的指派與呼叫之間夾著一次 `sub_473990(...)`,所以嚴格說我讀到的是**指派當下的值**——三處都是 0。只有 `sub_504480`（`:265265`）的 `v21 = 1` 是沒有被中間呼叫夾住的字面常數，那一個是確定的。所以：**「推進＝各 glyph 寬＋第六引數」是確定的；「這三處的第六引數是 0」是最佳讀數，不是鐵證。**
+  - `ITEM_NO_CELL_TOP = 20` 是從「32px 格子的 `bottom - 12`」推出來的，常數本身在原碼裡是 `12`（減去的那個數）加上格子高度 32 的結果。
+  - `sub_525AE0` 的第五個引數（glyph property 物件）與 `UI/Basic.img/ItemNo` 的對應關係，是 **`hud.ts` 原本那條註解（`4FC440 -> 525AE0`）＋本體裡 `itoa_w(ch - 48)` 查表的行為**一起推出來的；`ItemNo` 這個節點名字本身在 `sub_525AE0` 的字串表裡沒有出現。
+  - 順帶一提：`sub_43D750`（`:69546`）讀 registry 時的夾限 **`x > 784 → 784`、`y > 584 → 584`**（`:69600`／`:69602`）與 `client/equipment.ts` 的拖曳夾限一致；`statwindow.ts`／`skills.ts` 用的 `624`／`285` 是我們自己的政策，本輪未動（見 ADR-122）。
+
+- **驗證**：
+  - **`client_probe.ts` 前後輸出不再逐位元組相同——這是本輪故意的**：唯一差異是第 20 行 `rendered 3 frames; drawImage calls: 160` → **`161`**。原因是探針的背包裡有一組 `2000000 × 3`，那個「3」原本是 `fillText`（不算 `drawImage`），現在是原版的一枚 `ItemNo/3` 點陣字。10 個 `OK` banner、exit 0，**協定流量完全沒變**。基線是用 `git archive HEAD | tar -x -C /tmp/base123` 建出來的乾淨 ADR-122 樹跑出來的（不能直接 `git show HEAD:client/main.js` 蓋回去，因為 `hud.ts` 的 `drawItemCount` 已經刪了）。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1305 pass / 0 fail、5315 expect() calls、151 files、284.48s**（ADR-122 基線 1301/0，本輪 **+6 新測試、−2 退休**，淨 **+4**、0 新失敗）。
+  - 新測試在 `server/test/itemno.test.ts`（6 條）：`UI/Basic.img/ItemNo` 十枚 glyph 的實測寬高、`"%d"` 的取位數、`n146 += a6 + v34` 的推進（含 `sub_504480` 的間距 1）、左上錨點與逐步推進、未載入時一個都不畫、四個呼叫點的 `(rect.left, rect.bottom - 12)` 換算。
+  - 退休兩條：`server/test/native-hud.test.ts` 的 `525AE0` 那條（內容搬到 `itemno.test.ts`）與 `inventory-window.test.ts` 的「堆疊數印在格子右下角、有黑邊、還清乾淨 context」——**它釘的是我們自己發明的行為，行為改了，測試就跟著退**。
+  - `server/test/trade-state.test.ts` 的格子座標改成原生算術值，並補一條把 `count` 錨點換算回 `35c+291, 35r+148` 的迴圈。
+  - `client/main.js` **維持 5445 行**（只換了一行 import 與一行呼叫），七份文件不必同步行數。
+  - 撰寫時紅燈一次，是我自己的錯：第一版 patch script 漏掉 `inventory-window.test.ts` 第 384 行那條 `drawInventoryStackCount(ctx, 700, 100, 200)`，assert 擋下來了，補上「整條測試一起刪」才過。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。**本輪有畫面可見的改變**：背包裡的堆疊數字會從格子右下角移到**左下角**、字型換成原版點陣字；交易窗的堆疊數同樣換成點陣字；商店含 `1` 的數量會靠緊一點；交易窗的道具格與命中框左／上移 1px。協定與操作手感完全不變。

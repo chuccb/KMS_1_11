@@ -102,6 +102,7 @@ import {npcDialogue} from "./npcdialogue.ts";
 import {nativeCursor} from "./cursor.ts";
 import {npcContains, releaseOnInterrupt} from "./pointer.ts";
 import {drawSimpleTooltip, nativeTooltipRenderer, tooltipAnchor} from "./tooltip.ts";
+import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { backgroundCopies } from "./background.ts";
 import { mobLocomotion } from "./mobmotion.ts";
 import { systemMenu } from "./systemmenu.ts";
@@ -114,7 +115,6 @@ import {
   drawStatusGauge as paintStatusGauge,
   drawNamePlate,
   drawMapTitle,
-  drawItemCount,
   drawMessengerButton as paintMessengerButton,
   drawWhisperRecipient as paintWhisperRecipient,
   messengerButtonAt as messengerButtonHit,
@@ -2581,7 +2581,7 @@ function drawQuickItems() {
       }
     }
     const {quantity} = quickItemState(inventory, id);
-    drawItemCount(ctx, artImage, quantity, slot.x, slot.y + 20);
+    drawItemNo(ctx, artImage, quantity, slot.x, slot.y + ITEM_NO_CELL_TOP);
   });
   ctx.restore();
 }

@@ -4907,6 +4907,7 @@ typecheck／build／format 全綠。
   - 列間距 `n110 += 35`；`while ( n110 < 285 )` → `110 + 5×35 = 285`，**五列**（`SHOP.sellList.rows = 5`）。
 - `UI/Basic.img/ItemNo`：十個 glyph 皆 11px 高；`0,2..9` 為 **8px** 寬，`1` 為 **5px**（窄字）。故 `ITEM_NO_ADVANCE = 8`（固定推進）不重疊、不留縫。
 - **未決**：`sub_525AE0` 在本 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行）、無函式本體**，因此原版究竟是「固定 8」還是「各 glyph 寬＋間距」推進，此版證據無法判定。現況：商店列用固定 8，status bar 的 `drawItemCount` 用逐 glyph 寬。
+- **【ADR-123 更正】上面的「未決」是錯的**：`sub_525AE0` **有本體，在 `MapleStory.exe.c:298618`**（第 5343 行只是前向宣告）。推進是 `n146 += a6 + v34` = **各 glyph 自己的寬度＋第六個引數**。`ITEM_NO_ADVANCE = 8` 已作廢。
 - **無原碼依據**：`SHOP_ROW_TEXT_CLIP = 14`（一行文字的裁切高度）是我們自己的裁切框。
 - 買／賣／補充三個入口的守門（`shopPending || slotPending || mesoPending || modalOpen() || selfView?.hp <= 0`）已收回 `shopActionBlocked()`；注意 `hp === undefined` 時原式 `undefined <= 0` 為 **false**（玩家未知時不擋），已由測試釘住。
 
@@ -4915,6 +4916,7 @@ typecheck／build／format 全綠。
 - `UI/UIWindow.img/Item/backgrnd` = **162×315**，與 `INVENTORY.width/height`（`client/inventory-window.ts`）一致——美術檔回頭證明版面。**勿與 `sub_4D89F0` 的 Equip 窗 176×315 混淆**（另一個視窗）。
 - `UI/UIWindow.img/Item/activeIcon` = **36×36**，比 32px 格每邊大 2px → `INVENTORY_ACTIVE_ICON_INSET = 2`（有原證）。
 - 堆疊數錨點（格子右下角內縮 **1**、下方 **+2**，落在 35px pitch 的 3px 縫）**無原證**：背包數量畫家 `sub_4DB240`（`MapleStory.exe.c:225635`，`:225848` 呼叫 `sub_525AE0`）反編譯後埋在 `VARIANTARG` union，讀不出數字。同 `sub_525AE0` 在商店列（`sub_4B5FA0`）是可讀的，見 ADR-120。
+- **【ADR-123 更正】原版堆疊數是靠左的 (0, +20)**：`sub_4DB990`（`:226041`）建的 rect 是 `35c+6, 35r+80, 35c+38, 35r+112`，`:225848` 餵給 `sub_525AE0` 的是 `rect.left` 與 `rect.bottom - 12`。舊的「右下角內縮 1、下方 +2」已作廢。
 - `INVENTORY_TAB_LABEL`（left 6 / top 5 / width 22 / height 13 / baseline 12）＝蓋住 sheet 自帶韓文標籤的底板，**無原證**。
 - 關閉鈕座標 (114, 9) 已改用 `INVENTORY.close`（原本在 main.js 寫死一份）。
 - 繪製順序（與原頁一致）：sheet → 關閉鈕 → 頁籤面 → 項目格（圖示置中、堆疊數）→ hover 框 → 捲軸 → 金幣鈕 → 楓幣。
@@ -4934,3 +4936,19 @@ typecheck／build／format 全綠。
   - 讀入後的夾限：**`x > 784 → 784`、`y > 584 → 584`**（`:69600`／`:69602`）。`client/equipment.ts` 的拖曳夾限與此一致；`statwindow.ts`／`skills.ts` 的 `624`／`285`（＝800−176／600−315）是我們自己的「整扇窗留在畫面內」政策。
 - **`Stat/backgrnd2`（176×192）**：`statwindow.ts` 把它掛在父窗 +(176,123)，`123 + 192 = 315`，正好收在父窗下緣——故 `contains()` 的 detail 分支可以對兩邊都用 `STAT_WINDOW.height`。
 - **無原碼依據**：`MESSENGER_WINDOW.width = 297` 是 `backgrnd`(200) + `charView`(97) 拼出來的，不是單一 canvas；`charView.y = 13` 是 `335 − 322` 的差，屬我們自己推出的置中。
+
+### `sub_525AE0` 的本體與數字錨點（2026-10-21，ADR-123）
+
+- **`sub_525AE0` 有本體，在 `MapleStory.exe.c:298618`**（第 5343 行只是前向宣告；ADR-120／121 記載的「無本體」是錯的，已於兩處加註更正）。
+  - `sub_411E50(&v36, "%d", ArgList)` 把數量格式化成字串；逐一字元 `itoa_w(*(char *)(v6 + v36) - 48, Buffer)` 取回 0..9；`sub_402E20(&lVal)` + `sub_406EC0(v12, &pvarg, v27)` 到 property 裡查該數字 → `UI/Basic.img/ItemNo/{d}`。
+  - glyph 的 **top-left** 畫在推進中的 `n146` 與共用的 `a3` → **左上錨定**。
+  - `n146 += a6 + v34`：`v34` = 該 glyph 自己的寬度，`a6` = 第六個引數（間距）。
+  - 第六引數會變：`sub_504480`（`:265177`）在 `:265265` 傳字面常數 `1`。背包／交易／商店三處指派為 0，但中間夾著 `sub_473990`（**本 checkout 無本體**，只有 `:2288` 的 `idb` 宣告），故為最佳讀數非鐵證。
+- **呼叫點與錨點**（32px 格子，一律 `(rect.left, rect.bottom - 12)` = 格子左緣、頂邊 **+20**）：
+  - 背包 `sub_4DB240` `:225635` → 呼叫 `:225848`；rect 由 `sub_4DB990` `:226041` 建成 `SetRect(lprc, 35c+6, 35r+80, 35c+38, 35r+112)`。
+  - 交易 `sub_4D5440` `:219827` → 呼叫 `:219951`；`n146 = 35*(v2%2) + 291`（`:219870`）、`v26 = 35*(v2/2) + 160`（`:219871`）、另一側 `n146 -= 281`（`:219956`）→ 格子 rect `(35c+291 或 35c+10, 35r+128)`。
+  - 商店 `sub_4B5FA0` `:190388` → 呼叫 `:190691`；`n110_2 = 209`、y = `n110 + 1` = 111。
+  - `sub_4FC440` `:257680` → 呼叫 `:257831`；`LODWORD(v36) = v41 + 20`。
+- **`UI/Basic.img/ItemNo`**：十枚 glyph 皆 **11px 高**；`0,2..9` 為 **8px** 寬，`1` 為 **5px**。故「1」會把後面的數字往前拉 3px，固定 8px 推進（`ITEM_NO_ADVANCE`，已刪）不是原版行為。
+- **`sub_43D750`（`:69546`）**：registry `uiWndX%d`／`uiWndY%d`／`uiOpt%d`，`i=0..5`；`i!=4&&i!=5` 時預設 `8*(3*i+3)`（`:69584`）→ 24/48/72/96；`i==4` 為 8,8；`i==5` 為 500,50（`:69589`）。讀入後夾限 `x>784→784`、`y>584→584`（`:69600`/`:69602`）。
+- **`sub_461C50`（`:105778`）**：置中 `sub_545450(this, (800 - v17) >> 1, (600 - v16) >> 1, ...)`（`:105835`）。

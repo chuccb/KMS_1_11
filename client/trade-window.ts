@@ -1,6 +1,7 @@
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { paintVScrollbar } from "./vscroll.ts";
+import { drawItemNo } from "./itemno.ts";
 import { HUD_FONT } from "./hud.ts";
 import type { AvatarImage, BrowserLook } from "./image-cache.ts";
 import {
@@ -176,18 +177,15 @@ export function tradeRenderer({ ctx, image, avatars, icon }: TradeRendererOption
       if (rect === undefined) continue;
       const art = icon(offer.item.itemId);
       if (art.ready) ctx.drawImage(art.img, at.x + rect.x, at.y + rect.y);
-      if (offer.count > 1) {
+      if (offer.count > 1)
         // sub_4D5440: `sub_525AE0` anchors the digit glyphs left/top at (35c+291, 35r+148).
-        ctx.font = HUD_FONT;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(
-          String(offer.count),
+        drawItemNo(
+          ctx,
+          image,
+          offer.count,
           at.x + rect.x + TRADE_WINDOW.count.dx,
           at.y + rect.y + TRADE_WINDOW.count.dy,
         );
-      }
     }
     if (state.confirmed) {
       const wash = side === "mine" ? TRADE_WINDOW.lock.mine : TRADE_WINDOW.lock.theirs;

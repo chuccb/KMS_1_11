@@ -275,23 +275,6 @@ export function drawMapTitle(
   ctx.restore();
 }
 
-/** 4FC440 -> 525AE0, zero spacing: advance by each ORIGINAL ItemNo canvas width. */
-export function drawItemCount(
-  ctx: CanvasRenderingContext2D,
-  image: HtmlImageLookup,
-  value: number,
-  x: number,
-  y: number,
-): void {
-  const digits = Array.from(String(Math.max(0, Math.trunc(value))), (digit) =>
-    image(`UI/Basic.img/ItemNo/${digit}`),
-  );
-  if (!digits.every((d) => d.ready)) return; // Never paint later digits at a wrong x while loading.
-  for (const digit of digits) {
-    ctx.drawImage(digit.img, x, y);
-    x += digit.img.naturalWidth;
-  }
-}
 /** 4F9AD0 strict hit rectangles; the EXP target includes its label, not just coloured pixels. */
 export function statusVitalText(
   x: number,

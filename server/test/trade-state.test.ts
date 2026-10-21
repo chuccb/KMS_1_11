@@ -23,6 +23,7 @@ import {
   TRADE_SLOTS,
   type MiniRoomParticipant,
 } from "../src/protocol/miniroom.ts";
+import { ITEM_NO_CELL_TOP } from "../../client/itemno.ts";
 import { tradeOfferCount } from "../../client/trade-window.ts";
 import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
@@ -46,11 +47,14 @@ test("trade sheet geometry is sub_4D63C0's grid and sub_461C50's centring", () =
     { w: 367, h: 295, home: { x: 216, y: 152 } },
     "((800-367)>>1, (600-295)>>1)",
   );
-  assert.deepEqual(tradeSlotRect("mine", 1), { x: 292, y: 129, width: 32, height: 32 });
-  assert.deepEqual(tradeSlotRect("mine", 2), { x: 327, y: 129, width: 32, height: 32 });
-  assert.deepEqual(tradeSlotRect("mine", 8), { x: 327, y: 234, width: 32, height: 32 });
-  assert.deepEqual(tradeSlotRect("theirs", 1), { x: 11, y: 129, width: 32, height: 32 });
-  assert.deepEqual(tradeSlotRect("theirs", 7), { x: 11, y: 234, width: 32, height: 32 });
+  // sub_4D5440 builds the cell grid itself at :219870 / :219871 - `35 * (v2 % 2) + 291` for the
+  // column and `35 * (v2 / 2) + 160` for the row's BOTTOM, then steps `n146 -= 281` for the other
+  // side. A 32px cell whose bottom is 35r + 160 starts at 35r + 128, and 291 - 281 is 10.
+  assert.deepEqual(tradeSlotRect("mine", 1), { x: 291, y: 128, width: 32, height: 32 });
+  assert.deepEqual(tradeSlotRect("mine", 2), { x: 326, y: 128, width: 32, height: 32 });
+  assert.deepEqual(tradeSlotRect("mine", 8), { x: 326, y: 233, width: 32, height: 32 });
+  assert.deepEqual(tradeSlotRect("theirs", 1), { x: 10, y: 128, width: 32, height: 32 });
+  assert.deepEqual(tradeSlotRect("theirs", 7), { x: 10, y: 233, width: 32, height: 32 });
   assert.equal(tradeSlotRect("mine", 0), undefined);
   assert.equal(tradeSlotRect("mine", TRADE_SLOTS + 1), undefined);
   assert.deepEqual(TRADE_WINDOW.names, { left: 44, right: 327, y: 110 });
@@ -65,8 +69,22 @@ test("trade sheet geometry is sub_4D63C0's grid and sub_461C50's centring", () =
     ),
     16,
   );
-  // sub_4D5440 anchors the count digits at (35c+291, 35r+148): one left, 19 below the cell.
-  assert.deepEqual(TRADE_WINDOW.count, { dx: -1, dy: 19 });
+  // sub_4D5440 hands sub_525AE0 the cell rect's own left edge and `bottom - 12`, so the count sits
+  // at (35c+291, 35r+148) - flush with the cell's left edge, ITEM_NO_CELL_TOP down from its top.
+  assert.deepEqual(TRADE_WINDOW.count, { dx: 0, dy: ITEM_NO_CELL_TOP });
+  for (const [column, row, x, y] of [
+    [0, 0, 291, 148],
+    [1, 0, 326, 148],
+    [0, 3, 291, 253],
+  ] as const) {
+    const cell = tradeSlotRect("mine", row * 2 + column + 1);
+    assert.ok(cell);
+    assert.deepEqual(
+      { x: cell.x + TRADE_WINDOW.count.dx, y: cell.y + TRADE_WINDOW.count.dy },
+      { x, y },
+      `35*${column}+291, 35*${row}+148`,
+    );
+  }
 });
 
 test("the client-owned strings keep their original wording and line breaks", () => {
