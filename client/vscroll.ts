@@ -46,8 +46,29 @@ export interface VScrollBarGeometry {
   readonly width: number;
   /** The Create `len`: the full control, arrows included. */
   readonly height: number;
-  /** The `UI/Basic.img/VScr` cell edge, 12. */
+  /** The `UI/Basic.img/VScr` cell edge - see {@link VSCR_CELL}. */
   readonly arrow: number;
+}
+
+/**
+ * The `UI/Basic.img/VScr` cell edge in px - the one measurement the whole strip is built from.
+ *
+ * Every cell in the sheet is 12x12: `enabled/{prev0,prev1,next0,next1,base,thumb0,thumb1}` and
+ * `disabled/{prev,next,base}`. The EXE carries no `VScr` string of its own - the names reach
+ * `CCtrlScrollBar` through `sub_4591A0` - so `bun tools/wz.ts dump "UI/Basic.img"` is the only
+ * oracle, and it reports `Canvas 12x12` for all ten cells. Being square, that one number is at
+ * once the bar's width, both end caps, the thumb, and the pitch the trough tiles at.
+ */
+export const VSCR_CELL = 12;
+
+/**
+ * How far the thumb may travel: the track less the two end caps and the thumb itself.
+ *
+ * All three are one {@link VSCR_CELL} tall, hence `height - 3 * VSCR_CELL` - the `height - 36`
+ * the inventory and shop sheets and the NPC dialogue have always written out longhand.
+ */
+export function vScrollTravel(height: number, arrow: number = VSCR_CELL): number {
+  return height - 3 * arrow;
 }
 
 /** One of `sub_452500`'s hit zones: 101/102 arrows, 103/104 page, 105 thumb (100 = none). */
@@ -102,7 +123,7 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     /** `sub_452500`'s thumb top, relative to the bar's own top. */
     thumbTop(): number {
       if (max <= 1) return bar.arrow;
-      return bar.arrow + Math.floor((here() * (bar.height - 3 * bar.arrow)) / (max - 1));
+      return bar.arrow + Math.floor((here() * vScrollTravel(bar.height, bar.arrow)) / (max - 1));
     },
     reset() {
       rows = 0;
@@ -162,7 +183,8 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     /** `sub_4526A0`: `pos = startPos + max * dy / (track - 3*arrow)`, truncated then clamped. */
     moveTo(y: number) {
       if (drag === undefined || max <= 1) return;
-      settle(Math.trunc(drag.startPos + (max * (y - drag.startY)) / (bar.height - 3 * bar.arrow)));
+      const travel = vScrollTravel(bar.height, bar.arrow);
+      settle(Math.trunc(drag.startPos + (max * (y - drag.startY)) / travel));
     },
     /** `sub_4525B0`: arrows and the wheel step the position, clamped by `sub_452150`. */
     by(delta: number) {

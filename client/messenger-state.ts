@@ -36,7 +36,7 @@
  *   references in the PE - present with no consumer, like BtLock/BtReset (🟡 unpainted).
  */
 import type { MessengerEvent } from "../server/src/protocol/messenger.ts";
-import { vScrollScroller, type VScrollBarGeometry } from "./vscroll.ts";
+import { vScrollScroller, VSCR_CELL, type VScrollBarGeometry } from "./vscroll.ts";
 
 /** The mode-1 window: backgrnd (200x335) plus the charView column (97x322) at (200,13). */
 export const MESSENGER_WINDOW = {
@@ -51,7 +51,13 @@ export const MESSENGER_WINDOW = {
   /** id 1001, `sub_4E0FF0`; the page overlays a DOM input here. */
   edit: { x: 11, y: 286, width: 176, height: 12 },
   /** id 1002: Create(parent, 1002, 1, 0, 179, 58, 218, 0), `+44 = 172` wrap. */
-  scrollbar: { x: 179, y: 58, width: 12, height: 218, arrow: 12 } satisfies VScrollBarGeometry,
+  scrollbar: {
+    x: 179,
+    y: 58,
+    width: VSCR_CELL,
+    height: 218,
+    arrow: VSCR_CELL,
+  } satisfies VScrollBarGeometry,
   /**
    * `sub_4E1320`: sixteen rows at x=10, y = 63 + 13k. The wrap happens at append time in
    * `sub_4DEE50`: width **170** (`n170 = 170` through `sub_439A70`) and every continuation

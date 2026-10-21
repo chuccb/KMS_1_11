@@ -78,6 +78,7 @@ import {
   shopWindowAt as shopHitAt,
 } from "./shop-window.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
+import { VSCR_CELL } from "./vscroll.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
 import { createCamera, updateCamera, reframeCamera } from "./camera.ts";
 import { cameraControls } from "./camera-controls.ts";
@@ -1422,7 +1423,7 @@ canvas.addEventListener("mousemove", (event) => {
     const geometry = shopScrollbarGeometry(side);
     if (geometry !== undefined) {
       const position =
-        point.y - shopAt.y - SHOP.scrollbar[side].y - 12 - offset;
+        point.y - shopAt.y - SHOP.scrollbar[side].y - VSCR_CELL - offset;
       setShopScroll(
         side,
         Math.round((position * geometry.max) / geometry.travel),
@@ -1568,7 +1569,7 @@ canvas.addEventListener("mousedown", (event) => {
           point.y -
           shopAt.y -
           SHOP.scrollbar[shopHit.side].y -
-          12 -
+          VSCR_CELL -
           geometry.offset,
       };
     }
@@ -1645,7 +1646,7 @@ canvas.addEventListener("mousedown", (event) => {
     const g = inventoryScrollbarGeometry();
     if (hit.part === "thumb" && g.max > 0) {
       inventoryScrollDrag = {
-        offset: point.y - inventoryAt.y - INVENTORY.scrollbar.y - 12 - g.offset,
+        offset: point.y - inventoryAt.y - INVENTORY.scrollbar.y - VSCR_CELL - g.offset,
       };
       event.preventDefault();
     }
@@ -1959,7 +1960,7 @@ canvas.addEventListener(
     const localY = point.y - shopAt.y;
     for (const side of ["buy", "sell"]) {
       const list = shopListOf(side);
-      if (localX < list.x || localX >= SHOP.scrollbar[side].x + 12) continue;
+      if (localX < list.x || localX >= SHOP.scrollbar[side].x + VSCR_CELL) continue;
       if (localY < list.y || localY >= list.y + list.rows * list.pitch)
         continue;
       if (event.deltaY === 0) return;
@@ -3969,7 +3970,7 @@ window.addEventListener("mousemove", (event) => {
     ((p.y -
       inventoryAt.y -
       INVENTORY.scrollbar.y -
-      12 -
+      VSCR_CELL -
       inventoryScrollDrag.offset) *
       g.max) /
       g.travel,

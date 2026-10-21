@@ -21,6 +21,7 @@
  */
 import type { CanvasImage, ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
+import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 
 export interface InventoryBox {
   x: number;
@@ -67,7 +68,7 @@ export const INVENTORY: InventoryLayout = {
   height: 315,
   home: { x: 24, y: 24 },
   grid: { x: 6, y: 80, columns: 4, rows: 6, size: 32, pitch: 35 },
-  scrollbar: { x: 147, y: 80, width: 12, height: 208 },
+  scrollbar: { x: 147, y: 80, width: VSCR_CELL, height: 208 },
   coin: { x: 8, y: 294, width: 17, height: 17 },
   mesos: { x: 9, y: 296, width: 116, height: 13 },
   tabs: [
@@ -108,7 +109,7 @@ export interface InventoryScrollGeometry {
 /** 4DA810/4DA8B0: independent per-tab row positions; firstSlot = 4*row+1. */
 export function inventoryScrollbarGeometry(capacity: number, row: number): InventoryScrollGeometry {
   const max = Math.max(0, Math.ceil(capacity / 4) - 6);
-  const travel = INVENTORY.scrollbar.height - 36;
+  const travel = vScrollTravel(INVENTORY.scrollbar.height);
   // A non-finite row (never stored: the sender rounds) behaves like the old `?? 0` fallback.
   const safe = Number.isFinite(row) ? row : 0;
   const clamped = Math.max(0, Math.min(max, safe));
@@ -321,11 +322,18 @@ export function inventoryWindowAt(query: InventoryWindowQuery): InventoryHit | u
     const offset = localY - bar.y;
     const onThumb =
       query.scroll.max > 0 &&
-      offset >= 12 + query.scroll.offset &&
-      offset < 24 + query.scroll.offset;
+      offset >= VSCR_CELL + query.scroll.offset &&
+      offset < 2 * VSCR_CELL + query.scroll.offset;
     return {
       kind: "scrollbar",
-      part: offset < 12 ? "prev" : offset >= bar.height - 12 ? "next" : onThumb ? "thumb" : "track",
+      part:
+        offset < VSCR_CELL
+          ? "prev"
+          : offset >= bar.height - VSCR_CELL
+            ? "next"
+            : onThumb
+              ? "thumb"
+              : "track",
     };
   }
   const slot = inventorySlotAt(localX, localY, query.scroll.row);
@@ -354,12 +362,12 @@ export function drawInventoryScrollbar(
   };
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x + bar.x, y + bar.y, 12, bar.height);
+  ctx.rect(x + bar.x, y + bar.y, VSCR_CELL, bar.height);
   ctx.clip();
-  for (let py = 12; py < bar.height - 12; py += 12) stamp("base", py);
+  for (let py = VSCR_CELL; py < bar.height - VSCR_CELL; py += VSCR_CELL) stamp("base", py);
   stamp(geometry.max ? "prev0" : "prev", 0);
-  stamp(geometry.max ? "next0" : "next", bar.height - 12);
-  if (geometry.max) stamp(dragging ? "thumb1" : "thumb0", 12 + geometry.offset);
+  stamp(geometry.max ? "next0" : "next", bar.height - VSCR_CELL);
+  if (geometry.max) stamp(dragging ? "thumb1" : "thumb0", VSCR_CELL + geometry.offset);
   ctx.restore();
 }
 

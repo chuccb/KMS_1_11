@@ -4885,3 +4885,13 @@ typecheck／build／format 全綠。
   `a6` 是這一刀裡的第幾段（`sub_520F20` 的 `i_2`，`.c:293777`）；`sub_41F200`（Miss）／`sub_41E610`（數字）用同一個點。
 - **0 不是傷害值**：`sub_4C8ED0` 出不來 0（它的下限是 1），0 是「碰到但沒扣血」的表示，
   而 `sub_487A30` 走 `sub_41F200` 那條（Miss 點陣圖）——所以 `damageGlyphLayout` 對任何 `!(value > 0)` 都印 MISS。
+
+### UI/Basic.img 的兩個 cell 尺寸（2026-10-21，ADR-119）
+
+- `VScr`：**十個 cell 全部 12×12**（`enabled/{prev0,prev1,next0,next1,base,thumb0,thumb1}`、`disabled/{prev,next,base}`）。EXE 裡沒有 `VScr` 的 ASCII——`CCtrlScrollBar` 經 `sub_4591A0` 取 cell 名——所以 WZ 是唯一 oracle。`bun tools/wz.ts dump "UI/Basic.img"` 與 `server/test/ui-basic-cells.test.ts`（開 `Data.wz` 逐格讀回）皆可證。
+- 由它推出：`3 * VSCR_CELL + vScrollTravel(h) === h`，即 `prev` 帽＋拇指行程＋拇指＋`next` 帽＝整條軌道。原碼 `sub_452500`/`sub_4526A0` 的 `len - 3*arrow`／`len - arrow` 就是這個（交易 log：`+68 arrowLen=12`、`+72 trackLen=216` → zones 12／204、`thumbTop = 12 + floor(pos*180/(max-1))`、`dy/180`）。
+- 已命名為 `VSCR_CELL`（`client/vscroll.ts`），替掉 `vscroll`／`inventory-window`／`shop-window`／`npcdialogue`／`trade-state`／`messenger-state`／`skills`／`main.js` 共 24 處裸 12／36。
+- **未採用的說法**：既有筆記稱 `sub_451240` 以 COM art cell 高度回填 `+68`。實讀 `MapleStory.exe.c:89105`：`*(this + 17) = pvargDest` 存的是 COM 呼叫回傳的**物件指標**（vtable+80／+88），不是數字。故不重複該說法。
+- `Tab`：**九個 cell，`left{0,1}` 4×24、`middle{0,1,2}` 14×24、`right{0,1}` 12×24、`fill{0,1}` 1×24**（`sub_4582A0` 經 `sub_4591A0` 取這四種 piece 名）。已命名 `TAB_HEIGHT/TAB_LEFT/TAB_MIDDLE/TAB_RIGHT/TAB_FILL`（`client/shop-window.ts`）；`SHOP.tabs.height` 與 `INVENTORY.tabs[*].height` 都是 24。
+- NPC 對話捲軸的拖拉用 **18**（＝帽 + 半個拇指，抓中心），背包／商店用 **12**（拇指上緣）。兩者不一致但**皆保留原行為**，已註明。
+- 三個捲軸幾何模型**刻意不合併**：`CCtrlScrollBar` 用 `floor(pos*travel/(max-1))`，背包／商店用 `round(travel*pos/max)`——兩條不同的原碼公式。

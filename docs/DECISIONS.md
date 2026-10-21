@@ -3898,3 +3898,32 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1284 pass / 0 fail、5315 expect() calls、148 files、282.23s**（ADR-117 基線 1278/0，本輪 +6 全為新測試，0 新失敗）。新測試：`native-posture-attack` +2、`native-attack-effects` +2、`native-damage-render` +2。
   - 撰寫時失敗一次，是**我自己算錯**：以為 `shotNearDistance({left:-80, right:20})` 會被遠界夾成 19，實際上 −65 那道先夾、結果是 65。照原碼的夾取順序改測試，沒有改實作去遷就。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——畫面、手感、傷害都不會與 ADR-117 的 LIVE 有差別。
+
+## ADR-119：把 `UI/Basic.img` 的兩個 cell 尺寸收回常數（VScr 12px／Tab 4-14-12-1×24），本輪無行為改變（2026-10-21）
+
+- **背景**：接續「全部東西達到最乾淨易讀，且一律嚴格只用最新版 TypeScript／ESNext／Bun」。上一輪收的是攻擊與傷害數字的常數，這一輪收**畫面自己量自己的那兩個 cell**：`VScr`（每一支捲軸）與 `Tab`（兩條頁籤）。**這一輪沒有翻出 bug，也沒有任何行為改變**——`client_probe.ts` 前後輸出逐位元組相同可證。價值一樣是可讀性與「下次改動不會踩空」，不是修好什麼。
+
+- **（一）`client/vscroll.ts`：新增 `VSCR_CELL = 12` 與 `vScrollTravel(height, arrow = VSCR_CELL)`**。
+  - **證據在 WZ，不在 EXE**：`VScr` 這三個字母在 PE 裡**完全沒有 ASCII**——`CCtrlScrollBar` 是透過 `sub_4591A0` 的 property lookup 拿到 cell 名字的。所以唯一的 oracle 是 `bun tools/wz.ts dump "UI/Basic.img"`，它對 `enabled/{prev0,prev1,next0,next1,base,thumb0,thumb1}` 與 `disabled/{prev,next,base}` **十個 cell 全部回 `Canvas 12x12`**。`server/test/ui-basic-cells.test.ts` 現在直接開 `Data.wz` 把這十個讀回來釘住，常數不能自己漂走。
+  - **為什麼是「三格」**：`sub_452500`／`sub_4526A0` 的算法是 `len - 3*arrow` 與 `len - arrow`（FINDINGS §4.19／ADR-094 已記：交易 log 那支是 `+68 arrowLen=12`、`+72 trackLen=216`，zones 切在 `v<=12→101`、`v>=204→102`，`thumbTop = 12 + floor(pos*180/(max-1))`，拖拉 `dy/180`）。`216 - 36 = 180`、`216 - 12 = 204` 兩個都對上。所以 **`prev` 帽＋行程＋拇指＋`next` 帽 = 整條軌道**，也就是 `3 * VSCR_CELL + vScrollTravel(h) === h`——這條不變量現在對五支真實捲軸（背包 208、商店 207／174、交易 216、messenger 218）都有一條測試。
+  - **替換掉的地方**：`vscroll.ts` 兩處（`thumbTop`／`moveTo`）、`inventory-window.ts` 五處（含 `INVENTORY.scrollbar.width`）、`shop-window.ts` 五處、`npcdialogue.ts` 三處、`trade-state`／`messenger-state`／`skills` 的 `width: 12, arrow: 12` 三處、`client/main.js` 五處（商店拖拉兩處、背包拖拉兩處、滾輪命中框一處）。**原來寫成 `height - 36` 的行程三處，現在是 `vScrollTravel(height)`。**
+  - **一條我沒有照抄的說法**：FINDINGS 記「`+68 arrowLen=12`（`sub_451240` Create 後以 COM art cell 高度回填，asm 004512E4-004512F5）」。我實際讀了 `sub_451240`（`MapleStory.exe.c:89105`）：它在兩個分支都寫 `*(this + 17) = pvargDest`，而 `pvargDest` 是 COM vtable+80／+88 呼叫的**回傳物件指標**，不是一個數字。**所以我沒有在註解裡重複「從 art cell 高度回填」這個說法**——我只寫我驗證過的：WZ 十個 cell 都是 12×12，而原碼的 `arrow` 就是 12。
+
+- **（二）NPC 對話捲軸的 `18` 是刻意保留的行為，不是筆誤**：`npcdialogue.ts` 的拖拉換算是 `(p.y - y - 18) / (visibleHeight - 36)`，而背包／商店用的是 `12`（拇指**上緣**）。18 = 一個帽 + 半個拇指，也就是**抓在拇指中心**。這兩邊不一致，但我沒有「統一」它——那是行為改變，而且沒有原碼依據說哪邊對。現在 18 寫成 `VSCR_CELL + VSCR_CELL / 2` 並註明「center grab」，讓下一個人知道這是選擇不是打錯。
+
+- **（三）`shop-window.ts` 的 `SHOP.scrollbar[side]` 補上 `width`**：`shopWindowAt` 原來是 `inside({ ...bar, width: 12 }, …)`——因為型別裡沒有 `width`，只好就地攤開補一個。現在型別與常數都帶 `width: VSCR_CELL`，命中測試回到 `inside(bar, …)`，與背包那邊一致。
+
+- **（四）`client/shop-window.ts`：新增 `TAB_HEIGHT = 24`／`TAB_LEFT = 4`／`TAB_MIDDLE = 14`／`TAB_RIGHT = 12`／`TAB_FILL = 1`**。
+  - 同樣是 WZ 實證：`Tab/{left0,left1}` 4x24、`{middle0,middle1,middle2}` 14x24、`{right0,right1}` 12x24、`{fill0,fill1}` 1x24——九個 cell 全讀回來釘住（`sub_4582A0` 用 `sub_4591A0` 拿這四種 piece 名，state 是 lit=1／下一個=2／其餘=0，`fill` 只有亮與不亮）。
+  - `drawShopTabs` 裡的 `14` 原本出現三次（crease 位置、fill 迴圈終點、最後一枚 crease 落在右帽下）、`4` 與 `12` 各一次、`fill++` 的 1 是隱含的。現在全部用常數，並多一條測試：**四種 piece 的寬度加總必須剛好等於 `SHOP.tabs.width`（198）**，不多不少。
+  - 順手確認：`SHOP.tabs.height` 與 `INVENTORY.tabs[*].height` 都是 24，也就是同一個 cell 高度——這條也進了測試。
+
+- **（五）工具鏈仍為最新版，本輪不需要升級**：今日重新查 `registry.npmjs.org/<pkg>/latest` → typescript **7.0.2**、prettier **3.9.10**、`@oven/bun-linux-x64` **1.4.3**（`dist.shasum 2f13abde…`，與 ADR-093 的 pin 一致）、`@types/bun` **1.4.3**。playwright-core 1.64.1／@sparticuz/chromium 153.0.0 未重查（本輪未動瀏覽器測試路徑），沿用 ADR-117 的查核結果。**沒有任何 pin 落後，所以本輪沒有升級動作**——「一律只用最新版」在這一輪是查核結論，不是改動。
+
+- **（六）刻意**沒有**做的事**：`vscroll.ts`、`inventory-window.ts`、`shop-window.ts` 三個捲軸幾何模型看起來像重複，**但它們的取整不同**——`CCtrlScrollBar`（交易／messenger／技能）用 `floor(pos * travel / (max - 1))`，背包與商店用 `round(travel * pos / max)`。這是兩條不同的原碼公式，合併會改變行為，所以只共用 `VSCR_CELL`／`vScrollTravel`，**沒有共用取整**。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner）。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1291 pass / 0 fail、5315 expect() calls、149 files、277.24s**（ADR-118 基線 1284/0、148 files，本輪 **+7 全為新測試**、0 新失敗）。新測試全在新增的 `server/test/ui-basic-cells.test.ts`（7 項：VScr 十格／三格不變量／五支幾何／背包分區／商店分區／Tab 九格／四 piece 鋪滿）。
+  - `client/main.js` 5547 → **5548** 行（只多一行 `import { VSCR_CELL }`）。
+  - 撰寫時沒有紅燈，但有兩次自己的烏龍：第一次 patch script 因為冪等判斷寫得太鬆，把 `vscroll.ts` 的 doc block 與四個檔案的 import 行**各重複插入了一次**，是 `git checkout` 掉 `vscroll.ts` 重跑、再去重 import 收掉的；`npcdialogue.ts` 的 WZ 走訪一開始也因為 `WzNode` 包著 `WzCanvas`（不是直接是 `WzCanvas`）而 `{} is not iterable`，照實際結構改走訪才對。兩個都是我的工具錯，不是產品碼錯。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——畫面、手感、捲軸拖動都不會與 ADR-118 的 LIVE 有差別。

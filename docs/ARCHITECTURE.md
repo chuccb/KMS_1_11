@@ -103,7 +103,7 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5547 行，靜態耦合普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；ADR-109 已抽出 `client/inventory-window.ts`、ADR-110 已抽出 `client/shop-window.ts`、ADR-112 再把 status bar 收回 `client/hud.ts`／`client/jobs.ts`）。
+client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5548 行，靜態耦合普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；ADR-109 已抽出 `client/inventory-window.ts`、ADR-110 已抽出 `client/shop-window.ts`、ADR-112 再把 status bar 收回 `client/hud.ts`／`client/jobs.ts`）。
 最新增量（ADR-109）：strict／format／build 通過；新增 `inventory-window` 9/9；探針 TS 化後輸出與舊 `.mjs` 逐行相同；完整 suite 見 ADR-109（ADR-108 已達 **1213 pass / 0 fail**、44 項歷史失敗全數結案）。
 前輪完整 1205/8（1213 tests／142 files）與此前 1064/44 均保留歷史時點意義，見 [BUN_MIGRATION](BUN_MIGRATION.md)。strict／format／build 通過不代表全遊戲驗收。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。

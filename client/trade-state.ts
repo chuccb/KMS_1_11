@@ -1,6 +1,6 @@
 import type { MiniRoomEvent } from "../server/src/protocol/miniroom.ts";
 import type { ItemSlot } from "../server/src/protocol/itemslot.ts";
-import { vScrollScroller } from "./vscroll.ts";
+import { vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 
 /** `sub_4D2DB0` allocates eight 16-byte cells per side; `sub_4D63C0` numbers them 1..8.
  * Lives here (not in the server codec) so browser modules never pull a server runtime import;
@@ -63,7 +63,7 @@ export const TRADE_WINDOW = {
   },
   /** `sub_4D5440`: the count glyph anchor relative to the slot cell (`sub_525AE0` = left/top). */
   count: { dx: -1, dy: 19 },
-  scrollbar: { x: 262, y: 21, width: 12, height: 216, arrow: 12 },
+  scrollbar: { x: 262, y: 21, width: VSCR_CELL, height: 216, arrow: VSCR_CELL },
   slots: { size: 32, pitch: 35, columns: 2, rows: 4, top: 129, left: 11, right: 292 },
   names: { left: 44, right: 327, y: 110 },
   mesos: { left: 84, right: 366, y: 277 },

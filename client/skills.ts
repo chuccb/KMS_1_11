@@ -23,7 +23,7 @@ interface SkillWindowOptions {
 }
 import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
-import { vScrollPage, vScrollScroller } from "./vscroll.ts";
+import { vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 import { tooltipAnchor } from "./tooltip.ts";
 /** CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI. */
 export const SKILL_WINDOW = {
@@ -81,7 +81,10 @@ export function skillWindow({
   // sub_4ECD40's `vtable[8](bar, this, 2001, 1, 0, 161, 116, 162, 0)` (+44 = 156), and
   // sub_4EE420 keeps `SetMax(bar, listCount - 3)` - four visible rows, so rowCapacity 4.
   // sub_4ED8E0 draws from `*(bar + 48)` (pos) straight into the 8-byte skill records.
-  const scrollBar = vScrollScroller({ x: 161, y: 116, width: 12, height: 162, arrow: 12 }, 4);
+  const scrollBar = vScrollScroller(
+    { x: 161, y: 116, width: VSCR_CELL, height: 162, arrow: VSCR_CELL },
+    4,
+  );
   /** The old hand-rolled 0..rows-4 offset is exactly the native scrollbar pos. */
   const offset = () => scrollBar.pos;
   const catalogs = new Map<number, SkillCatalogue>();

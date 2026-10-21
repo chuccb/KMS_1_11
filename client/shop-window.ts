@@ -27,6 +27,7 @@
 import { INVENTORY_TABS, isRechargeableItem } from "./inventory-window.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
+import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 
 export type ShopSide = "buy" | "sell";
 export const SHOP_SIDES: readonly ShopSide[] = ["buy", "sell"];
@@ -71,7 +72,7 @@ export interface ShopLayout {
   /** The dark field left of the sheet's own `메소` label. */
   mesos: { right: number; y: number };
   /** 12-px scrollbars (`UI/Basic.img/VScr` canvases are 12x12), drawn only when a list overflows. */
-  scrollbar: Record<ShopSide, { x: number; y: number; height: number }>;
+  scrollbar: Record<ShopSide, { x: number; y: number; width: number; height: number }>;
 }
 
 export const SHOP: ShopLayout = {
@@ -92,8 +93,8 @@ export const SHOP: ShopLayout = {
   },
   mesos: { right: 368, y: 272 },
   scrollbar: {
-    buy: { x: 189, y: 68, height: 207 },
-    sell: { x: 390, y: 89, height: 174 },
+    buy: { x: 189, y: 68, width: VSCR_CELL, height: 207 },
+    sell: { x: 390, y: 89, width: VSCR_CELL, height: 174 },
   },
 };
 
@@ -155,7 +156,7 @@ export function shopScrollbarGeometry(
 ): ShopScrollGeometry | undefined {
   const max = rowCount - shopVisibleRows(side);
   if (max <= 0) return undefined;
-  const travel = SHOP.scrollbar[side].height - 36;
+  const travel = vScrollTravel(SHOP.scrollbar[side].height);
   return {
     max,
     travel,
@@ -211,17 +212,19 @@ export function shopWindowAt(query: ShopWindowQuery): ShopHit | undefined {
   for (const side of SHOP_SIDES) {
     const geometry = shopScrollbarGeometry(side, query.rows[side].length, query.scroll[side]);
     const bar = SHOP.scrollbar[side];
-    if (geometry !== undefined && inside({ ...bar, width: 12 }, localX, localY)) {
+    if (geometry !== undefined && inside(bar, localX, localY)) {
       const offset = localY - bar.y;
+      const onThumb =
+        offset >= VSCR_CELL + geometry.offset && offset < 2 * VSCR_CELL + geometry.offset;
       return {
         kind: "scrollbar",
         side,
         part:
-          offset < 12
+          offset < VSCR_CELL
             ? "prev"
-            : offset >= bar.height - 12
+            : offset >= bar.height - VSCR_CELL
               ? "next"
-              : offset >= 12 + geometry.offset && offset < 24 + geometry.offset
+              : onThumb
                 ? "thumb"
                 : "track",
       };
@@ -253,19 +256,32 @@ export function drawShopScrollbar(
   stamp("prev0", y);
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x, y + 12, 12, bar.height - 24);
+  ctx.rect(x, y + VSCR_CELL, VSCR_CELL, bar.height - 2 * VSCR_CELL);
   ctx.clip();
-  for (let tile = 12; tile < bar.height - 12; tile += 12) stamp("base", y + tile);
+  for (let tile = VSCR_CELL; tile < bar.height - VSCR_CELL; tile += VSCR_CELL)
+    stamp("base", y + tile);
   ctx.restore();
-  stamp("next0", y + bar.height - 12);
-  stamp("thumb0", y + 12 + geometry.offset);
+  stamp("next0", y + bar.height - VSCR_CELL);
+  stamp("thumb0", y + VSCR_CELL + geometry.offset);
 }
 
 /**
- * The four category tabs, built out of `UI/Basic.img/Tab` the way `CCtrlTab` (sub_4582A0) paints
- * them: one 4-px `left` cap, a run of 1-px `fill` columns per tab, a 14-px `middle` crease at each
- * tab's right edge, and one 12-px `right` cap that fades back into the sheet's navy strip. The
- * crease is state 1 under the lit tab and state 2 when the next tab is the lit one.
+ * The `UI/Basic.img/Tab` cell sizes: every cell in the sheet is 24 px tall and one of four widths
+ * (`bun tools/wz.ts dump "UI/Basic.img"` - `left{0,1}` 4x24, `middle{0,1,2}` 14x24, `right{0,1}`
+ * 12x24, `fill{0,1}` 1x24), which is exactly the four pieces `CCtrlTab` (`sub_4582A0`) builds a
+ * strip from: one `left` cap, a run of 1-px `fill` columns, a 14-px `middle` crease at each tab's
+ * right edge, and one `right` cap closing the strip. Both tab strips in the client are 24 px tall
+ * for the same reason - `SHOP.tabs.height` and every `INVENTORY.tabs[*].height`.
+ */
+export const TAB_HEIGHT = 24;
+export const TAB_LEFT = 4;
+export const TAB_MIDDLE = 14;
+export const TAB_RIGHT = 12;
+export const TAB_FILL = 1;
+
+/**
+ * The four category tabs the way `CCtrlTab` (sub_4582A0) paints them. The crease is state 1 under
+ * the lit tab and state 2 when the next tab is the lit one.
  */
 export function drawShopTabs(
   ctx: CanvasRenderingContext2D,
@@ -282,9 +298,7 @@ export function drawShopTabs(
   );
   const x0 = originX + tabs.x;
   const y = originY + tabs.y;
-  const cap = 4;
-  const right = 12;
-  const inner = tabs.width - cap - right;
+  const inner = tabs.width - TAB_LEFT - TAB_RIGHT;
   const stamp = (piece: string, x: number): void => {
     const entry = image(`UI/Basic.img/Tab/${piece}`);
     if (entry.ready) ctx.drawImage(entry.img, x, y);
@@ -293,24 +307,24 @@ export function drawShopTabs(
   ctx.font = "11px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  let start = x0 + cap;
+  let start = x0 + TAB_LEFT;
   for (let index = 0; index < count; index++) {
-    const end = x0 + cap + Math.round((inner * (index + 1)) / count);
+    const end = x0 + TAB_LEFT + Math.round((inner * (index + 1)) / count);
     const lit = index === open;
     // The crease belongs to this tab's right edge, so the last one sits under the right cap.
+    const crease = index < count - 1 ? TAB_MIDDLE : 0;
     if (index < count - 1) {
       const piece = lit ? "middle1" : index + 1 === open ? "middle2" : "middle0";
-      stamp(piece, end - 14);
+      stamp(piece, end - TAB_MIDDLE);
     }
     const state = lit ? 1 : 0;
-    for (let fill = start; fill < end - (index < count - 1 ? 14 : 0); fill++)
-      stamp(`fill${state}`, fill);
+    for (let fill = start; fill < end - crease; fill += TAB_FILL) stamp(`fill${state}`, fill);
     // `sub_4582A0` drops an unselected label one pixel, which is what makes the lit tab stand out.
     ctx.fillStyle = "#000000";
     ctx.fillText(INVENTORY_TABS[index]?.label ?? "", (start + end) / 2, y + (lit ? 12 : 13));
     start = end;
   }
-  stamp(`right${open === count - 1 ? 1 : 0}`, x0 + tabs.width - right);
+  stamp(`right${open === count - 1 ? 1 : 0}`, x0 + tabs.width - TAB_RIGHT);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }

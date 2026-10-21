@@ -46,6 +46,7 @@ import { dialogueAssets } from "./dialogue-assets.ts";
 import { drawSimpleTooltip } from "./tooltip.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 import { drawUtilFrame, drawUtilTextFrame } from "./utildialog.ts";
+import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 import {
   DIALOGUE_FONT,
   DIALOGUE_COLORS,
@@ -494,19 +495,25 @@ export function npcDialogue({ ctx, image, audio, point, onOpen, onReply }: Dialo
       p = point(event),
       x = c.x + c.textX + c.textWidth,
       y = c.y + c.textY;
-    if (p.x < x || p.x >= x + 12 || p.y < y || p.y >= y + c.visibleHeight) return;
+    if (p.x < x || p.x >= x + VSCR_CELL || p.y < y || p.y >= y + c.visibleHeight) return;
     event.preventDefault();
-    if (p.y < y + 12) setScroll(c.scroll - 1);
-    else if (p.y >= y + c.visibleHeight - 12) setScroll(c.scroll + 1);
+    if (p.y < y + VSCR_CELL) setScroll(c.scroll - 1);
+    else if (p.y >= y + c.visibleHeight - VSCR_CELL) setScroll(c.scroll + 1);
     else {
       dragging = true;
-      setScroll(((p.y - y - 18) / (c.visibleHeight - 36)) * c.maxScroll);
+      // The thumb is grabbed at its centre, not its top edge: one cap plus half a thumb.
+      const grab = VSCR_CELL + VSCR_CELL / 2;
+      setScroll(((p.y - y - grab) / vScrollTravel(c.visibleHeight)) * c.maxScroll);
     }
   });
   window.addEventListener("mousemove", (event) => {
     if (!current || !dragging) return;
     const c = current;
-    setScroll(((point(event).y - c.y - c.textY - 18) / (c.visibleHeight - 36)) * c.maxScroll);
+    // Same centre-grab offset as the mousedown arm above.
+    const grab = VSCR_CELL + VSCR_CELL / 2;
+    setScroll(
+      ((point(event).y - c.y - c.textY - grab) / vScrollTravel(c.visibleHeight)) * c.maxScroll,
+    );
   });
   window.addEventListener("mouseup", () => {
     dragging = false;
@@ -588,15 +595,16 @@ export function npcDialogue({ ctx, image, audio, point, onOpen, onReply }: Dialo
           base = "UI/Basic.img/VScr/enabled";
         ctx.save();
         ctx.beginPath();
-        ctx.rect(sx, sy, 12, c.visibleHeight);
+        ctx.rect(sx, sy, VSCR_CELL, c.visibleHeight);
         ctx.clip();
-        for (let py = 12; py < c.visibleHeight - 12; py += 12) stamp(`${base}/base`, sx, sy + py);
+        for (let py = VSCR_CELL; py < c.visibleHeight - VSCR_CELL; py += VSCR_CELL)
+          stamp(`${base}/base`, sx, sy + py);
         stamp(`${base}/prev0`, sx, sy);
-        stamp(`${base}/next0`, sx, sy + c.visibleHeight - 12);
+        stamp(`${base}/next0`, sx, sy + c.visibleHeight - VSCR_CELL);
         stamp(
           `${base}/${dragging ? "thumb1" : "thumb0"}`,
           sx,
-          sy + 12 + Math.round(((c.visibleHeight - 36) * c.scroll) / c.maxScroll),
+          sy + VSCR_CELL + Math.round((vScrollTravel(c.visibleHeight) * c.scroll) / c.maxScroll),
         );
         ctx.restore();
       }
