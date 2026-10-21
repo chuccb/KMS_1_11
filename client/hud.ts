@@ -17,6 +17,103 @@ export function expPercent(value: number, max: number): number {
   return gaugeFill(100, value, max);
 }
 
+/**
+ * The 2003 status bar (`UI/StatusBar.img`).
+ *
+ * `CUIStatusBar` is a window at (0, 392) of the 800x600 surface (`sub_545450(this, 0, 392, 800,
+ * 208)`), and it is not one picture: a 243x208 left panel, the 446x27 chat bar along the bottom and
+ * the 111x136 key pad at the right edge. HP/MP/EXP are 1-px gauge sheets stretched to the troughs
+ * the client fills - `v36 = 163 * hp` in `sub_4FA5E0` is the 163-px width, and `sub_4FA170`'s
+ * tooltip boxes name the same rectangles (HP 143..159, MP 162..178, EXP 190..198).
+ *
+ * The layout is gathered here with the rest of the HUD geometry (`STATUS_GAUGES`, `gaugeFill`,
+ * `statusVitalText`) because they are the same window's own rectangles; main.js keeps the hover and
+ * press state and asks these helpers with it.
+ */
+export interface StatusBarButton {
+  /** `UI/StatusBar.img/<name>/<state>/0` - `normal`, `mouseOver`, `pressed`. */
+  name: string;
+  x: number;
+  /** Relative to `STATUS_BAR.y`, like every other coordinate of this window. */
+  y: number;
+  w: number;
+  h: number;
+  action: string;
+}
+
+export const STATUS_BAR: Readonly<{
+  y: number;
+  panel: { path: string; x: number; y: number };
+  chat: { path: string; x: number; y: number };
+  keys: { path: string; x: number; y: number };
+  gauges: typeof STATUS_GAUGES;
+  buttons: readonly StatusBarButton[];
+}> = Object.freeze({
+  y: 392,
+  panel: { path: "UI/StatusBar.img/base/0", x: 0, y: 392 },
+  chat: { path: "UI/StatusBar.img/base/1", x: 243, y: 573 },
+  keys: { path: "UI/StatusBar.img/base/2", x: 689, y: 464 },
+  gauges: STATUS_GAUGES,
+  // `base/0` carries the same pixels at these spots; the client still draws the button widgets on
+  // top of it so a hover or a press can swap the face (36x35, and `BtMenu` 38x17).
+  buttons: [
+    { name: "BtItem", x: 9, y: 7, w: 36, h: 35, action: "inventory" },
+    { name: "BtEquip", x: 9, y: 43, w: 36, h: 35, action: "equip" },
+    { name: "BtStat", x: 38, y: 67, w: 36, h: 35, action: "stat" },
+    { name: "BtSkill", x: 9, y: 91, w: 36, h: 35, action: "skill" },
+    { name: "BtMenu", x: 192, y: 91, w: 38, h: 17, action: "menu" },
+  ],
+});
+
+/** The button under a SURFACE point, or `undefined`. `y` is already offset by `STATUS_BAR.y`. */
+export function statusBarButtonAt(x: number, y: number): StatusBarButton | undefined {
+  return STATUS_BAR.buttons.find(
+    (button) =>
+      x >= button.x &&
+      x < button.x + button.w &&
+      y >= STATUS_BAR.y + button.y &&
+      y < STATUS_BAR.y + button.y + button.h,
+  );
+}
+
+/** Every face the bar can show, so a hover or a press never has to wait for a fetch. */
+export function preloadStatusBar(image: (path: string) => unknown): void {
+  for (const button of STATUS_BAR.buttons)
+    for (const state of ["normal", "mouseOver", "pressed"])
+      image(`UI/StatusBar.img/${button.name}/${state}/0`);
+}
+
+/** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
+export function statusText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  align: CanvasTextAlign = "left",
+): void {
+  ctx.font = HUD_FONT;
+  ctx.textAlign = align;
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#000000";
+  ctx.fillText(text, x, y);
+}
+
+/** Integer division: HP/MP 163px, EXP 151px (4FA5E0). One source pixel stretched to the fill. */
+export function drawStatusGauge(
+  ctx: CanvasRenderingContext2D,
+  image: HtmlImageLookup,
+  key: "hp" | "mp" | "exp",
+  value: number,
+  max: number,
+): void {
+  const trough = STATUS_BAR.gauges[key];
+  const entry = image(`UI/StatusBar.img/gauge/${key}`);
+  if (!entry.ready || max <= 0) return;
+  const filled = gaugeFill(trough.w, value, max);
+  if (filled <= 0) return;
+  ctx.drawImage(entry.img, 0, 0, 1, trough.h, trough.x, STATUS_BAR.y + trough.y, filled, trough.h);
+}
+
 /** Native title is a separate 40px-high layer, anchored (799-width,3), not a minimap header.
  * WZ marks have 38x38 pixels. Gulim BA/16 white font + black offset shadow; browser font metrics differ.
  */

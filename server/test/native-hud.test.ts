@@ -4,11 +4,17 @@ import assert from "node:assert/strict";
 import {
   gaugeFill,
   expPercent,
+  STATUS_BAR,
   STATUS_GAUGES,
+  drawStatusGauge,
   mapTitleLayout,
   drawItemCount,
+  statusBarButtonAt,
+  statusText,
   statusVitalText,
+  preloadStatusBar,
 } from "../../client/hud.ts";
+import { jobNameOf } from "../../client/jobs.ts";
 import {
   QUICK_SLOTS,
   quickSlotAt,
@@ -171,4 +177,111 @@ test("local quickslot profiles are owner scoped, corrupt/blocked storage cannot 
     },
   };
   assert.equal(quickItemProfile(blocked, "a").bind(0, 2000000), true);
+});
+
+test("CUIStatusBar: the 392 window, its three plates and five buttons with exclusive edges", () => {
+  assert.equal(STATUS_BAR.y, 392);
+  assert.deepEqual(
+    [STATUS_BAR.panel, STATUS_BAR.chat, STATUS_BAR.keys].map((p) => [p.x, p.y]),
+    [
+      [0, 392],
+      [243, 573],
+      [689, 464],
+    ],
+  );
+  assert.equal(STATUS_BAR.gauges, STATUS_GAUGES, "the bar fills the HUD's own troughs");
+  assert.deepEqual(
+    STATUS_BAR.buttons.map((b) => [b.name, b.x, b.y, b.w, b.h, b.action]),
+    [
+      ["BtItem", 9, 7, 36, 35, "inventory"],
+      ["BtEquip", 9, 43, 36, 35, "equip"],
+      ["BtStat", 38, 67, 36, 35, "stat"],
+      ["BtSkill", 9, 91, 36, 35, "skill"],
+      ["BtMenu", 192, 91, 38, 17, "menu"],
+    ],
+  );
+  // y is relative to the window, so the surface row is 392 + button.y; right and bottom exclude.
+  const at = (x: number, y: number) => statusBarButtonAt(x, y)?.name;
+  assert.equal(at(9, 399), "BtItem");
+  assert.equal(at(44, 433), "BtItem");
+  assert.equal(at(8, 399), undefined);
+  assert.equal(at(45, 399), undefined);
+  assert.equal(at(9, 398), undefined, "one pixel above the window's first button");
+  assert.equal(at(9, 435), "BtEquip", "392 + 43");
+  assert.equal(at(192, 483), "BtMenu");
+  assert.equal(at(229, 483), "BtMenu");
+  assert.equal(at(230, 483), undefined);
+  assert.equal(at(192, 500), undefined, "BtMenu is 17 high, not 35");
+  // BtEquip covers 435..469 and BtSkill 483..517, so x=9 has a real 13px gap between them.
+  assert.equal(at(9, 475), undefined, "the gap between BtEquip and BtSkill");
+  assert.equal(at(400, 500), undefined);
+});
+
+test("every button face is preloaded once per state, so a hover never waits on a fetch", () => {
+  const asked: string[] = [];
+  preloadStatusBar((path) => asked.push(path));
+  assert.equal(asked.length, 15);
+  assert.equal(asked[0], "UI/StatusBar.img/BtItem/normal/0");
+  assert.equal(asked[1], "UI/StatusBar.img/BtItem/mouseOver/0");
+  assert.equal(asked[2], "UI/StatusBar.img/BtItem/pressed/0");
+  assert.equal(asked.at(-1), "UI/StatusBar.img/BtMenu/pressed/0");
+  assert.deepEqual(
+    asked.filter((p) => p.includes("BtStat")),
+    [
+      "UI/StatusBar.img/BtStat/normal/0",
+      "UI/StatusBar.img/BtStat/mouseOver/0",
+      "UI/StatusBar.img/BtStat/pressed/0",
+    ],
+  );
+});
+
+test("jobNameOf reads the native table exactly, then the 100s root, then 초보자", () => {
+  assert.equal(jobNameOf(0), "초보자");
+  assert.equal(jobNameOf(112), "영웅", "an exact id wins over the root");
+  assert.equal(jobNameOf(199), "검사", "an id with no entry falls back to its 100s root");
+  assert.equal(jobNameOf(311), "레인저");
+  assert.equal(jobNameOf(900), "초보자", "no table entry at all");
+});
+
+test("status text is plain black 12px Gulim, top-aligned, right-aligned only when asked", () => {
+  const calls: Record<string, unknown>[] = [];
+  const ctx = {
+    font: "",
+    textAlign: "",
+    textBaseline: "",
+    fillStyle: "",
+    fillText: (...args: unknown[]) => calls.push({ ...ctx, args }),
+  };
+  statusText(ctx as unknown as CanvasRenderingContext2D, "Lv.7", 54, 508);
+  statusText(ctx as unknown as CanvasRenderingContext2D, "검사", 136, 508, "right");
+  assert.deepEqual(
+    calls.map((c) => [c.font, c.textAlign, c.textBaseline, c.fillStyle, c.args]),
+    [
+      ["12px 'Gulim', '굴림', 'KMSCJK', sans-serif", "left", "top", "#000000", ["Lv.7", 54, 508]],
+      ["12px 'Gulim', '굴림', 'KMSCJK', sans-serif", "right", "top", "#000000", ["검사", 136, 508]],
+    ],
+  );
+});
+
+test("4FA5E0: one source pixel stretched to the integer fill, and nothing at all when empty", () => {
+  const draws: unknown[][] = [];
+  const ctx = { drawImage: (...args: unknown[]) => draws.push(args) };
+  const image = (ready: boolean) => () =>
+    ({ ready, img: { tag: "gauge" } }) as unknown as { ready: boolean; img: HTMLImageElement };
+  // 163 px trough, 40 of 200 -> 32 px; the source column is 1 px wide and the trough's own height.
+  drawStatusGauge(ctx as unknown as CanvasRenderingContext2D, image(true), "hp", 40, 200);
+  assert.deepEqual(draws, [[{ tag: "gauge" }, 0, 0, 1, 16, 49, 535, 32, 16]]);
+  draws.length = 0;
+  drawStatusGauge(ctx as unknown as CanvasRenderingContext2D, image(true), "exp", 10, 0);
+  assert.equal(draws.length, 0, "a zero maximum is not a full bar");
+  drawStatusGauge(ctx as unknown as CanvasRenderingContext2D, image(true), "hp", 0, 200);
+  assert.equal(draws.length, 0, "an empty bar draws nothing, not a 1px sliver");
+  drawStatusGauge(ctx as unknown as CanvasRenderingContext2D, image(false), "mp", 5, 10);
+  assert.equal(draws.length, 0, "an unloaded sheet is skipped whole");
+  drawStatusGauge(ctx as unknown as CanvasRenderingContext2D, image(true), "mp", 200, 200);
+  assert.deepEqual(
+    draws,
+    [[{ tag: "gauge" }, 0, 0, 1, 16, 49, 554, 163, 16]],
+    "full is the whole trough",
+  );
 });

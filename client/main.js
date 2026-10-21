@@ -85,7 +85,20 @@ import { systemMenu } from "./systemmenu.ts";
 import { whisperNameError } from "./whisper.ts";
 import {chatBalloons} from "./chatballoons.ts";
 import { chatHistory } from "./chatlog.ts";
-import { HUD_FONT, STATUS_GAUGES, gaugeFill, expPercent, drawMapTitle, drawItemCount, statusVitalText } from "./hud.ts";
+import {
+  HUD_FONT,
+  STATUS_BAR,
+  STATUS_GAUGES,
+  drawStatusGauge as paintStatusGauge,
+  drawMapTitle,
+  drawItemCount,
+  expPercent,
+  gaugeFill,
+  preloadStatusBar,
+  statusBarButtonAt,
+  statusText as paintStatusText,
+  statusVitalText,
+} from "./hud.ts";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.ts";
 import { animationFrame } from "./animation.ts";
 import { deathEffects, deathPose } from "./death.ts";
@@ -104,7 +117,7 @@ import { temporaryStats, drawTemporaryStats } from "./temporarystats.ts";
 import { naturalRecovery } from "./recovery.ts";
 import { testTools } from "./testtools.ts";
 import { skillWindow } from "./skills.ts";
-import { NATIVE_JOB_NAMES } from "./jobs.ts";
+import { jobNameOf } from "./jobs.ts";
 import {
   weaponIdOf,
   basicAmmo,
@@ -2469,90 +2482,31 @@ function drawEntitySprite(
 }
 
 /* --------------------------------------------------------------------------------------------
- * The 2003 status bar (`UI/StatusBar.img`).
- *
- * `CUIStatusBar` is a window at (0, 392) of the 800x600 surface (`sub_545450(this, 0, 392, 800,
- * 208)`), and it is not one picture: a 243x208 left panel, the 446x27 chat bar along the bottom and
- * the 111x136 key pad at the right edge. HP/MP/EXP are 1-px gauge sheets stretched to the troughs
- * the client fills - `v36 = 163 * hp` in `sub_4FA5E0` is the 163-px width, and `sub_4FA170`'s
- * tooltip boxes name the same rectangles (HP 143..159, MP 162..178, EXP 190..198).
+ * The 2003 status bar. `STATUS_BAR` (the 392 window, its three `base/N` plates and its five `Bt*`
+ * buttons), `statusBarButtonAt`, `preloadStatusBar`, `statusText` and `drawStatusGauge` now live in
+ * client/hud.ts next to the rest of that window's geometry (`STATUS_GAUGES`, `gaugeFill`,
+ * `statusVitalText`); the job name is client/jobs.ts's `jobNameOf`, next to the table it reads.
+ * What stays here is the state: which button the cursor is over and which one a press started on.
  * ------------------------------------------------------------------------------------------ */
-const STATUS_BAR = {
-  y: 392,
-  panel: { path: "UI/StatusBar.img/base/0", x: 0, y: 392 },
-  chat: { path: "UI/StatusBar.img/base/1", x: 243, y: 573 },
-  keys: { path: "UI/StatusBar.img/base/2", x: 689, y: 464 },
-  gauges: STATUS_GAUGES,
-  // `base/0` carries the same pixels at these spots; the client still draws the button widgets on
-  // top of it so a hover or a press can swap the face (36x35, and `BtMenu` 38x17).
-  buttons: [
-    { name: "BtItem", x: 9, y: 7, w: 36, h: 35, action: "inventory" },
-    { name: "BtEquip", x: 9, y: 43, w: 36, h: 35, action: "equip" },
-    { name: "BtStat", x: 38, y: 67, w: 36, h: 35, action: "stat" },
-    { name: "BtSkill", x: 9, y: 91, w: 36, h: 35, action: "skill" },
-    { name: "BtMenu", x: 192, y: 91, w: 38, h: 17, action: "menu" },
-  ],
-};
 
 /** The `Bt*` action the cursor is over, and the one a press started on. */
 let statusHover;
 let statusPressed;
 
-/** The bar's button at a surface point, or `undefined`. */
+/** The bar's button at a surface point, or `undefined` while there is no local player. */
 function statusButtonAt(x, y) {
   if (!selfView) return undefined;
-  for (const button of STATUS_BAR.buttons) {
-    const by = STATUS_BAR.y + button.y;
-    if (
-      x >= button.x &&
-      x < button.x + button.w &&
-      y >= by &&
-      y < by + button.h
-    )
-      return button;
-  }
-  return undefined;
+  return statusBarButtonAt(x, y);
 }
 
-/** The job names `CUIStatusBar` prints from its own table (this archive has no String.wz). */
-for (const button of STATUS_BAR.buttons)
-  for (const state of ["normal", "mouseOver", "pressed"])
-    artImage(`UI/StatusBar.img/${button.name}/${state}/0`);
-const JOB_NAMES = NATIVE_JOB_NAMES;
+preloadStatusBar(artImage);
 
-function jobNameOf(job) {
-  return (
-    JOB_NAMES.get(job) ?? JOB_NAMES.get(Math.floor(job / 100) * 100) ?? "초보자"
-  );
-}
-
-/** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
 function statusText(text, x, y, align = "left") {
-  ctx.font = HUD_FONT;
-  ctx.textAlign = align;
-  ctx.textBaseline = "top";
-  ctx.fillStyle = "#000000";
-  ctx.fillText(text, x, y);
+  paintStatusText(ctx, text, x, y, align);
 }
 
-/** Integer division: HP/MP 163px, EXP 151px (4FA5E0). */
 function drawStatusGauge(key, value, max) {
-  const trough = STATUS_BAR.gauges[key];
-  const entry = artImage(`UI/StatusBar.img/gauge/${key}`);
-  if (!entry.ready || max <= 0) return;
-  const filled = gaugeFill(trough.w, value, max);
-  if (filled <= 0) return;
-  ctx.drawImage(
-    entry.img,
-    0,
-    0,
-    1,
-    trough.h,
-    trough.x,
-    STATUS_BAR.y + trough.y,
-    filled,
-    trough.h,
-  );
+  paintStatusGauge(ctx, artImage, key, value, max);
 }
 
 

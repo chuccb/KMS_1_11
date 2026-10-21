@@ -38,6 +38,11 @@ export const NATIVE_JOB_NAMES: ReadonlyMap<number, string> = new Map([
   [422, "고스트"],
 ]);
 /** sub_43FFB0: root, second job, then third/fourth ancestors; beginners have no book. */
+/** `CUIStatusBar` prints the name from this table; this archive has no String.wz. */
+export function jobNameOf(job: number): string {
+  return NATIVE_JOB_NAMES.get(job) ?? NATIVE_JOB_NAMES.get(Math.floor(job / 100) * 100) ?? "초보자";
+}
+
 export function nativeSkillBooks(job: number): number[] {
   if (!Number.isInteger(job) || !NATIVE_JOB_NAMES.has(job) || job === 0) return [];
   const root = Math.trunc(job / 100) * 100,
