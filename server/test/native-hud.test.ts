@@ -6,6 +6,7 @@ import {
   expPercent,
   STATUS_BAR,
   STATUS_GAUGES,
+  drawNamePlate,
   drawStatusGauge,
   mapTitleLayout,
   drawItemCount,
@@ -284,4 +285,40 @@ test("4FA5E0: one source pixel stretched to the integer fill, and nothing at all
     [[{ tag: "gauge" }, 0, 0, 1, 16, 49, 554, 163, 16]],
     "full is the whole trough",
   );
+});
+
+test("47D110 name plate: A0 black, transparent 1px corners, text 2px inside, centred on x", () => {
+  const log: unknown[][] = [];
+  const ctx = {
+    font: "",
+    textAlign: "",
+    textBaseline: "",
+    fillStyle: "",
+    save: () => log.push(["save"]),
+    restore: () => log.push(["restore"]),
+    measureText: (text: string) => ({ width: text.length * 6.5 }),
+    fillRect: (...args: unknown[]) => log.push(["rect", ctx.fillStyle, ...args]),
+    fillText: (...args: unknown[]) => log.push(["text", ctx.fillStyle, ...args]),
+  };
+  drawNamePlate(ctx as unknown as CanvasRenderingContext2D, "멋진모험가", 100.4, 200.6);
+  // "멋진모험가" is 5 glyphs -> 32.5 -> ceil 33 + 5 = 38 wide; left = 100 - 19, top = 201 + 2.
+  const w = 38;
+  assert.deepEqual(log, [
+    ["save"],
+    ["rect", "rgba(0,0,0,0.6274509803921569)", 82, 203, 36, 16],
+    ["rect", "rgba(0,0,0,0.6274509803921569)", 81, 204, 1, 14],
+    ["rect", "rgba(0,0,0,0.6274509803921569)", 81 + w - 1, 204, 1, 14],
+    ["text", "#ffffff", "멋진모험가", 83, 205],
+    ["restore"],
+  ]);
+  assert.equal(ctx.font, "12px 'Gulim', '굴림', 'KMSCJK', sans-serif");
+  assert.equal(ctx.textBaseline, "top");
+  log.length = 0;
+  // NPCs pass #ffff20; an absent name paints nothing at all - not an empty plate.
+  drawNamePlate(ctx as unknown as CanvasRenderingContext2D, "루미너스", 10, 20, "#ffff20");
+  assert.equal(log.find((entry) => entry[0] === "text")?.[1], "#ffff20");
+  log.length = 0;
+  drawNamePlate(ctx as unknown as CanvasRenderingContext2D, undefined, 10, 20);
+  drawNamePlate(ctx as unknown as CanvasRenderingContext2D, "", 10, 20);
+  assert.deepEqual(log, []);
 });

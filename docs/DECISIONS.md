@@ -3747,3 +3747,19 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **沙箱重置的處理（本輪第二次）**：編輯過程沙箱又重置一次（HEAD 退回 `99ff07b`、`generated/` 含工具鏈整包消失）。處理順序：先把編輯中的 `hud.ts`／`jobs.ts` 複製到 `/tmp`，再 `git fetch` + `git reset --hard origin/arena/593e75b0-kms-1-11` 拉回**已推送**的 `374f39e`，貼回後 `git diff --stat` 顯示 **112 insertions / 0 deletions**，證明兩個檔案的內容是「已推送版本 + 純新增」，沒有把任何既有內容回退掉。工具鏈以 npm 重裝 `@oven/bun-linux-x64@1.4.3`（與 ADR-110／111 同版）。
 - **文件同步**：README、`docs/ARCHITECTURE.md`、`docs/BUN_MIGRATION.md`（第 17／244 行）、`docs/TOOLCHAIN.md`（第 7／69 行）、`docs/ROADMAP.md`、`docs/STRICT_FRAME_PLAY_TOOLS.md` 的 `main.js` 行數（5662 → 5616）同步；client TS 維持 108 支（本輪是收回既有模組，未新增檔案）。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策：找不到存檔就開全新隔離世界，不用新 fixture 假裝舊角色）。無遊戲行為改變（探針輸出逐位元組相同）。
+
+## ADR-113：name plate 與傳送門漩渦收回既有模組；天氣／霧債務的證據清查（資料已定位，動畫未做）
+
+- **背景**：ADR-112 把 status bar 收回 `hud.ts` 之後，繼續同一條線——**不是「哪個耦合低就搬哪個」（那條路 ADR-112 已證明抽盡），而是「哪個東西的鄰居已經在別的模組裡」**。同時處理債務清單裡的「天氣／霧尚未接」：那一行只說「沒接」，沒說原版到底有什麼，所以本輪先把證據讀出來，再決定能不能做。
+- **（一）name plate → `client/hud.ts`**：`drawName` 是 `CLife::47D110` 的名牌，唯一外部依賴是 `HUD_FONT`（已在 hud.ts）與 `ctx`。整支搬到 hud.ts 成為 `drawNamePlate(ctx, name, x, y, color = "#ffffff")`，main.js 的 `drawName` 退化成注入 `ctx` 的一行委派，**3 處呼叫點（NPC `#ffff20`、自己、其他玩家）一字未動**。搬過去時把原註解升級成可驗證的規格：寬 `ceil(measureText(name)) + 5`、高 16、`left = round(x) - trunc(w/2)`、`top = round(y) + 2`、底色 **A0 黑（`rgba(0,0,0,0.6274509803921569)` = 160/255）**、四角各留 1px 透明（主體內縮 1px 再加兩根 1x14 的端條）、文字在 `+2,+2`。
+- **（二）傳送門漩渦 → `client/portals.ts`**：`drawPortals` 拆成「誰在畫面上」（**純**）與「畫」（留在 main.js，因為它要用 `drawArchiveImage` 與 `loopFrame`）。新的 `portalSwirls(portals, cameraX, cameraY, bounds, margin = 120)` 只回傳 **`pt == 2` 的傳送門**（`pt == 0` 出生點、`pt == 1` 隱藏通道都沒有圖）在畫面上的座標，並以 120px 邊界外擴做剔除（對齊原版的「精靈足跡」剔除，不是整張地圖）。main.js 的 `drawPortals` 現在是五行：取幀 → 問 `portalSwirls` → 逐格 `drawArchiveImage`。
+- **（三）天氣／霧：證據讀完了，但**本輪不實作動畫**，理由寫在下面**：
+  - **資料確實存在**：`sub_46E7C0`（由 `sub_469980` 呼叫）讀 `Map/Map/%09d.img/info` 的 **`cloud`／`snow`／`rain`** 三個欄位；本 checkout 的 Data.wz **100 張地圖全部有這三個欄位**，其中 **17 張有值**：`cloud = 1` 共 12 張（101030000／101040000／101040001／101040002／102000000 佩里翁／102010000／102020000／106000000／106000001／106000100／106000101），`snow = 1` 共 5 張（105030000／105040000／105040100／105040200／105070000 深森林系），**`rain = 1` 只有 1 張（105080000 드레이크사냥터）**。
+  - **素材只有一半**：`Map/MapHelper.img/weather` 只有 **`snow/0`（29x29，單幀）** 與 **`cloud/0..6`（331x175 到 95x63 七幀）**——**沒有 `rain`**，所以那張雨天在地圖有旗標、在本版素材裡沒有圖。
+  - **三個初始化進入點已定位**：`sub_46E7C0` 末端依旗標分派——`cloud` → `sub_46ECE0`、`snow` → `sub_46F610`、`rain` → `sub_473990` + `sub_470320`。`sub_46F610`（雪）裡已可讀到的常數：粒子以 `n100`（0..100）為索引、**透明度 `255 - 2 * n100`**、間隔 **`50000 / n100` + 隨機基數**。
+  - **仍未定位**：雪／雲的**更新與繪製**函式（位置、速度、漂移、雲的捲動與層次 z）還埋在這些函式的 COM／VARIANT 呼叫裡，本輪沒有讀完。**依照「硬編碼的部分要徹底弄清楚意義」與「不以調速度掩蓋問題」，在參數未回到原版之前不寫任何動畫**——與其畫一個「看起來像雪」的東西，不如先不畫。
+  - **霧不存在**：100 張地圖的 `info` 欄位頻率統計只有 `version/cloud/snow/rain/streetName/mapName/town/mobRate/bgm/returnMap/mapMark`（＋32 張有 `VRTop/Left/Bottom/Right`），**沒有 `fog` 或任何霧欄位**；`MapHelper.img/weather` 也沒有霧素材。所以「霧」在本版**不是缺實作，是這個版本根本沒有**，債務清單裡的「天氣／霧」應改記為「天氣（雲／雪）」。
+- **驗證**：`client_probe.ts` 抽出前後的輸出 **逐位元組相同**（`diff` 0 行，兩次 exit 0，10 個 banner 全 OK），`prettier` 之後再跑仍是 0 行。新測試 **2 項全過**（`server/test/native-hud.test.ts` 13 → 14：名牌的 A0 底色、1px 透明角、`+2,+2` 文字、置中取整、NPC 黃色、空名字完全不畫；`server/test/presentation-portal.test.ts` 5 → 6：只畫 `pt == 2`、鏡頭位移、邊界剛好在 120 與多 1px 的差別、margin 是參數不是常數）。撰寫時三次失敗全是**我的測試資料算錯**（900 在 800+120 之內、`log.at(-1)` 是 `restore` 不是文字），對照原碼改正，未改動實作。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1248 pass / 0 fail、5315 expect() calls、148 files、316.01s**（ADR-112 基線 1246/0，本輪 +2 全為新測試，0 新失敗）。
+- **沙箱重置（本輪第三次）**：`generated/` 連同 `node_modules` 一起消失、HEAD 退回 `99ff07b`。這次工作樹內容是完整的，所以用 **`git reset --mixed origin/arena/…`（不動工作樹）** 把分支指回已推送的 `81f0a75`，`git status` 隨即全淨——**不用 `--hard` 就不會丟東西**；之後再 `bun install` 與重裝 `@oven/bun-linux-x64@1.4.3`。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。

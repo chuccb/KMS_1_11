@@ -90,6 +90,7 @@ import {
   STATUS_BAR,
   STATUS_GAUGES,
   drawStatusGauge as paintStatusGauge,
+  drawNamePlate,
   drawMapTitle,
   drawItemCount,
   expPercent,
@@ -99,6 +100,7 @@ import {
   statusText as paintStatusText,
   statusVitalText,
 } from "./hud.ts";
+import { portalSwirls } from "./portals.ts";
 import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.ts";
 import { animationFrame } from "./animation.ts";
 import { deathEffects, deathPose } from "./death.ts";
@@ -3475,46 +3477,25 @@ async function swing(skillId=0) {
   }
 }
 
-/** CLife::47D110: child z=5, at feet +(-width/2,2), text +(2,2), A0-black
- * rectangle with transparent 1px corners. Browser Gulim fallback metrics are not original GDI.
- */
+/** CLife::47D110; the plate itself lives in client/hud.ts with the rest of the HUD text. */
 function drawName(name, x, y, color = "#ffffff") {
-  if (!name) return;
-  ctx.save();
-  ctx.font = HUD_FONT;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  const w = Math.ceil(ctx.measureText(name).width) + 5, h = 16;
-  const left = Math.round(x) - Math.trunc(w / 2), top = Math.round(y) + 2;
-  ctx.fillStyle = "rgba(0,0,0,0.6274509803921569)";
-  ctx.fillRect(left + 1, top, w - 2, h);
-  ctx.fillRect(left, top + 1, 1, h - 2);
-  ctx.fillRect(left + w - 1, top + 1, 1, h - 2);
-  ctx.fillStyle = color;
-  ctx.fillText(name, left + 2, top + 2);
-  ctx.restore();
+  drawNamePlate(ctx, name, x, y, color);
 }
 
 /**
  * The portal swirls, exactly where the original draws them: `pt == 2` warps (`pt == 0` is a spawn
  * point and `pt == 1` a hidden passage, neither of which has a picture), using the shared
  * `MapHelper.img/portal/game/pv` animation. They use the fixed portal root z,
- * not an unconditional before/after-actor pass.
+ * not an unconditional before/after-actor pass. Which ones are on screen is `portalSwirls`
+ * (client/portals.ts, next to the rest of the portal rules); only the painting stays here.
  */
 function drawPortals(cameraX, cameraY, now) {
   if (!map || !mapArt) return;
   const frames = mapArt.portalFrames ?? [];
   const frame = loopFrame(frames, now);
   if (frame === undefined) return;
-  for (const portal of map.portals) {
-    if (portal.type !== 2) continue;
-    const x = portal.x - cameraX;
-    const y = portal.y - cameraY;
-    const width = 120;
-    if (x < -width || x > renderSurface.width + width || y < -width || y > renderSurface.height + width)
-      continue;
+  for (const { x, y } of portalSwirls(map.portals, cameraX, cameraY, renderSurface))
     drawArchiveImage(frame, x, y, false);
-  }
 }
 
 // ---------------------------------------------------------------- hud & chat

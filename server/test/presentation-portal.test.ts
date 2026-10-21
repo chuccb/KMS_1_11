@@ -2,6 +2,7 @@ import type { PortalTarget, PortalBody } from "../../client/portals.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { movementPortal, arrivalPortal } from "../../client/portals.ts";
+import { portalSwirls } from "../../client/portals.ts";
 const p = (type = 2, extra: Partial<PortalTarget> = {}) => ({
   name: "door",
   type,
@@ -62,4 +63,36 @@ test("spawn byte indexes non-type-3 array including sp; out-of-range falls back 
   assert.equal(arrivalPortal(map, 1), door);
   assert.equal(arrivalPortal(map, 0), sp);
   assert.equal(arrivalPortal(map, 255), sp);
+});
+
+test("only pt == 2 warps get a swirl, and the 120px margin is the cull, not the whole field", () => {
+  const portals = [
+    { x: 100, y: 100, type: 2 },
+    { x: 200, y: 100, type: 0 }, // a spawn point: no picture
+    { x: 300, y: 100, type: 1 }, // a hidden passage: no picture
+    { x: 400, y: 100, type: 2 },
+    { x: 1000, y: 100, type: 2 }, // off the right edge by more than the margin
+    { x: 100, y: -500, type: 2 }, // far above
+  ];
+  const bounds = { width: 800, height: 600 };
+  assert.deepEqual(portalSwirls(portals, 0, 0, bounds), [
+    { x: 100, y: 100 },
+    { x: 400, y: 100 },
+  ]);
+  // The camera moves the swirl with the field, and the cull is against the surface, not the
+  // field: with the camera at x=90 the 1000 portal sits at 910, still inside 800 + 120.
+  assert.deepEqual(portalSwirls(portals, 90, 100, bounds), [
+    { x: 10, y: 0 },
+    { x: 310, y: 0 },
+    { x: 910, y: 0 },
+  ]);
+  // Exactly on the margin is still drawn; one pixel beyond is not.
+  assert.deepEqual(portalSwirls([{ x: 920, y: 0, type: 2 }], 0, 0, bounds), [{ x: 920, y: 0 }]);
+  assert.deepEqual(portalSwirls([{ x: 921, y: 0, type: 2 }], 0, 0, bounds), []);
+  assert.deepEqual(
+    portalSwirls([{ x: 921, y: 0, type: 2 }], 0, 0, bounds, 200),
+    [{ x: 921, y: 0 }],
+    "the margin is a parameter, not a hard-coded 120",
+  );
+  assert.deepEqual(portalSwirls([], 0, 0, bounds), []);
 });

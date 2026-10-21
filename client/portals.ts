@@ -47,3 +47,30 @@ export function arrivalPortal<T extends PortalTarget>(
   const portals = map.portals.filter((p) => p.type !== 3);
   return portals[index] ?? portals.find((p) => p.name === "sp") ?? portals[0];
 }
+
+/**
+ * The swirls the field paints: `pt == 2` warps only (`pt == 0` is a spawn point and `pt == 1` a
+ * hidden passage, neither of which has a picture - `Map/MapHelper.img/portal/game/pv` is the one
+ * animation). They use the fixed portal root z, not an unconditional before/after-actor pass.
+ *
+ * A warp whose centre is more than `margin` (120) pixels outside the surface is skipped: the native
+ * clip is the surface rectangle grown by the sprite's own footprint, not the whole field.
+ */
+export function portalSwirls(
+  portals: readonly { x: number; y: number; type: number }[],
+  cameraX: number,
+  cameraY: number,
+  bounds: { width: number; height: number },
+  margin = 120,
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (const portal of portals) {
+    if (portal.type !== 2) continue;
+    const x = portal.x - cameraX,
+      y = portal.y - cameraY;
+    if (x < -margin || x > bounds.width + margin || y < -margin || y > bounds.height + margin)
+      continue;
+    out.push({ x, y });
+  }
+  return out;
+}

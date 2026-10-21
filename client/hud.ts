@@ -98,6 +98,38 @@ export function statusText(
   ctx.fillText(text, x, y);
 }
 
+/** CLife::47D110: child z=5, at feet +(-width/2,2), text +(2,2), A0-black
+ * rectangle with transparent 1px corners. Browser Gulim fallback metrics are not original GDI.
+ *
+ * The plate is `ceil(measureText(name)) + 5` wide and 16 high, its corners are left transparent
+ * (the fill is inset a pixel and two 1x14 bars close the ends), and the text sits 2px inside.
+ * `A0` is 160/255. NPCs pass `#ffff20` (see `drawNamePlate`'s caller), players use white.
+ */
+export function drawNamePlate(
+  ctx: CanvasRenderingContext2D,
+  name: string | undefined,
+  x: number,
+  y: number,
+  color = "#ffffff",
+): void {
+  if (!name) return;
+  ctx.save();
+  ctx.font = HUD_FONT;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const w = Math.ceil(ctx.measureText(name).width) + 5,
+    h = 16;
+  const left = Math.round(x) - Math.trunc(w / 2),
+    top = Math.round(y) + 2;
+  ctx.fillStyle = "rgba(0,0,0,0.6274509803921569)"; // A0
+  ctx.fillRect(left + 1, top, w - 2, h);
+  ctx.fillRect(left, top + 1, 1, h - 2);
+  ctx.fillRect(left + w - 1, top + 1, 1, h - 2);
+  ctx.fillStyle = color;
+  ctx.fillText(name, left + 2, top + 2);
+  ctx.restore();
+}
+
 /** Integer division: HP/MP 163px, EXP 151px (4FA5E0). One source pixel stretched to the fill. */
 export function drawStatusGauge(
   ctx: CanvasRenderingContext2D,
