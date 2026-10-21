@@ -3961,3 +3961,27 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` **5548 → 5482 行（−66）**。
   - 撰寫時紅燈三次，都是我自己的錯、不是產品碼錯：改 import 區塊時漏抄了 `shopRowAt`／`shopSellBounds`、多抄了一次 `shopVisibleRows`、多匯入了沒用到的 `ShopListPaint`；另外我用 Python 寫韓文常數時先寫成 `\uXXXX` 跳脫，落地後已換回字面字元。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——商店畫面、購買／販售／補充流程都不會與 ADR-119 的 LIVE 有差別。
+
+## ADR-121：把背包窗的繪製收回 `client/inventory-window.ts`（本輪無行為改變，main.js 5482→5445 行，2026-10-21）
+
+- **背景**：ADR-120 把商店列搬進 `shop-window.ts` 之後，`main.js` 裡剩下最像它的一塊就是背包窗的 `drawInventoryWindow`（95 行）。`inventory-window.ts` 早就備好所有零件（捲軸、標籤、堆疊數、頁籤面、金幣狀態），`main.js` 只是把它們串起來——所以這一輪把串的那一段也搬過去。本輪無任何行為改變——`client_probe.ts` 前後輸出逐位元組相同。
+
+- **（一）搬過去的兩個畫家**：`drawInventoryItems(ctx, image, originX, originY, paint)`（圖示置中於 32px 格、堆疊數、hover 框）與 `drawInventoryTabStrip(ctx, sheet, labels, originX, originY, openTab)`（蓋掉 sheet 自帶的韓文標籤、畫上我們自己的四個）。`main.js` 的 `drawInventoryWindow` 現在只剩：sheet → 關閉鈕 → 頁籤 → 項目 → 捲軸 → 金幣鈕 → 楓幣文字。
+
+- **（二）`INVENTORY_ACTIVE_ICON_INSET = 2` 有原證**：`UI/UIWindow.img/Item/activeIcon` 真的是 **36×36** canvas（`bun tools/wz.ts dump "UI/UIWindow.img"`），比 32px 的格子每邊各大 2px——所以 hover 框那個 `-2` 是「36−32 除以二」，不是喬出來的。
+
+- **（三）堆疊數的 `(-1, +2)` 查不到原證，照實說**：它畫在格子右下角內縮 1px、下方再 +2px，也就是落在 35px pitch 留給 32px 格的那 3px 縫裡。背包自己的數量畫家（`sub_4DB240`，`MapleStory.exe.c:225635`，在 `:225848` 呼叫 `sub_525AE0`）**反編譯後整個埋在 `VARIANTARG` union 裡，讀不出這兩個數字**——我只讀到「y 是某個 rect 欄位減 12」，而那個 rect 是哪一組欄位無法斷定。**所以這兩個常數只命名、不宣稱有原碼依據**（同一個 `sub_525AE0` 在商店那邊是讀得出來的，見 ADR-120）。
+
+- **（四）`INVENTORY_TAB_LABEL`（6/5/22/13/12）也沒有原證**：那是蓋住 sheet 自帶韓文標籤的底板，是我們自己的東西，註解照實寫。
+
+- **（五）修掉一處版面常數重複**：關閉鈕原本寫死 `x + 114, y + 9`，而 `INVENTORY.close = { x: 114, y: 9, width: 32, height: 15 }` 就在同一個模組裡。現在用回常數。
+
+- **（六）刪掉兩個只剩一行的轉接**：`main.js` 的 `drawInventoryScrollbar`（10 行）與 `drawInventoryLabel`（3 行）只是把 `ctx`/`artImage` 補進去，搬移後直接呼叫模組，兩個都刪。
+
+- **（七）順手交叉確認到一條**：`UI/UIWindow.img/Item/backgrnd` 是 **162×315**，與 `INVENTORY.width/height` 完全一致（`server/test/inventory-window.test.ts` 本來就釘著 162×315，現在是**美術檔回過頭證明版面**，不是版面自己說了算）。**要小心別和 FINDINGS 記的「`sub_4D89F0` 的 Equip 窗 176×315」搞混**——那是另一個視窗。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner）。**這個探針對本輪一樣是有限度的證據**：它走協定，碰不到畫布；上面的幾何是靠 WZ 尺寸與版面常數互相對照，不是靠探針。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1296 pass / 0 fail、5315 expect() calls、149 files、283.65s**（ADR-120 基線 1294/0，本輪 **+2 全為新測試**、0 新失敗）。新測試在 `server/test/inventory-window.test.ts`（23→25）：項目格的置中／堆疊數錨點／hover 框，與頁籤面的底板與四個標籤。
+  - `client/main.js` **5482 → 5445 行（−37）**。
+  - 撰寫時紅燈一次，是我自己的錯：搬移後 `main.js` 留下一條孤兒註解（`/** One tab label… */` 接在 `inventoryCellPaint` 頭上），已清掉。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——背包外觀、拖曳、頁籤、捲軸都不會與 ADR-120 的 LIVE 有差別。

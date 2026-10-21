@@ -6,14 +6,20 @@ import assert from "node:assert/strict";
 import {
   CONSUME_FAMILY,
   INVENTORY,
+  INVENTORY_ACTIVE_ICON_INSET,
+  INVENTORY_COUNT_DROP,
+  INVENTORY_COUNT_INSET,
   INVENTORY_DROP_MAX,
   INVENTORY_TABS,
+  INVENTORY_TAB_LABEL,
   MESO_DROP,
   clampInventoryScroll,
   consumeUseRoute,
+  drawInventoryItems,
   drawInventoryLabel,
   drawInventoryScrollbar,
   drawInventoryStackCount,
+  drawInventoryTabStrip,
   hasConsumeUseSound,
   inventoryCellOrigin,
   inventoryCoinState,
@@ -217,6 +223,9 @@ function fakeContext() {
     },
     clip() {
       calls.push("clip");
+    },
+    fillRect(x: number, y: number, width: number, height: number) {
+      calls.push(`fillRect:${x},${y},${width},${height}`);
     },
     drawImage(image: unknown, x: number, y: number) {
       drawn.push({ image, x, y });
@@ -601,4 +610,92 @@ test("sub_526F30 has a Use sound for the three healing families and nothing else
   assert.equal(hasConsumeUseSound(2030000), false);
   assert.equal(hasConsumeUseSound(2040000), false);
   assert.equal(hasConsumeUseSound(1302000), false);
+});
+
+/**
+ * The item painter: every icon is centred in its 32 px slot, the count hangs off the cell's
+ * bottom-right corner, and the hovered cell wears the 36x36 `activeIcon`.
+ *
+ * The frame's 2 px inset is not a guess - `UI/UIWindow.img/Item/activeIcon` really is a 36x36
+ * canvas (`bun tools/wz.ts dump "UI/UIWindow.img"`), two pixels larger than the slot on each side.
+ * The count's (-1, +2) has no such anchor: the inventory's own count painter (`sub_4DB240`)
+ * decompiles into `VARIANTARG` unions too far to read the numbers off it.
+ */
+test("the grid centres each icon in its slot and anchors the count off the cell's bottom-right", () => {
+  const { ctx, calls, drawn, image } = fakeContext();
+  const { grid } = INVENTORY;
+  const cell = inventoryCellOrigin(1, 0);
+  assert.ok(cell);
+  const icon = (name: string, width: number, height: number) => ({
+    img: name as unknown as CanvasImageSource,
+    ready: true,
+    width,
+    height,
+  });
+  drawInventoryItems(ctx, image, 0, 0, {
+    firstRow: 0,
+    cells: [
+      { slot: 1, icon: icon("icon", 30, 24), count: 700 },
+      // Slot 25 is the row below the six this page shows, so it paints nothing at all.
+      { slot: 25, icon: icon("off-page", 32, 32) },
+    ],
+    hovered: 1,
+  });
+  assert.equal(drawn.length, 2, "one icon and one hover frame; the off-page slot draws nothing");
+  // Centred in the slot, whatever the icon measures.
+  assert.equal(drawn[0]?.x, cell.x + Math.floor((grid.size - 30) / 2));
+  assert.equal(drawn[0]?.y, cell.y + Math.floor((grid.size - 24) / 2));
+  // The count: one pixel inside the cell's right edge, two below its bottom - in the 3 px gap the
+  // 35 px pitch leaves under the 32 px slot.
+  const count = [
+    `strokeText:700,${cell.x + grid.size - INVENTORY_COUNT_INSET},${cell.y + grid.size + INVENTORY_COUNT_DROP}`,
+    `fillText:700,${cell.x + grid.size - INVENTORY_COUNT_INSET},${cell.y + grid.size + INVENTORY_COUNT_DROP}`,
+  ];
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("strokeText") || call.startsWith("fillText")),
+    count,
+  );
+  // The hover frame, two pixels outside the cell on every side.
+  assert.equal(drawn[1]?.image, "UI/UIWindow.img/Item/activeIcon");
+  assert.equal(drawn[1]?.x, cell.x - INVENTORY_ACTIVE_ICON_INSET);
+  assert.equal(drawn[1]?.y, cell.y - INVENTORY_ACTIVE_ICON_INSET);
+});
+
+test("the tab strip covers each face's own label and prints the page's four in tab order", () => {
+  const { ctx, calls, drawn } = fakeContext();
+  const sheet = { img: "sheet" as unknown as CanvasImageSource, ready: true };
+  drawInventoryTabStrip(
+    ctx,
+    sheet,
+    INVENTORY_TABS.map((tab) => tab.label),
+    0,
+    0,
+    2, // 소비 - the second tab
+  );
+  // Two faces are stamped from the sheet: the open tab's lit one, and - because the sheet ships
+  // with its first tab already lit - an idle one over cell 0.
+  assert.deepEqual(
+    drawn.map((entry) => String(entry.image)),
+    ["sheet", "sheet"],
+  );
+  // Four label plates, each covering the Korean the stamp carries.
+  const plates = calls.filter((call) => call.startsWith("fillRect"));
+  assert.equal(plates.length, 4);
+  assert.equal(
+    plates[1],
+    `fillRect:${INVENTORY.tabs[1].x + INVENTORY_TAB_LABEL.left},` +
+      `${INVENTORY.tabs[1].y + INVENTORY_TAB_LABEL.top},` +
+      `${INVENTORY_TAB_LABEL.width},${INVENTORY_TAB_LABEL.height}`,
+  );
+  assert.deepEqual(
+    calls
+      .filter((call) => call.startsWith("fillText"))
+      .map((call) => call.slice("fillText:".length).split(",")[0]),
+    INVENTORY_TABS.map((tab) => tab.label),
+  );
+  // Each label sits at its own tab's centre, on the plate's baseline.
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("fillText")).map((call) => Number(call.split(",")[1])),
+    INVENTORY.tabs.map((box) => box.x + box.width / 2),
+  );
 });

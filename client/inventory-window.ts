@@ -386,6 +386,135 @@ export function drawInventoryLabel(
   ctx.fillText(label, centerX, baselineY);
 }
 
+/**
+ * The plate painted over a tab stamp, inside the tab's 34x24 box.
+ *
+ * The sheet is drawn with its own Korean labels already on the strip, so every face that gets
+ * stamped also has to be covered before the page's label goes on. No native constant found for
+ * these four numbers - they are the plate that hides the sheet's own text.
+ */
+export const INVENTORY_TAB_LABEL: Readonly<{
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  baseline: number;
+}> = Object.freeze({ left: 6, top: 5, width: 22, height: 13, baseline: 12 });
+
+/** The four faces: an idle face for the sheet's own lit tab, then each tab's label. */
+export function drawInventoryTabStrip(
+  ctx: CanvasRenderingContext2D,
+  sheet: { img: CanvasImageSource; ready: boolean },
+  labels: readonly string[],
+  originX: number,
+  originY: number,
+  openTab: number,
+): void {
+  if (!sheet.ready) return;
+  for (const face of inventoryTabFaces(openTab)) {
+    if (face.stamped)
+      ctx.drawImage(
+        sheet.img,
+        face.face.x,
+        face.face.y,
+        face.face.width,
+        face.face.height,
+        originX + face.box.x,
+        originY + face.box.y,
+        face.box.width,
+        face.face.height,
+      );
+    // The stamp carries the sheet's own Korean label; cover it and draw the right one.
+    ctx.fillStyle = face.lit ? "#ffffff" : "#ccddee";
+    ctx.fillRect(
+      originX + face.box.x + INVENTORY_TAB_LABEL.left,
+      originY + face.box.y + INVENTORY_TAB_LABEL.top,
+      INVENTORY_TAB_LABEL.width,
+      INVENTORY_TAB_LABEL.height,
+    );
+    drawInventoryLabel(
+      ctx,
+      labels[face.index] ?? "",
+      originX + face.box.x + face.box.width / 2,
+      originY + face.box.y + INVENTORY_TAB_LABEL.baseline,
+      face.lit,
+    );
+  }
+}
+
+/**
+ * The stack count's anchor, relative to the cell's own bottom-right corner: one pixel inside the
+ * right edge and two below the bottom, which lands it in the 3 px gap the 35 px pitch leaves below
+ * the 32 px slot. No native constant found - the inventory's own count painter (`sub_4DB240`)
+ * decompiles too far into `VARIANTARG` unions to read the numbers off it.
+ */
+export const INVENTORY_COUNT_INSET = 1;
+export const INVENTORY_COUNT_DROP = 2;
+
+/**
+ * `UI/UIWindow.img/Item/activeIcon` is a 36x36 canvas (`bun tools/wz.ts dump "UI/UIWindow.img"`),
+ * exactly two pixels larger than the 32 px slot on every side - so the hover frame hangs two
+ * pixels outside the cell on each edge.
+ */
+export const INVENTORY_ACTIVE_ICON_INSET = 2;
+
+/** One slot's painted content; the icon is loaded (or not) by the caller. */
+export interface InventoryCellPaint {
+  slot: number;
+  icon?: { img: CanvasImageSource; ready: boolean; width: number; height: number };
+  count?: number;
+}
+
+/** What {@link drawInventoryItems} needs: the cells to fill in and the slot under the cursor. */
+export interface InventoryItemPaint {
+  /** The first visible row; the slot it holds is `4 * row + 1` (`sub_4DA810`). */
+  firstRow: number;
+  cells: InventoryCellPaint[];
+  /** The hovered slot, which wears the `activeIcon` frame. */
+  hovered?: number;
+}
+
+/** The open tab's items, then the frame under the cursor - `sub_4DA810`'s own painting order. */
+export function drawInventoryItems(
+  ctx: CanvasRenderingContext2D,
+  image: ImageLookup,
+  originX: number,
+  originY: number,
+  paint: InventoryItemPaint,
+): void {
+  const { grid } = INVENTORY;
+  for (const cell of paint.cells) {
+    const at = inventoryCellOrigin(cell.slot, paint.firstRow);
+    if (at === undefined) continue;
+    const cellX = originX + at.x;
+    const cellY = originY + at.y;
+    const icon = cell.icon;
+    if (icon?.ready)
+      ctx.drawImage(
+        icon.img,
+        cellX + Math.floor((grid.size - icon.width) / 2),
+        cellY + Math.floor((grid.size - icon.height) / 2),
+      );
+    if (cell.count !== undefined)
+      drawInventoryStackCount(
+        ctx,
+        cell.count,
+        cellX + grid.size - INVENTORY_COUNT_INSET,
+        cellY + grid.size + INVENTORY_COUNT_DROP,
+      );
+  }
+  if (paint.hovered !== undefined) {
+    const at = inventoryCellOrigin(paint.hovered, paint.firstRow);
+    const frame = image("UI/UIWindow.img/Item/activeIcon");
+    if (at !== undefined && frame.ready)
+      ctx.drawImage(
+        frame.img,
+        originX + at.x - INVENTORY_ACTIVE_ICON_INSET,
+        originY + at.y - INVENTORY_ACTIVE_ICON_INSET,
+      );
+  }
+}
+
 /** The most `0x17` can carry for one throw-away (`short`). */
 export const INVENTORY_DROP_MAX = 32767;
 

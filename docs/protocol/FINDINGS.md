@@ -4909,3 +4909,12 @@ typecheck／build／format 全綠。
 - **未決**：`sub_525AE0` 在本 `MapleStory.exe.c` **只有 `idb` 宣告（第 5343 行）、無函式本體**，因此原版究竟是「固定 8」還是「各 glyph 寬＋間距」推進，此版證據無法判定。現況：商店列用固定 8，status bar 的 `drawItemCount` 用逐 glyph 寬。
 - **無原碼依據**：`SHOP_ROW_TEXT_CLIP = 14`（一行文字的裁切高度）是我們自己的裁切框。
 - 買／賣／補充三個入口的守門（`shopPending || slotPending || mesoPending || modalOpen() || selfView?.hp <= 0`）已收回 `shopActionBlocked()`；注意 `hp === undefined` 時原式 `undefined <= 0` 為 **false**（玩家未知時不擋），已由測試釘住。
+
+### 背包窗的繪製與幾個沒有原證的常數（2026-10-21，ADR-121）
+
+- `UI/UIWindow.img/Item/backgrnd` = **162×315**，與 `INVENTORY.width/height`（`client/inventory-window.ts`）一致——美術檔回頭證明版面。**勿與 `sub_4D89F0` 的 Equip 窗 176×315 混淆**（另一個視窗）。
+- `UI/UIWindow.img/Item/activeIcon` = **36×36**，比 32px 格每邊大 2px → `INVENTORY_ACTIVE_ICON_INSET = 2`（有原證）。
+- 堆疊數錨點（格子右下角內縮 **1**、下方 **+2**，落在 35px pitch 的 3px 縫）**無原證**：背包數量畫家 `sub_4DB240`（`MapleStory.exe.c:225635`，`:225848` 呼叫 `sub_525AE0`）反編譯後埋在 `VARIANTARG` union，讀不出數字。同 `sub_525AE0` 在商店列（`sub_4B5FA0`）是可讀的，見 ADR-120。
+- `INVENTORY_TAB_LABEL`（left 6 / top 5 / width 22 / height 13 / baseline 12）＝蓋住 sheet 自帶韓文標籤的底板，**無原證**。
+- 關閉鈕座標 (114, 9) 已改用 `INVENTORY.close`（原本在 main.js 寫死一份）。
+- 繪製順序（與原頁一致）：sheet → 關閉鈕 → 頁籤面 → 項目格（圖示置中、堆疊數）→ hover 框 → 捲軸 → 金幣鈕 → 楓幣。

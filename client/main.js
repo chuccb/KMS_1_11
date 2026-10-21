@@ -38,18 +38,16 @@ import {
   INVENTORY,
   INVENTORY_TABS,
   clampInventoryScroll,
-  drawInventoryLabel as paintInventoryLabel,
-  drawInventoryScrollbar as paintInventoryScrollbar,
-  drawInventoryStackCount as paintStackCount,
-  inventoryCellOrigin,
-  inventoryCoinState,
   consumeUseRoute,
+  drawInventoryItems as paintInventoryItems,
+  drawInventoryScrollbar as paintInventoryScrollbar,
+  drawInventoryTabStrip as paintInventoryTabs,
   hasConsumeUseSound,
+  inventoryCoinState,
   inventoryDropPlan,
   inventoryScrollbarGeometry as inventoryScrollGeometry,
   inventorySlotAt as inventorySlotAtLayout,
   inventoryStackCount,
-  inventoryTabFaces,
   inventoryTabOfItem,
   inventoryWindowAt as inventoryHitAt,
   isIrreplaceableItem,
@@ -3986,17 +3984,6 @@ window.addEventListener("mouseup", (event) => {
 window.addEventListener("blur", () => {
   inventoryScrollDrag = undefined;
 });
-function drawInventoryScrollbar(x, y) {
-  paintInventoryScrollbar(
-    ctx,
-    artImage,
-    x,
-    y,
-    inventoryScrollbarGeometry(),
-    inventoryScrollDrag !== undefined,
-  );
-}
-
 // The 2003 client keeps a window's place in the registry; a page can only keep it locally.
 try {
   const saved = JSON.parse(
@@ -4230,9 +4217,29 @@ function inventoryWindowAt(x, y) {
   });
 }
 
-/** One tab label, in the sheet's own colours: black on the lit tab, slate on the idle ones. */
-function drawInventoryLabel(label, centerX, baselineY, lit) {
-  paintInventoryLabel(ctx, label, centerX, baselineY, lit);
+/** One cell's painted content: the icon, centred in the slot, and its stack count. */
+function inventoryCellPaint(item) {
+  const icon = itemIcon(item.itemId);
+  return {
+    slot: item.slot,
+    icon: {
+      img: icon.img,
+      ready: icon.ready,
+      width: icon.img.naturalWidth,
+      height: icon.img.naturalHeight,
+    },
+    count: inventoryStackCount(item),
+  };
+}
+
+/** What `paintInventoryItems` needs: the open tab's items, the first visible row, the hovered slot. */
+function inventoryItemsPaint() {
+  const view = inventoryTabView();
+  return {
+    firstRow: inventoryScrollbarGeometry().row,
+    cells: (view?.items ?? []).map(inventoryCellPaint),
+    hovered: inventoryHover?.kind === "slot" ? inventoryHover.slot : undefined,
+  };
 }
 
 /**
@@ -4249,70 +4256,26 @@ function drawInventoryWindow() {
   const closeState = inventoryPressed === "close" && inventoryHover?.kind === "close" ? "pressed"
     : inventoryHover?.kind === "close" ? "mouseOver" : "normal";
   const close = artImage(`UI/UIWindow.img/BtUIClose/${closeState}/0`);
-  if (close.ready) ctx.drawImage(close.img, x + 114, y + 9);
+  if (close.ready) ctx.drawImage(close.img, x + INVENTORY.close.x, y + INVENTORY.close.y);
 
-  // Stamp the tab faces: the lit one over the open tab, an idle one over the sheet's own lit tab.
-  for (const face of inventoryTabFaces(inventoryTab)) {
-    const { box, face: stamp } = face;
-    if (face.stamped) {
-      ctx.drawImage(
-        entry.img,
-        stamp.x,
-        stamp.y,
-        stamp.width,
-        stamp.height,
-        x + box.x,
-        y + box.y,
-        box.width,
-        stamp.height,
-      );
-    }
-    // The stamp carries the sheet's own Korean label; cover it and draw the right one.
-    ctx.fillStyle = face.lit ? "#ffffff" : "#ccddee";
-    ctx.fillRect(x + box.x + 6, y + box.y + 5, 22, 13);
-    drawInventoryLabel(
-      INVENTORY_TABS[face.index].label,
-      x + box.x + box.width / 2,
-      y + box.y + 12,
-      face.lit,
-    );
-  }
+  paintInventoryTabs(
+    ctx,
+    entry,
+    INVENTORY_TABS.map((tab) => tab.label),
+    x,
+    y,
+    inventoryTab,
+  );
+  paintInventoryItems(ctx, artImage, x, y, inventoryItemsPaint());
 
-  // The items of the open tab.
-  const view = inventoryTabView();
-  const { grid } = INVENTORY;
-  const firstRow = inventoryScrollbarGeometry().row;
-  if (view !== undefined) {
-    for (const item of view.items) {
-      const cell = inventoryCellOrigin(item.slot, firstRow);
-      if (cell === undefined) continue;
-      const cellX = x + cell.x;
-      const cellY = y + cell.y;
-      const icon = itemIcon(item.itemId);
-      if (icon.ready) {
-        const width = icon.img.naturalWidth;
-        const height = icon.img.naturalHeight;
-        ctx.drawImage(
-          icon.img,
-          cellX + Math.floor((grid.size - width) / 2),
-          cellY + Math.floor((grid.size - height) / 2),
-        );
-      }
-      const count = inventoryStackCount(item);
-      if (count !== undefined)
-        paintStackCount(ctx, count, cellX + grid.size - 1, cellY + grid.size + 2);
-    }
-  }
-
-  // The hovered cell wears `activeIcon`: a 36x36 frame two pixels larger than the slot.
-  if (inventoryHover?.kind === "slot") {
-    const cell = inventoryCellOrigin(inventoryHover.slot, firstRow);
-    const active = artImage("UI/UIWindow.img/Item/activeIcon");
-    if (cell !== undefined && active.ready)
-      ctx.drawImage(active.img, x + cell.x - 2, y + cell.y - 2);
-  }
-
-  drawInventoryScrollbar(x, y);
+  paintInventoryScrollbar(
+    ctx,
+    artImage,
+    x,
+    y,
+    inventoryScrollbarGeometry(),
+    inventoryScrollDrag !== undefined,
+  );
   const coinState = inventoryCoinState({
     dead: selfView.hp <= 0,
     mesos: selfView.mesos,
