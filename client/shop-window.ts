@@ -26,6 +26,8 @@
  */
 import { INVENTORY_TABS, isRechargeableItem } from "./inventory-window.ts";
 import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
+import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
+import { TAB_FILL, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
@@ -86,8 +88,16 @@ export const SHOP: ShopLayout = {
   sell: { x: 283, y: 31, width: 46, height: 19 },
   recharge: { x: 225, y: 29, width: 50, height: 23 },
   tabs: { x: 206, y: 65, width: 198, height: 24 },
-  buyList: { x: 6, y: 68, rows: 6, pitch: 35, slot: 32, nameX: 42, nameRight: 184 },
-  sellList: { x: 209, y: 91, rows: 5, pitch: 35, slot: 32, nameX: 245, nameRight: 388 },
+  buyList: { x: 6, y: 68, rows: 6, pitch: SLOT_PITCH, slot: SLOT_SIZE, nameX: 42, nameRight: 184 },
+  sellList: {
+    x: 209,
+    y: 91,
+    rows: 5,
+    pitch: SLOT_PITCH,
+    slot: SLOT_SIZE,
+    nameX: 245,
+    nameRight: 388,
+  },
   face: {
     buy: { path: "UI/UIWindow.img/Shop/buy", x: 1, y: 67 },
     sell: { path: "UI/UIWindow.img/Shop/sell", x: 204, y: 90 },
@@ -265,20 +275,6 @@ export function drawShopScrollbar(
   stamp("next0", y + bar.height - VSCR_CELL);
   stamp("thumb0", y + VSCR_CELL + geometry.offset);
 }
-
-/**
- * The `UI/Basic.img/Tab` cell sizes: every cell in the sheet is 24 px tall and one of four widths
- * (`bun tools/wz.ts dump "UI/Basic.img"` - `left{0,1}` 4x24, `middle{0,1,2}` 14x24, `right{0,1}`
- * 12x24, `fill{0,1}` 1x24), which is exactly the four pieces `CCtrlTab` (`sub_4582A0`) builds a
- * strip from: one `left` cap, a run of 1-px `fill` columns, a 14-px `middle` crease at each tab's
- * right edge, and one `right` cap closing the strip. Both tab strips in the client are 24 px tall
- * for the same reason - `SHOP.tabs.height` and every `INVENTORY.tabs[*].height`.
- */
-export const TAB_HEIGHT = 24;
-export const TAB_LEFT = 4;
-export const TAB_MIDDLE = 14;
-export const TAB_RIGHT = 12;
-export const TAB_FILL = 1;
 
 /**
  * The four category tabs the way `CCtrlTab` (sub_4582A0) paints them. The crease is state 1 under

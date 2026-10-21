@@ -4111,3 +4111,50 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - `client/main.js` **維持 5445 行**（只換了一行 import 與一行呼叫），七份文件不必同步行數。
   - 撰寫時紅燈一次，是我自己的錯：第一版 patch script 漏掉 `inventory-window.test.ts` 第 384 行那條 `drawInventoryStackCount(ctx, 700, 100, 200)`，assert 擋下來了，補上「整條測試一起刪」才過。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。**本輪有畫面可見的改變**：背包裡的堆疊數字會從格子右下角移到**左下角**、字型換成原版點陣字；交易窗的堆疊數同樣換成點陣字；商店含 `1` 的數量會靠緊一點；交易窗的道具格與命中框左／上移 1px。協定與操作手感完全不變。
+
+## ADR-124：把 `32`/`35` 的道具格收回 `client/slot.ts`（本輪無行為改變，main.js 維持 5445 行，2026-10-21）
+
+- **背景**：ADR-123 讀 `sub_525AE0` 時順手撞見一件事——**同一個「32px 格、35px pitch」在五個視窗裡各拼一次**：背包 `grid: { size: 32, pitch: 35 }`、商店兩個 list 的 `slot: 32, pitch: 35`、交易 `slots: { size: 32, pitch: 35 }`、快捷鍵列的裸 `32`、裝備窗命中測試的裸 `32`。沒有人說它們是同一個東西，也沒有任何東西擋住漂移。這一輪把它收回一支模組，並回頭確認那兩個數字**在原碼裡出現了五次**。
+
+- **（一）`SLOT_SIZE = 32` 的五個出處**：
+  | 位置 | 原碼 | 讀到什麼 |
+  | --- | --- | --- |
+  | 背包 `sub_4DB990` `:226041` | `SetRect(lprc, 35c+6, 35r+80, 35c+38, 35r+112)` | `38-6 = 112-80 = 32`，**一句話裡同時有兩個數字** |
+  | 交易 `sub_4D5440` `:219870`/`:219871` | `n146 = 35*(v2%2)+291`、`v26 = 35*(v2/2)+160` | 列的底邊是 `35r+160`，故每列是一格 32 |
+  | 商店 `sub_4B5FA0` `:190521` | `n245 = v50 - v54 + 32` | 圖示從列頂往下錨 32 |
+  | 裝備 `sub_4D9110` `:223711` | `x < p < x + 32 && y < q < y + 32` | 14 組座標、每格 32、**兩邊都是嚴格小於** |
+  | 快捷鍵 `sub_4FC440` `:257805` | `n245 = v41 - v46 + 32` | 格子自己的高 |
+- **（二）`SLOT_PITCH = 35`**：背包 `SetRect` 兩軸都是 `35 * (…)`；商店 `n71 += 35`／`n110 += 35`；交易 `35 * (v2 % 2)`／`35 * (v2 / 2)`。
+- **（三）改動**：新增 `client/slot.ts`（只有兩個常數＋一段把五個出處列出來的註解），五個視窗共 10 處裸數字改成讀它。`ITEM_NO_CELL_TOP` 也跟著變成 `SLOT_SIZE - ITEM_NO_CELL_RISE`（`ITEM_NO_CELL_RISE = 12`，就是原碼從 `rect.bottom` 減掉的那個 12），從此**每個數字都有名字**。
+- **（四）順手修掉一條我上一輪留下的過時註解**：`client/trade-window.ts` 的模組文件還寫著「rows from y=129, columns 11/46 and 292/327」——那是 ADR-123 改之前的座標，已經是錯的。現在一併改成原生算術值（128／10,45／291,326）。
+- **（五）誠實標記**：`SLOT_SIZE` 在裝備窗與快捷鍵列**只有大小、沒有 pitch**（裝備窗的 14 格是 PE 裡的座標表，不是網格），所以那兩處只共用 `SLOT_SIZE`。pitch 減 size 剩下的 3px 是格子間的縫，不是格子的一部分——背包與商店的命中測試都擋掉落在縫裡的點擊。
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、exit 0、10 個 banner、`drawImage calls` 仍為 161）。本輪純重命名，所以探針對本輪是有意義的證據。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1318 pass / 0 fail、5315 expect() calls、153 files、282.71s**（ADR-123 基線 1305/0，本輪連 ADR-125 共 **+13 全為新測試**、0 新失敗）。
+  - 新測試 `server/test/slot.test.ts`（7 條）：`sub_4DB990` 那一句 `SetRect` 同時給出 32 與 35；四個網格都宣告同一格；`UI/UIWindow.img/Item/activeIcon` 實測是 `32+4` 見方（**美術檔回頭證明 `SLOT_SIZE`**）；`sub_4D9110` 的 14 格兩邊嚴格小於；`sub_4FC440` 的快捷鍵格與圖示下緣；`ITEM_NO_CELL_TOP = SLOT_SIZE - 12`；背包四欄 `6 + 4×35 = 146` 正好停在捲軸 `x = 147` 的前一格。
+  - `client/main.js` 維持 **5445 行**（本輪沒動它），七份文件不必同步行數。
+  - 撰寫時紅燈一次，是我自己的錯：第一版測試把第四欄的右緣算成 `6 + 2×35 + 32 = 113`，實際是 `6 + 3×35 + 32 = 143`（欄從 0 起算，我少乘一次），assert 擋下來了。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何行為改變——畫面與 ADR-123 的 LIVE 完全一致。
+
+## ADR-125：技能窗的版面全部改名，並把 Tab 片寬收回 `client/tabstrip.ts`（本輪無行為改變，main.js 維持 5445 行，2026-10-21）
+
+- **背景**：ADR-124 收掉道具格之後，`client/skills.ts` 是全 client 剩下最密的裸數字區：`161` 出現 **7 次**、`119` 與 `40` 各 **6 次**、`154` 與 `116` 各 **4 次**，散在版面宣告、四個 DOM 定位、三條命中區、兩處繪製裡，而且沒有一條註解說它們從哪裡來。這一輪回到 `sub_4ECD40`（CUISkill 的建構式），發現**整扇窗的版面就是它建出來的三個控制項**。
+
+- **（一）`sub_4ECD40`（`MapleStory.exe.c:243551`）的三個控制項**：
+  - **`:243618` 的 `CCtrlTab id2000`**：`(*(*(this+217)+32))(…, this, 2000, 3, 52, 170, 0)` → **x 3、y 52、寬 170**，所以頁籤條是 **3..173**。而 `UI/Basic.img/Tab` 自己的左帽 4px、右帽 12px，留下來給頁籤的正好是 **170 − 4 − 12 = 154**，從 **3 + 4 = 7** 開始。我們程式裡那三個裸數字 `3`/`7`/`154`/`173`/`161` 全是這一句話推出來的。
+  - **`:243639` 的 `CCtrlScrollBar id2001`**：`(…, this, 2001, 1, 0, 161, 116, 162, 0)`，緊接 `:243646` 的 `*(*(this+219)+44) = 156`（wrap 寬）。與交易窗、messenger 用的是同一批 `UI/Basic.img/VScr` 格子。
+  - **`:243695`..`:243704` 的四個 `CCtrlButton id(2010+i)`**：`(139, n137)`，`n137 = 137` 起、`n137 += 40`、`while (n137 < 297)` → **137 / 177 / 217 / 257 四顆**，間距 40——**這也是列距**。
+
+- **（二）`client/tabstrip.ts`**：`TAB_HEIGHT`/`TAB_LEFT`/`TAB_MIDDLE`/`TAB_RIGHT`/`TAB_FILL` 原本住在 `shop-window.ts`（ADR-119 放的），但它們是 **`UI/Basic.img/Tab` 這張美術檔的格子尺寸**，不是商店的東西——現在有三張 sheet 用同一條頁籤條（商店 `SHOP.tabs`、技能書 `SKILL_TABS`、背包 `inventoryTabFaces`）。搬到共用模組，商店與 ADR-119 那 7 條測試一行未改、全數仍綠。
+
+- **（三）`client/skills.ts` 新增的常數**：`SKILL_TABS`／`SKILL_TAB_INNER`／`SKILL_SCROLLBAR`／`SKILL_SCROLLBAR_NEXT_Y`／`SKILL_ROWS`／`SKILL_ROW_TOP`／`SKILL_ROW_PITCH`／`SKILL_ROW`／`SKILL_ROW_LIVE`／`SKILL_UP_BUTTON`。16 處裸數字改成讀常數，殘留的只剩宣告本身與註解。
+  - 順手刪掉 `SKILL_WINDOW` 上三個**沒有人讀的欄位**（`rows: 4`／`rowY: 119`／`rowHeight: 40`）——`rowHeight` 這個名字還是錯的，它是 pitch 不是高度。三處 `for (let i = 0; i < 4; i++)` 改成 `SKILL_ROWS`。
+
+- **（四）誠實標記**：`SKILL_ROW_TOP = 119`、`SKILL_ROW = { x: 5, width: 154 }`、`SKILL_ROW_LIVE = 38` **不是原碼數字**——`sub_4ED8E0`（列畫家）反編譯後整個埋在 `VARIANTARG` union 裡讀不出來，這三個是我們當年繞著美術畫的點擊框，註解照實寫。相對地，`40`（列距）有原證：它就是 SP-up 鈕的 `n137 += 40`，而 `279 = 119 + 4×40` 因此自洽。
+- **（五）沒動的一處，照實記**：技能窗的捲軸**底圖是自己手刻的**（`for (let y = 128; y < 266; y += 12) stamp(...)`），而交易窗與 messenger 都走共用的 `paintVScrollbar`。這輪只把數字換成常數、沒有改成共用畫家——`paintVScrollbar` 的 enable/disable 前綴與這裡的 `scrollBar.max > 1` 判斷要一起比對過才能換，留到下一輪。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、exit 0、10 個 banner、`drawImage calls` 仍為 161）。本輪純重命名。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → 見 ADR-124 那節的合併數字（本輪 **+6** 新測試、0 新失敗）。
+  - 新測試 `server/test/skill-window.test.ts`（6 條）：`id2000` 的 (3,52,170) 與 154/7/161 的換算；四片 `UI/Basic.img/Tab` 實測寬高且加總回到 170；`id2001` 的 (161,116,162) 與 278/266；四顆 `id2010+i` 的 (139, 137+40i) 與 `while (n137 < 297)` 只跑四次；`skillRowAt` 的四邊、2px 縫與 offset/count 守門；176×315 與 `sub_43D750` 的 (96,96)。
+  - `client/main.js` 維持 **5445 行**（本輪沒動它），七份文件不必同步行數。
+  - 撰寫時紅燈兩次，都是我自己的錯：第一次忘了宣告 `SKILL_SCROLLBAR`／`SKILL_SCROLLBAR_NEXT_Y`（assert 沒擋到，是 typecheck 抓的）；第二次把 `y += 12` 誤寫成 `y += SLOT_PITCH - 23`（想省一個 import，反而弄出一個意義不明的算式），已改回 `VSCR_CELL`。另外一條測試自己寫錯：`skillRowAt(..., 2, 5)` 的 count 守門會回 `-1`，我原本期待 `5`。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何行為改變——技能窗的外觀、頁籤、捲軸、SP 升級鈕都不會與 ADR-124 的 LIVE 有差別。

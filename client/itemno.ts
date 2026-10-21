@@ -30,6 +30,7 @@
  *  - shop `sub_4B5FA0` (`:190388`, call `:190691`) - `n110_2 = 209`, y = `n110 + 1`.
  *  - `sub_4FC440` (`:257680`, call `:257831`) - `LODWORD(v36) = v41 + 20`. The `+ 20` again.
  */
+import { SLOT_SIZE } from "./slot.ts";
 import type { CanvasImage } from "./render-types.ts";
 
 /** The property `sub_525AE0` indexes by digit (`sub_402E20(&lVal)` -> `sub_406EC0`). */
@@ -50,13 +51,15 @@ export function itemNoDigits(value: number): number[] {
   return Array.from(String(Math.max(0, Math.trunc(value))), (character) => Number(character));
 }
 
+/** What every one of these painters subtracts from the cell's BOTTOM (`rect.bottom - 12`). */
+export const ITEM_NO_CELL_RISE = 12;
+
 /**
- * Where a 32px cell puts its count: every one of these painters hands `sub_525AE0`
- * `(rect.left, rect.bottom - 12)`, and `rect.bottom - 12` is 20 px down from a 32px cell's own top
- * edge. Four independent call sites agree (see the module doc), which is what makes this a native
- * constant rather than one we picked.
+ * Where a cell puts its count: `rect.bottom - ITEM_NO_CELL_RISE`, which against a SLOT_SIZE-tall
+ * cell is 20 px down from its own top edge. Four independent call sites agree (see the module doc),
+ * which is what makes this a native constant rather than one we picked.
  */
-export const ITEM_NO_CELL_TOP = 20;
+export const ITEM_NO_CELL_TOP = SLOT_SIZE - ITEM_NO_CELL_RISE;
 
 /** `n146 += a6 + v34`: this glyph's own width, plus the caller's spacing. */
 export function itemNoAdvance(digit: number, gap = 0): number {

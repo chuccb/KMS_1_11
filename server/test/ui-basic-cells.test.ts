@@ -32,17 +32,8 @@ import {
   inventoryWindowAt,
   type InventoryTabView,
 } from "../../client/inventory-window.ts";
-import {
-  SHOP,
-  TAB_FILL,
-  TAB_HEIGHT,
-  TAB_LEFT,
-  TAB_MIDDLE,
-  TAB_RIGHT,
-  drawShopTabs,
-  shopWindowAt,
-  type ShopRow,
-} from "../../client/shop-window.ts";
+import { SHOP, drawShopTabs, shopWindowAt, type ShopRow } from "../../client/shop-window.ts";
+import { TAB_FILL, TAB_HEIGHT, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "../../client/tabstrip.ts";
 import { TRADE_WINDOW } from "../../client/trade-state.ts";
 import { MESSENGER_WINDOW } from "../../client/messenger-state.ts";
 

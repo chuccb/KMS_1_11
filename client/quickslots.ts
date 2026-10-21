@@ -16,6 +16,7 @@ export interface QuickStorage {
   setItem(key: string, value: string): void;
 }
 import { activeSkill } from "./active-skills.ts";
+import { SLOT_SIZE } from "./slot.ts";
 /** Seven original slots: PE 5BCEC0 / 4FC960 / 4FC9F0 and 511E20's VK dispatch table.
  * Ctrl attacks and Alt jumps; neither is one of these seven configurable slots.
  */
@@ -29,17 +30,20 @@ export const QUICK_SLOTS: readonly { key: string; x: number; y: number }[] = Obj
   { key: "PageDown", x: 764, y: 564 },
 ]);
 export function quickSlotAt(x: number, y: number): number {
-  return QUICK_SLOTS.findIndex((s) => x >= s.x && x < s.x + 32 && y >= s.y && y < s.y + 32);
+  return QUICK_SLOTS.findIndex(
+    (s) => x >= s.x && x < s.x + SLOT_SIZE && y >= s.y && y < s.y + SLOT_SIZE,
+  );
 }
 
 /** 4FC440: a quick-slot icon is anchored by its origin, NOT centred - left = slot.x - originX,
- * top = slot.y + 32 - originY. The 32 is the slot's own height, so an icon whose origin sits at the
- * usual `oy = 32` bottom lands flush with the slot's top edge. */
+ * top = slot.y + SLOT_SIZE - originY (`n245 = v41 - v46 + 32`, `MapleStory.exe.c:257805`). The
+ * SLOT_SIZE is the slot's own height, so an icon whose origin sits at the usual `oy = 32` bottom
+ * lands flush with the slot's top edge. */
 export function quickSlotIconOrigin(
   slot: { x: number; y: number },
   icon: { ox?: number; oy?: number } | undefined,
 ): { x: number; y: number } {
-  return { x: slot.x - (icon?.ox ?? 0), y: slot.y + 32 - (icon?.oy ?? 32) };
+  return { x: slot.x - (icon?.ox ?? 0), y: slot.y + SLOT_SIZE - (icon?.oy ?? SLOT_SIZE) };
 }
 
 /** The skill icon the bar asks for: `Skill/<job block>.img/skill/<id>/icon`. */

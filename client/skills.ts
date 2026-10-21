@@ -25,6 +25,7 @@ import { activeSkill } from "./active-skills.ts";
 import { releaseOnInterrupt } from "./pointer.ts";
 import { vScrollPage, vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 import { tooltipAnchor } from "./tooltip.ts";
+import { TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 /**
  * CUISkill: 4EC910/4ECD40/4ED8E0/4EE5E0. Four 40px rows, not the later two-column skill UI.
  *
@@ -36,14 +37,53 @@ export const SKILL_WINDOW = {
   width: 176,
   height: 315,
   home: { x: 96, y: 96 },
-  rows: 4,
-  rowY: 119,
-  rowHeight: 40,
+};
+
+/**
+ * `sub_4ECD40` (`MapleStory.exe.c:243551`) is where CUISkill builds its controls, and the whole
+ * sheet falls out of three of them:
+ *
+ *  - `CCtrlTab id2000 at (3, 52), 170 wide` (`:243618`) - the strip runs 3..173, and the part the
+ *    CAPS leave for the tabs themselves is 170 - 4 - 12 = 154 wide, from x = 3 + 4 = 7.
+ *  - `CCtrlScrollBar id2001 at (161, 116) height 162` (`:243639`), whose `+44` wrap is 156
+ *    (`:243646`) - the same `UI/Basic.img/VScr` cells the trade log and the messenger use.
+ *  - `CCtrlButton id(2010 + i) at (139, 137 + 40 * i)`, `n137 += 40`, `while (n137 < 297)`
+ *    (`:243695`..`:243704`) - four SP-up buttons on a 40 px pitch, which is also the row pitch.
+ *
+ * The rest of the numbers below are ours: the row band's `x`/`width` and its `SKILL_ROW_LIVE`
+ * height are the click target we drew around the art, not anything the PE states.
+ */
+export const SKILL_TABS = { x: 3, y: 52, width: 170, height: 24 };
+export const SKILL_TAB_INNER = {
+  x: SKILL_TABS.x + TAB_LEFT,
+  width: SKILL_TABS.width - TAB_LEFT - TAB_RIGHT,
+};
+export const SKILL_SCROLLBAR = { x: 161, y: 116, width: VSCR_CELL, height: 162, arrow: VSCR_CELL };
+/** Where the bar's `next` arrow goes: its own bottom edge less one cell. */
+export const SKILL_SCROLLBAR_NEXT_Y = SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height - VSCR_CELL;
+export const SKILL_ROWS = 4;
+export const SKILL_ROW_TOP = 119;
+export const SKILL_ROW_PITCH = 40;
+export const SKILL_ROW = { x: 5, width: 154 };
+export const SKILL_ROW_LIVE = 38;
+export const SKILL_UP_BUTTON = {
+  x: 139,
+  firstY: 137,
+  pitch: SKILL_ROW_PITCH,
+  lastY: 297,
+  width: 17,
+  height: 16,
 };
 export function skillRowAt(x: number, y: number, count: number, offset = 0) {
-  if (x < 5 || x >= 159 || y < 119 || y >= 279) return -1;
-  if ((y - 119) % 40 >= 38) return -1;
-  const row = offset + Math.floor((y - 119) / 40);
+  if (
+    x < SKILL_ROW.x ||
+    x >= SKILL_ROW.x + SKILL_ROW.width ||
+    y < SKILL_ROW_TOP ||
+    y >= SKILL_ROW_TOP + SKILL_ROWS * SKILL_ROW_PITCH
+  )
+    return -1;
+  if ((y - SKILL_ROW_TOP) % SKILL_ROW_PITCH >= SKILL_ROW_LIVE) return -1;
+  const row = offset + Math.floor((y - SKILL_ROW_TOP) / SKILL_ROW_PITCH);
   return row < count ? row : -1;
 }
 export function skillState(
@@ -87,10 +127,7 @@ export function skillWindow({
   // sub_4ECD40's `vtable[8](bar, this, 2001, 1, 0, 161, 116, 162, 0)` (+44 = 156), and
   // sub_4EE420 keeps `SetMax(bar, listCount - 3)` - four visible rows, so rowCapacity 4.
   // sub_4ED8E0 draws from `*(bar + 48)` (pos) straight into the 8-byte skill records.
-  const scrollBar = vScrollScroller(
-    { x: 161, y: 116, width: VSCR_CELL, height: 162, arrow: VSCR_CELL },
-    4,
-  );
+  const scrollBar = vScrollScroller(SKILL_SCROLLBAR, SKILL_ROWS);
   /** The old hand-rolled 0..rows-4 offset is exactly the native scrollbar pos. */
   const offset = () => scrollBar.pos;
   const catalogs = new Map<number, SkillCatalogue>();
@@ -136,7 +173,7 @@ export function skillWindow({
     signature = key;
     root.classList.toggle("hidden", !opened || !isInGame());
     position(root, at.x, at.y, SKILL_WINDOW.width, SKILL_WINDOW.height);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < SKILL_ROWS; i++) {
       const skill = active(i),
         button = el(`sp-up-${i}`);
       const tab = el(`skill-tab-${i}`),
@@ -146,9 +183,15 @@ export function skillWindow({
       tab.setAttribute("aria-selected", String(i === selected));
       tab.setAttribute("aria-label", book?.name ?? "無技能書");
       if (book) {
-        const x = i === 0 ? 3 : 7 + Math.round((154 * i) / books.length);
-        const end = i === books.length - 1 ? 173 : 7 + Math.round((154 * (i + 1)) / books.length);
-        position(tab, x, 52, end - x, 24);
+        const x =
+          i === 0
+            ? SKILL_TABS.x
+            : SKILL_TAB_INNER.x + Math.round((SKILL_TAB_INNER.width * i) / books.length);
+        const end =
+          i === books.length - 1
+            ? SKILL_TABS.x + SKILL_TABS.width
+            : SKILL_TAB_INNER.x + Math.round((SKILL_TAB_INNER.width * (i + 1)) / books.length);
+        position(tab, x, SKILL_TABS.y, end - x, SKILL_TABS.height);
       }
       button.hidden = !skill;
       button.disabled = !canUp(skill);
@@ -214,7 +257,7 @@ export function skillWindow({
     return { x: p.x - at.x, y: p.y - at.y };
   };
   position(el("skill-close"), 128, 9, 32, 15);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < SKILL_ROWS; i++) {
     el(`skill-tab-${i}`).addEventListener("click", () => {
       if (isModal() || !books[i]) return;
       selected = i;
@@ -223,7 +266,13 @@ export function skillWindow({
       sync();
     });
     const node = el(`sp-up-${i}`);
-    position(node, 139, 137 + 40 * i, 17, 16);
+    position(
+      node,
+      SKILL_UP_BUTTON.x,
+      SKILL_UP_BUTTON.firstY + SKILL_UP_BUTTON.pitch * i,
+      SKILL_UP_BUTTON.width,
+      SKILL_UP_BUTTON.height,
+    );
     node.addEventListener("click", () => {
       const skill = active(i);
       if (!opened || !isInGame() || !skill || !canUp(skill) || blocked()) return;
@@ -259,19 +308,35 @@ export function skillWindow({
     if (p.y < 35 && e.target === root) {
       drag = { x: p.x, y: p.y };
       e.preventDefault();
-    } else if (p.y >= 52 && p.y < 76 && p.x >= 3 && p.x < 173 && books.length) {
+    } else if (
+      p.y >= SKILL_TABS.y &&
+      p.y < SKILL_TABS.y + SKILL_TABS.height &&
+      p.x >= SKILL_TABS.x &&
+      p.x < SKILL_TABS.x + SKILL_TABS.width &&
+      books.length
+    ) {
       selected = Math.min(
         books.length - 1,
-        Math.max(0, Math.floor(((p.x - 7) * books.length) / 154)),
+        Math.max(0, Math.floor(((p.x - SKILL_TAB_INNER.x) * books.length) / SKILL_TAB_INNER.width)),
       );
       scroll(0);
       sync();
-    } else if (p.x >= 11 && p.x < 46 && p.y >= 119 && p.y < 279) {
+    } else if (
+      p.x >= 11 &&
+      p.x < 46 &&
+      p.y >= SKILL_ROW_TOP &&
+      p.y < SKILL_ROW_TOP + SKILL_ROWS * SKILL_ROW_PITCH
+    ) {
       const index = skillRowAt(p.x, p.y, rows().length, offset()),
         skill = rows()[index];
       if (skill && (learned.get(skill.id) ?? 0) > 0 && activeSkill(skill.id))
         onBindDrag(skill, point(e));
-    } else if (p.x >= 161 && p.x < 173 && p.y >= 116 && p.y < 278) {
+    } else if (
+      p.x >= SKILL_SCROLLBAR.x &&
+      p.x < SKILL_SCROLLBAR.x + VSCR_CELL &&
+      p.y >= SKILL_SCROLLBAR.y &&
+      p.y < SKILL_SCROLLBAR.y + SKILL_SCROLLBAR.height
+    ) {
       // sub_452500/sub_4521E0 through the shared scroller: arrows step, the track pages by
       // sub_452600's max(floor(max/16),16), the thumb starts the drag, and holding repeats
       // every 50 ms (sub_4523D0) - the old hand-rolled ±4 page was not the native amount.
@@ -388,14 +453,15 @@ export function skillWindow({
   };
   const tabs = () => {
     if (!books.length) return;
-    const piece = (p: string, x: number) => stamp(`UI/Basic.img/Tab/${p}`, x, 52);
-    piece(`left${selected === 0 ? 1 : 0}`, 3);
-    let start = 7;
+    const piece = (p: string, x: number) => stamp(`UI/Basic.img/Tab/${p}`, x, SKILL_TABS.y);
+    piece(`left${selected === 0 ? 1 : 0}`, SKILL_TABS.x);
+    let start = SKILL_TAB_INNER.x;
     for (let i = 0; i < books.length; i++) {
-      const end = 7 + Math.round((154 * (i + 1)) / books.length),
+      const end = SKILL_TAB_INNER.x + Math.round((SKILL_TAB_INNER.width * (i + 1)) / books.length),
         lit = i === selected;
-      if (i < books.length - 1) piece(`middle${lit ? 1 : i + 1 === selected ? 2 : 0}`, end - 14);
-      for (let x = start; x < end - (i < books.length - 1 ? 14 : 0); x++)
+      if (i < books.length - 1)
+        piece(`middle${lit ? 1 : i + 1 === selected ? 2 : 0}`, end - TAB_MIDDLE);
+      for (let x = start; x < end - (i < books.length - 1 ? TAB_MIDDLE : 0); x++)
         piece(`fill${lit ? 1 : 0}`, x);
       ctx.textAlign = "center";
       ctx.fillStyle = "#000";
@@ -406,7 +472,10 @@ export function skillWindow({
       );
       start = end;
     }
-    piece(`right${selected === books.length - 1 ? 1 : 0}`, 161);
+    piece(
+      `right${selected === books.length - 1 ? 1 : 0}`,
+      SKILL_TAB_INNER.x + SKILL_TAB_INNER.width,
+    );
     ctx.textAlign = "left";
   };
   function drawTooltip() {
@@ -500,12 +569,12 @@ export function skillWindow({
         stamp("Item/Book/0500.img/05000000/info/icon", 23, 82);
         ctx.fillStyle = "#000";
         ctx.fillText(book.name, at.x + 59, at.y + 91);
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < SKILL_ROWS; i++) {
           const s = active(i);
           if (!s) continue;
           const state = skillState(s, learned),
-            y = 119 + 40 * i;
-          stamp(`UI/UIWindow.img/Skill/skill${state === 0 ? 0 : 1}`, 5, y);
+            y = SKILL_ROW_TOP + SKILL_ROW_PITCH * i;
+          stamp(`UI/UIWindow.img/Skill/skill${state === 0 ? 0 : 1}`, SKILL_ROW.x, y);
           ctx.save();
           ctx.beginPath();
           ctx.rect(at.x + 43, at.y + y, 93, 18);
@@ -524,32 +593,37 @@ export function skillWindow({
                 : hover === id
                   ? "mouseOver"
                   : "normal";
-          stamp(`UI/UIWindow.img/Skill/BtSpUp/${face}/0`, 139, 137 + 40 * i);
+          stamp(
+            `UI/UIWindow.img/Skill/BtSpUp/${face}/0`,
+            SKILL_UP_BUTTON.x,
+            SKILL_UP_BUTTON.firstY + SKILL_UP_BUTTON.pitch * i,
+          );
         }
         const enabled = scrollBar.max > 1,
           prefix = `UI/Basic.img/VScr/${enabled ? "enabled" : "disabled"}`;
-        for (let y = 128; y < 266; y += 12) stamp(`${prefix}/base`, 161, y);
+        for (let y = SKILL_SCROLLBAR.y + VSCR_CELL; y < SKILL_SCROLLBAR_NEXT_Y; y += VSCR_CELL)
+          stamp(`${prefix}/base`, SKILL_SCROLLBAR.x, y);
         // The pressed arrow cells light up while held, exactly like paintVScrollbar.
         stamp(
           `${prefix}/${
             enabled && scrollBar.pressed === "prev" ? "prev1" : enabled ? "prev0" : "prev"
           }`,
-          161,
-          116,
+          SKILL_SCROLLBAR.x,
+          SKILL_SCROLLBAR.y,
         );
         stamp(
           `${prefix}/${
             enabled && scrollBar.pressed === "next" ? "next1" : enabled ? "next0" : "next"
           }`,
-          161,
-          266,
+          SKILL_SCROLLBAR.x,
+          SKILL_SCROLLBAR_NEXT_Y,
         );
         // sub_452500's thumbTop: arrow + floor(pos * (len - 3*arrow) / (max - 1)).
         if (enabled)
           stamp(
             `${prefix}/${scrollBar.dragging ? "thumb1" : "thumb0"}`,
-            161,
-            116 + scrollBar.thumbTop(),
+            SKILL_SCROLLBAR.x,
+            SKILL_SCROLLBAR.y + scrollBar.thumbTop(),
           );
       }
       stamp(

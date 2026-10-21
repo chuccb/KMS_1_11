@@ -1,5 +1,6 @@
 import type { InventoryView, ItemView } from "../server/src/client/session.ts";
 import type { HtmlImageLookup, UiPoint, UiAudio } from "./ui-types.ts";
+import { SLOT_SIZE } from "./slot.ts";
 import { requireElement } from "./dom.ts";
 import { isRecord, isFiniteNumber } from "./resource-validation.ts";
 type EquipmentHit =
@@ -51,7 +52,11 @@ export const EQUIP_SLOTS: readonly (readonly [number, number])[] = [
   [105, 253],
 ];
 export function equipSlotAt(x: number, y: number) {
-  return EQUIP_SLOTS.findIndex(([sx, sy]) => sx < x && x < sx + 32 && sy < y && y < sy + 32) + 1;
+  return (
+    EQUIP_SLOTS.findIndex(
+      ([sx, sy]) => sx < x && x < sx + SLOT_SIZE && sy < y && y < sy + SLOT_SIZE,
+    ) + 1
+  );
 }
 export function equipmentWindow({
   ctx,
@@ -202,8 +207,8 @@ export function equipmentWindow({
         if (a.ready)
           ctx.drawImage(
             a.img,
-            at.x + xy[0] + Math.floor((32 - a.img.naturalWidth) / 2),
-            at.y + xy[1] + Math.floor((32 - a.img.naturalHeight) / 2),
+            at.x + xy[0] + Math.floor((SLOT_SIZE - a.img.naturalWidth) / 2),
+            at.y + xy[1] + Math.floor((SLOT_SIZE - a.img.naturalHeight) / 2),
           );
       }
     },

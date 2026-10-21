@@ -29,7 +29,8 @@ import {
  *   - item counts left-anchored at (35c+291, 35r+148) like `sub_4D5440`'s `sub_525AE0` digits;
  *   - names centred on 44/327 at y=110, mesos right-aligned at 84/366 at y=277 (`sub_4D4960`);
  *   - avatars at (36,103) and (330,103), mine mirrored towards the middle (`sub_4D33A0`);
- *   - 8+8 cells of 32 px at a 35 px pitch, rows from y=129, columns 11/46 and 292/327;
+ *   - 8+8 cells of one SLOT_SIZE at a SLOT_PITCH pitch, rows from y=128, columns 10/45 and
+ *     291/326 (`sub_4D5440`’s own `35 * (v2 % 2) + 291` and `35 * (v2 / 2) + 160`);
  *   - a 50 % white wash over (286,124,76,144) or (4,124,76,144) once a side locks (`this+63/64`).
  *
  * My half is always the right one - where `sub_4D5C80` accepts drops and `sub_4D33A0` puts my

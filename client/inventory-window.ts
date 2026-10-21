@@ -23,6 +23,7 @@ import type { CanvasImage, ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
 import { vScrollTravel, VSCR_CELL } from "./vscroll.ts";
 import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
+import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 
 export interface InventoryBox {
   x: number;
@@ -68,7 +69,7 @@ export const INVENTORY: InventoryLayout = {
   width: 162,
   height: 315,
   home: { x: 24, y: 24 },
-  grid: { x: 6, y: 80, columns: 4, rows: 6, size: 32, pitch: 35 },
+  grid: { x: 6, y: 80, columns: 4, rows: 6, size: SLOT_SIZE, pitch: SLOT_PITCH },
   scrollbar: { x: 147, y: 80, width: VSCR_CELL, height: 208 },
   coin: { x: 8, y: 294, width: 17, height: 17 },
   mesos: { x: 9, y: 296, width: 116, height: 13 },
