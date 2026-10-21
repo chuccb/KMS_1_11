@@ -26,8 +26,26 @@
 
 開窗只有兩條路，都落到 `sub_4DDF10(roomId)`：
 
-1. **狀態列 BtChat**：`sub_4F6B70` 建 `CCtrlButton(parent, 1004, 2, 65, 91, 38, 17, "UI/StatusBar.img/BtChat")`
-   （狀態列原點 y=392 → 頁面 (65,483)、38×17）；`sub_4F88C0` case 1004 → `sub_4DDF10(0)`＝開新房。
+1. **狀態列 BtChat**：`sub_4F6B70` 以 vtable slot 32 建鈕，反編譯實際引數是
+   `Create(this, parent, id=1004, x=65, y=91, type=2, &out)`（**沒有 w/h 引數**——38×17 來自
+   `UI/StatusBar.img/BtChat` 這張 canvas 本身）。狀態列原點 y=392 → 頁面 (65,483)、38×17；
+   `sub_4F88C0` case 1004 → `sub_4DDF10(0)`＝開新房。
+
+   同一支 `sub_4F6B70` 用同一個 slot 建了六顆鈕（引數照反編譯原文，皆為狀態列區域座標）：
+
+   | id | 名稱 | x | y | type | art canvas |
+   |---|---|---|---|---|---|
+   | 1000 | BtItem | 9 | 7 | 6 | 36×35 |
+   | 1001 | BtEquip | 9 | 43 | 6 | 36×35 |
+   | 1002 | BtStat | 38 | 67 | 6 | 36×35 |
+   | 1003 | BtSkill | 9 | 91 | 6 | 36×35 |
+   | 1004 | BtChat | 65 | 91 | 2 | 38×17 |
+   | 1005 | BtMenu | 192 | 91 | 2 | 38×17 |
+
+   **這些矩形在原版就互相重疊**（1001/1002 交疊 x38..45 y67..78、1002/1003 交疊 x38..45
+   y91..102、1002/1004 交疊 x65..74 y91..102）。原版 hit test 取哪一顆尚未定位：本專案的
+   `statusBarButtonAt` 用 `find`（回先建的那顆），點擊則先問 BtChat，兩者在重疊區不一致，
+   **本輪只記錄不更動**（見 ADR-114）。
 2. **邀請模態的「是」**：`sub_4DDF10(roomId)`，roomId 是 `0x4D type 3` 帶來的 u32。
 
 `sub_4DDF10` → `sub_4DDAF0` 建 `CUIMessenger`：`this_8 == nullptr` 才 HeapAlloc（已開著＝no-op，

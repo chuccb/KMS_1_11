@@ -3763,3 +3763,32 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1248 pass / 0 fail、5315 expect() calls、148 files、316.01s**（ADR-112 基線 1246/0，本輪 +2 全為新測試，0 新失敗）。
 - **沙箱重置（本輪第三次）**：`generated/` 連同 `node_modules` 一起消失、HEAD 退回 `99ff07b`。這次工作樹內容是完整的，所以用 **`git reset --mixed origin/arena/…`（不動工作樹）** 把分支指回已推送的 `81f0a75`，`git status` 隨即全淨——**不用 `--hard` 就不會丟東西**；之後再 `bun install` 與重裝 `@oven/bun-linux-x64@1.4.3`。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。
+
+## ADR-114：格子／數量／鈕面／頁籤的純幾何收回既有模組，並把 BtChat 的原碼引數讀回來（含一處原版矩形重疊）
+
+- **背景**：延續 ADR-112／113 的同一條線——**「哪個東西的鄰居已經住在別的模組裡」**。`drawInventoryWindow` 是 main.js 裡最長的繪製函式，而它的座標、hit test 與捲軸幾何早就住在 `client/inventory-window.ts`，只有「畫」還留在 main.js。本輪把兩者之間那一層——**純計算**——搬過去；順手把悄悄話收件人欄與 BtChat 也收回 `client/hud.ts`，並把 BtChat 的**原碼引數**從反編譯讀回來。
+- **（一）`client/inventory-window.ts` 新增四個純函式**：
+  - `inventoryCellOrigin(slot, firstRow)`：格子座標，也就是既有 `inventorySlotAt` 的**反函數**（`4DA810` 的 `firstSlot = 4*row + 1`）。滑出六列的格子**沒有**格子座標（回 `undefined`），所以呼叫端不需要再自己寫 `continue`。測試用**往返驗證**：對 row 0/1/6/19 的每一格，`inventorySlotAt(inventoryCellOrigin(slot,row)) === slot`。
+  - `inventoryStackCount(item)`：格子角落印的數字。規則照原樣搬：`quantity > 1` 才印，但 **`207xxxx`（飛鏢／子彈）永遠印**；都沒有時退回可充值的 `ruc`。207 這個特例有原碼佐證——`sub_463BE0`／`sub_464000` 的丟棄路徑寫著 `*(_DWORD *)(v6 + 12) / 10000 == 207`，那一族是整組丟、不問數量，所以它的「數量」是**彈藥數**而不是堆疊數，數量為 1 也必須印。
+  - `drawInventoryStackCount(ctx, value, right, bottom)`：那段描邊數字整塊搬過去，並**改用 `save`/`restore`**。原來的內嵌版本把 `lineWidth = 2` 與 `strokeStyle` 留在 context 上沒有還原；main.js 裡只有這一處用 `strokeText`，所以行為相同，但以後加任何描邊都不會被它污染。測試的假 context 現在**真的快照還原**，所以「沒有外洩」是被驗證的，不是被宣稱的。
+  - `inventoryCoinState({dead, mesos, busy, pressed, hover})`：楓幣鈕的四態。保留原來的 `pressed && hover`——`CCtrlButton` 的 pressed 面只在指標還在鈕上時才出現，光是「按下但移開」不算。
+  - `inventoryTabFaces(tab)`：頁籤條的四張臉。原邏輯有個不明講就會被改壞的細節：底圖**自己就把第 0 個頁籤畫成亮的**，所以除了目前開啟的那一格，第 0 格也**永遠**要蓋一次（用 idle 臉），否則關掉時會留下底圖的亮面。
+- **（二）`client/hud.ts` 收回兩塊 StatusBar 的東西**：`drawWhisperRecipient(ctx, recipient)`（聊天列上 (245,578) 79x17 的收件人欄，沒有收件人時印 모두에게，且**裁切**在欄內）、`MESSENGER_BUTTON` + `messengerButtonAt(x,y)` + `drawMessengerButton(ctx, image, pressed, hover)`。main.js 的 `drawMessengerButton` 現在只剩「欄位可玩嗎」這層判斷。另外 `preloadStatusBar` 現在也預載 BtChat（原本只預載五顆鈕，BtChat 的 `mouseOver` 面要等 hover 才抓）。
+- **（三）`client/quickslots.ts` 新增兩個純函式**：`quickSlotIconOrigin(slot, icon)`（`4FC440`：快捷格圖示是**以 origin 錨定**，不是置中——`left = slot.x - ox`、`top = slot.y + 32 - oy`）與 `skillIconPath(skillId)`（`Skill/<trunc(id/10000)>.img/skill/<id>/icon`）。
+- **（四）原碼更正：`BtChat` 的建鈕引數**。文件原本寫成 `CCtrlButton(parent, 1004, 2, 65, 91, 38, 17, "...")`，但 `sub_4F6B70`（`MapleStory.exe.c` 253309 起）vtable slot 32 的實際引數是 **`Create(this, parent, id, x, y, type, &out)`——沒有 w/h**；38×17 來自 `UI/StatusBar.img/BtChat` 那張 canvas 本身。整張表讀回來是：
+
+  | id | 名稱 | x | y | type | art |
+  |---|---|---|---|---|---|
+  | 1000 | BtItem | 9 | 7 | 6 | 36×35 |
+  | 1001 | BtEquip | 9 | 43 | 6 | 36×35 |
+  | 1002 | BtStat | 38 | 67 | 6 | 36×35 |
+  | 1003 | BtSkill | 9 | 91 | 6 | 36×35 |
+  | 1004 | BtChat | 65 | 91 | 2 | 38×17 |
+  | 1005 | BtMenu | 192 | 91 | 2 | 38×17 |
+
+  （`6` 與 `2` 的語意未定位：`6` 恰好分到 36×35、`2` 分到 38×17，但不能只憑這個斷定它是「尺寸類」。）
+- **（五）一處原版就存在的矩形重疊，本輪只記錄、不更動**：上表六顆鈕**在原版就互相重疊**——1001/1002 交疊 x38..45 y67..78、1002/1003 交疊 x38..45 y91..102、1002/1004（BtStat／BtChat）交疊 x65..74 y91..102（頁面 483..494）。原版 hit test 在重疊區取哪一顆**尚未定位**（`sub_4FA170` 是 COM 分派，本輪讀不下去）。本專案目前不一致：`statusBarButtonAt` 用 `find` 回**先建的那顆**，而點擊流程先問 BtChat。**依照「不以未驗證冒充」不在本輪挑邊**，只在 `docs/NATIVE_MESSENGER.md`、`docs/protocol/FINDINGS.md` 與測試裡把重疊與其原碼依據寫死，之後有證據再定序。
+- **（六）一處微小的行為收斂**：hover 的格子如果因為捲動而不在六列內，原本會用溢出的座標畫出 `activeIcon`；現在與道具一樣跳過。`inventoryWindowAt` 只會回可見格子，所以正常流程摸不到這個差異。
+- **驗證**：`client_probe.ts` 抽出前後的輸出**逐位元組相同**（`diff` 0 行，兩次 exit 0，10 個 banner）；與 ADR-113 之後的輸出也相同。新測試 **8 項全過**（`server/test/inventory-window.test.ts` 8 → 13：格子往返共 4×24 組、堆疊數量的 207 特例、描邊不外洩、楓幣鈕四態、頁籤臉；`server/test/native-hud.test.ts` 14 → 17：收件人欄的裁切與 모두에게、BtChat 三態與矩形（含重疊）、快捷格 origin）。撰寫時三次失敗全是**我的測試資料算錯**：不知道 BtStat 的矩形本來就蓋住 BtChat 左上角、假 context 的 `save`/`restore` 只記 log 不還原狀態、`HtmlImageLookup` 要的是 `HTMLImageElement` 不是 `CanvasImageSource`。全部對照原碼／型別改正，未反過來改實作。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1256 pass / 0 fail、5315 expect() calls、148 files、317.55s**（ADR-113 基線 1248/0，本輪 +8 全為新測試，0 新失敗）。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。無遊戲行為改變（探針輸出逐位元組相同）。

@@ -40,8 +40,13 @@ import {
   clampInventoryScroll,
   drawInventoryLabel as paintInventoryLabel,
   drawInventoryScrollbar as paintInventoryScrollbar,
+  drawInventoryStackCount as paintStackCount,
+  inventoryCellOrigin,
+  inventoryCoinState,
   inventoryScrollbarGeometry as inventoryScrollGeometry,
   inventorySlotAt as inventorySlotAtLayout,
+  inventoryStackCount,
+  inventoryTabFaces,
   inventoryWindowAt as inventoryHitAt,
 } from "./inventory-window.ts";
 import {
@@ -86,13 +91,15 @@ import { whisperNameError } from "./whisper.ts";
 import {chatBalloons} from "./chatballoons.ts";
 import { chatHistory } from "./chatlog.ts";
 import {
-  HUD_FONT,
   STATUS_BAR,
   STATUS_GAUGES,
   drawStatusGauge as paintStatusGauge,
   drawNamePlate,
   drawMapTitle,
   drawItemCount,
+  drawMessengerButton as paintMessengerButton,
+  drawWhisperRecipient as paintWhisperRecipient,
+  messengerButtonAt as messengerButtonHit,
   expPercent,
   gaugeFill,
   preloadStatusBar,
@@ -101,7 +108,15 @@ import {
   statusVitalText,
 } from "./hud.ts";
 import { portalSwirls } from "./portals.ts";
-import { QUICK_SLOTS, quickSlotAt, quickItemState, quickItemProfile, quickSkillAllowed } from "./quickslots.ts";
+import {
+  QUICK_SLOTS,
+  quickSlotAt,
+  quickItemState,
+  quickItemProfile,
+  quickSkillAllowed,
+  quickSlotIconOrigin,
+  skillIconPath,
+} from "./quickslots.ts";
 import { animationFrame } from "./animation.ts";
 import { deathEffects, deathPose } from "./death.ts";
 import { reviveWindow } from "./revive.ts";
@@ -2539,23 +2554,27 @@ function drawQuickItems() {
   ctx.save();
   quickProfile.values().forEach((id, index) => {
     if (!id) return;
-    const {x,y} = QUICK_SLOTS[index];
+    const slot = QUICK_SLOTS[index];
     if(quickSkillAllowed(id)) {
       const data=combatCatalog.peekSkill(id.skillId);if(!data)void combatCatalog.skill(id.skillId);
-      const a=artImage(`Skill/${Math.trunc(id.skillId/10000)}.img/skill/${id.skillId}/icon`);
-      if(a.ready){ctx.save();if(!skillPanel.level(id.skillId))ctx.globalAlpha*=0.4;
-        ctx.drawImage(a.img,x-(data?.icon?.ox??0),y+32-(data?.icon?.oy??32));ctx.restore();}
+      const a=artImage(skillIconPath(id.skillId));
+      if(a.ready){const at=quickSlotIconOrigin(slot,data?.icon);
+        ctx.save();if(!skillPanel.level(id.skillId))ctx.globalAlpha*=0.4;
+        ctx.drawImage(a.img,at.x,at.y);ctx.restore();}
       return;
     }
-    // Native 4FC440: canvas left = x-originX, top = y-originY+32 (not centred).
+    // An unlearned level fades the icon; an item's stack count rides under it (4FC440/4FC180).
     const facts = itemInfo.get(id);
     if (facts === undefined) void describeItem(id);
     if (facts?.icon) {
       const icon = artImage(facts.icon.path);
-      if (icon.ready) ctx.drawImage(icon.img, x - facts.icon.ox, y + 32 - facts.icon.oy);
+      if (icon.ready) {
+        const at = quickSlotIconOrigin(slot, facts.icon);
+        ctx.drawImage(icon.img, at.x, at.y);
+      }
     }
     const {quantity} = quickItemState(inventory, id);
-    drawItemCount(ctx, artImage, quantity, x, y + 20);
+    drawItemCount(ctx, artImage, quantity, slot.x, slot.y + 20);
   });
   ctx.restore();
 }
@@ -3528,11 +3547,7 @@ function updateWhisperControl() {
   ui.say.setAttribute("aria-label", whisperRecipient ? `悄悄話給 ${whisperRecipient}` : "聊天輸入");
 }
 function drawWhisperRecipient() {
-  // Original StatusBar local fill(245,186,79,17), text(246,189); bar origin y392.
-  ctx.save(); ctx.fillStyle="#315573"; ctx.fillRect(245,578,79,17);
-  ctx.beginPath();ctx.rect(245,578,79,17);ctx.clip();
-  ctx.font=HUD_FONT;ctx.fillStyle="#ffffff";ctx.textAlign="left";ctx.textBaseline="top";
-  ctx.fillText(whisperRecipient || "모두에게",246,581);ctx.restore();
+  paintWhisperRecipient(ctx, whisperRecipient);
 }
 document.getElementById('chat-whisper').addEventListener('click', () => {
   if (revivePanel.open || (itemDialog.open || systemPanel.visible || playerContext.open) || browserLabOpen() ||
@@ -4059,21 +4074,15 @@ let messengerHover, messengerPressed;
 let messengerSuppressClick = false;
 let messengerTypingSent = false, messengerTypingAt = 0;
 const messengerSayInput = document.getElementById("messenger-say");
-/** `sub_4F6B70`: BtChat, id 1004, two states, bar-local (65,91) -> page (65,483). */
-const MESSENGER_BUTTON = Object.freeze({ x: 65, y: 483, width: 38, height: 17 });
 function messengerButtonAt(p) {
   return (
     loginScreens.stage === "game" && visualFieldActive && !revivePanel.open && !itemDialog.open &&
-    !systemPanel.visible && !playerContext.open &&
-    p.x >= MESSENGER_BUTTON.x && p.x < MESSENGER_BUTTON.x + MESSENGER_BUTTON.width &&
-    p.y >= MESSENGER_BUTTON.y && p.y < MESSENGER_BUTTON.y + MESSENGER_BUTTON.height
+    !systemPanel.visible && !playerContext.open && messengerButtonHit(p.x, p.y)
   );
 }
 function drawMessengerButton() {
   if (loginScreens.stage !== "game" || !visualFieldActive) return;
-  const state = messengerPressed === "button" ? "pressed" : messengerHover === "button" ? "mouseOver" : "normal";
-  const art = artImage(`UI/StatusBar.img/BtChat/${state}/0`);
-  if (art.ready) ctx.drawImage(art.img, MESSENGER_BUTTON.x, MESSENGER_BUTTON.y);
+  paintMessengerButton(ctx, artImage, messengerPressed === "button", messengerHover === "button");
 }
 function positionMessengerInput() {
   messengerSayInput.style.left = `${messengerAt.x + MESSENGER_WINDOW.edit.x}px`;
@@ -4237,12 +4246,9 @@ function drawInventoryWindow() {
   if (close.ready) ctx.drawImage(close.img, x + 114, y + 9);
 
   // Stamp the tab faces: the lit one over the open tab, an idle one over the sheet's own lit tab.
-  const lit = INVENTORY_TABS.findIndex((tab) => tab.tab === inventoryTab);
-  const litIndex = lit < 0 ? 0 : lit;
-  for (let index = 0; index < INVENTORY.tabs.length; index++) {
-    const box = INVENTORY.tabs[index];
-    const stamp = index === litIndex ? INVENTORY.litTab : INVENTORY.idleTab;
-    if (index === litIndex || index === 0) {
+  for (const face of inventoryTabFaces(inventoryTab)) {
+    const { box, face: stamp } = face;
+    if (face.stamped) {
       ctx.drawImage(
         entry.img,
         stamp.x,
@@ -4256,28 +4262,26 @@ function drawInventoryWindow() {
       );
     }
     // The stamp carries the sheet's own Korean label; cover it and draw the right one.
-    ctx.fillStyle = index === litIndex ? "#ffffff" : "#ccddee";
+    ctx.fillStyle = face.lit ? "#ffffff" : "#ccddee";
     ctx.fillRect(x + box.x + 6, y + box.y + 5, 22, 13);
     drawInventoryLabel(
-      INVENTORY_TABS[index].label,
+      INVENTORY_TABS[face.index].label,
       x + box.x + box.width / 2,
       y + box.y + 12,
-      index === litIndex,
+      face.lit,
     );
   }
 
   // The items of the open tab.
   const view = inventoryTabView();
   const { grid } = INVENTORY;
+  const firstRow = inventoryScrollbarGeometry().row;
   if (view !== undefined) {
     for (const item of view.items) {
-      const index = item.slot - 1 - 4 * inventoryScrollbarGeometry().row;
-      if (index < 0) continue;
-      const column = index % grid.columns;
-      const row = Math.floor(index / grid.columns);
-      if (row >= grid.rows) continue;
-      const cellX = x + grid.x + column * grid.pitch;
-      const cellY = y + grid.y + row * grid.pitch;
+      const cell = inventoryCellOrigin(item.slot, firstRow);
+      if (cell === undefined) continue;
+      const cellX = x + cell.x;
+      const cellY = y + cell.y;
       const icon = itemIcon(item.itemId);
       if (icon.ready) {
         const width = icon.img.naturalWidth;
@@ -4288,62 +4292,28 @@ function drawInventoryWindow() {
           cellY + Math.floor((grid.size - height) / 2),
         );
       }
-      const count =
-        item.quantity !== undefined &&
-        (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207)
-          ? item.quantity
-          : item.ruc !== undefined && item.ruc > 0
-            ? item.ruc
-            : undefined;
-      if (count !== undefined) {
-        ctx.font =
-          "10px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
-        ctx.textAlign = "right";
-        ctx.textBaseline = "bottom";
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.strokeText(
-          String(count),
-          cellX + grid.size - 1,
-          cellY + grid.size + 2,
-        );
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(
-          String(count),
-          cellX + grid.size - 1,
-          cellY + grid.size + 2,
-        );
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
-      }
+      const count = inventoryStackCount(item);
+      if (count !== undefined)
+        paintStackCount(ctx, count, cellX + grid.size - 1, cellY + grid.size + 2);
     }
   }
 
   // The hovered cell wears `activeIcon`: a 36x36 frame two pixels larger than the slot.
   if (inventoryHover?.kind === "slot") {
+    const cell = inventoryCellOrigin(inventoryHover.slot, firstRow);
     const active = artImage("UI/UIWindow.img/Item/activeIcon");
-    if (active.ready) {
-      const index =
-        inventoryHover.slot - 1 - 4 * inventoryScrollbarGeometry().row;
-      const cellX = x + grid.x + (index % grid.columns) * grid.pitch;
-      const cellY = y + grid.y + Math.floor(index / grid.columns) * grid.pitch;
-      ctx.drawImage(active.img, cellX - 2, cellY - 2);
-    }
+    if (cell !== undefined && active.ready)
+      ctx.drawImage(active.img, x + cell.x - 2, y + cell.y - 2);
   }
 
   drawInventoryScrollbar(x, y);
-  const coinState =
-    selfView.hp <= 0 ||
-    selfView.mesos < 10 ||
-    mesoPending ||
-    slotPending ||
-    shopPending
-      ? "disabled"
-      : coinPressed && inventoryHover?.kind === "coin"
-        ? "pressed"
-        : inventoryHover?.kind === "coin"
-          ? "mouseOver"
-          : "normal";
+  const coinState = inventoryCoinState({
+    dead: selfView.hp <= 0,
+    mesos: selfView.mesos,
+    busy: mesoPending || slotPending || shopPending,
+    pressed: coinPressed,
+    hover: inventoryHover?.kind === "coin",
+  });
   const coin = artImage(`UI/UIWindow.img/Item/BtCoin/${coinState}/0`);
   if (coin.ready)
     ctx.drawImage(coin.img, x + INVENTORY.coin.x, y + INVENTORY.coin.y);

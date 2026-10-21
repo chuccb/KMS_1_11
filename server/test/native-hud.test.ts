@@ -6,8 +6,13 @@ import {
   expPercent,
   STATUS_BAR,
   STATUS_GAUGES,
+  WHISPER_FIELD,
+  MESSENGER_BUTTON,
   drawNamePlate,
   drawStatusGauge,
+  drawWhisperRecipient,
+  drawMessengerButton,
+  messengerButtonAt,
   mapTitleLayout,
   drawItemCount,
   statusBarButtonAt,
@@ -23,6 +28,8 @@ import {
   bindQuickItem,
   quickItemState,
   quickItemProfile,
+  quickSlotIconOrigin,
+  skillIconPath,
 } from "../../client/quickslots.ts";
 import { mapTitleArt } from "../src/game/mapart.ts";
 import type { ArtReader } from "../src/game/wzart.ts";
@@ -221,11 +228,12 @@ test("CUIStatusBar: the 392 window, its three plates and five buttons with exclu
 test("every button face is preloaded once per state, so a hover never waits on a fetch", () => {
   const asked: string[] = [];
   preloadStatusBar((path) => asked.push(path));
-  assert.equal(asked.length, 15);
+  // Five bar buttons plus BtChat, which the bar's own list does not hit-test but does paint.
+  assert.equal(asked.length, 18);
   assert.equal(asked[0], "UI/StatusBar.img/BtItem/normal/0");
   assert.equal(asked[1], "UI/StatusBar.img/BtItem/mouseOver/0");
   assert.equal(asked[2], "UI/StatusBar.img/BtItem/pressed/0");
-  assert.equal(asked.at(-1), "UI/StatusBar.img/BtMenu/pressed/0");
+  assert.equal(asked.at(-1), "UI/StatusBar.img/BtChat/pressed/0");
   assert.deepEqual(
     asked.filter((p) => p.includes("BtStat")),
     [
@@ -321,4 +329,123 @@ test("47D110 name plate: A0 black, transparent 1px corners, text 2px inside, cen
   drawNamePlate(ctx as unknown as CanvasRenderingContext2D, undefined, 10, 20);
   drawNamePlate(ctx as unknown as CanvasRenderingContext2D, "", 10, 20);
   assert.deepEqual(log, []);
+});
+
+test("the whisper field is a 79x17 plate on the chat bar, clipped, reading 모두에게 when empty", () => {
+  assert.deepEqual(
+    [WHISPER_FIELD.x, WHISPER_FIELD.y, WHISPER_FIELD.width, WHISPER_FIELD.height],
+    [245, 578, 79, 17],
+    "bar-local (245,186) with the bar's origin at y=392",
+  );
+  assert.deepEqual([WHISPER_FIELD.textX, WHISPER_FIELD.textY], [246, 581]);
+  assert.equal(WHISPER_FIELD.everyone, "모두에게");
+  const log: unknown[][] = [];
+  const ctx = {
+    font: "",
+    textAlign: "",
+    textBaseline: "",
+    fillStyle: "",
+    save: () => log.push(["save"]),
+    restore: () => log.push(["restore"]),
+    beginPath: () => log.push(["beginPath"]),
+    rect: (...args: unknown[]) => log.push(["rect", ...args]),
+    clip: () => log.push(["clip"]),
+    fillRect: (...args: unknown[]) => log.push(["fillRect", ctx.fillStyle, ...args]),
+    fillText: (...args: unknown[]) => log.push(["text", ctx.fillStyle, ...args]),
+  };
+  drawWhisperRecipient(ctx as unknown as CanvasRenderingContext2D, undefined);
+  assert.deepEqual(log, [
+    ["save"],
+    ["fillRect", "#315573", 245, 578, 79, 17],
+    ["beginPath"],
+    ["rect", 245, 578, 79, 17],
+    ["clip"],
+    ["text", "#ffffff", "모두에게", 246, 581],
+    ["restore"],
+  ]);
+  assert.equal(ctx.font, "12px 'Gulim', '굴림', 'KMSCJK', sans-serif");
+  assert.equal(ctx.textBaseline, "top");
+  // An empty string is the same as no recipient: the field never goes blank.
+  log.length = 0;
+  drawWhisperRecipient(ctx as unknown as CanvasRenderingContext2D, "");
+  assert.equal(log.find((entry) => entry[0] === "text")?.[2], "모두에게");
+  log.length = 0;
+  drawWhisperRecipient(ctx as unknown as CanvasRenderingContext2D, "멋진모험가");
+  assert.equal(log.find((entry) => entry[0] === "text")?.[2], "멋진모험가");
+});
+
+test("BtChat is a 38x17 face at page (65,483) - the bar's own row - with three sprite states", () => {
+  assert.deepEqual(
+    [MESSENGER_BUTTON.x, MESSENGER_BUTTON.y, MESSENGER_BUTTON.width, MESSENGER_BUTTON.height],
+    [65, 483, 38, 17],
+  );
+  assert.equal(messengerButtonAt(65, 483), true);
+  assert.equal(messengerButtonAt(102, 499), true);
+  assert.equal(messengerButtonAt(64, 483), false);
+  assert.equal(messengerButtonAt(103, 483), false, "right edge is exclusive");
+  assert.equal(messengerButtonAt(65, 500), false, "17 high, not 35");
+  // BtChat is NOT one of the five buttons this page hit-tests - but the native rectangles do
+  // overlap: `sub_4F6B70` creates 1002 BtStat at (38, 67) 36x35 and 1004 BtChat at (65, 91) 38x17,
+  // so bar-local x 65..74 / y 91..102 (page 483..494) is inside both. Which control the original's
+  // hit test returns there is not established; the page has always let the click reach BtChat
+  // first, and this test only records that the overlap exists.
+  assert.equal(statusBarButtonAt(50, 480)?.name, "BtStat", "a point only BtStat owns");
+  assert.equal(statusBarButtonAt(70, 490)?.name, "BtStat", "BtStat reaches into BtChat's corner");
+  assert.equal(messengerButtonAt(70, 490), true, "and BtChat owns the same pixel");
+  assert.equal(statusBarButtonAt(75, 490), undefined, "past BtStat's right edge it is BtChat only");
+  assert.equal(messengerButtonAt(75, 490), true);
+  const drawn: { image: unknown; x: number; y: number }[] = [];
+  const asked: string[] = [];
+  const ctx = {
+    drawImage: (image: unknown, x: number, y: number) => drawn.push({ image, x, y }),
+  };
+  const image = (path: string) => {
+    asked.push(path);
+    return { ready: true, img: path as unknown as HTMLImageElement };
+  };
+  const paint = (pressed: boolean, hover: boolean) => {
+    drawn.length = 0;
+    asked.length = 0;
+    drawMessengerButton(ctx as unknown as CanvasRenderingContext2D, image, pressed, hover);
+    return drawn[0];
+  };
+  assert.deepEqual(paint(false, false), {
+    image: "UI/StatusBar.img/BtChat/normal/0",
+    x: 65,
+    y: 483,
+  });
+  assert.deepEqual(paint(false, true), {
+    image: "UI/StatusBar.img/BtChat/mouseOver/0",
+    x: 65,
+    y: 483,
+  });
+  // A press shows even when the pointer has left the button, which is how the page has always
+  // drawn this one - BtChat is toggled by its own hover/pressed pair, not CCtrlButton's.
+  assert.deepEqual(paint(true, false), {
+    image: "UI/StatusBar.img/BtChat/pressed/0",
+    x: 65,
+    y: 483,
+  });
+  assert.deepEqual(paint(true, true), {
+    image: "UI/StatusBar.img/BtChat/pressed/0",
+    x: 65,
+    y: 483,
+  });
+});
+
+test("4FC440: a quick-slot icon is anchored by its origin, and a skill icon lives under its job block", () => {
+  const slot = QUICK_SLOTS[0];
+  assert.deepEqual(quickSlotIconOrigin(slot, { ox: 8, oy: 32 }), { x: slot.x - 8, y: slot.y });
+  assert.deepEqual(
+    quickSlotIconOrigin(slot, { ox: 0, oy: 0 }),
+    { x: slot.x, y: slot.y + 32 },
+    "an origin at the top left pushes the icon down by the slot's own height",
+  );
+  // A missing origin is the skill branch's default: ox 0, oy 32, so the icon sits flush with the
+  // slot's top edge instead of being centred in it.
+  assert.deepEqual(quickSlotIconOrigin(slot, undefined), { x: slot.x, y: slot.y });
+  assert.deepEqual(quickSlotIconOrigin(slot, {}), { x: slot.x, y: slot.y });
+  assert.equal(skillIconPath(1001003), "Skill/100.img/skill/1001003/icon");
+  assert.equal(skillIconPath(3001004), "Skill/300.img/skill/3001004/icon");
+  assert.equal(skillIconPath(999), "Skill/0.img/skill/999/icon", "the trunc, not a round");
 });

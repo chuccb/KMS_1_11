@@ -78,9 +78,9 @@ export function statusBarButtonAt(x: number, y: number): StatusBarButton | undef
 
 /** Every face the bar can show, so a hover or a press never has to wait for a fetch. */
 export function preloadStatusBar(image: (path: string) => unknown): void {
-  for (const button of STATUS_BAR.buttons)
+  for (const name of [...STATUS_BAR.buttons.map((button) => button.name), "BtChat"])
     for (const state of ["normal", "mouseOver", "pressed"])
-      image(`UI/StatusBar.img/${button.name}/${state}/0`);
+      image(`UI/StatusBar.img/${name}/${state}/0`);
 }
 
 /** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
@@ -128,6 +128,76 @@ export function drawNamePlate(
   ctx.fillStyle = color;
   ctx.fillText(name, left + 2, top + 2);
   ctx.restore();
+}
+
+/**
+ * The whisper recipient field, on the chat bar along the bottom of the surface.
+ *
+ * Bar-local `fill(245, 186, 79, 17)` and `text(246, 189)` with the bar's origin at y=392, so the
+ * page paints the plate at (245, 578) and the name at (246, 581). Without a recipient the field
+ * reads 모두에게 - "to everyone" - which is what the native edit box shows before a name is picked.
+ */
+export const WHISPER_FIELD: Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  textX: number;
+  textY: number;
+  everyone: string;
+}> = Object.freeze({
+  x: 245,
+  y: 578,
+  width: 79,
+  height: 17,
+  textX: 246,
+  textY: 581,
+  everyone: "모두에게",
+});
+
+/** The whisper target's name, clipped to the field so a long name cannot spill out of it. */
+export function drawWhisperRecipient(
+  ctx: CanvasRenderingContext2D,
+  recipient: string | undefined,
+): void {
+  ctx.save();
+  ctx.fillStyle = "#315573";
+  ctx.fillRect(WHISPER_FIELD.x, WHISPER_FIELD.y, WHISPER_FIELD.width, WHISPER_FIELD.height);
+  ctx.beginPath();
+  ctx.rect(WHISPER_FIELD.x, WHISPER_FIELD.y, WHISPER_FIELD.width, WHISPER_FIELD.height);
+  ctx.clip();
+  ctx.font = HUD_FONT;
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(recipient || WHISPER_FIELD.everyone, WHISPER_FIELD.textX, WHISPER_FIELD.textY);
+  ctx.restore();
+}
+
+/** `sub_4F6B70`'s BtChat (StatusBar id 1004): bar-local (65, 91) -> page (65, 483), 38x17. */
+export const MESSENGER_BUTTON: Readonly<{ x: number; y: number; width: number; height: number }> =
+  Object.freeze({ x: 65, y: 483, width: 38, height: 17 });
+
+/** Whether a SURFACE point is on BtChat. The caller decides whether the field is playable. */
+export function messengerButtonAt(x: number, y: number): boolean {
+  return (
+    x >= MESSENGER_BUTTON.x &&
+    x < MESSENGER_BUTTON.x + MESSENGER_BUTTON.width &&
+    y >= MESSENGER_BUTTON.y &&
+    y < MESSENGER_BUTTON.y + MESSENGER_BUTTON.height
+  );
+}
+
+/** BtChat's own face; the WZ node carries `normal`, `mouseOver`, `pressed` and `disabled`. */
+export function drawMessengerButton(
+  ctx: CanvasRenderingContext2D,
+  image: HtmlImageLookup,
+  pressed: boolean,
+  hover: boolean,
+): void {
+  const state = pressed ? "pressed" : hover ? "mouseOver" : "normal";
+  const art = image(`UI/StatusBar.img/BtChat/${state}/0`);
+  if (art.ready) ctx.drawImage(art.img, MESSENGER_BUTTON.x, MESSENGER_BUTTON.y);
 }
 
 /** Integer division: HP/MP 163px, EXP 151px (4FA5E0). One source pixel stretched to the fill. */

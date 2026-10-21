@@ -31,6 +31,21 @@ export const QUICK_SLOTS: readonly { key: string; x: number; y: number }[] = Obj
 export function quickSlotAt(x: number, y: number): number {
   return QUICK_SLOTS.findIndex((s) => x >= s.x && x < s.x + 32 && y >= s.y && y < s.y + 32);
 }
+
+/** 4FC440: a quick-slot icon is anchored by its origin, NOT centred - left = slot.x - originX,
+ * top = slot.y + 32 - originY. The 32 is the slot's own height, so an icon whose origin sits at the
+ * usual `oy = 32` bottom lands flush with the slot's top edge. */
+export function quickSlotIconOrigin(
+  slot: { x: number; y: number },
+  icon: { ox?: number; oy?: number } | undefined,
+): { x: number; y: number } {
+  return { x: slot.x - (icon?.ox ?? 0), y: slot.y + 32 - (icon?.oy ?? 32) };
+}
+
+/** The skill icon the bar asks for: `Skill/<job block>.img/skill/<id>/icon`. */
+export function skillIconPath(skillId: number): string {
+  return `Skill/${Math.trunc(skillId / 10000)}.img/skill/${skillId}/icon`;
+}
 export function quickItemAllowed(id: unknown): boolean {
   return (
     typeof id === "number" &&

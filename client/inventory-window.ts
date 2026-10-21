@@ -126,6 +126,115 @@ export function clampInventoryScroll(capacity: number, row: number): number {
   return Math.max(0, Math.min(max, Math.round(row)));
 }
 
+/**
+ * Where a slot's cell sits inside the sheet, or `undefined` when the slot is not on the page the
+ * window is showing. The exact inverse of `inventorySlotAt`: `4DA810` keeps one row per tab and
+ * makes the page's first slot `4 * row + 1`, so a slot scrolled off the six visible rows has no
+ * cell at all.
+ */
+export function inventoryCellOrigin(slot: number, firstRow: number): UiPoint | undefined {
+  const { grid } = INVENTORY;
+  const index = slot - 1 - grid.columns * firstRow;
+  if (index < 0) return undefined;
+  const column = index % grid.columns;
+  const row = Math.floor(index / grid.columns);
+  if (row >= grid.rows) return undefined;
+  return { x: grid.x + column * grid.pitch, y: grid.y + row * grid.pitch };
+}
+
+/** The number the sheet prints in a cell's bottom-right corner, or `undefined` for none.
+ *
+ * A stack shows its quantity once it holds more than one - except the `207xxxx` throwing-star and
+ * bullet family, the rechargeable one: `sub_463BE0`/`sub_464000` drop it whole with no count dialog
+ * (`*(_DWORD *)(v6 + 12) / 10000 == 207`), and its "quantity" is the round count, which the page has
+ * always printed even at one. A stack with no printed quantity falls back to the rechargeable
+ * `ruc` (remaining uses) when that is positive.
+ */
+export function inventoryStackCount(item: {
+  itemId: number;
+  quantity?: number;
+  ruc?: number;
+}): number | undefined {
+  if (item.quantity !== undefined && (item.quantity > 1 || Math.floor(item.itemId / 10000) === 207))
+    return item.quantity;
+  if (item.ruc !== undefined && item.ruc > 0) return item.ruc;
+  return undefined;
+}
+
+/** The stack count, bottom-right inside the cell, with the outline the browser font needs. */
+export function drawInventoryStackCount(
+  ctx: CanvasRenderingContext2D,
+  value: number,
+  right: number,
+  bottom: number,
+): void {
+  ctx.save();
+  ctx.font = "10px 'Dotum', '돋움', 'Malgun Gothic', 'KMSCJK', sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.strokeText(String(value), right, bottom);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(String(value), right, bottom);
+  ctx.restore();
+}
+
+/** `UI/UIWindow.img/Item/BtCoin/<state>/0` (`sub_4D4960`). */
+export type InventoryCoinState = "disabled" | "pressed" | "mouseOver" | "normal";
+
+/**
+ * The meso button's face. A dead character, a purse under the 10-meso minimum the dialog asks for,
+ * or any request already in flight greys it out; a press only shows while the pointer is still on
+ * the button, the way `CCtrlButton` keeps its own pressed face.
+ */
+export function inventoryCoinState(view: {
+  dead: boolean;
+  mesos: number;
+  busy: boolean;
+  pressed: boolean;
+  hover: boolean;
+}): InventoryCoinState {
+  if (view.dead || view.mesos < 10 || view.busy) return "disabled";
+  if (view.pressed && view.hover) return "pressed";
+  return view.hover ? "mouseOver" : "normal";
+}
+
+/** `sub_4581F0`'s tab strip: the index of a `0x0B` inventory number, or 0 when it is unknown. */
+export function inventoryTabIndex(tab: number): number {
+  const found = INVENTORY_TABS.findIndex((entry) => entry.tab === tab);
+  return found < 0 ? 0 : found;
+}
+
+export interface InventoryTabFace {
+  index: number;
+  lit: boolean;
+  /** The tab's box on the sheet. */
+  box: InventoryBox;
+  /** The face to stamp: the lit one for the open tab, an idle one for the rest. */
+  face: InventoryBox;
+  /**
+   * Whether the sheet's own pixels under this tab have to be covered first. The sheet is painted
+   * with its first tab lit, so cell 0 needs an idle face whenever the open tab is not 0.
+   */
+  stamped: boolean;
+}
+
+/** The four faces of the strip for the open tab, in sheet order. */
+export function inventoryTabFaces(tab: number): InventoryTabFace[] {
+  const litIndex = inventoryTabIndex(tab);
+  return INVENTORY.tabs.map((box, index) => {
+    const lit = index === litIndex;
+    return {
+      index,
+      lit,
+      box,
+      face: lit ? INVENTORY.litTab : INVENTORY.idleTab,
+      stamped: lit || index === 0,
+    };
+  });
+}
+
 /** The slot number under a grid point, or 0 when the point is not on a cell. */
 export function inventorySlotAt(localX: number, localY: number, firstRow: number): number {
   const { grid } = INVENTORY;

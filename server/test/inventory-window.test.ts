@@ -9,8 +9,14 @@ import {
   clampInventoryScroll,
   drawInventoryLabel,
   drawInventoryScrollbar,
+  drawInventoryStackCount,
+  inventoryCellOrigin,
+  inventoryCoinState,
   inventoryScrollbarGeometry,
   inventorySlotAt,
+  inventoryStackCount,
+  inventoryTabFaces,
+  inventoryTabIndex,
   inventoryWindowAt,
   type InventoryTabView,
 } from "../../client/inventory-window.ts";
@@ -181,11 +187,15 @@ function fakeContext() {
   const calls: string[] = [];
   const drawn: { image: unknown; x: number; y: number }[] = [];
   const ctx = {
+    // A real snapshot, so a test can prove a painter leaves nothing behind.
     save() {
       calls.push("save");
+      stack.push(state());
     },
     restore() {
       calls.push("restore");
+      const previous = stack.pop();
+      if (previous) Object.assign(ctx, previous);
     },
     beginPath() {
       calls.push("beginPath");
@@ -203,8 +213,13 @@ function fakeContext() {
     textAlign: "",
     textBaseline: "",
     fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 0,
     fillText(text: string, x: number, y: number) {
       calls.push(`fillText:${text},${x},${y}`);
+    },
+    strokeText(text: string, x: number, y: number) {
+      calls.push(`strokeText:${text},${x},${y}`);
     },
   };
   const asked: string[] = [];
@@ -212,6 +227,17 @@ function fakeContext() {
     asked.push(path);
     return { ready: true, img: path as unknown as CanvasImageSource };
   };
+  const tracked = [
+    "font",
+    "textAlign",
+    "textBaseline",
+    "fillStyle",
+    "strokeStyle",
+    "lineWidth",
+  ] as const;
+  const stack: Record<string, unknown>[] = [];
+  const state = () =>
+    Object.fromEntries(tracked.map((key) => [key, ctx[key]])) as Record<string, unknown>;
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, drawn, asked, image };
 }
 
@@ -285,4 +311,121 @@ test("a tab label uses the sheet's own colours: black when lit, slate when idle"
   assert.equal(idle.ctx.fillStyle, "#44586e");
   assert.equal(idle.ctx.textAlign, "center");
   assert.equal(idle.ctx.textBaseline, "middle");
+});
+
+test("a cell origin is the exact inverse of the slot hit test, for every visible slot of every row", () => {
+  const { grid } = INVENTORY;
+  for (const firstRow of [0, 1, 6, 19]) {
+    for (let index = 0; index < grid.columns * grid.rows; index++) {
+      const slot = grid.columns * firstRow + index + 1;
+      const cell = inventoryCellOrigin(slot, firstRow);
+      assert.ok(cell, `slot ${slot} on row ${firstRow}`);
+      // The hit test reads the middle of the 32px face, so ask it about the cell's own centre.
+      assert.equal(
+        inventorySlotAt(cell?.x ?? -1, cell?.y ?? -1, firstRow),
+        slot,
+        `slot ${slot} at row ${firstRow} round-trips`,
+      );
+    }
+  }
+  // A slot scrolled past the page has no cell at all: the sheet shows six rows of four.
+  assert.equal(inventoryCellOrigin(1, 1), undefined, "slot 1 is above row 1's first slot");
+  assert.equal(inventoryCellOrigin(25, 0), undefined, "slot 25 is below the sixth row");
+  assert.equal(inventoryCellOrigin(4, 1), undefined, "one before row 1's first slot");
+  assert.deepEqual(inventoryCellOrigin(5, 1), { x: grid.x, y: grid.y }, "firstSlot = 4*row + 1");
+  assert.deepEqual(inventoryCellOrigin(24, 0), {
+    x: grid.x + 3 * grid.pitch,
+    y: grid.y + 5 * grid.pitch,
+  });
+});
+
+test("the printed stack count: quantities over one, always for the 207 family, else the ruc", () => {
+  assert.equal(inventoryStackCount({ itemId: 2000002, quantity: 1 }), undefined, "one potion");
+  assert.equal(inventoryStackCount({ itemId: 2000002, quantity: 2 }), 2);
+  assert.equal(inventoryStackCount({ itemId: 2000002 }), undefined);
+  // 207xxxx is the rechargeable family: `sub_463BE0` drops it whole with no count dialog, and its
+  // "quantity" is the round count, so the sheet prints it even at one.
+  assert.equal(inventoryStackCount({ itemId: 2070000, quantity: 1 }), 1);
+  assert.equal(inventoryStackCount({ itemId: 2070016, quantity: 200 }), 200);
+  assert.equal(inventoryStackCount({ itemId: 2060000, quantity: 1 }), undefined, "not 207");
+  // With no printable quantity the rechargeable remaining-uses count takes over.
+  assert.equal(inventoryStackCount({ itemId: 2070000, ruc: 0 }), undefined, "no rounds left");
+  assert.equal(inventoryStackCount({ itemId: 2070000, ruc: 700 }), 700);
+  assert.equal(inventoryStackCount({ itemId: 2070000, quantity: 1, ruc: 700 }), 1, "quantity wins");
+  assert.equal(inventoryStackCount({ itemId: 1002000, ruc: 5 }), 5, "equipment can carry a ruc");
+});
+
+test("the stack count prints bottom-right inside the cell, outlined, and leaves the context clean", () => {
+  const { ctx, calls } = fakeContext();
+  ctx.font = "leftover";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  drawInventoryStackCount(ctx, 700, 100, 200);
+  assert.deepEqual(
+    calls.filter((call) => call.startsWith("fillText") || call.startsWith("strokeText")),
+    ["strokeText:700,100,200", "fillText:700,100,200"],
+    `the black outline goes down first: ${calls.join(" ")}`,
+  );
+  // `save`/`restore` is the point: the old inline block left lineWidth and the alignment dirty.
+  assert.deepEqual([calls[0], calls.at(-1)], ["save", "restore"]);
+  assert.equal(ctx.strokeStyle, "", "the outline colour does not leak out of the painter");
+  assert.equal(ctx.lineWidth, 0, "nor does the 2px stroke width");
+  assert.equal(ctx.font, "leftover");
+  assert.equal(ctx.textAlign, "left");
+  assert.equal(ctx.textBaseline, "alphabetic");
+});
+
+test("BtCoin greys out for a dead character, a light purse or a request in flight", () => {
+  const idle = { dead: false, mesos: 5000, busy: false, pressed: false, hover: false };
+  assert.equal(inventoryCoinState(idle), "normal");
+  assert.equal(inventoryCoinState({ ...idle, hover: true }), "mouseOver");
+  // CCtrlButton keeps its pressed face only while the pointer is still on the button.
+  assert.equal(inventoryCoinState({ ...idle, pressed: true }), "normal");
+  assert.equal(inventoryCoinState({ ...idle, pressed: true, hover: true }), "pressed");
+  assert.equal(
+    inventoryCoinState({ ...idle, pressed: true, hover: true, dead: true }),
+    "disabled",
+    "a dead character outranks the press",
+  );
+  assert.equal(inventoryCoinState({ ...idle, mesos: 9 }), "disabled", "under the 10-meso minimum");
+  assert.equal(inventoryCoinState({ ...idle, mesos: 10 }), "normal", "exactly 10 is enough");
+  assert.equal(inventoryCoinState({ ...idle, busy: true }), "disabled");
+});
+
+test("the tab strip lights the open tab and always re-stamps cell 0, which the sheet paints lit", () => {
+  assert.deepEqual(
+    INVENTORY_TABS.map((tab) => [tab.tab, inventoryTabIndex(tab.tab)]),
+    [
+      [1, 0],
+      [2, 1],
+      [3, 2],
+      [4, 3],
+    ],
+  );
+  assert.equal(inventoryTabIndex(9), 0, "an unknown tab falls back to the first");
+  const faces = inventoryTabFaces(3);
+  assert.equal(faces.length, 4, "sub_4581F0 rejects n4 >= 4");
+  assert.deepEqual(
+    faces.map((face) => [face.index, face.lit, face.stamped]),
+    [
+      [0, false, true],
+      [1, false, false],
+      [2, true, true],
+      [3, false, false],
+    ],
+    "cell 0 is stamped because the sheet itself is drawn with the first tab lit",
+  );
+  assert.deepEqual(
+    faces.map((face) => face.face),
+    [INVENTORY.idleTab, INVENTORY.idleTab, INVENTORY.litTab, INVENTORY.idleTab],
+  );
+  assert.deepEqual(
+    faces.map((face) => face.box),
+    INVENTORY.tabs,
+  );
+  // With the first tab open there is only one stamp: cell 0 is the lit one.
+  assert.deepEqual(
+    inventoryTabFaces(1).map((face) => face.stamped),
+    [true, false, false, false],
+  );
 });

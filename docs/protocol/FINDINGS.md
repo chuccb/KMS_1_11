@@ -4125,8 +4125,11 @@ binary 只規定了**位元組**，下面這些是這份 repo 的**規則**，�
 
 **開窗的兩條路**：
 
-1. 狀態列的 **BtChat**（`sub_4F6B70` 建 `CCtrlButton(parent, 1004, 2, 65, 91, 38, 17, "UI/StatusBar.img/BtChat")`；
-   狀態列原點 y=392 → 頁面 (65,483)。`sub_4F88C0` case 1004 → `sub_4DDF10(0)`）：`roomId=0`＝開新房。
+1. 狀態列的 **BtChat**（`sub_4F6B70` 經 vtable slot 32 建鈕，反編譯引數為
+   `Create(this, parent, id=1004, x=65, y=91, type=2, &out)`；**沒有 w/h 引數**，38×17 來自
+   `UI/StatusBar.img/BtChat` 這張 canvas。狀態列原點 y=392 → 頁面 (65,483)。
+   `sub_4F88C0` case 1004 → `sub_4DDF10(0)`）：`roomId=0`＝開新房。
+   （六顆鈕的 id/x/y/type 表與原版矩形互相重疊一事見 `docs/NATIVE_MESSENGER.md`／ADR-114。）
 2. 邀請模態的「是」（`sub_4E1BB0`）→ `sub_4DDF10(roomId)`，roomId 就是 `0x4D type 3` 帶來的那個 u32。
 
 `sub_4DDF10` 先建窗（`sub_4DDAF0`：`this_8 == nullptr` 才 HeapAlloc；已開著＝no-op，所以 BtChat
