@@ -19,11 +19,15 @@ import {
   impactPosition,
   weaponHitKeys,
   ATTACK_EFFECT_Z,
+  ATTACK_ORIGIN_HEIGHT,
+  SHOT_NEAR_CLIP,
+  shotNearDistance,
 } from "../../client/attack-presentation.ts";
 import { animationFrame } from "../../client/animation.ts";
 import { shotRelease, attackDuration } from "../../client/attack-timing.ts";
 
-import { projectileLeg } from "../../client/basiccombat.ts";
+import { projectileLeg, shotNear } from "../../client/basiccombat.ts";
+import { MAGIC_HEIGHT, MAGIC_NEAR } from "../../client/magiccombat.ts";
 import { encodeUserAttack, readUserAttack, FIELD_OPCODE } from "../src/protocol/field.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 
@@ -269,5 +273,50 @@ test("both actors use the independent child5 clock; hit art/world damage enter t
   assert.match(
     server,
     /queueActiveHits\(\s*session,\s*opcode,\s*attack,\s*now\s*\+\s*shotRelease\(basicMotion\),?\s*\)/,
+  );
+});
+
+test("513C80/514D30: every attack line leaves the actor at y-25, magic and shot alike", () => {
+  // sub_513C80 `.c:279602`: `p_right_1 = this_1[101] - 25`. sub_514D30 uses the same figure, so it
+  // is one shared number and not a magic-only height - MAGIC_HEIGHT is now just its alias.
+  assert.equal(ATTACK_ORIGIN_HEIGHT, 25);
+  assert.equal(projectileLeg(0, 100, false, undefined, 65, 200).y0, 75);
+  assert.equal(
+    projectileLeg(0, 100, true, undefined, 65, 200).y0,
+    75,
+    "facing changes x, not the origin height",
+  );
+  assert.equal(projectileLeg(500, -40, false, undefined, 65, 200).y0, -65);
+  // The magic constants that really are magic-specific stay separate: X +/-50..300.
+  assert.notEqual(MAGIC_HEIGHT, MAGIC_NEAR);
+  assert.equal(MAGIC_HEIGHT, ATTACK_ORIGIN_HEIGHT, "same 25, one home");
+});
+
+test("512F90 clips a shot's near bound to 65 and to one pixel inside the far bound", () => {
+  // `*a4 = 65;` then `if (left < -65) left = -65; if (left >= right - 1) left = right - 1; *a4 = -left;`
+  assert.equal(SHOT_NEAR_CLIP, 65);
+  // No bounds at all: the native's own default of 65, which the page used to write as a literal.
+  assert.equal(shotNearDistance(undefined), 65);
+  assert.equal(shotNear(undefined), 65);
+  assert.equal(shotNear({}), 65);
+  // Inside the clip: the bounds' own left edge, mirrored into a distance.
+  assert.equal(shotNearDistance({ left: -30, right: 200, top: 0, bottom: 0 }), 30);
+  // Beyond it: pinned at 65, never nearer than that however long the weapon's rectangle is.
+  assert.equal(shotNearDistance({ left: -400, right: 200, top: 0, bottom: 0 }), 65);
+  assert.equal(
+    shotNearDistance({ left: -65, right: 200, top: 0, bottom: 0 }),
+    65,
+    "exactly the clip",
+  );
+  assert.equal(shotNearDistance({ left: -64, right: 200, top: 0, bottom: 0 }), 64);
+  // The two clamps run in that order - "-65 first", then "inside the far edge" - so a rectangle
+  // whose far edge is behind the clip lands on right - 1, which can be *further* than 65. No real
+  // weapon rectangle is shaped like that; these pin the order, not a case anyone will hit.
+  assert.equal(shotNearDistance({ left: -80, right: -70, top: 0, bottom: 0 }), 71);
+  assert.equal(shotNearDistance({ left: 0, right: -70, top: 0, bottom: 0 }), 71);
+  assert.equal(
+    shotNearDistance({ left: -80, right: 0, top: 0, bottom: 0 }),
+    65,
+    "the -65 clamp already won",
   );
 });

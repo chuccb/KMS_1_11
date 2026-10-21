@@ -8,9 +8,45 @@ export interface AttackTiming {
  * Browser clock phase starts at the accepted attack, not the original global update phase.
  */
 export const USER_UPDATE_MS: 30 = 30;
+/**
+ * The attack-speed byte, and the range both ends clamp it to.
+ *
+ * `sub_4BE8B0` on the way out (`.c:198498-198503`) and `sub_508700` on the way in
+ * (`.c:269574-269582`) are the same three lines: `n <= 0 -> 0`, `n >= 6 -> 6`, then
+ * `delay * (n + 5) / 8`. So 7 is not faster than 6 and -1 is not slower than 0, and a browser that
+ * scales with a raw byte lands on exactly the numbers the native does.
+ */
+export const ATTACK_SPEED = { min: 0, max: 6 } as const;
+
+export function clampAttackSpeed(speed: number): number {
+  const step = Math.trunc(speed);
+  if (step >= ATTACK_SPEED.max) return ATTACK_SPEED.max;
+  return step <= ATTACK_SPEED.min ? ATTACK_SPEED.min : step;
+}
+
 export function scaledAttackDelays(delays: readonly number[], speed: number): number[] {
-  const step = Math.max(0, Math.min(6, Math.trunc(speed)));
+  const step = clampAttackSpeed(speed);
   return delays.map((delay) => Math.trunc((delay * (step + 5)) / 8));
+}
+
+/**
+ * When the damage numbers for a multi-target swing appear.
+ *
+ * `sub_520F20` walks the packet's targets in `for ( n3000 = 0; ; n3000 += 70 )` (`.c:293748`) and
+ * hands `sub_4882F0` a time of `base + sub_515CA0(n3000, 280)`; `sub_515CA0(a, b)` is literally
+ * `a >= b ? b : a` (`.c:281167`) - a cap, not a scale. So every extra target the swing names is
+ * 70 ms later and the whole fan-out stops at 280 ms: a Slash Blast that catches six mobs finishes
+ * printing in under a third of a second instead of stretching out with the count.
+ *
+ * This is the delay *between targets*. The delay between successive hits on *one* target is
+ * `attackHitDelay` (120 ms, `sub_4882F0`'s own `DAMAGEINFO[0]`), and the two are independent.
+ */
+export const ATTACK_TARGET_STAGGER_MS = 70;
+export const ATTACK_TARGET_STAGGER_CAP_MS = 280;
+
+export function attackTargetDelay(targetIndex: number): number {
+  const targets = Math.max(0, Math.trunc(targetIndex));
+  return Math.min(targets * ATTACK_TARGET_STAGGER_MS, ATTACK_TARGET_STAGGER_CAP_MS);
 }
 export function attackFrameDuration(delay: number): number {
   return Math.max(1, Math.ceil(delay / USER_UPDATE_MS)) * USER_UPDATE_MS;

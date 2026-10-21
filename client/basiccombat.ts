@@ -1,4 +1,5 @@
 import type { BasicAttackAction } from "../server/src/game/basicattack.ts";
+import { ATTACK_ORIGIN_HEIGHT, shotNearDistance } from "./attack-presentation.ts";
 import { isRechargeableItem } from "./inventory-window.ts";
 export interface AmmunitionItem {
   slot: number;
@@ -69,10 +70,9 @@ export function basicAmmo<T extends AmmunitionItem>(
     .find((item) => (item.quantity ?? 0) >= required && isAmmunitionFor(weaponId, item.itemId));
 }
 export { attackDuration, attackFrame, shotRelease } from "./attack-timing.ts";
-/** Native shot range starts at the near swing boundary, clipped to 65 by 512F90. */
+/** 512F90: a shot starts at the near swing boundary, clipped to 65. */
 export function shotNear(motion: Pick<BasicAttackAction, "bounds"> | undefined) {
-  const bounds = motion?.bounds;
-  return bounds ? -Math.min(Math.max(bounds.left, -65), bounds.right - 1) : 65;
+  return shotNearDistance(motion?.bounds);
 }
 export function projectileLeg(
   x: number,
@@ -83,7 +83,7 @@ export function projectileLeg(
   range = 200,
 ) {
   const x0 = x + (facingLeft ? -near : near),
-    y0 = y - 25;
+    y0 = y - ATTACK_ORIGIN_HEIGHT;
   // Runtime callers supply 485B80's captured intersection point. Root-20 remains only for legacy API callers.
   const x1 = mob?.point?.x ?? mob?.x ?? x + (facingLeft ? -range : range);
   const y1 = mob?.point?.y ?? (mob ? mob.y - 20 : y0);

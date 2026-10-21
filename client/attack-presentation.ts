@@ -13,6 +13,31 @@ export interface Point {
 /** Original 4BE270 / 40A5E0 / 40EA70 / 485B80 / 487A30 / 50D7F0 presentation facts.
  * Inputs are archive metadata/captured RECTs; not a port of the swept CShape2D pool. */
 export const ATTACK_EFFECT_Z: 250310 = 250310; // 41F8A0, relative to tile base -1073721834.
+/**
+ * `sub_513C80` (`.c:279602`) and `sub_514D30`: every attack line - a basic shot and a magic ball
+ * alike - leaves the actor at `y - 25`. It is one number the two senders share, not a magic-only
+ * height, which is why it sits here rather than beside `MAGIC_NEAR` / `MAGIC_RANGE`.
+ */
+export const ATTACK_ORIGIN_HEIGHT: 25 = 25;
+/**
+ * `sub_512F90` (`.c:278743` and `.c:278795-278801`) clips the near end of a shot:
+ *
+ * ```
+ * *a4 = 65;                                     // the answer when there are no bounds at all
+ * if ( left < -65 ) left = -65;                 // never nearer than 65px behind the actor
+ * if ( left >= right - 1 ) left = right - 1;    // and never past the far edge
+ * *a4 = -left;
+ * ```
+ */
+export const SHOT_NEAR_CLIP: 65 = 65;
+/** `sub_512F90`: how far in front of the actor a shot starts, in the actor's own units. */
+export function shotNearDistance(bounds: Rect | undefined): number {
+  const left = Math.min(
+    Math.max(bounds?.left ?? -SHOT_NEAR_CLIP, -SHOT_NEAR_CLIP),
+    (bounds?.right ?? 0) - 1,
+  );
+  return -left;
+}
 export function weaponMasterySkills(weapon: number, shoot: boolean = false): number[] {
   const type = weapon >= 1000000 ? Math.trunc(weapon / 10000) % 100 : weapon;
   const ids: Partial<Record<number, number[]>> = shoot

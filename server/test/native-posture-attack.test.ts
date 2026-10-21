@@ -3,10 +3,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  ATTACK_SPEED,
+  ATTACK_TARGET_STAGGER_CAP_MS,
+  ATTACK_TARGET_STAGGER_MS,
   attackDuration,
   attackFrame,
   attackFrameStart,
   attackCanvasFrame,
+  attackHitDelay,
+  attackTargetDelay,
+  clampAttackSpeed,
   shotRelease,
   scaledAttackDelays,
   basicAttackAction,
@@ -222,4 +228,39 @@ test("542AF5: forced prone Down cannot accidentally grab a rope at a platform's 
   assert.equal(playerPosture(body), "prone");
   advancePlayer(body, { vertical: 1 }, world, 30);
   assert.equal(body.ladder, world.ladders[0]);
+});
+
+test("4BE8B0/508700 clamp the speed byte to 0..6, and 508700 scales with (n+5)/8", () => {
+  // Both ends are the same three lines: `n <= 0 -> 0`, `n >= 6 -> 6`, then `delay * (n + 5) / 8`.
+  assert.deepEqual(ATTACK_SPEED, { min: 0, max: 6 });
+  for (const n of [-99, -1, 0]) assert.equal(clampAttackSpeed(n), 0, `speed ${n}`);
+  for (const n of [1, 2, 3, 4, 5]) assert.equal(clampAttackSpeed(n), n, `speed ${n}`);
+  for (const n of [6, 7, 99]) assert.equal(clampAttackSpeed(n), 6, `speed ${n}`);
+  assert.equal(clampAttackSpeed(2.9), 2, "the byte is truncated, not rounded");
+  // (n+5)/8: speed 0 is slower than the WZ delay, speed 6 is nearly half again as long.
+  assert.deepEqual(scaledAttackDelays([240], 0), [150]);
+  assert.deepEqual(scaledAttackDelays([240], 3), [240], "speed 3 is the WZ delay unchanged");
+  assert.deepEqual(scaledAttackDelays([240], 6), [330]);
+  assert.deepEqual(
+    scaledAttackDelays([300, 400], 2),
+    [262, 350],
+    "truncated per frame, not on the sum",
+  );
+  // The clamp is what scaledAttackDelays applies, so a caller need not clamp first.
+  assert.deepEqual(scaledAttackDelays([240], 99), scaledAttackDelays([240], 6));
+  assert.deepEqual(scaledAttackDelays([240], -99), scaledAttackDelays([240], 0));
+});
+
+test("sub_515CA0: each extra target a swing names is 70 ms later, and the fan-out stops at 280", () => {
+  // `for (n3000 = 0; ; n3000 += 70)` with `sub_515CA0(n3000, 280)` = `n >= 280 ? 280 : n`.
+  assert.equal(ATTACK_TARGET_STAGGER_MS, 70);
+  assert.equal(ATTACK_TARGET_STAGGER_CAP_MS, 280);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 6, 7].map(attackTargetDelay),
+    [0, 70, 140, 210, 280, 280, 280, 280],
+  );
+  // This is between *targets*; the 120 ms of attackHitDelay is between hits on one target.
+  assert.deepEqual([0, 1, 2].map(attackHitDelay), [0, 120, 240]);
+  assert.equal(attackTargetDelay(3.9), 210, "the index is truncated, not rounded");
+  assert.equal(attackTargetDelay(-1), 0, "a negative index is not a negative delay");
 });

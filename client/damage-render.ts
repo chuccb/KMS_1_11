@@ -22,6 +22,37 @@ export interface DamageGlyph {
   ox: number;
   oy: number;
 }
+/**
+ * `sub_4C8ED0` (`.c:208415-208423`) finishes every damage roll with the same two comparisons:
+ * `v <= 1 -> 1`, then `v >= 9999 -> 9999`. The server's own rolls (`rollNativeMelee`,
+ * `rollNativeMagic` and `rollNativeTouch` in `server/src/game/nativecombat.ts`) end with
+ * `trunc(clamp(damage, 1, 9999))`, and `sub_4C8ED0`'s intermediate *stat* terms are clamped to
+ * 999 instead - a different, smaller ceiling for the same reason.
+ *
+ * `0` is not a damage value: it is the touch that missed. It never comes out of `sub_4C8ED0`, but
+ * the page carries it because that is what a refused hit has to print - see `damageGlyphLayout`,
+ * which shows the MISS bitmap for anything that is not `> 0`.
+ */
+export const NATIVE_DAMAGE = { min: 1, max: 9999 } as const;
+
+/**
+ * `sub_487A30` (`.c:142639`): where one damage number of one swing is anchored.
+ *
+ * `v16 = *(this + 91) - 30 * a6 - sub_485C20(this)` - the mob's own y, lifted 30 px for every hit
+ * that already landed on it, less the body's own rise. `a6` is the index of the hit inside the
+ * swing (the `i_2` that `sub_520F20`'s per-target loop increments, `.c:293777`), so the numbers
+ * climb the mob in the order the packet names them instead of printing on top of each other.
+ */
+export const DAMAGE_NUMBER_STACK_PX = 30;
+
+export function damageNumberAnchor(
+  mob: { x: number; y: number },
+  bodyRise: number,
+  ordinal: number,
+): { x: number; y: number } {
+  return { x: mob.x, y: mob.y - Math.max(0, bodyRise) - ordinal * DAMAGE_NUMBER_STACK_PX };
+}
+
 /** CAnimationDisplayer::41E610/41F200; NoRed for mob hits; NoViolet (palette 2) for incoming damage/MISS.
  * Glyph dimensions/origins are archive metadata, not hardcoded guessed font metrics.
  */

@@ -85,13 +85,13 @@ import { motionControls } from "./motion-controls.ts";
 import {mobAttackPreview} from "./mob-attack-preview.ts";
 import {mobForcedName,mobAttackName,mobForcedPose,mobForcedActive,replaceMobForced,mobDieAction} from "./mob-attacks.ts";
 import {mobAttackEffects} from "./mob-attack-effects.ts";
-import {ATTACK_EFFECT_Z,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.ts";
+import {ATTACK_EFFECT_Z,ATTACK_ORIGIN_HEIGHT,SHOT_NEAR_CLIP,attackMasteryTier,attackProfileAtTier,attackWorldRect,attackHitPoint,impactPosition,weaponHitKeys} from "./attack-presentation.ts";
 import {magicSearchRects,magicHitPoint,magicLeg,clipMagicRay} from "./magiccombat.ts";
 import {attackPredictions} from './attack-predictions.ts';
 import {activeSkill,activeMeleeActions,activeSkillSpeed,activeSkillCost,activeMeleeBounds,activeRangedActions,activeSkillAmmo,activeProjectileLayout,activeMagicActions,activeMagicSpeed} from './active-skills.ts';
 import { combatAssets } from "./combat-assets.ts";
 import { beginAttackAlert, advanceAttackAlert, clearAttackAlert, forcedAttackInput, nativeBodyAction } from "./posture.ts";
-import { basicAttackAction, scaledAttackDelays, attackCanvasFrame, attackHitDelay } from "./attack-timing.ts";
+import { attackCanvasFrame, attackHitDelay, attackTargetDelay, basicAttackAction, scaledAttackDelays } from "./attack-timing.ts";
 import { avatarStance, avatarMotionProfiles, resetAvatarMotion } from "./avatar-motion.ts";
 import { FACE_NAMES, faceProfiles, facePose, setFace, resetFace, movementFace } from "./faces.ts";
 import {tooltipPreview} from "./tooltip-preview.ts";
@@ -145,7 +145,7 @@ import {
   playerContactRect,
   intersects,
 } from "./contact.ts";
-import { damageNumbers } from "./damage-render.ts";
+import { NATIVE_DAMAGE, damageNumberAnchor, damageNumbers } from "./damage-render.ts";
 import { statTotals } from "./characterstats.ts";
 import { temporaryStats, drawTemporaryStats } from "./temporarystats.ts";
 import { naturalRecovery } from "./recovery.ts";
@@ -644,7 +644,9 @@ function handle(message) {
         return;
       }
       const damage = message.damage;
-      if (!Number.isInteger(damage) || damage < 0 || damage > 9999) return;
+      // sub_4C8ED0 clamps a real hit to 1..9999. 0 is the one value below that floor the page lets
+      // through: it is the touch that missed, it prints MISS, and it knocks back nothing.
+      if (!Number.isInteger(damage) || damage < 0 || damage > NATIVE_DAMAGE.max) return;
       const now = performance.now();
       contact.accept(damage);
       addDamageMark({
@@ -3080,9 +3082,12 @@ function drawSkillLayer(effect,x,y,now){
 function hitPresentation(mob,point,facingLeft,profile,action,magic=false){
   return {offset:point?{x:point.x-mob.x,y:point.y-mob.y}:undefined,facingLeft,profile,action,magic};
 }
-function physicalHitPoint(source,mob,facingLeft,bounds,shoot=false,near=65,range=nativeShotRange){
+function physicalHitPoint(source,mob,facingLeft,bounds,shoot=false,near=SHOT_NEAR_CLIP,range=nativeShotRange){
   const rect=mob.rect??mobRect(currentMobFrame(mob.mob??mob,performance.now()),mob,facingFlip(mobRenderFacing(mob.mob??mob)));
-  return attackHitPoint(attackWorldRect(source,shoot?{left:-range,right:-near,top:-25,bottom:-24}:bounds,facingLeft),rect);
+  // 513C80 gives a shot no WZ hit rectangle: it sweeps the one-pixel band at y-25 between its
+  // near and far bounds, and 485B80 widens that band onto whatever it meets.
+  const shot={left:-range,right:-near,top:-ATTACK_ORIGIN_HEIGHT,bottom:-ATTACK_ORIGIN_HEIGHT+1};
+  return attackHitPoint(attackWorldRect(source,shoot?shot:bounds,facingLeft),rect);
 }
 async function hitFrames(skillId,level,presentation){
   if(skillId){
@@ -3132,7 +3137,7 @@ function scheduleAttackHit(mobId, damage, at, ordinal=0, onImpact) {
     );
     const frame=currentMobFrame(mob,now);
     // Flinch is authoritative 0x33 (threshold/action/window), not every positive floating number.
-    if(frame){const mark={x:mob.x,y:mob.y-Math.max(0,frame.oy??0)-ordinal*30,value:damage,start:at,
+    if(frame){const mark={...damageNumberAnchor(mob,frame.oy??0,ordinal),value:damage,start:at,
       jitter:Array.from({length:String(damage).length},()=>Math.floor(Math.random()*2))};
       mark.order=layerOrder(mark,ATTACK_EFFECT_Z);addDamageMark(mark);}
     onImpact?.(mob,mobRect(frame,mob,facingFlip(mobRenderFacing(mob))));
@@ -3226,9 +3231,8 @@ async function receiveUserAttack(message, now) {
   const action = skillId?(magic?activeMagicActions(profile,skillId,skillData?.skillType):message.shoot?activeRangedActions(profile,skillId):activeMeleeActions(profile,skillId)).find(a=>a.action===message.action)
     :basicAttackAction(profile, message.action, message.shoot);
   if (!action) return; // Do not turn an unknown/skill action into a fabricated one-handed swing.
-  const speed = Math.max(0, Math.min(6, message.speed));
   // The relay owns speed; scale original WZ delays, never an already rounded profile.
-  const delays = scaledAttackDelays(action.baseDelays, speed);
+  const delays = scaledAttackDelays(action.baseDelays, message.speed);
   user.facing = message.facingLeft ? 1 : 0;
   const motion = {
     ...action,
@@ -3265,7 +3269,7 @@ async function receiveUserAttack(message, now) {
     const delay = magic?shotRelease(motion)+(magicBalls.length?magicPlan.leg.duration:0):message.shoot
       ? shotRelease(motion) +
         projectileLeg(source.x, source.y, message.facingLeft, snapshot, near).duration
-      : shotRelease(motion)+(skillId?Math.min(targetIndex*70,280):0);
+      : shotRelease(motion)+(skillId?attackTargetDelay(targetIndex):0);
     const point=magic?magicPlan.point:message.shoot?snapshot.point:physicalHitPoint(source,snapshot,message.facingLeft,activeMeleeBounds(action.bounds,skillData?.levels.find(row=>row.level===message.skillLevel)?.values.range??0,message.facingLeft,true),false,near);
     scheduleActiveHits(target.mobId,target.damages??[],skillId,message.skillLevel,now+delay,
       hitPresentation(snapshot,point,message.facingLeft,profile,motion.action,magic));
@@ -3480,7 +3484,7 @@ async function swing(skillId=0) {
       else if(shoot)launchActiveProjectiles(entity,ammo.itemId,motion,shotTarget,now,near,skillValues,bulletFrames);
       const attackToken=activePredictions.add({field:self,epoch:combatEpoch,start:now,skillId,skillLevel,
         targets:new Map(selected.map((target,index)=>[target.mobId,{mob:target,presentation:hitPresentation(target,snapshots.get(target.mobId)?.point,facingLeft,profile,motion.action,magic),delayMs:shotRelease(motion)+
-          (magic?(skillArt.balls.length?magicPlan.leg.duration:0):shoot?projectileLeg(source.x,source.y,facingLeft,snapshots.get(target.mobId),near,nativeShotRange).duration:Math.min(index*70,280))}]))});
+          (magic?(skillArt.balls.length?magicPlan.leg.duration:0):shoot?projectileLeg(source.x,source.y,facingLeft,snapshots.get(target.mobId),near,nativeShotRange).duration:attackTargetDelay(index))}]))});
       send({t:magic?'active-magic':shoot?'active-ranged':'active-melee',attackToken,skillId,action:motion.action,facingLeft,
         targets:selected.map(mob=>({mobId:mob.mobId,x:snapshots.get(mob.mobId)?.point?.x??mob.x,y:snapshots.get(mob.mobId)?.point?.y??mob.y}))});return;
     }

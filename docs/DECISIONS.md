@@ -3870,3 +3870,31 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1278 pass / 0 fail、5315 expect() calls、148 files、286.57s**（ADR-116 基線 1265/0，本輪 +13 全為新測試，0 新失敗）。新測試逐檔：`inventory-window` 16→23、`shop-window` 16→18、`trade-state` 5→6、`basicattack` 7→10。
   - 撰寫時失敗一次，是**我自己算錯**：以為 `inventoryDropPlan(2, 2000002, 32768)` 會 `refuse`，實際上數量窗本來就夾在 32767（`ask`），只有 207 那條沒有窗可退才會 `refuse`。對照原實作的分支改正測試，未改實作去遷就測試。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。玩家看得到的改變只有第三節那兩條（歸還卷軸的 500 ms 冷卻、快捷鍵不再觸發歸還卷軸）；第五節是線上格式修正，我們自己的 server 前後都收得下。
+
+## ADR-118：把攻擊時序／傷害數字的原版常數收回既有模組（本輪無行為改變，純命名與去重）
+
+- **背景**：接續「全部東西達到最乾淨易讀」。上一輪收的是道具／數量的家族判斷，這一輪收**攻擊與傷害數字這一半**：速度 byte、多目標排程、傷害數字堆疊、射擊近界、傷害上下限。**這一輪沒有翻出 bug，也沒有任何行為改變**——每一處都是把原來寫死在事件處理器裡的數字換成有原碼行號、有測試的名字，並**順手去掉一處重複夾取**。誠實地說：本輪的價值是可讀性與「下次改動不會踩空」，不是修好什麼。
+
+- **（一）`client/attack-timing.ts`**：
+  - `ATTACK_SPEED = { min: 0, max: 6 }` 與 `clampAttackSpeed(speed)`。`sub_4BE8B0`（送端，`.c:198498-198503`）與 `sub_508700`（收端，`.c:269574-269582`）是**同一段三行**：`n <= 0 → 0`、`n >= 6 → 6`，然後 `delay * (n + 5) / 8`。所以 7 不會比 6 快、−1 不會比 0 慢，而 `scaledAttackDelays` 現在用同一個函式夾。
+  - **去重**：`receiveUserAttack` 原本自己 `Math.max(0, Math.min(6, message.speed))` 一次，再交給 `scaledAttackDelays`——而後者內部本來就夾同一個範圍。現在直接把 `message.speed` 交進去。（兩者逐值等價：都是 `Math.trunc` 後夾，NaN 也是一樣傳下去。）
+  - `ATTACK_TARGET_STAGGER_MS = 70`／`ATTACK_TARGET_STAGGER_CAP_MS = 280`／`attackTargetDelay(targetIndex)`。`sub_520F20`（收端，`.c:293748`）的目標迴圈是 `for ( n3000 = 0; ; n3000 += 70 )`，每圈把 `sub_515CA0(n3000, 280)` 加進 `sub_4882F0` 的時間；`sub_515CA0(a, b)` 本體就是 `a >= b ? b : a`（`.c:281167`）——**是上限，不是縮放**。送端 `sub_512F90`（`.c:279000`/`279055`）是同一個寫法。
+  - **順便確認了一條我原本懷疑的**：C 裡 `sub_515CA0` 只出現在兩處（`.c:279028` 送端、`.c:293779` 收端），兩處都是**普攻**路徑。但 Slash Blast 這一類技能是走**普通近戰**送出的（ADR-070：「Slash Blast 普通近戰先找到目標才延伸遠邊至 WZrange／最多六隻；raw release＋min(targetIndex×70,280)排程」），所以頁面在 `skillId` 有值時才套這個延遲是對的；而本版普攻只有一個目標（`validatedBasicAttack` 拒絕 `targets.length > 1`），`attackTargetDelay(0)` 反正也是 0。**兩邊都對，所以一個字都沒改。**
+  - 另外：`attackHitDelay`（120 ms／每段）是**同一目標的多段**間隔，與這個**目標之間**的 70 ms 是兩件事，兩條測試現在都寫著，免得日後混用。
+
+- **（二）`client/damage-render.ts`**：
+  - `NATIVE_DAMAGE = { min: 1, max: 9999 }`。`sub_4C8ED0`（`.c:208415-208423`）的收尾就是 `v <= 1 → 1`、再 `v >= 9999 → 9999`；server 端 `nativecombat.ts` 的三個 roll 也以 `trunc(clamp(damage, 1, 9999))` 收尾。**注意 999 是另一個東西**：那是同一支函式裡對 PAD／EVA／PD 這些**數值項**的上限（`nativecombat.ts` 的 `clamp` 預設 `hi = 999`），不是傷害上限，測試裡已把兩者釘開。
+  - **0 不是傷害值**：它從 `sub_4C8ED0` 出不來（`rollNativeTouch` 只在「沒命中」時回 0），頁面讓它通過是因為那是「碰到但沒扣血」要印 MISS 的唯一表示。`damageGlyphLayout` 對任何 `!(value > 0)` 都印 MISS 點陣圖——所以 0 與「傷害 0」不是同一件事。
+  - `DAMAGE_NUMBER_STACK_PX = 30` 與 `damageNumberAnchor(mob, bodyRise, ordinal)`。`sub_487A30`（`.c:142639`）：`v16 = *(this + 91) - 30 * a6 - sub_485C20(this)`，也就是「怪物 y − 每段 30px − 身體自身的抬升」，`a6` 是這一刀裡的第幾段（`sub_520F20` 的 `i_2`，`.c:293777`）。
+
+- **（三）`client/attack-presentation.ts`**（攻擊幾何已經住在這裡：`attackWorldRect`／`attackHitPoint`／`impactPosition`）：
+  - `ATTACK_ORIGIN_HEIGHT = 25`。**這一個數字是普攻射擊與魔法共用的**：`sub_513C80`（普攻射擊，`.c:279602`）是 `p_right_1 = this_1[101] - 25`，`sub_514D30`（魔法）用同一個 25。所以它放在這裡，而不是留在 `magiccombat.ts` 的 `MAGIC_NEAR`／`MAGIC_RANGE` 旁邊——那兩個（50／300）才真的是魔法專屬（普攻遠界是 `±200`、近界是 `±n119`）。
+  - `MAGIC_HEIGHT` 現在是 `ATTACK_ORIGIN_HEIGHT` 的別名，`server/src/net/loginserver.ts` 那邊本來就拿它去驗**普攻射擊**的落點（`at.y - MAGIC_HEIGHT`），名字本來就已經名不副實了。
+  - `SHOT_NEAR_CLIP = 65` 與 `shotNearDistance(bounds)`。`sub_512F90`（`.c:278743` 與 `.c:278795-278801`）是 `*a4 = 65;` 起手，然後 `if (left < -65) left = -65; if (left >= right - 1) left = right - 1; *a4 = -left;`。**兩個夾取的先後順序有意義**：先夾 −65，再夾進遠界內側，所以遠界落在裁剪點後方時結果會是 `right - 1`（可能比 65 更遠）——沒有真實武器矩形長那樣，但測試把順序釘住了。`shotNear`（`basiccombat.ts`）與 `projectileLeg` 現在都從這裡取值，頁面 `physicalHitPoint` 那個 `{top:-25,bottom:-24}` 也改成由 `ATTACK_ORIGIN_HEIGHT` 算出來的 1px 帶。
+
+- **（四）`main.js` 六處寫死數字換掉**：`Math.min(6, …)`、`Math.min(index*70,280)`（兩處：遠端轉播與本機出手）、`ordinal*30`、`top:-25,bottom:-24`、`damage > 9999`、`near=65`。
+
+- **驗證**：`client_probe.ts` 前後輸出**逐位元組相同**（`diff` 0 行、兩次 exit 0、10 個 banner），且與 ADR-117 之後相同。**這一輪的探針是有效的證據**：它會走普攻／射擊／魔法的出手與轉播路徑，而本輪改的正是那條鏈上的數字，所以「逐位元組相同」確實支持「沒有行為改變」這個結論（上一輪那兩個 bug 探針碰不到，那時我就明說了它不是證據）。
+  - **閘**：`typecheck` ✓、`format:check` ✓、`build` ✓；CI 完整指令 → **1284 pass / 0 fail、5315 expect() calls、148 files、282.23s**（ADR-117 基線 1278/0，本輪 +6 全為新測試，0 新失敗）。新測試：`native-posture-attack` +2、`native-attack-effects` +2、`native-damage-render` +2。
+  - 撰寫時失敗一次，是**我自己算錯**：以為 `shotNearDistance({left:-80, right:20})` 會被遠界夾成 19，實際上 −65 那道先夾、結果是 65。照原碼的夾取順序改測試，沒有改實作去遷就。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪無任何遊戲行為改變——畫面、手感、傷害都不會與 ADR-117 的 LIVE 有差別。

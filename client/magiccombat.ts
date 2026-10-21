@@ -1,11 +1,13 @@
 import type { ContactPoint, NativeRect } from "./contact.ts";
+import { ATTACK_ORIGIN_HEIGHT } from "./attack-presentation.ts";
 import type { FootholdSegment } from "../server/src/wz/archive.ts";
 /** 514D30 / 491F20: X +/-50..300, Y-25; 20px slices, half-height=distance/4.
  * Selection uses caller-supplied mob RECTs. Browser frames/server snapshot tolerance are policy;
  * this is not a substitute for native swept CShape2D or its ZList insertion order. */
 export const MAGIC_NEAR: 50 = 50,
-  MAGIC_RANGE: 300 = 300,
-  MAGIC_HEIGHT: 25 = 25;
+  MAGIC_RANGE: 300 = 300;
+/** `ATTACK_ORIGIN_HEIGHT`: the same `y - 25` the basic shot starts from, not a magic-only figure. */
+export const MAGIC_HEIGHT: 25 = ATTACK_ORIGIN_HEIGHT;
 export function magicSearchRects(source: ContactPoint, facingLeft: boolean): NativeRect[] {
   const direction = facingLeft ? -1 : 1,
     rects = [];
