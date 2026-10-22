@@ -40,9 +40,9 @@ test("tiny viewports scroll instead of downsampling; legacy fit/native migrate, 
     assert.ok(Number.isFinite(viewLayout(values[0], values[1], values[2]).scale));
 });
 test("multiple clear choices remain distinct, and arbitrarily large windows cannot exceed the 4x memory budget", () => {
-  assert.equal(DISPLAY_MODES.length, 5);
+  assert.equal(DISPLAY_MODES.length, 6);
   assert.deepEqual(
-    DISPLAY_MODES.slice(1).map((mode) => viewLayout(10000, 10000, 2, mode).deviceScale),
+    DISPLAY_MODES.slice(2).map((mode) => viewLayout(10000, 10000, 2, mode).deviceScale),
     [1, 2, 3, 4],
   );
   assert.equal(viewLayout(1e9, 1e9, 10).deviceScale, 4);
@@ -85,4 +85,83 @@ test("a fixed header reserves its rows: the surface is centred below it, never b
   // A header taller than the whole viewport still yields a usable, finite layout.
   for (const bar of [600, 5000])
     assert.ok(Number.isFinite(viewLayout(1300, 600, 1, "pixel", bar).top));
+});
+
+test("the auto mode holds its scale across a boundary wobble instead of flipping the surface", () => {
+  // `floor(fit)` is a step function, so at a boundary a wobble of ONE pixel used to flip the scale
+  // 2 <-> 1: the surface alternated between 1600x1200 and 800x600, the whole game doubling and
+  // halving. A resizing iframe or a scrollbar appearing is enough to start it, and no single
+  // screenshot shows it because either size looks fine on its own.
+  for (const dpr of [1, 1.5, 2]) {
+    // 2000 wide keeps the width off the limit, so the height alone decides: 2x first fits at 1200/dpr.
+    const boundary = 1200 / dpr,
+      wobble = [boundary, boundary - 1, boundary, boundary - 1, boundary, boundary - 1];
+    const flipping: number[] = [];
+    for (const height of wobble) flipping.push(viewLayout(2000, height, dpr, "pixel").deviceScale);
+    assert.ok(
+      new Set(flipping).size > 1,
+      `without a held scale the raw boundary does flip (dpr ${dpr}: ${flipping.join(",")})`,
+    );
+
+    const seen = new Set<number>();
+    let current: number | undefined = 2;
+    for (const height of wobble) {
+      const l = viewLayout(2000, height, dpr, "pixel", 0, current);
+      seen.add(l.deviceScale);
+      current = l.deviceScale;
+    }
+    assert.deepEqual([...seen], [2], `held scale must not flip at dpr ${dpr}`);
+  }
+  // Changing mode must take effect at once. Holding the old scale across a mode change would pin
+  // `pixel-original` to whatever plain `pixel` was using - never reaching its floor at all.
+  assert.equal(
+    viewLayout(1203, 903, 1.25, "pixel-original", 0, 1).deviceScale,
+    2,
+    "a mode change is not a wobble: the new mode's own choice wins immediately",
+  );
+  // A real change of size still moves it, in both directions.
+  assert.equal(viewLayout(2000, 1000, 1, "pixel", 0, 2).deviceScale, 1, "far enough below -> 1x");
+  assert.equal(viewLayout(3000, 2000, 1, "pixel", 0, 2).deviceScale, 3, "enough room -> 3x");
+  // Manual sizes ignore the held scale entirely: that number is the one thing the user chose.
+  assert.equal(viewLayout(3000, 2000, 1, "pixel-1", 0, 3).deviceScale, 1);
+});
+
+test("pixel-original never shows the game smaller than the original 800x600 window", () => {
+  // CSS size is 800*deviceScale/dpr, so reaching 800x600 needs deviceScale >= dpr, and the next
+  // integer up is the only crisp way to get there. On a fractionally scaled display plain `pixel`
+  // therefore renders *smaller than the original* - crisp, but shrunk.
+  for (const dpr of [1, 1.25, 1.5, 2, 3])
+    for (const [w, h] of [
+      [2560, 1300],
+      [1536, 760],
+      [1280, 620],
+      [900, 500],
+      [4000, 3000],
+    ]) {
+      const l = viewLayout(w, h, dpr, "pixel-original");
+      assert.ok(Number.isInteger(l.deviceScale) && l.deviceScale >= 1 && l.deviceScale <= 4);
+      assert.ok(
+        (800 * l.deviceScale) / dpr >= 800 - 1e-9 && (600 * l.deviceScale) / dpr >= 600 - 1e-9,
+        `dpr ${dpr} at ${w}x${h} shows ${(800 * l.deviceScale) / dpr}x${(600 * l.deviceScale) / dpr}` +
+          ", below the original 800x600",
+      );
+      // It is the auto choice with a floor, never a smaller one.
+      const auto = viewLayout(w, h, dpr, "pixel");
+      assert.ok(l.deviceScale >= auto.deviceScale);
+    }
+  // Where plain auto would shrink, this one holds the original size and says so.
+  const shrunk = viewLayout(1536, 760, 1.25, "pixel"),
+    held = viewLayout(1536, 760, 1.25, "pixel-original");
+  assert.equal(shrunk.deviceScale, 1);
+  assert.equal(
+    (800 * shrunk.deviceScale) / 1.25,
+    640,
+    "plain auto shrinks to 640x480 on a 125% display",
+  );
+  assert.equal(held.deviceScale, 2);
+  assert.equal(
+    held.overflowing,
+    true,
+    "holding the original size means scrolling in a short window",
+  );
 });

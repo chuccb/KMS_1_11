@@ -6,6 +6,7 @@ import {
   DISPLAY_STORAGE_KEY,
 } from "../../client/display-controls.ts";
 import { requireElement } from "../../client/dom.ts";
+import { DISPLAY_MODES } from "../../client/display.ts";
 import { uiFixture, fixtureEvent } from "./helpers/ui-fixture.ts";
 
 test("typed display owns validated independent preference, DPR-only refresh, integer backing and listener disposal", () => {
@@ -57,7 +58,7 @@ test("typed display owns validated independent preference, DPR-only refresh, int
     assert.equal(canvas.style.transform, "scale(0.8)");
     assert.equal(canvas.width, 1600);
     assert.equal(canvas.height, 1200);
-    assert.equal(select.children.length, 5);
+    assert.equal(select.children.length, DISPLAY_MODES.length, "one option per display mode");
     const before = scales;
     controls.dispose();
     controls.dispose();

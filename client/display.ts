@@ -2,10 +2,18 @@
  * A small viewport scrolls the full surface instead of destroying source pixels.
  * Manual sizes are physical pixel multiples (not CSS multiples under fractional OS/browser zoom).
  */
-export const DISPLAY_MODES = ["pixel", "pixel-1", "pixel-2", "pixel-3", "pixel-4"] as const;
+export const DISPLAY_MODES = [
+  "pixel",
+  "pixel-original",
+  "pixel-1",
+  "pixel-2",
+  "pixel-3",
+  "pixel-4",
+] as const;
 export type DisplayMode = (typeof DISPLAY_MODES)[number];
 export const DISPLAY_OPTIONS: readonly { id: DisplayMode; label: string }[] = [
   { id: "pixel", label: "清晰自動 · 等比例" },
+  { id: "pixel-original", label: "清晰自動 · 不小於原版 800×600" },
   { id: "pixel-1", label: "清晰 1× · 800×600 實體像素" },
   { id: "pixel-2", label: "清晰 2× · 1600×1200 實體像素" },
   { id: "pixel-3", label: "清晰 3× · 2400×1800 實體像素" },
@@ -23,9 +31,24 @@ export function originGrid(dpr: number): number {
   return 1;
 }
 /**
+ * How far past a boundary the viewport must travel before the auto mode leaves the scale it is
+ * already using, measured in CSS pixels of the surface's short (600px) side.
+ *
+ * `floor(fit)` is a step function, so at a boundary a wobble of a single pixel flips the surface
+ * between two sizes - the game doubling and halving, over and over. A resizing iframe or a
+ * scrollbar appearing is enough to start it, and no single screenshot can show it because either
+ * size looks fine on its own. The band is a little wider than a scrollbar, which is the largest
+ * step the environment takes by itself.
+ */
+export const AUTO_HYSTERESIS_PX = 24;
+
+/**
  * @param reservedTop Height of a fixed header that overlays the top of the scroll area. Those rows
  * are not usable, so the surface is centred in what is left: without this, a window that is only
  * just tall enough slides the top of the game underneath the header and hides it.
+ * @param current The device scale already in use, when there is one. The auto mode keeps it until
+ * the viewport leaves its band, so that small size changes cannot flip the surface between sizes.
+ * Manual modes ignore it: their scale is the one thing the user chose outright.
  */
 export function viewLayout(
   width: number,
@@ -33,6 +56,7 @@ export function viewLayout(
   dpr = 1,
   requested: unknown = "pixel",
   reservedTop = 0,
+  current?: number,
 ) {
   width = Number.isFinite(width) && width > 0 ? width : 800;
   height = Number.isFinite(height) && height > 0 ? height : 600;
@@ -44,11 +68,25 @@ export function viewLayout(
   const chrome =
       Number.isFinite(reservedTop) && reservedTop > 0 ? Math.ceil(reservedTop / grid) * grid : 0,
     usable = Math.max(1, height - chrome);
-  const mode = displayMode(requested);
-  const deviceScale =
-    mode === "pixel"
-      ? Math.max(1, Math.min(4, Math.floor(Math.min(width / 800, usable / 600) * dpr + 1e-9)))
-      : Number(mode.slice(-1));
+  const mode = displayMode(requested),
+    fit = Math.min(width / 800, usable / 600) * dpr + 1e-9;
+  let deviceScale: number;
+  if (mode === "pixel-original")
+    // Never smaller than the original 800x600 window. CSS size is 800*deviceScale/dpr, so reaching
+    // 800x600 needs deviceScale >= dpr, and the next integer up is the only crisp way to get there.
+    // When that no longer fits the view scrolls - the policy the manual sizes already state.
+    deviceScale = Math.min(4, Math.max(1, Math.floor(fit), Math.ceil(dpr)));
+  else if (mode === "pixel") deviceScale = Math.max(1, Math.min(4, Math.floor(fit)));
+  else deviceScale = Number(mode.slice(-1));
+  // Only a step DOWN is held. The flip-flop is always a step down: fit crosses an integer, floor
+  // drops, the surface halves. Stepping up is never a wobble - it means the next size genuinely
+  // fits, and taking it cannot shrink the viewport again - so it must happen at once, which is also
+  // what makes changing mode take effect immediately instead of being pinned to the old size.
+  if ((mode === "pixel" || mode === "pixel-original") && Number.isInteger(current)) {
+    const held = current as number,
+      guard = (AUTO_HYSTERESIS_PX / 600) * dpr;
+    if (deviceScale < held && held >= 1 && held <= 4 && fit >= held - guard) deviceScale = held;
+  }
   const scale = deviceScale / dpr,
     cssWidth = 800 * scale,
     cssHeight = 600 * scale;

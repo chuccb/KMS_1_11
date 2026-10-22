@@ -221,6 +221,26 @@ export async function probeDisplay(target: string) {
                 devicePixelRatio === 1.25 &&
                 document.getElementById("view")?.getBoundingClientRect().width === 640,
             );
+            // That 640 is the whole reason `pixel-original` exists: on a 125% display the plain
+            // auto fit renders the game at 80% of the original window. The sixth option must hold
+            // the original size instead - and say so by overflowing.
+            await page.locator("#view-scale").selectOption("pixel-original", { force: true });
+            await pump(page);
+            await page.waitForFunction(
+              () => {
+                const view = document.getElementById("view"),
+                  viewport = document.getElementById("game-viewport");
+                return (
+                  !!view &&
+                  (view.getBoundingClientRect().width ?? 0) >= 800 &&
+                  (viewport?.scrollWidth ?? 0) > (viewport?.clientWidth ?? 0)
+                );
+              },
+              undefined,
+              { timeout: 5000 },
+            );
+            // Crispness itself needs no separate check here: the DISPLAY_MODES loop above already
+            // runs `stripes` on this mode. This only pins the size guarantee that mode is about.
           } finally {
             await session.detach();
           }

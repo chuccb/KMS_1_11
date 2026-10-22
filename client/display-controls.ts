@@ -58,6 +58,7 @@ export function displayControls({
     measuredHeight = NaN,
     measuredDpr = NaN,
     measuredChrome = NaN,
+    currentScale: number | undefined,
     disposed = false;
   // `display: none` measures 0, so a hidden header is already "reserves nothing".
   const chromeHeight = () => (chrome === undefined ? 0 : chrome.getBoundingClientRect().height);
@@ -78,7 +79,17 @@ export function displayControls({
     measuredHeight = size.height;
     measuredDpr = viewport.devicePixelRatio;
     measuredChrome = chromeHeight();
-    layout = viewLayout(measuredWidth, measuredHeight, measuredDpr, mode, measuredChrome);
+    // Hand the scale in use back in, so the auto mode can hold it across a boundary wobble instead
+    // of flipping the surface between two sizes. The first call has nothing to hold yet.
+    layout = viewLayout(
+      measuredWidth,
+      measuredHeight,
+      measuredDpr,
+      mode,
+      measuredChrome,
+      currentScale,
+    );
+    currentScale = layout.deviceScale;
     // Only an actual device-scale change reallocates the output. The logical renderer is separate.
     if (canvas.width !== layout.backingWidth) canvas.width = layout.backingWidth;
     if (canvas.height !== layout.backingHeight) canvas.height = layout.backingHeight;
