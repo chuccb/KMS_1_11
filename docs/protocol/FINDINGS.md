@@ -5065,3 +5065,25 @@ typecheck／build／format 全綠。
   已改為 `#chatbox { pointer-events: none }` + `#chatbox > * { pointer-events: auto }`
   （實測：`#say`／`#chat-lines`／`#chat-scroll`／`#emotes button` 都仍然收得到，只有那塊
   空白把指標還給畫布）。
+
+## ADR-133：登入／創角畫面的尺寸（`UI/Login.img`）與 `sub_42E0D0` 的角色格
+
+- **`CharSelect/menu` 是 490×398，程式裡寫的是 491**：`CHARACTER_UI.width` 長期多一格。
+  它不是「差一點」而已——**這條測試本來永遠不可能失敗**：它把常數再抄一次
+  （`[161, 85, 491, 398]`），而不是去量那張 canvas。兩扇窗都只用 `menu` 這張片自己的尺寸來畫，
+  所以 `width`/`height` 在 client 裡其實**沒有被用到**，錯數字才會活這麼久。已改為實測。
+- **一次收集成一張表**：`client/selection.ts` 新增 `LOGIN_CELLS`，每個尺寸都寫在**它來自的 WZ 路徑旁邊**，
+  再由 `server/test/presentation-selection.test.ts` 走過整張表逐項重測（button strip 是四個 face 的目錄，
+  所以量的是 `<path>/normal/0`）。新增一個尺寸就必須給路徑，不給就測不到。
+- **`sub_42E0D0`（`:54643`）就是整個角色格 hit test**，每一個數字都出自它：
+  `rc.left = n120 - 50`、`rc.top = 178`、`rc.right = n120`、`rc.bottom = 248`；
+  `n120` 從 **120** 起、每次 `+= 140`、到 `n120 >= 540` 停。
+  → 格子 **50×70**、間距 **140**、第一格左緣 120−50＝**70**；而 `540 = 120 + 3×140` 正是「三格」的由來。
+  腳底 `feetX`＝格子自己的中心 x（70+50/2＝95）、`feetY`＝底緣上方 10（178+70−10＝238）。
+- **世界列**：`WORLD_UI.rowWidth/rowHeight` 是 `WorldSelect/wsItem` **240×25**；
+  `rowY 199 = headerY 181 + wsHeader 18`（`wsHeader` 240×18）——所以 rowY 現在由表推出，不再手寫。
+- **人口條**：`worldGaugeClip` 的 101×7 是 `WorldSelect/wsGauge`。
+- **創角**：`NEW_CHARACTER_UI` 260×424 是 `CharSelect/newDlg`；`CREATION_BUTTONS[0]` 43×16 是
+  `CharSelect/BtCheckId`。
+- **按鈕尺寸不可合併**：`WorldSelect/BtConnect` 是 **111×24**，`CharSelect/BtSelect/BtDelete/BtNew`
+  三個都是 **141×24**。測試裡有 `notEqual` 擋住「順手整理成同一個常數」。

@@ -7,6 +7,7 @@ import { requireElement } from "./dom.ts";
 import { isRecord } from "./resource-validation.ts";
 import { isCreationCatalog } from "./ui-resource-validation.ts";
 import { buttonSprite, BT_DIALOG, uiButtonFace } from "./uicontrols.ts";
+import { LOGIN_CELLS } from "./selection.ts";
 type CreationMode = "closed" | "create" | "notice" | "delete";
 type CreationActor = AvatarActor & FaceActor;
 type CreationDice = [number, number, number, number];
@@ -50,16 +51,24 @@ const CONFIRMATION_BUTTONS = [
   { id: "native-no", x: 408, path: "BtNo", mode: "delete" },
   { id: "native-ok", x: 368, path: "BtOK", mode: "notice" },
 ] as const;
-/** CUINewChar controls: sub_42F160/430690/430C30. All x/y are native 800x600 pixels. */
-export const NEW_CHARACTER_UI = { x: 270, y: 88, width: 260, height: 424, feetX: 411, feetY: 211 };
+/** CUINewChar controls: sub_42F160/430690/430C30. All x/y are native 800x600 pixels.
+ * The plate is `CharSelect/newDlg`, measured with the rest of `LOGIN_CELLS`. */
+export const NEW_CHARACTER_UI = {
+  x: 270,
+  y: 88,
+  width: LOGIN_CELLS["CharSelect/newDlg"].width,
+  height: LOGIN_CELLS["CharSelect/newDlg"].height,
+  feetX: 411,
+  feetY: 211,
+};
 export const CREATION_BUTTONS = [
   {
     id: "check-name",
     path: "UI/Login.img/CharSelect/BtCheckId",
     x: 461,
     y: 229,
-    width: 43,
-    height: 16,
+    width: LOGIN_CELLS["CharSelect/BtCheckId"].width,
+    height: LOGIN_CELLS["CharSelect/BtCheckId"].height,
   },
   {
     id: "create",

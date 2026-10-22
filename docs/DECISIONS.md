@@ -4484,3 +4484,46 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **故意沒動**：`drawMessengerButton` 仍然只有三個**可達**的 face——BtChat 的 strip 雖然有
   `disabled`，但原版何時把它變灰沒有證據，不自己發明。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。
+
+
+## ADR-133：把登入／創角畫面的尺寸收回 `LOGIN_CELLS`，並修掉那個 `491`（無行為改變，main.js 維持 5522 行，2026-10-22）
+
+- **起因：一條永遠不會失敗的測試**。整理 `client/selection.ts` 時去量 `UI/Login.img`，發現
+  **`CharSelect/menu` 是 490×398，而 `CHARACTER_UI.width` 寫的是 491**。多一格已經很久了，
+  因為 `server/test/presentation-selection.test.ts` 是把常數**再抄一次**
+  （`[161, 85, 491, 398]`）而不是去量那張圖——**斷言重述常數，就不是回歸**。
+  這正好是 ADR-129／ADR-130 各出過一次的同型問題（永遠成立／寫反的斷言）。
+- **為什麼錯數字能活這麼久**：兩扇窗都只 `stamp(menu, layout.x, layout.y)`——**用那張片自己的尺寸**，
+  `WORLD_UI.width/height` 與 `CHARACTER_UI.width/height` 在 client 裡**完全沒有被用到**
+  （唯一的使用者就是那條測試）。所以改 491→490 **不改變任何繪製**，只是讓那個數字終於為真。
+- **做法**：`client/selection.ts` 新增 `LOGIN_CELLS`——一張凍結表，**每個尺寸都放在它來自的 WZ 路徑旁邊**
+  （`WorldSelect/menu`、`CharSelect/menu`、`newDlg`、`wsHeader`、`wsItem`、`wsIcon`、`wsGauge`、
+  四顆按鈕、`BtCheckId`）。`WORLD_UI`／`CHARACTER_UI`／`SELECTION_BUTTONS`／`worldGaugeClip`
+  全部讀它；`client/creation.ts` 的 `NEW_CHARACTER_UI` 與 `CREATION_BUTTONS[0]` 也讀同一張表。
+  測試改成**走過整張表逐項重測** `Data.wz`（button strip 是四個 face 的目錄，所以量 `<path>/normal/0`）。
+- **連帶抽出的原證（寫進 FINDINGS）**
+  - `sub_42E0D0`（`:54643`）就是整個角色格 hit test：`rc.left = n120-50`、`top 178`、`right n120`、
+    `bottom 248`，`n120` 從 120 起、`+= 140`、到 `>= 540` 停 → 格子 **50×70**、間距 **140**、
+    第一格左緣 **70**，`540 = 120+3×140` 就是「三格」。腳底＝格子中心 x（95）、底緣上方 10（238）。
+    程式原本就對，現在**有出處**，且 50／70／140／178／95／238 都由具名常數推出。
+  - `rowY 199 = headerY 181 + wsHeader 18`——現在由表推出，不再手寫。
+  - `wsItem` 240×25＝世界列；`wsGauge` 101×7＝人口條；`newDlg` 260×424＝創角窗；`BtCheckId` 43×16。
+- **順手清掉三個死欄位**：`CHARACTER_UI.feetX`／`feetY`／`spacing` 在 client 與 server 裡
+  **一個使用者都沒有**——`characterSlot()` 現在從 `CHARACTER_SLOT` 推出 95／238／140，抄在窗上的那份
+  就成只剩 look-alike 的殘渣。已移除（`rowX`／`visibleRows` 有在用，保留）。
+- **故意留下的**：`WORLD_UI.x/y`（250,89）、`CHARACTER_UI.x/y`（161,85）、`rowX`（24）、
+  `headerY`（181）、四顆按鈕的 x/y、創角窗的 `feetX/feetY`（411,211）——**沒有找到原碼依據**，
+  本輪不動，也不假裝動過。
+  注意 161 不是置中（(800−490)/2＝155），250 也不是（(800−305)/2＝247）；按鈕也沒有對齊規律
+  （BtConnect 在世界窗裡大約置中，三顆角色鈕卻靠右），所以**不替它們找規律**。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、probe exit 0（`drawImage` **165**、11 個 banner，
+  與 ADR-132 **逐位元組相同**——本次無行為改變）。全套件 **1354 pass / 0 fail / 156 files / 317.57s**
+  （ADR-132 是 1350 pass，+4 就是本輪新增的四條），`client/main.js` **維持 5522 行**，七份文件不必同步行數。
+- **一次紅的，誠實記下**：第一次跑全套件是 **1353 pass / 1 fail**——`drop-wz.test.ts` 的
+  「原始掉落圖示」**逾時**（`--timeout 30000`，它跑了 145s，整套也從 319s 脹到 496s）。
+  它不是斷言失敗，且那條測試**根本沒有 `done` callback**（bun 的訊息是通用模板）；單獨跑只要 **1.1s**。
+  真正原因是**我讓 LIVE server 一直開著一起跑**——把它停掉重跑，同一條 **1128ms**，全套 **0 fail / 317.57s**。
+  與本次改動無關（`drop-wz.test.ts` 不 import `selection.ts`/`creation.ts`），但記在這裡：
+  **跑全套件時不要讓 LIVE server 一起跑**。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪是純重構＋修一個沒人用的錯數字，
+  畫面不該有任何變化。
