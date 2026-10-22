@@ -13,27 +13,57 @@
  *                          => the 4-byte header is PLAINTEXT, the body is encrypted
  * dispatcher sub_43B170  : opcode = body[0] (one byte), cursor starts right after the header
  *
- * handshake  sub_43A410  : the very first packet is read raw and must be exactly 211 bytes
- *                            u16 at 0 must equal 211  (>211 -> CPatchException,
- *                                                      <211 -> CTerminateException)
+ * handshake  sub_43A410  : the very first packet is read raw and its u16 at 0 must equal 211
+ *                            u16 at 0 = the client version (ADR-139), *used as the byte count*
  *                            u16 at 2 = body length
  *                            body[bodyLength]
  *                            u32 sendSeed, u32 recvSeed
- *                          totals 211 = 4 + bodyLength + 8  =>  bodyLength = 199
+ *                          211 = 4 + bodyLength + 8  =>  bodyLength = 199
  *                          The body cannot be encrypted with the session cipher because the
  *                          cipher state arrives inside this same packet (state unverified).
+ *
+ * WHY THE VERSION IS ALSO THE LENGTH (ADR-139)
+ * --------------------------------------------
+ * `sub_43A410` reads the handshake in two steps (MapleStory.exe.c 66345-66370): it recv()s 2
+ * bytes, takes that u16 as a *total*, and loops recv()ing until it has that many bytes
+ * (`while (v17 - (char*)v15 != v16)`, and it refuses a value above the 1460 buffer
+ * (`cmp ecx, eax; ja`)). Only then does it compare the very same u16 against 0xD3:
+ *   < 211 -> CTerminateException -> "wrong VERSION of the client, reinstall" (see cipher.ts)
+ *   > 211 -> CPatchException carrying (expected 211, got N)                  (see cipher.ts)
+ * So one wire field does both jobs, and they cannot disagree: the packet must be 211 bytes long
+ * *and* say 211. That is why the body is not a free payload - changing its length would change
+ * the version the client demands. See `HANDSHAKE_VERSION` below.
+ *
+ * The 199-byte body is parsed but never used: `sub_418610(&v56, ...)` copies it into a local
+ * byte array (MapleStory.exe.c 66393), and the only later reference to that local is the
+ * refcount release at the end of the function (MapleStory.exe.lst 0043A884). The client reads
+ * nothing from it, so a server may fill it with anything - this server sends zeros.
  */
 import {
   CipherState,
   CLIENT_SEND_MAGIC,
+  CLIENT_VERSION,
   SERVER_SEND_MAGIC,
   magicFor,
   type Direction,
 } from "./cipher.ts";
 import { FramingError, toHex } from "./frame.ts";
 
-export const HANDSHAKE_TOTAL_BYTES = 211;
-export const HANDSHAKE_BODY_BYTES = HANDSHAKE_TOTAL_BYTES - 4 - 8; // 199
+/**
+ * The version the handshake's first u16 must carry (`cmp ax, 0D3h`, 0043A76E).
+ *
+ * The client reads exactly that many bytes, so the version *is* the packet length: the two are
+ * the same number on the wire, and nothing else in the handshake can be resized without also
+ * changing which client is allowed to connect. `HANDSHAKE_TOTAL_BYTES` below is therefore not an
+ * independent constant - it is this one, spelled as a byte count.
+ */
+export const HANDSHAKE_VERSION = CLIENT_VERSION;
+
+/** The opaque block the client copies and then ignores: `version - header - two seeds`. */
+export const HANDSHAKE_BODY_BYTES = HANDSHAKE_VERSION - 4 - 8; // 199
+
+/** Total wire bytes of the handshake: u16 version, u16 body length, body, u32 send, u32 recv. */
+export const HANDSHAKE_TOTAL_BYTES = 4 + HANDSHAKE_BODY_BYTES + 8; // 211 === HANDSHAKE_VERSION
 
 export interface SessionPacket {
   /** u16 at offset 0 (obfuscated magic for session packets) */
@@ -55,6 +85,9 @@ export interface Handshake {
  * `clientSendSeed` seeds the client's SEND state (CClientSocket+120) and
  * `clientRecvSeed` seeds its RECEIVE state (+124); a server should pick these and mirror
  * them (server recv = client send, server send = client recv).
+ *
+ * The first u16 carries `HANDSHAKE_VERSION`, which the client also reads as the byte count - so
+ * the packet it produces is always exactly `HANDSHAKE_VERSION` bytes long.
  */
 export function encodeHandshake(
   body: Uint8Array,

@@ -23,9 +23,27 @@
  *     The client's receive path sub_43AFA0 requires it exactly:
  *        mov ecx, [edi+7Ch] / shr ecx,10h / xor cx,[edi+6Eh] / cmp cx,0FF2Ch   (0043AFF9)
  *     and disconnects (sub_43AC20 -> AVCDisconnectException) when it does not match.
- * 0xFF2C is ~0xD3, so the two constants look like one constant that got complemented on one
- * side. It does not matter why: the client's check is what the server has to satisfy, so a
- * server MUST send 0xFF2C and MUST accept 0xD3. Getting this wrong is a silent disconnect.
+ * 0xD3 IS THE CLIENT VERSION, NOT A PICKED CONSTANT (ADR-139)
+ * -----------------------------------------------------------
+ * 0xD3 = 211 is the same number in three places, and only "the build's version" explains all
+ * three at once:
+ *   1. every c2s packet header    `push 0D3h`                    (0043AD75)
+ *   2. every s2c packet header    `cmp cx, 0FF2Ch`  = ~0xD3       (0043AFF9)
+ *   3. the handshake's u16 @ 0    `cmp ax, 0D3h`                  (0043A76E)
+ * Site 3 is what settles it. The client compares that field to 211 and, on mismatch, throws with
+ * a message about the *version*:
+ *   < 211 -> CTerminateException(0x22000005) -> "잘못된 버전의 클라이언트입니다 / 최신 버전의
+ *            클라이언트를 다시 설치해 주세요" ("it is a wrong VERSION of the client / reinstall
+ *            the latest version") - the string is at MapleStory.exe 0x1b59aa.
+ *   > 211 -> CPatchException, built by sub_468400 (MapleStory.exe.c 112328) as
+ *              WORD @ +4 = 211      (the version the client wants)
+ *              WORD @ +6 = received (the version it got)
+ *            i.e. an expected/got pair - a version check, with a patch/update to follow.
+ * Nothing in that path talks about bytes. See `session.ts` for why site 3 is *also* a length.
+ *
+ * It does not matter why Nexon used the version as the header magic: the client's check is what
+ * the server has to satisfy, so a server MUST send 0xFF2C and MUST accept 0xD3. Getting this
+ * wrong is a silent disconnect.
  *
  * Because swapNibbles is self-inverse, encrypt/decrypt are exact inverses:
  *   swapNibbles(key ^ (key ^ swapNibbles(plain))) === plain
@@ -33,10 +51,21 @@
 export const LCG_MULTIPLIER = 214013;
 export const LCG_INCREMENT = 2531011;
 
+/**
+ * The version of the 2003 KMS 1.11 client this server speaks (211).
+ *
+ * It is the header magic the client writes, the complement of the one it verifies, and the value
+ * the handshake's first u16 must carry. Kept here, once, so the three cannot drift apart.
+ */
+export const CLIENT_VERSION = 0x00d3;
+
 /** Header magic the client writes; a server must accept exactly this from a client. */
-export const CLIENT_SEND_MAGIC = 0x00d3;
-/** Header magic the client verifies on packets it receives; a server must send exactly this. */
-export const SERVER_SEND_MAGIC = 0xff2c; // = ~0x00d3, see the note above
+export const CLIENT_SEND_MAGIC = CLIENT_VERSION;
+/**
+ * Header magic the client verifies on packets it receives; a server must send exactly this.
+ * The one's complement of the version within 16 bits: `~0x00d3 & 0xffff === 0xff2c`.
+ */
+export const SERVER_SEND_MAGIC = ~CLIENT_VERSION & 0xffff;
 
 export type Direction = "c2s" | "s2c";
 

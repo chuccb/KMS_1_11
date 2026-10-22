@@ -4,6 +4,7 @@ import {
   CipherState,
   CLIENT_SEND_MAGIC,
   SERVER_SEND_MAGIC,
+  CLIENT_VERSION,
   LCG_INCREMENT,
   LCG_MULTIPLIER,
   decryptBody,
@@ -16,6 +17,7 @@ import {
 import {
   HANDSHAKE_BODY_BYTES,
   HANDSHAKE_TOTAL_BYTES,
+  HANDSHAKE_VERSION,
   SessionDeframer,
   decodeHandshake,
   describePacket,
@@ -217,4 +219,51 @@ test("a body over the client's 1456-byte limit is refused, not silently truncate
   const send = new CipherState(1);
   assert.throws(() => encodeSessionPacket(new Uint8Array(1457), send), FramingError);
   assert.equal(encodeSessionPacket(new Uint8Array(1456), send).length, 1460);
+});
+
+test("0xD3 is one constant - the client version - shared by both magics and the handshake", () => {
+  // ADR-139. The number 211 shows up three times in the binary and only "the build's version"
+  // explains all three:
+  //   0043AD75  push 0D3h                 -> every c2s packet header the client writes
+  //   0043AFF9  cmp cx, 0FF2Ch  (~0xD3)   -> every s2c packet header the client verifies
+  //   0043A76E  cmp ax, 0D3h              -> the handshake's u16 @ 0
+  // The third is what settles it: on mismatch the client throws with a message about the
+  // *version* (see the evidence quoted in cipher.ts), not about a length.
+  assert.equal(CLIENT_VERSION, 211);
+  assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION, "one definition, not two copies of 211");
+  assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION);
+  assert.equal(CLIENT_SEND_MAGIC, CLIENT_VERSION, "the client writes its version as the magic");
+  assert.equal(SERVER_SEND_MAGIC, ~CLIENT_VERSION & 0xffff);
+  assert.equal(SERVER_SEND_MAGIC, 0xff2c);
+  // The client reads exactly `u16 @ 0` bytes (sub_43A410), so the version IS the packet length:
+  // nothing in this handshake can be resized without also changing which client may connect.
+  assert.equal(HANDSHAKE_TOTAL_BYTES, HANDSHAKE_VERSION);
+  assert.equal(HANDSHAKE_BODY_BYTES, CLIENT_VERSION - 4 - 8);
+  // ...and the encoded wire proves it, rather than restating the arithmetic.
+  const wire = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 1, 2);
+  assert.equal(wire.length, CLIENT_VERSION);
+  assert.equal(new DataView(wire.buffer).getUint16(0, true), CLIENT_VERSION);
+});
+
+test("the handshake body is the client's ignored block: parsed, never read", () => {
+  // sub_418610 copies the 199 bytes into a local (MapleStory.exe.c 66393) and the only later
+  // reference is the release at 0043A884 - so the client reads nothing from it. A server may
+  // fill it with anything; this one sends zeros. What must hold is only its length.
+  for (const fill of [0x00, 0xff, 0x5a]) {
+    const body = new Uint8Array(HANDSHAKE_BODY_BYTES).fill(fill);
+    const decoded = decodeHandshake(encodeHandshake(body, 7, 8));
+    assert.equal(decoded.body.length, HANDSHAKE_BODY_BYTES);
+    assert.equal(decoded.body[0], fill);
+    assert.equal(decoded.sendSeed, 7);
+    assert.equal(decoded.recvSeed, 8);
+  }
+  // One byte too many or too few is rejected: the version field would no longer be the length.
+  assert.throws(
+    () => encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES + 1), 1, 2),
+    FramingError,
+  );
+  assert.throws(
+    () => encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES - 1), 1, 2),
+    FramingError,
+  );
 });
