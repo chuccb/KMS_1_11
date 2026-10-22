@@ -213,6 +213,7 @@ const STUB_CATALOG: ItemCatalog = {
 const STUB_SHOP_DEF: ShopDef = { shopId: 2003, npcTemplateId: 2003, items: [{ itemId: 2000000 }] };
 const STUB_SHOP: ShopKeeper = {
   shopOfNpc: (templateId) => (templateId === 2003 ? STUB_SHOP_DEF : undefined),
+  shopsOfNpc: () => [STUB_SHOP_DEF],
   linesOf: () => [{ itemId: 2000000, price: 25, maxCount: 200 }],
   priceOf: (itemId) => (itemId === 2000000 ? 25 : undefined),
   sellPriceOf: (itemId) => (itemId === 2000000 ? 12 : undefined),

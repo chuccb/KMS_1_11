@@ -711,8 +711,16 @@ test("wz png writes one file per canvas", needsArchive, () => {
   }
 });
 
-test("wz commands report what they find and fail cleanly otherwise", needsArchive, () => {
-  assert.equal(runWzCommand(["census", "--json", "--data", DATA_WZ]), 0);
-  assert.equal(runWzCommand(["dump", "no/such.img", "--data", DATA_WZ]), 1);
-  assert.equal(runWzCommand(["png", "UI/Basic.img", "--data", DATA_WZ]), 1, "png needs --out");
-});
+// This one shells out to `bun cli.ts` once per command, and each of those reopens the 87 MB
+// archive and scans its tail. Measured 4.3-4.8 s on a quiet machine, which left the old 5 s
+// budget no headroom at all: under a full-suite run it tipped over and timed out. 30 s buys
+// room for a loaded machine without turning a real hang into a silent pass.
+test(
+  "wz commands report what they find and fail cleanly otherwise",
+  { ...needsArchive, timeout: 30_000 },
+  () => {
+    assert.equal(runWzCommand(["census", "--json", "--data", DATA_WZ]), 0);
+    assert.equal(runWzCommand(["dump", "no/such.img", "--data", DATA_WZ]), 1);
+    assert.equal(runWzCommand(["png", "UI/Basic.img", "--data", DATA_WZ]), 1, "png needs --out");
+  },
+);

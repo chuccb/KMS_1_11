@@ -1043,7 +1043,10 @@ const STUB_MAP: MapData = {
     { templateId: 120100, x: 509, y: 300, foothold: 32, facing: 0, rx0: 0, rx1: 1000, cy: 300 },
     { templateId: 1210100, x: -5, y: 7, foothold: 0, facing: 1, rx0: -5, rx1: -5, cy: 7 },
   ],
-  npcs: [{ templateId: 2003, x: 69, y: 275, foothold: 28, facing: 0, rx0: 0, rx1: 0, cy: 275 }],
+  // 루나 (1011100) - a real vendor whose own `Npc/1011100.img/info/shop` carries potions, return
+  // scrolls and arrow quivers (ADR-140). Every price the tests below assert is that row's own
+  // `price`, not the item's `info/price`: the two disagree on 541 of 543 rows.
+  npcs: [{ templateId: 1011100, x: 69, y: 275, foothold: 28, facing: 0, rx0: 0, rx1: 0, cy: 275 }],
   portals: [
     { name: "sp", type: 0, x: 100, y: 200, toMapId: 0, toName: "" },
     // The one portal out of this map: `tm` is where it leads, `tn` the name of the portal it lands
@@ -1056,6 +1059,18 @@ const STUB_MAP: MapData = {
   footholdSegments: new Map([
     [32, { id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, prev: 0, next: 0 }],
   ]),
+};
+
+/**
+ * The map the recharge test runs on. It is a copy of {@link STUB_MAP} with a different npc on it:
+ * the only vendor that keeps 표창 on the shelf (알, 1001001 - ADR-140), bought through the very
+ * same wires, so nothing about the recharge path is proved against an invented shop.
+ */
+const STUB_STAR_MAP: MapData = {
+  ...STUB_MAP,
+  id: 1000001,
+  imagePath: "Map/Map/001000001.img",
+  npcs: [{ templateId: 1001001, x: 69, y: 275, foothold: 28, facing: 0, rx0: 0, rx1: 0, cy: 275 }],
 };
 
 /**
@@ -1157,7 +1172,7 @@ test(
     const npc = readNpcEnterField(new PacketReader(packets[3]!, 1), false);
     assert.deepEqual(
       { npcId: npc.npcId, templateId: npc.templateId, x: npc.x, y: npc.y, facing: npc.facing },
-      { npcId: 1, templateId: 2003, x: 69, y: 275, facing: 0 },
+      { npcId: 1, templateId: 1011100, x: 69, y: 275, facing: 0 },
       "the map's life entry, with an id from the NPC pool's own sequence",
     );
 
@@ -1236,7 +1251,7 @@ test(
       handoffs,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
-      npcWalk: npcWalkPolicy("2003"),
+      npcWalk: npcWalkPolicy("1011100"),
       handshake: { clientSendSeed: 0x77777777, clientRecvSeed: 0x88888888 },
       log: (line) => log.push(line),
     });
@@ -1932,24 +1947,40 @@ test(
     );
     assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
     const shop = readShopOpen(new PacketReader(opened[1]!, 1));
-    assert.equal(shop.shopId, 2003, "로빈's shop, keyed by the NPC template id");
+    assert.equal(shop.shopId, 1011100, "루나's shop, keyed by the NPC template id");
+    // Every one of these is `Npc/1011100.img/info/shop/<item>/price` - the shelf's own number,
+    // which is what the client is charged (ADR-140). The item's `info/price` says something else
+    // on nearly every row: 빨간 포션 is 25 there and 50 here, 마을 귀환 주문서 75 here is not its
+    // own 150 either, and the two 화살 rows are 1 meso apiece because they are a quiver, not a
+    // stack of arrows you drink.
     assert.deepEqual(
       shop.items.map((line) => [line.itemId, line.price]),
       [
-        [2000000, 25], // 빨간 포션, straight out of Item/Consume/0200.img
-        [2000003, 100], // 파란 포션
-        [2030000, 75], // 마을 귀환 주문서, out of Item/Consume/0203.img
-        // 4B3780: the eight rechargeable star rows ride along at price 0 in every WZ shop;
-        // the client files them into its recharge list, and the buy rows below are indexed
-        // against the price-nonzero filter of this very list.
-        [2070000, 0],
-        [2070001, 0],
-        [2070002, 0],
-        [2070003, 0],
-        [2070004, 0],
-        [2070005, 0],
-        [2070006, 0],
-        [2070007, 0],
+        [2000000, 50], // 빨간 포션
+        [2000001, 160], // 주황 포션
+        [2000002, 320], // 하얀 포션
+        [2000003, 200], // 파란 포션
+        [2000006, 620], // 엘릭서
+        [2002000, 500], // 민첩함의 물약
+        [2002001, 400], // 힘의 물약
+        [2002002, 500], // 지력의 물약
+        [2002004, 500], // 행운의 물약
+        [2002005, 500], // 체력 강화 물약
+        [2010000, 30], // 하얀 알약
+        [2010002, 50], // 파란 알약
+        [2010001, 106], // 빨간 알약
+        [2010003, 100], // 주황 알약
+        [2010004, 310], // 귀환의 깃털 대용 알약
+        [2060000, 1], // 활 전용 화살
+        [2061000, 1], // 석궁 전용 화살
+        [2030000, 150], // 마을 귀환 주문서
+        [2030004, 180], // 헤네시스 귀환 주문서
+        [2040000, 35000], // 투구 방어력 주문서
+        [2040400, 35000], // 상의 방어력 주문서
+        [2040600, 35000], // 하의 방어력 주문서
+        [2040700, 35000], // 신발 민첩성 주문서
+        [2044500, 70000], // 활 공격력 주문서
+        [2044600, 70000], // 석궁 공격력 주문서
       ],
     );
     assert.equal(client.headersOk, true);
@@ -1971,11 +2002,11 @@ test(
     const diff = readStatUpdate(new PacketReader(trade[2]!, 1));
     assert.deepEqual(
       diff,
-      { ack: false, diff: { mesos: 75 } },
+      { ack: false, diff: { mesos: 50 } },
       "the 0x0D flag 0x40000 is the money field",
     );
     assert.ok(
-      log.some((line) => line.includes("bought") && line.includes("mesos 75")),
+      log.some((line) => line.includes("bought") && line.includes("mesos 50")),
       log.join("\n"),
     );
 
@@ -1983,7 +2014,7 @@ test(
     client.send({
       kind: "unknown",
       opcode: CLIENT_SHOP_OPCODE,
-      body: encodeClientShopRequest({ kind: "buy", row: 1, itemId: 2000003, count: 1 }).slice(1),
+      body: encodeClientShopRequest({ kind: "buy", row: 1, itemId: 2000001, count: 1 }).slice(1),
     });
     const refused = await client.take(1);
     assert.deepEqual(
@@ -4658,7 +4689,8 @@ test(
     stats.maxHp = 50;
     stats.mp = 5;
     stats.maxMp = 30;
-    stats.mesos = 200;
+    // Two 빨간 포션 (50 each) and one 마을 귀환 주문서 (150), at 루나's own shelf prices.
+    stats.mesos = 250;
 
     const client = await FakeClient.connect(gameInfo.port);
     t.after(() => client.close());
@@ -4674,7 +4706,7 @@ test(
     });
     await client.drain();
 
-    // The shop on STUB_MAP's NPC (로빈, 2003), priced out of the real archive.
+    // The shop on STUB_MAP's NPC (루나, 1011100), priced out of the real archive.
     client.send({
       kind: "unknown",
       opcode: CLIENT_OBJECT_CLICK_OPCODE,
@@ -4682,25 +4714,14 @@ test(
     });
     const opened = await client.take(2);
     assert.equal(opened[1]![0], SHOP_OPEN_OPCODE);
+    const shelf = readShopOpen(new PacketReader(opened[1]!, 1)).items;
+    // Each shelf entry is the row's own `Npc/1011100.img/info/shop/<item>/price` (ADR-140), not
+    // the item's `info/price`: 빨간 포션 is 25 there and 50 here, 마을 귀환 주문서 150 here.
     assert.deepEqual(
-      readShopOpen(new PacketReader(opened[1]!, 1)).items.map((line) => [line.itemId, line.price]),
-      [
-        [2000000, 25], // 빨간 포션, Item/Consume/0200.img/02000000/info/price
-        [2000003, 100], // 파란 포션
-        [2030000, 75], // 마을 귀환 주문서, Item/Consume/0203.img/02030000/info/price
-        // 4B3780: every WZ shop also carries the eight rechargeable star rows at price 0 - the
-        // client files them into its recharge list, never into the buy list (the buy handler
-        // below validates its row against the price-nonzero filter of the very same rows).
-        [2070000, 0],
-        [2070001, 0],
-        [2070002, 0],
-        [2070003, 0],
-        [2070004, 0],
-        [2070005, 0],
-        [2070006, 0],
-        [2070007, 0],
-      ],
+      [2000000, 2030000].map((itemId) => shelf.find((line) => line.itemId === itemId)?.price),
+      [50, 150],
     );
+    const rowOf = (itemId: number): number => shelf.findIndex((line) => line.itemId === itemId);
 
     const buy = async (row: number, itemId: number): Promise<number> => {
       client.send({
@@ -4718,9 +4739,13 @@ test(
       assert.equal(change.op, INVENTORY_OP.put);
       return change.slot;
     };
-    const potionSlot = await buy(0, 2000000);
-    assert.equal(await buy(0, 2000000), potionSlot, "the second potion stacks into the same slot");
-    const scrollSlot = await buy(2, 2030000);
+    const potionSlot = await buy(rowOf(2000000), 2000000);
+    assert.equal(
+      await buy(rowOf(2000000), 2000000),
+      potionSlot,
+      "the second potion stacks into the same slot",
+    );
+    const scrollSlot = await buy(rowOf(2030000), 2030000);
     assert.notEqual(scrollSlot, potionSlot);
 
     // The use gate refuses while a shop is open ("never consume a stack that is being offered in
@@ -4857,8 +4882,8 @@ test(
     const handoffs = new HandoffRegistry();
     const game = new GameEntryServer({
       handoffs,
-      mapId: 1000000,
-      mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+      mapId: 1000001,
+      mapProvider: (mapId: number) => (mapId === 1000001 ? STUB_STAR_MAP : undefined),
       shops: shopKeeper(archive!),
       consumeSpec: consumeSpecProvider(archive!),
       mobTickMs: 10_000,
@@ -4894,8 +4919,8 @@ test(
     });
     await client.drain();
 
-    // 로빈's shop (STUB_MAP objectId 1): the 0x4A rows carry the eight recharge rows, and the
-    // 2070000 one carries its per-charge float in the 8 bytes where a cash serial would sit.
+    // 알's shop (STUB_STAR_MAP objectId 1): the 0x4A row for 2070000 carries its per-charge
+    // float in the 8 bytes where a cash serial would sit (FINDINGS 4.22.2).
     client.send({
       kind: "unknown",
       opcode: CLIENT_OBJECT_CLICK_OPCODE,
@@ -4906,7 +4931,9 @@ test(
     const starRow = readShopOpen(new PacketReader(opened[1]!, 1)).items.find(
       (line) => line.itemId === 2070000,
     )!;
-    assert.equal(starRow.price, 0, "a price-0 row is recharge-only");
+    // 알 asks 500 for the 표창 itself - a 207 row is priced like any other row here, and what
+    // makes it rechargeable is the 8 trailing bytes, not a price of 0 (ADR-140).
+    assert.equal(starRow.price, 500);
     assert.equal(starRow.maxCount, 500, "the WZ slotMax is the row's cap");
     assert.equal(
       shopRechargeUnitPrice(starRow),
@@ -4939,7 +4966,7 @@ test(
     assert.equal(change.item.quantity, 500);
     assert.deepEqual(readStatUpdate(new PacketReader(trade[2]!, 1)).diff, { mesos: 380 });
     assert.ok(
-      log.some((line) => line.includes("shop 2003 recharged 2070000 x400 at 0.3 (total 120")),
+      log.some((line) => line.includes("shop 1001001 recharged 2070000 x400 at 0.3 (total 120")),
       log.join("\n"),
     );
 

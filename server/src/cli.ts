@@ -26,7 +26,7 @@ import { npcDialogueProvider } from "./game/dialogue.ts";
 import { starterEquipmentIds } from "./game/equipment.ts";
 import { FileSaveStore, loadAccounts } from "./game/save.ts";
 import { startWebClient } from "./net/webclient.ts";
-import { SHOPS, shopKeeper, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
+import { shopKeeper, shopsOf, unpricedShopItems, type ShopKeeper } from "./game/shops.ts";
 import { consumeSpecProvider } from "./game/items.ts";
 import { scrollSpecProvider } from "./game/scrolls.ts";
 import { growthSkillProvider, type GrowthSkillProvider } from "./game/growth.ts";
@@ -399,8 +399,9 @@ async function runServe(rest: string[]): Promise<number> {
       art = artProviderOf(archive);
       audio = audioProviderOf(archive);
       // A shop row without a price cannot be sent (the client prints it), so it is collected here
-      // and reported once the logger exists.
-      for (const shop of SHOPS) {
+      // and reported once the logger exists. The shops are the archive's own `Npc/*/info/shop`
+      // nodes (ADR-140) - a row is only unpriced when neither it nor its item has a price.
+      for (const shop of shopsOf(archive)) {
         const unpriced = unpricedShopItems(shop, shops.priceOf);
         if (unpriced.length > 0) {
           shopWarnings.push(
