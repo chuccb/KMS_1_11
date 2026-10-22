@@ -168,7 +168,7 @@ test("diffStats reports exactly the fields that changed", () => {
   assert.deepEqual(diffStats(before, after), { level: 2, hp: 50, exp: 15 });
   assert.deepEqual(diffStats(before, { ...before }), {});
   // The five fields the client never reads in this packet are not in the diff, even when they differ.
-  const moved = { ...before, mapId: 12345, id: 9, name: "x", gender: 1, unknown101: 3 };
+  const moved = { ...before, mapId: 12345, id: 9, name: "x", gender: 1, spawnPortalIndex: 3 };
   assert.deepEqual(diffStats(before, moved), {});
 });
 
@@ -183,6 +183,6 @@ test("the diff and CharacterData agree on which fields exist", () => {
     "id",
     "mapId",
     "name",
-    "unknown101",
+    "spawnPortalIndex",
   ]);
 });

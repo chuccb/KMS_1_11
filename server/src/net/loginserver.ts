@@ -1505,7 +1505,7 @@ export class GameEntryServer {
       wallet: new MesoWallet(character.stats),
       send,
     };
-    session.at = instance.spawnAt(character.stats.unknown101);
+    session.at = instance.spawnAt(character.stats.spawnPortalIndex);
     send(encodeSetField(this.setFieldOf(character)));
     this.logSetField(session);
     instance.join(session);
@@ -1546,8 +1546,8 @@ export class GameEntryServer {
     session.attackReadyAt = undefined;
     this.pendingShots = this.pendingShots.filter((shot) => shot.session !== session);
     session.character.stats.mapId = mapId;
-    session.character.stats.unknown101 = spawnPortalIndex(target.map, portalName);
-    session.at = target.spawnAt(session.character.stats.unknown101);
+    session.character.stats.spawnPortalIndex = spawnPortalIndex(target.map, portalName);
+    session.at = target.spawnAt(session.character.stats.spawnPortalIndex);
     session.shop = undefined;
     session.talk = undefined;
     session.send(encodeSetField(this.setFieldOf(session.character)));

@@ -44,7 +44,7 @@
  * u16 fame                 // @+85/+87
  * u32 mesos                // @+89/+93 (its identity is evidence: FINDINGS 4.22)
  * u32 mapId                // @+97, not obfuscated - the map to load (see below)
- * u8  unknown101           // @+101: spawn portal index (native non-type-3 array), not obfuscated
+ * u8  spawnPortalIndex     // @+101: spawn portal index (native non-type-3 array), not obfuscated
  * ```
  *
  * The memory struct is 102 bytes (`sub_55BEB0` copies 100 bytes + a word; `sub_45F5C0` memcpy's 102
@@ -234,9 +234,14 @@ export interface CharacterStats {
    * enters purely by putting the right id in this field - `0x16` carries the whole block.
    */
   mapId: number;
-  /** u8 @+101: native spawn portal index. sub_511820 reads it into CPortalList array[1].
-   * Legacy field name kept for save/wire compatibility; not the 0x16 mode byte. */
-  unknown101: number;
+  /**
+   * u8 @+101: the spawn portal index - `sub_511820` reads it as an index into `CPortalList`'s
+   * general (non-type-3) array, which `sub_4A3920` builds in WZ enumeration order with type 3 going
+   * to its own auto array. It is **not** the `0x16` mode byte. The wire is positional
+   * (`writeByte`/`readByte`), so the name is free; the save file is not, and `save.ts` still reads
+   * the old `unknown101` key so files written before the rename keep their portal.
+   */
+  spawnPortalIndex: number;
 }
 
 /** One 8-byte record the client keeps per inventory (`this + 4 * inv + 102`). */
@@ -470,7 +475,7 @@ export function writeCharacterStats(writer: PacketWriter, s: CharacterStats): vo
   writer.writeU16(s.fame);
   writer.writeU32(s.mesos);
   writer.writeU32(s.mapId);
-  writer.writeByte(s.unknown101);
+  writer.writeByte(s.spawnPortalIndex);
 }
 
 /**
@@ -579,7 +584,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
   const fame = reader.readU16();
   const mesos = reader.readU32();
   const mapId = reader.readU32();
-  const unknown101 = reader.readByte();
+  const spawnPortalIndex = reader.readByte();
   return {
     id,
     name: nameFieldToString(nameField),
@@ -604,7 +609,7 @@ export function readCharacterStats(reader: PacketReader): CharacterStats {
     fame,
     mesos,
     mapId,
-    unknown101,
+    spawnPortalIndex,
   };
 }
 
@@ -688,7 +693,7 @@ export function zeroStats(): CharacterStats {
     fame: 0,
     mesos: 0,
     mapId: 0,
-    unknown101: 0,
+    spawnPortalIndex: 0,
   };
 }
 

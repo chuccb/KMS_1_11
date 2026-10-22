@@ -61,7 +61,7 @@ function sampleStats(): CharacterStats {
     fame: 0x0d17,
     mesos: 0x101c1d1e,
     mapId: 0x111f2021,
-    unknown101: 0x12,
+    spawnPortalIndex: 0x12,
   };
 }
 
@@ -105,7 +105,7 @@ test("the stat block layout is byte-exact against sub_45D840's read order", () =
       "120a" +
       "130b",
   );
-  // exp(u32) fame(u16) mesos(u32) mapId(u32) unknown101(u8)
+  // exp(u32) fame(u16) mesos(u32) mapId(u32) spawnPortalIndex(u8)
   assert.equal(hex.slice(2 * 54), "1615140c" + "170d" + "1e1d1c10" + "21201f11" + "12");
 });
 

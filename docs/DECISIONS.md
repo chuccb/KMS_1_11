@@ -4596,3 +4596,48 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   `client/main.js` **維持 5522 行**，七份文件不必同步行數。
 - **LIVE**：以 `--auto-register` 重啟（新世界新 save），讓你可以直接打任何帳號進去測；
   橫幅會印 `auto-register: ON - unknown ids are created (not original behaviour)`。
+
+
+## ADR-136：把 `unknown101` 正名為 `spawnPortalIndex`，並收回「沒給索引就走另一套」的分支（`main.js` 維持 5522 行，2026-10-22）
+
+- **為什麼現在才改名**：這個欄位（`CharacterData` 記憶體 +101）的意義早就由 `sub_511820` 定案——
+  **non-type3 一般門陣列的 u8 索引**（`sub_4A3920` 把 pt3 分到獨立 auto 陣列，其餘含 type0 按 WZ
+  列舉順序留在一般陣列），初始 x=portal.x、y=portal.y−10（§4.43）。舊名只是「保留舊欄名」的妥協。
+  意義既已定案，就不該再留一個會讓人以為「還沒搞清楚」的名字。
+- **統一的不是一個名字，是三個**：全專案對同一個值本來有三種叫法——
+  `CharacterStats.unknown101`、`SessionSnapshot.spawnPortal`、以及 `map.ts` 的 `spawnPortalIndex()`
+  函式。現在**一律 `spawnPortalIndex`**（它裝的是索引，所以取最精確的那個）。
+  共 12 個檔案 + `client/main.js` 的 `selfView.spawnPortal`；
+  `map.ts` 那個函式本來就叫這個名字，所以沒動。
+- **wire 不受影響，這點有查過不是猜的**：`chardata.ts` 是
+  `writer.writeByte(s.spawnPortalIndex)` / `reader.readByte()`——**位置性**編碼，不是鍵值，
+  所以改名不改任何一個位元組。probe 實測 `drawImage` **165**、11 個 banner，與 ADR-132 **逐位元組相同**。
+- **真正會壞的是存檔，而且壞法是靜默的**：`save.ts` 的 `characterFromSave` 是
+  `for (const key of Object.keys(zeroStats())) stats[key] = numberOf(source[key], ...)`——
+  **用欄名去查、查不到就退回 0**。所以直接改名會讓所有舊存檔的門索引
+  **無聲歸零**（每次登入都被丟回 0 號門），既不報錯也不寫 log。
+  實測 `generated/preview-20261022-adr132.json` 裡確實有 `"unknown101": 7`，不是假想風險。
+- **所以加了舊鍵 fallback**：新鍵缺席時讀 `unknown101`。
+  `SAVE_VERSION` **維持 1**——檔案格式沒有變，只是讀得懂舊的寫法；為改名去升版本會讓既有存檔
+  直接打不開，那才是真正的破壞。
+- **那條 fallback 有回歸測試，且已證實會紅**：`save.test.ts`
+  「a file from before the spawn portal index was named keeps its portal, not 0」三件事一起釘——
+  舊檔讀得到 7、**兩個鍵都在時新鍵贏**（舊鍵是 fallback 不是覆寫）、新版寫出來的檔用新鍵。
+  把 fallback 拿掉實測：`actual: 0, expected: 7` → 測試如期失敗，改回後通過。
+  另外也拿真實存檔（`adr132.json`）跑過：讀回 `spawnPortalIndex=7`。
+- **順手收回 `spawnPointOf` 的雙軌**（這是「碰一個東西就要把它相關的都做完」）：
+  原本「有索引→非 pt3 陣列[i]、y−10；沒索引→找名為 sp 的門、不減 10」是**兩套規則**。
+  現在一律「非 pt3 陣列的第 `portalIndex ?? 0` 個、腳下 y−10」，
+  與原生 byte=0 的行為一致；門全都沒有時退回原點且**不減 10**（沒有門就沒有可減的對象）。
+  ⚠️ **這不改變任何正式流程**：`loginserver` 一律是
+  `instance.spawnAt(character.stats.spawnPortalIndex)`（必然帶索引），
+  舊的無索引分支只服務 world-only fixture 與 `member.at` 未設的防禦性後備。
+  已把 `world.test.ts` 兩條 fixture 改成新規則，並**保留它原本想區分的東西**
+  （這張 stub map 的 `sp` 故意排在第二，所以現在多一條直接斷言「索引 1 → (100,290)」）。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、probe exit 0（`drawImage` **165**，與 ADR-132 **逐位元組相同**）。
+  全套件 **1357 pass / 0 fail / 156 files / 307.88s**（ADR-135 是 1356，+1 就是本輪新增那條），
+  跑之前照 ADR-133 的規則先關 LIVE。`client/main.js` **維持 5522 行**，七份文件不必同步行數。
+- **誠實標記**：`sub_511820` 只證明「+101 是一般門陣列的 u8 索引、初始 x/y 這樣取」；
+  **索引超出陣列長度時原版怎麼處理，沒有原證**，下面那串 fallback
+  （找 `sp` → 找 type0 → 第 0 個 → 原點）是我們自己的，不宣稱是原版行為。
+- **LIVE**：以 `--auto-register` 重啟（新世界新 save）。

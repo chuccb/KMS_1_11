@@ -9,7 +9,7 @@ export interface ProbeSelf {
   int: number;
   luk: number;
   ap: number;
-  spawnPortal: number;
+  spawnPortalIndex: number;
   avatarItems: number[];
 }
 export interface ProbeItem {
@@ -161,7 +161,7 @@ export function installBrowserObservation() {
       !number(value.int) ||
       !number(value.luk) ||
       !number(value.ap) ||
-      !number(value.spawnPortal) ||
+      !number(value.spawnPortalIndex) ||
       (value.mesos !== undefined && !u32(value.mesos)) ||
       !numbers(value.avatarItems)
     )
@@ -173,7 +173,7 @@ export function installBrowserObservation() {
       int: value.int,
       luk: value.luk,
       ap: value.ap,
-      spawnPortal: value.spawnPortal,
+      spawnPortalIndex: value.spawnPortalIndex,
       avatarItems: value.avatarItems,
     };
   }

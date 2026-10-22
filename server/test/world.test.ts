@@ -240,8 +240,16 @@ test("a player who has not moved yet stands on the map's spawn portal, on its ow
   const aboutHero = readUserEnterField(new PacketReader(about[0]!, 1));
   assert.deepEqual(
     { x: aboutHero.x, y: aboutHero.y, foothold: aboutHero.foothold },
-    { x: 100, y: 300, foothold: 32 },
-    "the `sp` portal wins over the portal that comes first, and its foothold comes from the map",
+    { x: 500, y: 240, foothold: 32 },
+    "a fresh character carries index 0, which is the FIRST non-pt3 portal (sub_4A3920), not the " +
+      "one called `sp` - and the feet land 10px above it (sub_511820)",
+  );
+  // The index is the only thing that picks a portal. This map's `sp` is index 1 and is somewhere
+  // else entirely, which is why the byte has to travel in `CharacterData` in the first place.
+  assert.deepEqual(
+    { x: field.spawnAt(1).x, y: field.spawnAt(1).y },
+    { x: 100, y: 290 },
+    "index 1 is `sp`: the same rule, a different portal",
   );
 });
 
@@ -638,8 +646,8 @@ test("a second map is a second field: its own spawn point, its own mobs, and it 
   assert.equal(alt.mapId, 2000000);
   assert.deepEqual(
     alt.spawnAt(),
-    { x: 600, y: 300, foothold: 32 },
-    "this map's portal, this map's foothold",
+    { x: 600, y: 290, foothold: 32 },
+    "this map's portal, this map's foothold - and the 10px above it (sub_511820)",
   );
   assert.equal(alt.portal("west00"), undefined, "the portal of the other map is not here");
   assert.equal(registry.size, 1);

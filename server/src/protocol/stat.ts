@@ -20,7 +20,7 @@
  *
  * `sub_45E0D0` tests the flag bits from `0x01` upwards, so the wire order of the diff is the flag
  * order, and a field is only present when its bit is set - "send what changed, nothing else".
- * Nineteen bits (up to `0x40000`) are read; `mapId` and `unknown101` are **not** in this packet
+ * Nineteen bits (up to `0x40000`) are read; `mapId` and `spawnPortalIndex` are **not** in this packet
  * (they only ever travel inside `CharacterData`).
  *
  * ⚠️ **The diff widths are not the `CharacterData` widths.** All of the following were read off the
@@ -78,12 +78,12 @@ export const STAT_OPCODE = 0x0d;
 
 /**
  * The fields that can travel in a diff: everything of `CharacterStats` except the five the reader
- * never touches (`id`, `name`, `gender`, `mapId`, `unknown101` - the last two only travel in
+ * never touches (`id`, `name`, `gender`, `mapId`, `spawnPortalIndex` - the last two only travel in
  * `CharacterData`). Deriving the union from `CharacterStats` keeps the two modules from drifting.
  */
 export type StatDiffName = Exclude<
   keyof CharacterStats,
-  "id" | "name" | "gender" | "mapId" | "unknown101"
+  "id" | "name" | "gender" | "mapId" | "spawnPortalIndex"
 >;
 
 /** A diff: only the fields that changed. */

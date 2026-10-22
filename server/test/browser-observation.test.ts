@@ -139,7 +139,7 @@ test("serialized typed observations preserve real WebSocket, draw overloads, tra
         int: 6,
         luk: 5,
         ap: 6,
-        spawnPortal: 0,
+        spawnPortalIndex: 0,
         avatarItems: [1302000],
       };
       const packets = [

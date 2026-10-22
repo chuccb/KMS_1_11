@@ -1205,7 +1205,7 @@ async function loadMap(mapId, generation) {
     for (const mob of map.mobs ?? []) ensureEntityArt("mob", mob.templateId);
     if (self && selfView) {
       // sub_511820: stats+101 indexes the NON-type-3 array; initialize ten pixels above tn.
-      const spawn = arrivalPortal(map, selfView.spawnPortal);
+      const spawn = arrivalPortal(map, selfView.spawnPortalIndex);
       self.x = spawn?.x ?? 0;
       self.y = (spawn?.y ?? 0) - 10;
     }

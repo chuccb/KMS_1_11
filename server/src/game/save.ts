@@ -299,6 +299,8 @@ export function characterToSave(character: CharacterData): unknown {
  * when the file has a number for it. That is why adding a stat field to `CharacterStats` does not
  * need a change here - and why a typo in the file is a default rather than a crash. Identity
  * (`id`, `name`) is the exception: it is required, because every table in this server is keyed by it.
+ * A **rename** is the other exception: the copy is keyed by field name, so a renamed field needs an
+ * explicit reading of its old key (see `spawnPortalIndex` below) or old files lose that value.
  */
 export function characterFromSave(value: unknown): CharacterData {
   const record = objectOf(value);
@@ -313,6 +315,14 @@ export function characterFromSave(value: unknown): CharacterData {
   for (const key of Object.keys(stats) as (keyof CharacterStats)[]) {
     if (typeof stats[key] !== "number") continue; // `name` is the only non-number
     (stats[key] as number) = numberOf(source[key], stats[key] as number);
+  }
+  // A rename, not a new field: this value was called `unknown101` before `sub_511820` showed it to
+  // be the spawn portal index, and files written before the rename spell the old key. The loop
+  // above keys off `zeroStats()`, so on such a file it finds nothing and leaves the value at 0 -
+  // which would quietly put every existing character back at portal 0 on its next login. Read the
+  // old key when the new one is absent. `SAVE_VERSION` stays 1: the file format did not change.
+  if (source["spawnPortalIndex"] === undefined) {
+    stats.spawnPortalIndex = numberOf(source["unknown101"], stats.spawnPortalIndex);
   }
   const items = record["items"];
   if (items === undefined) {

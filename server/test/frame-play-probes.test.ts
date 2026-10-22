@@ -32,7 +32,7 @@ const self: ProbeSelf = {
   int: 4,
   luk: 13,
   ap: 0,
-  spawnPortal: 0,
+  spawnPortalIndex: 0,
   avatarItems: [],
   mesos: 100,
 };

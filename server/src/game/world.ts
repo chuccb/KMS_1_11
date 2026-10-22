@@ -565,18 +565,26 @@ export class FieldRegistry<M extends FieldMember = FieldMember> {
   }
 }
 
-/** sub_511820: CharacterData+101 indexes non-type-3 portals; spawn feet at portal.y - 10.
- * Calls without an index retain the legacy/default sp helper used by world-only fixtures. */
+/**
+ * Where a map puts a player: `sub_511820` reads `CharacterData` +101 as an **index into the
+ * non-type-3 portal array** (`sub_4A3920` builds that array in WZ enumeration order, type 3 going
+ * to its own auto array) and puts the player's *feet* at `portal.y - 10` - the portal's `y` is
+ * where the portal is drawn, and a character is drawn from its feet up.
+ *
+ * An index the array does not hold (a map with fewer portals, or none at all) has no native
+ * behaviour to copy: the fallbacks below are ours, and a map with no portal at all yields the
+ * origin with no offset rather than an invented one.
+ */
 function spawnPointOf(map: MapData, portalIndex?: number): FieldPosition {
-  const nativePortal =
-    portalIndex === undefined ? undefined : map.portals.filter((p) => p.type !== 3)[portalIndex];
+  const portals = map.portals.filter((p) => p.type !== 3);
+  const nativePortal = portals[portalIndex ?? 0];
   const portal =
     nativePortal ??
     map.portals.find((entry) => entry.name.toLowerCase() === "sp") ??
     map.portals.find((entry) => entry.type === 0) ??
     map.portals[0];
   const x = portal?.x ?? 0;
-  const y = (portal?.y ?? 0) - (portalIndex === undefined ? 0 : 10);
+  const y = portal === undefined ? 0 : portal.y - 10;
   const segments = map.footholdSegments;
   const segment = segments === undefined ? undefined : footholdUnderPoint(segments, x, y);
   return segment === undefined ? { x, y } : { x, y, foothold: segment.id };

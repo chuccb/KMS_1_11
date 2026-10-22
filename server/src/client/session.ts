@@ -211,7 +211,7 @@ export interface SelfView {
   expToNext: number;
   mesos: number;
   mapId: number;
-  spawnPortal: number;
+  spawnPortalIndex: number;
   face: number;
   hair: number;
   avatarItems: number[];
@@ -705,7 +705,7 @@ function selfOf(character: CharacterData): SelfView {
     expToNext: expToNextLevel(stats.level),
     mesos: stats.mesos,
     mapId: stats.mapId,
-    spawnPortal: stats.unknown101,
+    spawnPortalIndex: stats.spawnPortalIndex,
     face: stats.appearanceA,
     hair: stats.appearanceB,
     avatarItems: wornItemIds(character),

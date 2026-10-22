@@ -478,7 +478,7 @@ n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（
 | 21 | u16 | `fame` | 記憶體 +85/+87 |
 | 22 | u32 | `mesos` | 記憶體 +89/+93；**這一欄是錢**（§4.22.5 的三個讀取端）|
 | 23 | u32 | **`mapId`** | 記憶體 +97，**不混淆**。**已證實是地圖 id**：`0x16` 把它與 `mode` 一起交給新場地物件（§4.11.2），最終 `sub_468E00` 用它載入 `Map/Map/%09d.img`（`sub_4694F0`）|
-| 24 | u8 | `unknown101`（保留舊欄名） | 記憶體 +101，**一般傳送門陣列索引**，不混淆（§4.43） |
+| 24 | u8 | `spawnPortalIndex` | 記憶體 +101，**一般傳送門陣列索引**（`sub_511820`，§4.43）。舊檔名 `unknown101` 仍會被讀（見下） |
 
 - ⚠️ **本節前一版寫的「75 bytes、尾巴多 u32/u16 各一」是錯的**：那版把 `sub_45D840` 的
   *記憶體* 位移（+65/+67/+71/+75…）當成線上位移。實際上線上尾巴只有 5 個欄位
@@ -2106,7 +2106,7 @@ u32 durationMs     // 暫時能力持續時間；0 = 後面沒有東西，非0�
 - **`str`/`dex`/`int`/`luk` 送 u8 的後果**：讀進來的是零擴展的一個 byte，存進紀錄時上半部被遮罩成 0，
   所以 client 看到的數值 = `value & 0xff`。**超過 255 的能力值送這一包會被 client 自己砍掉**
   （`protocol/stat.ts` 因此直接拒絕 >255 的值，而不是靜默截斷）。
-- `mapId` 與 `unknown101` **不在這 19 個 bit 裡**：它們只在 `CharacterData`（`0x16`／`0x02`）裡旅行。
+- `mapId` 與 `spawnPortalIndex` **不在這 19 個 bit 裡**：它們只在 `CharacterData`（`0x16`／`0x02`）裡旅行。
 - 19 個 bit 用完就沒了：旗標字最大是 `0x7FFFF`。
 
 **client 收到之後做什麼**（`sub_55BEB0` 在解碼之後的分支）：
@@ -2724,7 +2724,7 @@ Alt 離線     : Hero 收到 0x1D characterId=12
 #### 4.25.4 落點已定位：CharacterData+101 的 spawn portal index（2026-10-17 更正）
 
 原先把落點未知歸到 `0x16.mode` 是錯誤追蹤方向，現已由 `sub_511820` 確證。
-`unknown101` 是 **non-type3 一般門陣列的 u8 索引**（含 type0），初始 x=portal.x、y=portal.y−10。
+`spawnPortalIndex` 是 **non-type3 一般門陣列的 u8 索引**（含 type0），初始 x=portal.x、y=portal.y−10。
 伺服器現在將目的 `tn` 解析到這個索引，寫進角色資料、0x16與保存；remote及browser一致。
 完整來源、門類型及容錯差異見 §4.43。先前「tn只記日誌／永遠sp」僅為歷史實作，已不適用。
 
@@ -4232,8 +4232,17 @@ HP/MP 自然／AP 成長現已由原表接上（見 STAT_GROWTH，未測試）�
 
 1000000的八條真繩頂平台全部y1−2；舊y1−1會在平台下方，非素材缺失，也不應擴大floor snap。
 已改原版−5並由swept gravity落地。tm=0也不是無效門；真正無目的地為999999999，pt0不可啟動。
-`tn`→non-pt3 index→`unknown101`→0x16／保存／SelfView.spawnPortal，前後端與remote一致。
-舊欄名保留避免改壞save。mode仍有未明語意，但不能再把它與spawn byte混為一談。
+`tn`→non-pt3 index→`spawnPortalIndex`→0x16／保存／SelfView.spawnPortalIndex，前後端與remote一致。
+mode仍有未明語意，但不能再把它與spawn byte混為一談。
+
+**改名（ADR-136）**：意義已由 `sub_511820` 定案，故不再留「保留舊欄名」的妥協——
+`CharacterStats.unknown101`→`spawnPortalIndex`，`SessionSnapshot.spawnPortal`→`spawnPortalIndex`，
+瀏覽器端 `SelfView.spawnPortal`→`spawnPortalIndex`，全專案統一一名。
+wire 是位置性的 `writeByte`/`readByte`，**改名不改封包**；save 的 JSON 鍵會跟著改名，
+因此 `characterFromSave` 在新鍵缺席時仍讀舊鍵 `unknown101`（`save.test.ts` 有回歸，
+移除該 fallback 會讓舊檔的門索引靜默歸零 → 測試紅）。`SAVE_VERSION` 維持 1：格式沒變。
+同時收回 `spawnPointOf` 的「沒給索引就走另一套」分支：一律是「非 pt3 陣列的第 0 個、腳下 y−10」，
+與原生 byte=0 的行為一致（原分支只影響 world-only fixture，正式流程一律帶索引）。
 
 `/map`／`/warp`／`/go`／`/헉맵`用原0x0D kind=mapId/empty string；GameEntryServer採明確
 `--map-command off|all|account,...`政策，預設off，原TCP偽造也不能繞過。kind0與revive重疊：
@@ -4366,7 +4375,7 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
 9. ~~`unknown97`~~ → **已證實是 `mapId`**（§4.11.2b：`sub_468E00` 用它載入 `Map/Map/%09d.img`）。
    剩下的：**`unknown18`／`unknown1A`**（`GW_ItemSlot` 現金區塊）與 `unknown26`／`unknown93`
-   （能力值區塊），傳輸上已完整，語意待找讀取端；`unknown101` 已解為出生門索引，見 §4.43。
+   （能力值區塊），傳輸上已完整，語意待找讀端；`spawnPortalIndex` 已解為出生門索引，見 §4.43。
 10. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 11. **`0x0D` 的暫時能力尾段已重新定位**（§4.21.2／TEMPORARY_STATS）：舊panelFlags命名錯誤，

@@ -1683,17 +1683,21 @@ test(
     const world = await startWorld(t),
       { browser, field } = await enterGame(world.webPort, "admin", "admin");
     t.after(() => browser.close());
-    assert.equal((field.self as { spawnPortal: number }).spawnPortal, 0);
+    assert.equal((field.self as { spawnPortalIndex: number }).spawnPortalIndex, 0);
     browser.send({ t: "portal", name: "west00" });
     await browser.nextKind("request-release");
     const arrival = await browser.nextKind("field");
     assert.equal(arrival.mapId, 2000000);
-    assert.equal((arrival.self as { spawnPortal: number }).spawnPortal, 1, "tn east00 is not sp");
+    assert.equal(
+      (arrival.self as { spawnPortalIndex: number }).spawnPortalIndex,
+      1,
+      "tn east00 is not sp",
+    );
     browser.send({ t: "portal", name: "east00" });
     await browser.nextKind("request-release");
     const back = await browser.nextKind("field");
     assert.equal(back.mapId, 1000000);
-    assert.equal((back.self as { spawnPortal: number }).spawnPortal, 1);
+    assert.equal((back.self as { spawnPortalIndex: number }).spawnPortalIndex, 1);
   },
 );
 test(
@@ -1722,7 +1726,7 @@ test(
     await admin.nextKind("request-release");
     const moved = await admin.nextKind("field");
     assert.equal(moved.mapId, 2000000);
-    assert.equal((moved.self as { spawnPortal: number }).spawnPortal, 0);
+    assert.equal((moved.self as { spawnPortalIndex: number }).spawnPortalIndex, 0);
     admin.send({ t: "warp-map", mapId: 123456789 });
     await admin.nextKind("request-release");
     assert.match(String((await admin.nextKind("system-notice")).text), /does not exist/);

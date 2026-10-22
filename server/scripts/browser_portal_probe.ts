@@ -40,7 +40,7 @@ export async function probePortal(args: readonly string[], env: ProbeEnvironment
           const move = window.__kmsProbe.sent.findLast((m) => m.t === "move");
           return (
             f?.mapId === id &&
-            (index === undefined || f?.self.spawnPortal === index) &&
+            (index === undefined || f?.self.spawnPortalIndex === index) &&
             !!move &&
             !!f &&
             move.at > f.at
@@ -115,7 +115,7 @@ export async function probePortal(args: readonly string[], env: ProbeEnvironment
         JSON.stringify({
           start: start.move,
           arrival: arrival.move,
-          spawnPortal: arrival.field.self.spawnPortal,
+          spawnPortalIndex: arrival.field.self.spawnPortalIndex,
           sent,
         }),
       );
@@ -201,7 +201,7 @@ export async function probePortal(args: readonly string[], env: ProbeEnvironment
     const summary = await page.evaluate(() => ({
       fields: window.__kmsProbe.messages
         .filter((m) => m.t === "field")
-        .map((m) => ({ map: m.mapId, index: m.self.spawnPortal })),
+        .map((m) => ({ map: m.mapId, index: m.self.spawnPortalIndex })),
       portals: window.__kmsProbe.sent.filter((m) => m.t === "portal"),
       errors: window.__kmsProbe.messages.filter((m) => m.t === "error"),
     }));

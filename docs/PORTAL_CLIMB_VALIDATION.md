@@ -39,7 +39,8 @@
 - `tm=999999999` 無目的地；**tm=0 是有效地圖**，不能當 sentinel。pt=0 不可啟動。
 - `sub_472590` sender gate 為 500ms；空 s2c `0x19` 解除 pending，拒絕也必須回應。
 - **`sub_511820` 已定位 CharacterStats+101**：索引一般（non-pt3）陣列，初始化 x=portal.x、y=portal.y−10。
-  不是 `0x16` 的 mode。保留 wire/save 欄名 `unknown101` 避免破壞舊存檔；`SelfView.spawnPortal` 帶給瀏覽器。
+  不是 `0x16` 的 mode。wire 是位置性的（writeByte/readByte），改名不影響封包；save 的欄名已改為
+  `spawnPortalIndex`，但仍會讀舊鍵 `unknown101` 以免舊存檔被靜默歸零；`SelfView.spawnPortalIndex` 帶給瀏覽器。
 - 伺服器用來源門的 `tn` 找目的門在 non-pt3 陣列的索引，寫進 `0x16`、角色紀錄及保存；
   server remote spawn 與 browser local spawn 使用相同座標。相同地圖的傳送也重建 field。
 - 地圖 0 的角色重連保留 0；只有不提供 map 0 的 archive-free/tooling provider 沿用舊的 default-map 相容行為。

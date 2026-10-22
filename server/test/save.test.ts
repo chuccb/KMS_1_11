@@ -103,7 +103,7 @@ function sampleCharacter(
   stats.fame = 17;
   stats.mesos = 1_234_567;
   stats.mapId = 1010000;
-  stats.unknown101 = 7;
+  stats.spawnPortalIndex = 7;
   return characterDataOf(stats, items);
 }
 
@@ -252,6 +252,45 @@ test("a save whose records hold nothing the file mentions keeps the fresh values
   assert.equal(character.stats.id, 3);
   assert.equal(character.stats.name, "Solo");
   assert.equal(character.items, undefined, "a record with no item block stays one");
+});
+
+test("a file from before the spawn portal index was named keeps its portal, not 0", () => {
+  // The field was called `unknown101` while its meaning was still open; `sub_511820` showed it is
+  // the spawn portal index (FINDINGS 4.43) and the record was renamed to that. The reader keys off
+  // `zeroStats()`, so without an explicit reading of the old name the value would silently fall to
+  // 0 and every character in an older file would wake up at portal 0 on its next login.
+  const legacy = readSave(
+    JSON.stringify({
+      version: SAVE_VERSION,
+      accounts: {
+        admin: { password: "p", characters: [{ stats: { id: 3, name: "Legacy", unknown101: 7 } }] },
+      },
+    }),
+  ).get("admin")!.characters[0]!;
+  assert.equal(legacy.stats.spawnPortalIndex, 7, "the old key is still read");
+
+  // The old name is a fallback, never an override: a file holding both is read by its new name.
+  const both = readSave(
+    JSON.stringify({
+      version: SAVE_VERSION,
+      accounts: {
+        admin: {
+          password: "p",
+          characters: [{ stats: { id: 3, name: "Both", spawnPortalIndex: 4, unknown101: 7 } }],
+        },
+      },
+    }),
+  ).get("admin")!.characters[0]!;
+  assert.equal(both.stats.spawnPortalIndex, 4, "the new key wins when both are present");
+
+  // A file this build writes spells the new name, and a round trip keeps the value.
+  const text = saveJson(
+    new Map<string, AccountRecord>([
+      ["admin", { password: "p", characters: [sampleCharacter(3, "Hero")] }],
+    ]),
+  );
+  assert.match(text, /"spawnPortalIndex": 7/);
+  assert.equal(readSave(text).get("admin")!.characters[0]!.stats.spawnPortalIndex, 7);
 });
 
 test("a version this build does not write is refused, not loaded halfway", () => {

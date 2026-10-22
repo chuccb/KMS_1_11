@@ -6398,7 +6398,7 @@ test(
     assert.equal(arrival[0]![0], FIELD_OPCODE.requestRelease);
     const data = readSetField(new PacketReader(arrival.at(-1)!, 1)).character;
     assert.deepEqual(
-      [data.stats.mapId, data.stats.unknown101],
+      [data.stats.mapId, data.stats.spawnPortalIndex],
       [0, 1],
       "portal to map zero resolves east00, excluding auto pool",
     );
@@ -6438,7 +6438,7 @@ test(
     assert.deepEqual(
       [
         readSetField(new PacketReader(zero.at(-1)!, 1)).character.stats.mapId,
-        readSetField(new PacketReader(zero.at(-1)!, 1)).character.stats.unknown101,
+        readSetField(new PacketReader(zero.at(-1)!, 1)).character.stats.spawnPortalIndex,
       ],
       [0, 0],
       "authorized alive kind=0 is the original GM map-zero command, not revive",
