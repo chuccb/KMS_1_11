@@ -3607,7 +3607,8 @@ ADR-105 以 binary 證據推翻——現金裝備照普通裝備穿，`wornCash`
   **丟到地上的現金道具仍然拒絕**（`cashItem`——序號只存在道具欄那一格，落地紀錄沒有地方放它；原生
   `sub_463BE0` 自己也拒：`sub_47A420` 讀 WZ `info/cash`，再加序號非零。寧可少丟一件，也不要送一個會
   讓客戶端丟 `AVCDisconnectException` 的 `0x0B`（§4.6 的收尾檢查））。
-- **裝備的能力加成**：客戶端自己算傷害（§4.17），所以伺服器不重算武器攻擊力；「換武器 → 攻擊動作家族改變」那條路
+- **裝備的能力加成**：~~客戶端自己算傷害（§4.17），所以伺服器不重算武器攻擊力~~；**這句已過時**：伺服器現在照
+  `sub_4C7960` 算（`game/nativecombat.ts`，§4.51），用的正是裝備**實例**的 PAD；「換武器 → 攻擊動作家族改變」那條路
   （c2s `0x0F`／`0x10`／`0x11` 的選擇）也在客戶端，本伺服器不干預（§4.11.7c）。
 
 #### 4.36.6 ✅ 現金裝備／戒指格 12・13／寵物家族（ADR-105，結案）
@@ -4386,9 +4387,13 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    `0x2C` 裡。
 12. ~~**`mesos` 在 client 角色紀錄裡的位移**~~ → **已解**：`+89/+93`（第 22 欄）就是錢，
    `0x0D` 的旗標 `0x40000` 送它（§4.22.5）。剩下的延伸題是「**商店的庫存與收購價**」——
-   原伺服器的商店是腳本，所以那是我們的選擇（ADR-010），而不是還沒解出來的東西。
+   ~~原伺服器的商店是腳本，所以那是我們的選擇（ADR-010），而不是還沒解出來的東西。~~
+   **錯，ADR-140 已結案**：庫存與售價一直在 `Npc/<id>.img/info/shop`（20 個 NPC、594 列，
+   每列自帶 `price`／`stock`／`period`，207 另有 `unitPrice`）。只有賣回商店的**收購價**
+   （`SELL_PRICE_RATIO` 五折）仍是我們的選擇。
    同一句話也適用**新角色的起始錢**（`--start-mesos`，預設 0：2003 年的新角色身上沒有錢，
-   連一罐 25 元的紅水都買不起，那是設計而不是缺口）。
+   連一罐紅水都買不起，那是設計而不是缺口）。紅水的**商店價是 50**（루시 11100），
+   不是道具自己的 `info/price` 25；ADR-140 之前這裡引用的 25 就是拿錯的那個數字。
 13. **多玩家在同一張圖之後剩下的洞**（§4.24.9）：`0x1C` 的 `unknown64`／第二與第三個 u32／`action`
    語意（仍送 0；第一個 u32 ＝ **臉**已解，§4.11.3c）、`0x34` 的廣播範圍（我們的選擇）、`0x29` 的
    effect 1（未解）與「不送給升級者自己」的推論、頻道／分流（`FieldRegistry.of` 是入口）、
@@ -4411,7 +4416,10 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    （`avatarItemsOf` 讀的就是同一個穿戴 Map）。格號的證據鏈見 §4.11.3d。
    **骰子亦已完成**：newDlg 的四行標籤配合 `sub_430690` 四個 y 座標確定
    STR／DEX／INT／LUK 次序（§4.8.1a）。瀏覽器讀真 MakeCharInfo、套用骰點並走原始封包，
-   驗證與剩餘限制見 `../CREATION_VALIDATION.md`。裝備的初始 `ruc`／能力值仍未套入 WZ info。
+   驗證與剩餘限制見 `../CREATION_VALIDATION.md`。~~裝備的初始 `ruc`／能力值仍未套入 WZ info。~~
+   **已補**：`createCharacter` 現在把四件起始裝備整件換成 `equipmentFromTemplate`
+   （＝ `sub_47A740` 的 15 個 WORD + `tuc`→`ruc`），缺模板直接丟錯而不是默默給出全零裝備；
+   `equipment-generation.test.ts` 有釘住。舊存檔走顯式的 `planBlankStarterRepair`（不自動跑）。
 
 
 17. **ADR-059已編輯、未測試**：goWhisper在CConfig+24，不是聊天窗旗標；c2s23/22是拒收，
@@ -4548,7 +4556,8 @@ WZ facts與wire instance stats分開；套服／褲、雙手／盾原子卸下�
 - 464000交易拖放的207直接傳整組quantity，4D5C80排除一般count0但允許207 count0；
   新整組／空組在buy/recharge/sell/drop/pickup/既有server trade之間保留獨立物件。
 - WZ八種207的基礎容量為500/500/700/500/400/600/800/600，費率0.3/0.4/0.5/0.6/0.6/0.7/0.8/1。
-  stock、ceil整數補充費及50%回收仍是server政策，不是找到原服腳本。完整遠距扣彈仍未接，見ADR-045。
+  ~~stock~~ **ADR-140 已找到原資料**：`Npc/<id>.img/info/shop/<item>/stock` 與 `period`
+  就是庫存量與補貨間隔（「`period` 的單位是小時」仍是推論）。ceil整數補充費及50%回收仍是server政策，完整遠距扣彈仍未接，見ADR-045。
 - 未執行任何測試、typecheck或browser；只解析原資料及靜態閱讀原碼。新增golden測試來源未執行。
 
 
@@ -5267,3 +5276,56 @@ NPC 圖檔為原版 `Npc/%07d.img`（`sub_411E50`）**零填充 7 位**（`Npc/0
 
 **變異驗證**：`buyPriceOf` 退回 `info/price` → 6 條紅；`unitPriceOf` 退回 `info/unitPrice` → 1 條紅；
 庫存不減 → 1 條紅；移除 `info/shop` 讀取 → 4 條紅。
+
+### 4.51 ✅ `sub_4C7960` 的武器分支：能力值欄位、揮擊係數、action 32 的全套對照（ADR-141）
+
+**為何有這一節**：`game/nativecombat.ts` 是 `sub_4C7960`（`.c:207249`）的逐行轉寫，但其中**兩個分支
+「有原證卻沒有測試釘住」**——把任一個揮擊係數反過來，整套 1365 個測試仍然全綠。本節把原證記下來，
+並由 `server/test/native-physical-formula.test.ts` 釘死。
+
+**能力值欄位（同一組 obfuscated xor-pair）**：`sub_4C7960` 以 `a3[i] ^ a3[i+1]` 讀能力值。三個欄位
+由三個分支互相鎖定：劍系拿 `a3[6]^a3[7]` 當骰底、加 `a3[8]^a3[9]`；弓系正好相反；爪系骰
+`a3[12]^a3[13]` 並加前兩者的和。唯一一致的讀法：
+
+  `a3[6]^a3[7]` ＝ **STR**　　`a3[8]^a9` ＝ **DEX**　　`a3[12]^a3[13]` ＝ **LUK**　　（`a3[2]^a3[3]` ＝ 等級、`a3[4]^a3[5]` ＝ 職業）
+
+**武器分支表**（`uniform(x, x*factor)` 記為 U，`factor = (mastery*5+10)*0.009000000000000001`）:
+
+| weapon | 骰底 | 加項 | 係數（action 5–15／其他） | 原始碼位置 |
+|---|---|---|---|---|
+| 30 33 40 | STR | DEX | 4 / 4（單手劍沒有揮擊差別） | 207566 |
+| 31 32 37 38 41 42 44 | STR | DEX | **4 / 2** | 207628（`LABEL_91` 的 `v55+v55`） |
+| 43 | STR | DEX | **2 / 4**（**與上列相反**） | 207693 |
+| 45 46 | DEX | STR | 4 / 4 | 207855 |
+| 47 | LUK | STR+DEX | 4 / 4 | 207894 |
+| 33 且 branch 4（盜賊） | LUK | STR+DEX | 4 / 4 | 207569 |
+
+**`action === 32` 不是特例，是同一個 fallthrough**（207552–207977）：
+```c
+v34 = 0.0;
+if (weapon != 45 && != 46 && != 47) { n5_1 = action; goto LABEL_63; }
+n5_1 = action;
+if (action >= 22 && action <= 27) {
+LABEL_63:
+  if (n5_1 != 32) { switch (weapon) { ... } }   // action 32 -> 整段跳過
+}
+// 落到這裡 = (weapon ∈ {45,46,47} 且 action ∉ [22,27]) 或 action == 32
+v34 = uniform(STR, STR*0.5) * PAD * 0.006666666666666667;   // = 1/150
+```
+所以 `action 32` 對**任何**武器都走這條（劍也一樣），而 45/46/47 在 action 22–27 內反而回到 switch。
+
+**其餘常數全部對到**：`0.392156862745098` ＝ 100/255（等級夠時的命中分母）；`255 + diff*10`
+（等級不夠）；`branch 3` 命中 `0.4/0.8`、其餘 `0.5/1.5`；`raw *= (100-diff)*0.01`（`LABEL_132`，
+所有分支共用）；屬性 1 → ×0.5、2 → `max(raw, raw*1.5)` 上限 9999；`defense = uniform(PD*0.5, PD*0.6)`；
+爆擊 `uniform(0,100) > 3*level` → `× 5*level*0.01`；`<= 1` 一律給 1（這就是「最低傷害 1」）。
+
+**`sub_4C8ED0`（接觸傷害）同樣全套對到**（208239+）：EVA ＝ base+temp、`level < mob.level` 時
+`eva - (mobLevel-level)/2`；`uniform(eva*0.1, eva) >= mob.acc` 即 MISS；
+`damage = uniform(PA*0.7, PA*0.8) * PA * 0.01`；依職業扣
+`((str*0.15+dex*0.1)*PDD)/(level*2.5)`／`((dex+str)*0.5*PDD)/(level*2.2)`／`((str*0.2+dex*0.1)*PDD)/(level*2.5)`。
+
+**Detail（面板）第一列的「攻擊力」不是 PAD**：`detailRows` 是 `PAD + STR`（branch 0／1；
+branch 3 用 DEX、branch 4 用 `LUK + trunc((DEX+STR)/4)`）。所以「面板 29」可以是 `PAD 17 + STR 12`，
+**也可以是 `PAD 0 + STR 29`**——後者就是「面板攻擊力 29 但打怪都是 1」的全部原因：
+PAD 0 時 `raw` 被乘成 0，再由 `<= 1 → 1` 鉗成最低傷害。`equipment-generation.test.ts`
+有把這整條（Detail29／damage1 → 修復後 Detail46／正常傷害）釘住。
