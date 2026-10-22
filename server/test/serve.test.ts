@@ -510,6 +510,88 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
 });
 
 /**
+ * `--auto-register`: an unknown id is created instead of refused.
+ *
+ * The original has no such thing. An id the server does not know is answered with
+ * `LOGIN_RESULT.notRegistered` (5), "등록되지 않은 아이디입니다.", and an account only ever came to
+ * exist off-game - the closed-beta build says so itself: "베타당첨자의 경우에는 별도의 가입없이,
+ * 베타신청시의 계정/비번을 이용하세요." So this is a development switch in the same category as
+ * `--test-tools`, and these tests are mostly about the ways it must *not* fire: it is off unless it
+ * is asked for, it will not make an account out of an empty name or password, and it never
+ * overwrites an account that is already there.
+ */
+test("--auto-register: an unknown id is created, and the original's 5 is what changes", async (t) => {
+  /** One login server on a free port, with or without the switch. */
+  const serve = async (autoRegister: boolean) => {
+    const log: string[] = [];
+    const accounts = new Map<string, AccountRecord>();
+    let persisted = 0;
+    const server = new LoginServer({
+      accounts,
+      worlds: [{ name: "Scania", unknownId: 0 }],
+      gameServer: { ip: "127.0.0.1", port: 8585 },
+      handshake: { clientSendSeed: 0x11111111, clientRecvSeed: 0x22222222 },
+      pingMs: 0,
+      ...(autoRegister ? { autoRegister: true } : {}),
+      persist: () => {
+        persisted++;
+      },
+      log: (line) => log.push(line),
+    });
+    const info = await server.listen(0);
+    t.after(async () => {
+      await server.close();
+    });
+    /** One login attempt on a fresh connection; returns the result byte. */
+    const attempt = async (username: string, password: string): Promise<number> => {
+      const client = await FakeClient.connect(info.port);
+      client.send({ kind: "handshake-reply", opcode: 0x04, value: 0 });
+      client.send({ kind: "login-request", opcode: 0x01, username, password });
+      const result = parseLoginReply((await client.take(1))[0]!).result;
+      client.close();
+      return result;
+    };
+    return { accounts, log, attempt, persisted: () => persisted };
+  };
+
+  // 1. Without the switch this is still the 2003 answer, and the table stays empty.
+  const plain = await serve(false);
+  assert.equal(await plain.attempt("newbie", "pw"), LOGIN_RESULT.notRegistered);
+  assert.equal(await plain.attempt("newbie", "pw"), 5);
+  assert.equal(plain.accounts.size, 0, "the original never registers anybody");
+  assert.equal(plain.persisted(), 0);
+
+  // 2. With it, the first attempt creates the account and logs straight in.
+  const on = await serve(true);
+  assert.equal(await on.attempt("newbie", "pw"), LOGIN_RESULT.ok);
+  assert.deepEqual([...on.accounts.keys()], ["newbie"]);
+  assert.equal(on.accounts.get("newbie")?.password, "pw", "registered with the password typed");
+  assert.deepEqual(on.accounts.get("newbie")?.characters, [], "no characters until one is made");
+  assert.equal(on.persisted(), 1, "registering is durable, so a restart cannot forget it");
+  assert.ok(
+    on.log.some((line) => line.includes('auto-register: created account "newbie"')),
+    "and it says so, because an account appearing out of nowhere should never be silent",
+  );
+
+  // 3. The account is a real account now: the same id is no longer "unknown", so a wrong password
+  //    gets 4 ("잘못된 패스워드입니다.") rather than silently creating a second one or overwriting.
+  assert.equal(await on.attempt("newbie", "different"), LOGIN_RESULT.wrongPassword);
+  assert.equal(await on.attempt("newbie", "different"), 4);
+  assert.equal(on.accounts.get("newbie")?.password, "pw", "the password was not overwritten");
+  assert.equal(on.accounts.size, 1);
+  assert.equal(await on.attempt("newbie", "pw"), LOGIN_RESULT.ok, "the right one still works");
+  assert.equal(on.accounts.size, 1, "logging in twice does not create anything");
+
+  // 4. An empty name or password is never registered: an account anybody could open by typing
+  //    nothing is worse than no account, and 5 is still literally true - nothing was created.
+  assert.equal(await on.attempt("", "pw"), LOGIN_RESULT.notRegistered);
+  assert.equal(await on.attempt("somebody", ""), LOGIN_RESULT.notRegistered);
+  assert.equal(await on.attempt("", ""), LOGIN_RESULT.notRegistered);
+  assert.equal(on.accounts.size, 1, "still only the one real account");
+  assert.ok(!on.accounts.has(""), "no account named the empty string");
+});
+
+/**
  * One account, one live session (ADR-018).
  *
  * The 2003 client has a message for this - result `7`, "현재 접속중인 아이디이거나, 현재

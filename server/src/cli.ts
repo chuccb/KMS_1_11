@@ -65,7 +65,7 @@ usage:
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
         [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
         [--web-port <n>] [--handshake-body <hex>]
-        [--test-tools off|all|<accounts>] [--quiet]
+        [--auto-register] [--test-tools off|all|<accounts>] [--quiet]
   wz <command> [options]          Data.wz, for the asset and map pipelines: images, census,
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
@@ -108,6 +108,13 @@ notes:
   0x3D acknowledges. The browser does not yet generate CVecCtrlNpc walking paths. Server ownership
   and transparent index relay are reconstruction policies; see docs/NATIVE_NPC_BEHAVIOR.md.
   A bare --npc-walk means "all"; absent/none leaves movable NPCs unassigned.
+
+  --auto-register creates an account the first time somebody logs in with a name this server has
+  never seen, with the password they typed. Default off, and NOT original behaviour: the 2003 client
+  has no registration flow, an unknown id is answered with 5 ("등록되지 않은 아이디입니다.") and
+  accounts only ever existed off-game - the closed-beta build says so itself, "베타당첨자의 경우에는
+  별도의 가입없이, 베타신청시의 계정/비번을 이용하세요." An empty name or password is never
+  registered. Registering is saved immediately, so it survives a restart before the first character.
 
   --test-tools explicitly enables the DEVELOPMENT-ONLY browser panel for all or an account list.
   Default off; separate from --map-command. No native opcode is invented. Changes are explicit and
@@ -343,6 +350,8 @@ async function runServe(rest: string[]): Promise<number> {
   );
   const host = typeof args.host === "string" ? args.host : "0.0.0.0";
   const quiet = args.quiet === true;
+  // Opt-in and loud: the original never registered anybody, so this is a development convenience.
+  const autoRegister = args["auto-register"] === true;
   const seed = parseSeed(args.seed);
   const seedAccounts = parseAccounts(args.account);
   const worldNames = typeof args.world === "string" ? args.world.split(",") : ["Scania"];
@@ -492,6 +501,7 @@ async function runServe(rest: string[]): Promise<number> {
     handoffs,
     online,
     pingMs,
+    ...(autoRegister ? { autoRegister } : {}),
     ...(handshake ? { handshake } : {}),
     ...(persist ? { persist } : {}),
     ...(log ? { log } : {}),
@@ -601,6 +611,7 @@ async function runServe(rest: string[]): Promise<number> {
       `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
       `  npc control: ${npcWalk === undefined ? "stationary idle; movable off (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
+      `  auto-register: ${autoRegister ? "ON - unknown ids are created (not original behaviour)" : "off (--auto-register)"}\n` +
       `  test tools: ${testPolicy} (--test-tools; development only, default off)\n` +
       `  map commands: ${mapCommandPolicy} (--map-command; default off)\n` +
       `  heartbeat: ${pingMs === 0 ? "off (--ping <ms>)" : `0x08 every ${pingMs} ms, drop after ${pingMs * 3} ms`}\n` +

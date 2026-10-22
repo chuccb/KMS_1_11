@@ -328,6 +328,21 @@ export interface LoginServerOptions {
    */
   online?: OnlineAccounts;
   /**
+   * Create an account the first time somebody logs in with a name this server has never seen.
+   *
+   * **This is not original behaviour, and it is never the default.** The 2003 client has no
+   * registration flow at all: an id the server does not know gets `LOGIN_RESULT.notRegistered`
+   * (5), "등록되지 않은 아이디입니다.", and an account only ever came to exist off-game - which the
+   * closed-beta build says outright, "베타당첨자의 경우에는 별도의 가입없이, 베타신청시의 계정/비번을
+   * 이용하세요." So this is a development convenience in the same category as `--test-tools`, and
+   * a server left on it would quietly make every mistyped id a permanent account.
+   *
+   * A name or password that is empty is not registered: an account anybody could open by typing
+   * nothing is worse than no account, and the answer is still literally true - the id is not
+   * registered, because nothing was created.
+   */
+  autoRegister?: boolean;
+  /**
    * How often a quiet session is asked "are you still there?" (`0x08`; `net/heartbeat.ts`).
    * `0` turns the heartbeat off, which means a session that vanished silently keeps its account
    * occupied until the OS notices - only honest for a test that wants no timers. Defaults to
@@ -577,14 +592,28 @@ export class LoginServer {
 
       case "login-request": {
         if (state.stage !== "login") return;
-        const account = this.options.accounts.get(packet.username);
+        let account = this.options.accounts.get(packet.username);
         // Two different codes, because the client has two different messages: an unknown id is
         // "등록되지 않은 아이디입니다." (5) and a wrong password is "잘못된 패스워드입니다." (4,
         // `sub_4D0DB0`). Telling them apart is what the 2003 client was written for.
         if (!account) {
-          this.log(`  login refused: no account named "${packet.username}"`);
-          this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.notRegistered));
-          return;
+          // `--auto-register` (never the default; not original): make the account and fall through
+          // to the normal login. An empty name or password is refused instead, because an account
+          // anybody could open by typing nothing is worse than no account at all - and the answer
+          // is still literally true, since nothing was created.
+          if (!this.options.autoRegister || !packet.username || !packet.password) {
+            this.log(`  login refused: no account named "${packet.username}"`);
+            this.reply(socket, sendState, encodeLoginResult(LOGIN_RESULT.notRegistered));
+            return;
+          }
+          account = { password: packet.password, characters: [] };
+          this.options.accounts.set(packet.username, account);
+          this.log(
+            `  auto-register: created account "${packet.username}" ` +
+              `(--auto-register; the original would have answered 5, 등록되지 않은 아이디입니다.)`,
+          );
+          // Registering is durable, so a restart does not forget it before the first character.
+          this.persist();
         }
         if (account.password !== packet.password) {
           this.log(`  login refused for "${packet.username}": wrong password`);

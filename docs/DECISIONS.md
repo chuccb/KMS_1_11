@@ -4561,3 +4561,38 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   跑之前**先把 LIVE server 關掉**（ADR-133 記下的規則）——照做之後，上一輪逾時的那條
   `drop-wz.test.ts` 這次是 **1100ms**，與那次的 145s 對照，再次印證是爭用而非本次改動。
   `client/main.js` **維持 5522 行**，七份文件不必同步行數。
+
+
+## ADR-135：`--auto-register`（原版沒有自動註冊；這是刻意新增且預設關閉的功能，`main.js` 維持 5522 行，2026-10-22）
+
+- **先查原版，結論是「沒有」**：原版沒有任何註冊流程，未知 id 一律回 **5**「등록되지 않은 아이디입니다.」。
+  帳號只可能從遊戲外來——封測版自己寫明「베타당첨자의 경우에는 별도의 가입없이, 베타신청시의 계정/비번을 이용하세요.」。
+  所以這不是「補完原版遺漏」，而是**明確標示為非原版的新增功能**，與 `--test-tools`、`--map-command` 同一類。
+- **順手把登入結果碼對齊原始組語**（`sub_4D0DB0` `.c:215743`，韓文用 CP949 解回）：
+  3 刪除/停權、4 密碼錯、5 未註冊、7 已登入或維修、9 與 0xFF 系統錯誤。
+  switch 值是 `(u8)result + 1`（低位元組相加 → `0xFF + 1 = 0`，這解釋了為什麼有 `case 0`），
+  與 `protocol/replies.ts` 的表**完全吻合**（含 `systemError: 0xff`）。
+- **做法**：`LoginServerOptions.autoRegister?: boolean`（預設關閉）＋ CLI `--auto-register`。
+  未知的 id 就用「他打出來的密碼」建帳號，然後**走原本的登入流程**。
+- **三條不該動的界線（都寫成測試）**
+  1. **沒開就不會有**：仍回 5，帳號表維持空、`persist()` 一次都沒叫。
+  2. **空帳號或空密碼一律不註冊**：任何人打空白就能開的帳號比沒有帳號更糟；
+     而且回 5 是字面為真（什麼都沒建，所以「未註冊」是真的）。
+  3. **不覆寫既存帳號**：註冊後再用錯密碼是 **4**（잘못된 패스워드입니다.），不是再建一個或改密碼。
+- **註冊後立即 `persist()`**：註冊是持久的，重啟不會在創角前就忘掉（否則「註冊成功」是假的）。
+- **Log 一定寫明**：`auto-register: created account "x" (--auto-register; the original would have answered 5, 등록되지 않은 아이디입니다.)`，
+  因為帳號憑空出現這件事**不該是無聲的**。
+- **實機驗證**（真的跑一台起來打協定，不是只有單元測試）：
+  `newbie/pw` → 登入成功（已註冊）→ `newbie/wrong` → **4 密碼錯**（帳號是真的了）→
+  `newbie/pw` → 再登入成功 → `""/pw` → **5 未註冊**。
+- **這條測試務必會紅**：把註冊關掉（`if (true || ...)`）實測，測試如期失敗（`actual: 5, expected: 0`），
+  改回後通過。
+- **誠實標記為「找不到原證」**：`index.html` 的 `#user maxlength="64"`／`#pass maxlength="12"`
+  在 EXE 裡沒有依據，只是頁面自己的欄位上限；本輪**沒有**替它們編一個來源。
+  另外 `sub_524A00` 查的是 `Etc/ForbiddenName.img`（禁字表，用於角色名／密語對象），**不是**帳號長度檢查。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、probe exit 0（`drawImage` **165**，與 ADR-132 **逐位元組相同**）。
+  全套件 **1356 pass / 0 fail / 156 files / 313.58s**（ADR-134 是 1355，+1 就是本輪新增那條），
+  跑之前照 ADR-133 的規則先關 LIVE。
+  `client/main.js` **維持 5522 行**，七份文件不必同步行數。
+- **LIVE**：以 `--auto-register` 重啟（新世界新 save），讓你可以直接打任何帳號進去測；
+  橫幅會印 `auto-register: ON - unknown ids are created (not original behaviour)`。
