@@ -4757,3 +4757,13 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   2. `select.children.length` 與 `DISPLAY_MODES.length` 各有一處**寫死的 5**。
      已經把前者改成直接讀 `DISPLAY_MODES.length`（後者改成 6），讓它以後不可能再自己飄掉。
 - **閘**：`format:check` ✓、`typecheck` ✓、全套件待補（跑之前照 ADR-133 規則先關 LIVE）。
+- **順手查清一條 LIVE 記錄裡的紅字（結論：不是 bug，是沙箱自己在探埠）。**
+  LIVE 每次起來都會出現 `[serve] conn: session ended: body length 8276 exceeds the 1460 cap`。
+  這個數字遠超過原版的 1460 接收緩衝區，本來該是嚴重的協定事件，
+  所以我暫時在 `session.ts` 的 deframer 加了一行把原始位元組印出來（驗證完已完全還原，
+  `git status` 乾淨）。前半段解出來是：
+  `47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 38 36 30 36 …`
+  = **`GET / HTTP/1.1\r\nHost: 8606-…`**。
+  也就是**沙箱的埠預覽在對 8606 這個裸 TCP 的登入埠做 HTTP 探測**，
+  根本不是遊戲客戶端發的封包。伺服器把 HTTP 請求誤讀成封包、判定超長、關掉連線——**行為正確**。
+  不必修，也不必再查。
