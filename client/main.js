@@ -2626,6 +2626,7 @@ function statusButtonClick(button) {
     return;
   }
   if (button.action === "menu") { systemPanel.open(); return; }
+  if (button.action === "whisper") { pickWhisperRecipient(); return; }
   logLine(`${button.name}：這個原版視窗還沒接上來。`);
 }
 
@@ -3547,15 +3548,23 @@ function resetWhisper() {
   updateWhisperControl();
 }
 function updateWhisperControl() {
-  const button = document.getElementById("chat-whisper");
-  button.setAttribute("aria-pressed", String(!!whisperRecipient));
-  button.title = whisperRecipient ? `${whisperRecipient} · 點擊回到一般聊天` : "選擇悄悄話收件人";
+  // BtWhisper paints on the canvas with the other six of `sub_4F6B70`'s controls, so there is no
+  // button element to keep in step any more - only the chat input's own accessible name.
   ui.say.setAttribute("aria-label", whisperRecipient ? `悄悄話給 ${whisperRecipient}` : "聊天輸入");
 }
 function drawWhisperRecipient() {
   paintWhisperRecipient(ctx, whisperRecipient);
 }
-document.getElementById('chat-whisper').addEventListener('click', () => {
+/**
+ * `sub_4F8940`: BtWhisper's own arm (`sub_4F88C0` case 1006). A recipient already set is cleared
+ * - the original passes an empty `lpMultiByteStr_0` to `sub_4FB160` - and with none set the bar
+ * asks for one, in the original's own words (`asc_5BD308`, "귓속말 상대를 입력하세요.").
+ *
+ * The `/w name text` command does NOT come through here: it sends one whisper and leaves the
+ * recipient alone, which is its own thing. The player menu's whisper action and an incoming
+ * whisper's reply set `whisperRecipient` directly for the same reason.
+ */
+function pickWhisperRecipient() {
   if (revivePanel.open || modalOpen() || browserLabOpen() ||
       loginScreens.stage !== "game" || !visualFieldActive || !selfView || portalPending) return;
   if (whisperRecipient) {whisperRecipient="";updateWhisperControl();ui.say.focus();return;}
@@ -3567,7 +3576,7 @@ document.getElementById('chat-whisper').addEventListener('click', () => {
       whisperRecipient=lastWhisperRecipient=name; updateWhisperControl();ui.say.focus();
     },
   });
-});
+}
 
 function chatLine(name,text) {
   const system=name==='系統', whisper=name.endsWith('<<')||name.endsWith('>>');

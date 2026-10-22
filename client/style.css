@@ -253,6 +253,14 @@ body {
   width: 446px;
   height: 27px;
   font-size: 12px;
+  /* The chat bar's art is on the canvas, and `sub_4F6B70`'s BtWhisper (id 1006, surface
+     (327,575) 14x23) is one of the bar's own controls - so the bar itself must let the pointer
+     through to the canvas and only its real DOM widgets may take it. Without this the canvas
+     button is unreachable behind a transparent 446x27 rectangle. */
+  pointer-events: none;
+}
+#chatbox > * {
+  pointer-events: auto;
 }
 
 /* CUIStatusBar local (243,97), width=446-VScr width(12), height=84. */
@@ -364,25 +372,9 @@ body {
   width: 12px;
   height: 58px;
 }
-#chat-whisper {
-  position: absolute;
-  left: 84px;
-  top: 2px;
-  width: 14px;
-  height: 23px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fnormal%2F0");
-  cursor: pointer;
-}
-#chat-whisper:hover {
-  background-image: url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2FmouseOver%2F0");
-}
-#chat-whisper:active {
-  background-image: url("/api/png/UI%2FStatusBar.img%2FBtWhisper%2Fpressed%2F0");
-}
+/* BtWhisper used to be a DOM button here at left:84 top:2, 14x23 - the original's rectangle,
+   stamped with the original's own sprite. It is on the canvas now, drawn and hit-tested with the
+   other six of `sub_4F6B70`'s controls, so this rule is gone rather than left behind. */
 
 /*
  * The seven faces are a browser stand-in for the 2003 client's F1..F7, which a browser cannot take.

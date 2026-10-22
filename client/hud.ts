@@ -1,6 +1,13 @@
 import type { MapTitleArt } from "../server/src/game/mapart.ts";
 import type { HtmlImageLookup } from "./ui-types.ts";
-import { buttonSprite, uiButtonFace } from "./uicontrols.ts";
+import {
+  BT_STATUS_BAR_PAGE,
+  BT_STATUS_BAR_WHISPER,
+  BT_STATUS_BAR_WIDE,
+  buttonSprite,
+  uiButtonFace,
+  UI_BUTTON_FACES,
+} from "./uicontrols.ts";
 /** CUIStatusBar 4FA5E0/4FB440 and CField 46DA30, KMS 1.11 (not modern UI). */
 export const HUD_FONT: string = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
 export const STATUS_GAUGES: Readonly<
@@ -32,7 +39,7 @@ export function expPercent(value: number, max: number): number {
  * press state and asks these helpers with it.
  */
 export interface StatusBarButton {
-  /** `UI/StatusBar.img/<name>/<state>/0` - `normal`, `mouseOver`, `pressed`. */
+  /** `UI/StatusBar.img/<name>/<state>/0` - `normal`, `mouseOver`, `pressed` and `disabled`. */
   name: string;
   x: number;
   /** Relative to `STATUS_BAR.y`, like every other coordinate of this window. */
@@ -41,6 +48,25 @@ export interface StatusBarButton {
   h: number;
   action: string;
 }
+
+/**
+ * `sub_4F6B70`'s seven `CCtrlButton`s, in the order it creates them. None of them is given a
+ * width or height - `Create(this, parent, id, x, y, type, &out)` - so each box below is the size
+ * `Data.wz` gives that strip, read from `client/uicontrols.ts` rather than written out twice.
+ *
+ * `BtWhisper` (id 1006) is the one that was missing: `sub_4F88C0`'s switch has a seventh arm,
+ * `case 1006 -> sub_4F8940(this)`, and until now nothing in the client drew or hit-tested it.
+ */
+const STATUS_BAR_BUTTONS: readonly (Omit<StatusBarButton, "w" | "h"> & {
+  cell: { readonly width: number; readonly height: number };
+})[] = [
+  { name: "BtItem", cell: BT_STATUS_BAR_PAGE, x: 9, y: 7, action: "inventory" },
+  { name: "BtEquip", cell: BT_STATUS_BAR_PAGE, x: 9, y: 43, action: "equip" },
+  { name: "BtStat", cell: BT_STATUS_BAR_PAGE, x: 38, y: 67, action: "stat" },
+  { name: "BtSkill", cell: BT_STATUS_BAR_PAGE, x: 9, y: 91, action: "skill" },
+  { name: "BtMenu", cell: BT_STATUS_BAR_WIDE, x: 192, y: 91, action: "menu" },
+  { name: "BtWhisper", cell: BT_STATUS_BAR_WHISPER, x: 327, y: 183, action: "whisper" },
+];
 
 export const STATUS_BAR: Readonly<{
   y: number;
@@ -56,14 +82,12 @@ export const STATUS_BAR: Readonly<{
   keys: { path: "UI/StatusBar.img/base/2", x: 689, y: 464 },
   gauges: STATUS_GAUGES,
   // `base/0` carries the same pixels at these spots; the client still draws the button widgets on
-  // top of it so a hover or a press can swap the face (36x35, and `BtMenu` 38x17).
-  buttons: [
-    { name: "BtItem", x: 9, y: 7, w: 36, h: 35, action: "inventory" },
-    { name: "BtEquip", x: 9, y: 43, w: 36, h: 35, action: "equip" },
-    { name: "BtStat", x: 38, y: 67, w: 36, h: 35, action: "stat" },
-    { name: "BtSkill", x: 9, y: 91, w: 36, h: 35, action: "skill" },
-    { name: "BtMenu", x: 192, y: 91, w: 38, h: 17, action: "menu" },
-  ],
+  // top of it so a hover or a press can swap the face.
+  buttons: STATUS_BAR_BUTTONS.map(({ cell, ...button }) => ({
+    ...button,
+    w: cell.width,
+    h: cell.height,
+  })),
 });
 
 /** The button under a SURFACE point, or `undefined`. `y` is already offset by `STATUS_BAR.y`. */
@@ -79,11 +103,10 @@ export function statusBarButtonAt(x: number, y: number): StatusBarButton | undef
 
 /** Every face the bar can show, so a hover or a press never has to wait for a fetch. */
 export function preloadStatusBar(image: (path: string) => unknown): void {
-  // `UI/StatusBar.img/<name>` carries three faces, not the four `UI/Basic.img` buttons do, so
-  // this pass asks for three - the bars have no disabled arm to show.
+  // All seven strips carry all four faces - `disabled` included - so this pass asks for four.
+  // `BtChat` is in the list because the bar paints it without hit-testing it.
   for (const name of [...STATUS_BAR.buttons.map((button) => button.name), "BtChat"])
-    for (const face of ["normal", "mouseOver", "pressed"] as const)
-      image(buttonSprite(`UI/StatusBar.img/${name}`, face));
+    for (const face of UI_BUTTON_FACES) image(buttonSprite(`UI/StatusBar.img/${name}`, face));
 }
 
 /** 4FA170 uses 527720(1): plain black 12px Gulim, NOT white outlined text. */
@@ -139,6 +162,10 @@ export function drawNamePlate(
  * Bar-local `fill(245, 186, 79, 17)` and `text(246, 189)` with the bar's origin at y=392, so the
  * page paints the plate at (245, 578) and the name at (246, 581). Without a recipient the field
  * reads 모두에게 - "to everyone" - which is what the native edit box shows before a name is picked.
+ *
+ * `BtWhisper` (id 1006, 14x23 at surface (327,575)) is the plate's neighbour: 3px past its right
+ * edge and centred on it vertically. Pressing it is `sub_4F8940` - clear the recipient if one is
+ * set, otherwise ask for a name - which is why the two live next to each other on the chat bar.
  */
 export const WHISPER_FIELD: Readonly<{
   x: number;
@@ -179,7 +206,12 @@ export function drawWhisperRecipient(
 
 /** `sub_4F6B70`'s BtChat (StatusBar id 1004): bar-local (65, 91) -> page (65, 483), 38x17. */
 export const MESSENGER_BUTTON: Readonly<{ x: number; y: number; width: number; height: number }> =
-  Object.freeze({ x: 65, y: 483, width: 38, height: 17 });
+  Object.freeze({
+    x: 65,
+    y: 483,
+    width: BT_STATUS_BAR_WIDE.width,
+    height: BT_STATUS_BAR_WIDE.height,
+  });
 
 /** Whether a SURFACE point is on BtChat. The caller decides whether the field is playable. */
 export function messengerButtonAt(x: number, y: number): boolean {

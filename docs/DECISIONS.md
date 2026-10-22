@@ -4429,3 +4429,58 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   沒有 `CCtrlScrollBar` 可依（`sub_452600` 的 `max/16` 是控制項自己的分頁，不屬於這兩扇窗），
   本輪沒有替它們找原碼依據，所以不動、也不假裝動過。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。
+
+
+## ADR-132：狀態列的第七顆鈕 `BtWhisper`、三個尺寸收回實測格子、四面預載（有行為改變，main.js 5513→5522 行，2026-10-22）
+
+- **問題（三件，都是同一個東西牽出來的）**
+  1. **`BtWhisper` 不存在**：`sub_4F88C0` 的 switch 有**七**個 case，第七個是
+     `case 1006: sub_4F8940(this);`；舊的按鈕表（`docs/NATIVE_MESSENGER.md`）只列到 1005，
+     所以這一顆既沒被畫在畫布上、也沒被 hit test。它躲在 `UI/StatusBar.img/BtWhisper`
+     （14×23）與 EXE `.data:005BCF78`（`'/StatusBar.img/BtWhisper'`）裡，兩邊都在。
+  2. **五顆鈕的 36×35／38×17 是手寫的**：寫在 `client/hud.ts` 的 `STATUS_BAR.buttons` 裡，
+     與其 sprite 的尺寸重複。ADR-129 已經**量過**它們（全部相符），但還是「被相信」而不是「被讀出來」。
+  3. **預載只問三面**：`preloadStatusBar` 的註解說「狀態列只有三面、沒有 disabled」，
+     **這是錯的**——七個 strip 全部含 `disabled`，所以那一面從來沒被預載。
+- **做法**
+  - `client/uicontrols.ts` 新增三個實測格子：`BT_STATUS_BAR_PAGE` 36×35、
+    `BT_STATUS_BAR_WIDE` 38×17、新發現的 `BT_STATUS_BAR_WHISPER` 14×23，並把
+    `sub_4F6B70` 的 **id／x／y／type 表（1000..1006）**寫進註解當證據。
+  - `client/hud.ts` 的 `STATUS_BAR.buttons` 改由「格子 + 座標」表格推出 `w`/`h`；
+    `MESSENGER_BUTTON`（BtChat）改讀 `BT_STATUS_BAR_WIDE`；`preloadStatusBar` 改問四面。
+  - `BtWhisper` 加進 `STATUS_BAR.buttons`，`action: "whisper"`，走 `sub_4F8940`
+    （有收件人就清除、沒有就問名字）。**與瀏覽器 `/w` 捷徑共用同一個函式**，不會各走各的。
+  - **移除 DOM 代用鈕 `#chat-whisper`**：它當年就放在 `left:84 top:2`（`#chatbox` 在 243,573）
+    ＝頁面 (327,575) 14×23，與我從 C 推出來的**完全一致**，還用同一張 sprite。留著它，畫布上
+    那一顆永遠收不到 hover／press，所以代用鈕下台、由畫布自己畫（與使用者「把多餘的按鈕去除、
+    遊戲裡原本就已經有了」的既有政策一致）。
+  - **`#chatbox` 讓出指標**：它是 `#game-ui` 的直接子節點（`pointer-events: auto`），
+    整塊 446×27 吃掉畫布點擊。改成 `#chatbox { pointer-events: none }` +
+    `#chatbox > * { pointer-events: auto }`。
+- **實測（真瀏覽器，`elementFromPoint`）**
+
+  | 頁面座標 | 改前 | 改後 |
+  |---|---|---|
+  | (334,586) BtWhisper 中心 | `#chat-whisper` | **`#view`**（畫布） |
+  | (328,576)／(340,597) 鈕的兩個角 | `#chat-whisper` | **`#view`** |
+  | (500,586) `#say` 輸入框 | `#say` | `#say`（不變） |
+  | (500,530) 聊天記錄 | `#chat-lines` | `#chat-lines`（不變） |
+  | (400,550) | `#chat-lines` | `#chat-lines`（不變） |
+  | scroll／emotes／history 各自中心 | 自己 | 自己（不變） |
+  | (250,586) 收件人銘牌（空白處） | `#chatbox` | `#view` |
+
+- **一個做了又退回的決定（要記）**：為了讓 (250,586) 那類「狀態列空白處」不會點到後面的
+  portal，我曾在 click 尾巴加了 `if (point.y >= STATUS_BAR.y) return;`
+  （狀態列是 `sub_545450(this, 0, 392, 800, 208)` 的一扇窗，dblclick 與 contextmenu 本來就這樣判）。
+  **probe 立刻紅燈**：它有一條既有的回歸是「點 y>392 的 NPC 要送出 `{"t":"click","objectId":7}`」，
+  所以那個行為是被釘住的、**不能改**。已退回；現在 (250,586) 與 (100,500) 行為一致
+  （兩者都已經會到畫布），屬既有特性、本輪不擴大也不縮小。這條要連同「為什麼不順手修」
+  一起留著，免得將來有人照「狀態列是窗」的推理又改一次。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、probe exit 0、
+  `drawImage` **162 → 165**（多出來的正好是 BtWhisper × 3 frame，不是別的東西），
+  banner **10 → 11**（新增 `STATUS BAR BTWHISPER REGRESSIONS OK`：四個角在內、四個邊界外、
+  按下後 `sub_4F8940` 的輸入框真的開了）。
+  `client/main.js` **5513 → 5522 行**，六份文件同步行數。
+- **故意沒動**：`drawMessengerButton` 仍然只有三個**可達**的 face——BtChat 的 strip 雖然有
+  `disabled`，但原版何時把它變灰沒有證據，不自己發明。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。

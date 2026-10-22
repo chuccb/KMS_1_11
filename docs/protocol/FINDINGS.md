@@ -5041,3 +5041,27 @@ typecheck／build／format 全綠。
 - **商店與背包沒有 `CCtrlScrollBar`**：`sub_4B6EC0` 與 `sub_4DA810` 各存一個整數列索引，
   所以它們只借用「按住」這一半（現在是 `client/vscroll.ts` 的 `pressRepeat()`），
   列算術仍是自己的。
+
+## ADR-132：狀態列的第七顆鈕 `BtWhisper`（`sub_4F6B70` id 1006 / `sub_4F8940`）
+
+- **`sub_4F88C0` 有七個 case，不是六個**：`case 1006: sub_4F8940(this);`。舊的
+  `docs/NATIVE_MESSENGER.md` 按鈕表只列到 1005（BtMenu），所以 `BtWhisper` 一直沒被畫、
+  也沒被 hit test。
+- **建立引數**（`sub_4F6B70`，vtable slot 32）：`Create(this, parent, 1006, 327, 183, 0, &out)`，
+  **沒有 w/h 引數**；`type 0`。14×23 來自 `UI/StatusBar.img/BtWhisper`。狀態列原點 y=392
+  → 頁面 **(327, 575)**。
+- **版面交叉確認**：收件人銘牌在頁面 x 245..324、y 578..595；BtWhisper 在其右側 3px
+  （327−324=3）且**垂直置中**（586.5 vs 586.5）。兩組數字必出自同一份原始版面。
+- **`sub_4F8940` 的行為**：`this+246`（收件人）非空 → `sub_4FB160(this, lpMultiByteStr_0, ...)`
+  而 `lpMultiByteStr_0` 是**空字串**（`CHAR lpMultiByteStr_0[4] = {'\0',...}`），也就是**清除收件人**；
+  否則開輸入框問名字，原文是 `asc_5BD308` = **`"귓속말 상대를 입력하세요."`**
+  （CP949 `B1 D3 BC D3 B8 BB 20 BB F3 B4 EB B8 A6 20 C0 D4 B7 C2 C7 CF BC BC BF E4 2E`）——
+  本專案既有的對話框字串與此**逐位元組相同**。
+- **七個 strip 都有四個 face**：`BtChat/BtEquip/BtItem/BtMenu/BtSkill/BtStat/BtWhisper` 全部
+  含 `disabled`。舊的 `preloadStatusBar` 只預載 `normal/mouseOver/pressed` 三面（18 個），
+  已改為四面（28 個）。
+- **畫布要拿回指標**：`#chatbox` 是 `#game-ui` 的直接子節點，而被 `#game-ui > *` 給了
+  `pointer-events: auto`，所以它那塊 446×27（頁面 243..689 × 573..600）**整塊吃掉畫布的點擊**。
+  已改為 `#chatbox { pointer-events: none }` + `#chatbox > * { pointer-events: auto }`
+  （實測：`#say`／`#chat-lines`／`#chat-scroll`／`#emotes button` 都仍然收得到，只有那塊
+  空白把指標還給畫布）。

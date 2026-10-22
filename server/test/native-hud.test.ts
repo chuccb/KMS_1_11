@@ -154,7 +154,7 @@ test("local quickslot profiles are owner scoped, corrupt/blocked storage cannot 
   assert.equal(quickItemProfile(blocked, "a").bind(0, 2000000), true);
 });
 
-test("CUIStatusBar: the 392 window, its three plates and five buttons with exclusive edges", () => {
+test("CUIStatusBar: the 392 window, its three plates and six buttons with exclusive edges", () => {
   assert.equal(STATUS_BAR.y, 392);
   assert.deepEqual(
     [STATUS_BAR.panel, STATUS_BAR.chat, STATUS_BAR.keys].map((p) => [p.x, p.y]),
@@ -173,6 +173,9 @@ test("CUIStatusBar: the 392 window, its three plates and five buttons with exclu
       ["BtStat", 38, 67, 36, 35, "stat"],
       ["BtSkill", 9, 91, 36, 35, "skill"],
       ["BtMenu", 192, 91, 38, 17, "menu"],
+      // ADR-132: sub_4F88C0's case 1006, the one the six-button table left out. Bar-local
+      // (327,183) -> surface (327,575), and `type 0` still takes its box from the 14x23 strip.
+      ["BtWhisper", 327, 183, 14, 23, "whisper"],
     ],
   );
   // y is relative to the window, so the surface row is 392 + button.y; right and bottom exclude.
@@ -190,25 +193,75 @@ test("CUIStatusBar: the 392 window, its three plates and five buttons with exclu
   // BtEquip covers 435..469 and BtSkill 483..517, so x=9 has a real 13px gap between them.
   assert.equal(at(9, 475), undefined, "the gap between BtEquip and BtSkill");
   assert.equal(at(400, 500), undefined);
+  // BtWhisper: 14 wide and 23 tall, three pixels past the recipient plate and centred on it.
+  assert.equal(at(327, 575), "BtWhisper");
+  assert.equal(at(340, 597), "BtWhisper");
+  assert.equal(at(341, 575), undefined, "the right edge excludes");
+  assert.equal(at(327, 598), undefined, "and so does the bottom");
+  assert.equal(at(327, 574), undefined, "one pixel above it");
+  assert.equal(at(326, 575), undefined, "and one pixel to its left");
 });
 
 test("every button face is preloaded once per state, so a hover never waits on a fetch", () => {
   const asked: string[] = [];
   preloadStatusBar((path) => asked.push(path));
-  // Five bar buttons plus BtChat, which the bar's own list does not hit-test but does paint.
-  assert.equal(asked.length, 18);
+  // Six bar buttons plus BtChat, which the bar's own list does not hit-test but does paint - and
+  // four faces each, not three: every one of the seven strips carries `disabled` too. The old
+  // pass asked for 18 and left that face to be fetched on the first hover that needed it.
+  assert.equal(asked.length, 28);
   assert.equal(asked[0], "UI/StatusBar.img/BtItem/normal/0");
   assert.equal(asked[1], "UI/StatusBar.img/BtItem/mouseOver/0");
   assert.equal(asked[2], "UI/StatusBar.img/BtItem/pressed/0");
-  assert.equal(asked.at(-1), "UI/StatusBar.img/BtChat/pressed/0");
+  assert.equal(asked[3], "UI/StatusBar.img/BtItem/disabled/0");
+  assert.equal(asked.at(-1), "UI/StatusBar.img/BtChat/disabled/0");
   assert.deepEqual(
     asked.filter((p) => p.includes("BtStat")),
     [
       "UI/StatusBar.img/BtStat/normal/0",
       "UI/StatusBar.img/BtStat/mouseOver/0",
       "UI/StatusBar.img/BtStat/pressed/0",
+      "UI/StatusBar.img/BtStat/disabled/0",
     ],
   );
+  assert.deepEqual(
+    asked.filter((p) => p.includes("BtWhisper")),
+    [
+      "UI/StatusBar.img/BtWhisper/normal/0",
+      "UI/StatusBar.img/BtWhisper/mouseOver/0",
+      "UI/StatusBar.img/BtWhisper/pressed/0",
+      "UI/StatusBar.img/BtWhisper/disabled/0",
+    ],
+    "the button that did not exist here until ADR-132 is fetched like the other six",
+  );
+});
+
+test("BtWhisper is the recipient plate's neighbour, and sub_4F8940's arm is why", () => {
+  const whisper = STATUS_BAR.buttons.find((button) => button.name === "BtWhisper");
+  assert.ok(whisper);
+  assert.equal(whisper.action, "whisper");
+  // The plate is a surface rectangle; the button is window-local, so compare on the surface.
+  const plate = WHISPER_FIELD;
+  assert.equal(
+    STATUS_BAR.y + whisper.y + whisper.h / 2,
+    plate.y + plate.height / 2,
+    "the button is vertically centred on the plate - 575+23/2 = 578+17/2 = 586.5",
+  );
+  assert.equal(
+    STATUS_BAR.y + whisper.y,
+    575,
+    "and it is three pixels taller than the plate on each side, not aligned to its top",
+  );
+  assert.equal(
+    STATUS_BAR.y + whisper.y + whisper.h - (plate.y + plate.height),
+    3,
+    "it hangs 3px below the plate as well",
+  );
+  assert.equal(
+    whisper.x - (plate.x + plate.width),
+    3,
+    "and sits 3px past its right edge - 245+79 = 324, then 327",
+  );
+  assert.equal(whisper.x + whisper.w, 341, "so the pair ends where base/1's chat bar still runs");
 });
 
 test("jobNameOf reads the native table exactly, then the 100s root, then 초보자", () => {
@@ -341,7 +394,10 @@ test("the whisper field is a 79x17 plate on the chat bar, clipped, reading 모�
   assert.equal(log.find((entry) => entry[0] === "text")?.[2], "멋진모험가");
 });
 
-test("BtChat is a 38x17 face at page (65,483) - the bar's own row - with three sprite states", () => {
+test("BtChat is a 38x17 face at page (65,483) - the bar's own row - with three reachable faces", () => {
+  // Three *reachable*, not three in the archive: `sub_4F6B70`'s strip carries `disabled`
+  // like the other six, but `drawMessengerButton` is never asked for it. When the original
+  // greys BtChat out is not established, so no disabled arm was invented here.
   assert.deepEqual(
     [MESSENGER_BUTTON.x, MESSENGER_BUTTON.y, MESSENGER_BUTTON.width, MESSENGER_BUTTON.height],
     [65, 483, 38, 17],

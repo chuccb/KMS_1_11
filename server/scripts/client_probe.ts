@@ -662,6 +662,8 @@ interface ClientProbe {
   shopWindowAt(x: number, y: number): { kind: string };
   shopScrollbarGeometry(pane: string): { offset: number };
   runCommand(line: string, local: (name: string, text: string) => void): boolean;
+  statusBarButtonAt(x: number, y: number): { name: string; action: string } | undefined;
+  readonly whisperRecipient: string;
   skillPanel: { toggle(open: boolean): void; readonly open: boolean };
   testToolsPanel: { openPanel(): void; close(): void };
   setFacts(id: number, facts: TooltipFacts): void;
@@ -685,7 +687,8 @@ runInThisContext(
   testToolsPanel, skillPanel, itemDialog, wearItem,
   get inventory() { return inventory; },
   get remoteUsers() { return users; },
-  runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt,
+  runCommand, shopRowsOf, shopScrollbarGeometry, shopWindowAt, statusBarButtonAt,
+  get whisperRecipient() { return whisperRecipient; },
   get scroll() { return { ...shopScroll }; },
   get picked() { return shopSellPick; },
   get dragging() { return shopDrag !== undefined || shopScrollDrag !== undefined; },
@@ -1705,6 +1708,42 @@ el("qa-confirm").fire("change");
 assert.equal(el("qa-apply").disabled, false);
 probe.testToolsPanel.close();
 console.log("RECOVERY / EXPLICIT TEST TOOL REGRESSION SOURCES OK");
+
+// ---------------------------------------------------------------------------
+// ADR-132: BtWhisper - `sub_4F6B70`'s seventh button, id 1006 at surface (327,575) 14x23.
+// It is one of the status bar's own controls now, drawn and hit-tested on the canvas with the
+// other six rather than being a DOM stand-in laid over the same rectangle.
+const WHISPER_CENTRE = { clientX: 327 + 7, clientY: 575 + 11 };
+assert.equal(
+  probe.statusBarButtonAt(WHISPER_CENTRE.clientX, WHISPER_CENTRE.clientY)?.name,
+  "BtWhisper",
+  "the bar's own hit test owns the rectangle",
+);
+assert.equal(
+  probe.statusBarButtonAt(WHISPER_CENTRE.clientX, WHISPER_CENTRE.clientY)?.action,
+  "whisper",
+);
+// The four corners of the 14x23 cell are the button's; one pixel outside any edge is not.
+for (const [x, y] of [
+  [327, 575],
+  [340, 575],
+  [327, 597],
+  [340, 597],
+])
+  assert.equal(probe.statusBarButtonAt(x, y)?.name, "BtWhisper", `inside at ${x},${y}`);
+for (const [x, y] of [
+  [326, 586],
+  [341, 586],
+  [334, 574],
+  [334, 598],
+])
+  assert.equal(probe.statusBarButtonAt(x, y)?.name, undefined, `outside at ${x},${y}`);
+// sub_4F8940: with no recipient the button asks for one, using the original's own prompt string.
+assert.equal(probe.itemDialog.open, false);
+clickControl(WHISPER_CENTRE);
+assert.equal(probe.itemDialog.open, true, "BtWhisper opens the recipient prompt");
+assert.equal(probe.whisperRecipient, "", "and picks nothing until the dialog is accepted");
+console.log("STATUS BAR BTWHISPER REGRESSIONS OK");
 
 // The startup guard arms a real 15s timeout timer; every regression above has already run
 // synchronously, so exit explicitly instead of idling until that timer fires.

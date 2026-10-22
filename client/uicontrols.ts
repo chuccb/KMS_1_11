@@ -99,6 +99,39 @@ export const BT_GAME_MENU: UiCell = Object.freeze({ width: 136, height: 23 });
 export const CHECK_BOX: UiCell = Object.freeze({ width: 12, height: 12 });
 
 /**
+ * The status bar's own three sizes. `sub_4F6B70` creates its buttons through the same vtable slot
+ * 32 with **no width or height argument** - `Create(this, parent, id, x, y, type, &out)` - so like
+ * every other type-2 control here the box is whatever `Data.wz` says the sprite is.
+ *
+ * The ids, positions and types (all in window-local coordinates, the bar's own origin is y=392):
+ *
+ * | id | strip | x | y | type | cell |
+ * |---|---|---|---|---|---|
+ * | 1000 | `BtItem` | 9 | 7 | 6 | 36x35 |
+ * | 1001 | `BtEquip` | 9 | 43 | 6 | 36x35 |
+ * | 1002 | `BtStat` | 38 | 67 | 6 | 36x35 |
+ * | 1003 | `BtSkill` | 9 | 91 | 6 | 36x35 |
+ * | 1004 | `BtChat` | 65 | 91 | 2 | 38x17 |
+ * | 1005 | `BtMenu` | 192 | 91 | 2 | 38x17 |
+ * | 1006 | `BtWhisper` | 327 | 183 | 0 | 14x23 |
+ *
+ * All seven strips carry all four faces, `disabled` included - the status bar is not the
+ * three-face case it was assumed to be, and `preloadStatusBar` used to skip that face.
+ */
+export const BT_STATUS_BAR_PAGE: UiCell = Object.freeze({ width: 36, height: 35 });
+
+/** `UI/StatusBar.img/BtMenu` and `.../BtChat`, both 38x17: the two wide, short ones (ids 1004/5). */
+export const BT_STATUS_BAR_WIDE: UiCell = Object.freeze({ width: 38, height: 17 });
+
+/**
+ * `UI/StatusBar.img/BtWhisper`, 14x23: id 1006 at local (327,183) -> surface (327,575). It sits
+ * 3px to the right of the recipient plate and is vertically centred on it - the plate's middle is
+ * 578 + 17/2 = 586.5 and the button's is 575 + 23/2 = 586.5, which is the cross-check that the
+ * two coordinates came out of the same original layout rather than being fitted by eye.
+ */
+export const BT_STATUS_BAR_WHISPER: UiCell = Object.freeze({ width: 14, height: 23 });
+
+/**
  * `UI/Basic.img/Slider`: the two end caps are 3x4, the 1x2 fill stretches between them, and the
  * four thumb faces are 17x16. The system menu's sound sliders are built out of these three, and
  * the thumb is centred by halving its own width (`sliderCenter(...) - 8`).

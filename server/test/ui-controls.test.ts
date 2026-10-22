@@ -25,6 +25,9 @@ import {
   BT_COMBO_BOX,
   BT_DIALOG,
   BT_GAME_MENU,
+  BT_STATUS_BAR_PAGE,
+  BT_STATUS_BAR_WHISPER,
+  BT_STATUS_BAR_WIDE,
   BT_UI_CLOSE,
   buttonSprite,
   buttonSprites,
@@ -42,6 +45,7 @@ import { SKILL_CLOSE } from "../../client/skills.ts";
 import { STAT_WINDOW } from "../../client/statwindow.ts";
 import { MESSENGER_WINDOW } from "../../client/messenger-state.ts";
 import { dialogueButtons } from "../../client/npcdialogue-layout.ts";
+import { MESSENGER_BUTTON, STATUS_BAR } from "../../client/hud.ts";
 
 /** Every face of one strip, measured: they are all the same size, or the strip is not shared. */
 function allFaces(image: string, strip: string): string[] {
@@ -240,3 +244,47 @@ test("a face is one of the four the WZ stores, and nothing else is accepted", ()
   // The sprite path is `<strip>/<face>/0` - no state ever reaches for `/1`.
   assert.ok(buttonSprite("UI/Basic.img/BtOK", "pressed").endsWith("/pressed/0"));
 });
+
+test(
+  "the status bar's three sizes are its seven strips' own, and all seven carry four faces",
+  needsArchive,
+  () => {
+    const strips: [string[], { width: number; height: number }][] = [
+      [["BtItem", "BtEquip", "BtStat", "BtSkill"], BT_STATUS_BAR_PAGE],
+      [["BtChat", "BtMenu"], BT_STATUS_BAR_WIDE],
+      [["BtWhisper"], BT_STATUS_BAR_WHISPER],
+    ];
+    for (const [names, cell] of strips)
+      for (const strip of names) {
+        const faces = allFaces("UI/StatusBar.img", strip);
+        // The preload used to ask for three. Every one of the seven strips has a `disabled`
+        // canvas, so a face that is never fetched is a face that pops in late - not a face the
+        // archive does not have.
+        assert.equal(faces.length, 4, `${strip}: four faces, not three`);
+        const sizes = new Set(faces);
+        assert.equal(sizes.size, 1, `${strip}: the four faces agree on a size`);
+        assert.equal([...sizes][0], `${cell.width}x${cell.height}`, strip);
+      }
+    assert.equal(`${BT_STATUS_BAR_PAGE.width}x${BT_STATUS_BAR_PAGE.height}`, "36x35");
+    assert.equal(`${BT_STATUS_BAR_WIDE.width}x${BT_STATUS_BAR_WIDE.height}`, "38x17");
+    assert.equal(`${BT_STATUS_BAR_WHISPER.width}x${BT_STATUS_BAR_WHISPER.height}`, "14x23");
+
+    // sub_4F6B70 gives none of the seven a rectangle, so each box IS the strip it stamps.
+    for (const button of STATUS_BAR.buttons)
+      assert.equal(
+        canvasSize("UI/StatusBar.img", `${button.name}/normal/0`),
+        `${button.w}x${button.h}`,
+        `${button.name}: the hit box is the sprite`,
+      );
+    assert.equal(
+      canvasSize("UI/StatusBar.img", "BtChat/normal/0"),
+      `${MESSENGER_BUTTON.width}x${MESSENGER_BUTTON.height}`,
+    );
+    // The three sizes are three, not one: a 38x17 menu must not be reshaped into a 14x23 whisper
+    // button by anyone tidying these into a single constant later on.
+    assert.notEqual(
+      `${BT_STATUS_BAR_WIDE.width}x${BT_STATUS_BAR_WIDE.height}`,
+      `${BT_STATUS_BAR_WHISPER.width}x${BT_STATUS_BAR_WHISPER.height}`,
+    );
+  },
+);
