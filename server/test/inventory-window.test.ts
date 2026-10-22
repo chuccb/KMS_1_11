@@ -151,9 +151,11 @@ test("the window reports what a surface point is over, in the sheet's own order"
     kind: "scrollbar",
     part: "next",
   });
+  // ADR-131: sub_452500 zones the trough at the thumb - 103 page up above it, 104 below. At
+  // scroll 0 the thumb is flush under the prev cap, so this far down the trough is page down.
   assert.deepEqual(at(home.x + scrollbar.x + 6, home.y + scrollbar.y + 100, tab(24, [])), {
     kind: "scrollbar",
-    part: "track",
+    part: "pageDown",
   });
   assert.deepEqual(at(home.x + INVENTORY.grid.x, home.y + INVENTORY.grid.y, tab(24, [1])), {
     kind: "slot",
@@ -703,4 +705,71 @@ test("the tab strip covers each face's own label and prints the page's four in t
     calls.filter((call) => call.startsWith("fillText")).map((call) => Number(call.split(",")[1])),
     INVENTORY.tabs.map((box) => box.x + box.width / 2),
   );
+});
+
+test("the trough splits into pageUp and pageDown at the thumb, the same five zones the shop uses", () => {
+  const { home, scrollbar } = INVENTORY;
+  const view = tab(100, []);
+  const scroll = inventoryScrollbarGeometry(100, 10);
+  const part = (offset: number) => {
+    const hit = inventoryWindowAt({
+      position: home,
+      x: home.x + scrollbar.x + 6,
+      y: home.y + scrollbar.y + offset,
+      tabView: view,
+      scroll,
+    });
+    return hit?.kind === "scrollbar" ? hit.part : `not a scrollbar: ${JSON.stringify(hit)}`;
+  };
+  const thumbTop = scrollbar.arrow + scroll.offset;
+  assert.ok(thumbTop > scrollbar.arrow, `the thumb has left the top: ${scroll.offset}`);
+  assert.ok(thumbTop < scrollbar.height - 2 * scrollbar.arrow, "and has not reached the next cap");
+  assert.equal(part(2), "prev");
+  assert.equal(part(scrollbar.height - 2), "next");
+  assert.equal(part(scrollbar.arrow + 1), "pageUp");
+  assert.equal(part(thumbTop - 1), "pageUp", "the last pixel before the thumb");
+  assert.equal(part(thumbTop), "thumb");
+  assert.equal(part(thumbTop + scrollbar.arrow - 1), "thumb", "the thumb is one arrow-cell tall");
+  assert.equal(part(thumbTop + scrollbar.arrow), "pageDown");
+  assert.equal(part(scrollbar.height - scrollbar.arrow - 1), "pageDown");
+  // A tab that fits keeps the trough's two halves but not the thumb: there is nothing to drag,
+  // so the strip where the thumb would sit reads as page down instead. Nothing moves either way -
+  // clampInventoryScroll pins the row index - and the press never arms on a tab with max 0.
+  const fitted = inventoryScrollbarGeometry(24, 0);
+  const still = (offset: number) => {
+    const hit = inventoryWindowAt({
+      position: home,
+      x: home.x + scrollbar.x + 6,
+      y: home.y + scrollbar.y + offset,
+      tabView: tab(24, []),
+      scroll: fitted,
+    });
+    return hit?.kind === "scrollbar" ? hit.part : `not a scrollbar: ${JSON.stringify(hit)}`;
+  };
+  assert.equal(still(scrollbar.arrow + 1), "pageDown", "the slot where a thumb would sit");
+  assert.equal(still(100), "pageDown");
+  assert.equal(fitted.max, 0, "24 slots never scroll");
+});
+
+test("a held arrow shows the pressed art on the bag's bar too", () => {
+  const geometry = inventoryScrollbarGeometry(100, 10);
+  const { ctx, drawn, image } = fakeContext();
+  drawInventoryScrollbar(ctx, image, 24, 24, geometry, false, "prev");
+  const names = drawn.map((entry) => String(entry.image).replace("UI/Basic.img/VScr/enabled/", ""));
+  assert.equal(names[0], "prev1", "sub_4521E0: the down-arrow face, not the idle one");
+  assert.ok(names.includes("next0"), `the next cap stays idle: ${names.join(" ")}`);
+
+  const nextHeld = fakeContext();
+  drawInventoryScrollbar(nextHeld.ctx, nextHeld.image, 24, 24, geometry, false, "next");
+  assert.ok(
+    nextHeld.drawn.some((entry) => String(entry.image).endsWith("next1")),
+    nextHeld.drawn.map((entry) => String(entry.image)).join(" "),
+  );
+  // A dragging thumb and a held arrow are independent faces: sub_4524C0 never repeats the thumb,
+  // but sub_4526A0 still swaps its art while it is being dragged.
+  const both = fakeContext();
+  drawInventoryScrollbar(both.ctx, both.image, 24, 24, geometry, true, "prev");
+  const cells = both.drawn.map((entry) => String(entry.image));
+  assert.ok(cells.includes("UI/Basic.img/VScr/enabled/thumb1"), cells.join(" "));
+  assert.ok(cells.includes("UI/Basic.img/VScr/enabled/prev1"), cells.join(" "));
 });

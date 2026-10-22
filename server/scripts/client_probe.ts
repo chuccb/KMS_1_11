@@ -397,8 +397,10 @@ function emitWindow(type: string, event: DomEvent = {}): void {
 // Real browser delivery for canvas interaction (ADR-108): a mouseup/mousemove over the canvas
 // bubbles to the WINDOW listeners main.js uses for sprite-button activation and window drags, and
 // native CCtrlButton controls (shop buy/sell/close, inventory close, status, trade) activate only
-// when the full mousedown -> mouseup -> click trio lands on the same control. Rows, tabs and
-// scrollbars are not controls and stay bare clicks.
+// when the full mousedown -> mouseup -> click trio lands on the same control. Rows and tabs are
+// not controls and stay bare clicks - but a scrollbar acts on the PRESS (sub_4521E0, and ADR-131
+// holds it to repeat), so its arrows and track have to be driven with the whole trio or nothing
+// happens at all.
 function windowMouseUp(point: Partial<DomEvent> = {}): void {
   emitWindow("mouseup", {
     button: 0,
@@ -1277,17 +1279,17 @@ canvasEl.fire("click", shopPoint(279, 77));
 assert.equal(probe.shopRowsOf("sell").length, 8);
 // Clicking the very first pixel of a scrollbar must not select a row or start a window drag.
 assert.equal(probe.shopWindowAt(196 + 189, 154 + 80).kind, "scrollbar");
-canvasEl.fire("click", shopPoint(195, 269)); // next arrow
+clickControl(shopPoint(195, 269)); // next arrow
 assert.equal(probe.scroll.buy, 1);
-canvasEl.fire("click", shopPoint(195, 74)); // prev arrow
+clickControl(shopPoint(195, 74)); // prev arrow
 assert.equal(probe.scroll.buy, 0);
-canvasEl.fire("click", shopPoint(195, 200)); // page down
+clickControl(shopPoint(195, 200)); // page down
 assert.equal(probe.scroll.buy, 6);
 canvasEl.fire("wheel", { ...shopPoint(195, 180), deltaY: -1 });
 assert.equal(probe.scroll.buy, 5); // wheel over the scrollbar itself
 canvasEl.fire("wheel", { ...shopPoint(195, 180), deltaY: 0 });
 assert.equal(probe.scroll.buy, 5);
-canvasEl.fire("click", shopPoint(195, 74));
+clickControl(shopPoint(195, 74));
 const thumbY = 68 + 12 + probe.shopScrollbarGeometry("buy").offset + 6;
 canvasEl.fire("mousedown", shopPoint(195, thumbY));
 canvasMouseMove(shopPoint(195, 268));

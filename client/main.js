@@ -78,7 +78,7 @@ import {
   shopWindowAt as shopHitAt,
 } from "./shop-window.ts";
 import { requireContext2d, requireElement, isEditingControl } from "./dom.ts";
-import { VSCR_CELL } from "./vscroll.ts";
+import { pressRepeat, VSCR_CELL } from "./vscroll.ts";
 import { samplePlayerPosition, resetPlayerPresentation } from "./player-presentation.ts";
 import { createCamera, updateCamera, reframeCamera } from "./camera.ts";
 import { cameraControls } from "./camera-controls.ts";
@@ -1572,6 +1572,12 @@ canvas.addEventListener("mousedown", (event) => {
           VSCR_CELL -
           geometry.offset,
       };
+    } else if (shopHit.kind === "scrollbar") {
+      // sub_4521E0: an arrow or a track zone steps once on the press, then the timer takes over.
+      shopScrollPress.side = shopHit.side;
+      shopScrollAct(shopHit.side, shopHit.part);
+      shopScrollPress.repeat.press(shopHit.part, performance.now());
+      event.preventDefault();
     }
     if (shopHit.kind === "body") {
       shopDrag = {
@@ -1648,8 +1654,12 @@ canvas.addEventListener("mousedown", (event) => {
       inventoryScrollDrag = {
         offset: point.y - inventoryAt.y - INVENTORY.scrollbar.y - VSCR_CELL - g.offset,
       };
-      event.preventDefault();
+    } else if (g.max > 0) {
+      // sub_4521E0: the bag's bar does the same as the shop's, and the thumb never repeats.
+      inventoryScrollAct(hit.part);
+      inventoryScrollPress.repeat.press(hit.part, performance.now());
     }
+    event.preventDefault();
     return;
   }
   if (hit?.kind === "slot" && hit.item) {
@@ -1692,6 +1702,9 @@ function finishWindowPress(event) {
   }
   if (shopScrollDrag !== undefined) shopSuppressClick = event?.target === canvas;
   shopScrollDrag = undefined;
+  // sub_4522B0: the release is what clears the pressed art, wherever the pointer ended up.
+  shopScrollPress.repeat.release();
+  inventoryScrollPress.repeat.release();
   if (messengerDrag?.moved === true) messengerSuppressClick = event?.target === canvas;
   if (messengerScrollDrag) {
     messengerScrollDrag = false;
@@ -1831,19 +1844,8 @@ canvas.addEventListener("click", (event) => {
         rechargeShopItem(shopSellPick);
       }
     } else if (shopHit.kind === "scrollbar") {
-      const side = shopHit.side;
-      const geometry = shopScrollbarGeometry(side);
-      const localY = point.y - shopAt.y - SHOP.scrollbar[side].y;
-      const delta =
-        shopHit.part === "prev"
-          ? -1
-          : shopHit.part === "next"
-            ? 1
-            : localY < 12 + geometry.offset
-              ? -shopVisibleRows(side)
-              : shopVisibleRows(side);
-      if (shopHit.part !== "thumb")
-        setShopScroll(side, shopScroll[side] + delta);
+      // Nothing: the press on the way in already acted, and the timer is what repeats it. The
+      // direction used to be recomputed here from localY; sub_452500 zones the trough instead.
     } else if (shopHit.kind === "tab") {
       shopTab = shopHit.tab;
       shopSellPick = undefined;
@@ -1888,17 +1890,7 @@ canvas.addEventListener("click", (event) => {
       } catch {}
       inventoryPick = undefined;
     } else if (hit.kind === "scrollbar") {
-      const g = inventoryScrollbarGeometry();
-      const localY = point.y - inventoryAt.y - INVENTORY.scrollbar.y;
-      const delta =
-        hit.part === "prev"
-          ? -1
-          : hit.part === "next"
-            ? 1
-            : localY < 12 + g.offset
-              ? -6
-              : 6;
-      if (hit.part !== "thumb") setInventoryScroll(g.row + delta);
+      // Nothing: the press on the way in already acted, and the timer is what repeats it.
     } else if (hit.kind === "slot") {
       inventoryPick = hit.item;
       if (hit.item !== undefined) describeItem(hit.item.itemId);
@@ -2669,6 +2661,7 @@ function frame() {
     return;
   }
   const now = performance.now();
+  tickScrollPresses(now);
   testToolsPanel.tick(now);
   npcVisuals.tick(now);
   const elapsed = Math.max(0, Math.min(250, now - (lastPhysicsAt ?? now)));
@@ -3939,6 +3932,12 @@ let inventoryPick;
 /** 4DA810/4DA8B0: independent per-tab row positions; firstSlot = 4*row+1. */
 const inventoryScroll = [0, 0, 0, 0, 0];
 let inventoryScrollDrag;
+/**
+ * `sub_4521E0`'s held arrow for the bag. `sub_4DA810` keeps a plain row index, not a
+ * `CCtrlScrollBar`, so the bar needs its own press state: the trade/messenger/skill windows get
+ * theirs from the scroller in client/vscroll.ts, this one and the shop's do not.
+ */
+const inventoryScrollPress = { repeat: pressRepeat() };
 /** CTradingRoomDlg is modeless: its sheet, press and drag live beside the shop's own. */
 let tradeOpen = false;
 let tradeAt = { ...TRADE_WINDOW.home };
@@ -3954,6 +3953,22 @@ function inventoryScrollbarGeometry() {
     inventoryTabView()?.capacity ?? 0,
     inventoryScroll[inventoryTab] ?? 0,
   );
+}
+/**
+ * `sub_4521E0` for the bag: an arrow steps one row, the track pages by the six rows the grid
+ * shows. The thumb does nothing here - its press starts the drag up in the mousedown handler.
+ */
+function inventoryScrollAct(zone) {
+  if (zone === undefined || zone === "thumb") return;
+  const delta =
+    zone === "prev"
+      ? -1
+      : zone === "next"
+        ? 1
+        : zone === "pageUp"
+          ? -INVENTORY.grid.rows
+          : INVENTORY.grid.rows;
+  setInventoryScroll(inventoryScrollbarGeometry().row + delta);
 }
 function setInventoryScroll(row) {
   inventoryScroll[inventoryTab] = clampInventoryScroll(
@@ -3981,8 +3996,10 @@ window.addEventListener("mouseup", (event) => {
   if (inventoryScrollDrag) inventorySuppressClick = event.target === canvas;
   inventoryScrollDrag = undefined;
 });
+// Losing focus never produces a mouseup, so the press has to be dropped here as well.
 window.addEventListener("blur", () => {
   inventoryScrollDrag = undefined;
+  finishWindowPress();
 });
 // The 2003 client keeps a window's place in the registry; a page can only keep it locally.
 try {
@@ -4275,6 +4292,7 @@ function drawInventoryWindow() {
     y,
     inventoryScrollbarGeometry(),
     inventoryScrollDrag !== undefined,
+    inventoryScrollPress.repeat.zone,
   );
   const coinState = inventoryCoinState({
     dead: selfView.hp <= 0,
@@ -4392,6 +4410,8 @@ let shopHover;
 let shopDrag;
 let shopPressed;
 let shopScrollDrag;
+/** `sub_4521E0`'s held arrow for the shop, which - like the bag - keeps two plain row indices. */
+const shopScrollPress = { side: "buy", repeat: pressRepeat() };
 let shopBuyRow = -1;
 /** The category tab the sell pane shows (1 equip, 2 use, 3 install, 4 etc). */
 let shopTab = 1;
@@ -4468,7 +4488,55 @@ function shopListPaint(side) {
     const item = rows[row + scroll];
     visible.push(item === undefined ? undefined : shopRowPaint(side, item));
   }
-  return { picked, scroll, total: rows.length, rows: visible };
+  return {
+    picked,
+    scroll,
+    total: rows.length,
+    rows: visible,
+    // The press belongs to one pane: the other one's bar keeps its idle art.
+    pressed: shopScrollPress.side === side ? shopScrollPress.repeat.zone : undefined,
+  };
+}
+
+/**
+ * `sub_4523D0`, the control's OnTimer, for the two windows that borrow only the press half of it.
+ * The zone is re-hit from the live cursor every tick - never from the one the press started in -
+ * so sliding off the arrow stops the repeat and sliding back resumes it, and `sub_4524C0`'s 50 ms
+ * gate sets the cadence. The thumb never repeats: `sub_4526A0` moves it through the drag instead.
+ */
+function tickScrollPresses(now) {
+  const shopZone = shopScrollPress.repeat.zone,
+    bagZone = inventoryScrollPress.repeat.zone;
+  // Nothing held: this runs every frame, so do not pay for two window hit tests to learn that.
+  if (shopZone === undefined && bagZone === undefined) return;
+  const zone = (hit) => (hit?.kind === "scrollbar" ? hit.part : undefined);
+  const shopHit =
+    shopZone === undefined || pointerAt === undefined ? undefined : shopWindowAt(pointerAt.x, pointerAt.y);
+  const bagHit =
+    bagZone === undefined || shopHit !== undefined || pointerAt === undefined
+      ? undefined
+      : inventoryWindowAt(pointerAt.x, pointerAt.y);
+  if (shopScrollPress.repeat.tick(now, zone(shopHit)))
+    shopScrollAct(shopScrollPress.side, shopScrollPress.repeat.zone);
+  if (inventoryScrollPress.repeat.tick(now, zone(bagHit)))
+    inventoryScrollAct(inventoryScrollPress.repeat.zone);
+}
+
+/**
+ * The same press for the shop, over `shopVisibleRows(side)` - four in the buy pane, and the sell
+ * pane's own count. Both panes keep a plain row index, so neither has a `CCtrlScrollBar` to own it.
+ */
+function shopScrollAct(side, zone) {
+  if (zone === undefined || zone === "thumb") return;
+  const delta =
+    zone === "prev"
+      ? -1
+      : zone === "next"
+        ? 1
+        : zone === "pageUp"
+          ? -shopVisibleRows(side)
+          : shopVisibleRows(side);
+  setShopScroll(side, shopScroll[side] + delta);
 }
 
 /** Clamp scrolling after wheel/arrow/track/drag input, including a shrinking inventory. */

@@ -30,7 +30,7 @@ import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 import { TAB_FILL, TAB_LEFT, TAB_MIDDLE, TAB_RIGHT } from "./tabstrip.ts";
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
-import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollTravel, VSCR_CELL, type VScrollZone } from "./vscroll.ts";
 import { BT_UI_CLOSE } from "./uicontrols.ts";
 
 export type ShopSide = "buy" | "sell";
@@ -199,7 +199,7 @@ export type ShopHit =
   | { kind: "close" }
   | { kind: "button"; button: "buy" | "sell" | "recharge" }
   | { kind: "tab"; index: number; tab: number }
-  | { kind: "scrollbar"; side: ShopSide; part: "prev" | "next" | "thumb" | "track" }
+  | { kind: "scrollbar"; side: ShopSide; part: VScrollZone }
   | { kind: `${ShopSide}-row`; index: number; row: ShopRow }
   | { kind: "body" };
 
@@ -238,9 +238,11 @@ export function shopWindowAt(query: ShopWindowQuery): ShopHit | undefined {
     const geometry = shopScrollbarGeometry(side, query.rows[side].length, query.scroll[side]);
     const bar = SHOP.scrollbar[side];
     if (geometry !== undefined && inside(bar, localX, localY)) {
+      // `sub_452500`'s five zones. The track is not one thing: the part above the thumb is
+      // 103 (page up) and the part below it is 104 (page down), which is what makes a click
+      // there page by 16 rows and a *held* one keep paging.
       const offset = localY - bar.y;
-      const onThumb =
-        offset >= VSCR_CELL + geometry.offset && offset < 2 * VSCR_CELL + geometry.offset;
+      const thumbTop = VSCR_CELL + geometry.offset;
       return {
         kind: "scrollbar",
         side,
@@ -249,9 +251,11 @@ export function shopWindowAt(query: ShopWindowQuery): ShopHit | undefined {
             ? "prev"
             : offset >= bar.height - VSCR_CELL
               ? "next"
-              : onThumb
-                ? "thumb"
-                : "track",
+              : offset < thumbTop
+                ? "pageUp"
+                : offset < thumbTop + VSCR_CELL
+                  ? "thumb"
+                  : "pageDown",
       };
     }
     const row = shopRowAt(side, localX, localY, query.scroll[side]);
@@ -278,11 +282,13 @@ export function drawShopScrollbar(
   originX: number,
   originY: number,
   geometry: ShopScrollGeometry,
+  pressed?: VScrollZone,
 ): void {
   paintVScrollbar(ctx, image, { x: originX, y: originY }, SHOP.scrollbar[side], {
     // `geometry.max` counts rows past the visible ones; the painter wants the native `SetMax`.
     max: geometry.max + 1,
     offset: geometry.offset,
+    pressed,
   });
 }
 
@@ -456,6 +462,8 @@ export interface ShopListPaint {
   total: number;
   /** `shopVisibleRows(side)` entries; `undefined` where the list has run out. */
   rows: (ShopRowPaint | undefined)[];
+  /** `sub_4521E0`'s pressed zone, when the pointer went down on THIS pane's bar and is still on it. */
+  pressed?: VScrollZone;
 }
 
 /**
@@ -504,7 +512,8 @@ export function drawShopList(
       );
   }
   const geometry = shopScrollbarGeometry(side, paint.total, paint.scroll);
-  if (geometry !== undefined) drawShopScrollbar(ctx, image, side, originX, originY, geometry);
+  if (geometry !== undefined)
+    drawShopScrollbar(ctx, image, side, originX, originY, geometry, paint.pressed);
 }
 
 /**

@@ -4375,3 +4375,57 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 - **故意沒動**：`utilTextFrameRects` 那七個 `fillRect` 來自 `sub_531FB0` 的堆疊參數（FINDINGS 已記），
   不是 WZ 格子，所以沒有套任何常數。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪是純重構，畫面不該有任何變化。
+
+
+## ADR-131：把「按住捲軸箭頭會連續捲」補回商店與背包（有行為改變，main.js 5445→5513 行，2026-10-22）
+
+- **問題**：ADR-127 把 `CCtrlScrollBar` 收回 `client/vscroll.ts` 時，只把**交易、密語、技能**三扇窗
+  接上；商店（`sub_4B6EC0`）與背包（`sub_4DA810`）因為存的是**一個整數列索引**、不是
+  `CCtrlScrollBar`，所以一直沒有「按住」這件事 —— 一次點擊只走一格，`UI/Basic.img/VScr/enabled/`
+  底下的 **`prev1`／`next1`（按下的那一面）從來沒有被畫出來過**。原版的 `sub_4521E0`（按下）、
+  `sub_4523D0`（OnTimer）、`sub_4524C0`（50ms 閘）、`sub_4522B0`（放開）是四條獨立的證據，
+  本輪補的是這四條，不是「讓捲動快一點」。
+- **抽出來的是「按住」這一半，不是整顆控制項**：`client/vscroll.ts` 新增 `pressRepeat()`，
+  只管按下／計時／放開，**不含任何列索引運算**。商店與背包各自保留自己的列算術
+  （箭頭 ±1、軌道 ±`shopVisibleRows(side)`／±`INVENTORY.grid.rows`），
+  `vScrollScroller` 自己也改用同一顆，所以現在全案只有**一份** 50ms 閘。
+- **軌道不是一塊**：`sub_452500` 把軌道在 thumb 處切成 **103 page up / 104 page down**，
+  原本商店與背包回傳的都是一整塊 `track`，再由 click 處理器自己用 `localY < 12 + offset`
+  重算一次方向。現在 hit test 直接回傳原版那**五個 zone**
+  （`prev` / `next` / `pageUp` / `pageDown` / `thumb`），那份重算就刪掉了。
+  這是本輪 `main.js` 裡唯一被刪掉的邏輯，其餘都是新增。
+- **行為改變（三條，都是原版有、我們沒有）**
+  1. **按住箭頭／軌道會每 50ms 重複一次**，直到放開或游標移出那個 zone
+     （移開會停、移回來會繼續，**不必重新按下** —— 原版每 tick 用 `GetCursorPos` 重新 hit）。
+  2. **按下期間箭頭畫 `prev1`/`next1`**，放開才恢復。
+  3. **thumb 永不重複**（`sub_4524C0` 排除 zone 105；thumb 走的是 `sub_4526A0` 的拖曳）。
+- **效能**：`tickScrollPresses` 每 frame 都會被呼叫，所以在**沒有按住時直接 return**，
+  不會為了知道「沒事」而付兩次視窗 hit test。
+- **新／改測試（+5 條）**
+  - `server/test/vscroll.test.ts`：`pressRepeat` 的節奏 —— 按下先動一次、50ms 整仍在閘內
+    （`now - lastAct <= 50`）、51ms 才動第二次、每次動作**重新蓋章**所以是「每次動作後 50ms」
+    而不是「按下後每 50ms」、游標移到別的 zone 或移出捲軸會停、**移回來會繼續**、
+    thumb 永不重複、放開後連 9999ms 也不會再動；以及 `vScrollScroller` 用同一顆閘。
+  - `server/test/shop-window.test.ts`：軌道在 thumb 處切成 pageUp／pageDown（逐像素斷言
+    thumb 前後那一格）；按住時 `prev1` 出現而另一頭仍是 `prev0`；`drawShopList` 只把
+    `pressed` 傳給**自己那一側**（所以 press 才需要帶 `side`）。
+  - `server/test/inventory-window.test.ts`：同樣的五個 zone；按住與拖曳是**兩面獨立的旗子**
+    （`prev1` 與 `thumb1` 可以同時出現）。
+- **紅燈（兩次，都是我寫錯）**：(1) 我斷言「50ms 整就會重複」，但閘是
+  `now - lastAct <= 50`，所以 50ms **仍在閘內**、要 51ms；連帶把「第二次動作後 50ms」
+  也寫錯了一格。已改成真實值並把理由寫進註解。
+  (2) **會走兩步的 bug（自己抓到，還好）**：我先把「按下的時候動一次」加進 mousedown，
+  卻忘了原本的 `click` 處理器還留著同一段「箭頭 ±1、軌道 ±可見列數」的邏輯 —— 商店與背包
+  **各會多走一步**。背包那一側我第一輪就刪掉了，商店那一側**漏了**，是重讀 diff 時看到的。
+  兩側的 click 分支現在都只剩一句註解（原來在這裡重算方向的 `localY < 12 + offset`
+  也一起刪了，因為 hit test 已經回傳 `pageUp`/`pageDown`）。
+  (3) 背包那一側我原本讓 `max <= 0`（清單沒溢出）的軌道整段回傳 `pageUp`，
+  這會讓既有的 `part: "track"` 斷言變成 `pageUp`；改成**只對 thumb 套 `max > 0` 的守衛**
+  （跟原本的 `onThumb` 守衛一致），軌道兩半維持不變。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、
+  `bun server/scripts/client_probe.ts` exit 0、`drawImage` **162**、10 個 banner。
+  `client/main.js` **5445 → 5513 行（+68）**，七份文件同步行數。
+- **故意沒動**：商店／背包**一次走幾格**（±1 與 ±可見列數）維持原樣 —— 那兩個數字
+  沒有 `CCtrlScrollBar` 可依（`sub_452600` 的 `max/16` 是控制項自己的分頁，不屬於這兩扇窗），
+  本輪沒有替它們找原碼依據，所以不動、也不假裝動過。
+- **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。

@@ -187,10 +187,12 @@ test("the scrollbars are hit before the rows they overlap, and report their own 
     side: "buy",
     part: "next",
   });
+  // ADR-131: the trough is not one zone. sub_452500 splits it at the thumb - 103 page up above
+  // it, 104 page down below - and a held press is what makes the difference visible.
   assert.deepEqual(query(home.x + bar.x + 6, home.y + bar.y + 100), {
     kind: "scrollbar",
     side: "buy",
-    part: "track",
+    part: "pageDown",
   });
   const offset = shopScrollbarGeometry("buy", 12, 3)?.offset ?? 0;
   assert.deepEqual(
@@ -616,4 +618,77 @@ test("a shop request is blocked by any of the five gates, and by nothing else", 
   // Before the view arrives there is no hp to test, and the original `selfView?.hp <= 0` is false
   // then as well - so the guard must not block just because the player is unknown.
   assert.equal(shopActionBlocked({ ...clear, hp: undefined }), false);
+});
+
+test("the trough splits into pageUp and pageDown at the thumb, the way sub_452500 zones it", () => {
+  const { home } = SHOP;
+  const bar = SHOP.scrollbar.buy;
+  const many = rows(20); // 6 visible, so 15 rows of travel and the thumb sits mid-trough
+  const scroll = { buy: 7, sell: 0 };
+  const geometry = shopScrollbarGeometry("buy", many.length, scroll.buy);
+  assert.ok(geometry);
+  const thumbTop = bar.arrow + geometry.offset;
+  assert.ok(thumbTop > bar.arrow, `the thumb has left the top of the trough: ${geometry.offset}`);
+  assert.ok(thumbTop < bar.height - 2 * bar.arrow, "and has not reached the next cap yet");
+  const part = (offset: number) => {
+    const hit = query(home.x + bar.x + 6, home.y + bar.y + offset, many, rows(8), scroll);
+    // Narrowed rather than cast, so a point that stops being a scrollbar says so.
+    return hit?.kind === "scrollbar" ? hit.part : `not a scrollbar: ${JSON.stringify(hit)}`;
+  };
+  assert.equal(part(2), "prev");
+  assert.equal(part(bar.height - 2), "next");
+  assert.equal(part(bar.arrow + 1), "pageUp", "just under the prev cap, above the thumb");
+  assert.equal(part(thumbTop - 1), "pageUp", "the last pixel before the thumb");
+  assert.equal(part(thumbTop), "thumb");
+  assert.equal(part(thumbTop + bar.arrow - 1), "thumb", "the thumb is one arrow-cell tall");
+  assert.equal(part(thumbTop + bar.arrow), "pageDown", "and the trough resumes below it");
+  assert.equal(part(bar.height - bar.arrow - 1), "pageDown", "up to the next cap");
+});
+
+test("a held arrow shows the pressed art, and only on the pane the press belongs to", () => {
+  const geometry = shopScrollbarGeometry("buy", 12, 3);
+  assert.ok(geometry);
+  const { ctx, drawn, image } = fakeContext();
+  drawShopScrollbar(ctx, image, "buy", 196, 154, geometry, "prev");
+  const names = drawn.map((entry) => String(entry.image).replace("UI/Basic.img/VScr/enabled/", ""));
+  assert.equal(names[0], "prev1", "sub_4521E0: the down-arrow face, not the idle one");
+  assert.ok(!names.includes("next1"), "the other cap stays idle");
+
+  const nextHeld = fakeContext();
+  drawShopScrollbar(nextHeld.ctx, nextHeld.image, "buy", 196, 154, geometry, "next");
+  const nextNames = nextHeld.drawn.map((entry) =>
+    String(entry.image).replace("UI/Basic.img/VScr/enabled/", ""),
+  );
+  assert.equal(nextNames[0], "prev0", "holding next leaves the prev cap idle");
+  assert.ok(nextNames.includes("next1"), nextNames.join(" "));
+
+  // The list painter takes the zone from its own pane's paint: the sell pane's bar stays idle
+  // while the buy pane's arrow is held, which is why the press carries a side at all.
+  const both = fakeContext();
+  drawShopList(both.ctx, both.image, "buy", 196, 154, {
+    picked: -1,
+    scroll: 3,
+    total: 12,
+    rows: [],
+    pressed: "next",
+  });
+  const buyCells = both.drawn
+    .map((entry) => String(entry.image))
+    .filter((name) => name.startsWith("UI/Basic.img/VScr/"));
+  assert.ok(buyCells.includes("UI/Basic.img/VScr/enabled/next1"), buyCells.join(" "));
+  const sellOnly = fakeContext();
+  drawShopList(sellOnly.ctx, sellOnly.image, "sell", 196, 154, {
+    picked: -1,
+    scroll: 0,
+    total: 12,
+    rows: [],
+    pressed: undefined,
+  });
+  const sellCells = sellOnly.drawn
+    .map((entry) => String(entry.image))
+    .filter((name) => name.startsWith("UI/Basic.img/VScr/"));
+  assert.ok(
+    sellCells.every((name) => !name.endsWith("1")),
+    `the idle pane has no pressed face: ${sellCells.join(" ")}`,
+  );
 });

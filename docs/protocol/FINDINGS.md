@@ -5022,3 +5022,22 @@ typecheck／build／format 全綠。
 - **`drawUtilFrame` 的 clip 是有作用的（ADR-130）**：4px 的上下填充會一路貼到「自己的格子跨過右邊框」
   為止，所以大多數寬度下最後一格會**超出最多 3px**（寬 300：291+4=295 > 292）。這與 ADR-127
   「捲軸水槽的 clip 是多餘的」是**相反**的結論，兩處都不要照抄對方的做法。
+
+## ADR-131：按住捲軸箭頭（`sub_4521E0` / `sub_4523D0` / `sub_4524C0` / `sub_4522B0`）
+
+- **四條證據，四個不同的副程式**：按下是 `sub_4521E0`（動作後蓋 `+56` zone / `+60` tick）、
+  重複是 `sub_4523D0`（`CCtrlScrollBar` 的 OnTimer，vftable[0]）、節奏是 `sub_4524C0`
+  （zone 不是 100/105 且 `GetTickCount() - [esi+3C] > 0x32`，也就是**每 50ms 一次**）、
+  放開是 `sub_4522B0`。**thumb（zone 105）被 `sub_4524C0` 明確排除**，所以拖曳中的 thumb
+  永不重複 —— 它走的是 `sub_4526A0`。
+- **每 tick 用 `GetCursorPos` 重新 hit**：所以「按住後把游標移開箭頭」會**停止**重複，
+  移回來會**繼續**，而 press 本身要等放開才清。這跟「記住按下時那個 zone」是不一樣的行為，
+  實作時不能省。
+- **閘是 `>` 不是 `>=`**：`GetTickCount() - [esi+3C] > 0x32`，所以 50ms 整**仍在閘內**，
+  51ms 才是第二次。而且每次動作都會重新蓋章，因此節奏是「每次動作後 50ms」。
+- **軌道在 thumb 處分成兩區**（`sub_452500`）：thumb 之上是 103（page up）、
+  thumb 自己是 105、thumb 之下是 104（page down）。商店與背包原本把整段當成一個 `track`，
+  再由 click 處理器重算方向；ADR-131 起 hit test 直接回傳這五個 zone。
+- **商店與背包沒有 `CCtrlScrollBar`**：`sub_4B6EC0` 與 `sub_4DA810` 各存一個整數列索引，
+  所以它們只借用「按住」這一半（現在是 `client/vscroll.ts` 的 `pressRepeat()`），
+  列算術仍是自己的。

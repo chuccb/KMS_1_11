@@ -106,7 +106,7 @@ test("every bar is drawn one cell wide, and every CCtrlScrollBar one cell deep",
   }
 });
 
-test("the inventory bar splits into prev / thumb / track / next at whole cells", () => {
+test("the inventory bar splits into prev / thumb / pageDown / next at whole cells", () => {
   const { home, scrollbar } = INVENTORY;
   const tabView: InventoryTabView = { tab: 2, capacity: 100, items: [] };
   const at = (offset: number) =>
@@ -123,8 +123,14 @@ test("the inventory bar splits into prev / thumb / track / next at whole cells",
   assert.deepEqual(at(VSCR_CELL - 1), { kind: "scrollbar", part: "prev" });
   assert.deepEqual(at(VSCR_CELL), { kind: "scrollbar", part: "thumb" }, "the thumb's top edge");
   assert.deepEqual(at(2 * VSCR_CELL - 1), { kind: "scrollbar", part: "thumb" });
-  assert.deepEqual(at(2 * VSCR_CELL), { kind: "scrollbar", part: "track" }, "just below the thumb");
-  assert.deepEqual(at(scrollbar.height - VSCR_CELL - 1), { kind: "scrollbar", part: "track" });
+  // ADR-131: sub_452500 zones the trough - 103 page up above the thumb, 104 page down below it.
+  // At scroll 0 the thumb is flush under the prev cap, so there is no page up strip here.
+  assert.deepEqual(
+    at(2 * VSCR_CELL),
+    { kind: "scrollbar", part: "pageDown" },
+    "just below the thumb",
+  );
+  assert.deepEqual(at(scrollbar.height - VSCR_CELL - 1), { kind: "scrollbar", part: "pageDown" });
   assert.deepEqual(at(scrollbar.height - VSCR_CELL), { kind: "scrollbar", part: "next" });
   assert.deepEqual(at(scrollbar.height - 1), { kind: "scrollbar", part: "next" });
 });
@@ -150,7 +156,7 @@ test("the shop bar splits the same way, on both sides", () => {
     assert.deepEqual(at(VSCR_CELL - 1), { kind: "scrollbar", side, part: "prev" }, side);
     assert.deepEqual(at(VSCR_CELL), { kind: "scrollbar", side, part: "thumb" }, side);
     assert.deepEqual(at(2 * VSCR_CELL - 1), { kind: "scrollbar", side, part: "thumb" }, side);
-    assert.deepEqual(at(2 * VSCR_CELL), { kind: "scrollbar", side, part: "track" }, side);
+    assert.deepEqual(at(2 * VSCR_CELL), { kind: "scrollbar", side, part: "pageDown" }, side);
     assert.deepEqual(at(bar.height - VSCR_CELL), { kind: "scrollbar", side, part: "next" }, side);
     assert.equal(at(bar.height + 1)?.kind, "body", `${side}: below the bar is the sheet`);
   }

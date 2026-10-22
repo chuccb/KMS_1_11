@@ -21,7 +21,7 @@
  */
 import type { ImageLookup } from "./render-types.ts";
 import type { UiPoint } from "./ui-types.ts";
-import { paintVScrollbar, vScrollTravel, VSCR_CELL } from "./vscroll.ts";
+import { paintVScrollbar, vScrollTravel, VSCR_CELL, type VScrollZone } from "./vscroll.ts";
 import { BT_UI_CLOSE } from "./uicontrols.ts";
 import { drawItemNo, ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
@@ -274,7 +274,7 @@ export type InventoryHit =
   | { kind: "coin" }
   | { kind: "close" }
   | { kind: "tab"; index: number; tab: number }
-  | { kind: "scrollbar"; part: "prev" | "next" | "thumb" | "track" }
+  | { kind: "scrollbar"; part: VScrollZone }
   | { kind: "slot"; slot: number; item?: { slot: number } }
   | { kind: "body" };
 
@@ -308,11 +308,9 @@ export function inventoryWindowAt(query: InventoryWindowQuery): InventoryHit | u
   if (tab >= 0) return { kind: "tab", index: tab, tab: INVENTORY_TABS[tab]?.tab ?? tab + 1 };
   const bar = INVENTORY.scrollbar;
   if (inside(bar, localX, localY)) {
+    // `sub_452500`'s five zones - see the shop's hit test, which splits the track the same way.
     const offset = localY - bar.y;
-    const onThumb =
-      query.scroll.max > 0 &&
-      offset >= VSCR_CELL + query.scroll.offset &&
-      offset < 2 * VSCR_CELL + query.scroll.offset;
+    const thumbTop = VSCR_CELL + query.scroll.offset;
     return {
       kind: "scrollbar",
       part:
@@ -320,9 +318,13 @@ export function inventoryWindowAt(query: InventoryWindowQuery): InventoryHit | u
           ? "prev"
           : offset >= bar.height - VSCR_CELL
             ? "next"
-            : onThumb
-              ? "thumb"
-              : "track",
+            : offset < thumbTop
+              ? "pageUp"
+              : offset < thumbTop + VSCR_CELL
+                ? query.scroll.max > 0
+                  ? "thumb"
+                  : "pageDown"
+                : "pageDown",
     };
   }
   const slot = inventorySlotAt(localX, localY, query.scroll.row);
@@ -348,12 +350,14 @@ export function drawInventoryScrollbar(
   y: number,
   geometry: InventoryScrollGeometry,
   dragging: boolean,
+  pressed?: VScrollZone,
 ): void {
   paintVScrollbar(ctx, image, { x, y }, INVENTORY.scrollbar, {
     // `geometry.max` counts rows past the six that fit; the painter wants the native `SetMax`.
     max: geometry.max + 1,
     offset: geometry.offset,
     dragging,
+    pressed,
   });
 }
 

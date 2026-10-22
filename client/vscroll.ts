@@ -83,18 +83,63 @@ export function vScrollPage(max: number): number {
 }
 
 /**
+ * The held-arrow cadence on its own: `sub_4521E0` pressing, `sub_4523D0`'s timer re-hitting the
+ * live cursor, `sub_4524C0`'s 50 ms gate and `sub_4522B0` releasing - with none of the position
+ * handling, so a window that keeps its own row index can share the one implementation.
+ *
+ * The shop, the inventory and the NPC dialogue do exactly that: `sub_4B6EC0` and `sub_4DA810`
+ * store a plain integer, not a `CCtrlScrollBar`, so until now only the trade, messenger and skill
+ * windows had a held arrow at all. `vScrollScroller` below owns one of these too.
+ *
+ * `tick` takes the zone under the cursor *now*, never the one the press started in: the original
+ * re-hits from `GetCursorPos` every tick, so drifting off the arrow stops the repeat and drifting
+ * back resumes it, and the press itself is not cleared until `release`.
+ */
+export function pressRepeat(repeatMs: number = REPEAT_MS) {
+  let zone: VScrollZone | undefined,
+    lastAct = 0;
+  const self = {
+    /** The zone the pointer went down in, and the face the bar is drawn with. */
+    get zone() {
+      return zone;
+    },
+    /** `sub_4521E0`: button-down. The press acts once immediately - the caller does the acting. */
+    press(at: VScrollZone, now = 0): void {
+      zone = at;
+      lastAct = now;
+    },
+    /**
+     * `sub_4523D0` + `sub_4524C0`: one UI tick while the capture is down. Returns whether the
+     * pressed zone should act again; the gate restamps per act, so the cadence is one per window.
+     */
+    tick(now: number, at: VScrollZone | undefined): boolean {
+      if (zone === undefined || at !== zone) return false;
+      if (now - lastAct <= repeatMs) return false;
+      lastAct = now;
+      return true;
+    },
+    /** `sub_4522B0`: release drops the pressed art and stops the repeat. */
+    release(): void {
+      zone = undefined;
+      lastAct = 0;
+    },
+  };
+  return self;
+}
+export type PressRepeat = ReturnType<typeof pressRepeat>;
+
+/**
  * The scrollbar state machine. `rowCapacity` is how many wrapped lines the owning list
  * paints at once (16 for both the trade and the messenger log: `sub_4D5730`'s
  * `for (y = 26; y < 234; y += 13)` and `sub_4E1320`'s `for (i = 63; i < 271; i += 13)`),
  * so `max = max(1, rows - (rowCapacity - 1))`.
  */
 export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
+  const repeat = pressRepeat();
   let rows = 0,
     max = 1,
     pos: number | undefined,
-    drag: { startY: number; startPos: number } | undefined,
-    pressed: VScrollZone | undefined,
-    lastAct = 0;
+    drag: { startY: number; startPos: number } | undefined;
   const here = () => (pos === undefined ? Math.max(0, max - 1) : pos);
   const settle = (value: number) => {
     const p = Math.max(0, Math.min(max - 1, value));
@@ -118,7 +163,7 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
       return drag !== undefined;
     },
     get pressed() {
-      return pressed;
+      return repeat.zone;
     },
     /** `sub_452500`'s thumb top, relative to the bar's own top. */
     thumbTop(): number {
@@ -136,7 +181,8 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     reset() {
       rows = 0;
       max = 1;
-      pos = drag = pressed = undefined;
+      pos = drag = undefined;
+      repeat.release();
     },
     /** `sub_4D5900`: resize, then follow to the bottom only if already there. */
     sync(rowCount: number) {
@@ -165,8 +211,7 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
     /** `sub_4521E0`: the button-down action of one zone, stamping +56/+60. */
     activate(zone: VScrollZone, y: number, now = 0) {
       if (max <= 1) return;
-      pressed = zone;
-      lastAct = now;
+      repeat.press(zone, now);
       if (zone === "prev") self.by(-1);
       else if (zone === "next") self.by(1);
       else if (zone === "pageUp") self.by(-vScrollPage(max));
@@ -179,13 +224,12 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
      * the repeat; the 50 ms gate makes the cadence, and the thumb never repeats.
      */
     tick(now: number, x: number, y: number) {
-      if (max <= 1 || pressed === undefined || pressed === "thumb") return;
-      if (now - lastAct <= REPEAT_MS) return;
-      if (self.hit(x, y) !== pressed) return;
-      lastAct = now;
-      if (pressed === "prev") self.by(-1);
-      else if (pressed === "next") self.by(1);
-      else if (pressed === "pageUp") self.by(-vScrollPage(max));
+      if (max <= 1 || repeat.zone === "thumb") return;
+      if (!repeat.tick(now, self.hit(x, y))) return;
+      const zone = repeat.zone;
+      if (zone === "prev") self.by(-1);
+      else if (zone === "next") self.by(1);
+      else if (zone === "pageUp") self.by(-vScrollPage(max));
       else self.by(vScrollPage(max));
     },
     /** `sub_4526A0`: `pos = startPos + max * dy / (track - 3*arrow)`, truncated then clamped. */
@@ -206,7 +250,7 @@ export function vScrollScroller(bar: VScrollBarGeometry, rowCapacity = 16) {
      */
     end() {
       drag = undefined;
-      pressed = undefined;
+      repeat.release();
     },
   };
   return self;

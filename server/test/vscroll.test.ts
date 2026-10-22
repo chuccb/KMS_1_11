@@ -9,6 +9,7 @@ import { SKILL_SCROLLBAR } from "../../client/skills.ts";
 import { TRADE_WINDOW } from "../../client/trade-state.ts";
 import {
   paintVScrollbar,
+  pressRepeat,
   REPEAT_MS,
   vScrollPage,
   vScrollScroller,
@@ -210,4 +211,72 @@ test("the NPC dialogue's bar is the seventh CCtrlScrollBar, drawn by the same pa
   assert.equal((travel * 3) / 8, 76.5);
   assert.equal(drawn.at(-1)?.y, bar.y + 12 + 76);
   for (const entry of drawn) assert.equal(entry.x, bar.x, "the bar is one cell wide");
+});
+
+test("a window that keeps a plain row index gets the same cadence as a CCtrlScrollBar", () => {
+  // The shop (sub_4B6EC0) and the inventory (sub_4DA810) hold an integer, not a scroller, so they
+  // borrow just the press half of the control - sub_4521E0 down, sub_4523D0's timer, sub_4524C0's
+  // 50ms gate, sub_4522B0 release - and keep their own row arithmetic.
+  const held = pressRepeat();
+  let acts = 0;
+  const act = () => (acts += 1);
+  assert.equal(held.zone, undefined, "idle: nothing is drawn pressed");
+
+  held.press("prev", 1000);
+  act();
+  assert.equal(held.zone, "prev");
+  assert.equal(acts, 1, "the press itself acts once, before any timer runs");
+
+  // The gate restamps per act, so the cadence is one per window rather than one per 50ms slice.
+  for (let now = 1001; now <= 1050; now += 1) if (held.tick(now, "prev")) act();
+  assert.equal(
+    acts,
+    1,
+    `nothing repeats inside the gate, and 50ms on the nose is still inside it: ${acts}`,
+  );
+  assert.equal(
+    held.tick(1051, "prev"),
+    true,
+    "the gate is `now - lastAct <= 50`, so 51ms after the press is the second act",
+  );
+  act();
+  assert.equal(held.tick(1101, "prev"), false, "which restamped, so 1101 is only 50ms after it");
+  assert.equal(
+    held.tick(1102, "prev"),
+    true,
+    "and 1102 is the third act - not 1101, from the press",
+  );
+
+  // The zone is re-hit from the live cursor every tick: sliding off stops the repeat, and only a
+  // release clears the press, so sliding back resumes without a new button-down.
+  assert.equal(held.tick(1200, "next"), false, "the cursor drifted onto the other cap");
+  assert.equal(held.tick(1200, undefined), false, "or off the bar entirely");
+  assert.equal(held.zone, "prev", "but the press is still held");
+  assert.equal(held.tick(1200, "prev"), true, "and drifting back resumes it");
+
+  assert.equal(held.tick(1300, "thumb"), false, "sub_4524C0: the thumb never repeats");
+  held.release();
+  assert.equal(held.zone, undefined);
+  assert.equal(held.tick(9999, "prev"), false, "a released press is dead, not merely gated");
+});
+
+test("the scroller's own held arrow is the shared cadence, with the page size it pages by", () => {
+  const scroll = bar();
+  scroll.sync(80); // max = 80 - 15 = 65, a fresh list pinned at the bottom
+  const bottom = scroll.pos;
+  scroll.activate("next", local(210).y, 0);
+  assert.equal(scroll.pos, bottom, "already at the bottom: nothing to step onto");
+  scroll.activate("prev", local(4).y, 1000);
+  assert.equal(scroll.pos, bottom - 1, "sub_4525B0: one row per act");
+  assert.equal(scroll.pressed, "prev");
+  assert.equal(scroll.tick(1049, 184, 58 + 4), undefined);
+  assert.equal(scroll.pos, bottom - 1);
+  assert.equal(scroll.tick(1051, 184, 58 + 4), undefined);
+  assert.equal(scroll.pos, bottom - 2, "one per 50ms while the cursor stays on the arrow");
+
+  const paged = bar();
+  paged.sync(80);
+  paged.activate("pageUp", local(60).y, 0);
+  assert.equal(vScrollPage(65), 16, "sub_452600: max/16 floored, never under 16");
+  assert.equal(paged.pos, 64 - 16, "the page act is one jump, not a repeat of the step");
 });
