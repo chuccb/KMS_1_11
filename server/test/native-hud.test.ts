@@ -1,11 +1,13 @@
 /** Unit regressions. Verification status: docs/BUN_MIGRATION.md. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   gaugeFill,
   expPercent,
   STATUS_BAR,
   STATUS_GAUGES,
+  CHAT_BAR,
   WHISPER_FIELD,
   MESSENGER_BUTTON,
   drawNamePlate,
@@ -30,6 +32,7 @@ import {
   quickSlotIconOrigin,
   skillIconPath,
 } from "../../client/quickslots.ts";
+import { VSCR_CELL } from "../../client/vscroll.ts";
 import { mapTitleArt } from "../src/game/mapart.ts";
 import type { ArtReader } from "../src/game/wzart.ts";
 
@@ -471,4 +474,90 @@ test("4FC440: a quick-slot icon is anchored by its origin, and a skill icon live
   assert.equal(skillIconPath(1001003), "Skill/100.img/skill/1001003/icon");
   assert.equal(skillIconPath(3001004), "Skill/300.img/skill/3001004/icon");
   assert.equal(skillIconPath(999), "Skill/0.img/skill/999/icon", "the trunc, not a round");
+});
+
+/**
+ * `sub_4F6B70` makes nine controls, not seven. The page's chat has always sat on the right pixels;
+ * what it never had was a reason, and a stylesheet full of `434px` and `12px` is exactly the kind
+ * of thing a tidy-up "simplifies" into `100%` or `446px`.
+ *
+ * The archive half is already pinned elsewhere - `ui-basic-cells.test.ts` proves every
+ * `UI/Basic.img/VScr` cell is `VSCR_CELL` square - so this test uses `VSCR_CELL` directly and
+ * spends its effort on the two things that were only ever literals: that the page's own stylesheet
+ * still agrees with `CHAT_BAR`, and that the 70-character limit is control 1008's, not a guess.
+ */
+test("sub_4F6B70's chat log and chat input: the 446-VSCR_CELL column, the 340x12 box, 70 chars", () => {
+  const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8"),
+    css = source("../../client/style.css"),
+    html = source("../../client/index.html");
+
+  // One rule's declarations, read straight out of the stylesheet. Deliberately index arithmetic
+  // rather than a regex: in a template literal `\s` is just `s`, which is a quiet way to write a
+  // pattern that can never match.
+  const rule = (selector: string): Record<string, string> => {
+    const start = css.indexOf(`\n${selector} {`);
+    assert.notEqual(start, -1, `no ${selector} rule in client/style.css`);
+    const open = css.indexOf("{", start),
+      close = css.indexOf("}", open);
+    const out: Record<string, string> = {};
+    for (const declaration of css.slice(open + 1, close).split(";")) {
+      const colon = declaration.indexOf(":");
+      if (colon > 0) out[declaration.slice(0, colon).trim()] = declaration.slice(colon + 1).trim();
+    }
+    return out;
+  };
+  // A bare `0` is legal CSS - `#chat-history` uses it for `left` - so the unit is optional.
+  const px = (value: string | undefined, what: string): number => {
+    assert.match(value ?? "", /^-?[0-9]+(px)?$/, what);
+    return Number((value ?? "").replace("px", ""));
+  };
+
+  // The text column is 446 minus the scrollbar, and the scrollbar is one VSCR_CELL wide.
+  assert.equal(CHAT_BAR.width, 446);
+  assert.equal(VSCR_CELL, 12, "the one number the archive has to agree with");
+  assert.equal(CHAT_BAR.log.width, CHAT_BAR.width - VSCR_CELL);
+  assert.equal(CHAT_BAR.scroll.width, VSCR_CELL);
+  // 243 + (446 - 12) = 677 = 689 - 12, the right edge id 1007 is created with.
+  assert.equal(CHAT_BAR.log.x + CHAT_BAR.log.width, 689 - VSCR_CELL);
+
+  // Control 1008: bar-local (346,188) 340x12, and 70 at the font block's [12].
+  assert.deepEqual(
+    [CHAT_BAR.input.x, CHAT_BAR.input.y, CHAT_BAR.input.width, CHAT_BAR.input.height],
+    [346, 580, 340, 12],
+    "bar-local (346,188) with the bar's origin at y=392",
+  );
+  assert.equal(CHAT_BAR.maxLength, 70);
+
+  // Now the page. #chatbox is the 446-wide strip at left 243; the rest hang off it.
+  const bar = rule("#chatbox"),
+    log = rule("#chat-history"),
+    scroll = rule("#chat-scroll"),
+    input = rule("#say");
+  assert.equal(px(bar.left, "#chatbox left"), CHAT_BAR.x);
+  assert.equal(px(bar.width, "#chatbox width"), CHAT_BAR.width);
+
+  // The log sits above the bar: bar-local (243,97) is surface (243,489).
+  assert.equal(px(log.left, "#chat-history left"), 0);
+  assert.equal(px(bar.top, "#chatbox top") + px(log.top, "#chat-history top"), CHAT_BAR.log.y);
+  assert.equal(px(log.width, "#chat-history width"), CHAT_BAR.log.width);
+  assert.equal(px(log.height, "#chat-history height"), CHAT_BAR.log.height);
+
+  // The scrollbar is the VSCR_CELL-wide strip immediately right of the log's column.
+  assert.equal(px(scroll.left, "#chat-scroll left"), CHAT_BAR.log.width);
+  assert.equal(px(scroll.width, "#chat-scroll width"), CHAT_BAR.scroll.width);
+  assert.equal(px(scroll.height, "#chat-scroll height"), CHAT_BAR.scroll.height);
+
+  // The input is 103px into the bar, which is control 1008's surface (346,580).
+  assert.equal(px(bar.left, "#chatbox left") + px(input.left, "#say left"), CHAT_BAR.input.x);
+  assert.equal(px(bar.top, "#chatbox top") + px(input.top, "#say top"), CHAT_BAR.input.y);
+  assert.equal(px(input.width, "#say width"), CHAT_BAR.input.width);
+  assert.equal(px(input.height, "#say height"), CHAT_BAR.input.height);
+
+  // And the 70 is on the element, not just in the constant.
+  const say = html.indexOf('id="say"');
+  assert.notEqual(say, -1, "no #say input in client/index.html");
+  assert.ok(
+    html.slice(say, say + 400).includes(`maxlength="${CHAT_BAR.maxLength}"`),
+    `the #say input's maxlength is not ${CHAT_BAR.maxLength}`,
+  );
 });

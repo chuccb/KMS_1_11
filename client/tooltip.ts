@@ -158,37 +158,6 @@ export function tooltipRows(
   }
   return result;
 }
-export function drawTextTooltip(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  lines: string[],
-  { maxWidth = 270, keyline = false }: { maxWidth?: number; keyline?: boolean } = {},
-): void {
-  if (!lines.length) return;
-  ctx.save();
-  ctx.font = HUD_FONT;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  const rows = tooltipRows(lines, (text) => ctx.measureText(text).width, Math.max(1, maxWidth - 8));
-  // Oversized descriptions are clipped rather than allowed to put the entire box off-screen.
-  const height = Math.min(598, rows.length * 14 + 4);
-  const width = Math.max(
-    8,
-    Math.min(
-      maxWidth,
-      Math.ceil(rows.reduce((max, text) => Math.max(max, ctx.measureText(text).width), 0)) + 8,
-    ),
-  );
-  const at = tooltipPosition(x, y, width, height);
-  drawTooltipFrame(ctx, at.x, at.y, width, height, keyline);
-  ctx.beginPath();
-  ctx.rect(at.x + 3, at.y + 3, width - 6, height - 6);
-  ctx.clip();
-  ctx.fillStyle = "#ffffff";
-  rows.forEach((line, i) => ctx.fillText(line, at.x + 4, at.y + 3 + i * 14));
-  ctx.restore();
-}
 
 /** 500F50 simple name tip, not an item-stat panel: font172, text(4,3), width+8/height+6.
  * Font height is measured at runtime, like 505530; Canvas fallback metrics are not native GDI.

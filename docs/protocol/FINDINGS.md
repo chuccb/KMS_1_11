@@ -5087,3 +5087,30 @@ typecheck／build／format 全綠。
   `CharSelect/BtCheckId`。
 - **按鈕尺寸不可合併**：`WorldSelect/BtConnect` 是 **111×24**，`CharSelect/BtSelect/BtDelete/BtNew`
   三個都是 **141×24**。測試裡有 `notEqual` 擋住「順手整理成同一個常數」。
+
+## ADR-134：`sub_4F6B70` 其實做了九個控制項（1007／1008），與聊天列尺寸的出處
+
+- **`sub_4F6B70` 用 `Create` 建了 id 1000～1008**：1000～1006 是 `CCtrlButton`
+  （**872 bytes** 的物件，走 vtable+32，`(parent, id, x, y, type, &out)`）；
+  **1007、1008 是別的類別**。全部數字都從**原始組語**讀出（反編譯器對這兩個 call site 猜錯了 signature）。
+- **id 1008＝聊天輸入框**。`Create` 走的是 **vtable+8**（不是 +32），組語在 `.text:004F8214`：
+  `push 0Ch; push 154h; push 0BCh; push 15Ah; push 3F0h; push esi; call [edx+8]`
+  → `Create(parent, 1008, 346, 188, 340, 12, &font)`。後面填的字型區塊是
+  **12px、顏色 `0xFF000000`（黑）、`[12] = 70`**——70 就是輸入長度上限。
+  列區域（346,188）＋列原點 y=392 → **畫面 (346,580)**。
+- **id 1007**：`.text:004F8155` 起 `push 0; push 52h; push 62h; push eax; push 0; push 1; push 3EFh; push esi`
+  → `Create(parent, 1007, 1, 0, 689-W, 98, 82, 0)`，接著 `*(control+44) = 446 - W`。
+- **W 是捲軸寬度，而且量到了**：`sub_450F70(1, nullptr)` 解析的是 WZ 路徑 **`/enabled/prev0`**，
+  而 `UI/Basic.img/VScr` 的十個 cell **全部是 12×12**（`ui-basic-cells.test.ts` 已釘）。
+  → **W = 12**。所以 `446 - 12 = 434`（文字欄寬）、`243 + 446 - 12 = 677 = 689 - 12`（1007 拿到的右緣）。
+- **日誌列矩形**：`sub_4FBEE0` 與同型函式設的都是同一個框——列區域 **(243, 97)、(446-W) × 84**，
+  也就是畫面 (243,489) 434×84；捲軸 **W 寬 × 82 高**。
+- **`sub_4F8850` 是通用通知處理器，不是 1007 專屬**：`(id, code∈[300,304])` 加 `code==100` 這組形狀
+  在其他視窗也出現（`sub_4B4790` id 1003、`sub_4D4700` id 1003、`sub_4DE430` id 1002、
+  `sub_4ED1F0` id 2000），所以不要把它當成 1007 的行為去「實作」。
+- **更正一處先前的誤讀**：`sub_403350` 是**記憶體池配置器**（16/32/64/128），**不是字串表查詢**。
+  所以 `0x368/0x64/0xA0` 是**物件大小**（CCtrlButton 872、1007 的物件 100、1008 的 160），不是字串 id。
+- **結論：1007／1008 其實都已經實作，而且是逐像素正確的**（DOM 版）。`#chatbox` 在 (243,573) 寬 446；
+  `#chat-history` 在 (243,489) **434×84**；`#chat-scroll` **12 寬 82 高**；
+  `#say` 在 (243+103, 573+7) = **(346,580) 340×12**、12px 黑 Gulim、`maxlength="70"`。
+  本輪把它們收進 `CHAT_BAR`（`client/hud.ts`）並加測試，**沒有移動任何東西**。

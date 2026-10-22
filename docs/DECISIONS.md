@@ -4527,3 +4527,37 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   **跑全套件時不要讓 LIVE server 一起跑**。
 - **LIVE**：重啟於本 HEAD；**新世界新 save**（既有政策）。本輪是純重構＋修一個沒人用的錯數字，
   畫面不該有任何變化。
+
+
+## ADR-134：`sub_4F6B70` 的第九個控制項（1007／1008）、聊天列尺寸的出處，與一段死碼（`main.js` 維持 5522 行，2026-10-22）
+
+- **起因**：ADR-133 候選的 `sub_4F8850`（id 1007）一路追下去，發現它不是按鈕建構子而是**通知處理器**，
+  順藤摸出 `sub_4F6B70` 其實建了 **id 1000～1008 九個**控制項，而程式只實作了 1000～1006。
+- **1007／1008 都從原始組語讀出**（反編譯器對這兩個 call site 的 signature 猜錯，不能照抄）：
+  `1008` 走 vtable+8、`(parent, 1008, 346, 188, 340, 12, &font)`，字型區塊 12px 黑、`[12]=70`；
+  `1007` 走 vtable+32、`(parent, 1007, 1, 0, 689-W, 98, 82, 0)` 且 `*(control+44) = 446-W`。
+- **W 量到了**：`sub_450F70(1, nullptr)` 讀的是 WZ `/enabled/prev0`，而 `UI/Basic.img/VScr` 十個 cell
+  全是 12×12 → **W = 12** → 文字欄 `446-12 = 434`、捲軸 12 寬。
+- **結論是「其實已經對了」**：比對後發現 DOM 聊天列**逐像素**就是這組數字（`#say` 正好落在 (346,580) 340×12，
+  連 `maxlength="70"` 都對上）。所以本輪**不改行為**，只把這組數字從「樣式表裡沒有出處的 `434px`／`12px`」
+  收進 `client/hud.ts` 的 **`CHAT_BAR`**，並補一條測試把 `style.css`／`index.html` 按住。
+- **這條測試務必能紅**：寫完後把 `434px` 改成 `435px` 實測，測試**如期失敗**（`actual: 435, expected: 434`），
+  改回後通過——ADR-133 的教訓就是「重述常數的斷言不是回歸」，所以這條是**故意驗過會紅**的。
+- **順手清掉一段死碼**：`client/tooltip.ts` 的 `drawTextTooltip`（31 行）**零呼叫者**
+  （`native-rich-tooltip.test.ts` 甚至有 `assert.doesNotMatch(main, /drawTextTooltip/)` 在擋它回到 main.js）。
+  它是 `f4e0f57` 換成原生 rich tooltip 之後留下的。已刪除；`tooltipRows` 雖然只剩測試在用，
+  但它的註解明說是「保留給既有 fixtures」，所以**保留**。
+- **順手更正一處誤讀**：`sub_403350` 是記憶體池配置器，**不是**字串表查詢；`0x368/0x64/0xA0` 是物件大小。
+- **清點後確認「已經釘住」而本輪不必再動的**：`uiframe.ts`（`ui-frame.test.ts`）、
+  `inventory-window`／`shop-window`／`trade-state`／`messenger-state`（`ui-basic-cells.test.ts`，ADR-094）、
+  `ITEM_NO_*`（`itemno.test.ts`，ADR-123）、`EQUIP_WINDOW`／`STAT_WINDOW`（176×315＝各自的 `backgrnd`）、
+  `PLAYER_MENU`（89＝`ContextMenu/3`）、tooltip 的 `20/0/−128` 與 `14,32,68,68`（`native-rich-tooltip.test.ts`）。
+  `SHOT_NEAR_CLIP` 也不是 TS6133——`main.js:3080` 有在用。
+- **誠實標記為「沒有原證」的**：`SCREEN_MESSAGES`（290×14 @(504,382)，6 列，6000ms）。
+  只有淡出是原生的（`nativeScreenAlpha` 有 Shape2D 鏈），**那個框本身在 listing 裡找不到對應控制項**，
+  已在註解寫明它是瀏覽器自製、不該被當成原版引用。
+- **閘**：`format:check` ✓、`typecheck` ✓、`build` ✓、probe exit 0（`drawImage` **165**，與 ADR-132 **逐位元組相同**）。
+  全套件 **1355 pass / 0 fail / 156 files / 324.95s**（ADR-133 是 1354，+1 就是本輪新增的那條）。
+  跑之前**先把 LIVE server 關掉**（ADR-133 記下的規則）——照做之後，上一輪逾時的那條
+  `drop-wz.test.ts` 這次是 **1100ms**，與那次的 145s 對照，再次印證是爭用而非本次改動。
+  `client/main.js` **維持 5522 行**，七份文件不必同步行數。

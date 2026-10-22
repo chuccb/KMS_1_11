@@ -74,6 +74,17 @@ export function nativeScreenAlpha(age: number): number {
   const elapsed = Math.max(0, Math.min(SCREEN_MESSAGES.durationMs, Math.trunc(age)));
   return (255 - Math.trunc((255 * elapsed) / SCREEN_MESSAGES.durationMs)) / 255;
 }
+/**
+ * The fading stack of system notes along the right of the field: six rows, 14px apart, starting at
+ * (504,382), each one gone after six seconds.
+ *
+ * Only the fade is native - `nativeScreenAlpha` above is a real Shape2D chain
+ * (`10019160+98 -> 10011030 -> 10010AD0 -> 10010C40`, integer linear `RelMove`), and the browser
+ * test holds it to `128/255` at half the duration. **The stack's own box is not.** No control in
+ * the listing creates a 290x14 plate at (504,382), so this is the browser's way of showing the
+ * notices the client otherwise drops into the chat log, and it should not be cited as original.
+ * `feedback-browser.test.ts` is what keeps the six rows and the 14px pitch honest.
+ */
 export const SCREEN_MESSAGES = {
   count: 6,
   width: 290,

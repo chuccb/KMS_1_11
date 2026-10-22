@@ -8,6 +8,7 @@ import {
   uiButtonFace,
   UI_BUTTON_FACES,
 } from "./uicontrols.ts";
+import { VSCR_CELL } from "./vscroll.ts";
 /** CUIStatusBar 4FA5E0/4FB440 and CField 46DA30, KMS 1.11 (not modern UI). */
 export const HUD_FONT: string = "12px 'Gulim', '굴림', 'KMSCJK', sans-serif";
 export const STATUS_GAUGES: Readonly<
@@ -183,6 +184,58 @@ export const WHISPER_FIELD: Readonly<{
   textX: 246,
   textY: 581,
   everyone: "모두에게",
+});
+
+/**
+ * `sub_4F6B70`'s last two controls: the chat log (id 1007) and the chat input (id 1008).
+ *
+ * These two are not buttons. Every other control the bar makes is a `CCtrlButton` - an 872-byte
+ * object created through vtable+32 with `(parent, id, x, y, type, &out)` - but 1008 is created
+ * through **vtable+8** with `(parent, id, x, y, w, h, &font)`, and 1007 takes two arguments more
+ * than any button does. Both are read straight off the raw assembly, because the decompiler
+ * guessed a different signature for each call site:
+ *
+ *  - **1008** - `push 0Ch; push 154h; push 0BCh; push 15Ah; push 3F0h; push esi; call [edx+8]`
+ *    at `.text:004F8214`. So `Create(parent, 1008, 346, 188, 340, 12, &font)`, and the font block
+ *    the next instructions fill in is 12px, colour `0xFF000000`, with **70** at `[12]` - the
+ *    input's maximum length. Bar-local (346,188) is surface **(346,580)**.
+ *  - **1007** - `push 0; push 52h; push 62h; push eax; push 0; push 1; push 3EFh; push esi` at
+ *    `.text:004F8155`, i.e. `Create(parent, 1007, 1, 0, 689 - W, 98, 82, 0)` followed by
+ *    `*(control + 44) = 446 - W`.
+ *
+ * **W is the scrollbar.** `sub_450F70(1, nullptr)` resolves the WZ path `/enabled/prev0`, and
+ * every `UI/Basic.img/VScr` cell - `prev0` included - is `VSCR_CELL` square. So `W = VSCR_CELL`:
+ *
+ *  - the log's text column is `446 - W` wide (**434**),
+ *  - the bar it scrolls with is `W` wide (**12**),
+ *  - and `243 + (446 - W) = 689 - W`, which is the right edge 1007 is given.
+ *
+ * The log's own rect comes from `sub_4FBEE0` and its siblings, which all set the same box -
+ * bar-local **(243, 97), (446 - W) x 84** - and 84 is the height the page has always used.
+ *
+ * Nothing here moves anything: the DOM chat already sits on exactly these pixels. These constants
+ * exist so the numbers stop being unexplained literals in a stylesheet, and `native-hud.test.ts`
+ * holds the page to them.
+ */
+export const CHAT_BAR: Readonly<{
+  /** The 446-wide strip the chat controls live in: `left: 243px` on the page. */
+  x: number;
+  width: number;
+  /** The log, above the bar: `sub_4FBEE0`'s rect, bar-local (243, 97) `(446 - W) x 84`. */
+  log: Readonly<{ x: number; y: number; width: number; height: number }>;
+  /** The log's scrollbar: one `VSCR_CELL` wide, 82 tall. */
+  scroll: Readonly<{ width: number; height: number }>;
+  /** Control 1008, the input: bar-local (346, 188) 340x12. */
+  input: Readonly<{ x: number; y: number; width: number; height: number }>;
+  /** Control 1008's font block puts 70 at `[12]`. */
+  maxLength: number;
+}> = Object.freeze({
+  x: 243,
+  width: 446,
+  log: Object.freeze({ x: 243, y: 489, width: 446 - VSCR_CELL, height: 84 }),
+  scroll: Object.freeze({ width: VSCR_CELL, height: 82 }),
+  input: Object.freeze({ x: 346, y: 580, width: 340, height: 12 }),
+  maxLength: 70,
 });
 
 /** The whisper target's name, clipped to the field so a long name cannot spill out of it. */
