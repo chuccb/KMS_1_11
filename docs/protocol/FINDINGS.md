@@ -5148,3 +5148,30 @@ typecheck／build／format 全綠。
   註冊後**立即 `persist()`**，重啟不會在創角前就忘掉它。
 - **未解（誠實標記）**：`index.html` 的 `#user maxlength="64"`／`#pass maxlength="12"`
   **在 EXE 裡找不到依據**，只是頁面自己的欄位上限，本輪不假裝有原證。
+
+### 4.46 ✅ 畫面合成沒有模糊，但固定表頭會吃掉畫面頂端（ADR-137，2026-10-22）
+
+**先證偽「糊」這件事**：真 Chromium 跑 100 種組合（DPR 1／1.25／1.5／2／3 × 五種顯示模式 ×
+四種鏡頭），比對「最終截圖 vs canvas backing store」，並逐格檢查「一個來源像素是否剛好是一塊
+k×k 且內部同色的裝置像素」。**100/100 全部 `nonUniform=0`**。數學上也必然如此：
+CSS 尺寸恆為 `800×ds`、transform 恆為 `1/dpr`，乘回 dpr 恰好等於 backing store，
+所以合成器從來不需要縮放。鏡頭原點（`collisionRound`）、角色／怪物座標、UI 圖示原點亦全為整數。
+
+**真正的缺陷**：`#bar`（實測 43px）是 `position: fixed` 浮動表頭，但 `viewLayout` 量的是
+`#game-viewport`（`inset: 0`＝整個視窗），畫面在整個視窗置中 → 只要垂直餘量 < 43px，
+**畫面頂端就滑到表頭底下**：1300×600 與 1000×600 各被吃掉 **43px（7.2%）**，
+1200×620 吃掉 33px、1500×640@DPR2 吃掉 23px。偏矮的預覽 iframe 正好落在這個區間。
+
+**修法**：`viewLayout` 新增 `reservedTop`，扣掉表頭列後才置中；`displayControls` 新增 `chrome`
+去量它（標題畫面 `display: none` 量到 0，自然不保留任何列）。表頭高度由內容決定（43），
+直接相加會讓 `43 × 1.5 = 64.5` 落在半個裝置像素上，故保留列必須**無條件進位**到 `originGrid`。
+
+**UI 層的驗證缺口**：`zoom-display-browser.test.ts` 只畫世界層；HUD／狀態列／聊天全在 800×600
+的 UI buffer 上再整數放大，**之前完全沒測**。新增 `display-ui-surface.test.ts` 用全不透明 2×2
+棋盤（最高頻率、不留透明讓世界層透出）補上，並涵蓋預設 `pixel` 模式與 `wide` 鏡頭。
+變異驗證：`presentUi` 改 `imageSmoothingEnabled=true` → `nonUniform` 由 0 暴衝到 479,999/480,000。
+
+**尚未解決（需使用者決定）**：整數裝置像素放大在分數縮放螢幕上會讓畫面**小於原版 800×600**
+（CSS 尺寸 = `800×ds/dpr`，要 ≥800×600 需 `ds ≥ dpr`，下一個整數又太大）。
+實測 DPR 1.25 → 640×480（80%）、DPR 1.5 → 533×400（67%）、DPR 2 偏矮 → 400×300（50%）。
+完全清晰，只是小；改成「不小於原版」就必須進位並允許捲動。

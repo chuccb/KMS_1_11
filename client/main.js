@@ -2198,6 +2198,9 @@ const displayController = displayControls({
   stage: requireElement("game-stage", "div"),
   scroll: requireElement("game-viewport", "div"),
   select: requireElement("view-scale", "select"),
+  // The header is a fixed overlay: the rows it covers are not usable, so the surface is centred
+  // below it instead of behind it (the title screen hides the header and then reserves nothing).
+  chrome: requireElement("bar", "header"),
   onScale: layout => gameCursor.resize(layout.deviceScale, layout.dpr),
 });
 

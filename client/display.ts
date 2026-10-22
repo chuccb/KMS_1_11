@@ -22,19 +22,36 @@ export function originGrid(dpr: number): number {
     if (Math.abs(step * dpr - Math.round(step * dpr)) < 1e-6) return step;
   return 1;
 }
-export function viewLayout(width: number, height: number, dpr = 1, requested: unknown = "pixel") {
+/**
+ * @param reservedTop Height of a fixed header that overlays the top of the scroll area. Those rows
+ * are not usable, so the surface is centred in what is left: without this, a window that is only
+ * just tall enough slides the top of the game underneath the header and hides it.
+ */
+export function viewLayout(
+  width: number,
+  height: number,
+  dpr = 1,
+  requested: unknown = "pixel",
+  reservedTop = 0,
+) {
   width = Number.isFinite(width) && width > 0 ? width : 800;
   height = Number.isFinite(height) && height > 0 ? height : 600;
   dpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const grid = originGrid(dpr);
+  // Snap the reserved rows **up** to the grid. The header's own height is whatever its content
+  // needs, so it is usually not a whole number of device pixels; leaving it raw would put the
+  // surface origin on a half device pixel - exactly what `originGrid` exists to prevent.
+  const chrome =
+      Number.isFinite(reservedTop) && reservedTop > 0 ? Math.ceil(reservedTop / grid) * grid : 0,
+    usable = Math.max(1, height - chrome);
   const mode = displayMode(requested);
   const deviceScale =
     mode === "pixel"
-      ? Math.max(1, Math.min(4, Math.floor(Math.min(width / 800, height / 600) * dpr + 1e-9)))
+      ? Math.max(1, Math.min(4, Math.floor(Math.min(width / 800, usable / 600) * dpr + 1e-9)))
       : Number(mode.slice(-1));
   const scale = deviceScale / dpr,
     cssWidth = 800 * scale,
     cssHeight = 600 * scale;
-  const grid = originGrid(dpr);
   return {
     width: cssWidth,
     height: cssHeight,
@@ -44,11 +61,12 @@ export function viewLayout(width: number, height: number, dpr = 1, requested: un
     backingWidth: 800 * deviceScale,
     backingHeight: 600 * deviceScale,
     left: Math.max(0, Math.floor((width - cssWidth) / (2 * grid) + 1e-9) * grid),
-    top: Math.max(0, Math.floor((height - cssHeight) / (2 * grid) + 1e-9) * grid),
-    // Pad only the scroll tail, so even the browser-clamped END remains on both grids.
+    top: chrome + Math.max(0, Math.floor((usable - cssHeight) / (2 * grid) + 1e-9) * grid),
+    // Pad only the scroll tail, so even the browser-clamped END remains on both grids. The stage
+    // has to cover the header too, because the surface is positioned below it.
     contentWidth: width + Math.ceil(Math.max(0, cssWidth - width) / grid) * grid,
-    contentHeight: height + Math.ceil(Math.max(0, cssHeight - height) / grid) * grid,
-    overflowing: cssWidth > width + 1e-6 || cssHeight > height + 1e-6,
+    contentHeight: height + Math.ceil(Math.max(0, cssHeight - usable) / grid) * grid,
+    overflowing: cssWidth > width + 1e-6 || cssHeight > usable + 1e-6,
   };
 }
 export type ViewLayout = ReturnType<typeof viewLayout>;

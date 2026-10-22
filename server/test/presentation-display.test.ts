@@ -63,3 +63,26 @@ test("scroll tails are padded to the common origin grid, including the clamped m
       assert.ok(v.contentWidth >= v.width && v.contentHeight >= v.height);
     }
 });
+
+test("a fixed header reserves its rows: the surface is centred below it, never behind it", () => {
+  // `viewLayout` used to centre in the whole viewport while the header is a fixed overlay, so a
+  // window that was only just tall enough slid the top of the game underneath it. The header
+  // measures 0 while the title screen hides it, which is why "reserves nothing" is the default.
+  for (const dpr of [1, 1.25, 1.5, 2, 3])
+    for (const bar of [0, 43]) {
+      const l = viewLayout(1300, 600, dpr, "pixel", bar);
+      assert.ok(l.top >= bar, `top ${l.top} must clear the ${bar}px header (dpr ${dpr})`);
+      // The whole surface stays inside the rows the header leaves, or it is reported as scrolling.
+      assert.ok(l.overflowing || l.top + l.height <= 600);
+      assert.ok(Math.abs(l.top * dpr - Math.round(l.top * dpr)) < 1e-8);
+      assert.ok(l.contentHeight >= bar + l.height);
+    }
+  // The same window, before the fix: it claimed 1x fit while hiding the top 43 rows.
+  const without = viewLayout(1300, 600, 1, "pixel", 0),
+    withBar = viewLayout(1300, 600, 1, "pixel", 43);
+  assert.equal(without.top, 0);
+  assert.equal(withBar.top, 43);
+  // A header taller than the whole viewport still yields a usable, finite layout.
+  for (const bar of [600, 5000])
+    assert.ok(Number.isFinite(viewLayout(1300, 600, 1, "pixel", bar).top));
+});

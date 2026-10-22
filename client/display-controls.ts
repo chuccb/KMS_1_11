@@ -19,6 +19,12 @@ interface DisplayControlsOptions {
   select: HTMLSelectElement;
   onScale(layout: ViewLayout): void;
   viewport?: DisplayViewport;
+  /**
+   * A fixed element that overlays the top of the scroll area - the header bar. Its height is
+   * removed from the usable area so the surface is never tucked underneath it. A header that is
+   * hidden (the title screen hides it) measures 0 and reserves nothing.
+   */
+  chrome?: HTMLElement;
 }
 export function displayControls({
   canvas,
@@ -29,6 +35,7 @@ export function displayControls({
   select,
   onScale,
   viewport = window,
+  chrome,
 }: DisplayControlsOptions) {
   let storage: Pick<Storage, "getItem" | "setItem"> | undefined,
     mode: DisplayMode = "pixel";
@@ -50,7 +57,10 @@ export function displayControls({
   let measuredWidth = NaN,
     measuredHeight = NaN,
     measuredDpr = NaN,
+    measuredChrome = NaN,
     disposed = false;
+  // `display: none` measures 0, so a hidden header is already "reserves nothing".
+  const chromeHeight = () => (chrome === undefined ? 0 : chrome.getBoundingClientRect().height);
   let layout = viewLayout(
     viewport.innerWidth,
     viewport.innerHeight,
@@ -59,7 +69,7 @@ export function displayControls({
   );
   const available = () => ({
     width: scroll.clientWidth || viewport.innerWidth,
-    height: scroll.clientHeight || viewport.innerHeight,
+    height: (scroll.clientHeight || viewport.innerHeight) - chromeHeight(),
   });
   function resize() {
     if (disposed) return;
@@ -67,7 +77,8 @@ export function displayControls({
     measuredWidth = size.width;
     measuredHeight = size.height;
     measuredDpr = viewport.devicePixelRatio;
-    layout = viewLayout(measuredWidth, measuredHeight, measuredDpr, mode);
+    measuredChrome = chromeHeight();
+    layout = viewLayout(measuredWidth, measuredHeight, measuredDpr, mode, measuredChrome);
     // Only an actual device-scale change reallocates the output. The logical renderer is separate.
     if (canvas.width !== layout.backingWidth) canvas.width = layout.backingWidth;
     if (canvas.height !== layout.backingHeight) canvas.height = layout.backingHeight;
@@ -131,7 +142,8 @@ export function displayControls({
       if (
         size.width !== measuredWidth ||
         size.height !== measuredHeight ||
-        viewport.devicePixelRatio !== measuredDpr
+        viewport.devicePixelRatio !== measuredDpr ||
+        chromeHeight() !== measuredChrome
       )
         resize();
     },
