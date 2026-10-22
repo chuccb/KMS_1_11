@@ -42,8 +42,13 @@
  * On a level-up the record's HP and MP are refilled **if the character is alive**, which is what the
  * client's own routine does (`sub_4C71C0`: only when `hp > 0`, then `hp = maxHp`, `mp = maxMp`).
  * Maxima now grow from the native table for every crossed level, including while dead.
- * Learned HP/MP passives use WZ x, with normal worn INT for MP. AP/SP level rewards are still
- * unlocated: do not silently introduce a later version's 5/3 rewards into this build.
+ * Learned HP/MP passives use WZ x, with normal worn INT for MP.
+ *
+ * AP/SP per level are **located as absent**, not merely unlocated (ADR-142): the whole
+ * decompilation references the AP and SP slots only inside their two getters, never in a
+ * write, so the 2003 value lived entirely in the server that is not part of this build. The
+ * amounts we grant are therefore a declared, logged, overridable policy - see
+ * {@link DEFAULT_LEVEL_REWARD} - not a recovered number.
  */
 import type { CharacterStats } from "../protocol/chardata.ts";
 import { growVitals, type GrowthContext } from "./growth.ts";
@@ -57,6 +62,37 @@ export const EXP_TABLE_OVERFLOW = 0x7fffffff;
 
 /** The multiplier of the `51..200` branch, exactly as the double in `.rdata:00586DF0`. */
 export const EXP_GROWTH_FACTOR = 1.0548;
+
+/**
+ * What one level is worth, in points the player then spends.
+ *
+ * **A POLICY, NOT RECOVERED EVIDENCE (ADR-142) - and provably unrecoverable from this build.**
+ * The proof that the original number is gone, not merely unlooked-for:
+ *   1. AP sits at character-record `+69/+71` and SP at `+73/+75`, the same obfuscated xor-pairs as
+ *      every other stat. Across the whole decompilation those four offsets are referenced exactly
+ *      four times, and **all four are reads inside two one-line getters** - `sub_4F5450`
+ *      (`a1+69 ^ a1+71`, AP) and `sub_4EF600` (`a1+73 ^ a1+75`, SP). There is no writer anywhere
+ *      outside the packet decoder.
+ *   2. `sub_4C71C0` is the only level-up routine in the binary. It has **no call site**, and it
+ *      touches level, exp, max HP/MP and the HP/MP refill - never AP or SP.
+ *   3. `Etc/MakeCharInfo.img` carries only the six appearance groups; no AP, no SP.
+ * So in KMS 1.11 the reward was entirely the server's, and that server is gone. Any value here is
+ * ours, which is why both are named, logged at startup and overridable (`--ap-per-level`,
+ * `--sp-per-level`) rather than baked into the level-up arithmetic.
+ */
+export interface LevelReward {
+  ap: number;
+  sp: number;
+}
+
+/**
+ * The defaults: 5 AP and 3 SP, the amounts this game is remembered for.
+ *
+ * They are not from this build (see {@link LevelReward}); they are here so that the two subsystems
+ * the points feed - `spendAbility` and skill learning - are reachable at all instead of being dead
+ * behind a permanent zero. Set either flag to 0 for a build that grants nothing.
+ */
+export const DEFAULT_LEVEL_REWARD: LevelReward = { ap: 5, sp: 3 };
 
 /** The level's contribution to `n * (n * n / 2 + 15)` (levels 1..5). */
 const LOW_LEVEL_LIMIT = 5;
@@ -100,6 +136,9 @@ export interface ExpGain {
   gained: number;
   /** Levels gained by this award (0 for a plain gain, 1 or more when the bar filled up). */
   levels: number;
+  /** Points granted by those levels; zero when none were gained (see {@link LevelReward}). */
+  apGained: number;
+  spGained: number;
   /** `true` when anything in the record changed - i.e. when a `0x0D` has to be sent. */
   changed: boolean;
   /** `true` when the level went up and HP/MP were refilled to their maxima. */
@@ -121,12 +160,17 @@ export function awardExp(
   amount: number,
   maxLevel = EXP_TABLE_MAX_LEVEL,
   growth: GrowthContext = {},
+  reward: LevelReward = DEFAULT_LEVEL_REWARD,
 ): ExpGain {
   const gain = Number.isFinite(amount) ? Math.trunc(amount) : 0;
-  if (gain <= 0) return { gained: 0, levels: 0, changed: false, fullHeal: false };
+  if (gain <= 0) {
+    return { gained: 0, levels: 0, apGained: 0, spGained: 0, changed: false, fullHeal: false };
+  }
 
   const before = { level: stats.level, exp: stats.exp, hp: stats.hp, mp: stats.mp };
   const limit = Math.min(Math.trunc(maxLevel), EXP_TABLE_MAX_LEVEL);
+  const ap = Math.max(0, Math.trunc(reward.ap)),
+    sp = Math.max(0, Math.trunc(reward.sp));
   let levels = 0;
   let exp = stats.exp + gain;
   while (stats.level < limit && exp >= expToNextLevel(stats.level)) {
@@ -136,6 +180,15 @@ export function awardExp(
     growVitals(stats, ABILITY_MASK.maxHp | ABILITY_MASK.maxMp, "level", growth);
   }
   stats.exp = Math.min(exp, 0xffffffff);
+  // The points ride with the level, so they arrive in the same `0x0D` as the maxima. Both fields
+  // are u16 on the wire; a character who never spends them will eventually saturate, which is why
+  // they are clamped rather than allowed to wrap into a negative number.
+  const apGained = levels * ap,
+    spGained = levels * sp;
+  if (levels > 0) {
+    stats.ap = Math.min(0xffff, stats.ap + apGained);
+    stats.sp = Math.min(0xffff, stats.sp + spGained);
+  }
   if (levels > 0 && stats.hp > 0) {
     stats.hp = stats.maxHp;
     stats.mp = stats.maxMp;
@@ -143,6 +196,8 @@ export function awardExp(
   return {
     gained: gain,
     levels,
+    apGained,
+    spGained,
     changed:
       stats.exp !== before.exp ||
       stats.level !== before.level ||

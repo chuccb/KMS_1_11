@@ -1599,9 +1599,13 @@ test(
     assert.equal(diff.mp, diff.maxMp);
     assert.deepEqual(
       Object.keys(diff).sort(),
-      ["exp", "hp", "level", "maxHp", "maxMp", "mp"],
-      "the diff is exactly what changed: the bar, the level, the grown maxima and the refill",
+      ["ap", "exp", "hp", "level", "maxHp", "maxMp", "mp", "sp"],
+      "the diff is exactly what changed: the bar, the level, the grown maxima, the refill and the level's points",
     );
+    // The points ride the same 0x0D as the maxima (ADR-142); they are a policy, so the amounts are
+    // read from the constant rather than retyped here.
+    assert.equal(diff.ap, 5, "one level at the default AP reward");
+    assert.equal(diff.sp, 3, "one level at the default SP reward");
     assert.ok(
       log.some(
         (line) => line.includes("+20 exp for killing stub") && line.includes("exp 15, level 2"),
@@ -4075,9 +4079,11 @@ test(
     assert.equal(diff.mp, diff.maxMp);
     assert.deepEqual(
       Object.keys(diff).sort(),
-      ["exp", "hp", "level", "maxHp", "maxMp", "mp"],
-      "the diff is exactly the bar, the level, the grown maxima and the refill",
+      ["ap", "exp", "hp", "level", "maxHp", "maxMp", "mp", "sp"],
+      "the diff is exactly the bar, the level, the grown maxima, the refill and the level's points",
     );
+    assert.equal(diff.ap, 5);
+    assert.equal(diff.sp, 3);
     const effectsForHero = (await hero.drain()).filter(
       (bytes) => bytes[0] === FIELD_OPCODE.userEffect,
     );
@@ -4302,6 +4308,9 @@ test(
         maxHp: record.stats.maxHp,
         mp: record.stats.maxMp,
         maxMp: record.stats.maxMp,
+        // The level's points are part of the same diff, so they are durable too (ADR-142).
+        ap: 5,
+        sp: 3,
       },
       "the growth diff is persisted immediately",
     );
@@ -4330,7 +4339,9 @@ test(
     assert.equal(saved.stats.maxHp, told.diff.maxHp);
     assert.equal(saved.stats.mp, told.diff.maxMp);
     assert.equal(saved.stats.maxMp, told.diff.maxMp);
-    assert.equal(saved.stats.ap, 0);
+    // The level's points are durable too, not a per-session display value (ADR-142).
+    assert.equal(saved.stats.ap, 5);
+    assert.equal(saved.stats.sp, 3);
     assert.equal(saved.stats.mesos, 500);
     assert.equal(saved.items?.inventories.length, 4, "the bags came back too");
   },

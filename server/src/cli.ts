@@ -33,6 +33,7 @@ import { growthSkillProvider, type GrowthSkillProvider } from "./game/growth.ts"
 import { itemCatalogOf, type ItemCatalog } from "./game/iteminfo.ts";
 import { audioProviderOf, type AudioProvider } from "./game/audio.ts";
 import { artProviderOf } from "./game/art.ts";
+import { DEFAULT_LEVEL_REWARD } from "./game/exp.ts";
 import type { ArtProvider } from "./net/webclient.ts";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -61,7 +62,8 @@ usage:
                                   function that proves it (src/protocol/schema.ts)
   serve [--port <n>] [--host <addr>] [--account <user:pass>[,<user:pass>...]]
         [--world <name>[,<name>...]] [--game-ip <addr>] [--game-port <n>] [--map <id>]
-        [--start-mesos <n>] [--map-command <off|all|user,user,...>]
+        [--start-mesos <n>] [--ap-per-level <n>] [--sp-per-level <n>]
+        [--map-command <off|all|user,user,...>]
         [--data <Data.wz|off>] [--mob-speed <px/s>] [--mob-respawn <ms>]
         [--npc-walk <none|all|id,id,...>] [--save <path|off>] [--ping <ms|off>] [--seed <n>]
         [--web-port <n>] [--handshake-body <hex>]
@@ -294,6 +296,22 @@ async function runServe(rest: string[]): Promise<number> {
   const mapId = args.map === undefined ? DEFAULT_MAP_ID : Number(args.map);
   const webPort = args["web-port"] === undefined ? undefined : Number(args["web-port"]);
   const startMesos = args["start-mesos"] === undefined ? 0 : Number(args["start-mesos"]);
+  const apPerLevel =
+    args["ap-per-level"] === undefined ? DEFAULT_LEVEL_REWARD.ap : Number(args["ap-per-level"]);
+  const spPerLevel =
+    args["sp-per-level"] === undefined ? DEFAULT_LEVEL_REWARD.sp : Number(args["sp-per-level"]);
+  if (!Number.isInteger(apPerLevel) || apPerLevel < 0 || apPerLevel > 0xffff) {
+    process.stderr.write(
+      `invalid --ap-per-level: ${String(args["ap-per-level"])} (0..65535; UNKNOWN in 2003, see ADR-142)\n`,
+    );
+    return 1;
+  }
+  if (!Number.isInteger(spPerLevel) || spPerLevel < 0 || spPerLevel > 0xffff) {
+    process.stderr.write(
+      `invalid --sp-per-level: ${String(args["sp-per-level"])} (0..65535; UNKNOWN in 2003, see ADR-142)\n`,
+    );
+    return 1;
+  }
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     process.stderr.write(`invalid --port: ${String(args.port)}\n`);
     return 1;
@@ -517,6 +535,7 @@ async function runServe(rest: string[]): Promise<number> {
       pingMs,
       mapId,
       starterEquipmentIds: starterEquipmentIds(creationCatalog),
+      levelReward: { ap: apPerLevel, sp: spPerLevel },
       allowTestTools: (username) =>
         testPolicy !== "off" && (testPolicy === "all" || testUsers.has(username)),
       allowMapCommand: (username) =>
@@ -559,6 +578,12 @@ async function runServe(rest: string[]): Promise<number> {
       );
     }
   }
+  // ADR-142: the 2003 client proves nothing about AP/SP - it only ever *reads* those two fields -
+  // so whatever a level is worth here is ours. Say so out loud at startup rather than letting the
+  // numbers look like evidence.
+  log?.(
+    `level reward: ${apPerLevel} AP / ${spPerLevel} SP per level (server policy - UNKNOWN in the 2003 build, override with --ap-per-level/--sp-per-level)`,
+  );
   const info = await login.listen(port, host);
   // The browser client (ADR-034). It dials this process over TCP, so it must come up after the two
   // listeners: `--web-port` with `--game-port` is checked above, and the login port is the one that

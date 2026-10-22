@@ -4340,8 +4340,12 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    `0x34` 的離場／收屍／受擊都已完成，§4.15／§4.16／§4.17）、
    `0x46–0x48`（CQuestMan）**已完成**：只有 `0x47` 有 case，而且它就是 NPC 對話（`0x15` 是回包），
    見 §4.23；`0x4D–0x52`（messenger／miniroom）**交易已完成**（§4.40／ADR-032：`0x25` 七個 type、
-   `0x50` 的 1／2／3／4／6／8／11／12／13、participant 的形狀、原子交換），**messenger 那半還沒**
-   （`0x51`／`0x52`、`0x25 type 5` 的邀請都只記一行）。
+   `0x50` 的 1／2／3／4／6／8／11／12／13、participant 的形狀、原子交換），
+   **messenger 那半也已完成**（§4.41／ADR-095）：`0x4D`–`0x4F` 才是 messenger
+   （`sub_4E18D0`／`CUIMessenger`，c2s 是 `0x24`），`0x50`–`0x52` 是 miniroom
+   （`sub_4815E0`／`CMiniRoomBaseDlg`，c2s 是 `0x25`）——舊註解把兩組 opcode 寫反了，
+   而且 `0x25 type 5`（`inviteByName`）也已實作（`loginserver.ts` 的 `case "inviteByName"`，
+   `test/miniroom.test.ts`）。
    （CRewardPool 的 `0x42–0x45` **已完成**：只有 `0x43`／`0x44` 有 handler，見 §4.18；
    商店的 `0x4A`／`0x4B` **已完成**（開窗與結果；`0x49`／`0x4C` 沒有 case），
    加上 client 的 `0x33`／`0x16` 與那個空的 `0x19`，見 §4.22；
@@ -4380,7 +4384,15 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
 10. **組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式：兩者都帶角色資料但長度不同，值得並排比一次。
 11. **`0x0D` 的暫時能力尾段已重新定位**（§4.21.2／TEMPORARY_STATS）：舊panelFlags命名錯誤，
-   現在已有duration/mask/values/source codec及加速藥水（未測），其餘戰鬥buff效果與**AP／SP 自然發放量**仍缺。HP／MP 的原表與被動已於本輪重新定位並接上，
+   現在已有duration/mask/values/source codec及加速藥水（未測），其餘戰鬥buff效果仍缺。
+   ~~**AP／SP 自然發放量仍缺**~~ → **ADR-142：定位為「不存在」，不是還沒找到。**
+   整份反編譯只在一對 getter（`sub_4F5450` 讀 `+69/+71`、`sub_4EF600` 讀 `+73/+75`）裡
+   **讀**這兩個欄位，沒有任何寫入者；`sub_4C71C0` 是全 exe 唯一的升級常式，只動 level／exp／
+   HP·MP 上限與補滿，完全不碰 AP／SP；`Etc/MakeCharInfo.img` 也沒有。所以 2003 年的發放量
+   整段在 server 上，而 server 不在這一版裡 —— **任何數值都是我們的政策**，故做成具名常數
+   `DEFAULT_LEVEL_REWARD`（5 AP／3 SP）＋ `--ap-per-level`／`--sp-per-level`，開機時印在 log，
+   `level-reward.test.ts` 釘住「只有 getter、沒有寫入者」這件事本身。
+   HP／MP 的原表與被動已於本輪重新定位並接上，
    舊「client 裡沒有成長量」判讀錯誤，見 STAT_GROWTH／ADR-047（均未測試）。~~「被怪物打 → 扣玩家的血」沒有驅動者~~ →
    **已解**：驅動者是 **c2s `0x1C`**（client 自己算完傷害、回報差值，伺服器落帳並用 `0x0D` 回覆），
    見 **§4.33**／ADR-021；`0x2C` 的尾段確實是**路徑**不是傷害（§4.20.7），所以傷害從來就不在
@@ -4451,8 +4463,10 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    （這版沒有的形狀）仍整筆拒絕。現在整份 WZ 只剩 `mdd` 一個欄位沒有消費者，含它的道具照舊
    `spec.unapplied` 整筆拒絕，不白耗道具。duration/mask舊誤讀已更正，見§4.21.2。
 
-21. **道具欄拖放剩下的一件事**（§4.36.5）：**裝備的能力加成**（傷害是客戶端自己算的，所以本伺服器不重算
-   武器攻擊力，換武器也不動我們的帳）。落地本身的常數（壽命／可撿範圍／「必須動過」）是伺服器的選擇，
+21. **道具欄拖放剩下的一件事**（§4.36.5）：**裝備的能力加成**。~~傷害是客戶端自己算的，所以本伺服器不重算
+   武器攻擊力，換武器也不動我們的帳。~~ → **過時，ADR-141 已翻案**：`game/nativecombat.ts`
+   現在把 `sub_4C7960` 的武器分支整條搬到伺服器上重算（武器→主屬／副屬對照表、`case 32` 的落穿、
+   45／46／47 的槍星路徑），`native-physical-formula.test.ts` 8/8 突變全數釘死。落地本身的常數（壽命／可撿範圍／「必須動過」）是伺服器的選擇，
    要等實機 run 對照。（**現金裝備／戒指格 12・13／寵物家族已由 ADR-105 以 binary 證據結案**，見 §4.36.6：
    現金裝備照普通裝備穿、`wornCash` 是伺服器專屬回聲組、戒指有原生 sender 但這一版沒有內容、寵物零內容。）
 

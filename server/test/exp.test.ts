@@ -75,10 +75,18 @@ test("a gain that does not fill the bar only moves exp", () => {
   stats.hp = 40;
   stats.maxHp = 50;
   const gain = awardExp(stats, 20);
-  assert.deepEqual(gain, { gained: 20, levels: 0, changed: true, fullHeal: false });
+  assert.deepEqual(gain, {
+    gained: 20,
+    levels: 0,
+    apGained: 0,
+    spGained: 0,
+    changed: true,
+    fullHeal: false,
+  });
   assert.equal(stats.exp, 30);
   assert.equal(stats.level, 3);
   assert.equal(stats.hp, 40, "no level-up, no refill");
+  assert.equal(stats.ap, 0, "no level-up, no points either");
 });
 
 test("a gain that fills the bar levels up, subtracts the threshold and refills HP/MP", () => {
@@ -89,14 +97,23 @@ test("a gain that fills the bar levels up, subtracts the threshold and refills H
   stats.maxHp = 50;
   stats.mp = 5;
   stats.maxMp = 30;
-  const gain = awardExp(stats, 20, undefined, { rand15: () => 0 });
-  assert.deepEqual(gain, { gained: 20, levels: 1, changed: true, fullHeal: true });
+  const gain = awardExp(stats, 20, undefined, { rand15: () => 0 }, { ap: 0, sp: 0 });
+  assert.deepEqual(gain, {
+    gained: 20,
+    levels: 1,
+    apGained: 0,
+    spGained: 0,
+    changed: true,
+    fullHeal: true,
+  });
   assert.equal(stats.exp, 15, "10 + 20 - f(1) = 15");
   assert.equal(stats.level, 2);
   assert.equal(stats.hp, 70);
   assert.equal(stats.maxHp, 70);
   assert.equal(stats.mp, 40);
   assert.equal(stats.maxMp, 40);
+  // The reward is passed in, so a zero policy leaves the fields alone; the shipping default and the
+  // reason it is non-zero are pinned in level-reward.test.ts.
   assert.equal(stats.ap, 0);
   assert.equal(stats.sp, 0);
 });

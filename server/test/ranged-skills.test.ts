@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { WzArchive } from "../src/wz/archive.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
 import { planRangedPreparation } from "../src/game/rangedpreview.ts";
+import { DEFAULT_LEVEL_REWARD } from "../src/game/exp.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
 import { skillCatalogOf } from "../src/game/skills.ts";
 import { validatedActiveRanged, activeArt } from "../src/game/activeskills.ts";
@@ -329,8 +330,11 @@ test("opt-in preparation is per-family, requires explicit level consent and reus
     assert.equal(plan.stats.level, minimum);
     assert.equal(plan.stats.exp, 3);
     assert.equal(plan.stats.job, job);
-    assert.equal(plan.stats.ap, c.stats.ap);
-    assert.equal(plan.stats.sp, c.stats.sp);
+    // Raising the level is still a level-up, so it carries the same points a played level would
+    // (ADR-142). Carving out an exception here would mean two level-10 characters hold different AP
+    // depending on how they got there, which is worse than the side effect.
+    assert.equal(plan.stats.ap, c.stats.ap + (minimum - 1) * DEFAULT_LEVEL_REWARD.ap);
+    assert.equal(plan.stats.sp, c.stats.sp + (minimum - 1) * DEFAULT_LEVEL_REWARD.sp);
     assert.deepEqual(plan.items.map32, c.items!.map32);
     assert.equal(plan.items.worn.size, 0);
     assert.deepEqual(c, before);

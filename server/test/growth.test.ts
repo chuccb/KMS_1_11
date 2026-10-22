@@ -10,7 +10,7 @@ import { ABILITY_MASK, encodeAbilityRequest, readAbilityRequest } from "../src/p
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeStatUpdate, readStatUpdate } from "../src/protocol/stat.ts";
 import { spendAbility } from "../src/game/ability.ts";
-import { awardExp, expToNextLevel } from "../src/game/exp.ts";
+import { DEFAULT_LEVEL_REWARD, awardExp, expToNextLevel } from "../src/game/exp.ts";
 import { readSave, saveJson } from "../src/game/save.ts";
 import {
   characterGrowthContext,
@@ -195,10 +195,14 @@ test("two HP/MP allocations use real c2s/s2c codecs and survive an unchanged sav
   assert.deepEqual(saved, stats);
 });
 
-test("each crossed level grows maxima, refills only the living, and does not invent AP/SP rewards", () => {
+// The points are policy now (ADR-142), so the maxima half is asserted with an explicit zero
+// reward: that keeps "the level-up itself invents nothing" honest without also asserting that
+// the server grants nothing - it does, and level-reward.test.ts pins how much.
+test("each crossed level grows maxima, refills only the living, and grants only what the policy asked for", () => {
+  const none = { ap: 0, sp: 0 };
   const stats = fixture();
   stats.int = 0;
-  const gained = awardExp(stats, 100, undefined, { rand15: () => 0 });
+  const gained = awardExp(stats, 100, undefined, { rand15: () => 0 }, none);
   assert.equal(gained.levels, 2);
   assert.deepEqual(
     [stats.level, stats.exp, stats.maxHp, stats.maxMp, stats.hp, stats.mp, stats.ap, stats.sp],
@@ -206,17 +210,35 @@ test("each crossed level grows maxima, refills only the living, and does not inv
   );
   const dead = fixture(200);
   dead.hp = 0;
-  awardExp(dead, 15, undefined, { rand15: () => 0 });
+  awardExp(dead, 15, undefined, { rand15: () => 0 }, none);
   assert.deepEqual([dead.maxHp, dead.maxMp, dead.hp, dead.mp, dead.ap], [60, 74, 0, 5, 3]);
+
+  // And the same level with the shipping default: the maxima are untouched by the points.
+  const paid = fixture();
+  paid.int = 0;
+  awardExp(paid, 100, undefined, { rand15: () => 0 }, DEFAULT_LEVEL_REWARD);
+  assert.deepEqual(
+    [paid.maxHp, paid.maxMp, paid.hp, paid.mp],
+    [90, 70, 90, 70],
+    "granting AP/SP must not change the vitals the level already grew",
+  );
+  assert.equal(paid.ap, 3 + 2 * DEFAULT_LEVEL_REWARD.ap);
+  assert.equal(paid.sp, 2 * DEFAULT_LEVEL_REWARD.sp);
   const capped = fixture();
   capped.level = 199;
-  awardExp(capped, expToNextLevel(199), undefined, { rand15: () => 0 });
+  awardExp(capped, expToNextLevel(199), undefined, { rand15: () => 0 }, none);
   assert.equal(capped.level, 200);
   const before = { ...capped };
-  awardExp(capped, 100, undefined, {
-    rand15: () => {
-      throw new Error("no growth at cap");
+  awardExp(
+    capped,
+    100,
+    undefined,
+    {
+      rand15: () => {
+        throw new Error("no growth at cap");
+      },
     },
-  });
+    none,
+  );
   assert.deepEqual(capped, { ...before, exp: before.exp + 100 });
 });

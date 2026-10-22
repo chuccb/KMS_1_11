@@ -4906,3 +4906,85 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
   3. §6 第 16 項「起始裝備的能力值仍未套入 WZ」——已補（見上）。
   4. §6 第 21 項「傷害是客戶端自己算的，所以伺服器不重算武器攻擊力」——**已過時**，
      伺服器現在照 `sub_4C7960` 算，用的正是實例 PAD。
+
+---
+
+## ADR-142：AP／SP 每級發放量 —— 定位為「不存在」，並做成具名政策
+
+- **日期**：2026-10-23
+- **狀態**：已接受（已實作、已測試、已變異驗證）
+
+### 問題
+
+`ability.ts` 的 `spendAbility` 要求 `ap > 0`，`skills.ts` 的技能點花費要求 `sp > 0`，但
+`zeroStats()` 把兩者都設成 0、`createCharacter` 從來不發，而伺服器唯一會動等級的地方
+（`awardExp`）也完全不碰這兩個欄位。也就是說**升級永遠不會給點數，能力值與技能兩個子系統在
+遊戲裡是死的**。
+
+### 查證：不是「還沒找到」，是「原本就不在這裡」
+
+我先假設是漏找，把整條鏈翻了一遍，結果是**正面證據**——原 client 根本沒有這條規則：
+
+1. **欄位位置**：AP 在角色紀錄 `+69/+71`、SP 在 `+73/+75`（同一區塊的混淆 xor 對，跟其他
+   能力值一樣）。`sub_45D2E0`（`.c` 的序列化常式）按線路順序整塊寫出，把兩者夾在
+   `maxMp +65/67` 與 `exp u32 +77/81` 之間，寬度也對（走 u16 的 `sub_45D640`）。
+2. **整份反編譯只有四個引用，而且全是讀**：
+   - `sub_4F5450`（AP getter）＝ `*(_WORD*)(a1+69) ^ *(_WORD*)(a1+71)`
+   - `sub_4EF600`（SP getter）＝ `*(_WORD*)(a1+73) ^ *(_WORD*)(a1+75)`
+   - 沒有任何 `*(_WORD *)(a1 + 69|71|73|75) =` 的寫入。
+3. **`sub_4C71C0` 是全 exe 唯一的升級常式**，而且它**沒有呼叫者**。它只動 level
+   （`+31/+32`）、exp（`+77/+81`）、`sub_4C7450` 的 HP/MP 上限，以及活著時把 HP/MP 補滿；
+   `+69..+75` 一個都沒碰。
+4. `Etc/MakeCharInfo.img` 只有六組外觀 × 三個道具 id，沒有 AP 也沒有 SP。
+
+結論：2003 年的發放量整段在 **server** 上，而 server 不在這一版裡。跟 ADR-140 的商店不同
+（那裡的資料一直在 WZ，是我自己讀錯），**這裡是真的沒有了**。
+
+### 決定
+
+- **不猜一個數字冒充原證。** 改成：具名常數 `DEFAULT_LEVEL_REWARD = { ap: 5, sp: 3 }`，
+  兩個 CLI 旗標 `--ap-per-level`／`--sp-per-level`（0..65535），開機時在 log 印一行
+  「server policy - UNKNOWN in the 2003 build」。選非零預設的理由不是「我知道原版是 5/3」，
+  而是**預設 0 會讓兩個子系統永久失效**——那不是難度選擇，是功能不存在。
+- 這跟 `--start-mesos`（ADR-007 那一族）是同一類東西：server 自己的選擇，說清楚就好。
+  差別只有一個：`--start-mesos` 的 0 有原證（2003 新角色身上沒錢），所以預設 0；
+  AP/SP 沒有原證，所以預設給一個能玩的數字並標示為政策。
+- `awardExp` 多回傳 `apGained`／`spGained`，點數跟等級一起走同一個 `0x0D`。兩個欄位在線路上
+  是 u16，所以用 `Math.min(0xffff, ...)` 飽和而不讓它繞回負數。
+- 型別上放在 `GameEntryServerOptions`，不是 `LoginServerOptions`——`awardExp` 的呼叫點在
+  `GameEntryServer` 裡（我第一版放錯了類別，型別檢查沒抓到因為兩邊都吃同一個 optional，
+  是實際對著 `loginserver.ts` 看才知道的）。
+
+### 測試
+
+`server/test/level-reward.test.ts`（9 個）：
+
+- **讀真的反編譯來證明「沒有寫入者」**，而不是把結論重打一遍：切出 `sub_45D2E0` 的函式主體
+  驗證欄位順序與寬度、切出兩個 getter 驗證讀哪兩個 offset、再對整份檔案掃一遍確認
+  `*(_WORD *)(a1 + 69|71|73|75) =` 一行都沒有。**這三條是 ADR 的前提，前提倒了 ADR 就要重來。**
+- 行為面：升一級給 5/3、升三級給 15/9、沒升級就不給、政策 0 就不給、u16 飽和。
+- 以及 spendAbility 的連通性：`ap = 0` 時 `{}` 且不動 STR，有預設值時 STR +1、AP −1。
+
+**變異驗證（7 條）**：拿掉 AP 發放（2 紅）、拿掉 SP 發放（2 紅）、改成每筆都發（2 紅）、
+拿掉 u16 鉗制（1 紅）、預設 5→4（1 紅）、ap/sp 對調（2 紅）、`levels * ap` 改成
+`levels + ap`（4 紅）。
+
+有一條**存活的等價突變**值得記：把 `if (levels > 0)` 的 guard 拿掉，測試全綠。那不是測試漏洞
+——`levels === 0` 時 `levels * ap` 本來就是 0，guard 純粹是文件。這條已寫進註解，
+免得下一個人以為那裡該有個測試。
+
+### 順手更正 FINDINGS §6 的過時記載
+
+1. 第 4 項「messenger 那半還沒（`0x51`／`0x52`、`0x25 type 5` 的邀請都只記一行）」——
+   **整句是錯的，而且錯三個方向**：
+   - opcode 寫反了：`0x4D`–`0x4F` 才是 messenger（`sub_4E18D0`／`CUIMessenger`，c2s `0x24`），
+     `0x50`–`0x52` 是 miniroom（`sub_4815E0`／`CMiniRoomBaseDlg`，c2s `0x25`）。
+   - 歸錯子系統：messenger 早就是 `server/src/game/messenger.ts`（170 行）＋
+     `client/messenger-state.ts`（360 行），接在 `loginserver` 與 `session` 上。
+   - 說「只記一行」的 `0x25 type 5`（`inviteByName`）也早就實作了（`loginserver.ts` 的
+     `case "inviteByName"`，`test/miniroom.test.ts` 有測）。
+   > 教訓：§6 的備註會同時在三個方向過期。動手前先 `wc -l` 那個模組、再 `grep` 那個 opcode
+   > 看它有沒有真的接上。
+2. 第 11 項「**AP／SP 自然發放量**仍缺」→ 改成「定位為不存在」，見本 ADR。
+3. 第 21 項「傷害是客戶端自己算的，所以伺服器不重算武器攻擊力」→ **已過時**，ADR-141 已把
+   `sub_4C7960` 搬到伺服器上（`nativecombat.ts`）。

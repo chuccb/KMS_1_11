@@ -227,7 +227,7 @@ import {
   readQuestReply,
   type QuestReply,
 } from "../protocol/quest.ts";
-import { awardExp } from "../game/exp.ts";
+import { awardExp, DEFAULT_LEVEL_REWARD, type LevelReward } from "../game/exp.ts";
 import { applyVitalReport } from "../game/vitals.ts";
 import { consumeDeltas, healsVitals, consumeTemporary, type ConsumeSpec } from "../game/items.ts";
 import { DEFAULT_PING_MS, Heartbeat } from "./heartbeat.ts";
@@ -366,6 +366,7 @@ export interface LoginServerOptions {
    * created after it is set; a save that already has characters is untouched.
    */
   startMesos?: number;
+
   creationCatalog?: CreationCatalog;
   /** Fresh creation only; never used to overwrite saved equipment on login. */
   itemCatalog?: ItemCatalog;
@@ -1004,6 +1005,22 @@ export interface GameEntryServerOptions {
    * persist immediately (including delayed projectile kills). Ordinary movement does not rewrite
    * the save for every step; leaving still captures the latest map/session state.
    */
+
+  /**
+   * AP and SP granted per level (`--ap-per-level`, `--sp-per-level`). Defaults to
+   * {@link DEFAULT_LEVEL_REWARD} - **5 / 3**, which is a policy, not recovered evidence: see ADR-142
+   * and the note on {@link LevelReward} for the proof that the 2003 value is gone rather than
+   * merely unread.
+   *
+   * The knob is here for the same reason {@link startMesos} is: *which* number a server hands out
+   * was the server's own decision, and the 2003 server is not part of this build. Unlike mesos it
+   * gates two whole subsystems - `spendAbility` refuses to run at `ap === 0` and skill learning
+   * refuses at `sp === 0` - so a zero here does not merely make the game harder, it makes both
+   * permanently dead. Hence a non-zero default, and hence both values being logged at startup
+   * instead of being quietly folded into the level-up.
+   */
+  levelReward?: LevelReward;
+
   persist?(): void;
   log?(line: string): void;
 }
@@ -3109,6 +3126,7 @@ export class GameEntryServer {
       amount,
       undefined,
       characterGrowthContext(session.character, this.options.growthSkill, this.options.itemCatalog),
+      this.options.levelReward ?? DEFAULT_LEVEL_REWARD,
     );
     if (!gain.changed) return;
     const stats = session.character.stats;
