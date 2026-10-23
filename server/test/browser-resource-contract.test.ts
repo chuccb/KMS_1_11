@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { WzArchive } from "../src/wz/archive.ts";
 import { artProviderOf } from "../src/game/art.ts";
+import { mapCatalogOf } from "../src/game/map.ts";
 import { skillCatalogOf } from "../src/game/skills.ts";
 import { startWebClient } from "../src/net/webclient.ts";
-import { isCreationCatalog } from "../../client/ui-resource-validation.ts";
+import { isCreationCatalog, isMapDestinations } from "../../client/ui-resource-validation.ts";
 import { isNpcMetadata } from "../../client/entity-resource-validation.ts";
 import { ACTIVE_SKILLS } from "../../client/active-skills.ts";
 import {
@@ -23,6 +24,7 @@ test("browser metadata guards accept original WZ HTTP responses, without a game 
     port: 0,
     loginPort: 0,
     art: artProviderOf(archive),
+    mapCatalog: mapCatalogOf(archive),
     skills: skillCatalogOf(archive),
   });
   try {
@@ -31,6 +33,7 @@ test("browser metadata guards accept original WZ HTTP responses, without a game 
         (id) => [`/api/attack/${id}`, isBasicAttackProfile] as [string, (data: unknown) => boolean],
       ),
       ["/api/projectile/2060000", isSpriteFrames],
+      ["/api/maps", isMapDestinations],
       ["/api/creation", isCreationCatalog],
       ["/api/mob/100100", isMobMetadata],
       ...[1001000, 1002000, 1002001, 2100].map(

@@ -1,4 +1,5 @@
 import { partyState, partyInfo, type PartyCommandFeedback } from "../../../client/party-state.ts";
+import { MAX_MAP_COMMAND_ID, RETURN_MAP_NONE } from "../../../client/map-constants.ts";
 import { tradeState, type TradeCommandFeedback } from "../../../client/trade-state.ts";
 import { FameRequestClock, type FameFeedback } from "./fame.ts";
 import {
@@ -1818,7 +1819,12 @@ export class ClientSession {
 
   /** Original /헉맵 sender: c2s 0x0D, s32 mapId and an empty name. Server permission is authoritative. */
   async warpTo(mapId: number): Promise<void> {
-    if (!Number.isSafeInteger(mapId) || mapId < 0 || mapId > 0x7fffffff || mapId === 999999999)
+    if (
+      !Number.isSafeInteger(mapId) ||
+      mapId < 0 ||
+      mapId > MAX_MAP_COMMAND_ID ||
+      mapId === RETURN_MAP_NONE
+    )
       throw new Error("invalid map id");
     if (!this.gameLink || !this.self) throw new Error("map command requires an active field");
     if (this.self.hp <= 0) throw new Error("revive before using map commands");

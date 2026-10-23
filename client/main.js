@@ -1,4 +1,6 @@
 import { chatEntry } from "./chat-entry.ts";
+import { mapSearchMessages, parseMapCommand } from "./map-commands.ts";
+import { RETURN_MAP_NONE } from "./map-constants.ts";
 import { partyInvitation } from "./party-invitation.ts";
 import { runSocialCommand } from "./social-commands.ts";
 import { partyCommandLines } from "./party-state.ts";
@@ -1304,9 +1306,6 @@ async function loadMapArt(mapId, generation) {
 const PORTAL_BOX = { left: 18, right: 18, up: 11, down: 26 };
 /** `sub_472590` will not send a second `0x0D` for 500 ms; the page keeps the same promise. */
 const PORTAL_GUARD_MS = 500;
-/** `RETURN_MAP_NONE` (`game/map.ts`): a portal that leads to no map at all. */
-const RETURN_MAP_NONE = 999999999;
-
 /**
  * A pointer event as a point of the 800x600 view (the canvas is scaled to the window by CSS).
  *
@@ -5068,55 +5067,34 @@ function runCommand(text, local) {
     else local("系統", "請先進入地圖；體驗工具只對伺服器明確授權帳號開放。");
     return true;
   }
-  const warp = /^\/(map|warp|go|헉맵)(?:\s+(.*))?$/i.exec(text);
-  if (warp) {
-    const id = /^\d+$/.test(warp[2] ?? "") ? Number(warp[2]) : NaN;
-    if (
-      !Number.isSafeInteger(id) ||
-      id < 0 ||
-      id > 0x7fffffff ||
-      id === RETURN_MAP_NONE
-    )
-      local(
-        "系統",
-        "用法：/map 地圖ID（/maps 關鍵字 可查詢）。需伺服器開放地圖命令權限。",
-      );
-    else if (!selfView || selfView.hp <= 0)
-      local("系統", "請先進入地圖並復活，再使用地圖命令。");
-    else send({ t: "warp-map", mapId: id });
-    return true;
-  }
-  const maps = /^\/maps(?:\s+(.*))?$/i.exec(text);
-  if (maps) {
-    const query = (maps[1] ?? "").toLowerCase();
-    void fetch("/api/maps")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((all) => {
-        const matches = all.filter((m) =>
-          `${m.id} ${m.name} ${m.streetName}`.toLowerCase().includes(query),
-        );
-        for (const m of matches.slice(0, 20))
-          local("地圖", `${m.id} · ${m.streetName} / ${m.name}`);
+  const mapCommand = parseMapCommand(text);
+  if (mapCommand) {
+    switch (mapCommand.kind) {
+      case "invalid-warp":
         local(
           "系統",
-          matches.length
-            ? `共 ${matches.length} 筆${matches.length > 20 ? "，先顯示20筆；可加關鍵字縮小範圍" : ""}。/map ID 前往。`
-            : "沒有符合的地圖。",
+          "用法：/map 地圖ID（/maps 關鍵字 可查詢）。需伺服器開放地圖命令權限。",
         );
-      })
-      .catch((e) => local("系統", `地圖清單讀取失敗：${e.message}`));
-    return true;
-  }
-  if (/^\/where$/i.test(text)) {
-    local(
-      "系統",
-      self
-        ? `${map?.streetName ?? ""} / ${map?.name ?? ""} · 地圖 ${self.mapId} · (${Math.round(self.x)}, ${Math.round(self.y)})`
-        : "尚未進入地圖。",
-    );
+        break;
+      case "warp":
+        if (!selfView || selfView.hp <= 0)
+          local("系統", "請先進入地圖並復活，再使用地圖命令。");
+        else send({ t: "warp-map", mapId: mapCommand.mapId });
+        break;
+      case "search":
+        void mapSearchMessages(mapCommand.query, (path) => fetch(path)).then((messages) => {
+          for (const message of messages) local(message.channel, message.text);
+        });
+        break;
+      case "where":
+        local(
+          "系統",
+          self
+            ? `${map?.streetName ?? ""} / ${map?.name ?? ""} · 地圖 ${self.mapId} · (${Math.round(self.x)}, ${Math.round(self.y)})`
+            : "尚未進入地圖。",
+        );
+        break;
+    }
     return true;
   }
   if (/^\/help$/i.test(text)) {

@@ -101,7 +101,7 @@ import type { NpcTemplate } from "../game/npcs.ts";
 import { FieldRegistry, type FieldInstance, type FieldMember } from "../game/world.ts";
 import { MesoWallet, pickUpDrop, takeItem, grantItem } from "../game/rewards.ts";
 import { applyChangeSlot } from "../game/inventory.ts";
-import { reviveMapId, spawnPortalIndex, type MapData } from "../game/map.ts";
+import { RETURN_MAP_NONE, reviveMapId, spawnPortalIndex, type MapData } from "../game/map.ts";
 import { decodeClientPacket, describeClientPacket } from "../protocol/login.ts";
 import {
   ATTACK_RELAY_OPCODE,
@@ -1689,7 +1689,7 @@ export class GameEntryServer {
         refuse("Revive before using map commands.");
         return;
       }
-      if (request.name !== "" || request.kind === 999999999) {
+      if (request.name !== "" || request.kind === RETURN_MAP_NONE) {
         refuse("Invalid map command.");
         return;
       }
@@ -1723,7 +1723,7 @@ export class GameEntryServer {
       this.options.log?.(`game: 0x0D "${name}" is no portal of map ${session.instance.mapId}`);
       return;
     }
-    if (portal.type === 0 || portal.toMapId < 0 || portal.toMapId === 999999999) {
+    if (portal.type === 0 || portal.toMapId < 0 || portal.toMapId === RETURN_MAP_NONE) {
       this.options.log?.(
         `game: portal "${name}" of map ${session.instance.mapId} is disabled (type 0 or invalid tm)`,
       );

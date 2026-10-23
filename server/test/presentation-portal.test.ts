@@ -1,8 +1,13 @@
-import type { PortalTarget, PortalBody } from "../../client/portals.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { movementPortal, arrivalPortal } from "../../client/portals.ts";
-import { portalSwirls } from "../../client/portals.ts";
+import {
+  arrivalPortal,
+  movementPortal,
+  portalSwirls,
+  type PortalBody,
+  type PortalTarget,
+} from "../../client/portals.ts";
+import { RETURN_MAP_NONE } from "../../client/map-constants.ts";
 const p = (type = 2, extra: Partial<PortalTarget> = {}) => ({
   name: "door",
   type,
@@ -50,7 +55,7 @@ test("reverse load order, auto pool priority, disabled targets and real map zero
     auto = p(3);
   assert.equal(movementPortal([a, z], b(), true), z);
   assert.equal(movementPortal([auto, z], b(), true), auto);
-  for (const toMapId of [999999999, -1, undefined])
+  for (const toMapId of [RETURN_MAP_NONE, -1, undefined])
     assert.equal(movementPortal([p(2, { toMapId })], b(), true), undefined);
   const zero = p(2, { toMapId: 0 });
   assert.equal(movementPortal([zero], b(), true), zero);

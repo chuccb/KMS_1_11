@@ -350,7 +350,7 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
 - 完整 **564/564＋TypeScript PASS**；五種DPR、真小地圖操作與傳送／繩頂登台回歸通過。
   原函式、精確尺寸與限制見 [DISPLAY_MINIMAP_VALIDATION.md](DISPLAY_MINIMAP_VALIDATION.md)。
 
-## 最新修正：傳送門／繩頂與地圖命令（2026-10-17）
+## 歷史修正：傳送門／繩頂與地圖命令（2026-10-17）
 
 - 原版 **地面按 ↑** 使用 type1/2 門，type3 自動傳送；500ms＋0x19 pending gate。
 - `tn` 指向的目的門已寫進 CharacterData+101 並保存，前端／伺服器／其他玩家落點一致，不再永遠 sp。
@@ -360,6 +360,10 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
 - 聊天 Enter 後正確退出輸入焦點，不再重新 focus 而鎖住方向鍵。
 - 完整 **561/561＋TypeScript PASS**；原版來源、隔離 Chromium 與未完成項目見
   [PORTAL_CLIMB_VALIDATION.md](PORTAL_CLIMB_VALIDATION.md)。
+
+## 最新整理：strict map-command parsing／地圖目錄驗證（2026-10-24）
+
+`/map ID`（含 `/warp`／`/go`／`/헉맵`）只接受非負安全整數、`0x0D` signed-32-bit 上限內的 map ID，排除 WZ no-destination sentinel；實際 map 0 有效，原 field／存活與 server permission gate 不變。`/maps` 的 `/api/maps` payload 現在先驗證，再依 ID／地圖名／區域名不分大小寫搜尋；最多列 20 筆，HTTP／JSON／資料格式錯誤會顯示明確系統訊息。共用值在 `client/map-constants.ts`，原 server `game/map.ts` export 保留；純解析／錯誤／邊界回歸見 [ADR-161](DECISIONS.md)。
 
 ## 本輪新增（2026-10-17）
 

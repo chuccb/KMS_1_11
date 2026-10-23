@@ -1,4 +1,5 @@
 import { ABILITY_REQUEST_OPCODE, encodeAbilityRequest } from "../src/protocol/ability.ts";
+import { RETURN_MAP_NONE } from "../../client/map-constants.ts";
 /**
  * The login server, driven over a real TCP socket by a fake client.
  *
@@ -6430,8 +6431,8 @@ test(
       mobs: [],
       npcs: [],
       portals: [
-        { name: "sp", type: 0, x: 100, y: 300, toMapId: 999999999, toName: "" },
-        { name: "auto", type: 3, x: 200, y: 300, toMapId: 999999999, toName: "" },
+        { name: "sp", type: 0, x: 100, y: 300, toMapId: RETURN_MAP_NONE, toName: "" },
+        { name: "auto", type: 3, x: 200, y: 300, toMapId: RETURN_MAP_NONE, toName: "" },
         ...STUB_MAP_ALT.portals,
       ],
     };

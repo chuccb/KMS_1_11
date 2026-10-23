@@ -2,6 +2,7 @@ import type { CreationCatalog } from "../server/src/game/creation.ts";
 import type { MapDestination } from "../server/src/game/map.ts";
 import type { TestToolResult } from "../server/src/game/testtools.ts";
 import { isRecord, isFiniteNumber } from "./resource-validation.ts";
+import { MAX_MAP_COMMAND_ID, RETURN_MAP_NONE } from "./map-constants.ts";
 
 export function isCreationCatalog(value: unknown): value is CreationCatalog {
   if (
@@ -25,17 +26,21 @@ export function isCreationCatalog(value: unknown): value is CreationCatalog {
       ),
   );
 }
-export function isMapDestinations(value: unknown): value is MapDestination[] {
+function isMapDestination(value: unknown): value is MapDestination {
   return (
-    Array.isArray(value) &&
-    value.every(
-      (map: unknown) =>
-        isRecord(map) &&
-        isFiniteNumber(map.id) &&
-        typeof map.name === "string" &&
-        typeof map.streetName === "string",
-    )
+    isRecord(value) &&
+    typeof value.id === "number" &&
+    Number.isSafeInteger(value.id) &&
+    value.id >= 0 &&
+    value.id <= MAX_MAP_COMMAND_ID &&
+    value.id !== RETURN_MAP_NONE &&
+    typeof value.name === "string" &&
+    typeof value.streetName === "string"
   );
+}
+
+export function isMapDestinations(value: unknown): value is MapDestination[] {
+  return Array.isArray(value) && value.every(isMapDestination);
 }
 export function isTestToolResult(value: unknown): value is TestToolResult {
   return (

@@ -1,3 +1,5 @@
+import { RETURN_MAP_NONE } from "./map-constants.ts";
+
 export interface PortalTarget {
   type: number;
   name: string;
@@ -29,7 +31,7 @@ export function movementPortal<T extends PortalTarget>(
         p.type === 0 ||
         !p.name ||
         !(p.toMapId >= 0) ||
-        p.toMapId === 999999999
+        p.toMapId === RETURN_MAP_NONE
       )
         continue;
       const radius = automatic ? 50 : 20,

@@ -1,4 +1,5 @@
 import { physicalBounds, type PhysicalBounds } from "../../../client/native-terrain.ts";
+import { RETURN_MAP_NONE } from "../../../client/map-constants.ts";
 /**
  * What the server knows about a map.
  *
@@ -22,6 +23,7 @@ import { asNumber, asText, entriesOf, propertyOf } from "../wz/props.ts";
 import { mapImagePath } from "../wz/paths.ts";
 import { footholdSegments, mapSummary } from "../wz/archive.ts";
 import type { FootholdSegments, MapObject, MapSummary, WzArchive } from "../wz/archive.ts";
+export { RETURN_MAP_NONE };
 
 // The types this module's API is written in come from the archive layer; re-exporting them keeps the
 // import list of a caller that only talks maps down to one module.
@@ -90,14 +92,6 @@ export interface MapData {
   physicalBounds?: PhysicalBounds;
   climbables?: MapLadder[];
 }
-
-/**
- * The `returnMap` value the shipped data uses for "this map has no map to send you back to": 25 of
- * the 100 maps carry it (`analysis/map_meta.json`). It is **not** a map id - there is no
- * `Map/Map/999999999.img` - so a server that passed it on would send a player into a map nobody can
- * read. Every town carries its own id here instead (`test/map.test.ts` pins that for Henesys).
- */
-export const RETURN_MAP_NONE = 999999999;
 
 /**
  * Where the player who revived goes (c2s `0x0D` with `kind = 0`, the `CUIRevive` dialog's OK:

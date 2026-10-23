@@ -1,13 +1,19 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-23（ADR-160：trade cash-block JSON-safe projection 與完整 MiniRoom payload guard；Bun 1.4.4 `bun fmt` 取代 Prettier CLI）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-24（ADR-161：strict map-command parsing／catalog validation；工具鏈 latest 核對無須升版）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 **ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
 全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支未嚴格型別化**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
-並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
+並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union；ADR-161 抽出 strict map command／catalog boundary。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
 歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+
+## 最新增量：strict map commands 與 `/api/maps` 驗證（ADR-161）
+
+`client/map-commands.ts` 接手 `/map`／`/warp`／`/go`／`/헉맵`、`/maps` 與 `/where` 的嚴格解析，保留本機 field／permission gate；數字必須是非負安全整數、符合 `0x0D` 的 s32 上限且不是無目的地 sentinel，map 0 仍有效。`client/map-constants.ts` 單一提供 `RETURN_MAP_NONE` 與上限，`server/src/game/map.ts` 仍 re-export 原常數。
+
+`/maps` 在篩選／輸出前驗證 `/api/maps` 的 map ID 與名稱欄位符合 command wire policy；保留按 ID／名稱／區域名稱不分大小寫搜尋與最多 20 列顯示，對 HTTP／JSON／格式錯誤回傳明確訊息。新增 parser／search／malformed payload 測試，並用真 Data.wz HTTP endpoint、server policy 與 portal regressions 覆蓋跨層契約。focused **24/0、4 files**；完整 gates 見 [ADR-161](DECISIONS.md)。
 
 ## 前輪增量：strict server-to-browser JSON 訊息合約（ADR-157）
 
@@ -15,7 +21,7 @@ ADR-157 新增 `server/src/net/webclient-messages.ts`，把 `ClientEvent.kind` �
 
 同日重新查 registry／GitHub latest：Bun 與 `@types/bun` 已由 **1.4.3 升至 1.4.4**，TS 7.0.2、Prettier 3.9.10、Playwright Core 1.64.1、Chromium tooling 153.0.0 仍為 latest；checkout v7.0.1／setup-bun v2.2.0 Actions 仍為 latest。新 Bun tarball SHA1／SHA512 與 registry metadata 相符，`bun install --frozen-lockfile --ignore-scripts` 27 installs／47 packages 無漂移；new-runtime strict typecheck／全範圍 format／build 通過，focused **44/0、4 files**，full suite **1468/0、5334 expects、170 files（345.05s）**。隔離測試，不登入／操作 LIVE 角色或存檔。驗證詳見 ADR-157 與工具鏈文件。
 
-## 最新增量：lossless trade projection 與 MiniRoom payload guard（ADR-160）
+## 前輪增量：lossless trade projection 與 MiniRoom payload guard（ADR-160）
 
 `client/trade-wire.ts` 定義 MiniRoom JSON DTO：cash block 的 `sn`／`unknown1A` u64 只在投影時以 `BigInt.toString(10)` 表示為 canonical 十進位字串，`unknown18` 保持 number、null 保持 null，原協定物件與存檔不改。browser `TradeState` 消費同一 wire type；server protocol path 使用明示的 `receiveProtocol` 投影，不把 raw BigInt 當成 browser event。
 
@@ -65,7 +71,7 @@ Bun 1.4.4 `bun fmt` 已作為正式 formatter；用鎖檔 Prettier 3.9.10 作一
 ## 優先序 1：繼續真正的嚴格 TypeScript 遷移
 
 - 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。**ADR-109 已處理 client_probe（→ `.ts`）並從 main.js
-  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；ADR-156 已抽出 WebSocket transport 與頂層 JSON discriminator 守衛，main.js（5549 行）本體仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
+  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；ADR-156 已抽出 WebSocket transport 與頂層 JSON discriminator 守衛，main.js（5529 行）本體仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
   靜態耦合普查（321 個 top-level 宣告中僅 3 個零耦合）已列為分層順序的依據，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 - frame／play已strict TS實作遷移，真RAF／畫布來源與有界keyboard計畫見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；不對玩家執行手動工具。
 - 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。

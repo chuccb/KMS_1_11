@@ -6144,7 +6144,7 @@ Trade 不能只依靜態型別就推斷 JSON-safe。`ItemSlotCashBlock` 含 `big
 - 擴大的 formatter audit：**436 個 `.ts` + 4 個 package／config／workflow paths = 440/440**，Prettier 3.9.10 與 Bun 1.4.4 輸出逐檔 byte-identical。ADR-158 當時的 438-path compare 維持其歷史紀錄。
 - 全部測試與 trade BigInt regression 使用本機檔案、synthetic peer、mock／隔離 fixtures；沒有 LIVE login、角色建立／操作或 save 讀寫。既有 memory-only preview 仍使用 `--save off`。
 
-### 後續
+### 後續（ADR-159 當時）
 
 Messenger payload guard 完成；接下來若處理 `trade`，先決定明確、可往返且 JSON-safe 的 BigInt/cash-block wire representation，加入 WebClient serialize/decode regression，再接 trade validator。不可用降低 strictness 或改成 `any` 來避開。
 
@@ -6175,3 +6175,30 @@ Trade state 會保存 offer item；視圖依 item id／裝備欄位繪製，並�
 - `bun run build` 通過；browser assets 留在 ignored `dist/client`。
 - 最終完整 `bun run test`：**1478 pass／0 fail／5334 `expect()` calls，171 files，299.19 s**。
 - 所有測試使用 synthetic peer、隔離 fixture／mock 與本機 Data.wz；沒有 LIVE login、角色建立／操作或既有 save 讀寫。既有 memory-only preview 仍為 `--save off`，沒有登入或操作。
+
+## ADR-161：strict map-command boundary、地圖目錄驗證與共用 map policy（2026-10-24）
+
+**狀態**：已接受（`/map`／`/maps`／`/where` 解析移至 strict TypeScript；`/api/maps` 目錄逐項驗證；無目的地 sentinel 與 `0x0D` s32 上限共用；原 `server/src/game/map.ts` export 保留）
+
+### 背景
+
+地圖命令的 alias parsing、數字邊界、`/where` 回覆與 `/maps` fetch／filter／訊息組裝原本都在尚未 strict 型別化的 `client/main.js`。`/api/maps` 的 response 是 `unknown` 網路資料，舊路徑直接呼叫 `.filter` 並假設每列有可印出的 `id`／`name`／`streetName`；既有 map-summary guard 只檢查有限數字，未保證是安全整數、落在 wire 範圍內或排除 no-destination sentinel。`RETURN_MAP_NONE` 也在 browser portal、client map command、server session／入口各處以裸數字表示。
+
+原意已由資料與協定確認：WZ `info/returnMap` 的 `999999999` 是「沒有回傳地圖」而非 map ID；原始分析記錄顯示 100 張中 25 張使用它，且不存在 `Map/Map/999999999.img`。`0x0D` map-command `kind` 是 signed 32-bit map ID，故合法表達上限為 `0x7fffffff`；map 0 是真實有效地圖，不能錯誤排除。
+
+### 決策與實作
+
+1. 新增無副作用的 `client/map-constants.ts`，以 `RETURN_MAP_NONE` 與 `MAX_MAP_COMMAND_ID` 集中 browser／session／catalog 所需的 map policy；sentinel 同時供 portal 與 game entry 使用，`server/src/game/map.ts` import 並 re-export `RETURN_MAP_NONE`，保留既有模組 API；sentinel 的 WZ 意義與 s32 wire 限制寫在定義旁，不把兩者混成任意 hardcode。
+2. 新增 strict `client/map-commands.ts`：`parseMapCommand` 保留 `/map`、`/warp`、`/go`、`/헉맵` aliases 與 `/maps`／`/where`，warp 只接受十進位非負 safe integer、不超過 s32 上限且不等於 sentinel；map 0 仍可解析。`client/main.js` 只負責保留原 field／死亡／授權流程並 dispatch typed result，本輪減少 20 行；沒有把 server permission 改成 client policy。
+3. `isMapDestinations` 對 unknown catalog 要求 array 中每列都是 record、ID 為安全整數且落在 `0..MAX_MAP_COMMAND_ID`（排除 no-destination sentinel）、`name` 與 `streetName` 為字串。`mapSearchMessages` 在篩選前先驗證 `/api/maps`，保留依 ID／名稱／區域名不分大小寫搜尋、原中文訊息與最多顯示 20 列；HTTP／fetch／JSON／形狀錯誤都轉成可顯示的系統訊息。
+4. 新增四項 parser／catalog／search regression，涵蓋 aliases、map 0、`s32` 邊界、sentinel、負數／小數／超界、欄位畸形、大小寫／全部查詢欄位、20 列上限與 fetch／HTTP／JSON errors。browser-resource contract 以真 `Data.wz` `/api/maps` 驗證 HTTP response；既有 map／portal／server command fixtures 使用共用常數而不改其實際政策。
+5. 2026-10-24 再查 npm registry 與 GitHub latest：Bun 1.4.4、TypeScript 7.0.2、`@types/bun` 1.4.4、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1、setup-bun v2.2.0 均與固定版一致，沒有無謂改 lockfile／依賴。現樹 `client/` 有 122 個 `.ts`；唯一仍未 strict 型別化的 authored client source 是 5529 行 `client/main.js`。442 個 TypeScript 加 4 個 package/config/workflow formatter inputs 共 446 個，Prettier 3.9.10 與 Bun 1.4.4 輸出逐檔 byte-identical。
+
+### 測試與驗證
+
+- map commands／真 WZ browser resource／map provider／portal focused：**24 pass／0 fail，4 files**。
+- `bun run typecheck`（pinned TypeScript 7.0.2、strict／ESNext）通過；`bun check --no-script --timing`：**738 checked／739 loaded，無型別錯誤**。
+- `bun run format:check` 通過；Prettier 3.9.10 與 Bun 1.4.4 formatter audit：**446/446 byte-identical**。
+- `bun run build` 通過；browser assets 留在 ignored `dist/client`。
+- 完整 `bun run test`：**1482 pass／0 fail／5334 `expect()` calls，172 files，345.82 s**。
+- 完整測試只用隔離 fixtures、mock／合成 peer、local test server 與唯讀 `Data.wz`；沒有 LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe。既有 memory-only preview 沒有被操作，仍使用 `--save off`。

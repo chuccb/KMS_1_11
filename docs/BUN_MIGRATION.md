@@ -1,8 +1,16 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-23（ADR-160：trade cash-block JSON-safe projection 與完整 MiniRoom guard）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-24（ADR-161：strict map-command／catalog validation；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：trade JSON projection 與 full MiniRoom guard（ADR-160）
+## 最新增量：map command 與地圖目錄的 strict TypeScript boundary（ADR-161）
+
+新增 `client/map-constants.ts`（WZ no-destination sentinel／`0x0D` s32 上限）與 `client/map-commands.ts`（alias／整數邊界 parser、`/where`／`/maps` route 及 validated catalog search）；server `game/map.ts` 保留原 `RETURN_MAP_NONE` export。`client/main.js` 委派新模組後少 20 行，field／permission gate 和有效命令輸出不變；`/api/maps` 的 unknown payload 在顯示前必須通過 map destination guard，ID 0 保持有效。
+
+新增四項純 map-command regression；真 Data.wz `/api/maps`、map/provider、portal 與 server map-policy fixtures 共 **24/0、4 files**。TypeScript 7.0.2 strict typecheck、`bun check`（738 checked／739 loaded）、format check、Bun browser build 通過；Prettier 3.9.10 comparison 為 **446/446 byte-identical**。完整 `bun run test` **1482/0、5334 expects、172 files（345.82 s）**。最新 registry／GitHub 核對日期 2026-10-24，原有 Bun／TS／Chromium／Actions pins 仍是 latest，未為升級而改依賴。
+
+唯一未 strict 型別化來源仍是 `client/main.js`（5529 行）；`client/` 有 **122 支 `.ts`**。全程未登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe；既有 memory-only preview 仍使用 `--save off`。
+
+## 前輪增量：trade JSON projection 與 full MiniRoom guard（ADR-160）
 
 `client/trade-wire.ts` 把 `MiniRoomEvent` 投影為獨立 JSON DTO；cash block 的 `sn`／`unknown1A` u64 使用 `BigInt.toString(10)` 成 canonical 十進位字串，`unknown18` 保持數字，null／其他事件原樣保留。原始 protocol／save model 不改，沒有經過 JS number 或 generic coercion。出站 `ClientEventJson`／`WebClientServerMessage` 與 browser `TradeState` 共用 DTO；session 對 native event 使用明示的 protocol 接口。
 
@@ -45,7 +53,7 @@ JSON parse 與 active-connection generation fence；`client/main.js` 不再直�
 invalid envelope、舊 socket stale event fence、active error/close、return-to-title close code）；mock browser startup／static／UI 與
 system-UI source wiring 聚焦共 **18/0、5 files**。`typecheck`／`format:check`／`build` 通過；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files**（378.63 s）。本輪不新增依賴、不改 strict、不連真遊戲、不操作帳號／角色／save。
 
-目前 `client/` 有 **120 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
+目前 `client/` 有 **122 支 `.ts`**，`client/main.js` 為 **5529 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
 
 ## 前輪增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
 
@@ -210,7 +218,7 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 
 ## 已落實
 
-- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（438 路徑與 SHA512 verified Prettier 3.9.10 byte-identical，Prettier direct dependency 已移除）。Bun／型別與保留 package metadata latest 於 2026-10-23 重查，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
+- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（最初遷移的 438-path audit 保留其歷史結果，Prettier direct dependency 已移除）。ADR-161 當輪以 Prettier 3.9.10 對本樹 446 個輸入再次 byte-compare，**446/446 相同**；Bun／型別與保留 package metadata latest 於 2026-10-24 重查，固定 pins 仍一致，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
 - 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前81）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
@@ -286,7 +294,7 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 
 ### 尚未遷移的來源（ADR-109 起僅餘 main.js）
 
-- **client/main.js（5549 行）**：仍為 JS／TS 混合入口，未完成分層與型別化。ADR-109 的耦合普查與 `client/inventory-window.ts`、
+- **client/main.js（5529 行）**：仍為 JS／TS 混合入口，未完成分層與型別化。ADR-109 的耦合普查與 `client/inventory-window.ts`、
   既有 shop/window/hud 抽離，以及 ADR-156 的 `client/websocket-transport.ts`（socket lifecycle／頂層 envelope）都是逐域門面；
   其餘 shop operation、rendering、pointer/UI state 與 event-specific payload validation 仍在 main，需逐領域重構，不是一次改名能完成。
 - ~~server/scripts/client_probe.mjs~~ → 已於 ADR-109 遷為 `client_probe.ts`。

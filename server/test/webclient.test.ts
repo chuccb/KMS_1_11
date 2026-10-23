@@ -1,4 +1,5 @@
 import { skillCatalogOf } from "../src/game/skills.ts";
+import { MAX_MAP_COMMAND_ID, RETURN_MAP_NONE } from "../../client/map-constants.ts";
 import { ClientSession } from "../src/client/session.ts";
 import { creationCatalogOf } from "../src/game/creation.ts";
 import { MemorySaveStore, readSave } from "../src/game/save.ts";
@@ -77,7 +78,7 @@ const TOWN_MAP: MapData = {
   npcs: [],
   portals: [
     { name: "sp", type: 0, x: 200, y: 300, toMapId: 0, toName: "" },
-    { name: "auto", type: 3, x: 0, y: 0, toMapId: 999999999, toName: "" },
+    { name: "auto", type: 3, x: 0, y: 0, toMapId: RETURN_MAP_NONE, toName: "" },
     { name: "east00", type: 2, x: 400, y: 300, toMapId: 1000000, toName: "west00" },
   ],
   footholds: 1,
@@ -1731,7 +1732,7 @@ test(
     admin.send({ t: "warp-map", mapId: 123456789 });
     await admin.nextKind("request-release");
     assert.match(String((await admin.nextKind("system-notice")).text), /does not exist/);
-    for (const mapId of [-1, 1.5, 999999999, 2147483648]) {
+    for (const mapId of [-1, 1.5, RETURN_MAP_NONE, MAX_MAP_COMMAND_ID + 1]) {
       admin.send({ t: "warp-map", mapId });
       assert.match(String((await admin.nextKind("error")).message), /invalid map id/);
     }
