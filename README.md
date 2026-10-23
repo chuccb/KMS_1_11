@@ -39,12 +39,12 @@
 `.prettierrc.json` 保留為共用格式設定。根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
 **全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），
 唯一尚未型別化的 authored 來源仍是主瀏覽器入口 `client/main.js`（5549 行，仍為 JS／TS 混用）；
-不可把目前 typecheck 成功當成全客戶端已嚴格檢查。WebSocket 收件端已對選定 server event 加 runtime guard；`trade`／`messenger` 內層仍是明列缺口，未識別／未分類的 runtime `t` 仍 pass-through（已知的 `t: "unknown"` 則有 guard），不是全訊息 schema。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)、[嚴格TS遷移](docs/BUN_MIGRATION.md) 與 ADR-158。
+不可把目前 typecheck 成功當成全客戶端已嚴格檢查。WebSocket 收件端目前對 57 個 discriminator 中 56 個加 runtime guard（Messenger 八種 event／三格 roster 已覆蓋）；`trade` 是唯一明列缺口，因已驗證的 type-11 cash-block `bigint` 路徑會讓直接 JSON stringify 失敗。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），不是全訊息 schema。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)、[嚴格TS遷移](docs/BUN_MIGRATION.md) 與 ADR-159。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；115支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；117支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture

@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-23（ADR-158：selected inbound payload guards；Bun formatter migration）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-23（ADR-159：Messenger inbound payload guard；Bun formatter migration）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
@@ -38,8 +38,9 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大且未嚴格型別化，逐領域分層尚未完成 |
 | `client/websocket-transport.ts` | 嚴格型別化的 browser WebSocket 建立／替換／送出／關閉、generation fence、JSON envelope 與 open guard；選定 payload guard 可拒收 malformed message，coverage/gaps 另列 |
-| `client/server-message-validation.ts` | server-to-browser 選定 event runtime guards；trade／messenger nested unions 是明確 gaps；未識別的 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），不是完整 schema |
-| `client/*.ts` | 115個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
+| `client/server-message-validation.ts` | server-to-browser 選定 event runtime guards；56 種 discriminator 有 guard，`trade` 唯一明列 gap（已證實 MiniRoom cash-block `bigint` 會使 `JSON.stringify` 失敗）；未識別 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），不是完整 schema |
+| `client/messenger-message-validation.ts`／`client/messenger-constants.ts` | 驗證 Messenger 全部八種事件、巢狀 look 與固定三格 roster；房間大小共用純常數供 browser、protocol、server 使用 |
+| `client/*.ts` | 117 個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
 | `client/social-commands.ts`／`party-state.ts`／`party-invitation.ts`／`chat-entry.ts` | 原社交指令嚴格解析（`/파티*`／`/귓속말`／`/찾기`＋明示別名）、`55C5E0` 六格名冊狀態、邀請確認所有權與編輯框生命週期；`server/src/net/chat-input.ts` 與 bridge 共用同一路由，斜線行不會落到公開聊天 |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
@@ -108,7 +109,8 @@ ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false；formatter �
 client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5549 行；ADR-109 普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；已抽出 `client/inventory-window.ts`、`client/shop-window.ts`、`client/hud.ts`／`client/jobs.ts`，ADR-156 再抽出 `client/websocket-transport.ts`）。
 前輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
 前輪（ADR-157）新增 strict 出站 JSON message union，讓 `WebClient.send` 與 `clientEventJson` 的 discriminator／payload 關聯受 compiler 驗證；當時尚未做 inbound runtime validation，亦未型別化 main.js。Bun／@types 升至 registry latest 1.4.4；該輪 focused44/0、完整1468/0（5334 expects、170 files）。
-本輪（ADR-158）transport 掛上選定 payload guards；`trade`／`messenger` nested unions 明列為 gaps，未識別的 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），`main.js` 仍不是 strict TS。Bun `fmt` 與鎖檔 Prettier 3.9.10 對438個 format input逐檔byte-identical後，正式移除 Prettier依賴。實測／完整suite結果見 [ADR-158](DECISIONS.md)。
+前輪（ADR-158）transport 掛上選定 payload guards；當時 `trade`／`messenger` nested unions 明列為 gaps。Bun `fmt` 與鎖檔 Prettier 3.9.10 對 438 個 format input 逐檔 byte-identical 後，正式移除 Prettier 依賴。
+本輪（ADR-159）加入 Messenger 全八種事件及固定三格 roster 的 runtime guard，現為 56 種 discriminator 已 guard、`trade` 唯一明列 gap；type-11 cash-block `bigint` 已追通至 bridge 的 `JSON.stringify` 並有隔離 regression 證實會丟 `TypeError`。未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`main.js` 仍不是 strict TS。完整驗證及 trade 保留原因見 [ADR-159](DECISIONS.md)。
 ADR-108／109 的 1213 pass／0 fail、inventory-window 9/9 與 probe 輸出等價結果是各自歷史時點；較早的 1205/8、1064/44 亦不代表現況，詳 [BUN_MIGRATION](BUN_MIGRATION.md)。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
 舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。本輪發現先前 8515 服務已停止後，另開全新 memory-only 隔離服務：web/login/game ports 8515/8516/8517、`--save off`、安全城鎮 map `101000000`（啟動時 0 mobs）、只有新的 `preview`／`observer` 帳號；沒有舊角色／save 被載入。`/healthz`、首頁與 `/main.js` 只讀檢查皆回應 200；沒有登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在此程序記憶體中，重啟即消失；預覽是否在線以本輪 LIVE 入口為準，不以舊 PID／save 路徑推定。

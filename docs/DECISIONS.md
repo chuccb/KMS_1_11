@@ -6109,3 +6109,41 @@ ADR-156 已把 browser WebSocket lifecycle 與 JSON envelope 移進 strict TypeS
 - validator＋transport focused tests：**12 pass／0 fail**；probe 的 `client-ui.test.ts` focused test 通過；deterministic `world.test.ts` focused：**24 pass／0 fail**。
 - 最終完整 `bun run test`：**1475 pass／0 fail／5334 expects，171 files，321.09 s**。第一次完整 suite 曾因 world test 依賴隨機掉落而有 1 個 flaky failure；僅修測試 RNG，之後完整 suite 全數通過。
 - Prettier comparison 與所有 tests 均使用本機檔案／隔離 fixtures／mock transport；沒有登入 LIVE、建立或操作角色、讀寫既有玩家 save，也沒有變更 production loot RNG／drop policy。依使用者要求另啟可手動測試的獨立記憶體預覽：web/login/game ports **8515／8516／8517**、`--save off`、map `101000000`、只配置 `preview`／`observer` 沙箱帳號；啟動時 0 mobs，唯讀 GET `/healthz`、`/`、`/main.js` 均回 **200**。沒有自動登入、建角、角色操作或建立 save；使用者自行操作的新進度只存在記憶體，程序重啟即消失。`client/main.js` 仍未型別化；`trade`／`messenger` gaps 與未識別 runtime `t` pass-through 仍明確存在（已知 `t: "unknown"` 有 guard）。
+
+## ADR-159：完整 guard Messenger event union，保留已證實不安全的 trade gap（2026-10-23）
+
+**狀態**：已接受（57 個 server message discriminator 中 56 個有明列 runtime guard；`messenger` 已涵蓋，`trade` 是唯一明列 gap；未知／未分類 runtime `t` 仍 pass-through；`client/main.js` 尚未 strict 型別化）
+
+### 背景
+
+ADR-158 已把選定 server-to-browser payload guards 接到 browser transport，但當時把 `trade` 與 `messenger` 都列為 gaps。Messenger protocol 已有完整巢狀 `MessengerEvent` union，包含參與者、cell look 清單與固定三格 roster；繼續把整個 union 留白就無法在 transport boundary 拒絕畸形 event。此輪需要覆蓋所有 variant，而不把 `main.js` 或整個 server-message schema 說成已遷移／完整。
+
+Trade 不能只依靜態型別就推斷 JSON-safe。`ItemSlotCashBlock` 含 `bigint`，所以要沿實際 MiniRoom item event 查明能否抵達 `WebClient.send` 的直接 `JSON.stringify`，再決定是否可加入 guard；不得先做數字／字串 normalization。
+
+### 發現
+
+1. `MessengerEvent` 有八種 variant：participant、joinFailed、left、invite、inviteResult、chat、cellUpdate、roster。Participant、cellUpdate 與 roster fill 都巢狀含 look list；native client 限定 room slot 為 0..2，type 7 roster 固定讀三格。
+2. 原房間大小常數移到 `client/messenger-constants.ts` 純模組，供 client state、runtime validator、protocol 與 server registry 共用。`server/src/protocol/messenger.ts` 不再 runtime-import 整個 UI state 模組；protocol 只依賴這個無 UI 副作用的常數來源。
+3. Trade 路徑已被追通：MiniRoom `0x50 type 11` 在 `readMiniRoomResult` 呼叫 `readItemSlot(reader, 0)`；`readItemSlot` 對有 cash-block flag 的資料用 `readU64()` 產生 `sn`／`unknown1A` BigInt；`ClientSession` 把事件送至 `WebClient` listener；`clientEventJson` 是 mechanical `kind`→`t` projection；`WebClient.send` 呼叫 `JSON.stringify(message)`。內部 server 亦會從角色庫存的 item 建 type 11 回包。
+4. `server/test/native-trade-session.test.ts` 用隔離 encrypted peer 送含兩個 BigInt 的 non-null cash block，確認它完整穿過 `0x50` codec 與 `ClientSession` event、保留於 `clientEventJson` projection，且直接 stringify 會丟 `TypeError`。這是可重現的序列化缺口，不是「BigInt 或許不會到達」的假設；它也不是 LIVE 連線測試。
+
+### 決策
+
+1. 新增 `client/messenger-message-validation.ts`，以 event discriminator 完整檢查全部八種 variant；驗證必要字串／布林值、u8／u32 範圍、slot 0..`MESSENGER_ROOM_SIZE - 1`、非零外觀 ID 清單與 marker-specific roster cell，並要求 roster 長度恰等於共用房間大小。
+2. `client/server-message-validation.ts` 將 `messenger` 加入 guarded list、從 gap 移除；`SERVER_MESSAGE_VALIDATION_GAPS` 僅保留 `trade`，compile-time coverage assertion 照常要求每個 discriminator 分類。測試鎖定 56 個 guarded types，並明確確認 `trade` 尚未驗證。
+3. 保留 `trade` gap，直到設計並測試不失真的 JSON-safe wire projection。這一輪不將 BigInt stringify 成字串、不轉成可能失真的 number、不改協定資料、不宣稱 direct JSON send 可安全承載 cash block。
+4. 新增逐 variant accept/reject fixtures：含 participant/cell look 成功與零值拒絕、邊界 slot、join/invite/result/chat、roster 2／3／4 格及 malformed fill／marker；同時保留協定、狀態、session、Chromium UI、transport/browser startup regressions。沒有新增依賴、`any`、strict 放寬或 LIVE 操作。
+5. 更新 README、架構導覽、roadmap、toolchain、Bun migration 記錄。ADR-158 的 55 guarded／兩個 gaps 與 438-path formatter comparison 是該輪歷史結果；本輪 current tree 為 56 guarded／一個 gap，formatter comparison 擴至 440 paths。
+
+### 測試與驗證
+
+- focused Messenger／validator／trade JSON-gap／native session／Chromium UI／browser-startup／client UI：**35 pass／0 fail，8 files**。
+- 完整 `bun run test`：**1476 pass／0 fail／5334 `expect()` calls，171 files，299.67 s**。
+- `bun run typecheck`（pinned TypeScript 7.0.2、strict／ESNext）通過；`bun check --no-script --timing`：**732 checked／733 loaded，無錯**。
+- `bun run format:check` 通過；Bun `fmt`：**0 formatted／440 unchanged**；`bun run build` 通過，browser assets 產生於 ignored `dist/client`。
+- 擴大的 formatter audit：**436 個 `.ts` + 4 個 package／config／workflow paths = 440/440**，Prettier 3.9.10 與 Bun 1.4.4 輸出逐檔 byte-identical。ADR-158 當時的 438-path compare 維持其歷史紀錄。
+- 全部測試與 trade BigInt regression 使用本機檔案、synthetic peer、mock／隔離 fixtures；沒有 LIVE login、角色建立／操作或 save 讀寫。既有 memory-only preview 仍使用 `--save off`。
+
+### 後續
+
+Messenger payload guard 完成；接下來若處理 `trade`，先決定明確、可往返且 JSON-safe 的 BigInt/cash-block wire representation，加入 WebClient serialize/decode regression，再接 trade validator。不可用降低 strictness 或改成 `any` 來避開。

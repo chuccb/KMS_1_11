@@ -43,6 +43,10 @@
  * `0x4E`／`0x4F` 走同一個 handler，本伺服器不用它們（封包沒有辦法分辨三者，所以固定送 `0x4D`）。
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
+import { MESSENGER_ROOM_SIZE } from "../../../client/messenger-constants.ts";
+
+/** The browser-owned three-cell fact is re-exported here for protocol and server callers. */
+export { MESSENGER_ROOM_SIZE } from "../../../client/messenger-constants.ts";
 
 export const MESSENGER_OPCODE = {
   /** c2s：`sub_4A1EA0(..., 36, 0)` 的 36。 */
@@ -50,9 +54,6 @@ export const MESSENGER_OPCODE = {
   /** s2c：`sub_4E18D0`（`0x4D`／`0x4E`／`0x4F` 都指向它，這裡固定用第一個）。 */
   result: 0x4d,
 } as const;
-
-/** `sub_4DF3E0` 只認 `slot <= 2`。 */
-export const MESSENGER_ROOM_SIZE = 3;
 
 /** c2s `0x24` 的 type。 */
 export const MESSENGER_REQUEST_TYPE = {
@@ -180,7 +181,9 @@ export function encodeMessengerParticipant(
   announce: boolean,
 ): Uint8Array {
   if (participant.slot < 0 || participant.slot >= MESSENGER_ROOM_SIZE) {
-    throw new RangeError(`messenger slot ${participant.slot} is outside the client's 0..2`);
+    throw new RangeError(
+      `messenger slot ${participant.slot} is outside the client's 0..${MESSENGER_ROOM_SIZE - 1}`,
+    );
   }
   const writer = resultWriter(MESSENGER_RESULT_TYPE.participant)
     .writeByte(participant.slot)
@@ -202,7 +205,9 @@ export function encodeMessengerJoinFailed(code = 1): Uint8Array {
 /** `type 2`：某一格離開（名字由 client 從那一格取）。 */
 export function encodeMessengerLeft(slot: number): Uint8Array {
   if (slot < 0 || slot >= MESSENGER_ROOM_SIZE) {
-    throw new RangeError(`messenger slot ${slot} is outside the client's 0..2`);
+    throw new RangeError(
+      `messenger slot ${slot} is outside the client's 0..${MESSENGER_ROOM_SIZE - 1}`,
+    );
   }
   return resultWriter(MESSENGER_RESULT_TYPE.left).writeByte(slot).toBytes();
 }
@@ -279,7 +284,9 @@ export function encodeMessengerCellUpdate(cell: {
   look: readonly number[];
 }): Uint8Array {
   if (cell.slot < 0 || cell.slot >= MESSENGER_ROOM_SIZE) {
-    throw new RangeError(`messenger slot ${cell.slot} is outside the client's 0..2`);
+    throw new RangeError(
+      `messenger slot ${cell.slot} is outside the client's 0..${MESSENGER_ROOM_SIZE - 1}`,
+    );
   }
   const writer = resultWriter(MESSENGER_RESULT_TYPE.cellUpdate)
     .writeByte(cell.slot)

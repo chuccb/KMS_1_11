@@ -154,17 +154,92 @@ function validFieldMessage() {
   };
 }
 
-test("validation coverage and remaining nested-union gaps are explicit", () => {
+test("validation coverage and the remaining trade gap are explicit", () => {
+  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.size, 56);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("login"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("field"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("stat-basis"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("unknown"), true);
+  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("messenger"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("trade"), false);
-  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("messenger"), false);
-  assert.deepEqual(SERVER_MESSAGE_VALIDATION_GAPS, ["trade", "messenger"]);
+  assert.deepEqual(SERVER_MESSAGE_VALIDATION_GAPS, ["trade"]);
   assert.equal(validateServerMessagePayload({ t: "unknown", opcode: 0x42, bytes: 3 }), true);
   assert.equal(validateServerMessagePayload({ t: "unknown", opcode: 0x100, bytes: 3 }), false);
+  assert.equal(validateServerMessagePayload({ t: "trade", event: null }), true);
   assert.equal(validateServerMessagePayload({ t: "future-event" }), true);
+});
+
+test("messenger event variants and the fixed three-cell roster validate completely", () => {
+  const events: unknown[] = [
+    {
+      kind: "participant",
+      participant: {
+        slot: 2,
+        name: "Observer",
+        level: 99,
+        face: 20_000,
+        look: [30_000, 1_000_002],
+      },
+      announce: true,
+    },
+    { kind: "joinFailed", code: 1 },
+    { kind: "left", slot: 0 },
+    { kind: "invite", inviterName: "Hero", roomId: 12 },
+    { kind: "inviteResult", ok: 0, name: "Missing" },
+    { kind: "chat", line: "Hero : hello" },
+    { kind: "cellUpdate", slot: 1, level: 8, face: 20_001, look: [30_001] },
+    {
+      kind: "roster",
+      cells: [
+        { action: "clear" },
+        { action: "keep" },
+        { action: "fill", level: 7, face: 20_002, look: [30_002], name: "Third" },
+      ],
+    },
+  ];
+  const describe = (value: unknown) => JSON.stringify(value) ?? String(value);
+  for (const event of events)
+    assert.equal(validateServerMessagePayload({ t: "messenger", event }), true, describe(event));
+
+  const malformed: unknown[] = [
+    {
+      kind: "participant",
+      participant: { slot: 3, name: "Overflow", level: 1, face: 20_000, look: [30_000] },
+      announce: false,
+    },
+    { kind: "participant", participant: { slot: 0 }, announce: "yes" },
+    {
+      kind: "participant",
+      participant: { slot: 0, name: "Bad look", level: 1, face: 20_000, look: [0] },
+      announce: false,
+    },
+    { kind: "joinFailed", code: 256 },
+    { kind: "left", slot: -1 },
+    { kind: "invite", inviterName: "Hero", roomId: -1 },
+    { kind: "inviteResult", ok: 2, name: "Missing" },
+    { kind: "chat", line: 3 },
+    { kind: "cellUpdate", slot: 1, level: 8, face: 20_001, look: [0] },
+    { kind: "roster", cells: [{ action: "clear" }, { action: "keep" }] },
+    {
+      kind: "roster",
+      cells: [{ action: "clear" }, { action: "keep" }, { action: "clear" }, { action: "clear" }],
+    },
+    {
+      kind: "roster",
+      cells: [
+        { action: "clear" },
+        { action: "keep" },
+        { action: "fill", level: 7, face: 20_002, look: [30_002] },
+      ],
+    },
+    {
+      kind: "roster",
+      cells: [{ action: "clear" }, { action: "keep" }, { action: "invalid" }],
+    },
+    { kind: "future-event" },
+  ];
+  for (const event of malformed)
+    assert.equal(validateServerMessagePayload({ t: "messenger", event }), false, describe(event));
 });
 
 test("login, character-list and account-control payloads reject malformed fields", () => {

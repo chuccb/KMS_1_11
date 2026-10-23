@@ -1,4 +1,4 @@
-/** Selected server-to-browser runtime guards. Trade and messenger unions remain explicit gaps. */
+/** Selected server-to-browser runtime guards. Trade remains the one explicit nested-union gap. */
 import { PARTY_MAX_MEMBERS } from "./party-state.ts";
 import { readLoginCharacters, readLoginWorlds } from "./login-data.ts";
 import { readFeedbackEvent } from "./feedback-data.ts";
@@ -6,6 +6,7 @@ import { parseDrop, parseDropRemoval } from "./drop-presentation.ts";
 import { TEMPORARY_FIELDS } from "./temporarystats.ts";
 import { isTestToolResult } from "./ui-resource-validation.ts";
 import { isFiniteNumber, isRecord } from "./resource-validation.ts";
+import { isMessengerEvent } from "./messenger-message-validation.ts";
 import type { WebClientServerMessage } from "../server/src/net/webclient-messages.ts";
 import type { ServerEventEnvelope } from "./websocket-transport.ts";
 
@@ -13,7 +14,7 @@ type PayloadValidator = (message: Record<string, unknown>) => boolean;
 
 type CoveredMessageType = WebClientServerMessage["t"];
 
-/** Message families with full event-specific checks at the browser transport boundary. */
+/** Message discriminators with a dedicated payload guard at the browser transport boundary. */
 const GUARDED_MESSAGE_TYPES = [
   "login",
   "characters",
@@ -34,6 +35,7 @@ const GUARDED_MESSAGE_TYPES = [
   "party",
   "party-command",
   "trade-command",
+  "messenger",
   "fame",
   "user-enter",
   "user-look",
@@ -72,10 +74,9 @@ const GUARDED_MESSAGE_TYPES = [
   "disconnect",
 ] as const satisfies readonly CoveredMessageType[];
 
-/** These nested protocol unions are intentionally left to their domain-specific consumers for now. */
+/** MiniRoom type 11 can carry BigInt cash fields that make `WebClient.send`'s JSON.stringify throw. */
 export const SERVER_MESSAGE_VALIDATION_GAPS = [
   "trade",
-  "messenger",
 ] as const satisfies readonly CoveredMessageType[];
 
 type ClassifiedMessageType =
@@ -719,6 +720,7 @@ const payloadValidators = {
   party: (message: Record<string, unknown>) => validPartyResult(message.result),
   "party-command": validPartyCommand,
   "trade-command": validTradeCommand,
+  messenger: (message: Record<string, unknown>) => isMessengerEvent(message.event),
   fame: (message: Record<string, unknown>) => validFameResult(message.result),
   "user-enter": (message: Record<string, unknown>) => validUserView(message.user),
   "user-look": (message: Record<string, unknown>) =>

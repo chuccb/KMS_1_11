@@ -1,10 +1,16 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-23。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-23（ADR-159：Messenger payload guard；Trade BigInt serialization path traced）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成.
 
-## 最新增量：選定 inbound payload guards 與 Bun 原生 formatter（ADR-158）
+## 最新增量：Messenger event guard 與 trade serialization trace（ADR-159）
 
-`client/websocket-transport.ts` 加入 optional per-payload callback；JSON object／own string `t` 通過後才執行 guard，false 或 thrown exception 都 fail-closed 到既有 malformed callback。`client/main.js` 明確注入 `client/server-message-validation.ts`。這只驗證列出的 message families（login／characters／account replies、combat／stat basis、field/entity/movement、temporary stats、party/social、inventory/shop/NPC dialogue、drops/feedback/lifecycle 等），精確型別見 `SERVER_MESSAGE_VALIDATED_TYPES`。`trade`、`messenger` nested unions 明列在 `SERVER_MESSAGE_VALIDATION_GAPS`；未識別／未分類的 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard）。`client/main.js` 仍未 strict 型別化，亦不宣稱完整 `ClientEvent` runtime schema。
+`client/messenger-message-validation.ts` 現在接上 `client/server-message-validation.ts`，完整驗證八種 Messenger event variant、巢狀 participant／look 欄位，以及固定恰好三格的 `clear`／`keep`／`fill` roster；`MESSENGER_ROOM_SIZE` 由 `client/messenger-constants.ts` 單一提供，client state、protocol、server 與 validator 共用。測試逐 variant 覆蓋 accept/reject，以及畸形槽位、look、欄位型別／範圍、roster 長度和 cell。
+
+Messenger 已不再是 gap：目前 56 種 server-to-browser discriminator 有 guard，`trade` 是唯一明列的 `SERVER_MESSAGE_VALIDATION_GAPS`。Trade path 已查實：`0x50 type 11` → `readItemSlot` → `ClientSession` event → mechanical `clientEventJson` projection → `WebClient.send` 的直接 `JSON.stringify`；隔離 regression 用 non-null cash block 的兩個 `bigint` 欄位證明 stringify 會丟 `TypeError`。故先維持 trade gap，直到定義並驗證不失真的 JSON-safe wire projection；本輪不正規化或偷偷字串化。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`client/main.js` 仍未 strict 型別化，不宣稱完整 `ClientEvent` schema。
+
+## 前輪增量：選定 inbound payload guards 與 Bun 原生 formatter（ADR-158）
+
+`client/websocket-transport.ts` 加入 optional per-payload callback；JSON object／own string `t` 通過後才執行 guard，false 或 thrown exception 都 fail-closed 到既有 malformed callback。`client/main.js` 明確注入 `client/server-message-validation.ts`。這只驗證列出的 message families（login／characters／account replies、combat／stat basis、field/entity/movement、temporary stats、party/social、inventory/shop/NPC dialogue、drops/feedback/lifecycle 等），精確型別見 `SERVER_MESSAGE_VALIDATED_TYPES`。當時 `trade`、`messenger` nested unions 明列在 `SERVER_MESSAGE_VALIDATION_GAPS`；未識別／未分類的 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard）。`client/main.js` 仍未 strict 型別化，亦不宣稱完整 `ClientEvent` runtime schema。
 
 新 `server/test/server-message-validation.test.ts` 覆蓋代表 payload accept/reject 與範圍／巢狀欄位；transport tests 覆蓋接受、拒絕及 validator throw。所有測試只用隔離物件／fake socket；不登入或操作角色／save。實際 gates 與最新結果見 [ADR-158](DECISIONS.md)。
 
@@ -14,7 +20,7 @@ Bun 1.4.4 內建 `bun fmt` 取代 Prettier CLI：以 lockfile 原 SHA512 驗證�
 
 新增 `server/src/net/webclient-messages.ts`：用 conditional mapped union 將 `ClientEvent.kind` 轉為 JSON `t`，明確列出 field capability flags、mob presentation／forcedDuration、登入／角色／角色建立刪除、`stat-basis`、attack／touch result、test-tools 等全部 `WebClient.send` 訊息。`clientEventJson` 現在保留 event discriminator；`BrowserSession.send(message: WebClientServerMessage)` 移除原本的 `unknown` sink。`touch-result` 使用互斥 success／rejection union。無 `any`、strict 放寬或新 runtime dependency。
 
-這是**出站 JSON 的編譯期合約**，不等於序列化內容已深度 runtime 驗證。ADR-157 當時 browser inbound transport 僅檢查 JSON object＋string `t`；ADR-158 後才接上選定 per-event guard，且 `trade`／`messenger` 仍有明確 gaps，未識別／未分類的 runtime `t` pass-through（已知 `t: "unknown"` 有 guard）；`client/main.js` 仍未 strict 型別化。
+這是**出站 JSON 的編譯期合約**，不等於序列化內容已深度 runtime 驗證。ADR-157 當時 browser inbound transport 僅檢查 JSON object＋string `t`；ADR-158 後才接上選定 per-event guard，且在 ADR-158 當時 `trade`／`messenger` 仍有明確 gaps，未識別／未分類的 runtime `t` pass-through（已知 `t: "unknown"` 有 guard）；`client/main.js` 仍未 strict 型別化。
 
 ADR-157 當輪實際核對 registry／GitHub latest 後，把 Bun／`@types/bun` 由 1.4.3 升到 **1.4.4**；TypeScript 7.0.2、當時使用的 Prettier 3.9.10、playwright-core 1.64.1、@sparticuz/chromium 153.0.0 與 checkout v7.0.1／setup-bun v2.2.0 維持 latest。官方 registry tarball SHA1／SHA512 verified；`.bun-version`／`packageManager`／`engines`／`@types/bun`／`bun.lock` 同步，frozen install 27 installs／47 packages 無漂移。ADR-157 當時 typecheck、format check、browser build 通過；相關 bridge／projection focused **44/0、4 files**；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files（345.05 s）**。後續 formatter dependency migration、format byte comparison 與本輪最新回歸見 ADR-158。
 
@@ -31,7 +37,7 @@ JSON parse 與 active-connection generation fence；`client/main.js` 不再直�
 invalid envelope、舊 socket stale event fence、active error/close、return-to-title close code）；mock browser startup／static／UI 與
 system-UI source wiring 聚焦共 **18/0、5 files**。`typecheck`／`format:check`／`build` 通過；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files**（378.63 s）。本輪不新增依賴、不改 strict、不連真遊戲、不操作帳號／角色／save。
 
-目前 `client/` 有 **115 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
+目前 `client/` 有 **117 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
 
 ## 前輪增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
 

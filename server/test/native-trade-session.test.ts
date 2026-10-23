@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { syntheticSocialPeer, byteName } from "./fixtures/synthetic-social-peer.ts";
 import { routeChatInput } from "../src/net/chat-input.ts";
+import { clientEventJson } from "../src/net/client-event-json.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import {
   MINIROOM_KIND,
@@ -105,7 +106,15 @@ test("0x50 becomes trade events; 0x25 leaves only under the native guards", asyn
 
   // 5. Peer packets decode with their side index intact (the view maps me to the right).
   p.send(encodeMiniRoomMesos({ index: 0, amount: 777 }));
-  p.send(encodeMiniRoomItem({ index: 0, roomSlot: 4, item: nonEquipSlot(2000001, 3) }));
+  p.send(
+    encodeMiniRoomItem({
+      index: 0,
+      roomSlot: 4,
+      item: nonEquipSlot(5_000_001, 3, {
+        cash: { sn: 0x123456789abcdefn, unknown18: 3, unknown1A: 0x102030405060708n },
+      }),
+    }),
+  );
   p.send(encodeMiniRoomLock());
   await p.barrier();
   const peerish = tradeEvents(p.events)
@@ -116,6 +125,15 @@ test("0x50 becomes trade events; 0x25 leaves only under the native guards", asyn
   if (peerish[1]?.kind === "item") {
     assert.equal(peerish[1].index, 0);
     assert.equal(peerish[1].roomSlot, 4);
+    assert.deepEqual(peerish[1].item.cash, {
+      sn: 0x123456789abcdefn,
+      unknown18: 3,
+      unknown1A: 0x102030405060708n,
+    });
+    const browserMessage = clientEventJson({ kind: "trade", event: peerish[1] }, 0);
+    // WebClient.send performs this direct JSON.stringify; this synthetic 0x50 path reaches the
+    // bridge projection with BigInt intact, so trade cannot be called JSON-safe or deeply guarded yet.
+    assert.throws(() => JSON.stringify(browserMessage), { name: "TypeError", message: /BigInt/ });
   }
   assert.deepEqual(peerish[2], { kind: "lock" });
 

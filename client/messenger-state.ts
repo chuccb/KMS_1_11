@@ -38,6 +38,8 @@
 import type { MessengerEvent } from "../server/src/protocol/messenger.ts";
 import { vScrollScroller, VSCR_CELL, type VScrollBarGeometry } from "./vscroll.ts";
 import { BT_UI_CLOSE } from "./uicontrols.ts";
+import { MESSENGER_ROOM_SIZE } from "./messenger-constants.ts";
+export { MESSENGER_ROOM_SIZE } from "./messenger-constants.ts";
 
 /** The mode-1 window: backgrnd (200x335) plus the charView column (97x322) at (200,13). */
 export const MESSENGER_WINDOW = {
@@ -181,9 +183,9 @@ export function messengerState() {
     /** `sub_4DDF10`: the window comes up with the five help rows, empty cells. */
     openLocal(): MessengerTransition[] {
       room = {
-        slots: [undefined, undefined, undefined],
+        slots: Array.from({ length: MESSENGER_ROOM_SIZE }, () => undefined),
         lines: [...MESSENGER_TEXT.help],
-        typing: [false, false, false],
+        typing: Array.from({ length: MESSENGER_ROOM_SIZE }, () => false),
       };
       invite = undefined;
       return [{ kind: "opened" }];
@@ -209,7 +211,11 @@ export function messengerState() {
     receive(event: MessengerEvent, now = 0): MessengerTransition[] {
       switch (event.kind) {
         case "participant": {
-          if (room === undefined || event.participant.slot < 0 || event.participant.slot > 2)
+          if (
+            room === undefined ||
+            event.participant.slot < 0 ||
+            event.participant.slot >= MESSENGER_ROOM_SIZE
+          )
             return [];
           const { slot, name, level, face, look } = event.participant;
           room.slots[slot] = { name, level, face, look, since: now };
@@ -223,7 +229,7 @@ export function messengerState() {
           return [{ kind: "line", text: MESSENGER_TEXT.joinFailed }];
         }
         case "left": {
-          if (room === undefined || event.slot < 0 || event.slot > 2) return [];
+          if (room === undefined || event.slot < 0 || event.slot >= MESSENGER_ROOM_SIZE) return [];
           const member = room.slots[event.slot];
           room.slots[event.slot] = undefined;
           room.typing[event.slot] = false;
@@ -278,7 +284,7 @@ export function messengerState() {
         case "cellUpdate": {
           // `sub_4E2170`: only an occupied cell applies; level/face/look replace in place,
           // the name and the typing flag stay, and no row is printed.
-          if (room === undefined || event.slot < 0 || event.slot > 2) return [];
+          if (room === undefined || event.slot < 0 || event.slot >= MESSENGER_ROOM_SIZE) return [];
           const member = room.slots[event.slot];
           if (member === undefined) return [];
           room.slots[event.slot] = {
