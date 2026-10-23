@@ -89,6 +89,7 @@ import {
 import type { MobTemplate } from "../game/mobs.ts";
 import { temporaryStats } from "../../../client/temporarystats.ts";
 import type { AudioProvider } from "../game/audio.ts";
+import type { BrowserMapArtResource, BrowserMapResource } from "../../../client/map-resources.ts";
 import type { MapData, MapDestination } from "../game/map.ts";
 import type { MapArt } from "../game/mapart.ts";
 import type { AvatarFrame } from "../game/avatar.ts";
@@ -243,7 +244,7 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 }
 
 /** The map geometry the browser needs: everything a 2D view draws the ground from. */
-function mapJson(map: MapData): unknown {
+function mapJson(map: MapData): BrowserMapResource {
   const segments: {
     layer?: number;
     group?: number;
@@ -301,7 +302,7 @@ function mapJson(map: MapData): unknown {
 }
 
 /** `/api/map/<id>/art`: the background stack, the tiles/objects and the camera's own bounds. */
-function artJson(art: MapArt): unknown {
+function artJson(art: MapArt): BrowserMapArtResource {
   return {
     title: art.title,
     miniMap: art.miniMap,

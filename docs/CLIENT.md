@@ -361,7 +361,13 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
 - 完整 **561/561＋TypeScript PASS**；原版來源、隔離 Chromium 與未完成項目見
   [PORTAL_CLIMB_VALIDATION.md](PORTAL_CLIMB_VALIDATION.md)。
 
-## 最新整理：strict map-command parsing／地圖目錄驗證（2026-10-24）
+## 最新整理：strict map-resource HTTP contract／runtime guards（2026-10-24）
+
+`client/map-resources.ts` 為 `/api/map/<id>`、`/api/map/<id>/art` 與地圖名稱建立 browser wire DTO 和深度 unknown-payload guards。畫地圖前驗證 ID／名稱、地形、portal、ladder、spawn、物理／相機 bounds、背景、sprite、動畫 frame、missing-tile 資料與 optional minimap；`client/main.js` 另外要求 response ID 必須和請求相同，保留原場地 generation fence。server `mapJson`／`artJson` 使用相同 DTO 作編譯期約束，未改 WZ parser、權限、協定或存檔。
+
+真 Data.wz HTTP endpoints、全部 **100 張 map JSON routes**、畸形 geometry／frame rejection 與全部 **100 張 map-art** 的 guard regression 通過；map 0 保持有效。`client_probe.ts` 的 map/art fixtures 已改成符合正式 DTO 且 shim 依請求 ID 回應，沒有放寬 guard。focused contract **5/0、1 file**；完整 suite **1485/0、5334 expects、172 files（374.64 s）**。詳 [ADR-162](DECISIONS.md)。
+
+## 前輪整理：strict map-command parsing／地圖目錄驗證（2026-10-24）
 
 `/map ID`（含 `/warp`／`/go`／`/헉맵`）只接受非負安全整數、`0x0D` signed-32-bit 上限內的 map ID，排除 WZ no-destination sentinel；實際 map 0 有效，原 field／存活與 server permission gate 不變。`/maps` 的 `/api/maps` payload 現在先驗證，再依 ID／地圖名／區域名不分大小寫搜尋；最多列 20 筆，HTTP／JSON／資料格式錯誤會顯示明確系統訊息。共用值在 `client/map-constants.ts`，原 server `game/map.ts` export 保留；純解析／錯誤／邊界回歸見 [ADR-161](DECISIONS.md)。
 
@@ -496,7 +502,8 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 
 | 端點 | 回什麼 |
 |---|---|
-| `GET /api/map/<id>/art` | `{ backs[], sprites[], bounds, portalFrames[], missingTiles, missingTileSets[] }`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,z,front:false,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，依tile／obj各自原公式排序，同z保留原插入順序；`bounds` 是相機可以顯示的矩形 |
+| `GET /api/map/<id>` | `{id,name,streetName,bgm,recovery,physicalBounds?,portals[],footholds[],ladders[],mobs[],npcs[]}`。只讀地圖幾何／傳送門／出生資料；browser 先驗證整份 payload，並要求 response ID 與 request ID 相符 |
+| `GET /api/map/<id>/art` | `{title?,miniMap?,backs[],sprites[],bounds,portalFrames[],missingTiles,missingTileSets[]}`。`backs[]` 是 `{path,ox,oy,x,y,rx,ry,type,cx,cy,a,z,front,flip}`；`sprites[]` 是 `{kind,x,y,z,layer,flip,frames[{path,delay,a0?,a1?,ox,oy}]}`，依tile／obj各自原公式排序，同z保留原插入順序；`bounds` 是相機可以顯示且順序有效的矩形；`miniMap` 為 WZ 選用資料，不存在時欄位可省略。DTO／深度 guards 位於 `client/map-resources.ts`。
 | `GET /api/death` | `{fall[],land[]}`：原 Tomb queue／delay／origin；fall只排到至少800ms，land全格。原素材無法讀取時404，不生成替代圖 |
 | `GET /api/png/<path>` | 一張 WZ canvas 的 PNG。`<path>` 是 `Map/…`、`Character/…`、`Mob/…`、`Npc/…`、`Effect/…`、`Item/…`、`UI/…` 其中之一，整個路徑 URL-encode 成一段；`..` 與其他檔案一律 404 |
 | `GET /api/avatar.png?face&hair&items&stance&frame&flip&emotion&faceFrame` | 組好的一張角色 PNG；`x-frame-dx`／`x-frame-dy` 標頭是它左上角相對腳底的位置（頁面只加這兩個值） |

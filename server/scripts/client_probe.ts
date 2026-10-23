@@ -13,6 +13,7 @@ import { runInThisContext } from "node:vm";
 // Type-only: erased, so they cost nothing and never evaluate a client module before the shim.
 import type { RecoveryInput } from "../../client/recovery.ts";
 import type { TooltipFacts } from "../../client/tooltip.ts";
+import type { BrowserMapArtResource, BrowserMapResource } from "../../client/map-resources.ts";
 
 // ------------------------------------------------------------------ shim types
 type Listener = (event: DomEvent) => void;
@@ -469,21 +470,24 @@ globals.Image = class {
 };
 
 // ------------------------------------------------------------------ server fixture payloads
-const STUB_MAP = {
+const STUB_MAP: BrowserMapResource = {
   id: 1000000,
   name: "stub",
   streetName: "stub",
+  bgm: "Bgm00/Map",
+  recovery: 1,
   portals: [
-    { name: "sp", type: 0, x: -91, y: 181, toMapId: 999999999 },
-    { name: "door", type: 2, x: 200, y: 181, toMapId: 1010000 },
+    { name: "sp", type: 0, x: -91, y: 181, toMapId: 999999999, toName: "" },
+    { name: "door", type: 2, x: 200, y: 181, toMapId: 1010000, toName: "in00" },
   ],
   footholds: [{ id: 32, x1: 0, y1: 300, x2: 1000, y2: 300, next: 0, prev: 0 }],
-  // The real /api/map JSON lists its NPCs (webclient.ts mapPayload), and loadMap preloads their
-  // metadata from exactly this list; the stub carries the one template the NPC battery clicks.
+  ladders: [],
+  // The real /api/map JSON lists NPCs (webclient.ts mapJson); loadMap preloads their metadata from
+  // exactly this list, and the stub carries the one template the NPC battery clicks.
   mobs: [],
   npcs: [{ templateId: 2003, x: 300, y: 420, foothold: 32 }],
 };
-const STUB_ART = {
+const STUB_ART: BrowserMapArtResource = {
   backs: [
     {
       path: "Map/Back/x.img/back/0",
@@ -497,8 +501,9 @@ const STUB_ART = {
       cx: 0,
       cy: 0,
       a: 255,
-      front: 0,
-      flip: 0,
+      z: -147990,
+      front: false,
+      flip: false,
     },
   ],
   sprites: [
@@ -508,11 +513,14 @@ const STUB_ART = {
       x: 0,
       y: 0,
       z: -500,
-      flip: 0,
+      flip: false,
       frames: [{ path: "Map/Tile/x.img/a/0", delay: 0, ox: 0, oy: 0 }],
     },
   ],
   bounds: { left: 0, top: 0, right: 1000, bottom: 692 },
+  missingTiles: 0,
+  missingTileSets: [],
+  portalFrames: [],
 };
 interface JsonResponse {
   ok: boolean;
@@ -549,6 +557,10 @@ const shimFetch = async (url: string | URL | Request): Promise<JsonResponse> => 
     });
   }
   if (path.endsWith("/art")) return ok(STUB_ART);
+  if (path.startsWith("/api/map/")) {
+    const mapId = Number(path.slice("/api/map/".length));
+    return Number.isSafeInteger(mapId) ? ok({ ...STUB_MAP, id: mapId }) : ok({});
+  }
   // isNpcMetadata (entity-resource-validation.ts) requires the full record; the click rectangle is
   // the server's own native dc* fallback (npcClickBounds, sprites.ts), not an invented hit box.
   if (path.startsWith("/api/npc/"))

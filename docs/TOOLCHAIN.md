@@ -1,16 +1,16 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-24（ADR-161：strict map-command／catalog boundary；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-24（ADR-162：strict map-resource wire contract；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path Prettier 3.9.10 byte audits 均保留為各輪紀錄。本輪新增兩個 client TypeScript module 與一個測試檔，現樹包含 **442 個 `.ts`＋4 個 package/config/workflow paths，共 446 個格式輸入**；Prettier 3.9.10 與 Bun 1.4.4 輸出 **446/446 byte-identical**。Prettier 只作臨時比較工具，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path byte audits 保留為歷史紀錄。ADR-162 現樹含 **443 個 `.ts`＋4 個 package/config/workflow paths，共 447 個格式輸入**；Prettier 3.9.10 僅作臨時比較，與 Bun 1.4.4 輸出 **447/447 byte-identical**，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
 
 strict `client/websocket-transport.ts` 把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
 自 `client/main.js` 移到可單元測試的 TypeScript 邊界；JSON object＋string `t` 後再呼叫 optional payload guard，guard 回 false 或 throw 都 fail-closed。
-`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **122 支 client `.ts`**、`client/main.js` **5529 行**。本輪驗收與 full suite 數據見 ADR-161；全部以隔離測試／mock，未操作 LIVE 角色或 save。
+`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **123 支 client `.ts`**、`client/main.js` **5535 行**。最新地圖資源 boundary 與 gates 見 ADR-162；全部以隔離測試／mock，未操作 LIVE 角色或 save。
 
 ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
-（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源仍是 `client/main.js`（5529 行）**；
+（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源仍是 `client/main.js`（5535 行）**；
 靜態耦合普查顯示它是彼此糾結的單體（321 個 top-level 宣告中僅 3 個零耦合），沒有可機械切開的純區塊，
 故採門面分層逐領域搬移，不以改名冒充遷移。frame／play 已於前輪遷為 strict TS，詳
 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。歷史數字／PID不代表當前 LIVE。
@@ -45,7 +45,17 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 
 格式化則由 Prettier 3.9.10 換成 Bun 1.4.4 內建 `bun fmt`：兩個 formatter 使用同一 `.prettierrc.json`，438 個格式化路徑的結果逐檔 byte-for-byte 一致；已移除 Prettier package／lock entry，設定檔保留。`bun check --no-script` 亦在 730 個 TS files 無 type errors；維持 pinned TypeScript 7.0.2 `tsc` 為正式 typecheck script。
 
-## 最新增量：strict map-command parsing 與 `/api/maps` guard（ADR-161）
+## 最新增量：strict map-resource HTTP contract 與 DTO guards（ADR-162）
+
+`client/map-resources.ts` 定義 `/api/map/<id>` map geometry、`/api/map/<id>/art` 與 map-name 的 browser wire types，並對 `unknown` payload 深度驗證。`client/main.js` 僅在完整 guard 通過且回應 `id` 等於請求 map ID 時安裝 map／art；既有場地 generation fence 保留。server `mapJson`／`artJson` 明確回傳共用 DTO，編譯期避免 browser projection 漂移。
+
+map guard 涵蓋合法 map ID／名稱、有限 terrain／portal／ladder／spawn 數值、物理 bounds、背景、sprite、frame、相機 bounds 順序、missing-tile 欄位，以及可選 minimap 的原生畫布尺寸與座標；map 0 仍有效，no-destination sentinel 仍非法。沒有改 WZ parser、原地形資料、地圖命令權限或存檔 policy。
+
+`server/test/browser-resource-contract.test.ts` 用唯讀真 Data.wz HTTP map/art response 與 malformed fixtures 驗證 wire contract；同一真 WZ HTTP server 逐一驗證 **100 張 map JSON response**；全 archive 的 **100 張 map-art** 亦全部通過 browser guard。`client_probe.ts` fixtures 以 `BrowserMapResource`／`BrowserMapArtResource` 約束，且依 request path 回正確 map ID；沒有放寬 guard。contract focused **5/0、1 file**。
+
+ADR-162 的 TypeScript 7.0.2 strict typecheck、Bun 1.4.4 `bun check --no-script --timing`、format check、browser build、Prettier 3.9.10 comparison **447/447 byte-identical** 與完整 suite **1485/0、5334 expects、172 files** 全通過。僅使用 local test server、isolated fixtures 與唯讀 Data.wz；未登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe。詳細結果見 [ADR-162](DECISIONS.md)。
+
+## 前輪增量：strict map-command parsing 與 `/api/maps` guard（ADR-161）
 
 `client/map-commands.ts` 將原在 `client/main.js` 的 `/map` aliases、`/maps`、`/where` parsing／呈現移至可 strict typecheck 的 pure module；`client/map-constants.ts` 單一提供 `RETURN_MAP_NONE` 與 `0x0D` signed-32-bit 上限，`server/src/game/map.ts` 保留原 export。地圖目錄先以 `isMapDestinations` 驗證每個 ID 為安全、非負且可表達的整數（排除 no-destination sentinel），name／streetName 必須是字串，再做原本不分大小寫的搜尋與最多 20 筆顯示。map ID 0 仍有效。
 
@@ -100,9 +110,9 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **122 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **123 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
-  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5529 行，JS／TS 混用），必須繼續實際遷移；
+  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5535 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
@@ -179,9 +189,9 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 
 ## 實際驗證狀態
 
-本輪 ADR-161：strict typecheck／format check／Bun check／browser build 通過；focused **24/0、4 files**，完整 suite **1482/0、5334 expects、172 files（345.82 s）**。現樹 formatter audit **446/446 byte-identical**；2026-10-24 latest 核對與固定 pins 一致。詳細地圖命令政策與安全界線見 [ADR-161](DECISIONS.md)。
+本輪 ADR-162：strict typecheck／format check／Bun check／browser build 通過；map-resource contract focused **5/0、1 file**，完整 suite **1485/0、5334 expects、172 files（374.64 s）**。現樹 formatter audit **447/447 byte-identical**；2026-10-24 latest 核對與固定 pins 一致。未登入 LIVE、未操作角色或既有 save。詳細地圖 JSON wire contract 與安全界線見 [ADR-162](DECISIONS.md)。
 
-最新掉落／fh增量：strict／format／build通過，focused73/0（7 files），新增28案例。
+前輪掉落／fh增量：strict／format／build通過，focused73/0（7 files），新增28案例。
 完整1023/44（1067 tests / 117 files，187.28s），相對7162765 failure multiset含重複新增0／移除0，CI仍不綠。
 全100張原WZ地圖379422組、真PNG／DPR1／2 component及新LIVE的81modules／唯讀標題120幀通過、0WS。
 新獨立測試入口不是舊進度恢復；玩家自行操作後不重啟或重置，不能以save hash不變當作並行觀測前提。
@@ -226,4 +236,4 @@ frozen lockfile（47 packages 無漂移）、根 strict typecheck、格式與 br
 
 focused 20/0；真 Chromium 的來源版與建置版、PNG實際壓縮／快取、150筆原音訊解碼、fixture獨占寫入與防越界皆通過。原 WZ manifest checksum 及其他既有測試保留。現有 LIVE 首頁200、兩個entry與69個模組 HTTP／MIME／JS parser 通過；只載入頁面的 Chromium 實測 ready／首幀通過、page errors=0、WebSocket attempts=0。沒有登入 LIVE、操作現有角色或重啟 server。
 
-**44個失敗仍阻擋驗收；main.js 與10支工具仍未遷完，這不是全專案完成。** 詳細範圍、原證與失敗清單見 [BUN_MIGRATION](BUN_MIGRATION.md)。CI 不使用 continue-on-error、skip、縮小範圍或關閉 strict。
+**歷史快照（38cdd2d）**：當時44個失敗仍未結案、main.js與10支工具仍待遷移；ADR-108後44項已結案，ADR-109及後續輪次已遷完工具，目前僅主入口 `client/main.js` 尚未 strict 型別化。此段保留當輪證據，不代表現行 suite 仍有失敗。CI 不使用 continue-on-error、skip、縮小範圍或關閉 strict；完整歷史見 [BUN_MIGRATION](BUN_MIGRATION.md)。

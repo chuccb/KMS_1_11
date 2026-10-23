@@ -1,14 +1,22 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-24（ADR-161：strict map-command／catalog validation；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-24（ADR-162：strict map-resource API contract；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：map command 與地圖目錄的 strict TypeScript boundary（ADR-161）
+## 最新增量：strict map-resource JSON contract 與 runtime guards（ADR-162）
+
+新增 `client/map-resources.ts`，集中 `/api/map/<id>` map geometry、`/api/map/<id>/art` 與 map-name 的 browser DTOs 和深度 `unknown` guards；browser 只在 payload 形狀有效且 map ID 與請求相符時安裝資源。`server/src/net/webclient.ts` 的 `mapJson`／`artJson` 現在明確回傳共用 wire types。guard 驗證地圖 ID／名稱、地形、portal、ladder、spawn、物理與相機 bounds、背景／sprite／frame、missing-tile metadata 及可選 minimap；map 0 合法，no-destination sentinel 仍拒絕。
+
+`server/test/browser-resource-contract.test.ts` 以唯讀 Data.wz 真 HTTP response 驗證 map 與 art endpoint，加入 malformed resource/frame rejection；另以同一真 WZ HTTP server 逐一驗證全部 100 張 map JSON response 與 100 組 map-art payload。`client_probe.ts` 的 map/art fixtures 現依 wire DTO 定義，HTTP map shim 回應與請求一致的 ID，未放寬 production guards。focused contract **5/0、1 file**。
+
+TypeScript 7.0.2 strict typecheck、Bun 1.4.4 `bun check`、format check、Bun browser build、Prettier 3.9.10 比較 **447/447 byte-identical** 全通過；完整 `bun run test` **1485/0、5334 expects、172 files（374.64 s）**。registry／GitHub latest 核對日期 2026-10-24，固定 Bun／TS／Chromium／Actions pins 仍 latest，無需改依賴。
+
+唯一未 strict 型別化來源仍是 `client/main.js`（5535 行）；`client/` 有 **123 支 `.ts`**。沒有登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe；本輪另啟動全新 memory-only preview，明確使用 `--save off`，沒有載入或操作舊進度（詳下方〈預覽與存檔〉）。
+
+## 前輪增量：map command 與地圖目錄的 strict TypeScript boundary（ADR-161）
 
 新增 `client/map-constants.ts`（WZ no-destination sentinel／`0x0D` s32 上限）與 `client/map-commands.ts`（alias／整數邊界 parser、`/where`／`/maps` route 及 validated catalog search）；server `game/map.ts` 保留原 `RETURN_MAP_NONE` export。`client/main.js` 委派新模組後少 20 行，field／permission gate 和有效命令輸出不變；`/api/maps` 的 unknown payload 在顯示前必須通過 map destination guard，ID 0 保持有效。
 
 新增四項純 map-command regression；真 Data.wz `/api/maps`、map/provider、portal 與 server map-policy fixtures 共 **24/0、4 files**。TypeScript 7.0.2 strict typecheck、`bun check`（738 checked／739 loaded）、format check、Bun browser build 通過；Prettier 3.9.10 comparison 為 **446/446 byte-identical**。完整 `bun run test` **1482/0、5334 expects、172 files（345.82 s）**。最新 registry／GitHub 核對日期 2026-10-24，原有 Bun／TS／Chromium／Actions pins 仍是 latest，未為升級而改依賴。
-
-唯一未 strict 型別化來源仍是 `client/main.js`（5529 行）；`client/` 有 **122 支 `.ts`**。全程未登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe；既有 memory-only preview 仍使用 `--save off`。
 
 ## 前輪增量：trade JSON projection 與 full MiniRoom guard（ADR-160）
 
@@ -218,7 +226,7 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 
 ## 已落實
 
-- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（最初遷移的 438-path audit 保留其歷史結果，Prettier direct dependency 已移除）。ADR-161 當輪以 Prettier 3.9.10 對本樹 446 個輸入再次 byte-compare，**446/446 相同**；Bun／型別與保留 package metadata latest 於 2026-10-24 重查，固定 pins 仍一致，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
+- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（最初遷移的 438-path audit 保留其歷史結果，Prettier direct dependency 已移除）。ADR-161 當輪對 446 個輸入 byte-compare；ADR-162 現樹為 **443 個 `.ts`＋4 個 config/package/workflow paths，Prettier 3.9.10 與 Bun 輸出 447/447 相同**。Bun／型別與保留 package metadata latest 於 2026-10-24 重查，固定 pins 仍一致，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
 - 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前81）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
@@ -290,11 +298,11 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 2. ~~`server/scripts/client_probe.mjs` 的形式遷移~~ **已完成（ADR-109）**：現為 `server/scripts/client_probe.ts`，納入 strict 檢查並由 `server/test/client-ui.test.ts` spawn 執行。**剩餘唯一未完成項是 client/main.js**。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. **44 項失敗已於 ADR-108 全數結案（1213 pass / 0 fail）**；本節保留歷史清單供追溯，不再代表現況失敗。
-5. **本輪全套工程 gates 已綠**：ADR-156 的 `typecheck`／`format:check`／`build`／完整 suite 均通過；不表示完成主入口嚴格型別化、每種 HTTP／WebSocket event 的深 schema，或替使用者進行手動登入／角色遊玩驗收。後續任何變更仍須重跑對應 gates。
+5. **本輪全套工程 gates 已綠**：ADR-162 的 `typecheck`／`format:check`／Bun `check`／`build`／完整 suite 均通過；不表示完成主入口嚴格型別化、每種 HTTP／WebSocket event 的深 schema，或替使用者進行手動登入／角色遊玩驗收。後續任何變更仍須重跑對應 gates。
 
 ### 尚未遷移的來源（ADR-109 起僅餘 main.js）
 
-- **client/main.js（5529 行）**：仍為 JS／TS 混合入口，未完成分層與型別化。ADR-109 的耦合普查與 `client/inventory-window.ts`、
+- **client/main.js（5535 行）**：仍為 JS／TS 混合入口，未完成分層與型別化。ADR-109 的耦合普查與 `client/inventory-window.ts`、
   既有 shop/window/hud 抽離，以及 ADR-156 的 `client/websocket-transport.ts`（socket lifecycle／頂層 envelope）都是逐域門面；
   其餘 shop operation、rendering、pointer/UI state 與 event-specific payload validation 仍在 main，需逐領域重構，不是一次改名能完成。
 - ~~server/scripts/client_probe.mjs~~ → 已於 ADR-109 遷為 `client_probe.ts`。
@@ -348,6 +356,6 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 
 ## 預覽與存檔
 
-本輪沒有找到舊玩家 save，不冒稱恢復。既有 web 8515 / native 8516 / game 8517 的 memory-only LIVE 保持運行，沒有重啟或清空；使用者可能已有新的記憶體角色進度，不能再稱它當下必然空白。preview/preview、observer/observer 是此獨立世界的帳號，不是還原的舊帳號。
+2026-10-24 已啟動一個**全新、隔離、memory-only** 測試程序：browser web port 8515，login/game ports 8516／8517，`Data.wz` 唯讀，出生地圖 101000000（啟動時 0 mobs），明確 `--save off`。`preview:preview`、`observer:observer` 是此程序的測試帳號；`--map-command` 與開發限定 `--test-tools` 只對這兩個帳號啟用。此程序不載入、不恢復舊角色或既有 save；沒有自動登入、建立／操作角色或寫檔。只讀 GET `/healthz`、`/`、`/main.js`、真 map JSON 與 map-art 都回 200，map/art payload 均通過新 browser guards；沒有打開 WebSocket。
 
---save off 重啟會遺失記憶體進度，不寫既有玩家存檔。實際在線狀態以 LIVE 程序為準；手動啟動指令及安全限制見 README / TOOLCHAIN。
+玩家自行建立或操作的進度只存在這個程序記憶體；重啟會全部遺失。`--save off` 不讀寫既有玩家存檔；預覽是否在線以 Arena 本輪 `Browser game preview` live preview 為準。啟動參數與存檔保護說明見 README。

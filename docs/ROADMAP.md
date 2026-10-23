@@ -1,15 +1,23 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-24（ADR-161：strict map-command parsing／catalog validation；工具鏈 latest 核對無須升版）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-24（ADR-162：strict map-resource wire contract／runtime guards；工具鏈 latest 核對無須升版）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 **ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
 全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支未嚴格型別化**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
-並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union；ADR-161 抽出 strict map command／catalog boundary。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
+並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union；ADR-161 抽出 strict map command／catalog boundary；ADR-162 為 map／art HTTP resources 定義 DTO、runtime guards 與請求 ID 一致性檢查。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
 歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
-## 最新增量：strict map commands 與 `/api/maps` 驗證（ADR-161）
+## 最新增量：strict map-resource API contract 與 browser guards（ADR-162）
+
+新增 `client/map-resources.ts`，為 `/api/map/<id>`、`/api/map/<id>/art` 與 map-name 定義共用 JSON DTO／runtime validators。`client/main.js` 將 response 先作 `unknown` 驗證，再要求回應 map ID 與請求一致後才更新 map/name/art state；server serializers 也回傳同一 browser wire types。現有 map-generation race fence 不變。
+
+完整驗證 map／art 欄位（terrain、portal、ladder、spawn、physical/camera bounds、backs、sprites、frames、optional minimap、missing-tile metadata），拒絕畸形 payload；map 0 有效，no-destination sentinel 仍被拒。真 WZ HTTP contract 通過；regression 逐一 GET Data.wz 的 **100/100 map JSON routes**，另將 **100/100 map-art** 全部送過 browser guard。UI probe fixtures 依 DTO 修正，沒有降低 runtime guards。
+
+新增 map-resource contract tests 後，full `bun run test` **1485 pass／0 fail／5334 expects／172 files（374.64 s）**；strict typecheck、format、Bun check、build、447/447 formatter audit 均通過。只讀 Data.wz／isolated HTTP fixtures，沒有 LIVE login、角色操作、既有 save 讀寫或 state-changing probe。詳 [ADR-162](DECISIONS.md)。
+
+## 前輪增量：strict map commands 與 `/api/maps` 驗證（ADR-161）
 
 `client/map-commands.ts` 接手 `/map`／`/warp`／`/go`／`/헉맵`、`/maps` 與 `/where` 的嚴格解析，保留本機 field／permission gate；數字必須是非負安全整數、符合 `0x0D` 的 s32 上限且不是無目的地 sentinel，map 0 仍有效。`client/map-constants.ts` 單一提供 `RETURN_MAP_NONE` 與上限，`server/src/game/map.ts` 仍 re-export 原常數。
 
@@ -71,7 +79,7 @@ Bun 1.4.4 `bun fmt` 已作為正式 formatter；用鎖檔 Prettier 3.9.10 作一
 ## 優先序 1：繼續真正的嚴格 TypeScript 遷移
 
 - 使用者目前要求全案乾淨易讀、只用最新版TS／ESNext／Bun。**ADR-109 已處理 client_probe（→ `.ts`）並從 main.js
-  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；ADR-156 已抽出 WebSocket transport 與頂層 JSON discriminator 守衛，main.js（5529 行）本體仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
+  抽出背包視窗幾何**、ADR-110 續抽商店視窗幾何並把兩模組引用的原版 `sub_` 證據逐條回讀 `MapleStory.exe.c`／`Data.wz` 交叉確認（剔除查無實據的 `sub_4AC3A0`）**；ADR-156 已抽出 WebSocket transport 與頂層 JSON discriminator 守衛，main.js（5535 行）本體仍需逐領域門面分層與實作型別，不只改名、不以 `any` 包住。
   靜態耦合普查（321 個 top-level 宣告中僅 3 個零耦合）已列為分層順序的依據，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 - frame／play已strict TS實作遷移，真RAF／畫布來源與有界keyboard計畫見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；不對玩家執行手動工具。
 - 7支browser工具的明示admission與typed觀測、NPC/mob素材及look已拆出；手動登入／角色情境未替使用者執行，見[本輪整理](STRICT_BROWSER_TOOL_MIGRATION.md)。

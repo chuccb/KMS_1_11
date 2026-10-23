@@ -1,6 +1,7 @@
 import { chatEntry } from "./chat-entry.ts";
 import { mapSearchMessages, parseMapCommand } from "./map-commands.ts";
 import { RETURN_MAP_NONE } from "./map-constants.ts";
+import { browserMapName, isBrowserMapArtResource, isBrowserMapName, isBrowserMapResource } from "./map-resources.ts";
 import { partyInvitation } from "./party-invitation.ts";
 import { runSocialCommand } from "./social-commands.ts";
 import { partyCommandLines } from "./party-state.ts";
@@ -1205,8 +1206,10 @@ async function rememberMapName(mapId) {
     const response = await fetch(`/api/map/${mapId}`);
     if (!response.ok) return;
     const data = await response.json();
-    const name=[data.streetName,data.name].filter(Boolean).join(':');
-    mapNames.set(data.id,name);return name;
+    if (!isBrowserMapName(data) || data.id !== mapId) return;
+    const name = browserMapName(data);
+    mapNames.set(data.id, name);
+    return name;
   } catch {
     // Leave the explicit id fallback if metadata could not be loaded.
   }
@@ -1218,11 +1221,13 @@ async function loadMap(mapId, generation) {
     if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
     const loaded = await response.json();
     if (self?.mapId !== mapId || generation !== mapGeneration) return; // Including same-map revive/re-entry.
+    if (!isBrowserMapResource(loaded) || loaded.id !== mapId)
+      throw new Error(`map ${mapId}: invalid map resource`);
     map = loaded;
     mapAnimationStart = performance.now();
     audio.setBgm(map.bgm);
     terrain = collisionWorld(map);
-    mapNames.set(map.id,[map.streetName,map.name].filter(Boolean).join(':'));
+    mapNames.set(map.id, browserMapName(map));
     hoveredPortal = undefined;
     // The map reset: the art of the previous map must not be drawn under the new one.
     mapArt = undefined;
@@ -1268,6 +1273,7 @@ async function loadMapArt(mapId, generation) {
     }
     const art = await response.json();
     if (map?.id !== mapId || generation !== mapGeneration) return;
+    if (!isBrowserMapArtResource(art)) throw new Error(`map ${mapId}: invalid map art resource`);
     mapArt = art;
     lensSettings.reveal(performance.now());
     miniMapPanel.setMap(art.miniMap, map.portals);

@@ -6202,3 +6202,30 @@ Trade state 會保存 offer item；視圖依 item id／裝備欄位繪製，並�
 - `bun run build` 通過；browser assets 留在 ignored `dist/client`。
 - 完整 `bun run test`：**1482 pass／0 fail／5334 `expect()` calls，172 files，345.82 s**。
 - 完整測試只用隔離 fixtures、mock／合成 peer、local test server 與唯讀 `Data.wz`；沒有 LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe。既有 memory-only preview 沒有被操作，仍使用 `--save off`。
+
+## ADR-162：strict map-resource wire contract、browser guards 與 WZ regression（2026-10-24）
+
+**狀態**：已接受（`/api/map/<id>` 與 `/api/map/<id>/art` 改以共享 browser DTO 形成編譯期 contract；瀏覽器在消費未知 HTTP payload 前深度驗證，並拒絕與請求不一致的 map ID）
+
+### 背景
+
+`/api/map/<id>` 與 `/api/map/<id>/art` 是 browser 地圖繪製、portal／spawn／terrain 查詢及背景／tile／object 呈現的權威唯讀資料。`client/main.js` 先前直接信任 `response.json()`，server 的 map/art serializer 也沒有指定 shared browser DTO；HTTP 成功因此不能證明 payload 具有 renderer 依賴的 shape，也不能證明 server 回的是所請求 map。地圖切換已有 generation fence，但它只避免舊請求覆蓋新場地，並未驗證同一 generation 內的 payload。
+
+Map geometry 與 map art 分別由 server `MapData` 與 WZ-backed `MapArt` 產生。map art 的 `miniMap` 與 title metadata 可選，不可把無 minimap 的合法地圖拒絕，也不可造 fallback；資料範圍涵蓋 footholds、portals、ladders、spawn、physical bounds、back layers、tile/object sprites、frames 及 camera bounds。map ID 0 是有效 ID，`RETURN_MAP_NONE` 不是可載入的地圖 ID。
+
+### 決策與實作
+
+1. 新增純型別邊界 `client/map-resources.ts`，提供 `BrowserMapName`、`BrowserMapResource`、`BrowserMapArtResource` 與 `browserMapName`。Map DTO 對應現有 JSON projection；未更動 WZ parser、`MapData`／`MapArt` 的遊戲權威或地圖命令 policy。
+2. 對 map-name、map geometry 與 map art 各提供 `unknown` runtime guard。驗證有效 map ID／名稱、BGM／recovery、可選且有序的 physical bounds、portal／foothold／ladder／spawn 欄位、可繪背景與 sprite、非空動畫 frames、alpha／origin 值、相機 bounds、missing-tile metadata，以及 optional minimap 的尺寸／座標／NPC marks。map 0 保留；no-destination sentinel、畸形數字、倒置 bounds 與空 drawable frames 拒絕。
+3. `client/main.js` 的 `rememberMapName`、`loadMap`、`loadMapArt` 先以 guard 驗證 `response.json()`，並要求 response ID 與 request map ID 相符才更新 state；場地 generation race guard 與原本 street-before-map name 格式保留。失敗 payload 不寫入 renderer state。
+4. server `mapJson` 與 `artJson` 指定 `BrowserMapResource`／`BrowserMapArtResource` return types，讓 serialization shape 接受 TypeScript 檢查。因兩端共用 DTO，沒有用 `any`、strictness suppression 或全域 casting。
+5. `server/test/browser-resource-contract.test.ts` 注入唯讀 WZ provider，驗證真 `/api/map/100000000`／`/art` HTTP response、地圖 ID／optional fields 與 malformed fixtures；新增全 archive regression，透過同一真 WZ HTTP server 驗證 **100 張 map JSON routes**，並對 Data.wz 內 **100 張 map-art** 全部呼叫 browser guard。`client_probe.ts` fixtures 明確使用正式 browser DTO，shim 對 `/api/map/<id>` 依 request path 回傳相符 ID；保留 guards，不以放寬產品驗證修測試。
+6. 只讀本機 `Data.wz` 與隔離 HTTP／UI fixtures。沒有登入 LIVE、操作角色、讀寫既有 save、修改原版 WZ 或執行 state-changing probe；不改 save format、protocol、登入狀態或地圖權限。
+
+### 測試與驗證
+
+- `server/test/browser-resource-contract.test.ts`：**5 pass／0 fail**；涵蓋真 WZ HTTP boundary、100 張 map JSON routes、malformed geometry／frames、optional minimap 與全部 100 張 archive map-art。
+- `bun run typecheck`（pinned TypeScript 7.0.2、strict／ESNext）、`bun run format:check`、`bun check --no-script --timing`（739 checked／740 loaded）、`bun run build` 均通過。
+- Prettier 3.9.10 與 Bun 1.4.4 formatter audit：443 個 `.ts` 加 4 個 package/config/workflow inputs，**447/447 byte-identical**；Prettier 不作專案依賴。
+- 完整 `bun run test`：**1485 pass／0 fail／5334 `expect()` calls，172 files，374.64 s**。
+- 無 LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe；memory-only preview 不屬於測試步驟，仍須使用 `--save off`。
