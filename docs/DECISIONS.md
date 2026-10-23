@@ -5862,3 +5862,53 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
   全部 **1459 pass／0 fail／5334 expect、169 files**（370.60 s）。
 - `MapleStory.exe.c`／`.lst` 已還原 byte-identical：`1a247f0e4bd602d9d8f1f55f68f5d2dc`／
   `88d0372f36a4c05e59d21afee8a16eb6`。
+
+## ADR-154：`0x34` 同時是目前 MP 與 client 狀態更新；server 出招是明示重建政策
+
+**日期**：2026-10-23
+**狀態**：已接受（client binary 的雙重效果已結案；原 server 的 MP／`0x2C` 政策仍需 oracle）
+
+### 背景
+
+§4.17.6 原本把 `0x34` 問成「命中通知，還是 MP 更新」，並寫本伺服器每次命中都送 `info.maxMP`、怪物不消耗 MP。
+這兩句都已和實際實作脫節：client handler 一方面把欄位存進 `mob+132` 供 `conMP` 比較，另一方面改
+`mob+116`／flash 狀態；server 的 `MobField.attackPackets` 也已按 `conMP` 扣怪物 MP，再廣播 `0x34`。
+
+### 發現
+
+1. **client binary 證明 `0x34` 有兩個效果，並非二選一。** `sub_488D90` 把 u16 放進 `mob+132`；唯一讀者
+   `sub_487D10` 以它和每個 attack 的 `conMP` 比較，付不起的招式跳過。handler 也會依舊狀態做
+   `1→5`、`2→4`、`3→5`，其他狀態走 `sub_485330(mob,1)`（flash／state 4）。受擊動作本身還要
+   `sub_487A30` 的傷害、`pushed`、時間窗與本機攻擊等條件；**不是收到了 `0x34` 就直接播 hit1**。
+2. **本伺服器的 MP 鏈是可測的產品政策。** 新場地怪以 `info.maxMP` 建立目前 MP；`attackPackets`
+   選中 WZ attack 後扣它的 `conMP`，並在攻擊 `0x33` 後送 post-debit 的 `0x34`。玩家打怪時
+   `applyDamage` 不改 MP，只把目前值放進 `0x34`；死亡仍是 `0x30`，真正重生時才把 MP 補回 `maxMP`。
+   因此「剛出生、還未出招」的 `0x34` 才等於 `info.maxMP`，不能把它當成永遠的值。
+3. **這不是原 server 的證據。** c2s `0x2C` 在本 checkout 只有 codec／decode 說明，沒有
+   `ClientSession`／`FieldInstance` gameplay handler。`MobField.attackPackets` 是 ADR-076 的獨立
+   engaged-target 重建政策，不是由 `0x2C` 觸發，也不是完整搬回 2003 client AI。原 server 是否在出招後扣
+   `conMP`、何時送 `0x34`、如何處理 `0x2C`、以及是否對玩家落傷害，仍須 oracle；不能把本 server 的規則
+   宣稱成原版。
+
+### 決策
+
+1. 把 `0x34` 精確描述為**目前 MP 更新＋client 狀態／flash 副作用**；hit1 另有自己的 damage queue 與 guard。
+2. 保留本伺服器已實作的 MP 模型：`info.maxMP` 起始／重生補滿；招式消耗 `conMP`；攻擊後與玩家命中時
+   送當前 MP，玩家命中不補 MP。將它標成重建政策而非 binary 還原。
+3. `0x2C` 繼續只作 codec／decode，不猜它的 server-side authority，也不以它作本模型的觸發器。
+4. 更正 §4.17.4／§4.17.5／§4.17.6、§4.20.5／§4.20.6、`NATIVE_MOB_ATTACKS.md` 與 mobs/protocol
+   註解；新增跨事件 MP 回歸斷言。
+
+> **規則：封包可能同時是資料更新與狀態機輸入。** 欄位被用作 MP，不代表 handler 沒有動畫副作用；
+> handler 會閃光，也不代表欄位就不是 MP。先分清「client 收到後做什麼」與「原 server 為什麼送」，
+> 再把我們自己的 AI／MP 政策明標為政策。
+
+### 測試與驗證
+
+- `server/test/native-mob-attacks.test.ts`：新怪初始 MP、怪物 attack 的 `conMP` debit／post-debit `0x34`、
+  debit 後玩家受擊仍送目前 MP、MP 用盡不能再選招、真正重生才補回 maxMP。
+- `server/test/mobs.test.ts`：沒有先出招的全新怪，其 `0x34` 等於 WZ `maxMP`；更名避免把初始狀態當成永遠值。
+- **變異驗證：3/3 全數釘死**：玩家命中把 MP 重設到 max、怪物出招不扣 `conMP`、重生不補 MP；每次均還原並 checksum 驗證。
+- Gates：`bun run format`、`bun run typecheck`、`bun run build` 通過；`bun test --ignore='*browser*'`
+  **1459 pass／0 fail／5334 expect、169 files**（372.00 s）。
+- `MapleStory.exe.c`／`.lst` 沒有修改，checksum 仍為 ADR-153 記錄值。

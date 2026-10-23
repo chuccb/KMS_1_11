@@ -1647,9 +1647,11 @@ if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
 1. **扣血**：`MobField.applyDamage(mobId, damage, now)`。攻擊包裡每個目標記錄的傷害是 `hits` 個 `u16`
    加起來（§4.13.1），直接從 `hp` 扣、夾在 0。**伺服器不重算傷害**（理由與之後要補的驗證見 **ADR-006**）：
    2003 的 client 自己算、自己畫，伺服器重算只會與 client 不一致；它管的是「哪幾隻怪存在、各有多少 HP」。
-2. **命中**（HP > 0）：送 **`0x34`**，值是 `info.maxMP`（§4.17.1：這是讓 client 進 4／5 狀態、也就是
-   讓怪物彈一下的唯一方法）。傷害數字不用送 —— client 已經畫完了。
-3. **殺死**（HP == 0）：先送 `0x34`（讓閃光進狀態），再送 **`0x30`（`delayMs = 0`）**：死亡動畫立刻開始，
+2. **命中**（HP > 0）：送 **`0x34`**，值是怪物的**目前 MP**，不是固定的 `info.maxMP`：新怪從
+   `maxMP` 開始，每次選中的怪物攻擊扣掉該筆 `conMP`；此後玩家打它只重送目前值，不會補回 MP。
+   `0x34` 同時走 client 的狀態／閃光副作用，讓有待顯示傷害的怪物能彈一下（§4.17.1）。傷害數字不用送 ——
+   client 已經畫完了。
+3. **殺死**（HP == 0）：先送目前 MP 的 `0x34`（讓閃光進狀態），再送 **`0x30`（`delayMs = 0`）**：死亡動畫立刻開始，
    屍體留在畫面上。`dieMs` 來自 `Mob/<id>.img` 的 die 影格（§4.17.2 的表）。
 4. **收屍與重生**：`dieMs` 之後送 `0x31 flag = 0`；再過 `MOB_RESPAWN_MS`（**5000 ms，伺服器自己的選擇**，
    `--mob-respawn` 可調）送 `0x31 flag != 0`（`templateId` + `0x2F` 身體），怪物回到地圖檔給的出生點、
@@ -1661,14 +1663,18 @@ if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
 | 檔案 | 內容 |
 |---|---|
 | `server/test/mob.test.ts` | `0x30`（含負延遲）、`0x31` 的兩個 flag、`0x34`、`0x31 flag != 0` 的尾巴與 `0x2F` **逐 byte 相同**、`decode` 的解讀器 |
-| `server/test/mobs.test.ts` | 扣血／`0x34` 的值／殺死時送 `0x34`＋`0x30`、死掉後不再有 `0x33`、`dieMs` 之後收屍、`respawnMs` 之後重生（回到出生點、HP 回滿）、`tickPackets` 的順序、沒有 image 的怪不能被打、真 `Data.wz` 的 `dieMs`／`maxMP` |
+| `server/test/mobs.test.ts` | 扣血／初始 `0x34` 值／殺死時送 `0x34`＋`0x30`、死掉後不再有 `0x33`、`dieMs` 之後收屍、`respawnMs` 之後重生（回到出生點、HP／MP 回滿）、`tickPackets` 的順序、沒有 image 的怪不能被打、真 `Data.wz` 的 `dieMs`／`maxMP` |
+| `server/test/native-mob-attacks.test.ts` | 怪物選招依 `conMP` 消耗 MP 並送 post-debit `0x34`；之後玩家命中仍送目前 MP（不補滿），只有重生補回 `maxMP` |
 | `server/test/serve.test.ts` | 真 socket：一刀 10 點 → `0x34` → `0x30` →（40 ms 的假 `dieMs` 之後）`0x31 flag = 0`；打不存在的 id → 完全不回封包，只寫 log |
 
 #### 4.17.6 還不能宣稱的部分
 
-1. **`0x34` 是「命中通知」還是單純「MP 更新」**：`mob+132` 的讀者只證明它被當 MP 用（拿來比 `conMP`），
-   不能排除原伺服器在怪物攻擊時扣 MP 後再送一次。本伺服器**每次命中都送 `info.maxMP`**（怪物不消耗 MP），
-   並在這裡註明「進 4／5 狀態」是實作目的之一。
+1. **「命中通知」與「MP 更新」不是二選一**：client binary 已證明 `0x34` 的 u16 存入 `mob+132`
+   並與 `conMP` 比較，且同一 handler 會切 `mob+116`／打開 flash，供受擊動畫使用；所以它同時更新
+   MP 並驅動狀態副作用。binary **不能**回答原 server 在怪物攻擊後是否扣 `conMP`、是否廣播那次 MP 變化、
+   或攻擊者打怪時伺服器當時送的是哪個值。本伺服器的明確重建政策是：新怪以 `info.maxMP` 起始，選招後
+   扣 `conMP` 並送攻擊後 MP；玩家命中只送目前 MP，不補回。`native-mob-attacks.test.ts` 釘住「用盡 MP 後再
+   被打仍送 0；重生才補回容量」。原 server 的精確發包政策仍需 oracle，不能把本伺服器策略冒充原版。
 2. **屍體是 client 自己收還是等 `0x31`**：`sub_485530` 只設死亡動作，沒有把怪物拆出池子；`sub_492100`
    到期時也只呼叫 `sub_491AB0(..., 1)`（=開始死亡）。本伺服器假設**要送 `0x31`**；若原 client 會自己收屍，
    多送一個 `0x31 flag = 0` 也只是查不到 id 的空操作（`sub_491830` 的 early return）。
@@ -2054,7 +2060,7 @@ case '5' (0x35) -> sub_488E10   動畫
 ⇒ 「1 = 站著、2/3 = 攻擊（miss/hit）、4/5 = 攻擊動畫的命中階段、-2/-3 = 走動」是**讀出來的合理命名**，
 不是 binary 裡的字串。這一節只主張轉移，不主張名字。
 
-#### 4.20.5 伺服器這一側：這一回合只做「讀得懂」
+#### 4.20.5 伺服器：`0x2C` 仍只有 codec；獨立出招模型是重建政策
 
 - `protocol/mob.ts` 新增 `MOB_OPCODE.anim`（`0x35`）、`encodeMobAnim`／`readMobAnim`／`describeMobAnim`；
   動畫區塊的讀寫抽成 `writeMobChannels`／`readMobChannels`，與 `0x2F` 的尾巴**共用同一份實作**
@@ -2064,10 +2070,14 @@ case '5' (0x35) -> sub_488E10   動畫
   `hasPosition` 由 `actionByte` 與位置自己導出）；`describeClientFieldPacket` 會印出
   `0x2c mob attack: mobId=… attack1,left flags=0x11 at (x,y) tail=nB`，所以 `serve`／`decode` 的日誌
   從這一版起就看得懂原 client 的怪物攻擊。
-- **不做**：伺服器不模擬怪物 AI、不重算傷害、**不改玩家的 HP**（`0x0D` 能力值差異包雖然已解出並用於
-  經驗值／升級，§4.21，但「被怪物打 → 掉血」還沒接上：`0x2C` 只是 client 的報告，`applyAttack` 只處理
-  我們自己角色的攻擊）。`serve --game-port` 目前仍舊自己送 `0x33` 讓怪物巡邏——那是**我們 client 還沒
-  有 AI 之前的替代品**，與本節的結論並存但不同層（ADR-008 有寫明）。
+- **`0x2C` 仍沒有 gameplay handler**：`readClientMobAttack` 目前供 codec／decode 使用，`ClientSession`／
+  `FieldInstance` 不用這個 client 報告去扣玩家 HP 或更新怪物 MP。原版怪物 AI 與「client 回報後 server
+  應如何落帳」仍然是兩個不同問題；原 server 不在本 repo。
+- **另有一個明示的重建出招政策**（ADR-076、`docs/NATIVE_MOB_ATTACKS.md`）：`MobField.attackPackets`
+  只對已 engaged 且仍在場的玩家挑選 WZ attack，按 `conMP` 扣怪物目前 MP，再廣播 `0x33`／`0x34`；
+  它不處理 `0x2C`，也不代表完整還原原 server AI。客戶端仍有自己的原版 AI；server 的巡邏／出招是本產品
+  的場地模型，**不由此 ticker 對玩家 HP 做怪物攻擊傷害計算**。另一條 body-contact 路徑是獨立實作，不能
+  拿來推斷原 server 對 `0x2C` 的處理。
 
 #### 4.20.6 還不能宣稱的部分
 
@@ -2080,8 +2090,10 @@ case '5' (0x35) -> sub_488E10   動畫
 3. **`mob+124 + 24` 與 `+72`**：前者是 `0x2C` 尾段的開關、後者是命中影格，都是怪物圖片解析後的欄位，
    沒有名字。
 4. **`mob+104` / `mob+108` 的身份**：只知道 `+108` 會被打、它的 `+216` 進封包。
-5. **`0x2C` 之後伺服器該做什麼**：2003 年的伺服器（`d3d8`／`sub_55...` 那一側）不在手邊，
-   「扣怪物的 MP 後回 `0x34`」只是合理推測，**沒有證據**，所以本伺服器不做。
+5. **原 server 的 `0x2C`／怪物 MP 政策仍需 oracle**：2003 年的 server（`d3d8`／`sub_55...` 那一側）
+   不在手邊，所以不知道它是否消費 `conMP`、何時回 `0x34`、或如何處理 `0x2C`。本 checkout 對 `0x2C`
+   只有 codec；另有 ADR-076 的明示重建政策：自己的 engaged-target ticker 扣 `conMP` 並送目前 MP，但不把
+   這個政策說成原版，也不由 `0x2C` 觸發。
 6. **沒有實機驗證**：`0x35` 送出去之後 client 播什麼、`0x2C` 的時序（一次攻擊到底送幾包），
    都要等 ADR-004 的 oracle run。
 

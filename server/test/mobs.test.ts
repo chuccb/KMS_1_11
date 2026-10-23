@@ -537,7 +537,7 @@ test("a hit takes the client's damage off the mob's HP and answers with 0x34", (
   assert.equal(field.movePackets(999).length, 1, "a hurt mob keeps walking");
 });
 
-test("0x34 carries the mob's maxMP - the value the attack picker spends", () => {
+test("a fresh mob's 0x34 carries its full MP, the resource its attack picker spends", () => {
   const map = flatMap([{ x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 }]);
   const field = new MobField({
     map,
@@ -671,7 +671,7 @@ test("the die animation and 0x34's value come out of the mob's own image", needs
   );
   assert.equal(templates(100100)?.dieMs, 1620, "파란달팽이: 9 frames");
   assert.equal(templates(5130100)?.dieMs, 1440, "와일드보어: 8 frames");
-  assert.equal(templates(5130100)?.maxMP, 200, "info.maxMP is what 0x34 reports");
+  assert.equal(templates(5130100)?.maxMP, 200, "info.maxMP is the starting/refill MP capacity");
   assert.equal(templates(120100)?.maxMP, 0, "most 2003 mobs have no MP at all");
   assert.equal(MOB_RESPAWN_MS, 5000, "the default respawn this server picks");
 

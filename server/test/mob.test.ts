@@ -195,7 +195,7 @@ test("describeMobEnterField says what a log line needs", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 0x30 / 0x31 / 0x34 - the packets that take a mob's HP away (FINDINGS 4.17)
+// 0x30 / 0x31 / 0x34 - mob death/lifecycle and MP/state packets; HP is server bookkeeping (FINDINGS 4.17)
 // ---------------------------------------------------------------------------
 
 /** Offset of each field inside an encoded `0x30`/`0x31`/`0x34`, opcode byte included. */

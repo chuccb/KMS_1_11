@@ -39,12 +39,13 @@ import { elementAttributes } from "./elements.ts";
  * DAMAGE AND DEATH: the packets are `protocol/mob.ts`'s 0x30/0x31/0x34 (that file has the client-side
  * evidence); the numbers behind them are here:
  *
- *   hp / mp    `Mob/<id>.img -> info.maxHP` / `info.maxMP`. The damage itself is whatever the
- *              attacking client reported in its 0x0F - a 2003 client computes its own damage and
- *              draws its own numbers (FINDINGS 4.13.1) - so the server's job is bookkeeping:
- *              subtract, clamp at 0, hand the mob's MP back (`0x34`, which is also what puts the mob
- *              into the state whose hit animation the client then plays) and, once the HP runs out,
- *              start the death sequence.
+ *   hp / mp    `Mob/<id>.img -> info.maxHP` / `info.maxMP` provide the initial HP/MP and respawn
+ *              capacity. A chosen attack spends its native `conMP`; `0x34` reports the current MP.
+ *              Player-hit damage is whatever the attacking client reported in its 0x0F - a 2003
+ *              client computes its own damage and draws its own numbers (FINDINGS 4.13.1) - so the
+ *              server subtracts/clamps HP without refilling or draining MP. `0x34` also drives the
+ *              client's mob-state/flash side effect used by hit animation. The original server's
+ *              exact update policy remains unknown (FINDINGS 4.17.6).
  *   dieMs      how long the corpse stays: the sum of the frames of the mob's own die action
  *              (`Mob/<id>.img/die1`, `delay` per frame, 180 ms when a frame has none - the client's
  *              own default in `sub_40B530`). `sub_486180` is the client function that adds them up,
@@ -97,7 +98,10 @@ export interface MobTemplate {
   /** 48D080 info.bodyAttack; missing/zero means no contact damage. */
   bodyAttack?: boolean;
   maxHP: number;
-  /** `info.maxMP`. What `0x34` carries (`mob+132` is the MP the attack picker spends). */
+  /**
+   * `info.maxMP`, the mob's starting/refill MP capacity. Native `conMP` costs reduce current MP;
+   * `0x34` publishes the current value, not this cap (FINDINGS 4.17.1 / 4.17.6).
+   */
   maxMP: number;
   /** Native info PA/PD/MD/acc/eva (NOT later-version PADamage/PDDamage names). */
   pa?: number;
@@ -258,6 +262,7 @@ export interface FieldMob {
   forced?: { action: number; facing: number; since: number; duration: number };
   attackUntil?: number;
   aggroCharacterId?: number;
+  /** Current MP: starts at `maxMp`, is debited by each chosen `conMP`, and is reported by `0x34`. */
   mp?: number;
   decisionAt?: number;
   intent?: -1 | 0 | 1;
@@ -271,7 +276,7 @@ export interface FieldMob {
    */
   maxHp: number | undefined;
   hp: number | undefined;
-  /** `info.maxMP`: what `0x34` reports. `undefined` for a mob without an image, like `maxHp`. */
+  /** `info.maxMP`: starting/refill cap. `undefined` for a mob without an image, like `maxHp`. */
   maxMp: number | undefined;
   /** ms timestamp the corpse is dropped at (`0x31 flag=0`); 0 while the mob is alive. */
   removeAt: number;
@@ -299,10 +304,10 @@ export interface MobFieldOptions {
 /**
  * What one hit did to one mob, plus the packets that hit has to produce.
  *
- * `packets` is what the connection writes right away: the `0x34` that reports the mob's MP (and puts
- * it into the flash state its hit animation needs) and, on a kill, the `0x30` that starts the die
- * animation. The corpse disappears later - `MobField.lifecyclePackets` hands that packet out when the
- * animation is over.
+ * `packets` is what the connection writes right away: the `0x34` that reports the mob's current MP
+ * (and drives the client's state/flash side effect) and, on a kill, the `0x30` that starts the die
+ * animation. A player hit does not refill MP; the corpse disappears later, when
+ * `MobField.lifecyclePackets` hands out the delayed removal.
  */
 export interface MobDamage {
   mobId: number;
@@ -310,7 +315,9 @@ export interface MobDamage {
   damage: number;
   hp: number;
   maxHp: number;
+  /** Current MP reported in the hit's `0x34`, after any prior `conMP` costs. */
   mp: number;
+  /** `info.maxMP` cap, not the hit's `0x34` value when MP has been spent. */
   maxMp: number;
   killed: boolean;
   /** ms the corpse will hold its last frame - the die animation's length; 0 when nothing died. */
@@ -398,7 +405,8 @@ export class MobField {
    * The damage is the attacking client's own number: a 2003 client rolls, applies and draws its
    * damage before reporting it (FINDINGS 4.13.1), so this server records what it is told - it does
    * not recompute it. The browser bridge uses the located native 4C7960 basic-attack formula;
-   * the field retains the original packet trust contract rather than rolling a second time.
+   * the field retains the original packet trust contract rather than rolling a second time. The
+   * `0x34` here republishes current MP; it does not restore any `conMP` already spent.
    */
   applyDamage(
     mobId: number,

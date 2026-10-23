@@ -80,7 +80,12 @@ mob-leave刪掉其pending攻擊／球；已建立effect保持最後owner位置�
 
 本輪明示server政策：被玩家已接受攻擊（含MISS／0）後engaged；只找該玩家仍同場且HP>0的最新field位置，不全圖找最近人；非flyer需grounded；MP足夠且raw／attack窗皆空才選招。tick先做attack再patrol，扣一次conMP、廣播原0x33＋0x34，所有玩家同一條權威path。不另加猜測cooldown／MP自然回復／偽Attack聲。
 
-0x34是真u16 MP，不是HP，也不是「收到就hit1」；ClientSession／browser保留MP，唯讀inspect顯示MP與可用招式數。server考量現在HP的getter讀session.character，不捕捉可能已換掉的舊character快照。
+0x34是真正的**目前 MP**（u16），不是 HP，也不是「收到就直接播 hit1」；client handler 另有 mob 狀態／flash
+副作用，hit1 還要等自己的傷害記錄與條件成立。此 checkout 的政策是 `info.maxMP` 起始、每次選招扣 `conMP`、
+攻擊後發 `0x34`、玩家命中只重送目前 MP、重生才補滿；`native-mob-attacks.test.ts` 釘住 MP 用盡後再被打仍回 0。
+這是明示重建政策，**不代表原 server 一定同樣處理**；原 server 是否扣 MP／何時送 `0x34` 與 c2s `0x2C`
+的處理仍待 oracle。ClientSession／browser 保留 MP，唯讀 inspect 顯示 MP 與可用招式數。server 考量現在 HP 的
+getter 讀 `session.character`，不捕捉可能已換掉的舊 character 快照。
 
 晚進場：原native wire沒有當前forced影格的phase欄位；保留resumePackets trim未走path，forced尚存時以signed KEEP header續路徑，不能隨後一個普通header把已恢復phase又清掉。CLI同process另外提供**已驗證當前帳號／角色場地的browser-only phase sideband**（age／duration／raw剩餘／MP）；用相對age續播body，**不新增native opcode、不重播舊effect／release／hit**。已在飛的舊球與歷史屍體不為新進者重建；原global phase／延遲校正／owner本機預測仍非完整。
 

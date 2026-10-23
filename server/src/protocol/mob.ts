@@ -142,9 +142,10 @@ export const MOB_OPCODE = {
    */
   move: 0x33,
   /**
-   * `CMobPool` 0x34 (`sub_492380` -> `sub_488D90`): `u32 mobId` + `u16 mp`. The value is the mob's
-   * MP (its only reader compares it against the attacks' `conMP`); it also pushes the mob into the
-   * flash state that lets the client replay its hit animation.
+   * `CMobPool` 0x34 (`sub_492380` -> `sub_488D90`): `u32 mobId` + `u16 currentMP`. The value is the
+   * mob's MP (its only reader compares it against attack `conMP`); the handler also updates the mob
+   * state/flash path used by the client's hit reaction. Whether the original server spends MP on
+   * attacks before sending this remains unknown (FINDINGS 4.17.6).
    */
   stat: 0x34,
   /**
@@ -392,7 +393,7 @@ export function encodeMobLeaveDelayed(body: MobLeaveDelayed): Uint8Array {
   return writer.toBytes();
 }
 
-/** Encode one `0x34` packet: the mob's MP (and, with it, "this mob is in its flash state"). */
+/** Encode one `0x34` packet: the mob's current MP; the client handler also updates its hit/flash state. */
 export function encodeMobStat(body: MobStat): Uint8Array {
   const writer = new PacketWriter(8);
   writer.writeByte(MOB_OPCODE.stat);
@@ -417,8 +418,8 @@ export interface MobLeaveDelayed {
 export interface MobStat {
   mobId: number;
   /**
-   * The mob's MP, `u16` - `sub_488D90` stores it in `mob+132`, the value the attack picker compares
-   * against each attack's `conMP`. Nothing in the client reads it as HP.
+   * The mob's current MP, `u16` - `sub_488D90` stores it in `mob+132`, the value the attack picker
+   * compares against each attack's `conMP`. Nothing in the client reads it as HP.
    */
   mp: number;
 }

@@ -225,6 +225,8 @@ test("authority: engaged live target, MP debit/0x34, hold patrol, KB still moves
     hit.packets.map((p) => p[0]),
     [0x34, 0x33],
   );
+  assert.equal(hit.mp, 2, "a player hit does not refill the MP spent on the first attack");
+  assert.equal(readMobStat(new PacketReader(hit.packets[0]!, 1)).mp, 2);
   assert.equal(f.mobs[0]!.forced!.action, 10);
   assert.equal(f.mobs[0]!.reactionUntil, 1300);
   assert.equal(f.mobs[0]!.attackUntil, 1720);
@@ -242,7 +244,10 @@ test("authority: engaged live target, MP debit/0x34, hold patrol, KB still moves
   assert.equal(f.attackPackets(1720, [target]).length, 2);
   assert.equal(f.mobs[0]!.mp, 0);
   assert.equal(f.attackPackets(2440, [target]).length, 0, "spent MP prevents the next cast");
-  f.applyDamage(1, 1000, 2500);
+  const killed = f.applyDamage(1, 1000, 2500)!;
+  assert.equal(killed.mp, 0, "the 0x34 on a hit reports the mob's remaining MP, not maxMP");
+  assert.equal(readMobStat(new PacketReader(killed.packets[0]!, 1)).mp, 0);
+  assert.equal(f.mobs[0]!.mp, 0, "damage does not restore spent MP");
   assert.equal(f.mobs[0]!.forced, undefined);
   assert.equal(f.mobs[0]!.aggroCharacterId, undefined);
   f.lifecyclePackets(9000);
