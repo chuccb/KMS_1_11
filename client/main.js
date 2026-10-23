@@ -1,7 +1,12 @@
 import { chatEntry } from "./chat-entry.ts";
 import { mapSearchMessages, parseMapCommand } from "./map-commands.ts";
 import { RETURN_MAP_NONE } from "./map-constants.ts";
-import { browserMapName, isBrowserMapArtResource, isBrowserMapName, isBrowserMapResource } from "./map-resources.ts";
+import { browserMapName } from "./map-resources.ts";
+import {
+  fetchBrowserMapArtResource,
+  fetchBrowserMapName,
+  fetchBrowserMapResource,
+} from "./map-resource-loader.ts";
 import { partyInvitation } from "./party-invitation.ts";
 import { runSocialCommand } from "./social-commands.ts";
 import { partyCommandLines } from "./party-state.ts";
@@ -1202,27 +1207,20 @@ function handle(message) {
 
 /** 4694F0/472910: lookup of street:map is client-side; it is not a movement or portal request. */
 async function rememberMapName(mapId) {
-  try {
-    const response = await fetch(`/api/map/${mapId}`);
-    if (!response.ok) return;
-    const data = await response.json();
-    if (!isBrowserMapName(data) || data.id !== mapId) return;
-    const name = browserMapName(data);
-    mapNames.set(data.id, name);
-    return name;
-  } catch {
-    // Leave the explicit id fallback if metadata could not be loaded.
-  }
+  const data = await fetchBrowserMapName(mapId);
+  if (!data) return;
+  const name = browserMapName(data);
+  mapNames.set(data.id, name);
+  return name;
 }
 
 async function loadMap(mapId, generation) {
   try {
-    const response = await fetch(`/api/map/${mapId}`);
-    if (!response.ok) throw new Error(`map ${mapId}: HTTP ${response.status}`);
-    const loaded = await response.json();
-    if (self?.mapId !== mapId || generation !== mapGeneration) return; // Including same-map revive/re-entry.
-    if (!isBrowserMapResource(loaded) || loaded.id !== mapId)
-      throw new Error(`map ${mapId}: invalid map resource`);
+    const loaded = await fetchBrowserMapResource(
+      mapId,
+      () => self?.mapId === mapId && generation === mapGeneration,
+    );
+    if (!loaded) return; // Including same-map revive/re-entry.
     map = loaded;
     mapAnimationStart = performance.now();
     audio.setBgm(map.bgm);
@@ -1266,14 +1264,16 @@ async function loadMap(mapId, generation) {
  */
 async function loadMapArt(mapId, generation) {
   try {
-    const response = await fetch(`/api/map/${mapId}/art`);
-    if (!response.ok) {
-      logLine(`map ${mapId}: no art (${response.status})`);
+    const result = await fetchBrowserMapArtResource(
+      mapId,
+      () => map?.id === mapId && generation === mapGeneration,
+    );
+    if (result.kind === "stale") return;
+    if (result.kind === "http-error") {
+      logLine(`map ${mapId}: no art (${result.status})`);
       return;
     }
-    const art = await response.json();
-    if (map?.id !== mapId || generation !== mapGeneration) return;
-    if (!isBrowserMapArtResource(art)) throw new Error(`map ${mapId}: invalid map art resource`);
+    const art = result.art;
     mapArt = art;
     lensSettings.reveal(performance.now());
     miniMapPanel.setMap(art.miniMap, map.portals);

@@ -6229,3 +6229,26 @@ Map geometry 與 map art 分別由 server `MapData` 與 WZ-backed `MapArt` 產�
 - Prettier 3.9.10 與 Bun 1.4.4 formatter audit：443 個 `.ts` 加 4 個 package/config/workflow inputs，**447/447 byte-identical**；Prettier 不作專案依賴。
 - 完整 `bun run test`：**1485 pass／0 fail／5334 `expect()` calls，172 files，374.64 s**。
 - 無 LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe；memory-only preview 不屬於測試步驟，仍須使用 `--save off`。
+
+## ADR-163：strict map-resource HTTP loader 與 generation fence（2026-10-24）
+
+**狀態**：已接受（map name／geometry／art 的 fetch、JSON boundary 與 stale response policy 由 strict TypeScript 負責；`client/main.js` 保留目前場地 ownership callback 與 renderer/state orchestration）
+
+### 背景
+
+ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `rememberMapName`、`loadMap`、`loadMapArt` 仍在 `client/main.js` 各自直接 fetch／解析 JSON／套用錯誤政策。三者看似重複，實際上 error policy 不同：`/find` 的 name lookup 對 metadata failure 靜默保留 ID；geometry 需報告 HTTP／contract error；art 的 HTTP miss 是可顯示的 no-art 狀態。geometry 與 art 都在 `await response.json()` 後檢查場地 generation，確保同地圖重新進場也不會被舊 response 覆蓋。把這些差異一律改成共用 throwing fetcher 或僅保留 schema guard，會改變使用者可見行為或破壞 stale-response fence。
+
+### 決策與實作
+
+1. 新增純 TypeScript `client/map-resource-loader.ts`，以窄 `MapResourceJsonResponse`／可注入 `MapResourceFetcher` 隔離 HTTP 讀取。response body 明確視為 `unknown`，重用 ADR-162 的 map-name／geometry／art runtime guards；不複製 schema、不假定 HTTP status 保證 JSON shape，也不新增 UI／DOM 副作用。
+2. `fetchBrowserMapName` 保留 fail-soft policy：network、HTTP、JSON parse、欄位 shape 或 request-ID 任一不符都回 `undefined`，使 caller 留在原本 map-ID fallback。正確 map name 仍由既有 `browserMapName` 格式化與存入 cache。
+3. `fetchBrowserMapResource` 保留非 2xx HTTP error 與 malformed/mismatched-ID error。只有 body parse 完成後才呼叫 `isCurrent`；stale request 回 `undefined`，再以完整 geometry guard 與 requested ID 檢查 valid payload。`main.js` 注入原本的 `self?.mapId === mapId && generation === mapGeneration` callback，沒有更動 generation 的建立／遞增時機。
+4. `fetchBrowserMapArtResource` 回傳 discriminated union：`ready` 帶 guarded art、`http-error` 帶 status、`stale` 表示解析後已失去 field ownership；malformed art 與 fetch／JSON exception 仍 throw。main 仍負責原 no-art log、`mapArt`／minimap／scene install 與圖片預熱。
+5. 新增四項純隔離測試，鎖定 name soft failure／ID、geometry HTTP／shape／ID、JSON pending 時切換 generation 的 stale fence，以及 art ready／HTTP miss／stale／malformed 分支。沒有改 endpoint、server policy、WZ data、map command、地形、鏡頭、存檔或遊戲規則；不增加 abort、retry、fallback art 或 timer。
+
+### 測試與驗證
+
+- `server/test/map-resource-loader.test.ts`：**4 pass／0 fail**；geometry race test 在 JSON promise 等待期間切換 ownership，並用 malformed stale payload 證明先丟棄舊請求、再驗 shape 的原時序。
+- `bun run check` 通過：pinned TypeScript 7.0.2 strict／ESNext typecheck、Bun 1.4.4 `format:check`、完整 `bun test` 與 browser build；完整 suite **1489 pass／0 fail／5334 `expect()` calls，173 files，378.89 s**。
+- Bun 1.4.4 `bun check --no-script --timing`：**741 checked／742 loaded**；Prettier 3.9.10 與 Bun formatter 逐檔 audit：445 個 `.ts` 加 4 個 package/config/workflow paths，**449/449 byte-identical**。Prettier 仍不是 runtime／package dependency。
+- 新的 memory-only `Browser game preview` 綁定 web/login/game **8515／8516／8517**，明確 `--save off`；唯讀 GET `/healthz`、`/`、`/main.js`、map JSON/art 回 200，兩種 map payload guard 均通過。沒有打開 WebSocket、LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe；測試僅使用注入 fetcher／isolated fixtures、local test server 與唯讀 `Data.wz`。使用者若自行遊玩，進度只留在該程序記憶體，重啟即消失。

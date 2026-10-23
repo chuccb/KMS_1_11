@@ -1,16 +1,24 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-24（ADR-162：strict map-resource API contract；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-24（ADR-163：strict map-resource HTTP lifecycle／generation fence；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：strict map-resource JSON contract 與 runtime guards（ADR-162）
+## 最新增量：strict map-resource HTTP loader 與 generation fence（ADR-163）
+
+新增 `client/map-resource-loader.ts`，將 `/api/map/<id>` 的 name／geometry 與 `/api/map/<id>/art` 的 fetch、HTTP／JSON 邊界及 stale-generation 判斷由未型別化的 `client/main.js` 拆到 strict TypeScript。module 以可注入 fetcher 做隔離測試，所有 JSON 先視為 `unknown` 並重用 ADR-162 的既有 DTO guards，沒有複製或放寬 schema。
+
+保留三條不同的原行為：map-name lookup 對 fetch／HTTP／JSON／shape／ID 錯誤 fail-soft，讓 `/find` 留在 map-ID fallback；geometry 保留 HTTP／contract error，JSON 到達後才用 field identity + `mapGeneration` fence 丟棄 stale response；art 回傳 `ready`／`http-error`／`stale` discriminated result，讓 main 保留原 no-art 訊息、過期 ignore 與 renderer state install，malformed art 仍報錯。未引入 cancellation、retry、缺素材 fallback、timer 或規則改動。
+
+新增 `server/test/map-resource-loader.test.ts` 四項隔離 regression，覆蓋 name optional failure、geometry HTTP／shape／request-ID、JSON pending 時 field owner 改變、art ready／missing／stale／malformed。focused **4 pass／0 fail、1 file**。嚴格驗證、全套回歸、formatter byte audit 與 preview 重開結果於本節結尾更新。
+
+## 前輪增量：strict map-resource JSON contract 與 runtime guards（ADR-162）
 
 新增 `client/map-resources.ts`，集中 `/api/map/<id>` map geometry、`/api/map/<id>/art` 與 map-name 的 browser DTOs 和深度 `unknown` guards；browser 只在 payload 形狀有效且 map ID 與請求相符時安裝資源。`server/src/net/webclient.ts` 的 `mapJson`／`artJson` 現在明確回傳共用 wire types。guard 驗證地圖 ID／名稱、地形、portal、ladder、spawn、物理與相機 bounds、背景／sprite／frame、missing-tile metadata 及可選 minimap；map 0 合法，no-destination sentinel 仍拒絕。
 
 `server/test/browser-resource-contract.test.ts` 以唯讀 Data.wz 真 HTTP response 驗證 map 與 art endpoint，加入 malformed resource/frame rejection；另以同一真 WZ HTTP server 逐一驗證全部 100 張 map JSON response 與 100 組 map-art payload。`client_probe.ts` 的 map/art fixtures 現依 wire DTO 定義，HTTP map shim 回應與請求一致的 ID，未放寬 production guards。focused contract **5/0、1 file**。
 
-TypeScript 7.0.2 strict typecheck、Bun 1.4.4 `bun check`、format check、Bun browser build、Prettier 3.9.10 比較 **447/447 byte-identical** 全通過；完整 `bun run test` **1485/0、5334 expects、172 files（374.64 s）**。registry／GitHub latest 核對日期 2026-10-24，固定 Bun／TS／Chromium／Actions pins 仍 latest，無需改依賴。
+TypeScript 7.0.2 strict typecheck、Bun 1.4.4 `bun check`、format check、Bun browser build 均通過；`bun check --no-script --timing` 為 **741 checked／742 loaded**，formatter audit **449/449 byte-identical**。完整 `bun run check` 的 suite **1489 pass／0 fail／5334 expects、173 files（378.89 s）**。registry／GitHub latest 核對日期 2026-10-24，固定 Bun／TS／Chromium／Actions pins 仍 latest，無需改依賴。
 
-唯一未 strict 型別化來源仍是 `client/main.js`（5535 行）；`client/` 有 **123 支 `.ts`**。沒有登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe；本輪另啟動全新 memory-only preview，明確使用 `--save off`，沒有載入或操作舊進度（詳下方〈預覽與存檔〉）。
+ADR-162 時點唯一未 strict 型別化來源是 `client/main.js`（5535 行）；當時 `client/` 有 **123 支 `.ts`**。該輪沒有登入 LIVE、操作角色、讀寫既有 save 或執行 state-changing probe；最新 preview 狀態見本文件下方〈預覽與存檔〉。
 
 ## 前輪增量：map command 與地圖目錄的 strict TypeScript boundary（ADR-161）
 
@@ -61,7 +69,7 @@ JSON parse 與 active-connection generation fence；`client/main.js` 不再直�
 invalid envelope、舊 socket stale event fence、active error/close、return-to-title close code）；mock browser startup／static／UI 與
 system-UI source wiring 聚焦共 **18/0、5 files**。`typecheck`／`format:check`／`build` 通過；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files**（378.63 s）。本輪不新增依賴、不改 strict、不連真遊戲、不操作帳號／角色／save。
 
-目前 `client/` 有 **122 支 `.ts`**，`client/main.js` 為 **5529 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
+ADR-156 當時 `client/` 有 **122 支 `.ts`**、`client/main.js` 為 **5529 行**；那一輪的 transport／selected payload guard 仍不等於 main 遷移完成。當前數量與後續 main 抽取見本文件最新增量。
 
 ## 前輪增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
 
@@ -226,8 +234,8 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 
 ## 已落實
 
-- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（最初遷移的 438-path audit 保留其歷史結果，Prettier direct dependency 已移除）。ADR-161 當輪對 446 個輸入 byte-compare；ADR-162 現樹為 **443 個 `.ts`＋4 個 config/package/workflow paths，Prettier 3.9.10 與 Bun 輸出 447/447 相同**。Bun／型別與保留 package metadata latest 於 2026-10-24 重查，固定 pins 仍一致，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
-- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前81）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
+- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4，單一根 package / bun.lock / tsconfig / CI；formatter 使用 Bun 1.4.4 `bun fmt`（最初遷移的 438-path audit 保留其歷史結果，Prettier direct dependency 已移除）。ADR-161 當輪對 446 個輸入 byte-compare；ADR-163 現樹為 **445 個 `.ts`＋4 個 config/package/workflow paths，Prettier 3.9.10 與 Bun 輸出 449/449 相同**。Bun／型別與保留 package metadata latest 於 2026-10-24 重查，固定 pins 仍一致，歷史 1.4.3／Prettier pins 保留在各 ADR 當時紀錄。
+- 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（ADR-162 為 123、ADR-163 為 124，含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。
 - 原生 ESNext modules、Bun browser build；開發 HTTP 移除 TS 型別後用 JavaScript MIME 回應。獨立 HTTP test 與現有 LIVE 的兩個 entry／完整 import graph 均驗過狀態、MIME、JS parser；本輪另以真正 Chromium 執行初始化及 rendering，不登入 LIVE。
@@ -356,6 +364,6 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 
 ## 預覽與存檔
 
-2026-10-24 已啟動一個**全新、隔離、memory-only** 測試程序：browser web port 8515，login/game ports 8516／8517，`Data.wz` 唯讀，出生地圖 101000000（啟動時 0 mobs），明確 `--save off`。`preview:preview`、`observer:observer` 是此程序的測試帳號；`--map-command` 與開發限定 `--test-tools` 只對這兩個帳號啟用。此程序不載入、不恢復舊角色或既有 save；沒有自動登入、建立／操作角色或寫檔。只讀 GET `/healthz`、`/`、`/main.js`、真 map JSON 與 map-art 都回 200，map/art payload 均通過新 browser guards；沒有打開 WebSocket。
+2026-10-24（ADR-163）已重新啟動一個**全新、隔離、memory-only** 測試程序：browser web port 8515，login/game ports 8516／8517，`Data.wz` 唯讀，出生地圖 101000000（啟動時 0 mobs），明確 `--save off`。`preview:preview`、`observer:observer` 是此程序的測試帳號；`--map-command` 與開發限定 `--test-tools` 只對這兩個帳號啟用。此程序不載入、不恢復舊角色或既有 save；沒有自動登入、建立／操作角色或寫檔。只讀 GET `/healthz`、`/`、`/main.js`、真 map JSON 與 map-art 都回 200，map/art payload 均通過新 browser guards；沒有打開 WebSocket。
 
-玩家自行建立或操作的進度只存在這個程序記憶體；重啟會全部遺失。`--save off` 不讀寫既有玩家存檔；預覽是否在線以 Arena 本輪 `Browser game preview` live preview 為準。啟動參數與存檔保護說明見 README。
+玩家自行建立或操作的進度只存在這個程序記憶體；重啟會全部遺失。`--save off` 不讀寫既有玩家存檔；預覽是否在線以 Arena 本輪 `Browser game preview` live preview 為準。本輪只驗 HTTP／resource guards，沒有登入或遊玩。啟動參數與存檔保護說明見 README。

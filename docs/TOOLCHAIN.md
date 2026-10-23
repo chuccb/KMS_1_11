@@ -1,12 +1,12 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-24（ADR-162：strict map-resource wire contract；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-24（ADR-163：strict map-resource HTTP loader／generation fence；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path byte audits 保留為歷史紀錄。ADR-162 現樹含 **443 個 `.ts`＋4 個 package/config/workflow paths，共 447 個格式輸入**；Prettier 3.9.10 僅作臨時比較，與 Bun 1.4.4 輸出 **447/447 byte-identical**，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path byte audits 保留為歷史紀錄。ADR-163 現樹含 **445 個 `.ts`＋4 個 package/config/workflow paths，共 449 個格式輸入**；Prettier 3.9.10 僅作臨時比較，與 Bun 1.4.4 輸出 **449/449 byte-identical**，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
 
 strict `client/websocket-transport.ts` 把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
 自 `client/main.js` 移到可單元測試的 TypeScript 邊界；JSON object＋string `t` 後再呼叫 optional payload guard，guard 回 false 或 throw 都 fail-closed。
-`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **123 支 client `.ts`**、`client/main.js` **5535 行**。最新地圖資源 boundary 與 gates 見 ADR-162；全部以隔離測試／mock，未操作 LIVE 角色或 save。
+`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **124 支 client `.ts`**、`client/main.js` **5535 行**。map DTO／runtime guards（ADR-162）與 strict HTTP loader／generation fence（ADR-163）分層；全部以隔離測試／mock，未操作 LIVE 角色或 save。
 
 ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
@@ -45,7 +45,15 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 
 格式化則由 Prettier 3.9.10 換成 Bun 1.4.4 內建 `bun fmt`：兩個 formatter 使用同一 `.prettierrc.json`，438 個格式化路徑的結果逐檔 byte-for-byte 一致；已移除 Prettier package／lock entry，設定檔保留。`bun check --no-script` 亦在 730 個 TS files 無 type errors；維持 pinned TypeScript 7.0.2 `tsc` 為正式 typecheck script。
 
-## 最新增量：strict map-resource HTTP contract 與 DTO guards（ADR-162）
+## 最新增量：strict map-resource HTTP loader 與 generation fence（ADR-163）
+
+`client/map-resource-loader.ts` 將既有 `/api/map/<id>` name／geometry 與 `/api/map/<id>/art` 請求從未型別化的 `client/main.js` 拆至 strict TypeScript。fetcher 可注入、response 保持 `unknown`，重用 ADR-162 的 DTO guards；不重複 schema、不更動 server 或 WZ source。
+
+三種 API 保留各自原有政策：map-name 查詢對 fetch／HTTP／JSON／shape／ID failure 回 `undefined`，維持 `/find` 的 ID fallback；geometry HTTP／contract failure 仍拋出可記錄錯誤，完整讀取 JSON 後才檢查目前 field／`mapGeneration`，stale response 不會安裝；map-art 以 `ready`／`http-error`／`stale` union 明確區分合法素材、原有 no-art 訊息與過期請求，malformed art 仍拋錯。generation check 的時點與 `self?.mapId`／`map?.id` identity 條件皆保留，未加入 abort、retry、fallback art 或新 timer。
+
+新增 `server/test/map-resource-loader.test.ts` 四項隔離 regression，覆蓋 map-name soft-failure／ID、geometry HTTP／shape／ID、JSON 尚未完成時切換 owner 的 stale fence、art valid／missing／stale／malformed 分支。focused **4/0、1 file**。`client/main.js` 只保留 state 安裝、記錄與 renderer work；HTTP parse／validation／generation ownership policy 集中在新 TS boundary。本輪 pinned TypeScript 7.0.2 strict typecheck、Bun 1.4.4 format check、`bun check --no-script --timing`（**741 checked／742 loaded**）、browser build 與完整 `bun run check` 全通過；全套 **1489 pass／0 fail／5334 expects、173 files（378.89 s）**。Prettier 3.9.10／Bun formatter **449/449 byte-identical**。新 memory-only preview 使用 `--save off`，read-only GET 與兩種 map guard 均通過，未登入或建立／操作角色。
+
+## 前輪增量：strict map-resource HTTP contract 與 DTO guards（ADR-162）
 
 `client/map-resources.ts` 定義 `/api/map/<id>` map geometry、`/api/map/<id>/art` 與 map-name 的 browser wire types，並對 `unknown` payload 深度驗證。`client/main.js` 僅在完整 guard 通過且回應 `id` 等於請求 map ID 時安裝 map／art；既有場地 generation fence 保留。server `mapJson`／`artJson` 明確回傳共用 DTO，編譯期避免 browser projection 漂移。
 
@@ -110,7 +118,7 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **123 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **124 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
   **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5535 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
@@ -189,7 +197,7 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 
 ## 實際驗證狀態
 
-本輪 ADR-162：strict typecheck／format check／Bun check／browser build 通過；map-resource contract focused **5/0、1 file**，完整 suite **1485/0、5334 expects、172 files（374.64 s）**。現樹 formatter audit **447/447 byte-identical**；2026-10-24 latest 核對與固定 pins 一致。未登入 LIVE、未操作角色或既有 save。詳細地圖 JSON wire contract 與安全界線見 [ADR-162](DECISIONS.md)。
+本輪 ADR-163：strict typecheck／format check／Bun check／browser build 通過；map-resource loader focused **4/0、1 file**，完整 suite **1489/0、5334 expects、173 files（378.89 s）**。`bun check --no-script --timing` 為 **741 checked／742 loaded**，現樹 formatter audit **449/449 byte-identical**。固定 pins 與 2026-10-24 latest 核對一致；新 memory-only preview 明確 `--save off`，唯讀 GET／map guards 通過，沒有登入／操作角色或觸碰既有 save。詳細 map-resource DTO、HTTP lifecycle 與安全界線見 [ADR-162](DECISIONS.md)／[ADR-163](DECISIONS.md)。
 
 前輪掉落／fh增量：strict／format／build通過，focused73/0（7 files），新增28案例。
 完整1023/44（1067 tests / 117 files，187.28s），相對7162765 failure multiset含重複新增0／移除0，CI仍不綠。

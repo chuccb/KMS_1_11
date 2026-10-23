@@ -1,15 +1,21 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-24（ADR-162：strict map-resource wire contract／runtime guards；工具鏈 latest 核對無須升版）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-24（ADR-163：strict map-resource HTTP loading／generation fence；工具鏈 latest 核對無須升版）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 **ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
 全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支未嚴格型別化**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
-並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union；ADR-161 抽出 strict map command／catalog boundary；ADR-162 為 map／art HTTP resources 定義 DTO、runtime guards 與請求 ID 一致性檢查。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
+並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union；ADR-161 抽出 strict map command／catalog boundary；ADR-162 為 map／art HTTP resources 定義 DTO、runtime guards 與請求 ID 一致性檢查；ADR-163 再將 map-resource fetch／HTTP error policy／generation fence 拆至 strict TS boundary。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
 歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
-## 最新增量：strict map-resource API contract 與 browser guards（ADR-162）
+## 最新增量：strict map-resource HTTP loader 與 generation fence（ADR-163）
+
+`client/map-resource-loader.ts` 將 map-name／map geometry／map art 的 `fetch`、JSON `unknown` boundary 與 stale-generation decision 自 `client/main.js` 移到可注入 fetcher 的 strict TypeScript。仍共用 ADR-162 的 map DTO guards，不複製 schema；main 保留 state install、記錄、renderer 更新及 field ownership callback。
+
+name lookup 對 network／HTTP／JSON／shape／ID failure 保持 fail-soft，`/find` 仍顯示 map-ID fallback；geometry 保留 HTTP／contract errors，待 JSON body 完成後以原 map ID + `mapGeneration` 檢查丟棄 stale result；art 以 `ready`／`http-error`／`stale` discriminated union 保留原 no-art log、stale ignore 與 malformed error。沒有引入 abort／retry／fallback art／timer。新增四項隔離測試，驗證 JSON pending 時 ownership 改變及各 API policy；focused **4/0、1 file**。pinned strict typecheck、format check、`bun check`（741 checked／742 loaded）、build 與完整 `bun run check` 通過：**1489 pass／0 fail／5334 expects、173 files（378.89 s）**；Prettier／Bun audit **449/449 byte-identical**。memory-only preview 使用 `--save off`，僅唯讀驗證 HTTP 與 map guards，未登入或操作角色。詳 [ADR-163](DECISIONS.md)。
+
+## 前輪增量：strict map-resource API contract 與 browser guards（ADR-162）
 
 新增 `client/map-resources.ts`，為 `/api/map/<id>`、`/api/map/<id>/art` 與 map-name 定義共用 JSON DTO／runtime validators。`client/main.js` 將 response 先作 `unknown` 驗證，再要求回應 map ID 與請求一致後才更新 map/name/art state；server serializers 也回傳同一 browser wire types。現有 map-generation race fence 不變。
 
