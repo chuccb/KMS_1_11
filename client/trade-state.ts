@@ -1,14 +1,14 @@
 import type { MiniRoomEvent } from "../server/src/protocol/miniroom.ts";
-import type { ItemSlot } from "../server/src/protocol/itemslot.ts";
+import type { ItemSlotJson, MiniRoomEventJson } from "./trade-wire.ts";
+import { miniRoomEventJson } from "./trade-wire.ts";
+import { MINIROOM_TRADE_KIND, TRADE_SLOTS } from "./trade-constants.ts";
 import { vScrollScroller, VSCR_CELL } from "./vscroll.ts";
 import { BT_UI_CLOSE } from "./uicontrols.ts";
 import { ITEM_NO_CELL_TOP } from "./itemno.ts";
 import { SLOT_PITCH, SLOT_SIZE } from "./slot.ts";
 
-/** `sub_4D2DB0` allocates eight 16-byte cells per side; `sub_4D63C0` numbers them 1..8.
- * Lives here (not in the server codec) so browser modules never pull a server runtime import;
- * `protocol/miniroom.ts` re-exports it, the same arrangement as PARTY_MAX_MEMBERS. */
-export const TRADE_SLOTS = 8;
+/** Shared protocol values live in a pure module, not this UI state machine. */
+export { TRADE_SLOTS } from "./trade-constants.ts";
 
 /**
  * The 1:1 exchange window (CTradingRoomDlg, `sub_4D2DB0`) as the 2003 client draws it.
@@ -152,7 +152,7 @@ export interface TradeParticipant {
 export interface TradeOffer {
   roomSlot: number;
   count: number;
-  item: ItemSlot;
+  item: ItemSlotJson;
 }
 export interface TradeSideState {
   offers: ReadonlyMap<number, TradeOffer>;
@@ -227,6 +227,70 @@ export function tradeState() {
           messages: [...room.messages],
         };
 
+  const receive = (event: MiniRoomEventJson): TradeTransition[] => {
+    switch (event.kind) {
+      case "invite": {
+        // `sub_481910`: one modal at a time, and never while a room is up. The view decides
+        // visibility (CConfig goExchange, dialog policy); a blocked offer is answered false.
+        if (invite === undefined && room === undefined)
+          invite = { id: event.inviterId, name: event.inviterName };
+        return [{ kind: "invite", inviterId: event.inviterId, inviterName: event.inviterName }];
+      }
+      case "enter": {
+        // `sub_481790` throws for a second dialog and for a kind it cannot build; ignore both.
+        if (room !== undefined || event.roomKind !== MINIROOM_TRADE_KIND) return [];
+        room = {
+          myIndex: event.myIndex,
+          participants: new Map(event.participants.map((p) => [p.index, { ...p }])),
+          sides: [emptySide(), emptySide()],
+          messages: [],
+        };
+        invite = undefined;
+        return [{ kind: "opened", myIndex: event.myIndex }];
+      }
+      case "participant": {
+        if (room === undefined || room.participants.has(event.participant.index)) return [];
+        room.participants.set(event.participant.index, { ...event.participant });
+        return [{ kind: "participant", index: event.participant.index }];
+      }
+      case "message": {
+        if (room === undefined) return [];
+        room.messages.push(event.text);
+        if (room.messages.length > LOG_LINES)
+          room.messages.splice(0, room.messages.length - LOG_LINES);
+        return [{ kind: "message", text: event.text }];
+      }
+      case "item": {
+        if (room === undefined || event.index < 0 || event.index > 1) return [];
+        const side = room.sides[event.index];
+        side.offers.set(event.roomSlot, {
+          roomSlot: event.roomSlot,
+          count: event.item.kind === "equip" ? 1 : event.item.quantity,
+          item: event.item,
+        });
+        return [{ kind: "offer", index: event.index, roomSlot: event.roomSlot }];
+      }
+      case "mesos": {
+        if (room === undefined || event.index < 0 || event.index > 1) return [];
+        room.sides[event.index].mesos = event.amount;
+        return [{ kind: "mesos", index: event.index }];
+      }
+      case "lock": {
+        // `sub_4D3BB0`: one flag for "the other side locked"; my own lock is set locally.
+        if (room === undefined) return [];
+        const other = room.myIndex === 0 ? 1 : 0;
+        room.sides[other].confirmed = true;
+        return [{ kind: "locked" }];
+      }
+      case "finish":
+        room = undefined;
+        return [{ kind: "closed", code: event.code }];
+      case "refused":
+      case "ready":
+        return [];
+    }
+  };
+
   return {
     get room(): TradeRoomState | undefined {
       return snapshot();
@@ -243,69 +307,11 @@ export function tradeState() {
       invite = undefined;
       return true;
     },
-    /** `sub_4815E0`/`sub_481D00`/`sub_4D3360` applied to the room model. */
-    receive(event: MiniRoomEvent): TradeTransition[] {
-      switch (event.kind) {
-        case "invite": {
-          // `sub_481910`: one modal at a time, and never while a room is up. The view decides
-          // visibility (CConfig goExchange, dialog policy); a blocked offer is answered false.
-          if (invite === undefined && room === undefined)
-            invite = { id: event.inviterId, name: event.inviterName };
-          return [{ kind: "invite", inviterId: event.inviterId, inviterName: event.inviterName }];
-        }
-        case "enter": {
-          // `sub_481790` throws for a second dialog and for a kind it cannot build; ignore both.
-          if (room !== undefined || event.roomKind !== 1) return [];
-          room = {
-            myIndex: event.myIndex,
-            participants: new Map(event.participants.map((p) => [p.index, { ...p }])),
-            sides: [emptySide(), emptySide()],
-            messages: [],
-          };
-          invite = undefined;
-          return [{ kind: "opened", myIndex: event.myIndex }];
-        }
-        case "participant": {
-          if (room === undefined || room.participants.has(event.participant.index)) return [];
-          room.participants.set(event.participant.index, { ...event.participant });
-          return [{ kind: "participant", index: event.participant.index }];
-        }
-        case "message": {
-          if (room === undefined) return [];
-          room.messages.push(event.text);
-          if (room.messages.length > LOG_LINES)
-            room.messages.splice(0, room.messages.length - LOG_LINES);
-          return [{ kind: "message", text: event.text }];
-        }
-        case "item": {
-          if (room === undefined || event.index < 0 || event.index > 1) return [];
-          const side = room.sides[event.index];
-          side.offers.set(event.roomSlot, {
-            roomSlot: event.roomSlot,
-            count: event.item.kind === "equip" ? 1 : event.item.quantity,
-            item: event.item,
-          });
-          return [{ kind: "offer", index: event.index, roomSlot: event.roomSlot }];
-        }
-        case "mesos": {
-          if (room === undefined || event.index < 0 || event.index > 1) return [];
-          room.sides[event.index].mesos = event.amount;
-          return [{ kind: "mesos", index: event.index }];
-        }
-        case "lock": {
-          // `sub_4D3BB0`: one flag for "the other side locked"; my own lock is set locally.
-          if (room === undefined) return [];
-          const other = room.myIndex === 0 ? 1 : 0;
-          room.sides[other].confirmed = true;
-          return [{ kind: "locked" }];
-        }
-        case "finish":
-          room = undefined;
-          return [{ kind: "closed", code: event.code }];
-        case "refused":
-        case "ready":
-          return [];
-      }
+    /** `sub_4815E0`/`sub_481D00`/`sub_4D3360` consumes the JSON-safe browser event contract. */
+    receive,
+    /** Server sessions decode native protocol BigInts; preserve them as exact decimal strings in state. */
+    receiveProtocol(event: MiniRoomEvent): TradeTransition[] {
+      return receive(miniRoomEventJson(event));
     },
     /** `sub_4D61F0` sets `this+63` locally; the wire only ever carries the peer's lock. */
     confirmLocally() {

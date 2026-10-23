@@ -1892,7 +1892,7 @@ export class ClientSession {
           // `sub_4815E0`: with no dialog up only types 1/2/4 are legal; the codec throws on the
           // rest exactly like the native's AVCDisconnectException path, and the log keeps it.
           const event = decodeMiniRoomEvent(readMiniRoomResult(new PacketReader(plain, 1)));
-          this.trade.receive(event);
+          this.trade.receiveProtocol(event);
           this.emit({ kind: "trade", event });
           return;
         }

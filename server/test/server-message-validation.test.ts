@@ -5,6 +5,8 @@ import {
   SERVER_MESSAGE_VALIDATION_GAPS,
   validateServerMessagePayload,
 } from "../../client/server-message-validation.ts";
+import { EQUIP_STATS } from "../src/protocol/itemslot.ts";
+import { MINIROOM_KIND, MINIROOM_REFUSAL } from "../src/protocol/miniroom.ts";
 
 const self = {
   characterId: 7,
@@ -154,19 +156,220 @@ function validFieldMessage() {
   };
 }
 
-test("validation coverage and the remaining trade gap are explicit", () => {
-  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.size, 56);
+test("validation coverage is explicit and unclassified runtime types stay pass-through", () => {
+  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.size, 57);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("login"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("field"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("stat-basis"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("unknown"), true);
   assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("messenger"), true);
-  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("trade"), false);
-  assert.deepEqual(SERVER_MESSAGE_VALIDATION_GAPS, ["trade"]);
+  assert.equal(SERVER_MESSAGE_VALIDATED_TYPES.has("trade"), true);
+  assert.deepEqual(SERVER_MESSAGE_VALIDATION_GAPS, []);
   assert.equal(validateServerMessagePayload({ t: "unknown", opcode: 0x42, bytes: 3 }), true);
   assert.equal(validateServerMessagePayload({ t: "unknown", opcode: 0x100, bytes: 3 }), false);
-  assert.equal(validateServerMessagePayload({ t: "trade", event: null }), true);
+  assert.equal(validateServerMessagePayload({ t: "trade", event: null }), false);
   assert.equal(validateServerMessagePayload({ t: "future-event" }), true);
+});
+
+function tradeParticipant(index: number) {
+  return {
+    index,
+    name: index === 0 ? "Peer" : "Self",
+    face: 20_000,
+    look: [30_000, 1_000_002],
+    level: 20 + index,
+  };
+}
+
+function tradeEquipItem() {
+  return {
+    kind: "equip",
+    itemId: 1_302_000,
+    cash: null,
+    ruc: 7,
+    cuc: 0,
+    ...equipStats,
+  };
+}
+
+function tradeStackItem() {
+  return {
+    kind: "nonequip",
+    itemId: 2_000_001,
+    cash: null,
+    quantity: 3,
+  };
+}
+
+function tradeMessage(event: unknown) {
+  return { t: "trade", event };
+}
+
+test("all trade event variants and lossless cash-block JSON fields validate", () => {
+  const events: unknown[] = [
+    { kind: "invite", inviterId: 7, inviterName: "Peer" },
+    { kind: "refused", code: MINIROOM_REFUSAL.notFound },
+    { kind: "refused", code: MINIROOM_REFUSAL.busy, name: "Peer" },
+    { kind: "participant", participant: tradeParticipant(1) },
+    {
+      kind: "enter",
+      roomKind: MINIROOM_KIND.trade,
+      myIndex: 1,
+      participants: [tradeParticipant(0), tradeParticipant(1)],
+    },
+    {
+      kind: "enter",
+      roomKind: MINIROOM_KIND.trade,
+      myIndex: 0,
+      participants: [tradeParticipant(0)],
+    },
+    { kind: "message", text: "Trade message" },
+    { kind: "finish", code: 3 },
+    { kind: "item", index: 0, roomSlot: 1, item: tradeEquipItem() },
+    { kind: "item", index: 1, roomSlot: 8, item: tradeStackItem() },
+    {
+      kind: "item",
+      index: 1,
+      roomSlot: 8,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: {
+          sn: "18446744073709551615",
+          unknown18: 65_535,
+          unknown1A: "0",
+        },
+      },
+    },
+    { kind: "mesos", index: 0, amount: 0xffff_ffff },
+    { kind: "lock" },
+    { kind: "ready" },
+  ];
+  const describe = (value: unknown) => JSON.stringify(value) ?? String(value);
+  for (const event of events)
+    assert.equal(validateServerMessagePayload(tradeMessage(event)), true, describe(event));
+
+  const malformed: unknown[] = [
+    null,
+    { kind: "future-event" },
+    { kind: "invite", inviterId: -1, inviterName: "Peer" },
+    { kind: "invite", inviterId: 7, inviterName: 4 },
+    { kind: "refused", code: 256 },
+    { kind: "refused", code: MINIROOM_REFUSAL.busy },
+    { kind: "refused", code: MINIROOM_REFUSAL.notFound, name: "unexpected" },
+    { kind: "participant", participant: { ...tradeParticipant(0), index: 2 } },
+    {
+      kind: "participant",
+      participant: { ...tradeParticipant(0), look: [30_000, 0] },
+    },
+    { kind: "enter", roomKind: 2, myIndex: 0, participants: [tradeParticipant(0)] },
+    {
+      kind: "enter",
+      roomKind: MINIROOM_KIND.trade,
+      myIndex: 2,
+      participants: [tradeParticipant(0)],
+    },
+    { kind: "enter", roomKind: MINIROOM_KIND.trade, myIndex: 0, participants: [] },
+    {
+      kind: "enter",
+      roomKind: MINIROOM_KIND.trade,
+      myIndex: 0,
+      participants: [tradeParticipant(0), tradeParticipant(0)],
+    },
+    {
+      kind: "enter",
+      roomKind: MINIROOM_KIND.trade,
+      myIndex: 1,
+      participants: [tradeParticipant(0)],
+    },
+    { kind: "message", text: 4 },
+    { kind: "finish", code: 256 },
+    { kind: "item", index: 2, roomSlot: 1, item: tradeStackItem() },
+    { kind: "item", index: 0, roomSlot: 0, item: tradeStackItem() },
+    { kind: "item", index: 0, roomSlot: 9, item: tradeStackItem() },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: { ...tradeEquipItem(), itemId: 2_000_001 },
+    },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: { ...tradeStackItem(), itemId: 1_302_000 },
+    },
+    { kind: "item", index: 0, roomSlot: 1, item: { ...tradeStackItem(), itemId: 0x1_0000_0000 } },
+    { kind: "item", index: 0, roomSlot: 1, item: { ...tradeStackItem(), quantity: 65_536 } },
+    { kind: "item", index: 0, roomSlot: 1, item: { ...tradeStackItem(), cash: {} } },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: { sn: "0", unknown18: 0, unknown1A: "0" },
+      },
+    },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: { sn: "01", unknown18: 0, unknown1A: "0" },
+      },
+    },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: { sn: Number.MAX_SAFE_INTEGER, unknown18: 0, unknown1A: "0" },
+      },
+    },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: { sn: "1", unknown18: 65_536, unknown1A: "0" },
+      },
+    },
+    {
+      kind: "item",
+      index: 0,
+      roomSlot: 1,
+      item: {
+        ...tradeStackItem(),
+        itemId: 5_000_001,
+        cash: { sn: "1", unknown18: 0, unknown1A: "18446744073709551616" },
+      },
+    },
+    { kind: "mesos", index: 2, amount: 0 },
+    { kind: "mesos", index: 0, amount: 0x1_0000_0000 },
+  ];
+  for (const event of malformed)
+    assert.equal(validateServerMessagePayload(tradeMessage(event)), false, describe(event));
+
+  for (const stat of EQUIP_STATS) {
+    const item = { ...tradeEquipItem(), [stat]: 65_536 };
+    assert.equal(
+      validateServerMessagePayload(tradeMessage({ kind: "item", index: 0, roomSlot: 1, item })),
+      false,
+      `${stat} must stay within its native u16 field`,
+    );
+  }
+  assert.equal(
+    validateServerMessagePayload({ t: "trade", event: { kind: "item", index: 0, roomSlot: 1 } }),
+    false,
+  );
 });
 
 test("messenger event variants and the fixed three-cell roster validate completely", () => {

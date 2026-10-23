@@ -1,12 +1,20 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-23（ADR-159：Messenger payload guard；Trade BigInt serialization path traced）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成.
+更新：2026-10-23（ADR-160：trade cash-block JSON-safe projection 與完整 MiniRoom guard）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：Messenger event guard 與 trade serialization trace（ADR-159）
+## 最新增量：trade JSON projection 與 full MiniRoom guard（ADR-160）
+
+`client/trade-wire.ts` 把 `MiniRoomEvent` 投影為獨立 JSON DTO；cash block 的 `sn`／`unknown1A` u64 使用 `BigInt.toString(10)` 成 canonical 十進位字串，`unknown18` 保持數字，null／其他事件原樣保留。原始 protocol／save model 不改，沒有經過 JS number 或 generic coercion。出站 `ClientEventJson`／`WebClientServerMessage` 與 browser `TradeState` 共用 DTO；session 對 native event 使用明示的 protocol 接口。
+
+`client/trade-message-validation.ts` 深度驗證所有十種 MiniRoom variant，包括 participant／enter indices、八個 offer slots、equip/non-equip 欄位、u8／u16／u32 與 canonical u64 範圍；`trade` 加入 `SERVER_MESSAGE_VALIDATED_TYPES`，`SERVER_MESSAGE_VALIDATION_GAPS` 現為空。合成 peer regression 從 `0x50 type 11` 穿過 decoder、session、projection，直接 `JSON.stringify`／`JSON.parse` round-trip 後仍保有相同十進位 u64 字串；validation fixtures 覆蓋每一 variant 與畸形邊界。
+
+現有 57 個 discriminator 全數有明列 guard，但未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard）；這不是完整 schema，`client/main.js` 仍未 strict 型別化。focused／完整驗證見 [ADR-160](DECISIONS.md)。
+
+## 前輪增量：Messenger event guard 與 trade serialization trace（ADR-159）
 
 `client/messenger-message-validation.ts` 現在接上 `client/server-message-validation.ts`，完整驗證八種 Messenger event variant、巢狀 participant／look 欄位，以及固定恰好三格的 `clear`／`keep`／`fill` roster；`MESSENGER_ROOM_SIZE` 由 `client/messenger-constants.ts` 單一提供，client state、protocol、server 與 validator 共用。測試逐 variant 覆蓋 accept/reject，以及畸形槽位、look、欄位型別／範圍、roster 長度和 cell。
 
-Messenger 已不再是 gap：目前 56 種 server-to-browser discriminator 有 guard，`trade` 是唯一明列的 `SERVER_MESSAGE_VALIDATION_GAPS`。Trade path 已查實：`0x50 type 11` → `readItemSlot` → `ClientSession` event → mechanical `clientEventJson` projection → `WebClient.send` 的直接 `JSON.stringify`；隔離 regression 用 non-null cash block 的兩個 `bigint` 欄位證明 stringify 會丟 `TypeError`。故先維持 trade gap，直到定義並驗證不失真的 JSON-safe wire projection；本輪不正規化或偷偷字串化。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`client/main.js` 仍未 strict 型別化，不宣稱完整 `ClientEvent` schema。
+ADR-159 時 Messenger 已不再是 gap：當時 56 種 server-to-browser discriminator 有 guard，`trade` 是唯一明列的 `SERVER_MESSAGE_VALIDATION_GAPS`。Trade path 已查實：`0x50 type 11` → `readItemSlot` → `ClientSession` event → mechanical `clientEventJson` projection → `WebClient.send` 的直接 `JSON.stringify`；隔離 regression 用 non-null cash block 的兩個 `bigint` 欄位證明 stringify 會丟 `TypeError`。ADR-160 隨後定義並測試 lossless JSON-safe projection，再把 trade 加入 guard。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`client/main.js` 仍未 strict 型別化，不宣稱完整 `ClientEvent` schema。
 
 ## 前輪增量：選定 inbound payload guards 與 Bun 原生 formatter（ADR-158）
 
@@ -37,7 +45,7 @@ JSON parse 與 active-connection generation fence；`client/main.js` 不再直�
 invalid envelope、舊 socket stale event fence、active error/close、return-to-title close code）；mock browser startup／static／UI 與
 system-UI source wiring 聚焦共 **18/0、5 files**。`typecheck`／`format:check`／`build` 通過；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files**（378.63 s）。本輪不新增依賴、不改 strict、不連真遊戲、不操作帳號／角色／save。
 
-目前 `client/` 有 **117 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
+目前 `client/` 有 **120 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport／selected payload guard 抽出說成 main 遷移已完成。
 
 ## 前輪增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
 

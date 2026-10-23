@@ -18,6 +18,7 @@ import {
   encodeMiniRoomLock,
   encodeMiniRoomMesos,
   encodeMiniRoomFinish,
+  MINIROOM_KIND,
   readClientMiniRoomRequest,
   readMiniRoomResult,
   TRADE_SLOTS,
@@ -28,6 +29,7 @@ import { tradeOfferCount } from "../../client/trade-window.ts";
 import { nonEquipSlot } from "../src/protocol/itemslot.ts";
 import { PacketReader } from "../src/protocol/packet.ts";
 import { encodeCp949 } from "../src/protocol/cp949.ts";
+import { clientEventJson } from "../src/net/client-event-json.ts";
 
 /** Protocol names cross the wire as CP949 byte strings, exactly like the fixture's. */
 const byteName = (text: string) => Buffer.from(encodeCp949(text)).toString("latin1");
@@ -39,7 +41,48 @@ const participant = (index: number, name: string): MiniRoomParticipant => ({
   look: [30000],
   level: 20 + index,
 });
-const read = (bytes: Uint8Array) => readMiniRoomResult(new PacketReader(bytes, 1));
+const readProtocol = (bytes: Uint8Array) => readMiniRoomResult(new PacketReader(bytes, 1));
+const read = (bytes: Uint8Array) =>
+  clientEventJson({ kind: "trade", event: readProtocol(bytes) }, 0).event;
+
+test("native cash-block BigInts stay raw and enter shared trade state as exact decimal strings", () => {
+  const state = tradeState();
+  state.receiveProtocol(
+    readProtocol(
+      encodeMiniRoomEnter({
+        roomKind: MINIROOM_KIND.trade,
+        myIndex: 0,
+        participants: [participant(0, "Self"), participant(1, "Peer")],
+      }),
+    ),
+  );
+
+  const nativeItem = readProtocol(
+    encodeMiniRoomItem({
+      index: 1,
+      roomSlot: 2,
+      item: nonEquipSlot(5_000_001, 3, {
+        cash: { sn: 0x123456789abcdefn, unknown18: 3, unknown1A: 0x102030405060708n },
+      }),
+    }),
+  );
+  assert.equal(nativeItem.kind, "item");
+  if (nativeItem.kind !== "item") throw new Error("expected a MiniRoom item event");
+  assert.equal(typeof nativeItem.item.cash?.sn, "bigint");
+
+  state.receiveProtocol(nativeItem);
+
+  assert.equal(
+    typeof nativeItem.item.cash?.sn,
+    "bigint",
+    "projection does not mutate the protocol event",
+  );
+  assert.deepEqual(state.theirSide()?.offers.get(2)?.item.cash, {
+    sn: "81985529216486895",
+    unknown18: 3,
+    unknown1A: "72623859790382856",
+  });
+});
 
 test("trade sheet geometry is sub_4D63C0's grid and sub_461C50's centring", () => {
   assert.deepEqual(
@@ -114,7 +157,7 @@ test("0x50 transitions build the room the window paints; type 7 stays a no-op", 
   const enter = state.receive(
     read(
       encodeMiniRoomEnter({
-        roomKind: 1,
+        roomKind: MINIROOM_KIND.trade,
         myIndex: 1,
         participants: [participant(0, byteName("상대")), participant(1, byteName("나"))],
       }),
@@ -137,6 +180,22 @@ test("0x50 transitions build the room the window paints; type 7 stays a no-op", 
     read(encodeMiniRoomItem({ index: 1, roomSlot: 3, item: nonEquipSlot(2000001, 12) })),
   );
   assert.equal(state.mySide()?.offers.get(3)?.count, 12);
+  state.receive(
+    read(
+      encodeMiniRoomItem({
+        index: 1,
+        roomSlot: 4,
+        item: nonEquipSlot(5_000_001, 2, {
+          cash: { sn: 0x123456789abcdefn, unknown18: 3, unknown1A: 0x102030405060708n },
+        }),
+      }),
+    ),
+  );
+  assert.deepEqual(state.mySide()?.offers.get(4)?.item.cash, {
+    sn: "81985529216486895",
+    unknown18: 3,
+    unknown1A: "72623859790382856",
+  });
   assert.deepEqual(state.receive(read(encodeMiniRoomLock())), [{ kind: "locked" }]);
   assert.equal(state.theirSide()?.confirmed, true, "type 13 locks the OTHER side");
   assert.equal(state.mySide()?.confirmed, false);
@@ -151,7 +210,7 @@ test("sub_4D5C80/sub_4D5F50 guards: locked, alone, 500 ms throttle, occupied cel
   alone.receive(
     read(
       encodeMiniRoomEnter({
-        roomKind: 1,
+        roomKind: MINIROOM_KIND.trade,
         myIndex: 0,
         participants: [participant(0, byteName("나"))],
       }),
@@ -162,7 +221,7 @@ test("sub_4D5C80/sub_4D5F50 guards: locked, alone, 500 ms throttle, occupied cel
   state.receive(
     read(
       encodeMiniRoomEnter({
-        roomKind: 1,
+        roomKind: MINIROOM_KIND.trade,
         myIndex: 0,
         participants: [participant(0, byteName("나")), participant(1, byteName("상대"))],
       }),

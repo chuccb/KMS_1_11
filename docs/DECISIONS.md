@@ -6147,3 +6147,31 @@ Trade 不能只依靜態型別就推斷 JSON-safe。`ItemSlotCashBlock` 含 `big
 ### 後續
 
 Messenger payload guard 完成；接下來若處理 `trade`，先決定明確、可往返且 JSON-safe 的 BigInt/cash-block wire representation，加入 WebClient serialize/decode regression，再接 trade validator。不可用降低 strictness 或改成 `any` 來避開。
+
+## ADR-160：MiniRoom trade BigInt 的無損 JSON projection 與完整 event guard（2026-10-23）
+
+**狀態**：已接受（57 個已知 server-to-browser discriminator 全數有明列 runtime guard；`SERVER_MESSAGE_VALIDATION_GAPS` 為空；未識別 runtime `t` 仍 pass-through；`client/main.js` 尚未 strict 型別化）
+
+### 背景
+
+ADR-159 留下的唯一 trade gap 有可重現原因：MiniRoom `0x50 type 11` 讀出的 cash block 含兩個 `u64 bigint`，沿 `ClientSession` → `clientEventJson` 到 `WebClient.send` 後，直接 `JSON.stringify` 會丟 `TypeError`。不能用 `Number`、通用 coercion 或只把 guard 關閉來掩蓋；須先明定精確 wire representation，並檢查 browser state／tooltip 消費路徑。
+
+Trade state 會保存 offer item；視圖依 item id／裝備欄位繪製，並不對 cash-block u64 做數值運算。兩個 raw protocol 值可在 bridge DTO 表示成 canonical 十進位字串，維持整數精確值，同時讓瀏覽器能 JSON parse／留存。原始 `ItemSlot` protocol／save 型別不需更改。
+
+### 決策與實作
+
+1. 新增純型別／投影模組 `client/trade-wire.ts`：`ItemSlotCashBlockJson` 將 `sn`、`unknown1A` 定為字串，`unknown18` 仍為數字；`miniRoomEventJson` 對 BigInt 明確呼叫 `.toString(10)`，null block 與其他 MiniRoom variants 不變。沒有經過 JS number，沒有修改 TCP codec、資料庫／save schema 或原 protocol item。
+2. `webclient-messages.ts` 的 `MiniRoomEventJson`／`ClientEventJson` 將 `trade` 分支指向安全 DTO；`clientEventJson` 使用明確 MiniRoom 投影，`WebClient.send` 維持直接 JSON serialization。browser `TradeState.receive` 與 `TradeOffer.item` 使用 wire type；native `ClientSession` 走明示的 `receiveProtocol`，先投影再存入共用 state。
+3. 新增純常數來源 `client/trade-constants.ts`：供 validator、state 與 protocol 共用 `TRADE_SLOTS`、雙人容量、交易房 kind 與 busy refusal code；`protocol/miniroom.ts` 不再 runtime-import 含 UI 的 `trade-state.ts` 取常數。
+4. 新增 `client/trade-message-validation.ts`，逐 discriminator 驗證全部十種 MiniRoom event，及 participant／room index、room kind／名冊、1..8 slot、完整 equip/non-equip item 欄位與 u8／u16／u32 範圍。Cash u64 僅接受 canonical base-10 字串、拒絕前導零／超過 u64／數值型 coercion；非 null block 的 `sn` 必須非零（native writer 以 `sn != 0` 推導 block flag）。`trade` 移入 guarded list、從 gaps 移除，空 gap list 仍納入 compile-time coverage assertion。未識別 runtime discriminator 的 pass-through 政策不變。
+5. regression 更新為完整 native-peer 鏈：synthetic `0x50 type 11` 中兩個超過 JS safe-integer 範圍的 BigInt 經 session／projection 後 `JSON.stringify` → `JSON.parse`，十進位字串逐值完全相等；trade state 亦確認保存精確字串。validator fixtures 覆蓋十種 event、equip/non-equip、有／無 cash block、u64 邊界與畸形 nested fields；由協定 `EQUIP_STATS` 逐一驗證 15 個裝備 stat 的 u16 guard。
+6. 更新 README、architecture、roadmap、toolchain 與 Bun migration 的現行狀態；ADR-159 保留為當時 56 guarded／trade gap 的歷史紀錄。現樹 client TypeScript 為 120 支；formatter inputs 為 439 個 `.ts` 加 4 個 package／config／workflow paths。
+
+### 測試與驗證
+
+- trade／Messenger／server-message validator focused：**16 pass／0 fail，3 files**。
+- `bun run typecheck`（pinned TypeScript 7.0.2、strict／ESNext）通過；`bun check --no-script --timing`：**735 checked／736 loaded，無型別錯誤**。
+- `bun run format:check` 通過；Prettier 3.9.10 與 Bun 1.4.4 formatter audit：現樹 **443/443 byte-identical**。
+- `bun run build` 通過；browser assets 留在 ignored `dist/client`。
+- 最終完整 `bun run test`：**1478 pass／0 fail／5334 `expect()` calls，171 files，299.19 s**。
+- 所有測試使用 synthetic peer、隔離 fixture／mock 與本機 Data.wz；沒有 LIVE login、角色建立／操作或既有 save 讀寫。既有 memory-only preview 仍為 `--save off`，沒有登入或操作。

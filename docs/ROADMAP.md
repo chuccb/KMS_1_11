@@ -1,12 +1,12 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-23（ADR-159：完成 Messenger server-to-browser payload guard；Bun 1.4.4 `bun fmt` 取代 Prettier CLI）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-23（ADR-160：trade cash-block JSON-safe projection 與完整 MiniRoom payload guard；Bun 1.4.4 `bun fmt` 取代 Prettier CLI）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 **ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
 全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支未嚴格型別化**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
-並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards，ADR-159 再完整 guard Messenger。現只明列 trade gap，仍不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
+並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 將 `ClientEvent` → `t` 投影與 `WebClient.send` 收斂為 strict union；ADR-158 接上 selected inbound payload guards；ADR-159 guard Messenger；ADR-160 為 trade 定義無損 JSON projection 並 guard MiniRoom 全 union。現有 57 個已知 discriminator 全數 guard，但未識別 runtime `t` 仍 pass-through，故不是全事件 runtime schema；main 本體仍未型別化，靜態耦合普查表明需採門面分層逐領域搬移），
 歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
 
 ## 前輪增量：strict server-to-browser JSON 訊息合約（ADR-157）
@@ -15,11 +15,17 @@ ADR-157 新增 `server/src/net/webclient-messages.ts`，把 `ClientEvent.kind` �
 
 同日重新查 registry／GitHub latest：Bun 與 `@types/bun` 已由 **1.4.3 升至 1.4.4**，TS 7.0.2、Prettier 3.9.10、Playwright Core 1.64.1、Chromium tooling 153.0.0 仍為 latest；checkout v7.0.1／setup-bun v2.2.0 Actions 仍為 latest。新 Bun tarball SHA1／SHA512 與 registry metadata 相符，`bun install --frozen-lockfile --ignore-scripts` 27 installs／47 packages 無漂移；new-runtime strict typecheck／全範圍 format／build 通過，focused **44/0、4 files**，full suite **1468/0、5334 expects、170 files（345.05s）**。隔離測試，不登入／操作 LIVE 角色或存檔。驗證詳見 ADR-157 與工具鏈文件。
 
-## 最新增量：完成 Messenger inbound payload guard（ADR-159）
+## 最新增量：lossless trade projection 與 MiniRoom payload guard（ADR-160）
 
-`client/messenger-message-validation.ts` 驗證全部八種 Messenger event、巢狀 participant／look 欄位與恰好三格 roster；`MESSENGER_ROOM_SIZE` 移至純共用常數，client state、protocol、server 與 guard 使用同一來源。Messenger 已自 explicit gaps 移除，現為 56 種 discriminator 有 guard、`trade` 是唯一 gap。Trade gap 有實證：`0x50 type 11` → `readItemSlot` → `ClientSession` event → `clientEventJson` → `WebClient.send` 的直接 `JSON.stringify`；隔離 regression 已證明非 null cash block 內的 `bigint` 會讓 stringify 丟 `TypeError`。須先定義並測試不失真的 JSON-safe wire projection，不能偷偷字串化後加深 guard。
+`client/trade-wire.ts` 定義 MiniRoom JSON DTO：cash block 的 `sn`／`unknown1A` u64 只在投影時以 `BigInt.toString(10)` 表示為 canonical 十進位字串，`unknown18` 保持 number、null 保持 null，原協定物件與存檔不改。browser `TradeState` 消費同一 wire type；server protocol path 使用明示的 `receiveProtocol` 投影，不把 raw BigInt 當成 browser event。
 
-未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard）；這不是完整 runtime schema，`client/main.js` 仍未 strict 型別化。focused／完整驗證與 440-path formatter audit 見 [ADR-159](DECISIONS.md)。
+`client/trade-message-validation.ts` 驗證全部十種 MiniRoom event、參與者／房間索引、item kind／數值範圍與 cash-block u64 字串上下界；trade 加入 central guarded set，明列 gaps 歸零。現有 57 個已知 discriminator 全數有 guard；未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是完整 runtime schema，`client/main.js` 仍未 strict 型別化。focused／完整驗證見 [ADR-160](DECISIONS.md)。
+
+## 前輪增量：完成 Messenger inbound payload guard（ADR-159）
+
+`client/messenger-message-validation.ts` 驗證全部八種 Messenger event、巢狀 participant／look 欄位與恰好三格 roster；`MESSENGER_ROOM_SIZE` 移至純共用常數，client state、protocol、server 與 guard 使用同一來源。Messenger 已自 explicit gaps 移除。該時點為 56 種 discriminator 有 guard、`trade` 唯一 gap；Type-11 cash-block BigInt 的 `JSON.stringify` 失敗已由隔離 peer regression 證實。ADR-160 已用不失真的十進位字串 projection 關閉該 gap。
+
+未識別／未分類 runtime `t` 當時及現今都 pass-through（已知 `t: "unknown"` 有 guard）；完整歷史驗證見 [ADR-159](DECISIONS.md)。
 
 ## 前輪增量：選定 inbound payload guards 與 Bun formatter（ADR-158）
 

@@ -1,11 +1,18 @@
 /** Compile-time server-to-browser JSON contract. Runtime payload validation remains event-specific. */
 import type { StatBasis } from "../../../client/characterstats.ts";
 import type { ClientEvent } from "../client/session.ts";
+import type { MiniRoomEventJson } from "../../../client/trade-wire.ts";
+import type { MiniRoomEvent } from "../protocol/miniroom.ts";
 import type { ItemInfo } from "../game/iteminfo.ts";
 import type { MobPresentation } from "../game/mobs.ts";
 import type { PhysicalAttackTrace } from "../game/nativecombat.ts";
 import type { TestToolResult } from "../game/testtools.ts";
 import type { WorldEntry } from "../protocol/replies.ts";
+export type {
+  ItemSlotCashBlockJson,
+  ItemSlotJson,
+  MiniRoomEventJson,
+} from "../../../client/trade-wire.ts";
 
 type ClientEventProjection<Event extends ClientEvent> = Event extends {
   kind: infer Kind extends string;
@@ -31,7 +38,14 @@ export type ClientEventJson<Event extends ClientEvent = ClientEvent> = Event ext
           presentation?: MobPresentation;
           forcedDuration?: number;
         }
-      : ClientEventProjection<Event>;
+      : Event extends {
+            kind: "trade";
+            event: infer TradeEvent extends MiniRoomEvent;
+          }
+        ? Omit<ClientEventProjection<Event>, "event"> & {
+            event: MiniRoomEventJson<TradeEvent>;
+          }
+        : ClientEventProjection<Event>;
 
 /** The character-list projection is smaller than CharacterData and is never written back to a save. */
 export interface CharacterSummary {

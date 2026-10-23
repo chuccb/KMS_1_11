@@ -1,12 +1,12 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-23（ADR-159：Messenger server-to-browser runtime payload guard；Bun 1.4.4 formatter 取代 Prettier）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-23（ADR-160：trade JSON-safe projection／MiniRoom payload guard；Bun 1.4.4 formatter 取代 Prettier）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 遷移時的 438 個路徑已逐檔一致。本輪新增兩個 TypeScript module 後重做現樹 audit：436 個 `.ts` 加 4 個 package/config/workflow path，共 **440/440** 與 Prettier 3.9.10 輸出 byte-identical；Prettier 仍只作已驗證的比較工具，沒有恢復成依賴。Bun／`@types/bun` 1.4.4 與 TypeScript 7.0.2 維持固定；另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`。playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 維持 latest 核查；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path 與 ADR-159 的 440-path Prettier 3.9.10 byte audit 均保留為各輪紀錄。ADR-160 新增三個 TypeScript module，現樹包含 439 個 `.ts` 加 4 個 package/config/workflow paths，共 443 個格式輸入；本輪再次逐檔 byte-audit 後記錄於 ADR-160。Prettier 只作已驗證的比較工具，沒有恢復成依賴。Bun／`@types/bun` 1.4.4 與 TypeScript 7.0.2 維持固定；另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`。playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 維持 latest 核查；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
 
 strict `client/websocket-transport.ts` 把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
 自 `client/main.js` 移到可單元測試的 TypeScript 邊界；JSON object＋string `t` 後再呼叫 optional payload guard，guard 回 false 或 throw 都 fail-closed。
-`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；目前 56 種 discriminator 有 guard，`trade` 是唯一明列 gap；其 `0x50 type 11` → `readItemSlot` → `ClientSession` → `clientEventJson` 路徑會把 non-null cash-block `bigint` 送到 `WebClient.send`，隔離 regression 證明直接 `JSON.stringify` 會丟 `TypeError`，須先定義不失真的 JSON-safe projection 才能補 guard，未識別／未分類 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **117 支 client `.ts`**、`client/main.js` **5549 行**。本輪驗收與 full suite 數據見 ADR-159；全部以隔離測試／mock，未操作 LIVE 角色或 save。
+`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **120 支 client `.ts`**、`client/main.js` **5549 行**。本輪驗收與 full suite 數據見 ADR-160；全部以隔離測試／mock，未操作 LIVE 角色或 save。
 
 ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
@@ -45,13 +45,21 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 
 格式化則由 Prettier 3.9.10 換成 Bun 1.4.4 內建 `bun fmt`：兩個 formatter 使用同一 `.prettierrc.json`，438 個格式化路徑的結果逐檔 byte-for-byte 一致；已移除 Prettier package／lock entry，設定檔保留。`bun check --no-script` 亦在 730 個 TS files 無 type errors；維持 pinned TypeScript 7.0.2 `tsc` 為正式 typecheck script。
 
-## 最新增量：Messenger payload guard 與唯一 trade gap（ADR-159）
+## 最新增量：trade JSON projection 與完整 MiniRoom guard（ADR-160）
+
+`client/trade-wire.ts` 定義獨立 JSON-safe MiniRoom DTO：僅把 cash block 的 `sn`／`unknown1A` u64 用 `BigInt.toString(10)` 編為 canonical 十進位字串；`unknown18` 保持 number，null 與其他 event 欄位不變。原始 protocol 與 save 型別未改，沒有經過可能失真的 JS number。`clientEventJson`、出站 `WebClientServerMessage`、browser `TradeState` 共用該 wire contract；native session 有明示 `receiveProtocol` 邊界。
+
+`client/trade-message-validation.ts` 驗證全部十種 MiniRoom variants、participant／room indexes、1..8 slot、equip/non-equip 欄位及 u8／u16／u32／u64 範圍；只有十進位、無前導零的 u64 字串可進 browser，cash block 的 `sn` 必須非零。trade 加入 guarded set，現為 **57/57 已知 discriminator 有 guard、gaps 為空**。隔離 native-peer regression 驗證 `0x50 type 11` → codec／session／projection → `JSON.stringify`／`JSON.parse`，兩個 u64 完整以十進位字串 round-trip；validator fixtures 逐 variant accept/reject。
+
+未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），所以仍不是全事件 runtime schema；`client/main.js` 尚未 strict 型別化。驗證／formatter audit 見 [ADR-160](DECISIONS.md)。未登入 LIVE、未操作角色、未讀寫 save；既有 memory-only preview 繼續 `--save off`。
+
+## 前輪增量：Messenger payload guard 與 trade gap trace（ADR-159）
 
 新增 `client/messenger-message-validation.ts` 並接入 central `validateServerMessagePayload` map 與 compile-time coverage set。全部八種 `MessengerEvent` 都驗：participant／left／cell-update 槽位界線、level／face／look 欄位、chat／invite／result payload，以及 `roster` 恰好三格且 marker-specific cells 合法。`MESSENGER_ROOM_SIZE` 移到純 `client/messenger-constants.ts`，client state、protocol、server registry、guard 共用同一常數；protocol 不載入 UI state 模組。
 
-當前是 **56 個 guarded discriminator、`trade` 唯一明列 gap**。Type-11 cash-block BigInt 已經隔離 peer regression 證實會穿過 codec 與 bridge JSON projection，導致 direct `JSON.stringify` 丟 `TypeError`；故保留 gap，直到定義不失真的 JSON-safe projection。本輪不正規化或字串化。未知／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`client/main.js` 仍未 strict 型別化；不宣稱完整 server-message schema。
+ADR-159 當時是 **56 個 guarded discriminator、`trade` 唯一明列 gap**。Type-11 cash-block BigInt 已由隔離 peer regression 證明可穿過 codec 與 bridge JSON projection，造成 direct `JSON.stringify` 丟 `TypeError`；此 gap 在 ADR-160 才由明確的無損 projection 關閉。未知／未分類 runtime `t` 當時及現今都 pass-through（已知 `t: "unknown"` 有 guard）；`client/main.js` 仍未 strict 型別化，不宣稱完整 server-message schema。
 
-驗證結果：focused **35/0、8 files**；full suite **1476/0、5334 expects、171 files（299.67 s）**；strict TypeScript 7.0.2 typecheck、`bun run format:check`、`bun check`（732 files）與 browser build 通過。現樹 formatter audit 擴至 **440/440 byte-identical**。沒有 LIVE login、角色操作或 save 讀寫；memory-only preview 繼續 `--save off`。
+ADR-159 的驗證結果：focused **35/0、8 files**；full suite **1476/0、5334 expects、171 files（299.67 s）**；strict TypeScript 7.0.2 typecheck、`bun run format:check`、`bun check`（732 files）與 browser build 通過。該輪 formatter audit 是 **440/440 byte-identical**。沒有 LIVE login、角色操作或 save 讀寫；memory-only preview 使用 `--save off`。
 
 ## 唯一版本與安裝入口
 
@@ -86,14 +94,14 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **117 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **120 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
   **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5549 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
-- `client/websocket-transport.ts` 是 browser socket lifecycle／頂層 JSON envelope 的 strict TS 模組，且由 `client/main.js` 接上 optional selected-payload guard；精確 guarded types、唯一 `trade` gap 與未識別 runtime `t` pass-through 見 `client/server-message-validation.ts`（已知 `t: "unknown"` 有 guard）。這不是完整 `ClientEvent` runtime schema，也不代表 `main.js` 已型別化。
+- `client/websocket-transport.ts` 是 browser socket lifecycle／頂層 JSON envelope 的 strict TS 模組，且由 `client/main.js` 接上 per-family payload guards；目前 57 個已知 discriminator 全數受 guard，`SERVER_MESSAGE_VALIDATION_GAPS` 為空。未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard）；這不是完整 `ClientEvent` runtime schema，也不代表 `main.js` 已型別化。
 - `bun run build` 用 Bun 的 browser/ESM bundler 輸出 ignored `dist/client`，複製 HTML、CSS 與字型。
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。

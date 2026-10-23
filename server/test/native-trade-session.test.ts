@@ -131,9 +131,27 @@ test("0x50 becomes trade events; 0x25 leaves only under the native guards", asyn
       unknown1A: 0x102030405060708n,
     });
     const browserMessage = clientEventJson({ kind: "trade", event: peerish[1] }, 0);
-    // WebClient.send performs this direct JSON.stringify; this synthetic 0x50 path reaches the
-    // bridge projection with BigInt intact, so trade cannot be called JSON-safe or deeply guarded yet.
-    assert.throws(() => JSON.stringify(browserMessage), { name: "TypeError", message: /BigInt/ });
+    assert.deepEqual(browserMessage, {
+      t: "trade",
+      event: {
+        kind: "item",
+        index: 0,
+        roomSlot: 4,
+        item: {
+          kind: "nonequip",
+          itemId: 5_000_001,
+          cash: { sn: "81985529216486895", unknown18: 3, unknown1A: "72623859790382856" },
+          quantity: 3,
+        },
+      },
+    });
+    const serialized = JSON.stringify(browserMessage);
+    assert.ok(serialized, "the bridge's direct JSON.stringify produces a string");
+    assert.deepEqual(
+      JSON.parse(serialized),
+      browserMessage,
+      "decimal u64 fields round-trip exactly",
+    );
   }
   assert.deepEqual(peerish[2], { kind: "lock" });
 

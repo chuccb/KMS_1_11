@@ -1,4 +1,4 @@
-/** Selected server-to-browser runtime guards. Trade remains the one explicit nested-union gap. */
+/** Selected server-to-browser runtime guards for the explicitly classified message families. */
 import { PARTY_MAX_MEMBERS } from "./party-state.ts";
 import { readLoginCharacters, readLoginWorlds } from "./login-data.ts";
 import { readFeedbackEvent } from "./feedback-data.ts";
@@ -7,6 +7,7 @@ import { TEMPORARY_FIELDS } from "./temporarystats.ts";
 import { isTestToolResult } from "./ui-resource-validation.ts";
 import { isFiniteNumber, isRecord } from "./resource-validation.ts";
 import { isMessengerEvent } from "./messenger-message-validation.ts";
+import { isMiniRoomEventJson } from "./trade-message-validation.ts";
 import type { WebClientServerMessage } from "../server/src/net/webclient-messages.ts";
 import type { ServerEventEnvelope } from "./websocket-transport.ts";
 
@@ -35,6 +36,7 @@ const GUARDED_MESSAGE_TYPES = [
   "party",
   "party-command",
   "trade-command",
+  "trade",
   "messenger",
   "fame",
   "user-enter",
@@ -74,10 +76,8 @@ const GUARDED_MESSAGE_TYPES = [
   "disconnect",
 ] as const satisfies readonly CoveredMessageType[];
 
-/** MiniRoom type 11 can carry BigInt cash fields that make `WebClient.send`'s JSON.stringify throw. */
-export const SERVER_MESSAGE_VALIDATION_GAPS = [
-  "trade",
-] as const satisfies readonly CoveredMessageType[];
+/** No currently-declared server message discriminator is intentionally left unguarded. */
+export const SERVER_MESSAGE_VALIDATION_GAPS = [] as const satisfies readonly CoveredMessageType[];
 
 type ClassifiedMessageType =
   (typeof GUARDED_MESSAGE_TYPES)[number] | (typeof SERVER_MESSAGE_VALIDATION_GAPS)[number];
@@ -720,6 +720,7 @@ const payloadValidators = {
   party: (message: Record<string, unknown>) => validPartyResult(message.result),
   "party-command": validPartyCommand,
   "trade-command": validTradeCommand,
+  trade: (message: Record<string, unknown>) => isMiniRoomEventJson(message.event),
   messenger: (message: Record<string, unknown>) => isMessengerEvent(message.event),
   fame: (message: Record<string, unknown>) => validFameResult(message.result),
   "user-enter": (message: Record<string, unknown>) => validUserView(message.user),
@@ -807,8 +808,8 @@ type GuardedMessageType = keyof typeof payloadValidators;
 
 /**
  * Returns false only for a malformed payload in a guarded family. Other event discriminators stay
- * pass-through by design; in this revision the nested trade and messenger protocol unions remain
- * explicitly unvalidated here. Exceptions from existing parsers fail closed as malformed messages.
+ * pass-through by design; trade and messenger validate their complete nested protocol unions.
+ * Exceptions from existing parsers fail closed as malformed messages.
  */
 export function validateServerMessagePayload(message: ServerEventEnvelope): boolean {
   if (!isRecord(message) || typeof message.t !== "string") return false;

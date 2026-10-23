@@ -38,9 +38,10 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 |---|---|
 | `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大且未嚴格型別化，逐領域分層尚未完成 |
 | `client/websocket-transport.ts` | 嚴格型別化的 browser WebSocket 建立／替換／送出／關閉、generation fence、JSON envelope 與 open guard；選定 payload guard 可拒收 malformed message，coverage/gaps 另列 |
-| `client/server-message-validation.ts` | server-to-browser 選定 event runtime guards；56 種 discriminator 有 guard，`trade` 唯一明列 gap（已證實 MiniRoom cash-block `bigint` 會使 `JSON.stringify` 失敗）；未識別 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），不是完整 schema |
+| `client/server-message-validation.ts` | server-to-browser 選定 event runtime guards；57 個已知 discriminator 全數有 guard，含 trade／messenger 巢狀 unions；未識別 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），不是完整 schema |
+| `client/trade-message-validation.ts`／`trade-wire.ts`／`trade-constants.ts` | 驗證十種 MiniRoom event 與 item-slot 範圍；cash-block u64 以無損十進位字串表達，房間／refusal 常數不載入 UI state |
 | `client/messenger-message-validation.ts`／`client/messenger-constants.ts` | 驗證 Messenger 全部八種事件、巢狀 look 與固定三格 roster；房間大小共用純常數供 browser、protocol、server 使用 |
-| `client/*.ts` | 117 個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
+| `client/*.ts` | 120 個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
 | `client/social-commands.ts`／`party-state.ts`／`party-invitation.ts`／`chat-entry.ts` | 原社交指令嚴格解析（`/파티*`／`/귓속말`／`/찾기`＋明示別名）、`55C5E0` 六格名冊狀態、邀請確認所有權與編輯框生命週期；`server/src/net/chat-input.ts` 與 bridge 共用同一路由，斜線行不會落到公開聊天 |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
@@ -50,7 +51,7 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
 | `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 整數世界像素／原UI兩段合成、四視野、時間轉場、偏好／減少動態；不改物理／協定 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
-| `server/src/net/client-event-json.ts`／`webclient-messages.ts` | `ClientEvent.kind` → JSON `t` projection 與完整 server-to-browser 出站 discriminated union；`WebClient.send` 編譯期受型別約束，不代表runtime深schema驗證 |
+| `server/src/net/client-event-json.ts`／`webclient-messages.ts` | `ClientEvent.kind` → JSON `t` projection 與完整 server-to-browser 出站 union；trade cash-block u64 在投影時轉 canonical 十進位字串；`WebClient.send` 編譯期受型別約束 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |
@@ -110,7 +111,7 @@ client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`�
 前輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
 前輪（ADR-157）新增 strict 出站 JSON message union，讓 `WebClient.send` 與 `clientEventJson` 的 discriminator／payload 關聯受 compiler 驗證；當時尚未做 inbound runtime validation，亦未型別化 main.js。Bun／@types 升至 registry latest 1.4.4；該輪 focused44/0、完整1468/0（5334 expects、170 files）。
 前輪（ADR-158）transport 掛上選定 payload guards；當時 `trade`／`messenger` nested unions 明列為 gaps。Bun `fmt` 與鎖檔 Prettier 3.9.10 對 438 個 format input 逐檔 byte-identical 後，正式移除 Prettier 依賴。
-本輪（ADR-159）加入 Messenger 全八種事件及固定三格 roster 的 runtime guard，現為 56 種 discriminator 已 guard、`trade` 唯一明列 gap；type-11 cash-block `bigint` 已追通至 bridge 的 `JSON.stringify` 並有隔離 regression 證實會丟 `TypeError`。未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`main.js` 仍不是 strict TS。完整驗證及 trade 保留原因見 [ADR-159](DECISIONS.md)。
+前輪（ADR-159）加入 Messenger 全八種事件及固定三格 roster 的 runtime guard；當時 trade 曾因 cash-block BigInt 未具 JSON-safe projection 而保留 gap。最新（ADR-160）以 `client/trade-wire.ts` 將兩個 u64 精確投影為十進位字串並完整 guard MiniRoom union，現有 57 個已知 discriminator 全數受 guard。未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`main.js` 仍不是 strict TS；完整驗證見 [ADR-160](DECISIONS.md)。
 ADR-108／109 的 1213 pass／0 fail、inventory-window 9/9 與 probe 輸出等價結果是各自歷史時點；較早的 1205/8、1064/44 亦不代表現況，詳 [BUN_MIGRATION](BUN_MIGRATION.md)。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
 舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。本輪發現先前 8515 服務已停止後，另開全新 memory-only 隔離服務：web/login/game ports 8515/8516/8517、`--save off`、安全城鎮 map `101000000`（啟動時 0 mobs）、只有新的 `preview`／`observer` 帳號；沒有舊角色／save 被載入。`/healthz`、首頁與 `/main.js` 只讀檢查皆回應 200；沒有登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在此程序記憶體中，重啟即消失；預覽是否在線以本輪 LIVE 入口為準，不以舊 PID／save 路徑推定。

@@ -50,6 +50,12 @@
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 import { readItemSlot, writeItemSlot, type ItemSlot } from "./itemslot.ts";
+import {
+  MINIROOM_BUSY_REFUSAL_CODE,
+  MINIROOM_TRADE_KIND,
+  TRADE_SLOTS,
+} from "../../../client/trade-constants.ts";
+export { TRADE_SLOTS } from "../../../client/trade-constants.ts";
 
 /** 兩個方向的號碼。 */
 export const MINIROOM_OPCODE = {
@@ -59,13 +65,8 @@ export const MINIROOM_OPCODE = {
   result: 0x50,
 } as const;
 
-/** s2c `type 4` 的第一個 byte，也是 c2s `type 0` 的第二個 byte：唯一的值是 `1`（交易）。 */
-export const MINIROOM_KIND = { trade: 1 } as const;
-
-/** 交易格數：`sub_4D2DB0` 為每一邊配了 8 格（`0x84` bytes / 16 bytes）。定義在純 client
- * 模組（瀏覽器不得拉伺服器 runtime import），此處再匯出供伺服器與測試使用。 */
-export { TRADE_SLOTS } from "../../../client/trade-state.ts";
-import { TRADE_SLOTS } from "../../../client/trade-state.ts";
+/** s2c `type 4`／c2s `type 0`: the sole implemented 1:1 trade room kind. */
+export const MINIROOM_KIND = { trade: MINIROOM_TRADE_KIND } as const;
 
 /** `0x25` 的 type。 */
 export const MINIROOM_REQUEST_TYPE = {
@@ -100,7 +101,7 @@ export const MINIROOM_REFUSAL = {
   /** 「캐릭터를 찾을 수 없습니다」 */
   notFound: 1,
   /** 「'%s'님은 다른 일을 하는 중입니다」 */
-  busy: 2,
+  busy: MINIROOM_BUSY_REFUSAL_CODE,
 } as const;
 
 /** `type 8` 的結束碼。 */
