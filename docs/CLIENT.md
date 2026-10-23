@@ -31,7 +31,7 @@ LIVE同PID4942，87modules與標題120幀唯讀確認；未自動登入或操作
 ## 2026-10-18：掉落最終在fh，權威與呈現一起整理
 
 怪物戰利品、玩家道具與金幣丟棄共用真WZ有向地板選點，處理空中／斜坡／上下平台／平台邊緣／虛空。
-原0x43傳真正落地x/y，玩家kind2立即放置；browser不再到420ms突然上移16px。
+原0x43傳真正落地x/y，玩家kind2立即放置；browser不再到420ms突然上移16px。後續補完 kind lifecycle：kind0 transient 動畫完成後本機清理，kind1 persistent 落地等 server remove（本 server 的怪物掉落選 kind1），kind2 立即放置；signed `animationStartOffset` 已納入 browser 時鐘。420ms 仍是呈現政策，不是 native timing。
 抽出strict drop-presentation／drop-renderer，unknown drop/remove守衛、提前拾取連續性、原PNG尺寸底部貼地、固定四幀金幣。
 原版是canvas中心−16而非背包origin；本次按要求底部貼地是明示新呈現政策，不冒稱原版相同。
 focused73/0、全100圖379422組及真browser DPR1／2通過；完整1023/44，既有failure multiset未增減。
@@ -555,7 +555,7 @@ mob-enter    { mob }         mob-move { mobId, x, y }
 mob-die      { mobId }                                   ← 0x30 的正延遲：屍體演動畫，0x31 才移除
 mob-leave    { mobId }
 user-attack  { characterId, facingLeft, targets[] }       ← 0x23（別人的揮擊，含他們骰的數字）
-drop-enter   { drop }                                    ← 0x43（money/value/x/y/mobId）
+drop-enter   { drop }                                    ← 0x43（kind/money/value/x/y/mobId/animationStartOffset）
 drop-leave   { dropId, reason, characterId? }             ← 0x44（taken 時 page 把圖示飛向那個人）
 stat-basis   { basis, wornFacts, ammoPad }                 ← 原WZ計算資料，不是新增native封包
 hit          { mobId, damage }                            ← 橋自己回的：這一下的數字（線路上沒有）

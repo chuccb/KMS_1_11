@@ -958,9 +958,9 @@ export interface GameEntryServerOptions {
    */
   scrollSpec?: (itemId: number) => ScrollSpec | undefined;
   /**
-   * The success roll's generator. There is no original server binary, so the roll is this server's
-   * policy; the default is a seeded `ClientRandom` (the client's own generator) and a test injects a
-   * fixed one to force a success or a failure.
+   * The scroll success roll's server-side policy source. The default uses a fixed-seed port of the
+   * client algorithm, but is not seeded from `0x16` and is not evidence of original server behavior;
+   * tests inject a fixed source to force a success or failure.
    */
   scrollRandom?: RandomSource;
   /** Native 463BE0 rejects WZ cash items as well as a wire cash serial. Unknown facts refuse. */
@@ -988,11 +988,15 @@ export interface GameEntryServerOptions {
   /** How long a killed mob stays away before it is spawned again, in ms. Defaults to `MOB_RESPAWN_MS`. */
   mobRespawnMs?: number;
   /**
-   * What a killed monster leaves behind. `defaultDropPolicy` (the shipped table: mesos, the mob's
-   * own junk item, a potion) is the default; a test passes a fixed one.
+   * What a killed monster leaves behind. `defaultDropPolicy` is the repo's policy, not an original
+   * server table; deployments and tests may replace it.
    */
   dropPolicy?: DropPolicy;
-  /** How long a drop lies on the ground, in ms. Defaults to `DROP_LIFETIME_MS`. */
+  /** Optional server loot RNG forwarded to fields; without it, each field gets a fresh crypto source. */
+  dropRandom?: RandomSource;
+  /** Signed s16 animation-start offset for monster-shaped `0x43`; defaults to policy 0. */
+  dropAnimationStartOffsetMs?: number;
+  /** How long a server-owned drop lies on the ground, in ms. Defaults to `DROP_LIFETIME_MS`. */
   dropLifetimeMs?: number;
   /** Horizontal/vertical reach of a pickup, in px. Server choices (`game/drops.ts`). */
   pickupRangeX?: number;
@@ -1134,7 +1138,7 @@ export class GameEntryServer {
    * id，邀請卻可以跨地圖（聊天室本來就不在同一張圖上）。
    */
   private readonly messenger = new MessengerRegistry();
-  /** The scroll success roll's generator (`handleScrollUpgrade`); seeded, or a test's fixed one. */
+  /** The scroll success roll's server-side policy source (`handleScrollUpgrade`), independent of `0x16`. */
   private readonly scrollRandom: RandomSource;
   private readonly heartbeat: Heartbeat;
   private readonly seats: SeatKeeper;
@@ -1167,6 +1171,10 @@ export class GameEntryServer {
         : {}),
       ...(options.mobRespawnMs !== undefined ? { mobRespawnMs: options.mobRespawnMs } : {}),
       ...(options.dropPolicy !== undefined ? { dropPolicy: options.dropPolicy } : {}),
+      ...(options.dropRandom !== undefined ? { dropRandom: options.dropRandom } : {}),
+      ...(options.dropAnimationStartOffsetMs !== undefined
+        ? { dropAnimationStartOffsetMs: options.dropAnimationStartOffsetMs }
+        : {}),
       ...(options.dropLifetimeMs !== undefined ? { dropLifetimeMs: options.dropLifetimeMs } : {}),
       ...(options.pickupRangeX !== undefined ? { pickupRangeX: options.pickupRangeX } : {}),
       ...(options.pickupRangeY !== undefined ? { pickupRangeY: options.pickupRangeY } : {}),

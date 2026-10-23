@@ -125,7 +125,7 @@ client 必須能與該 server 完整互動。
 | `MESO_DROP_CHANCE_PER_MILLE` / `MOB_JUNK_CHANCE_PER_MILLE` / `MOB_POTION_CHANCE_PER_MILLE` | 600 / 300 / 50 | 原伺服器的掉寶率在 client 裡不存在（掉落是 `0x43` 單向宣告）|
 | `MESO_PER_LEVEL` | 3 | 金額公式 `1 + range(0, level * 3)` 的上界 |
 | `POTION_BY_LEVEL` | 4 個等級帶 | 四個藥水id 有 WZ 名字與價格，**哪個等級帶給哪一瓶**是選擇（`test/drop.test.ts` 釘住）|
-| `DROP_LIFETIME_MS` | 300000 | 掉落物多久消失（`0x44 kind 0`）|
+| `DROP_LIFETIME_MS` | 300000 | 本伺服器地面掉落壽命，逾時送 `0x44 kind 0`；不等於 client `0x43 kind 0` 的 3000 ms 本機動畫清理 guard |
 | `DROP_SPREAD_PX` | 24 | 掉落物離怪物的水平擴散 |
 | `PICKUP_RANGE_PX` / `PICKUP_RANGE_Y_PX` | 40 / 60 | 「站在上面」的判定範圍 |
 | `MOB_RESPAWN_MS`（§4.17）| 5000 | 怪物重生時間 |
@@ -136,17 +136,20 @@ client 必須能與該 server 完整互動。
 2. **每一項都能被單獨量測**：ADR-004 的實機 run 只要抓一份真實流量，就能對照「掉落率／壽命／
    擴散距離／可撿範圍」四個常數，改成量到的值、跑同一組測試（`drop.test.ts` 的機率斷言用注入的
    亂數源，不依賴真隨機）。
-3. **`DropPolicy` 是注入的**：`DropField` 接受 `policy`／`random`／`lifetimeMs`／`spreadPx`／
-   `pickupRangePx`，所以「換一份掉落表」不需要動 `DropField` 或網路層，測試也不必碰真隨機。
+3. **`DropPolicy` 與 RNG 都可注入**：`DropField` 接受 `policy`／`random`／`lifetimeMs`／`spreadPx`／
+   `pickupRangePx`；其預設 RNG 是 field-local crypto source，與 client `0x16` streams 無關；測試可注入固定 RNG。
+   因此換掉落表或固定測試序列都不需改網路層，且不會把 client RNG 說成原 server loot RNG。
 
 **後果**：
 - 任何時候看到這些數字，都應該假設「這是我們選的，不是解出來的」；`FINDINGS §4.18.8` 與
   `server/README.md` 都這樣寫。
-- client 的 메소 顯示**不會**跟著變（`MesoWallet` 是伺服器端帳）：能力值區塊裡沒有已證實的錢欄位，
-  而 `0x0D` 的 19 個 bit 裡也確實沒有錢（§4.21 解出後可以確定「不是漏送」）。這是已知缺口，不是 bug。
-- 掉落物目前是**每個連線一份**（跟 `MobField` 一樣，ADR-001 的共享世界還沒做）：
-  兩個玩家會各看到自己的掉落物。共享世界的 Phase 2 要把 `DropField` 跟 `MobField` 一起搬到
-   per-field registry。
+- ~~client 的 meso 顯示不會跟著變~~ → **已解決**（FINDINGS §4.22.5）：`CharacterData` 第 22 欄是 mesos，
+  `0x0D` bit `0x40000` 會更新錢包。`MesoWallet` 是同一角色紀錄的 view；拾取同時送它的 diff 與 `0x11` 聊天提示。
+- 掉落物現在由 `FieldInstance` **每張地圖共享一份**（ADR-012），不是每個連線各一份。怪物持久掉落
+  本 server 選 `0x43 kind 1`：它符合 client `+5` cleanup flag 的行為，能在飛行結束後留地上等 `0x44`；
+  這不是原 server packet policy 的證據。`0x43` 尾端 signed s16 是 client app-clock animation offset，預設
+  0 是本專案選擇；不應和 ground lifetime 混淆。WZ item names 只支持解析候選 asset，monster-to-item
+  關係仍是本專案 policy（可重跑 `tools/audit-drop-evidence.ts`）。
 
 ---
 
@@ -5912,3 +5915,62 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
 - Gates：`bun run format`、`bun run typecheck`、`bun run build` 通過；`bun test --ignore='*browser*'`
   **1459 pass／0 fail／5334 expect、169 files**（372.00 s）。
 - `MapleStory.exe.c`／`.lst` 沒有修改，checksum 仍為 ADR-153 記錄值。
+
+## ADR-155：`0x43` client lifecycle、signed animation offset、WZ audit 與 server loot RNG
+
+**日期**：2026-10-23
+**狀態**：已接受（client packet 行為與 repo implementation 已結案；原 server 的掉落政策仍未知）
+
+### 背景
+
+此 repo 原先把持久怪物掉落送為 `0x43 kind 0`，將尾端 signed s16 當成無語意欄位，並以 item 名稱推導
+`MOB_JUNK_DROP` 怪物配對；server loot 也共用 `ClientRandom`，註解把 client `0x16` seeds 描述成掉落隨機性的來源。
+這幾項混淆了 client 解碼結果、WZ asset、缺失的 2003 server policy，以及我們自己的實作選擇。
+
+### 發現
+
+1. **client kind lifecycle 可由 EXE 分支還原，不能據此推原 server 用哪個 kind。** `sub_4A88A0` 讀 trailing s16，
+   設 `entry+44 = appClock + offset`；`sub_4A7A00` 以該時間起算怪物掉落動畫。Kind 0 的 `entry+5` cleanup flag
+   為 0，動畫到 state 3 或 offset-adjusted 3000 ms fallback guard 時在 client 本機移除；kind 1/2 設 flag，kind 1
+   仍播放 monster-drop animation、留在 pool 等 `0x44`，kind 2 建立時已在 state 3。`0x44 kind 2` 才帶角色 id，
+   並啟動拾取移動。這些是 client 行為證據；原 server packet policy／ground lifetime 不在 client binary 裡。
+2. **player drop inputs 與 server-owned reward pool 要分開。** client 有 `0x17 toSlot = 0` 道具丟棄及 c2s `0x1F`
+   楓幣丟棄；它沒有 ground-pickup request，也沒有 monster-loot selection request。server 仍負責場地掉落狀態、
+   怪物戰利品政策、pickup eligibility／ownership 與 expiry。
+3. **WZ item assets 不構成 monster drop table。** `tools/audit-drop-evidence.ts` 只在 CLI 開啟 Data.wz；每張
+   archive image 使用新的 `WeakSet` 遍歷。重跑結果：1056 images、28 Mob images、1,048,039 property entries；
+   唯一 keyword property path 是 `Sound/Game.img[0]/DropItem`，keyword string values 為空、Mob `info` subtree
+   無 drop-like property。現行 21 個 mob-item 候選都能解析 mob/item asset names；7 個 Mob templates 未映射。
+   這只能驗證 parser 可見的 archive/property 範圍與 asset 存在，不能證明候選配對或哪隻怪會掉什麼。
+4. **client RNG 與 server loot RNG 是不同用途／不同來源。** `0x16` seeds 初始化 client generator；已定位的
+   consumer 包含 physical 與 touch damage。`0x43` 到達 client 時 loot id／amount 已選好。現在 server loot 預設
+   使用 `node:crypto.randomInt`，與 client streams 無關；`RandomSource` 可從 `GameEntryServerOptions.dropRandom`
+   注入，沿 `FieldRegistry`／`FieldInstance` 到 `DropField`，讓政策與整條 server integration 可 deterministic 測試。
+   這不是原 server RNG 的還原。
+
+### 決策
+
+1. `DROP_KIND` 命名為 `transientFromMob = 0`、`fromMob = 1`、`placed = 2`。本 server 對需要留在地上的怪物 loot
+   選 kind 1，玩家 item/meso throw 用 kind 2；這是 repo packet policy，不宣稱原 server 也是如此。
+2. 把尾端欄位命名為 `animationStartOffset`（signed s16），原樣 codec round-trip，並傳到 browser。browser 依
+   `packet receipt time + signed offset` 起算 hop；kind 0 在 browser state-3 等效 hop 完成時本機清理，另保留
+   offset-aware 3000 ms guard；kind 1 動畫後持續到 server remove；kind 2 立即放置。420 ms hop 與 offset 預設 0
+   是本專案呈現／packet policy，不是 native animation timing 或原 server 證據。client wire kind 常數在
+   `client/drop-presentation.ts` 作本地鏡像（`DropAppear` 仍是 type-only import），避免 browser module graph
+   載入 server protocol source。
+3. 保留現行掉落率／候選道具對應／金額公式／300 s ground lifetime／spread／pickup bounds，但全部明確標成 repo policy。
+   300 s server expiry 後送的 `0x44 kind 0`，不可與 `0x43 kind 0` 的 3 s client transient cleanup 混用。
+4. 保留舊 `ClientRandom` 作 client stream reconstruction；不再拿它供 server loot policy。WZ audit 與候選表的名稱
+   都不能寫成原掉落表、原掉率或原 RNG 的恢復。
+5. 更新 `FINDINGS §4.18`、ADR-007、`server/README.md`、client／architecture／parity／toolchain 文件與 regression
+   tests。原始 `MapleStory.exe.c`／listing/WZ 不修改，不登入遊戲、不操作角色、不讀寫玩家 save。
+
+### 驗證
+
+- `bun tools/audit-drop-evidence.ts`：1056 images／28 Mob images／1,048,039 property entries；keyword path
+  `Sound/Game.img[0]/DropItem`；0 keyword string hits、0 Mob info hits；21 個候選映射的 mob/item asset name
+  可解析；7 個 Mob 未映射。`server/test/drop-wz.test.ts` 釘住此結果，並保留 100 maps、379,422 landing samples。
+- Focused drop／browser／WZ／socket suite 通過；`server/test/drop-browser.test.ts` 使用隔離 Chromium、真 WZ PNG，
+  驗證 kind 0 local cleanup／offset guard、kind 1 rest、kind 2 placed path，無帳密、WebSocket、角色或 save。
+- `bun run typecheck`、`bun run format:check`、`bun run build` 通過。
+- `bun run test`：**1463 pass／0 fail／5334 expect、169 files**（374.64 s）。

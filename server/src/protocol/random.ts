@@ -1,19 +1,20 @@
 /**
  * The client's own random number generator, ported exactly.
  *
- * The 2003 client does **not** use the CRT `rand()` for anything that matters: a packet's random
- * seed (`0x16`'s three `u32`s) is handed to `sub_4C7930`, which seeds two generators with it
- * (`CWvsApp+632` and `CWvsApp+652`), and every roll that a player can see - the damage numbers
- * (`sub_4C7960(CWvsApp+632, ...)`), the attack action (`sub_427F60`), drops, mob behaviour - comes
- * out of that generator. The CRT `rand()` shows up in exactly one place: seeding the *global*
- * generator at startup (`sub_461930(&dword_5D2C20, rand(), rand(), rand())`, once).
+ * A packet's random seed (`0x16`'s three `u32`s) is handed to `sub_4C7930`, which seeds two client
+ * generators (`CWvsApp+632` and `CWvsApp+652`). Located consumers include physical damage
+ * (`sub_4C7960(CWvsApp+632, ...)`) and touch damage (`sub_4C8ED0(CWvsApp+652, ...)`). This does
+ * **not** make server-selected loot part of the client RNG: `0x43`
+ * arrives with the item id or meso amount already chosen, and the audited WZ has no monster drop
+ * table. This repo's server loot uses an independent, injectable server RNG (`game/drops.ts`).
  *
- * That matters for a server, because it makes the client's "random" results reproducible:
+ * The CRT `rand()` shows up in one located place: seeding a separate global generator at startup
+ * (`sub_461930(&dword_5D2C20, rand(), rand(), rand())`, once). Do not conflate those streams.
  *
- *   - the server chooses the seed it sends in `0x16`, so it knows every value the client will roll;
- *   - the damage a client reports in `0x0F` can therefore be *recomputed* instead of trusted
- *     (a 2003 client has no reason to lie, but a rewritten one does - this is the first half of
- *     server-authoritative damage).
+ * For a server-side parity check, a known `0x16` seed makes a client stream reproducible only when
+ * the consumer and call order are also known and mirrored; it does not imply every random consumer
+ * has been located. A damage report can be checked against the specific physical-damage stream and
+ * inputs that the server models. None of those client streams is a source for this repo's loot rolls.
  *
  * EVIDENCE (MapleStory.exe.c)
  * --------------------------
@@ -67,16 +68,18 @@ export function nextRandom(state: RandomState): number {
   return (v3 ^ v4 ^ v5) >>> 0;
 }
 
-/** `sub_4619F0`'s `Random(span, lo)` form: never touches the state when `span` is 0. */
+/** `sub_4619F0`'s `Random(span, lo)` form; span 0 returns the raw next value and still advances state. */
 export function randomRange(state: RandomState, lo: number, span: number): number {
   if (span === 0) return nextRandom(state);
   return lo + (nextRandom(state) % span);
 }
 
 /**
- * A generator with its own state - the server side needs one per field (the client seeds two with
- * the same parts, `CWvsApp+632` and `+652`: physical attack 4C7960 uses the first,
- * touch damage 4C8ED0 the second). Attack-action selection is not yet synchronized with the browser.
+ * One isolated instance of the client's generator. The client seeds two streams from the same
+ * packet parts (`CWvsApp+632` and `+652`): physical damage uses the first and touch damage the
+ * second. A server may use this class to reproduce a specifically evidenced client stream; it is
+ * not a default or evidence source for server-selected loot. Attack-action selection is not yet
+ * synchronized with the browser.
  */
 export class ClientRandom {
   readonly state: RandomState;

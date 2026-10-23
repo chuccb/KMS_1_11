@@ -4,10 +4,15 @@
  */
 import type { DropAppear } from "../server/src/protocol/drop.ts";
 import { isRecord } from "./resource-validation.ts";
+
+/** Wire values mirror `server/src/protocol/drop.ts`; keep them local to avoid a browser import of server code. */
+const DROP_KIND = { transientFromMob: 0, fromMob: 1, placed: 2 } as const;
 export const DROP_HOP_MS = 420;
 export const DROP_HOP_HEIGHT = 28;
 export const DROP_PICKUP_MS = 260;
 export const DROP_PICKUP_HEIGHT = 30;
+/** Native kind-0 fallback guard, relative to the packet's signed animation-start offset. */
+export const DROP_TRANSIENT_CLEANUP_GUARD_MS = 3000;
 export interface DropPoint {
   x: number;
   y: number;
@@ -48,18 +53,21 @@ export function parseDrop(value: unknown): DropAppear | undefined {
     x: value.x,
     y: value.y,
   };
-  if (drop.kind <= 1) {
+  if (drop.kind <= DROP_KIND.fromMob) {
     if (
       !integer(value.mobId, 0, 0xffffffff) ||
       !integer(value.mobX, -32768, 32767) ||
       !integer(value.mobY, -32768, 32767) ||
-      (value.unknown !== undefined && !integer(value.unknown, -32768, 32767))
+      (value.animationStartOffset !== undefined &&
+        !integer(value.animationStartOffset, -32768, 32767))
     )
       return;
     drop.mobId = value.mobId;
     drop.mobX = value.mobX;
     drop.mobY = value.mobY;
-    if (typeof value.unknown === "number") drop.unknown = value.unknown;
+    if (typeof value.animationStartOffset === "number") {
+      drop.animationStartOffset = value.animationStartOffset;
+    }
   }
   return drop;
 }
@@ -104,8 +112,18 @@ export function dropPosition(
       phase: "pickup",
     };
   }
-  const t = drop.kind > 1 ? 1 : progress(now - record.born, DROP_HOP_MS);
-  if (t >= 1) return { x: drop.x, y: drop.y, t: 1, phase: "rest" };
+  const animationElapsed = now - record.born - (drop.animationStartOffset ?? 0);
+  if (
+    drop.kind === DROP_KIND.transientFromMob &&
+    animationElapsed > DROP_TRANSIENT_CLEANUP_GUARD_MS
+  )
+    return;
+  const hasMonsterBlock = drop.kind <= DROP_KIND.fromMob;
+  const t = hasMonsterBlock ? progress(animationElapsed, DROP_HOP_MS) : 1;
+  if (t >= 1) {
+    if (drop.kind === DROP_KIND.transientFromMob) return;
+    return { x: drop.x, y: drop.y, t: 1, phase: "rest" };
+  }
   return {
     x: record.fromX + (drop.x - record.fromX) * t,
     y: record.fromY + (drop.y - record.fromY) * t - DROP_HOP_HEIGHT * Math.sin(Math.PI * t),

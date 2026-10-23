@@ -1688,10 +1688,11 @@ if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
 
 ### 4.18 ✅ 掉落與拾取：`0x43`／`0x44`（`CRewardPool`）＋ `0x0B`／`0x11`（`CWvsApp`）
 
-§4.13.2 記過一件事：v1.11 的 client **沒有**「撿東西」這個請求 —— 所有送出的地方都是寫死的
-opcode，最大只到 `0x33`。所以掉落是**伺服器單方面決定**的：誰掉、掉什麼、誰撿到、什麼時候消失，
-全部由伺服器送封包宣告，client 只負責演動畫。這一節把四個相關封包解到欄位層，並修正 §4.6 的一個
-錯誤（`0x0B` 的種類位元組）。
+§4.13.2 記過一件事：v1.11 的 client **沒有 ground-pickup 請求，也沒有選擇怪物戰利品的請求**。
+但玩家主動丟棄並非單向：`0x17 toSlot = 0` 會把道具丟到地上，c2s `0x1F` 會丟楓幣
+（§4.36／§4.18 supplement）。因此本節區分輸入與權威：client 可提出自己的 item/meso throw；server 決定
+怪物掉落、掉落物場地狀態、誰能撿與何時移除，`0x43`／`0x44` 再通知 clients 呈現。此處把四個相關封包解到欄位層，
+並修正 §4.6 的一個錯誤（`0x0B` 的種類位元組）。
 
 | opcode | 方向 | 角色 | 處理函式 | 證據 |
 |---|---|---|---|---|
@@ -1728,14 +1729,22 @@ return opcode - 68;                                  // 0x42 / 0x45 落到這裡
 | ↓ 只有 `kind <= 1` 才讀 | | | |
 | `mobId` | u32 | `sub_45DCC0` | 怪物 id：`sub_492C00`（154413-154433）拿它在 `CMobPool` 裡查；**查到就把「目前位置」覆寫成 `mob+360`/`mob+364`** —— 這就是「東西從怪物身上飛出來」的來源 |
 | `mobX`, `mobY` | s16 ×2 | `sub_45DC80` | 上面那個查詢**失敗**時的替代位置（失敗是正常路徑，不會丟例外）|
-| `unknown` | s16 | `sub_45DC80` | 無條件讀取（`.lst` 004A8C4A）之後只出現在一個指標加法（`v92[11] = ptr + 它`，178350）；沒有任何繪圖路徑把它當座標，**本伺服器寫 0** |
+| `animationStartOffset` | s16 | `sub_45DC80`（`MapleStory.exe.lst:004A8C4A`）| signed 毫秒偏移：`sub_4A88A0` 設 `entry+44 = client app clock + offset`（178063-178372）；`sub_4A7A00` 等到該時刻才推進怪物掉落動畫。kind 0 也以它為基準做 3000 ms 本機清理 guard。它不是落點、地面壽命或未使用欄位 |
 
 - 金額圖示：`sub_4A9C10`（178753-178760）決定用哪一張錢堆圖：
   `a < 50 → 0`、`a < 100 → 1`、`a < 1000 → 2`、其餘 `3`，圖示名 = `%08d` of `9000000 + 那個值`，
   在 `Item/Special/0900.img`（四張錢堆）。
 - client 建出來的紀錄是 **88 bytes**（`sub_4ABB80`，180160-180207：一次配 1476 bytes / 15 筆）：
   `+4 = kind`、`+5 = (kind == 1 || kind == 2)`、`+8 = dropId`、`+12 = money`、`+16 = value`。
-  `+5` 的角色未解；本伺服器送 `kind = 0`（怪物掉的）與 `kind = 2`（玩家自己丟的，§4.36），沒有送出者用 `kind = 1`。
+  `+5` 是實際 cleanup flag，不再標成未解：kind 0 為 0，kind 1/2 為 1。`sub_4A7A00` 的 kind-0
+  branch 會在動畫 state 3 或 `clientClock - entry+44 > 3000` 時本機移除；kind 1 走同一怪物動畫，
+  但這個 flag 阻止上述本機 cleanup，留到 server 的 `0x44`；kind 2 建立時直接從 state 3 開始。
+  kind 1 還有 `"DropItem"` 音效分支（`sub_4A7A00`，177060-177270）。因此本伺服器把 kind 1
+  用於持久怪物掉落、kind 2 用於玩家丟棄；這是符合 client lifecycle 的**本專案 packet policy**，
+  不是原 server 的選擇證據。
+- `entry+44` 的初值是建立時的 client app clock 加 trailing signed s16；state 0 只有在目前 clock 大於
+  `entry+44` 後才開始動畫（`sub_4A88A0`／`sub_4A7A00`）。故偏移正負都必須保留並套用到動畫起始時間。
+  kind 0 的 3000 ms 是 client 的 transient-record fallback guard，不是 ground drop lifetime。
 - 畫圖前對兩個 y 各做一次 `-= 16`，所以**封包裡的 y 是地面線**，圖示畫在地面線上 16 px。
 - 線路長度：`kind 0/1` = 1 + 4 + 1 + 4 + 2 + 2 + (4 + 2 + 2 + 2) = **22 bytes**；`kind 2` = **15 bytes**（含 opcode）。
 
@@ -1788,19 +1797,35 @@ count × {
 
 #### 4.18.6 伺服器這一側：`game/drops.ts` 與 `game/rewards.ts`
 
-client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/net/loginserver.ts` 的 `tickField`／`pickUp`）：
+client 沒有 ground-pickup 請求；`0x17 toSlot = 0` 道具丟棄與 c2s `0x1F` 楓幣丟棄則是 client input，
+經各自驗證後建立 placed entry。**怪物 loot、ground state、pickup eligibility／ownership 與 expiry** 由伺服器
+權威處理（`src/net/loginserver.ts` 的 `tickField`／`pickUp`）：
 
-1. **誰掉什麼**：`defaultDropPolicy(source, random)` —— 三個各自獨立的 roll（`random.range(0, 1000)`）：
-   600‰ 掉錢（`1 + range(0, level * 3)`）、300‰ 掉這隻怪自己的雜物（`MOB_JUNK_DROP`，配對來自
-   `Item/Etc/0400.img` 的**道具名字**：달팽이 → 달팽이의 껍질…）、50‰ 掉藥水（`POTION_BY_LEVEL` 四個等級帶）。
-   三者的機率、金額公式與藥水等級帶**都是伺服器自己的選擇**（ADR-007；binary 裡沒有這些數字）。
-   **玩家自己丟的**是第三條來源（`0x17` `toSlot = 0`，§4.36）：`FieldInstance.dropItem` →
-   `DropField.dropFromPlayer`，`kind = DROP_KIND.placed`（沒有怪物區塊），**落點就是玩家站的地方**
-   （不擴散、不查腳踏點），數量由請求決定——`game/inventory.ts` 已經先從那一格扣掉了。
-2. **掉在哪**：`x` 在怪物 ±`DROP_SPREAD_PX`（24 px）內、`y` 取怪物腳下腳踏點的高度（`footholdYAt`），
-   腳踏點查不到才用怪物自己的 y。
-3. **存在多久**：`DROP_LIFETIME_MS`（300000 ms）之後 `0x44 kind 0`（`vanished`）——怪物掉的與玩家丟的同一條路。
-4. **誰撿到**：每個 field tick 檢查「玩家在自己的 `0x0E` 移動包裡報的位置」與每一筆掉落的距離
+1. **誰掉什麼**：`defaultDropPolicy(source, random)` —— 三個各自獨立的 repository-policy roll
+   （`random.range(0, 1000)`）：600‰ 掉錢（`1 + range(0, level * 3)`）、300‰ 嘗試從
+   `MOB_JUNK_ITEM_BY_TEMPLATE_ID` 取本專案指定的候選道具、50‰ 掉藥水（`POTION_BY_LEVEL` 四個等級帶）。
+   名稱與 item id 在 WZ 中可解析，但 monster-to-item 配對、三種機率、金額公式與藥水等級帶**都不是
+   WZ 或 EXE 恢復出的原 server 規則**（ADR-007；原 server 沒有隨 repo 提供）。
+   可重跑的唯讀 archive audit 是 `bun run tools/audit-drop-evidence.ts`；它以**每張 image 獨立的
+   `WeakSet`** 遍歷 1056 張 image、1,048,039 個 property entry，找到 28 張 Mob image、0 個 Mob `info`
+   drop-like 欄位，且唯一符合關鍵字 `drop|loot|meso|money|expire|lifetime|chance` 的 property path
+   是 sound 資源 `Sound/Game.img[0]/DropItem`；沒有相符的 string value。21 個本專案候選配對的
+   Mob/item name 都能在 WZ 找到，另有 7 個 Mob template 不配對。這些結果只證明 archive 資料存在與
+   關鍵字搜尋範圍內沒有表，不會把 item 名稱變成怪物掉落證據；固定測試在 `server/test/drop-wz.test.ts`。
+   **玩家主動丟棄**是另外兩種 client input，不套用 monster roll：`0x17 toSlot = 0` 道具（§4.36）由
+   `FieldInstance.dropItem` → `DropField.dropFromPlayer` 建成 `kind = DROP_KIND.placed`，保存 item instance；
+   c2s `0x1F` 楓幣（§4.18 supplement）由 `dropMesosFromPlayer` 建成同樣無 monster block 的 kind 2。
+   兩種都是放置在玩家當下位置的場地 entry，再由 server pickup policy 統一處理。
+2. **掉在哪**：`x` 在怪物 ±`DROP_SPREAD_PX`（24 px）內，`y` 由 `DropLandingIndex` 依實際有向 foothold
+   求地面點；這是本專案的選點政策，不是原 server 證據。
+3. **存在多久**：`DROP_LIFETIME_MS`（300000 ms，本專案地面壽命政策）後 server 送 `0x44 kind 0`
+   （`gone`）——怪物掉的與玩家丟的同一條路。這和 `0x43 kind 0` 的 client 本機動畫清理完全不同：
+   後者在動畫 state 3 或其 3000 ms fallback 時間清理 transient entry，不能解讀成地面物品只活 3 秒。
+4. **browser 呈現**：`client/drop-presentation.ts` 將 `animationStartOffset` 加到封包到達時的本機時間，
+   以它起算動畫。kind 0 在 browser 的 hop 結束（或 native 3000 ms guard）後回傳 `undefined`，
+   `client/main.js` 刪除記錄；kind 1 飛完後留在地上等 `0x44`；kind 2 立即放置。browser 的 420 ms hop
+   是呈現政策，不是量出的原版動畫時長。
+5. **誰撿到**：每個 field tick 檢查「玩家在自己的 `0x0E` 移動包裡報的位置」與每一筆掉落的距離
    （`PICKUP_RANGE_PX` 40 / 上下 `PICKUP_RANGE_Y_PX` 60）。**站在上面就是全部的觸發條件**，沒有請求、
    沒有按鍵；一次 tick 只撿一筆（這樣 client 的飛行動畫才一筆一筆演）。
    另外，只有**比這個人最後一次移動更早**就躺在那裡的掉落才撿得起來（`reachable` 的第三個參數；
@@ -1808,10 +1833,10 @@ client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/n
    殺牠的人腳下**（擴散 ≤ 24 px），沒有它下一 tick 就會被同一個人吸走、客戶端看不到「從屍體飛出來」；
    而玩家丟的東西**一定在自己腳下**，沒有它就會立刻被自己撿回來（等於丟不掉）。
    這是伺服器自己的選擇（ADR-007）：binary 這一半在 client，沒有流量能證明原伺服器怎麼做。
-5. **撿到的三個封包（順序固定）**：`0x44 kind 2`（含角色 id）→ 道具才有的 `0x0B op 0`（放進哪一格）→
+6. **撿到的三個封包（順序固定）**：`0x44 kind 2`（含角色 id）→ 道具才有的 `0x0B op 0`（放進哪一格）→
    `0x11`（訊息）；三者都送給**全場**（`0x44` 是「東西是誰拿走的」，別人的 client 要靠它收掉那張圖）。
    錢只送 `0x44` + `0x0D`（錢包是紀錄的一部分）+ `0x11`。
-6. **放哪一格**：`grantItem` —— 同 id、未滿 `MAX_ITEM_STACK`（200）的堆疊優先；否則第一個空格；
+7. **放哪一格**：`grantItem` —— 同 id、未滿 `MAX_ITEM_STACK`（200）的堆疊優先；否則第一個空格；
    裝備與現金道具**永不堆疊**（兩件同 id 的裝備 = 兩格）。背包滿 → **不撿**，掉落留在原地（第三種
    `0x11` 存在，但每 tick 對站在上面的人印一次會變噪音）。
    建新格時如果**地面知道那件道具本身**（玩家丟的，`DropEntry.slot`），就用它當模板（`freshSlot`）：
@@ -1821,23 +1846,31 @@ client 不會請求，所以**整條迴圈都在伺服器的判斷裡**（`src/n
 
 | 檔案 | 內容 |
 |---|---|
-| `server/test/drop.test.ts` | `0x43` 的兩種長度與欄位、`0x44` 的三個 kind、`0x11` 的三種形狀、`0x0B` 的 byte 向量與「裝備欄不可換鑰」、掉落的落點／過期／可撿範圍／「必須先動過」、`MOB_JUNK_DROP` 與等級帶、`grantItem` 的堆疊與「裝備不堆疊」、玩家丟的東西（`dropFromPlayer`：落點就是玩家、沒有怪物區塊、15 bytes、模板欄位留著） |
-| `server/test/serve.test.ts` | 真 socket 的整條迴圈：一刀殺怪 → `0x34`＋`0x30`＋`0x43` → 走到錢上 → `0x44 kind 2`＋`0x11` → 走到道具上 → `0x44`＋`0x0B`＋`0x11`；再站一次不會重複撿。另一個測試覆蓋玩家自己丟的：`0x17 toSlot = 0` → `0x0B`＋`0x43`（自己與觀察者都收到）→ 站著不動與走開 80 px 都不會撿 → 走回去才 `0x44`＋`0x0B`＋`0x11` |
-| `server/test/schema.test.ts` | 新增的四筆目錄列（`0x43`／`0x44`／`0x0B`／`0x11`）都要能被 `decode` 的描述器認出來 |
+| `server/test/drop.test.ts` | kind 0/1/2 的線路長度、persistent kind 1、signed s16 offset round-trip／範圍、server offset policy、`0x44`／`0x11`／`0x0B` codecs、落點／過期／pickup、candidate-item／等級帶政策、inventory 與玩家丟棄 |
+| `server/test/drop-presentation.test.ts` | kind 0 本機 cleanup、kind 1 落地持續、kind 2 立即放置；正負 offset 的延遲／提前、邊界驗證與 pickup 動畫 |
+| `server/test/drop-browser.test.ts` | 隔離 Chromium component：kind 0 animation-end cleanup 與 offset-aware native guard、kind 1 落地持續、真 WZ PNG／fh 與 pickup 呈現 |
+| `server/test/drop-wz.test.ts` | `auditDropWzEvidence` per-image WZ regression（image/property counts、keyword paths、21 個可解析的政策候選、7 個未映射 Mob），以及原有 100 張地圖的 landing／PNG 回歸 |
+| `server/test/serve.test.ts` | 真 socket：注入的 server RNG 經 `GameEntryServer` 到 loot policy；monster loot 發 `0x43 kind 1` 與非零 signed offset；另測完整拾取與玩家丟棄迴圈 |
+| `server/test/schema.test.ts` | `0x43`／`0x44`／`0x0B`／`0x11` 目錄列都能被 `decode` 描述器認出來 |
 
 #### 4.18.8 還不能宣稱的部分
 
-1. **`kind` 的三個值**：`0x43` 只有「`kind <= 1` 多讀怪物區塊」與「`+5 = kind == 1 || kind == 2`」兩個
-   線索，沒有字串或分支替它們命名；本伺服器只送 `kind = 0`（怪物）與 `kind = 2`（玩家丟的，§4.36），
-   沒有送出者用 `kind = 1`。`0x44` 的 `kind 1`（「安靜移除 + 效果」）
-   與 `kind 2` 的飛行動畫細節（`sub_41BAC0`）也沒有實機看過。
+1. **client lifecycle 已解，原 server kind policy 仍未知**：`sub_4A88A0`／`sub_4A7A00` 證明 kind 0 會在
+   state 3／3000 ms fallback 本機清理、kind 1 的 client cleanup flag 使 entry 留到 `0x44`、kind 2 一開始
+   就放置。這解釋了本 server 為持久怪物掉落選 kind 1；但沒有原 server 或流量，不能聲稱它當年也送 1。
+   `0x44 kind 1` 的其他效果與 `kind 2` 的實際拾取動畫仍沒有原 client 執行驗證。
 2. ~~client 的錢包不會動~~ → **已解決**（§4.22.5）：`+89/+93`（`CharacterData` 第 22 欄）就是錢，
    `0x0D` 的旗標 `0x40000` 就是它。拾取現在同時送 `0x11`（那行字）與 `0x0D`（錢包數字），
    `MesoWallet` 也改成同一份紀錄的視圖，不再是另一本帳。
-3. **機率、壽命、擴散、可撿範圍全是伺服器的選擇**（ADR-007）：binary 裡一個都沒有，
-   「看起來對」要等 ADR-004 的實機 run 量。
-4. **`0x43` kind <= 1 的 `unknown` s16** 仍未解（本伺服器寫 0）。
-5. **沒有實機驗證**：`0x43` 的飛行、`0x44 kind 2` 的撿取音效、`0x0B` 放進格子的畫面，全部只由反編譯碼推導。
+3. **掉落表、對應、機率、金額公式、壽命、擴散與 pickup bounds 都仍是本專案政策**（ADR-007）：
+   per-image WZ audit 的關鍵字搜尋沒有找到怪物掉落表；道具名稱只證明 item asset，不證明哪隻怪會掉它。
+   server loot 使用獨立、可注入的 RNG；它不使用 `0x16` client seeds，也不代表原 server 的 RNG。
+4. **兩種 3000/300000 時間不可混為一談**：`0x43` kind 0 的 3000 ms 是 client transient entry cleanup guard；
+   本 server `DROP_LIFETIME_MS = 300000` 是 server-owned ground item policy，逾時發 `0x44 kind 0`。
+   signed trailing s16 已解為 client animation-start offset（`entry+44 = appClock + offset`），不是上述地面壽命。
+5. **沒有原 client 的實機執行驗證**：飛行的視覺外觀、`0x44 kind 2` 音效、`0x0B` 背包畫面仍依反編譯
+   control flow、WZ 資產與 browser component tests；browser 420 ms hop 不是 native measured timing。
+6. **拾取分配／隊伍歸屬仍未知**：本 server 對 kill session 執行現行 pickup policy，不代表已恢復原隊伍分配公式。
 
 ### 4.19 ✅ NPC：`0x39`／`0x3A`／`0x3B`（`CNpcPool`）
 
@@ -3792,9 +3825,10 @@ ADR-105 以 binary 證據推翻——現金裝備照普通裝備穿，`wornCash`
 
 #### 4.36.5 還缺的一半（OPEN）
 
-- **落地的那三個常數是伺服器的選擇**：躺多久（沿用 `DROP_LIFETIME_MS` 300 s）、誰能撿（同圖＋走到範圍內
-  40/60 px＋「必須在這筆掉落之後動過」，§4.18.6 第 4 點）、以及**丟錢**（`0x17` 只搬道具欄裡的東西，玩家沒有
-  丟錢的送出者）。binary 這一半在 client，要等 ADR-004 的實機 run 才能對照（ADR-007）。
+- **地面壽命與拾取仍是伺服器政策**：躺多久（`DROP_LIFETIME_MS` 300 s）、誰能撿（同圖＋40/60 px
+  reach＋「必須在這筆掉落之後動過」，§4.18.6 第 5 點）都未由 binary 恢復。玩家楓幣丟棄已有 client sender：
+  c2s `0x1F`（`sub_55D5F0`，§4.18 supplement）；它和 `0x17` 道具丟棄分開處理。`0x43`／`0x44` 的呈現端
+  client logic 已由反編譯碼解出，但原 server pickup/lifetime policy 仍需 oracle（ADR-007）。
 - ~~**現金裝備**~~：**已由 ADR-105 結案（§4.36.6）**——穿戴路上沒有原生 cash 閘門，現金裝備照普通裝備穿；
   `wornCash` 沒有任何 client sender 能指到（`sub_465710` 的負槽只映到普通 worn 組），維持伺服器專屬回聲組。
   **丟到地上的現金道具仍然拒絕**（`cashItem`——序號只存在道具欄那一格，落地紀錄沒有地方放它；原生

@@ -24,11 +24,10 @@ import {
   readInventoryChange,
 } from "../src/protocol/inventory.ts";
 import { equipSlot, nonEquipSlot } from "../src/protocol/itemslot.ts";
-import { ClientRandom } from "../src/protocol/random.ts";
 import {
   DROP_SPREAD_PX,
   DropField,
-  MOB_JUNK_DROP,
+  MOB_JUNK_ITEM_BY_TEMPLATE_ID,
   POTION_BY_LEVEL,
   defaultDropPolicy,
   type DropSource,
@@ -61,7 +60,7 @@ const snail: DropSource = {
   foothold: 3,
 };
 
-test("0x43 kind 0 is kind, dropId, money, value, x, y, mobId, mobX, mobY, unknown", () => {
+test("0x43 kind 1 is the persistent mob-drop form: fields and signed animation offset", () => {
   const bytes = encodeDropAppear({
     dropId: 0x11223344,
     kind: DROP_KIND.fromMob,
@@ -72,12 +71,14 @@ test("0x43 kind 0 is kind, dropId, money, value, x, y, mobId, mobX, mobY, unknow
     mobId: 7,
     mobX: 100,
     mobY: 200,
+    animationStartOffset: -125,
   });
   assert.equal(bytes.length, 1 + 1 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 2);
   assert.equal(bytes[0], DROP_OPCODE.appear);
-  assert.deepEqual(readDropAppear(new PacketReader(bytes, 1)), {
+  const decoded = readDropAppear(new PacketReader(bytes, 1));
+  assert.deepEqual(decoded, {
     dropId: 0x11223344,
-    kind: 0,
+    kind: 1,
     money: false,
     value: 4000019,
     x: 120,
@@ -85,16 +86,20 @@ test("0x43 kind 0 is kind, dropId, money, value, x, y, mobId, mobX, mobY, unknow
     mobId: 7,
     mobX: 100,
     mobY: 200,
-    unknown: 0,
+    animationStartOffset: -125,
   });
+  assert.equal(
+    describeDropAppear(decoded),
+    "dropId=287454020 kind=1 item 4000019 at (120,240) from mob 7 animationStartOffset=-125ms",
+  );
 });
 
-test("0x43 kind 1 carries the mob block too, kind 2 does not", () => {
+test("0x43 kind 0 carries the mob block but is transient; kind 2 carries none", () => {
   const withMob = readDropAppear(
     new PacketReader(
       encodeDropAppear({
         dropId: 1,
-        kind: DROP_KIND.fromMobAlt,
+        kind: DROP_KIND.transientFromMob,
         money: true,
         value: 45,
         x: -3,
@@ -105,6 +110,11 @@ test("0x43 kind 1 carries the mob block too, kind 2 does not", () => {
     ),
   );
   assert.equal(withMob.mobId, 2);
+  assert.equal(
+    withMob.animationStartOffset,
+    0,
+    "omitted server policy offset is encoded as signed zero",
+  );
   // kind 2 stops after y - and the encoder must not have written the block either.
   const placed = encodeDropAppear({
     dropId: 2,
@@ -120,6 +130,24 @@ test("0x43 kind 1 carries the mob block too, kind 2 does not", () => {
   assert.equal(read.mobId, undefined);
   assert.equal(read.money, true);
   assert.equal(read.value, 1000);
+});
+
+test("0x43 trailing signed offset round-trips the full s16 range", () => {
+  for (const animationStartOffset of [-32768, -1, 0, 1, 32767]) {
+    const bytes = encodeDropAppear({
+      dropId: 1,
+      kind: DROP_KIND.fromMob,
+      money: false,
+      value: 4000019,
+      x: 0,
+      y: 0,
+      animationStartOffset,
+    });
+    assert.equal(
+      readDropAppear(new PacketReader(bytes, 1)).animationStartOffset,
+      animationStartOffset,
+    );
+  }
 });
 
 test("0x43 x and y are signed: a drop left of the map origin stays negative", () => {
@@ -267,7 +295,7 @@ test("the drop policy rolls mesos, the monster's own junk item and a potion", ()
   const rolls = defaultDropPolicy({ ...snail, level: 4 }, scripted([0, 0, 0, 0, 0]));
   assert.deepEqual(rolls, [
     { money: 1 },
-    { itemId: MOB_JUNK_DROP[100100]!, count: 1 },
+    { itemId: MOB_JUNK_ITEM_BY_TEMPLATE_ID[100100]!, count: 1 },
     { itemId: 2000000, count: 1 },
   ]);
   // All three chances fail: nothing drops.
@@ -321,18 +349,18 @@ test("a killed monster's drop lands on its own ground and starts where it died",
 
 test("the spread keeps two drops of one kill apart, inside the reach of the source", () => {
   const field = new DropField({
-    random: new ClientRandom(1, 2, 3),
+    random: scripted([0, 1, 2]),
     policy: () => [{ money: 1 }, { money: 2 }, { money: 3 }],
   });
   const spawned = field.spawnFromDeath(snail, 0);
   for (const drop of spawned) {
     assert.ok(Math.abs(drop.x - snail.x) <= DROP_SPREAD_PX, `${drop.x} is outside the spread`);
   }
-  // Same spread, but drawn from the field's generator: two of three differ from a fixed position.
+  // The injected server RNG drives spread independently of the client `0x16` stream.
   assert.ok(new Set(spawned.map((drop) => drop.x)).size > 1);
 });
 
-test("0x43 for a drop carries the monster it fell out of, kind 0", () => {
+test("0x43 monster loot uses persistent kind 1 and carries its source mob", () => {
   const field = new DropField({ policy: () => [{ itemId: 2000000 }], spreadPx: 0 });
   const [drop] = field.spawnFromDeath(snail, 0);
   const body = field.appearBody(drop!);
@@ -346,6 +374,17 @@ test("0x43 for a drop carries the monster it fell out of, kind 0", () => {
   const read = readDropAppear(new PacketReader(bytes, 1));
   assert.equal(read.x, drop!.x);
   assert.equal(read.y, drop!.y);
+});
+
+test("DropField validates and serializes the configured signed animation-start offset", () => {
+  const field = new DropField({
+    policy: () => [{ itemId: 2000000 }],
+    spreadPx: 0,
+    animationStartOffsetMs: -321,
+  });
+  const [drop] = field.spawnFromDeath(snail, 0);
+  assert.equal(field.appearBody(drop!).animationStartOffset, -321);
+  assert.throws(() => new DropField({ animationStartOffsetMs: 32768 }), /signed s16/);
 });
 
 test("a player's throw-away lands where they stand, with no monster and no spread", () => {

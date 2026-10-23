@@ -1522,7 +1522,7 @@ export const PACKETS: readonly PacketSchema[] = [
       {
         name: "kind",
         type: "u8",
-        note: "DROP_KIND; 0 and 1 also carry the monster below, 2 is a placed drop (a v1.11 client has no request for one)",
+        note: "0/1 carry the monster block; client kind 0 is locally cleaned up, while kind 1 sets the client keep flag and is this server's persistent-loot choice; 2 starts placed (the v1.11 client has no request for one)",
       },
       {
         name: "dropId",
@@ -1544,14 +1544,14 @@ export const PACKETS: readonly PacketSchema[] = [
       {
         name: "mobId",
         type: "u32",
-        note: "kind <= 1 only; looked up in CMobPool and, when the monster is still there, the icon's current position is taken from mob+360/+364",
+        note: "kind 0/1 only; looked up in CMobPool and, when the monster is still there, the icon's current position is taken from mob+360/+364",
       },
       { name: "mobX", type: "s16", note: "kind <= 1 only; the fallback for that position" },
       { name: "mobY", type: "s16", note: "kind <= 1 only" },
       {
-        name: "unknown",
+        name: "animationStartOffset",
         type: "s16",
-        note: "kind <= 1 only; read unconditionally (.lst 004A8C4A) and never used as a coordinate, so this server writes 0",
+        note: "kind 0/1 only; signed millisecond offset added to the client's app clock before the mob-drop animation advances (entry+44); not ground lifetime or a coordinate. This server defaults to 0",
       },
     ],
   },

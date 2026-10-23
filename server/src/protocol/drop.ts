@@ -2,10 +2,11 @@
  * The reward pool: the three packets that make a drop exist, disappear, and be reported.
  *
  * This is the `CRewardPool` half of the field (opcodes `0x42`..`0x45`) plus the one CWvsApp-level
- * notice that tells a player what they just picked up (`0x11`). Both were located in this repo's
- * reverse-engineering pass - FINDINGS 4.18 - and both are **server -> client only**: a v1.11 client
- * has no drop request and no pickup request at all, so who gets what is entirely the server's
- * decision (see `game/drops.ts`).
+ * notice that tells a player what they just picked up (`0x11`). These `CRewardPool` / notice packets
+ * are **server -> client** (FINDINGS §4.18). Separately, the client can throw an item with c2s
+ * `0x17 toSlot = 0` or mesos with c2s `0x1F`; it has no ground-pickup request and no monster-loot
+ * selection request. The field owns ground state and this repository's monster-loot/pickup policy
+ * (`game/drops.ts`).
  *
  * EVIDENCE (MapleStory.exe.c)
  * ---------------------------
@@ -43,9 +44,11 @@
  *                 and when it is still in the pool the drop's *current* position is overwritten from
  *                 `mob+360`/`mob+364` - that is what makes the item fly out of the monster.
  *   s16 x, s16 y  the fallback for that current position when the lookup misses (a miss is handled).
- *   s16 unknown   read unconditionally (`sub_45DC80`, `.lst` 004A8C4A) and then only ever used in a
- *                 pointer sum (`v92[11] = ptr + that`, 178350): nothing in the draw path reads it as
- *                 a coordinate, so this server writes 0.
+ *   s16 animationStartOffset  signed delay from the client's current app clock to the animation
+ *                 start (`sub_45DC80`, MapleStory.exe.lst:004A8C4A; `entry+44 = appClock + offset`,
+ *                 `sub_4A88A0`, 178063-178372). `sub_4A7A00`
+ *                 waits until that time before advancing a mob drop; kind 0 also uses it for the
+ *                 local 3000 ms cleanup guard. It is not a ground lifetime or a coordinate.
  *
  * The entry the client builds is 88 bytes (`sub_4ABB80`: 1476-byte chunks, 15 entries each) with
  * `+4 = kind`, `+5 = (kind == 1 || kind == 2)`, `+8 = dropId`, `+12 = money`, `+16 = value`.
@@ -77,10 +80,10 @@
  *               message is built only `if (name != nullptr && *name != 0)`.
  *   otherwise:  no fields at all -> "아이템을 더 이상 가질 수 없습니다"
  *
- * The client's own counters are *not* touched by any of this: 0x11 is a chat line, and the meso
- * total shown in the status bar is updated by a packet that is not located yet (the `0x0D` stat
- * update - see FINDINGS 4.18's closing note and 6). So the server keeps its own wallet
- * (`game/rewards.ts`) and the player reads the gain from the notice until that packet is decoded.
+ * `0x11` is only the chat notice; the character's meso total is updated separately by `0x0D`
+ * flag `0x40000` (`CharacterData` field 22, FINDINGS §4.22.5). The server's `MesoWallet` is a view
+ * over that same character record (`game/rewards.ts`), and pickup sends both the wallet diff and
+ * this notice. Do not treat the loot chat line itself as the balance update.
  */
 import { PacketReader, PacketWriter } from "./packet.ts";
 
@@ -93,25 +96,26 @@ export const DROP_OPCODE = {
 } as const;
 
 /**
- * The leading byte of `0x43`.
+ * The leading byte of `0x43`, read with the client lifecycle in `sub_4A88A0` / `sub_4A7A00`.
  *
- * The only thing the client's branches say about it: `kind <= 1` adds the `mobId` + fallback
- * position + unknown block, and a new record's `+5` byte is set to `kind == 1 || kind == 2`. Nothing
- * in the client names the three cases, and this server only sends what it can justify:
- * `fromMob` for a monster's loot.
+ * Kinds 0 and 1 both carry the monster block. The client sets its `entry+5` cleanup flag only for
+ * kinds 1 and 2. Kind 0 is locally removed when its animation reaches state 3 or its 3000 ms guard
+ * fires; kind 1 remains in the pool until a server `0x44`; kind 2 is created already placed. The
+ * server uses kind 1 for persistent monster loot and kind 2 for placed player drops. This recovers
+ * client behavior, not the original server's packet policy.
  */
 export const DROP_KIND = {
-  /** A drop that came out of a monster (the extra block is read). */
-  fromMob: 0,
-  /** Same shape as `fromMob`, different `+5` byte. Role not located. */
-  fromMobAlt: 1,
+  /** Monster-shaped, transient client entry: its client-side animation path cleans it up. */
+  transientFromMob: 0,
+  /** Monster-shaped entry with the client cleanup flag set; used for persistent mob loot here. */
+  fromMob: 1,
   /**
    * No extra block at all: the drop is simply *placed* where the packet says.
    *
-   * This is the only one of the three the client can be told without a monster (the other two make it
-   * read a `mobId` and two fallback coordinates), so it is what a player's own throw-away uses - the
-   * `0x17` with `toSlot = 0` that `sub_463BE0` sends (FINDINGS 4.36). What the client does
-   * differently is its own `+5` byte (`kind == 1 || kind == 2`); the codec here only writes the shape.
+   * This is the only kind the client can be told without a monster (the other two make it read a
+   * `mobId` and two fallback coordinates), so it is what a player's own throw-away uses - the
+   * `0x17` with `toSlot = 0` that `sub_463BE0` sends (FINDINGS 4.36). It starts in state 3 and remains
+   * until a server `0x44` removes it.
    */
   placed: 2,
 } as const;
@@ -134,7 +138,7 @@ export const LOOT_OPCODE = 0x11;
 export interface DropAppear {
   /** ZMap key inside the field; unique per field, chosen by the server. */
   dropId: number;
-  /** `DROP_KIND`; `fromMob`/`fromMobAlt` carry the monster block below. */
+  /** `DROP_KIND`; `transientFromMob`/`fromMob` carry the monster block below. */
   kind: number;
   /** `true` = `value` is mesos, `false` = an item id. The client's `v92[3]`. */
   money: boolean;
@@ -149,8 +153,11 @@ export interface DropAppear {
   mobX?: number;
   /** The fallback current y when that monster is no longer in the pool. */
   mobY?: number;
-  /** The block's trailing `s16`: read by the client, never used as a value. Send 0. */
-  unknown?: number;
+  /**
+   * The mob block's trailing signed millisecond offset: client animation begins at its app clock plus
+   * this value. Present only for kinds 0 and 1; zero is this server's explicit policy default.
+   */
+  animationStartOffset?: number;
 }
 
 /** One `0x44` (drop removed) packet. */
@@ -187,14 +194,14 @@ export function encodeDropAppear(drop: DropAppear): Uint8Array {
   writer.writeU32(drop.value >>> 0);
   writeSigned16(writer, drop.x);
   writeSigned16(writer, drop.y);
-  if (drop.kind <= DROP_KIND.fromMobAlt) {
+  if (drop.kind <= DROP_KIND.fromMob) {
     // The client reads all four fields without looking at the packet length, so the block is always
     // written in full - a short block would throw on the client (ZException 38) and desynchronise
-    // the field.
+    // the field. The signed s16 is a client-app-clock animation offset, not an unused pad.
     writer.writeU32((drop.mobId ?? 0) >>> 0);
     writeSigned16(writer, drop.mobX ?? drop.x);
     writeSigned16(writer, drop.mobY ?? drop.y);
-    writeSigned16(writer, drop.unknown ?? 0);
+    writeSigned16(writer, drop.animationStartOffset ?? 0);
   }
   return writer.toBytes();
 }
@@ -208,11 +215,11 @@ export function readDropAppear(reader: PacketReader): DropAppear {
   const x = readSigned16(reader);
   const y = readSigned16(reader);
   const drop: DropAppear = { dropId, kind, money, value, x, y };
-  if (kind <= DROP_KIND.fromMobAlt) {
+  if (kind <= DROP_KIND.fromMob) {
     drop.mobId = reader.readU32();
     drop.mobX = readSigned16(reader);
     drop.mobY = readSigned16(reader);
-    drop.unknown = readSigned16(reader);
+    drop.animationStartOffset = readSigned16(reader);
   }
   return drop;
 }
@@ -222,7 +229,11 @@ export function describeDropAppear(drop: DropAppear): string {
   const what = drop.money ? `${drop.value} mesos` : `item ${drop.value}`;
   const at = `at (${drop.x},${drop.y})`;
   const from = drop.mobId === undefined ? "" : ` from mob ${drop.mobId}`;
-  return `dropId=${drop.dropId} kind=${drop.kind} ${what} ${at}${from}`;
+  const offset =
+    drop.animationStartOffset === undefined
+      ? ""
+      : ` animationStartOffset=${drop.animationStartOffset}ms`;
+  return `dropId=${drop.dropId} kind=${drop.kind} ${what} ${at}${from}${offset}`;
 }
 
 /** Encode one `0x44`, opcode byte included. */

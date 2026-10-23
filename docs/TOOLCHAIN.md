@@ -122,7 +122,8 @@ source／bundle 的真瀏覽器啟動與假傳輸 UI 測試納入 bun run test�
 現行 typed 工具（有副作用的分支須依限制手動操作）：
 
 ```sh
-bun tools/audit-drop-landing.ts  # 原WZ全圖，只讀、無登入／save
+bun tools/audit-drop-landing.ts   # 原WZ全圖，只讀、無登入／save
+bun tools/audit-drop-evidence.ts  # per-image 掉落證據掃描，只讀、無登入／save
 bun server/scripts/art_perf_probe.ts
 bun server/scripts/browser_audio_probe.ts <明示web-port或http(s)://origin>
 bun server/scripts/equipment_fixture.ts generated/validation/<全新名稱>.json

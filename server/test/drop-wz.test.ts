@@ -6,7 +6,27 @@ import { WzArchive } from "../src/wz/archive.ts";
 import { artReaderOf } from "../src/game/wzart.ts";
 import { itemCatalogOf } from "../src/game/iteminfo.ts";
 import { auditDropLandings } from "../../tools/audit-drop-landing.ts";
+import { auditDropWzEvidence } from "../../tools/audit-drop-evidence.ts";
 import { mesoFramePath } from "../../client/drop-renderer.ts";
+
+test("per-image Data.wz traversal finds item assets but no original monster-drop table", () => {
+  const archive = WzArchive.open(resolve(import.meta.dirname, "../../Data.wz"));
+  const report = auditDropWzEvidence(archive);
+  assert.equal(report.archiveImages, 1056);
+  assert.equal(report.mobImages, 28);
+  assert.equal(report.propertyEntries, 1_048_039);
+  assert.deepEqual(report.keywordPropertyPaths, ["Sound/Game.img[0]/DropItem"]);
+  assert.deepEqual(report.keywordStringValuePaths, []);
+  assert.deepEqual(report.mobInfoKeywordPropertyPaths, []);
+  assert.equal(report.policyMappings.length, 21);
+  assert.ok(report.policyMappings.every((mapping) => mapping.mobName && mapping.itemName));
+  assert.deepEqual(report.policyMappingsMissingMobImages, []);
+  assert.deepEqual(report.policyMappingsMissingItemNodes, []);
+  assert.deepEqual(
+    report.unmappedMobs.map(({ mobTemplateId }) => mobTemplateId),
+    [130100, 1110101, 1130100, 2130100, 9999997, 9999998, 9999999],
+  );
+});
 
 test("all 100 original WZ maps: 379422 slope/edge/jump drops survive native packets and browser landing/depth", () => {
   const archive = WzArchive.open(resolve(import.meta.dirname, "../../Data.wz"));

@@ -1,8 +1,9 @@
 /** Read-only original-WZ audit. Pure on import; explicit CLI opens Data.wz, never a save/socket. */
 import { resolve } from "node:path";
 import { WzArchive, footholdSegments, type FootholdSegment } from "../server/src/wz/archive.ts";
+import { DROP_ANIMATION_START_OFFSET_MS } from "../server/src/game/drops.ts";
 import { DropLandingIndex, type DropOrigin } from "../server/src/game/drop-landing.ts";
-import { encodeDropAppear, readDropAppear } from "../server/src/protocol/drop.ts";
+import { encodeDropAppear, readDropAppear, DROP_KIND } from "../server/src/protocol/drop.ts";
 import { PacketReader } from "../server/src/protocol/packet.ts";
 import { createDropRecord, dropPosition, DROP_HOP_MS } from "../client/drop-presentation.ts";
 import { collisionWorld, actorDepth } from "../client/motion.ts";
@@ -50,7 +51,7 @@ export function auditDropLandings(archive: WzArchive): DropLandingAudit {
         new PacketReader(
           encodeDropAppear({
             dropId: 1,
-            kind: 0,
+            kind: DROP_KIND.fromMob,
             money: false,
             value: 4000019,
             x: at.x,
@@ -58,6 +59,7 @@ export function auditDropLandings(archive: WzArchive): DropLandingAudit {
             mobId: 1,
             mobX: Math.trunc(source.x),
             mobY: Math.trunc(source.y),
+            animationStartOffset: DROP_ANIMATION_START_OFFSET_MS,
           }),
           1,
         ),

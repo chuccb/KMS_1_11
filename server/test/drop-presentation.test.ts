@@ -10,8 +10,9 @@ import {
   DROP_PICKUP_MS,
 } from "../../client/drop-presentation.ts";
 import { dropIconPath, mesoTier, mesoFramePath } from "../../client/drop-renderer.ts";
+import { DROP_KIND } from "../src/protocol/drop.ts";
 const drop = {
-  kind: 0,
+  kind: DROP_KIND.fromMob,
   dropId: 1,
   money: false,
   value: 4000019,
@@ -20,15 +21,18 @@ const drop = {
   mobId: 7,
   mobX: 20,
   mobY: 100,
+  animationStartOffset: 0,
 };
-function record(kind = 0) {
+function record(kind: number = DROP_KIND.fromMob) {
   const result = createDropRecord({ ...drop, kind }, 1000);
   assert.ok(result);
   return result;
 }
 
-test("reward JSON boundary validates native ranges and required monster block without coercion", () => {
+test("reward JSON boundary validates native ranges, monster block and signed offset without coercion", () => {
   assert.deepEqual(parseDrop(drop), drop);
+  assert.equal(parseDrop({ ...drop, animationStartOffset: -32768 })?.animationStartOffset, -32768);
+  assert.equal(parseDrop({ ...drop, animationStartOffset: 32767 })?.animationStartOffset, 32767);
   for (const value of [
     null,
     [],
@@ -46,7 +50,8 @@ test("reward JSON boundary validates native ranges and required monster block wi
     { ...drop, mobId: undefined },
     { ...drop, mobX: undefined },
     { ...drop, mobY: Infinity },
-    { ...drop, unknown: 65535 },
+    { ...drop, animationStartOffset: 32768 },
+    { ...drop, animationStartOffset: "0" },
   ])
     assert.equal(parseDrop(value), undefined);
   assert.deepEqual(parseDrop({ ...drop, kind: 2, mobId: "ignored" }), {
@@ -76,9 +81,34 @@ test("hop reaches the exact authoritative ground point without the old 16px rest
   assert.deepEqual(dropPosition(entry, 999), dropPosition(entry, 1000));
   assert.deepEqual(dropPosition(entry, 100000), end);
 });
-test("kind1 uses monster flight; native kind2 is immediately placed, not an invented hop", () => {
-  assert.equal(dropPosition(record(1), 1000)?.phase, "hop");
-  assert.deepEqual(dropPosition(record(2), 1000), { x: 100, y: 300, t: 1, phase: "rest" });
+test("kind 0 cleans up locally, kind 1 persists after flight, and kind 2 starts placed", () => {
+  const transient = record(DROP_KIND.transientFromMob);
+  assert.equal(dropPosition(transient, 1000)?.phase, "hop");
+  assert.equal(dropPosition(transient, 1000 + DROP_HOP_MS), undefined, "state 3 removes kind 0");
+  assert.equal(dropPosition(transient, 1000 + 3001), undefined, "native 3000 ms guard is retained");
+  assert.deepEqual(dropPosition(record(DROP_KIND.fromMob), 1000 + DROP_HOP_MS), {
+    x: 100,
+    y: 300,
+    t: 1,
+    phase: "rest",
+  });
+  assert.deepEqual(dropPosition(record(DROP_KIND.placed), 1000), {
+    x: 100,
+    y: 300,
+    t: 1,
+    phase: "rest",
+  });
+});
+
+test("signed animation offset delays or advances the hop relative to packet receipt", () => {
+  const delayed = record(DROP_KIND.fromMob);
+  delayed.drop.animationStartOffset = 100;
+  assert.deepEqual(dropPosition(delayed, 1100), { x: 20, y: 100, t: 0, phase: "hop" });
+  assert.ok(dropPosition(delayed, 1101)!.t > 0);
+
+  const advanced = record(DROP_KIND.fromMob);
+  advanced.drop.animationStartOffset = -100;
+  assert.equal(dropPosition(advanced, 1000)!.t, 100 / DROP_HOP_MS);
 });
 test("pickup during a hop starts at the displayed position, not a teleport to final FH", () => {
   const entry = record(),

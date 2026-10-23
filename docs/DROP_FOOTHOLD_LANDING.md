@@ -127,3 +127,23 @@ ignored `generated/drop-landing/` 保留 registry／install／baseline-tests／f
 觀測期間有獨立遊戲連線在更新新進度，因此初次「整個save hash應不變」斷言不成立；
 保留初始log並改列並行診斷，不凍結玩家、不倒回存檔或重啟伺服器來讓hash檢查變綠。
 只讀browser自己的0WS有獨立閘門驗證，不能把其他遊戲連線活動算成agent自動操作，也不拿它冒稱手動驗收PASS。
+
+## 2026-10-23 follow-up：drop lifecycle／signed offset／WZ 證據（ADR-155）
+
+本節補充 packet presentation／evidence，不改本文件已實作的真 foothold 權威選點與底部貼地呈現：
+
+- `0x43 kind 0/1` 都帶 monster block，但 native client lifecycle 不同。kind 0 是 transient entry，hop/state 3 後
+  browser 本機清理；kind 1 設 native cleanup flag，本 server 用它表示持久怪物掉落，等 `0x44`。kind 2 沒有
+  monster block，建立時已放置；player item throw `0x17 toSlot=0` 與 meso throw `0x1F` 是 client inputs，拾取沒有
+  client request。server kind 1 是本專案政策，不能反推原 server 也如此。
+- trailing signed s16 已命名 `animationStartOffset`；native `entry+44 = appClock + offset`。browser 對正負 offset
+  起算 hop；kind 0 同時保留 offset-aware 3000 ms cleanup guard。420 ms hop 是 browser policy，不是量得的 EXE timing。
+- 新的唯讀 `bun tools/audit-drop-evidence.ts` 以每張 WZ image 新建 `WeakSet`，重跑結果：1056 archive images、
+  28 Mob images、1,048,039 property entries；唯一 keyword property path 是 `Sound/Game.img[0]/DropItem`
+  （聲音資源），沒有 keyword string value 或 Mob `info` drop-like property。21 個候選 monster-item asset 均可解析，
+  7 個 Mob 未映射；item 名稱不證明原掉落表／對應。`server/test/drop-wz.test.ts` 釘住結果。
+- 掉率、item association、meso formula、300 s ground lifetime、spread、pickup reach 均維持本專案政策；server loot
+  RNG 現為獨立 crypto source，並可由 `dropRandom` 注入，不使用 `0x16` client seeds，也不代表原 server RNG。
+
+舊 2026-10-18 測試數字只屬當時紀錄。2026-10-23 重新跑全 gate：`bun run typecheck`、`bun run format:check`、
+`bun run build` 通過；`bun run test` **1463 pass／0 fail／5334 expect、169 files**。沒有登入、操作角色或讀寫玩家 save。

@@ -1,76 +1,83 @@
 /**
  * The drops of one field: what a killed monster leaves behind, where it lies, and when it goes away.
  *
- * WHY THIS IS SERVER-SIDE, ALL OF IT
- * ----------------------------------
- * A v1.11 client has no drop request and no pickup request: every send site in the binary passes a
- * *literal* opcode and the largest is `51` = `0x33` (FINDINGS 4.13.2), while the reward pool is
- * `0x42`..`0x45` in the server -> client direction (FINDINGS 4.18). So who gets what is this module's
- * decision, and the client only ever *shows* it: `0x43` makes a drop appear, `0x44` kind 2 makes it
- * fly to the taker (and plays the pickup sound on their own client), `0x0B` puts it in their
- * inventory, `0x11` prints the line in chat.
+ * SERVER-OWNED WORLD STATE, WITH DISTINCT CLIENT INPUTS
+ * ----------------------------------------------------
+ * The client does send player-initiated drop inputs: `0x17 toSlot = 0` throws an item and c2s `0x1F`
+ * throws mesos. It has no request to pick up a ground drop, and no request that selects monster loot.
+ * The `CRewardPool` packets `0x43`/`0x44` are server -> client (FINDINGS §4.18): this module owns the
+ * field's ground records, the repo's monster-loot policy, pickup eligibility/ownership and expiry.
+ * `0x43` makes a drop appear; `0x44 kind 2` makes it fly to the taker (and plays the pickup sound on
+ * their own client); `0x0B` puts an item in inventory; `0x11` prints the gain notice. Player item/meso
+ * throw inputs are decoded and validated separately before creating placed (`kind 2`) field drops.
  *
- * WHAT IS EVIDENCE, WHAT IS A CHOICE
- * ----------------------------------
- * `Item/Etc/0400.img` is the junk table and it is *readable*: every entry is named after the monster
- * it comes from (`04000019 달팽이의 껍질` = "snail's shell", `04000022 스톤골렘의 돌조각` = "stone
- * golem's stone piece", `04000023 콜드아이의 꼬리` = "cold eye's tail"). `MOB_JUNK_DROP` below is that
- * pairing - the item names are the evidence, and the ids are the real children of that image. The
- * potions come from `Item/Consume/0200.img` and are handed out by level band, cheapest first by their
- * own `info.price` (25 / 80 / 100 / 160).
+ * WHAT THE ARCHIVE DOES AND DOES NOT PROVE
+ * ----------------------------------------
+ * `Item/Etc/0400.img` contains named item assets, not monster-to-item drop records. The read-only,
+ * per-image traversal in `tools/audit-drop-evidence.ts` finds 28 `Mob/*.img` templates, no drop-like
+ * property under their `info` nodes, and only `Sound/Game.img[0]/DropItem` among archive-wide
+ * drop/loot/meso/money/expiry/lifetime/chance property names. The item names can motivate a policy
+ * association, but they do not prove what any monster drops. `MOB_JUNK_ITEM_BY_TEMPLATE_ID` and
+ * `POTION_BY_LEVEL` are this repository's explicit choices; their item ids and names are checked
+ * against WZ, while their associations and level bands are not recovered original-server data.
  *
- * What is *not* evidence, because it lived on the 2003 server and that server is gone: the rates, the
- * meso amounts, the lifetime, the drop spread and the pickup reach. There is no `drop` node anywhere
- * in `Data.wz` and no table in the client to read them from. They are therefore named constants with
- * one place to change, the same status as `PATROL_SPEED_PX_PER_SEC` in `game/mobs.ts`, and
- * `defaultDropPolicy` is replaceable wholesale (`DropFieldOptions.policy`).
+ * The rates, meso formula, lifetime, spread, and pickup reach also lived on the missing 2003 server.
+ * They remain named, replaceable repository policy (`DropFieldOptions.policy` and field options), not
+ * claims about original behavior. The native executable does establish the client packet lifecycle:
+ * kind 1 is used here for persistent monster drops, kind 0 is transient client-owned animation, and
+ * the trailing signed s16 is an animation-start offset. See FINDINGS §4.18 and ADR-155.
  *
- * Every roll goes through `ClientRandom` - the client's *own* generator (`protocol/random.ts`), whose
- * seeds travel in `0x16`. A seeded field is reproducible in a test, and a field seeded from the seeds
- * it sends is running the same numbers the client would.
+ * Server loot has its own cryptographically secure random source, independent of the client's `0x16`
+ * streams. `DropFieldOptions.random` is injectable for deterministic tests and explicit deployments;
+ * no client seed, damage stream, or client PRNG state controls which loot this server selects.
  */
-import { ClientRandom } from "../protocol/random.ts";
+import { randomInt } from "node:crypto";
 import { DROP_KIND, encodeDropAppear, type DropAppear } from "../protocol/drop.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { FootholdSegments } from "../wz/archive.ts";
 import { DropLandingIndex, type DropOrigin } from "./drop-landing.ts";
 
-/** Chance (out of 1000) that a killed monster leaves mesos. */
+/** Repository policy: chance (out of 1000) that a killed monster leaves mesos. */
 export const MESO_DROP_CHANCE_PER_MILLE = 600;
 
-/** Upper bound of the meso roll: `1 + range(0, level * MESO_PER_LEVEL)`. */
+/** Repository policy: upper bound of the meso roll, `1 + range(0, level * MESO_PER_LEVEL)`. */
 export const MESO_PER_LEVEL = 3;
 
-/** Chance (out of 1000) that a killed monster leaves its own junk item. */
+/** Repository policy: chance (out of 1000) to roll a configured junk-item candidate. */
 export const MOB_JUNK_CHANCE_PER_MILLE = 300;
 
-/** Chance (out of 1000) that a killed monster leaves a potion. */
+/** Repository policy: chance (out of 1000) that a killed monster leaves a potion. */
 export const MOB_POTION_CHANCE_PER_MILLE = 50;
 
-/** How long a drop lies on the ground before it disappears (as `0x44` kind 0). */
+/** Repository policy for the signed `0x43` animation-start offset; not a recovered server value. */
+export const DROP_ANIMATION_START_OFFSET_MS = 0;
+
+/**
+ * Repository policy: time a server-owned ground drop lasts before `0x44 kind 0` removes it.
+ * This 300-second field lifetime is unrelated to the client's kind-0 animation cleanup guard (3 s).
+ */
 export const DROP_LIFETIME_MS = 300_000;
 
-/** How far from the monster a drop may land, in px. */
+/** Repository policy: how far from the monster a drop may land, in px. */
 export const DROP_SPREAD_PX = 24;
 
-/** How close a player has to be for the field to hand them a drop. */
+/** Repository policy: how close a player has to be for the field to hand them a drop. */
 export const PICKUP_RANGE_PX = 40;
 
-/** How far above/below a player the field still considers them to be on the drop. */
+/** Repository policy: vertical reach for a pickup, in px. */
 export const PICKUP_RANGE_Y_PX = 60;
 
 /**
- * The junk item each monster leaves behind, straight out of `Item/Etc/0400.img`.
+ * Repository policy candidates for a mob's ordinary item drop, keyed by `Mob/*.img` template id.
  *
- * The pairing is read off the item names (the archive's own data, not a guess):
- * `04000019 달팽이의 껍질` (snail's shell) for `100100 달팽이` (snail), `04000016 빨간 달팽이의 껍질`
- * for `130101 빨간 달팽이` (red snail), `04000001 주황 버섯의 갓` (orange mushroom's cap) for
- * `1210102 주황버섯`, `04000023 콜드아이의 꼬리` for `4230100 콜드아이`, and so on. The monsters that
- * are missing here (the stumps, the small bat, the minotaur, the two test templates) have no item in
- * this build that names them: `04000003 나뭇가지` / `04000005 나뭇잎` would fit a stump, but nothing
- * in the data says which, so those monsters drop mesos (and, higher up, potions) only.
+ * This is not an extracted WZ table. The per-image audit finds no drop table or drop-like field in
+ * the 28 Mob images. IDs and displayed names resolve to `Mob/*.img/info/name` and
+ * `Item/Etc/0400.img/<itemId>/info/name`, but those names alone do not prove a monster-to-item
+ * association (especially across related mob families). The seven unmapped templates are deliberate:
+ * Stump, Dark Stump, Axe Stump, Dark Axe Stump, Yoyo, Small Bat, and Minotaur. Do not infer an
+ * original drop from this policy map.
  */
-export const MOB_JUNK_DROP: Readonly<Record<number, number>> = {
+export const MOB_JUNK_ITEM_BY_TEMPLATE_ID: Readonly<Record<number, number>> = {
   100100: 4000019, // 달팽이 -> 달팽이의 껍질
   100101: 4000000, // 파란 달팽이 -> 파란 달팽이의 껍질
   130101: 4000016, // 빨간 달팽이 -> 빨간 달팽이의 껍질
@@ -99,11 +106,10 @@ export const MOB_JUNK_DROP: Readonly<Record<number, number>> = {
  * `02000000 빨간 포션` (hp 50, price 25), `02000003 파란 포션` (mp 100, price 100),
  * `02000001 주황 포션` (hp 150, price 80), `02000002 하얀 포션` (hp 300, price 160).
  *
- * A **server choice**, like the odds: the four items and their names/prices are the archive's, the
- * bands are this repo's, and `test/drop.test.ts` pins them (red for the weakest monsters, then the
- * MP potion, then orange, then white for everything from level 35 up). The whole table is four
- * entries wide because there are exactly four town potions in this build - a `0500`/`0201` drop
- * would be a different, equally unproven decision (see ADR-007).
+ * A **repository choice**, like the odds: these four items' names/prices are in the archive, while
+ * the level bands and their association with mob levels are policy (pinned in `drop.test.ts`). This
+ * table is not an exhaustive WZ consumable list or evidence of the original server's potion drops.
+ * Choosing another category such as `0500`/`0201` would be a different, equally unproven policy.
  */
 export const POTION_BY_LEVEL: readonly { upToLevel: number; itemId: number }[] = [
   { upToLevel: 9, itemId: 2000000 }, // 빨간 포션 (hp 50, 25 mesos)
@@ -112,12 +118,26 @@ export const POTION_BY_LEVEL: readonly { upToLevel: number; itemId: number }[] =
   { upToLevel: Infinity, itemId: 2000002 }, // 하얀 포션 (hp 300, 160 mesos)
 ];
 
-/** The only thing a policy needs from a generator (`ClientRandom` has both). */
+/** The random operations used by server-side loot policy; this is not the client's `0x16` stream. */
 export interface RandomSource {
-  /** A 32-bit value, as `sub_4619F0` returns it. */
+  /** One unsigned 32-bit value. */
   next(): number;
-  /** `lo + next() % span`, as the client's `Random(span, lo)`. */
+  /** For positive `span`, an integer in `[lo, lo + span)`; for zero, one raw value. */
   range(lo: number, span: number): number;
+}
+
+/** A fresh field-local source, independent of all client seeds and client-side random streams. */
+function createServerDropRandom(): RandomSource {
+  const next = () => randomInt(0, 0x1_0000_0000);
+  return {
+    next,
+    range(lo, span) {
+      if (!Number.isInteger(lo) || !Number.isInteger(span) || span < 0) {
+        throw new RangeError(`invalid loot random range: lo=${lo}, span=${span}`);
+      }
+      return span === 0 ? next() : lo + randomInt(span);
+    },
+  };
 }
 
 /** The monster a drop came out of. */
@@ -166,7 +186,7 @@ export function defaultDropPolicy(source: DropSource, random: RandomSource): Dro
     rolls.push({ money: 1 + random.range(0, span) });
   }
   if (random.range(0, 1000) < MOB_JUNK_CHANCE_PER_MILLE) {
-    const itemId = MOB_JUNK_DROP[source.templateId];
+    const itemId = MOB_JUNK_ITEM_BY_TEMPLATE_ID[source.templateId];
     if (itemId !== undefined) rolls.push({ itemId, count: 1 });
   }
   if (random.range(0, 1000) < MOB_POTION_CHANCE_PER_MILLE) {
@@ -180,15 +200,15 @@ export function defaultDropPolicy(source: DropSource, random: RandomSource): Dro
 /**
  * One drop lying in a field.
  *
- * `kind` is the `0x43` shape this drop uses, and it is the drop's *history* rather than its state:
- * `fromMob` carries the monster block (and makes the client animate the item out of the monster),
- * `placed` has no such block at all - which is the only shape a player's throw-away can use
- * (`DROP_KIND.placed`).
+ * `kind` is the `0x43` shape this drop uses. `fromMob` carries the monster block and sets the
+ * client's no-local-cleanup flag, so this server's persistent monster loot waits for `0x44`; `placed`
+ * has no monster block and starts at its ground point. The client also understands transient kind 0,
+ * but the server does not use it for persistent ground entries.
  */
 export interface DropEntry {
   /** The `0x43`/`0x44` pool key; unique inside the field, handed out from 1. */
   dropId: number;
-  /** `DROP_KIND.fromMob` for a killed monster's loot, `DROP_KIND.placed` for a throw-away. */
+  /** `DROP_KIND.fromMob` for persistent monster loot; `DROP_KIND.placed` for a throw-away. */
   kind: number;
   /**
    * The item itself, for a drop a player threw: the ground keeps the object rather than only its id,
@@ -220,10 +240,12 @@ export interface DropEntry {
 export interface DropFieldOptions {
   /** Real ground for all rewards: monster loot, player items and mesos. */
   footholds?: FootholdSegments;
-  /** The field's generator; a seeded `ClientRandom` makes a session reproducible in a test. */
+  /** Field-local loot random source; omitted means a fresh server-side crypto source. */
   random?: RandomSource;
   /** Defaults to `defaultDropPolicy`. */
   policy?: DropPolicy;
+  /** Defaults to the repository's zero-offset policy (`DROP_ANIMATION_START_OFFSET_MS`). */
+  animationStartOffsetMs?: number;
   /** Defaults to `DROP_LIFETIME_MS`. */
   lifetimeMs?: number;
   /** Defaults to `DROP_SPREAD_PX`. */
@@ -246,6 +268,7 @@ export class DropField {
   private readonly options: DropFieldOptions;
   private readonly random: RandomSource;
   private readonly policy: DropPolicy;
+  private readonly animationStartOffsetMs: number;
   private readonly lifetimeMs: number;
   private readonly landing: DropLandingIndex;
   private nextDropId = 1;
@@ -253,8 +276,18 @@ export class DropField {
   constructor(options: DropFieldOptions = {}) {
     this.options = options;
     this.landing = new DropLandingIndex(options.footholds);
-    this.random = options.random ?? new ClientRandom(0x5a17, 0x1d0f, 0x2b3c);
+    this.random = options.random ?? createServerDropRandom();
     this.policy = options.policy ?? defaultDropPolicy;
+    this.animationStartOffsetMs = options.animationStartOffsetMs ?? DROP_ANIMATION_START_OFFSET_MS;
+    if (
+      !Number.isInteger(this.animationStartOffsetMs) ||
+      this.animationStartOffsetMs < -32768 ||
+      this.animationStartOffsetMs > 32767
+    ) {
+      throw new RangeError(
+        `drop animation offset must be a signed s16, got ${this.animationStartOffsetMs}`,
+      );
+    }
     this.lifetimeMs = options.lifetimeMs ?? DROP_LIFETIME_MS;
   }
 
@@ -269,8 +302,8 @@ export class DropField {
    * The drop's x is spread by `spreadPx` (several drops from one kill should not sit on one pixel,
    * and the client animates each of them separately anyway), and its y is the foothold under that x -
    * projecting to a real floor edge over a void. Only a floorless map retains an unresolved y.
-   * The *monster's* position is kept too: that is what `0x43` kind 0 sends, and what makes the client
-   * animate the drop out of the monster instead of popping it into existence where it lands.
+   * The *monster's* position is kept too: `0x43` kind 1 sends it so the client animates the drop out
+   * of the monster, while the client cleanup flag keeps this ground entry until a server `0x44`.
    */
   spawnFromDeath(source: DropSource, now: number): DropEntry[] {
     const spawned: DropEntry[] = [];
@@ -345,7 +378,7 @@ export class DropField {
     return entry;
   }
 
-  /** The `0x43` body of one drop: the monster block only for the kinds that carry it. */
+  /** The `0x43` body of one drop, including the animation offset for monster-shaped kinds. */
   appearBody(entry: DropEntry): DropAppear {
     const body: DropAppear = {
       dropId: entry.dropId,
@@ -355,10 +388,11 @@ export class DropField {
       x: entry.x,
       y: entry.y,
     };
-    if (entry.kind <= DROP_KIND.fromMobAlt) {
+    if (entry.kind <= DROP_KIND.fromMob) {
       body.mobId = entry.mobId;
       body.mobX = entry.mobX;
       body.mobY = entry.mobY;
+      body.animationStartOffset = this.animationStartOffsetMs;
     }
     return body;
   }

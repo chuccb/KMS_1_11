@@ -1358,6 +1358,7 @@ test(
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
+    let dropRandomCalls = 0;
     const game = new GameEntryServer({
       handoffs,
       mapId: 1000000,
@@ -1375,8 +1376,18 @@ test(
       }),
       mobTickMs: 20,
       mobRespawnMs: 5000,
-      // One guaranteed drop per kill, so the packet after the death is always the same one.
-      dropPolicy: () => [{ money: 25 }],
+      // The server-level injected RNG reaches the field policy; spread is disabled to isolate that call.
+      dropPolicy: (_source, random) => [{ money: random.range(25, 1) }],
+      dropRandom: {
+        next: () => 0,
+        range: (lo, span) => {
+          dropRandomCalls++;
+          assert.equal(span, 1);
+          return lo;
+        },
+      },
+      dropSpreadPx: 0,
+      dropAnimationStartOffsetMs: -7,
       handshake: { clientSendSeed: 0x99999999, clientRecvSeed: 0xaaaaaaaa },
       log: (line) => log.push(line),
     });
@@ -1473,7 +1484,13 @@ test(
     assert.equal(loot.money, true);
     assert.equal(loot.value, 25);
     assert.equal(loot.mobId, 1, "the drop knows the monster it came out of");
-    assert.equal(loot.kind, 0);
+    assert.equal(loot.kind, 1, "persistent monster loot sets the client's cleanup flag");
+    assert.equal(
+      loot.animationStartOffset,
+      -7,
+      "the signed offset passes through server field construction",
+    );
+    assert.equal(dropRandomCalls, 1, "the injected server RNG reached the drop policy");
 
     // ... and 40 ms of die animation later the corpse goes. The walking timer is what sends it.
     const corpse = await killer.take(1);

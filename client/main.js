@@ -1077,8 +1077,9 @@ function handle(message) {
     }
 
     case "drop-enter": {
-      // The drop flies out of the monster that left it: the packet carries the monster and where the
-      // item came to rest, and the two are a hop apart.
+      // Parse the ground point and, for monster-shaped kinds, source mob and signed start offset.
+      // Persistent server monster loot is kind 1; transient kind 0 is cleaned locally, while kind 2
+      // player throws start placed. Kind 0 needs no server 0x44 when its animation ends.
       const record = createDropRecord(message.drop, performance.now(), (id) =>
         mobs.get(String(id)),
       );
@@ -2989,7 +2990,7 @@ function drawDrop(key, record, cameraX, cameraY, now) {
       : users.get(String(record.takenBy));
   const at = dropPosition(record, now, taker);
   if (at === undefined) {
-    drops.delete(key);
+    drops.delete(key); // kind 0 expires locally, or a taken drop's pickup animation has finished
     return;
   }
   rewardPainter.draw(record.drop, at, { x: cameraX, y: cameraY }, now);

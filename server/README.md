@@ -43,9 +43,9 @@
 | `src/game/map.ts` | ✅ **伺服器的地圖視圖**：`WzArchive` → `MapData`（`life` 出生點分怪物／NPC、`portal`、`info`、腳踏點 `footholdSegments`）；`mapDataProvider(archive)` 快取（§4.15／§4.16）。 |
 | `src/game/world.ts` | ✅ **每一張地圖的共享世界**（ADR-012）：`FieldRegistry`（`mapId → FieldInstance`，第一次有人進場才建立、之後留著）＋`FieldInstance`（`mobs`／`npcs`／`drops` ＋ 在場成員）。`join()` 把整張圖的快照送給新來的人（每個活著的怪 `0x2F`、每個 NPC 完整 `0x39`、地上每個 `0x43`、每個已在場玩家 `0x1C`）並讓其他人收到他的 `0x1C`；`leave()` 送 `0x1D`；`reportMove()` 把別人走的路包成 `0x22`（同時蓋上 `lastMoveAt`，「站上去撿」用它判斷這筆掉落是不是比這次移動更早）；`applyDamage`／`spawnFromDeath`／`pickUp` 的結果廣播全場；`dropItem()` 是「玩家把東西丟到地上」那一半（`0x17 toSlot = 0` → 全場一個 `0x43`，丟的人也算，§4.36）；`tick()` 只有在**有人在看**的時候才派 `0x33`，但屍體、重生與掉落物過期照算；`portal(name)` 是「玩家用了哪個傳送門」的查詢（名字不分大小寫，查不到就是沒有）。`0x1C`／`0x1D`／`0x22` 的 sender 只在這裡（FINDINGS §4.24／§4.25）。 |
 | `src/game/mobs.ts` | ✅ **一場地的怪物**：出生點吸附腳踏點、巡邏範圍 = 腳踏點折線 ∩ `rx0/rx1`、每段一個 `0x33`（`MobField`）；`Mob/<id>.img -> info` 的 `speed`／`maxHP`／`maxMP`／`level`／`exp` 與 die 動畫長度（`dieMs`，Σ 影格 `delay`，預設 180 ms）由 `mobTemplateProvider` 快取。怪物屬於**場地**（`game/world.ts`，ADR-012）：id、位置與 HP 都是那張圖的，兩個玩家打的是同一隻。怪物是**伺服器驅動**的，而且**有 HP**：`applyDamage` → `0x34`＋（死亡時）`0x30`，`tickPackets` 收屍與重生（§4.16／§4.17）。⚠️ 原 client 的怪物 AI **在自己身上**（§4.20／ADR-008）：這裡的巡邏是我們 client 還沒有 AI 之前的替代品，不是最終架構。 |
-| `src/protocol/drop.ts` | ✅ **掉落物封包**：`0x43`（出現：`kind`／`dropId`／`money`／`value`／落點，`kind <= 1` 再多一顆怪物區塊；**玩家自己丟的用 `kind 2`**＝沒有怪物區塊、15 bytes，§4.36）、`0x44`（消失／被撿走，`kind 2` 帶角色 id）、`0x11`（獲得提示的三種形狀）；`0x42`／`0x45` 在 client 裡沒有 handler（FINDINGS §4.18）。 |
+| `src/protocol/drop.ts` | ✅ **掉落物封包**：`0x43` kind 0/1 帶怪物區塊與 trailing signed `animationStartOffset`（`entry+44 = client app clock + offset`）；kind 0 是 client transient cleanup，kind 1 設 keep flag（本 server 用於持久怪物掉落，原 server 選擇未知）；kind 2 是立即放置、無怪物區塊的 15-byte 玩家 throw（§4.36）。另有 `0x44` 消失／拾取及 `0x11` 獲得提示；`0x42`／`0x45` 在 client 裡沒有 handler（FINDINGS §4.18）。 |
 | `src/protocol/inventory.ts` | ✅ **道具欄異動 `0x0B`**：`result`／`count`／每筆 `{op, inventory, slot, …}`，`op 0` 接一個 `GW_ItemSlot`（**沒有種類位元組**）；`op 1`（換金鑰）在裝備欄會被 client 丟 `CTerminateException`，encoder 直接拒絕（§4.18.4）。 |
-| `src/game/drops.ts` | ✅ **一場地的掉落物**（`DropField`，屬於場地：`dropId` 是那張圖的 key，`0x44 kind 2` 說出是誰撿走的）：掉落表（`MOB_JUNK_DROP`／`POTION_BY_LEVEL`／三個機率常數）、落點吸附腳踏點、壽命與「玩家站在上面＋**在這次移動之前就躺在那裡**」的判定（`reachable` 的第三個參數，不然丟在自己腳下的東西會立刻被自己撿回來）、以及 `dropFromPlayer`（玩家丟的東西：落點就是玩家、`kind 2`、**留住那件道具本身**讓撿回來的還是同一件）；機率與壽命都是**伺服器的選擇**（ADR-007）。 |
+| `src/game/drops.ts` | ✅ **每張地圖共享的掉落物**（`DropField`）：`MOB_JUNK_ITEM_BY_TEMPLATE_ID` 是 repo policy 候選對應，不是 WZ 掉落表；`POTION_BY_LEVEL`、600‰／300‰／50‰、meso formula、300 s ground lifetime、24 px spread 與 pickup bounds 也都是未恢復的 server policy（ADR-007）。落點吸附真 foothold；monster kind 1 持續到 server `0x44`，signed animation offset 可注入，預設 0；loot random 預設 field-local crypto source，與 `0x16` client streams 分離，可由 `dropRandom` 注入。`reachable` 避免腳下新掉落立刻自動拾取；`dropFromPlayer` 保留丟下的 item instance。可重跑 [`audit-drop-evidence.ts`](../tools/audit-drop-evidence.ts)，但不可把 item name 當原 monster-drop 證據。 |
 | `src/game/rewards.ts` | ✅ **獎勵與錢包**（`grantItem`／`MesoWallet`／`pickUpDrop`）：同 id 堆疊到 200、否則第一個空格、**裝備與現金道具永不堆疊**、背包滿就留在原地；`pickUpDrop` 回傳「該送哪幾個封包」的資料（地面知道那件道具時用 `grantItem` 的第四個參數 `template` 當模板，撿回來的捲軸武器不會變成新的）；`takeItem` 是商店收購那一半。**`MesoWallet` 是角色紀錄第 22 欄（`stats.mesos`）的視圖**，不是第二本帳 —— 撿到錢時 `0x0D` 的旗標 `0x40000` 會讓 client 的錢包跟著動（§4.22.5）。 |
 | `src/protocol/npc.ts` | ✅ **NPC 封包**：`0x39` 進場（`u32 npcId`；**已知 id 只有 5 bytes**，新 id 才接 `u32 templateId`＋`s16 x,y`＋`u8 facing`＋`u16`＋`s16 ×2`，共 20 bytes）、`0x3A` 離場（只有 `u32 npcId`）、`0x3B` **走動**（**`u8 flag` 在前**＋`u32 npcId`；flag 1 ＝「你自己走」，FINDINGS §4.28）；`0x3C`–`0x40` 只讀 id，只有 `0x3D` 再讀兩顆**動畫**索引＋（模板旗標非 0 時才有的）`CMovePath`（FINDINGS §4.19）。**沒有**怪物 `0x2F` 那個動畫旗標區塊。 |
 | `src/protocol/stat.ts` | ✅ **能力值差異包 `0x0D`（s2c）**：`u8 ack` ＋ `u32 flags`（19 個 bit，`0x01`…`0x40000`，**依旗標順序**）＋ `u32 durationMs`（0 = 沒有暫時能力尾段）。`diffStats(舊, 新)` 只回報有變的欄位；`encodeStatUpdate`／`readStatUpdate`／`describeStatUpdate`。⚠️ 有些欄位的**線上寬度與 `CharacterData` 不同**（`str`/`dex`/`int`/`luk` **1 byte**、`unknown26`／`fame` **4 bytes**）；`unknown26` 僅保留低 byte、`fame` 僅低 word。超出 client 實際保留寬度的值直接**拒絕**而不是靜默截斷（FINDINGS §4.21）。 |
@@ -249,15 +249,19 @@ golden 測試逐 byte 對齊 client 自己的寫入順序，`decode` 也會把�
 客戶端接著回報的移動（`0x0E`）與攻擊（`0x0F`）都會被 `decode` 的解讀器寫進日誌
 （FINDINGS §4.11.2b；`test/serve.test.ts` 用假 client 逐欄驗證）。
 
-**掉落與拾取也已接上**（FINDINGS §4.18）：怪物死掉時伺服器依掉落表送 `0x43`（錢或道具，附「從哪隻怪
-飛出來」的怪物區塊），掉落物 5 分鐘後過期（`0x44 kind 0`）；玩家**走到上面**就會被撿走 —— `0x44 kind 2`
-（帶角色 id，client 才會播撿取音效與飛行動畫）＋`0x0B`（道具放進哪一格）＋`0x11`（聊天視窗那行字）。
-掉落表、機率、壽命、擴散範圍與可撿範圍全部是**伺服器的選擇**，集中成常數（`src/game/drops.ts`，ADR-007）；
-要換一份掉落表只需傳一個 `policy` 進去（`DropField` 的選項），不用動網路層。
-2026-10-18 ADR-083：怪物／玩家物品／金幣共用 `game/drop-landing.ts` 的真有向fh落點，含空中丟棄、斜坡與平台邊緣；
-0x43仍只傳原x/y，不增加fh欄位。browser圖示底部貼地與原版中心−16的差異、全100圖379422組及真PNG驗證見
-[掉落與fh](../docs/DROP_FOOTHOLD_LANDING.md)。
-client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）就是錢，`0x0D` 的旗標 `0x40000` 送它（§4.22.5）。
+**掉落與拾取也已接上**（FINDINGS §4.18）：怪物死掉時伺服器依**本專案政策**送 `0x43 kind 1`（錢或道具、
+怪物來源 id／座標與 signed animation offset），kind 1 讓 native client 飛完後保留這筆掉落直到 `0x44`；玩家
+走到上面就會被撿走 —— `0x44 kind 2`（帶角色 id，client 播撿取音效與飛行動畫）＋`0x0B`（道具欄）＋`0x11`
+（聊天提示）。`kind 0` 是 client 本機動畫 cleanup，3000 ms guard 不是地面壽命；本 server 的 5 分鐘是**獨立的
+server policy**，逾時發 `0x44 kind 0`。persistent monster packet 選 kind 1、300 s lifetime、rates、金額公式、
+item mapping、擴散與 pickup bounds 均不是原 server 行為的恢復；`Item/Etc/0400.img` 是 item asset catalog，
+不是 monster drop table。每張地圖共享 `DropField`；policy 與 `dropRandom` 可注入，預設 loot RNG 是獨立 server
+crypto source，不讀 `0x16` client seeds。
+2026-10-18 ADR-083：怪物／玩家物品／金幣共用 `game/drop-landing.ts` 真有向 foothold 落點，含空中丟棄、斜坡與
+平台邊緣；`0x43` 仍只傳原 x/y，不增加 foothold 欄位。per-image WZ evidence 可重跑
+[`tools/audit-drop-evidence.ts`](../tools/audit-drop-evidence.ts)；landing 379422 組與真 PNG 驗證見
+[掉落與fh](../docs/DROP_FOOTHOLD_LANDING.md)。client 自己的錢包顯示**會**跟著變：`+89/+93`（紀錄第 22 欄）
+就是錢，`0x0D` 的旗標 `0x40000` 送它（§4.22.5）。
 
 **NPC 也已經進場**（FINDINGS §4.19）：同一個 `life` 清單裡 `type = "n"` 的出生點會各拿到一個 `0x39`
 （`u32 npcId`＋`u32 templateId`＋座標＋面向），**緊接在怪物的 `0x2F` 之後、同一個 TCP 串流**；

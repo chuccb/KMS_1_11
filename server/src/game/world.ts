@@ -32,7 +32,13 @@ import { encodeDropRemove, DROP_REMOVE_KIND } from "../protocol/drop.ts";
 import { encodeUserEnterField, encodeUserLeaveField, encodeUserMove } from "../protocol/field.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 import { footholdUnderPoint } from "../wz/archive.ts";
-import { DropField, type DropEntry, type DropFieldOptions, type DropPolicy } from "./drops.ts";
+import {
+  DropField,
+  type DropEntry,
+  type DropFieldOptions,
+  type DropPolicy,
+  type RandomSource,
+} from "./drops.ts";
 import type { ItemSlot } from "../protocol/itemslot.ts";
 import type { MapData, MapPortal } from "./map.ts";
 import { MobField, type MobFieldOptions, type MobTemplate } from "./mobs.ts";
@@ -109,9 +115,13 @@ export interface FieldInstanceOptions {
   mobSpeedPxPerSecond?: number;
   /** How long a killed mob stays away, in ms. Defaults to `MOB_RESPAWN_MS`. */
   mobRespawnMs?: number;
-  /** What a killed monster leaves behind. Defaults to `defaultDropPolicy`. */
+  /** What a killed monster leaves behind. Defaults to the repository's `defaultDropPolicy`. */
   dropPolicy?: DropPolicy;
-  /** How long a drop lies on the ground, in ms. Defaults to `DROP_LIFETIME_MS`. */
+  /** Loot RNG for this field; omitted means `DropField` creates a fresh crypto-backed source. */
+  dropRandom?: RandomSource;
+  /** Signed s16 animation-start offset sent on monster-shaped `0x43` packets; defaults to policy 0. */
+  dropAnimationStartOffsetMs?: number;
+  /** How long a server-owned drop lies on the ground, in ms. Defaults to `DROP_LIFETIME_MS`. */
   dropLifetimeMs?: number;
   /** Horizontal/vertical reach of a pickup, in px. Server choices (`game/drops.ts`). */
   pickupRangeX?: number;
@@ -179,6 +189,10 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
         ? { footholds: options.map.footholdSegments }
         : {}),
       ...(options.dropPolicy !== undefined ? { policy: options.dropPolicy } : {}),
+      ...(options.dropRandom !== undefined ? { random: options.dropRandom } : {}),
+      ...(options.dropAnimationStartOffsetMs !== undefined
+        ? { animationStartOffsetMs: options.dropAnimationStartOffsetMs }
+        : {}),
       ...(options.dropLifetimeMs !== undefined ? { lifetimeMs: options.dropLifetimeMs } : {}),
       ...(options.pickupRangeX !== undefined ? { pickupRangePx: options.pickupRangeX } : {}),
       ...(options.pickupRangeY !== undefined ? { pickupRangeY: options.pickupRangeY } : {}),
@@ -491,6 +505,9 @@ export interface FieldRegistryOptions {
   mobSpeedPxPerSecond?: number;
   mobRespawnMs?: number;
   dropPolicy?: DropPolicy;
+  /** Optional source forwarded to each field; absent fields create their own crypto-backed RNG. */
+  dropRandom?: RandomSource;
+  dropAnimationStartOffsetMs?: number;
   dropLifetimeMs?: number;
   pickupRangeX?: number;
   pickupRangeY?: number;
@@ -537,6 +554,10 @@ export class FieldRegistry<M extends FieldMember = FieldMember> {
         ? { mobRespawnMs: this.options.mobRespawnMs }
         : {}),
       ...(this.options.dropPolicy !== undefined ? { dropPolicy: this.options.dropPolicy } : {}),
+      ...(this.options.dropRandom !== undefined ? { dropRandom: this.options.dropRandom } : {}),
+      ...(this.options.dropAnimationStartOffsetMs !== undefined
+        ? { dropAnimationStartOffsetMs: this.options.dropAnimationStartOffsetMs }
+        : {}),
       ...(this.options.dropLifetimeMs !== undefined
         ? { dropLifetimeMs: this.options.dropLifetimeMs }
         : {}),

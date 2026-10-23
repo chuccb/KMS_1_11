@@ -120,12 +120,22 @@ test("real reward PNG bottoms touch authoritative WZ FH at DPR1/2; fixed money f
             assert.equal(result.draw.x + Math.trunc(result.draw.width / 2), 200);
             assert.equal(result.alpha, 0.6);
           }
-        const flying = { ...body, kind: 0, mobId: 1, mobX: body.x - 40, mobY: body.y - 80 };
+        const flying = { ...body, kind: 1, mobId: 1, mobX: body.x - 40, mobY: body.y - 80 };
         const before = await render(flying, 419.9999),
           rest = await render(flying, 420);
         assert.ok(before.pose && rest.pose);
         assert.ok(Math.abs(before.pose.y - rest.pose.y) < 0.001);
         assert.equal(rest.draw!.y + rest.draw!.height, 300);
+        const transient = { ...flying, kind: 0 },
+          transientEnd = await render(transient, 420),
+          transientGuard = await render({ ...transient, animationStartOffset: 10000 }, 13001);
+        assert.equal(transientEnd.pose, undefined, "browser removes kind 0 at animation state 3");
+        assert.equal(transientEnd.painted, false);
+        assert.equal(
+          transientGuard.pose,
+          undefined,
+          "the offset-aware native cleanup guard is honored",
+        );
         const hopping = await render(flying, 100),
           pickup = await render(flying, 100, {
             pickup: { at: 100, id: 9, taker: { x: body.x + 100, y: body.y } },
