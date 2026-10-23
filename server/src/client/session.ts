@@ -2561,10 +2561,13 @@ export const CLIENT_EVENT_KINDS = [
 ] as const satisfies readonly ClientEvent["kind"][];
 
 /**
- * `0x30` is two packets wearing one opcode: a positive delay means "start the death animation"
- * (the monster stays in the pool until `0x31` takes the corpse), and a negative one means "it is
- * already gone". The 2003 client plays `Mob/<id>.img/die1` for the first - a picture, not a removal,
- * so the page is told about it instead of silently losing the monster.
+ * `0x30` is two packets wearing one opcode: a positive delay means "start the death
+ * animation" (`sub_491AB0(...,1)` plays `die1` and unlinks the pool entry — the timed path
+ * ignores `mob+112`, see §4.16.3/ADR-152), and a negative one means "it is already gone"
+ * (`sub_491AB0(...,0)`, pin cleared first, refused while the sprite is busy). The 2003 client
+ * plays `Mob/<id>.img/die1` for the first — a picture, not an instant disappearance — so the
+ * page is told about it instead of silently losing the monster; our `MobField` keeps its own
+ * `removeAt`/`respawnAt` timers to mimic the corpse staying until `0x31`.
  */
 export function mobLeaveEvent(leave: MobLeaveDelayed, present: boolean): ClientEvent | undefined {
   if (leave.delayMs < 0) return present ? { kind: "mob-leave", mobId: leave.mobId } : undefined;

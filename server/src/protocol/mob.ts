@@ -87,15 +87,17 @@
  *                            `mob+276 = 13 + rand() % template+116`, `template+116` being the number
  *                            of die actions the mob's image has (see the counters note below). Every
  *                            mob in this `Data.wz` has exactly one (`die1`), so the action is always
- *                            13. A *negative* delay removes the mob at once (`sub_491AB0(..., 0)`)
- *                            but refuses while the sprite is busy (`sub_485520` = frames left), so a
- *                            die animation in flight is never cut short. **0x30 alone does not unlink
- *                            the mob** - the corpse stays in the pool until 0x31 says otherwise, which
- *                            is why dying is two packets.
+ *                            13, and the pool entry is unlinked as part of the same call — the timed
+ *                            path does **not** consult `mob+112`. A *negative* delay removes the mob
+ *                            at once (`sub_491AB0(..., 0)`) but first clears `mob+112` and then
+ *                            refuses while the sprite is busy (`sub_485520` = frames left), so a die
+ *                            animation in flight is never cut short.
  *
- *  0x31 `u8 flag` + `u32 mobId` (`sub_4927B0`) `flag == 0` -> `sub_491830`: the mob is removed (the
- *                            flash is switched off first if the sprite is busy, then the pool entry
- *                            is unlinked once `mob+112` is clear). `flag != 0` -> `sub_491630`: a
+ *  0x31 `u8 flag` + `u32 mobId` (`sub_4927B0`) `flag == 0` -> `sub_491830`: the pool entry is
+ *                            unlinked only when `mob[28]` (`mob+112`, the field-mob pin from 0x2F) is
+ *                            already 0 — otherwise the handler just stops the controller and returns.
+ *                            `0x2F` sets that pin to 1 in both branches; `0x30` negative clears it;
+ *                            `0x31`-created transients leave it 0 (ADR-152). `flag != 0` -> `sub_491630`: a
  *                            known mob is merely refreshed, an unknown one is created from the rest
  *                            of the packet - a `u32 templateId` followed by *exactly* the body of
  *                            0x2F, since both go through `CMob::Init` - and the new mob gets
@@ -123,15 +125,16 @@ export const MOB_OPCODE = {
   enterField: 0x2f,
   /**
    * `CMobPool` 0x30 (`sub_4926B0`): `u32 mobId` + `s16 delayMs`. `delayMs >= 0` puts the mob in the
-   * pool's timed queue (`sub_492100`) so it starts dying - i.e. plays a die action - when the timer
-   * runs out; a negative `delayMs` removes it at once (unless its die animation is still running).
-   * The mob is *not* unlinked by this packet: `presence` does that.
+   * pool's timed queue (`sub_492100`) so it starts dying - i.e. plays a die action and is unlinked -
+   * when the timer runs out (`sub_491AB0(...,1)`, pin not consulted); a negative `delayMs` tries to
+   * remove it at once (`sub_491AB0(...,0)`, pin cleared first, refused while the sprite is busy).
    */
   leaveDelayed: 0x30,
   /**
-   * `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`. `flag == 0` removes the mob;
-   * `flag != 0` refreshes a known mob, or creates an unknown one from a `u32 templateId` plus the
-   * body of 0x2F (and flashes it, `sub_485330(mob, 1)`).
+   * `CMobPool` 0x31 (`sub_4927B0`): `u8 flag` + `u32 mobId`. `flag == 0` removes the mob only when
+   * `mob+112` is already 0 (field mobs start pinned at 1 via 0x2F, §4.16.3); `flag != 0` refreshes a
+   * known mob (one `sub_485330(mob,1)` step) or creates an unknown one from a `u32 templateId` plus
+   * the body of 0x2F (and flashes it). See `mob+112` note in §4.16.3 / ADR-152.
    */
   presence: 0x31,
   /**
@@ -403,9 +406,9 @@ export interface MobLeaveDelayed {
   /** Pool key, the same id `0x2F` handed out. */
   mobId: number;
   /**
-   * ms until the die animation starts. `0` = now, which is what a kill wants; a negative value means
-   * "remove it at once" instead (`sub_491AB0(..., 0)`), which the client skips while the mob is still
-   * animating.
+   * ms until the die animation starts **and the pool entry is unlinked** (`sub_491AB0(...,1)`,
+   * pin ignored). `0` = now, which is what a kill wants. A negative value means "remove it at
+   * once" (`sub_491AB0(...,0)`, pin cleared first, refused while the sprite is busy).
    */
   delayMs: number;
 }
