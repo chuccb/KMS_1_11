@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-19。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-23（ADR-157）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
@@ -48,7 +48,7 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
 | `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 整數世界像素／原UI兩段合成、四視野、時間轉場、偏好／減少動態；不改物理／協定 |
 | `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
-| `server/src/net/client-event-json.ts` | 真bridge的純收件JSON projection，保留system-notice.type／field epoch，供合併加密TCP回歸共用 |
+| `server/src/net/client-event-json.ts`／`webclient-messages.ts` | `ClientEvent.kind` → JSON `t` projection 與完整 server-to-browser 出站 discriminated union；`WebClient.send` 編譯期受型別約束，不代表runtime深schema驗證 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
 | `server/src/protocol/` | bytes、cipher、字串、各系統 codec；`schema.ts` 索引已知／partial／skeleton |
@@ -100,15 +100,16 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 
 ## 工具鏈與驗證狀態
 
-根 `.bun-version`／`package.json`／`bun.lock`／`tsconfig.json` 是唯一工具鏈；Bun1.4.3／TS7.0.2，
+根 `.bun-version`／`package.json`／`bun.lock`／`tsconfig.json` 是唯一工具鏈；Bun1.4.4／TS7.0.2，
 ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
 client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5549 行；ADR-109 普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；已抽出 `client/inventory-window.ts`、`client/shop-window.ts`、`client/hud.ts`／`client/jobs.ts`，ADR-156 再抽出 `client/websocket-transport.ts`）。
-本輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
+前輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
+本輪（ADR-157）新增 strict 出站 JSON message union，讓 `WebClient.send` 與 `clientEventJson` 的 discriminator／payload 關聯受 compiler 驗證；這是 compile-time contract，尚非 runtime schema，且不型別化 main.js。Bun／@types 升至 registry latest 1.4.4；strict／format／build通過，focused44/0、完整1468/0（5334 expects、170 files）。
 ADR-108／109 的 1213 pass／0 fail、inventory-window 9/9 與 probe 輸出等價結果是各自歷史時點；較早的 1205/8、1064/44 亦不代表現況，詳 [BUN_MIGRATION](BUN_MIGRATION.md)。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
-舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。本輪 LIVE 是另開的 memory-only 隔離服務（web port 8515、`--save off`、WZ map `000040000`；載入 63 mobs），HTTP health、`main.js` 與 strict transport 模組皆回應 200；沒有登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在該程序記憶體中，重啟即消失；預覽是否在線以本輪 LIVE 入口為準，不以舊 PID／save 路徑推定。
+舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。本輪發現先前 8515 服務已停止後，另開全新 memory-only 隔離服務：web/login/game ports 8515/8516/8517、`--save off`、安全城鎮 map `101000000`（啟動時 0 mobs）、只有新的 `preview`／`observer` 帳號；沒有舊角色／save 被載入。`/healthz`、首頁與 `/main.js` 只讀檢查皆回應 200；沒有登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在此程序記憶體中，重啟即消失；預覽是否在線以本輪 LIVE 入口為準，不以舊 PID／save 路徑推定。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
 標題／登入／世界與選角責任、原證及驗證見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
 鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

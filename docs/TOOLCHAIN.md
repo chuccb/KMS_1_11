@@ -1,8 +1,10 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-23（ADR-156）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-23（ADR-157：出站 WebSocket JSON contract strict union；Bun 與 @types/bun 升至 1.4.4）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-本輪新增 strict `client/websocket-transport.ts`，把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
+本輪重新核對 npm registry 最新版與 GitHub Actions latest：Bun／`@types/bun` 為 1.4.4；TypeScript 7.0.2、Prettier 3.9.10、Playwright Core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 未變。以 registry 官方 `@oven/bun-linux-x64@1.4.4` tarball SHA1／SHA512 核對後升級；packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+
+前輪新增 strict `client/websocket-transport.ts`，把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
 自 `client/main.js` 移到可單元測試的 TypeScript 邊界；收件端以 `unknown` 檢查 JSON object 與 string `t`，不把 malformed envelope
 交給 main handler。這不是每個 `ClientEvent` payload 的深 schema，main 本身仍未納入 TypeScript 檢查；現況 **114 支 client `.ts`**、
 `client/main.js` **5549 行**。focused fake-socket／browser startup／static／UI 與 system-UI wiring **18/0、5 files**；typecheck、format check、build 通過；完整 suite **1468 pass／0 fail／5334 expects、170 files**。全部使用隔離測試與 mock transport，不連實際遊戲。
@@ -30,25 +32,24 @@ strict／format／build通過；完整1038/44（1082 tests／120 files，287.81s
 strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s），對2eaa5f2失敗multiset新增0／移除0，CI仍不綠。
 七DPR×五尺寸／游標、16組原PNG分層與LIVE同PID唯讀驗證見 [PIXEL_CAMERA](PIXEL_CAMERA.md)；main／3MJS仍待實際遷移。
 
+## 最新增量：strict WebClient server-to-browser union（ADR-157）
+
+`server/src/net/webclient-messages.ts` 定義 `ClientEvent` JSON 投影與 browser bridge 其他出站 message union，`clientEventJson` 保留各 `t` discriminator；`WebClient.send` 由 `unknown` 改接受該 union，並把 `touch-result` 成功／拒絕形狀分開。這只提供 TypeScript 編譯期保證，不是 JSON 的 runtime validator；browser transport 仍僅檢查 object＋string `t`，`main.js` 尚未納入 strict compiler。新 Bun 1.4.4 下 frozen install、typecheck、format check 與 build 通過；focused **44/0、4 files**，完整 suite **1468/0、5334 expects、170 files（345.05 s）**。具體界線見 [BUN_MIGRATION](BUN_MIGRATION.md)／[ADR-157](DECISIONS.md)。
+
 ## 唯一版本與安裝入口
 
 | 工具 | 固定穩定版 | 鎖定來源 |
 | --- | --- | --- |
-| Bun | 1.4.3 | `.bun-version`、根 `package.json` 的 `packageManager` |
+| Bun | 1.4.4 | `.bun-version`、根 `package.json` 的 `packageManager` |
 | TypeScript | 7.0.2 | 根 `package.json` 與 `bun.lock` |
-| Bun 型別 | 1.4.3 | 同上；與 runtime 同版 |
+| Bun 型別 | 1.4.4 | 同上；與 runtime 同版 |
 | Prettier | 3.9.10 | 同上與 `.prettierrc.json` |
 | Playwright Core | 1.64.1 | 根 devDependencies / bun.lock，Bun 直接執行 |
 | Chromium tooling | 153.0.0 | 同上；只作隔離 browser 驗證 |
 | checkout Action | v7.0.1 | CI 固定完整 commit SHA |
 | setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
-版本來源（六項 registry latest 與兩 CI Action 於 2026-10-19 清潔輪以 API 實測**全部相符**，ADR-093；存證 `generated/native-messages/registry-latest-cleanup.json` 與 `generated/bun-install-proof.json`，Bun tarball 經 SHA512 驗證）：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3)、
-[TypeScript registry](https://registry.npmjs.org/typescript/latest)、
-[Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、
-[Prettier registry](https://registry.npmjs.org/prettier/latest)、
-[setup-bun release](https://github.com/oven-sh/setup-bun/releases/tag/v2.2.0)。
-六項runtime／compiler／tool套件為本輪最新穩定版基線，不宣稱永遠最新；升版要重新檢查 lockfile、型別、回歸及瀏覽器建置。
+版本來源：**2026-10-23** 重新查詢六項 npm latest 與兩個 GitHub Actions latest；Bun／`@types/bun` 升到 1.4.4，其餘 exact pins 沒變。`@oven/bun-linux-x64@1.4.4` tarball SHA1 `9ffc89c427ea37043589bdfe2d5999b01cb2eee2` 與 SHA512 `CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog==` 與 registry metadata 相符；新 runtime `bun install --frozen-lockfile --ignore-scripts` 檢查 **27 installs／47 packages，無變更**。其餘版本來源：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.4)、[TypeScript registry](https://registry.npmjs.org/typescript/latest)、[Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、[Prettier registry](https://registry.npmjs.org/prettier/latest)、[Playwright Core registry](https://registry.npmjs.org/playwright-core/latest)、[Chromium tooling registry](https://registry.npmjs.org/@sparticuz/chromium/latest)、[checkout releases](https://github.com/actions/checkout/releases/latest)、[setup-bun releases](https://github.com/oven-sh/setup-bun/releases/latest)。ADR-093 的 2026-10-19 查核是當時基線，不代表目前仍相同；之後升版必須重跑 lockfile、型別、回歸與瀏覽器 build。
 
 先用官方發行版安裝固定 Bun，再從 repository 根目錄執行：
 
@@ -61,8 +62,7 @@ bun run build
 ```
 
 `setup.ts` 檢查實際 Bun 版本後，只執行 frozen lockfile 安裝，禁止安裝生命週期腳本；不測試、不登入、不寫進度。
-本沙箱的 Bun 位於 ignored `generated/toolchain/bin/bun`；新 shell 可明示
-`export PATH="$PWD/generated/toolchain/bin:$PATH"`。不覆寫作業系統的 Node/Python。
+本輪沙箱以 registry 官方 tarball 驗證後，暫存 Bun 1.4.4 與依賴於 ignored `node_modules/` 供驗證；該路徑不進 Git，沙箱重置後須按 `.bun-version` 重新安裝／加入 PATH。不覆寫作業系統的 Node/Python。
 
 ## 編譯、瀏覽器與遷移界線
 

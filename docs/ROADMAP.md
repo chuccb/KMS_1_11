@@ -1,13 +1,19 @@
 # 現行路線圖與已知缺口
 
-更新：2026-10-23（ADR-156：抽出嚴格型別化的瀏覽器 WebSocket transport boundary）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
+更新：2026-10-23（ADR-157：嚴格型別化 WebClient 對瀏覽器送出的 JSON 訊息合約；Bun／Bun 型別升至 1.4.4）。瀏覽器 `client/` 是唯一客戶端主線（ADR-065）。
 本頁列現況與優先序，不再累積多份「最新」、預估週數或未採用的引擎出口條件。
 逐輪原版證據、歷史實測與改動界線保留在[文件索引](README.md)與 [ADR](DECISIONS.md)。
 **有程式與回歸來源不代表已驗收。** 各輪strict／format／build與focused、完整suite記錄見 [社交指令鏈](NATIVE_SOCIAL_COMMANDS.md)與[角色互動續作](NATIVE_PLAYER_INTERACTIONS.md)；
 **ADR-108 已將既有 44 項失敗全數結案（完整 1213 pass / 0 fail）**，不再是驗收阻擋項；未登入或操作LIVE角色。
 全案TS／ESNext／Bun整理只剩 **`client/main.js` 一支未嚴格型別化**（ADR-109 已把 `client_probe.mjs` 遷為 `client_probe.ts`
-並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 把 WebSocket lifecycle／JSON envelope 邊界移入 strict `client/websocket-transport.ts`，但 per-event payload 深 schema 與 main 本體仍未型別化；靜態耦合普查表明需採門面分層逐領域搬移），
+並自 main.js 抽出 `client/inventory-window.ts`；ADR-156 抽出 strict browser WebSocket lifecycle／頂層 JSON envelope；ADR-157 再把 `ClientEvent` → `t` 的投影與所有 `WebClient.send` 輸出收斂為 strict discriminated union。這是**編譯期輸出合約**，不是客戶端 per-event 深度 runtime schema；main 本體仍未型別化；靜態耦合普查表明需採門面分層逐領域搬移），
 歷史native工具情境仍待完成，見 [BUN_MIGRATION](BUN_MIGRATION.md)。
+
+## 最新增量：strict server-to-browser JSON 訊息合約（ADR-157）
+
+新增 `server/src/net/webclient-messages.ts`，把 `ClientEvent.kind` 一對一投影為 JSON `t` union，並納入 field capability flags、mob presentation／forced duration、登入／角色／建立／刪除、stat-basis、touch、attack-hit 與 test-tools 等 bridge 訊息；`clientEventJson` 保留每個 union discriminator，`WebClient.send` 不再接受 `unknown`。Touch result 也改成 success／rejection 互斥的 discriminated union。這些都是**編譯期約束**：並未驗證已序列化 JSON、未擴大 browser transport 的頂層 envelope 守衛，也沒有聲稱 `client/main.js` 已 strict。
+
+同日重新查 registry／GitHub latest：Bun 與 `@types/bun` 已由 **1.4.3 升至 1.4.4**，TS 7.0.2、Prettier 3.9.10、Playwright Core 1.64.1、Chromium tooling 153.0.0 仍為 latest；checkout v7.0.1／setup-bun v2.2.0 Actions 仍為 latest。新 Bun tarball SHA1／SHA512 與 registry metadata 相符，`bun install --frozen-lockfile --ignore-scripts` 27 installs／47 packages 無漂移；new-runtime strict typecheck／全範圍 format／build 通過，focused **44/0、4 files**，full suite **1468/0、5334 expects、170 files（345.05s）**。隔離測試，不登入／操作 LIVE 角色或存檔。驗證詳見 ADR-157 與工具鏈文件。
 
 完整現況分類、程式入口、歷史缺口更正與後續順序，見[與原版差異總盤點](ORIGINAL_PARITY_AUDIT.md)（初始基準4f9ad1b，A類含ADR-078更新）。
 

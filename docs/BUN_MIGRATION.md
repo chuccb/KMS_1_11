@@ -2,7 +2,15 @@
 
 更新：2026-10-23。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：獨立 strict WebSocket transport 與 JSON envelope（ADR-156）
+## 最新增量：strict server-to-browser 訊息合約與 Bun 1.4.4 升級（ADR-157）
+
+新增 `server/src/net/webclient-messages.ts`：用 conditional mapped union 將 `ClientEvent.kind` 轉為 JSON `t`，明確列出 field capability flags、mob presentation／forcedDuration、登入／角色／角色建立刪除、`stat-basis`、attack／touch result、test-tools 等全部 `WebClient.send` 訊息。`clientEventJson` 現在保留 event discriminator；`BrowserSession.send(message: WebClientServerMessage)` 移除原本的 `unknown` sink。`touch-result` 使用互斥 success／rejection union。無 `any`、strict 放寬或新 runtime dependency。
+
+這是**出站 JSON 的編譯期合約**，不等於序列化內容已深度 runtime 驗證；瀏覽器 inbound transport 仍只檢查 JSON object＋string `t`，`client/main.js` 仍未 strict 型別化。後續仍應為各 event 做 runtime guard，或逐領域遷移入口；不可把此 type union 寫成全面 schema validation。
+
+本輪實際核對 registry／GitHub latest 後，把 Bun／`@types/bun` 由 1.4.3 升到 **1.4.4**；TypeScript 7.0.2、Prettier 3.9.10、playwright-core 1.64.1、@sparticuz/chromium 153.0.0 與 checkout v7.0.1／setup-bun v2.2.0 維持 latest。官方 registry tarball SHA1／SHA512 verified；`.bun-version`／`packageManager`／`engines`／`@types/bun`／`bun.lock` 同步，frozen install 27 installs／47 packages 無漂移。新 runtime strict typecheck、全範圍 `format:check`、browser build 通過；相關 bridge／projection focused **44/0、4 files**；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files（345.05 s）**。全套只用隔離 fixtures／mock peer，未登入 LIVE、未操作角色／save、未啟動 state-changing probe。先前 LIVE 已停，因此重新開啟新的 memory-only 預覽：8515/8516/8517、`--save off`、map 101000000、preview／observer 帳號；health／首頁唯讀檢查 200，無角色或舊 save 載入，未自動登入。
+
+## 前輪增量：獨立 strict WebSocket transport 與 JSON envelope（ADR-156）
 
 新增 `client/websocket-transport.ts`，由嚴格 TypeScript 模組擁有 browser socket 建立／替換／送出／關閉、open-state 檢查、
 JSON parse 與 active-connection generation fence；`client/main.js` 不再直接持有 `WebSocket` 或散落檢查 `readyState`，
@@ -180,7 +188,7 @@ LIVE同一PID，只讀載入72 modules與Chromium首幀通過、0WS；沒有登�
 
 ## 已落實
 
-- Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI。
+- Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4、Prettier 3.9.10，單一根 package / bun.lock / tsconfig / CI；Bun／型別與 package metadata latest 於 2026-10-23 重查，歷史 1.4.3 pins 保留在各 ADR 當時紀錄。
 - 上一輪完成剩餘 20 個 client .mjs 的實作型別與關聯呼叫鏈；61 個原有瀏覽器 leaf 已 typed。client 當時 **74 支 .ts**（目前81）（含共用型別／守衛），沒有 .mjs 或重複 declaration；**main.js 仍未遷移**。沒有新增 production any、ts-ignore、allowJs 或關閉 strict；全部 .ts / .mts 都納入編譯。
 - DOM 元素依真實 tag/context 縮窄；影像 lookup 區分 Canvas 與 HTML image；系統設定的 sound/game draft 分離，取消還原與明示保存有隔離測試；創角回覆、刪除目標、NPC stale-page／asset lifecycle、技能和裝備 DTO 都有明確型別。
 - 共用 combat/UI resource guards；不把 response.json()、storage JSON 直接當可信型別。真 WZ HTTP 契約測試涵蓋六類武器、投射物、創角 catalogue、怪物、技能書與全部已接主動技能；這不代表所有既有 API 都已逐一做完深 schema 審核。

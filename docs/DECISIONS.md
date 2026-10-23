@@ -6025,3 +6025,50 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
 - 沒有連 LIVE 遊戲、登入、建立／操作角色或修改 save；無 EXE／C／listing／WZ／protocol/server gameplay 改動。
 - 現況：`client/websocket-transport.ts` 為 strict TS，`client/main.js` 仍 5,549 行、唯一未 strict 型別化的 authored client source。
   下一個遷移仍需按整合 domain 建 typed façade，並逐 event 加深 JSON schema；不可因此降低 `strict`、加 `allowJs` 或用 `any` 包過去。
+
+## ADR-157：為 WebClient 的 server-to-browser JSON 建立 strict union，並升級當前 Bun latest（2026-10-23）
+
+**狀態**：已接受（出站 message 編譯期合約完成；runtime deep validation 與 `client/main.js` strict 遷移仍未完成）
+
+### 背景
+
+`server/src/client/session.ts` 已有完整 `ClientEvent` discriminated union，但 `clientEventJson()` 回傳 `Record<string, unknown>`，
+`BrowserSession.send()` 也接受 `unknown`。因此 TS 無法在 server→browser 投影與實際 JSON 輸出之間檢查 event `kind`／`t`、payload 或額外 bridge metadata；
+錯別字及不相符的回覆 shape 可以通過 compiler。
+
+### 發現
+
+1. 真正的 server→browser writer 是 `BrowserSession.send`，目前由 ClientSession event、login／character stage replies、touch／attack feedback、
+   `stat-basis` 與 test-tools 等多條路徑呼叫。把這個 sink 由 `unknown` 收窄，可讓 TS 覆蓋所有既有 writer，而不重寫 gameplay。
+2. `clientEventJson` 做的是同一個機械投影：`ClientEvent.kind` → JSON `t`，其他欄位以原名保留；`field` 再帶 contact epoch／已接通能力，
+   mob enter／move 會由 WebClient 附加 presentation／forcedDuration。這些形狀可從現有程式推導，不需反編造原版封包 schema。
+3. touch reply 的 success 必須帶 damage；拒絕可有 retryAfter／message，不能同時偽裝成 success。原 `accepted: boolean` 加任意 `Record<string, unknown>` spread
+   未表達這個互斥關係。
+4. `client/websocket-transport.ts` 仍只在 browser runtime 檢查 JSON object＋own string `t`。本 ADR 僅新增 server 出站的**編譯期**契約，未做每事件
+   runtime schema，也不會令尚未納入 `tsconfig` 的 `client/main.js` 自動變成 strict TS。
+5. 2026-10-23 npm registry latest 顯示 Bun／`@types/bun` 均已到 1.4.4；TypeScript 7.0.2、Prettier 3.9.10、playwright-core 1.64.1、
+   @sparticuz/chromium 153.0.0 未變。GitHub latest 仍是 checkout v7.0.1／setup-bun v2.2.0。
+
+### 決策
+
+1. 新增 `server/src/net/webclient-messages.ts`，以 distributive conditional mapped union 將 `ClientEvent` 投影成 `t` JSON message，並明列 field、mob、
+   login／characters／created／name-checked／deleted／error、stat-basis、touch-result、hit／active-hit 與 test-tools messages。
+2. `clientEventJson<Event>()` 回傳與輸入 event 關聯的 `ClientEventJson<Event>`，保留 `kind`／`t` 的 discriminant 及 field／mob 額外欄位。唯一 assertion
+   局限在機械 spread projection，旁邊說明其一對一關係；沒有把任意 JSON cast 成事件。
+3. `BrowserSession.send()` 改收 `WebClientServerMessage`，不再接受 `unknown`。mob metadata enrichment 依已投影的 `json.t` 縮窄；touch reply 改用明確
+   success／rejection union，移除任意 extras spread。如此所有 server writer 都經 compiler 檢查。
+4. 不擴大 client transport runtime parser、不改 transport error routing、不新增 dependencies、不降低 `strict`／`erasableSyntaxOnly`、不開 `allowJs`；
+   inbound 深 payload validation 與 `main.js` 遷移仍留待續作。
+5. Bun 官方 npm tarball `@oven/bun-linux-x64@1.4.4` SHA1 為 `9ffc89c427ea37043589bdfe2d5999b01cb2eee2`，SHA512 integrity 為
+   `sha512-CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog==`；兩者與 npm registry metadata 相符。
+   同步 `.bun-version`、`packageManager`、`engines`、`@types/bun` 與 `bun.lock` 至 1.4.4；其餘 exact pins 及 CI Action SHA 不變。
+
+### 測試與驗證
+
+- `bun install --frozen-lockfile --ignore-scripts`（Bun 1.4.4）：**27 installs／47 packages，無漂移**。
+- `bun run typecheck`（ESNext／strict／全部納管 TS）：通過；`bun run format:check` 全範圍通過；`bun run build` browser ESM build 通過。
+- Bridge／ClientEvent projection focused：**44 pass／0 fail，4 files**（player-menu-session、native-feedback-session、native-social-session、webclient）。
+- 完整 `bun run test`：**1468 pass／0 fail／5334 expects，170 files，345.05 s**；未 skip／刪減測試或降低 gates。
+- `git diff --check` 通過。真實遊戲沒有登入；未建立／操作角色、未修改／重啟任何 save 或既有 LIVE；沒有跑 state-changing 手動 probe。
+- 先前 8515 服務實測已不在監聽；為遵守使用者要求保留可測入口，另啟一個新的 memory-only preview（web/login/game 8515/8516/8517、`--save off`、map 101000000、僅新 preview／observer 帳號）；server 啟動記錄 0 mobs，`/healthz`、首頁與 `/main.js` 都是 200。沒有載入舊角色／save，也沒有自動登入／建立角色；新進度由使用者自行操作且重啟即失去。
+- 目前結果只證明 compiler 可檢查 server 出站 JSON contract，及回歸行為沒有倒退；不證明 browser inbound deep schema、`client/main.js` strict 遷移或完整手動 gameplay 已驗收。

@@ -33,7 +33,7 @@
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
 - **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-2026-10-20 重新核對 latest 並鎖定：**Bun 1.4.3、TypeScript 7.0.2、@types/bun 1.4.3、Prettier 3.9.10**
+2026-10-23 重新核對 latest 並鎖定：**Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4、Prettier 3.9.10**
 （playwright-core 1.64.1／Chromium 153.0.0 同輪核對，只作隔離瀏覽器驗證）。
 根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
 **全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），

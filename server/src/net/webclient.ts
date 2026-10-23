@@ -2,6 +2,7 @@ import { isPartyCommand } from "../../../client/social-commands.ts";
 import { routeChatInput } from "./chat-input.ts";
 import { Transpiler } from "bun";
 import { clientEventJson } from "./client-event-json.ts";
+import type { CharacterSummary, WebClientServerMessage } from "./webclient-messages.ts";
 import { readBrowserMovePath } from "./browsermove.ts";
 import type { MobPresentation } from "../game/mobs.ts";
 import { MOB_BODY_ACTIONS, mobForcedName } from "../../../client/mob-attacks.ts";
@@ -201,29 +202,6 @@ export interface WebClientServer {
   port: number;
   host: string;
   close(): Promise<void>;
-}
-
-/** One character in the list the browser shows. */
-interface CharacterSummary {
-  id: number;
-  name: string;
-  level: number;
-  job: number;
-  face: number;
-  hair: number;
-  hp: number;
-  maxHp: number;
-  mp: number;
-  maxMp: number;
-  exp: number;
-  mesos: number;
-  mapId: number;
-  str: number;
-  dex: number;
-  int: number;
-  luk: number;
-  /** Worn item ids, so a character can be drawn before it enters the field. */
-  items: number[];
 }
 
 function summaryOf(character: CharacterData): CharacterSummary {
@@ -564,7 +542,7 @@ class BrowserSession {
     socket.onClose = () => this.close();
   }
 
-  private send(message: unknown): void {
+  private send(message: WebClientServerMessage): void {
     this.socket.sendText(JSON.stringify(message));
   }
 
@@ -1128,13 +1106,16 @@ class BrowserSession {
   private async touch(message: Record<string, unknown>): Promise<void> {
     const contactId = Number(message.contactId),
       field = Number(message.contactField);
-    const reply = (accepted: boolean, extra: Record<string, unknown> = {}) =>
+    const reply = (
+      result:
+        | { accepted: true; damage: number }
+        | { accepted: false; message?: string; retryAfterMs?: number },
+    ) =>
       this.send({
         t: "touch-result",
         contactId,
         contactField: field,
-        accepted,
-        ...extra,
+        ...result,
       });
     if (
       !Number.isSafeInteger(contactId) ||
@@ -1142,7 +1123,7 @@ class BrowserSession {
       field !== this.contactField ||
       contactId <= this.lastContactId
     )
-      return reply(false);
+      return reply({ accepted: false });
     this.lastContactId = contactId;
     const session = this.session,
       character = session?.character;
@@ -1161,9 +1142,10 @@ class BrowserSession {
       this.dyingMobs.has(mobId) ||
       (facing !== 0 && facing !== 1)
     )
-      return reply(false);
+      return reply({ accepted: false });
     if (this.touchBusy || now < this.touchReadyAt)
-      return reply(false, {
+      return reply({
+        accepted: false,
         retryAfterMs: Math.max(30, Math.ceil(this.touchReadyAt - now)),
       });
     const point = (value: unknown): ContactPoint | undefined => {
@@ -1179,7 +1161,8 @@ class BrowserSession {
       previousPlayer = point(message.previousPlayer);
     const currentMob = point(message.mob),
       previousMob = point(message.previousMob);
-    if (!player || !previousPlayer || !currentMob || !previousMob) return reply(false);
+    if (!player || !previousPlayer || !currentMob || !previousMob)
+      return reply({ accepted: false });
     const near = (a: ContactPoint, b: ContactPoint, limit: number) =>
       Math.abs(a.x - b.x) <= limit && Math.abs(a.y - b.y) <= limit;
     // Session movement is sampled at 100ms; bridge mob records retain the latest wire endpoint.
@@ -1190,7 +1173,7 @@ class BrowserSession {
       !near(currentMob, mob, 1024) ||
       !near(currentMob, previousMob, 192)
     )
-      return reply(false);
+      return reply({ accepted: false });
     const actions = this.options.art?.mob(mob.templateId)?.actions;
     const frame = MOB_BODY_ACTIONS.flatMap((action) => actions?.[action] ?? []).find(
       (frame) => frame.path === message.frame,
@@ -1202,7 +1185,7 @@ class BrowserSession {
         mobContactRect(frame, currentMob, facing === 0, previousMob),
       )
     )
-      return reply(false);
+      return reply({ accepted: false });
     const basis = characterStatBasis(character, this.options.itemCatalog, this.options.skills);
     const damage = rollNativeTouch(
       basis.basic,
@@ -1214,10 +1197,12 @@ class BrowserSession {
     this.touchReadyAt = now + 1500; // Bridge anti-duplicate policy; browser visuals tick the native signed clock.
     try {
       if (damage > 0) await session.reportTouchDamage(damage);
-      if (this.session === session && this.contactField === field) reply(true, { damage });
+      if (this.session === session && this.contactField === field)
+        reply({ accepted: true, damage });
     } catch (error) {
       if (this.session === session && this.contactField === field)
-        reply(false, {
+        reply({
+          accepted: false,
           message: error instanceof Error ? error.message : String(error),
         });
     } finally {
@@ -1263,21 +1248,17 @@ class BrowserSession {
         this.contactField,
         this.options.partyInviteIdentity === true,
       );
-      if (
-        (event.kind === "mob-enter" || event.kind === "mob-move") &&
-        this.username &&
-        session.selfView
-      ) {
-        const id = event.kind === "mob-enter" ? event.mob.mobId : event.mobId;
+      if ((json.t === "mob-enter" || json.t === "mob-move") && this.username && session.selfView) {
+        const id = json.t === "mob-enter" ? json.mob.mobId : json.mobId;
         json.presentation = this.options.mobPresentation?.(
           this.username,
           session.selfView.characterId,
           id,
         );
       }
-      if (event.kind === "mob-move" && event.actionByte !== undefined && event.actionByte >= 0) {
-        const mob = session.mob(event.mobId),
-          name = mobForcedName(event.actionByte >> 1);
+      if (json.t === "mob-move" && json.actionByte !== undefined && json.actionByte >= 0) {
+        const mob = session.mob(json.mobId),
+          name = mobForcedName(json.actionByte >> 1);
         const frames = mob && name && this.options.art?.mob(mob.templateId)?.actions[name];
         if (frames)
           json.forcedDuration = frames.reduce(
