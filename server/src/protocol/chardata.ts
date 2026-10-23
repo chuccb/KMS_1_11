@@ -190,7 +190,12 @@ export interface CharacterStats {
    * hair. `0x06`'s second appearance word is that same slot (`sub_430D00`).
    */
   appearanceB: number;
-  /** u8 @+26; role unlocated. Must still be present - the client throws on underflow. */
+  /**
+   * Opaque u8 @+26. CharacterData round-trips it; the 0x0D diff uses a u32 slot but the client
+   * stores only its low byte. No semantic consumer is located in the avatar rebuild path (FINDINGS
+   * 4.9 / 4.21.1), so keep the byte rather than guessing a name. New reconstructed characters use
+   * 0 as server policy; existing values are preserved.
+   */
   unknown26: number;
   /**
    * u32 @+27 - **not** the hair the client draws: `sub_45D840` stores this word verbatim and

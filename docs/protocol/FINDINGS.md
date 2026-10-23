@@ -470,7 +470,7 @@ n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（
 | 3 | u8 | `gender` | |
 | 4 | u32 | `appearanceA` | `sub_42E2C0` 把它交給 `sub_424590`（兩值 setter）|
 | 5 | u32 | `appearanceB` | `sub_42E2C0` 把它放進 avatar 的第 0 個部位格 |
-| 6 | u8 | `unknown26` | 真的是 u8，夾在第二個外觀字與頭髮之間（結構有 `#pragma pack`）|
+| 6 | u8 | `unknown26` | 不透明的 u8，夾在 `appearanceB` 與下一個 dword 間；語意未解，完整流向見下文 |
 | 7 | u32 | `hair` | |
 | 8 | u8 | `level` | 以下到 `unknown93` 在**客戶端記憶體**裡是混淆的 |
 | 9–19 | u16 ×11 | `job, str, dex, int, luk, hp, maxHp, mp, maxMp, ap, sp` | 寬度與順序完全吻合 |
@@ -489,6 +489,19 @@ n × 8 bytes                     // 客戶端每欄一個 8-byte 記錄陣列（
 - 客戶端的**記憶體**結構是 102 bytes（`sub_55BEB0` 複製 100 bytes + 一個 word；`sub_45F5C0`
   對隊友直接 memcpy 0x66 = 102 bytes）：差額就是每個混淆配對的填充半 + 對齊尾巴。
 - 讀寫兩端都逐欄位讀取且越界就丟 `ZException(38)`，所以伺服器必須把 69 bytes 全部寫滿。
+- **`unknown26` 的鏈已完整釘住，但語意仍不能命名**（ADR-153）：在 `CharacterData`，`sub_45D840`
+  用 `sub_45DC40` 讀 1 byte 存到 `+26`（`.lst:0045D943`），`sub_45D2E0` 從 `+26` 取 1 byte 寫回
+  （`.lst:0045D37C`）；前後正是 `appearanceB @+22` 與下一個 dword `@+27`。在 `0x0D` 的 `0x04` flag，
+  `sub_45E0D0` 用 `sub_45DCC0` 讀 4-byte u32，卻只把 `AL` 寫到 `+26`（`.lst:0045E187`／
+  `0045E19B`）；配對的 serializer `sub_45DE00` 也只載入那個 byte，再輸出 u32（`.lst:0045DE70`）。
+  **listing 沒有它的直接 call xref**，所以這一點只補充序列化器本身的欄位形狀；實際 client 接收寬度
+  以有真實呼叫鏈的 `sub_45E0D0` 為準。
+  所以可逆範圍只有 `0..255`；`encodeStatUpdate` 現在會拒絕會被 client 截掉的高位。整份 listing
+  對 `[reg+1Ah]` 的掃描只有這四個純量讀／寫；另外四個 `lea [reg+1Ah]` 是 `GW_ItemSlot` 現金區塊
+  的位址計算，不是角色欄位。外觀重建 `sub_4C5020` 讀 gender (`src+17`) 和 level (`src+31`)，不讀
+  `src+26`；目前看不到把這個 byte 當作外觀、能力或規則輸入的消費端。`0x06` 新角色封包也沒有
+  這個欄位；本伺服器新紀錄用 `0` 是**重建政策**，現有角色則保留其值。沒有原 server／資料樣本
+  能證明它是不是 skin 或其他語意，故維持 `unknown26`，不猜名。
 
 **`GW_ItemSlot`（單一道具）** — 這是前一版缺的那一塊，完整落在 `server/src/protocol/itemslot.ts`：
 
@@ -2116,7 +2129,7 @@ u32 durationMs     // 暫時能力持續時間；0 = 後面沒有東西，非0�
 |---|---|---|---|---|
 | `0x00001` | `appearanceA` | u32 | u32 | `sub_45DCC0` |
 | `0x00002` | `appearanceB` | u32 | u32 | `sub_45DCC0` |
-| `0x00004` | `unknown26` | **u32** | u8 | `sub_45DCC0`（讀 4 byte，只留 1 byte：`mov [edi+1Ah], al`）|
+| `0x00004` | `unknown26` | **u32** | u8 | `sub_45DCC0` 讀 4 byte、只留低 byte（`.lst:0045E19B`）；配對 serializer `sub_45DE00` 的函式本體把 byte 零擴展成 u32（無 direct call xref，§4.9） |
 | `0x00008` | `hair` | u32 | u32 | `sub_45DCC0` |
 | `0x00010` | `level` | u8 | u8 | `sub_45DC40` |
 | `0x00020` | `job` | u16 | u16 | `sub_45DC80` |
@@ -2138,9 +2151,10 @@ u32 durationMs     // 暫時能力持續時間；0 = 後面沒有東西，非0�
   （§4.9 的 69-byte 區塊）把 `unknown26` 讀 1 byte、`fame` 讀 2 bytes、`str`/`dex`/`int`/`luk`
   讀 2 bytes；而 `sub_45E0D0` 讀 4／4／1 bytes。三處都在 `.lst` 的組語裡逐 byte 確認過
   （Hex-Rays 對前兩處只寫 `u8`／`u16`，會讓人以為兩邊一樣）。
-- **`str`/`dex`/`int`/`luk` 送 u8 的後果**：讀進來的是零擴展的一個 byte，存進紀錄時上半部被遮罩成 0，
-  所以 client 看到的數值 = `value & 0xff`。**超過 255 的能力值送這一包會被 client 自己砍掉**
-  （`protocol/stat.ts` 因此直接拒絕 >255 的值，而不是靜默截斷）。
+- **窄欄位的保留寬度**：`unknown26` 雖在 diff 上佔 u32，client 只保留低 byte；`fame` 佔 u32、只保留
+  低 word；`str`/`dex`/`int`/`luk` 每個都只讀 u8，存入記憶體時上半部為 0。因此 `encodeStatUpdate`
+  現在按 client 實際保留寬度檢查：`unknown26 <= 255`、`fame <= 65535`、四個能力值各 `<= 255`，
+  拒絕會被靜默截掉的值（`protocol/stat.ts`；`server/test/stat.test.ts`）。
 - `mapId` 與 `spawnPortalIndex` **不在這 19 個 bit 裡**：它們只在 `CharacterData`（`0x16`／`0x02`）裡旅行。
 - 19 個 bit 用完就沒了：旗標字最大是 `0x7FFFF`。
 
@@ -2303,8 +2317,9 @@ return 1;                                     // 一次一級
    目前 `0x0D` 會帶成長後 maxima 與活人 refill。**自然 AP／SP 發放仍未定位**，不自行補數字。
    [STAT_GROWTH](../STAT_GROWTH.md) 說明證據與原 server 未取得的界線。
 4. **沒有實機驗證**（ADR-004）：HP 條／經驗條會不會照著動、升級特效會不會播，全部由反編譯碼推導。
-5. `fame`／`unknown26` 這種「線上 4 byte、記憶體 1–2 byte」的欄位，只知道寬度不知道用途；本伺服器
-   不會主動送它們。
+5. `fame`／`unknown26` 都是「差異包 u32、記憶體較窄」：`fame` 保留 u16，`unknown26` 保留 u8
+   （§4.9／§4.21.1）。`unknown26` 的**語意仍未解**，但其傳輸鏈已結案；伺服器不會自行改變這些值，
+   若明確提供差異，`encodeStatUpdate` 只接受 client 能完整保留的範圍。
 6. **誰能改 client 的 HP**：把整份 binary 裡「寫紀錄 `+53`／`+55`（hp 遮罩對）」的程式碼掃過一次，
    總共只有四個地方，**沒有任何一個是「怪物打玩家」**：
 
@@ -4572,8 +4587,11 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
      （`cashSn` 等，`sub_45E560` 寫、`sub_45E6A0` 比；`itemslot.ts` 的 `ItemSlotCashBlock`），
      現金裝備那一半也由 ADR-105 以 binary 證據結案（§4.36.6）。
    - ~~`unknown93`~~：**已解**，它不是欄位，是 `mesos` 混淆配對的另一半（`+89/+93`，§4.22.5）。
-   - `unknown26` 仍在：夾在第二個外觀字與 `hair` 之間的**真的 u8**（`sub_45D840`／`sub_45D2E0`
-     都讀寫它），傳輸完整、語意未找。**能力值與錢的位移已經沒有 unknown 了。**
+   - `unknown26` 是唯一仍**沒有語意名稱**的紀錄欄位，但不再是傳輸缺口（ADR-153）：它是夾在
+     `appearanceB` 與下一個 dword 間的 u8；CharacterData 讀／寫、`0x0D` diff 的 u32→low-byte
+     截取及反向 zero-extend 都已交叉驗證，且 listing 沒有找到直接的規則／外觀消費端。新角色設 0
+     是伺服器重建政策，舊角色原值保留。不要猜成 skin；若要知道它在原 server 的真正用途，仍需
+     原伺服器或真實角色資料。**能力值與錢的位移已經沒有 unknown 了。**
    `spawnPortalIndex` 已解為出生門索引，見 §4.43。
 10. ~~**組隊的 102-byte 角色區塊**（§4.10 `0x10` type 13）與 §4.11.3 的進場紀錄是不是同一種
    格式~~ → **比過了，不是同一種**（已結案）。`sub_45F5C0` 是一次 `qmemcpy(…, 0x66)`，

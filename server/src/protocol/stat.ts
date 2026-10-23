@@ -91,8 +91,10 @@ export type StatDiff = Partial<Record<StatDiffName, number>>;
 
 interface StatDiffFieldSpec {
   readonly name: StatDiffName;
-  /** Bytes this field occupies **in this packet** (the table in the header explains the quirks). */
+  /** Bytes this field occupies on the wire (which can differ from the client's storage width). */
   readonly bytes: 1 | 2 | 4;
+  /** Bytes the client retains in CharacterData; defaults to the wire width. */
+  readonly storedBytes?: 1 | 2 | 4;
   /** `0x8000` (`sp`) is read by the client's signed `s16` reader (`sub_45DD80`). */
   readonly signed?: boolean;
 }
@@ -104,8 +106,8 @@ interface StatDiffFieldSpec {
 export const STAT_DIFF_FIELDS: readonly StatDiffFieldSpec[] = [
   { name: "appearanceA", bytes: 4 },
   { name: "appearanceB", bytes: 4 },
-  // 4 bytes on the wire, 1 byte kept in memory - the reader is `sub_45DCC0`.
-  { name: "unknown26", bytes: 4 },
+  // The u32 diff slot is read by `sub_45DCC0`, but the receiver stores only AL at CharacterData+26.
+  { name: "unknown26", bytes: 4, storedBytes: 1 },
   { name: "hair", bytes: 4 },
   { name: "level", bytes: 1 },
   { name: "job", bytes: 2 },
@@ -121,8 +123,8 @@ export const STAT_DIFF_FIELDS: readonly StatDiffFieldSpec[] = [
   { name: "ap", bytes: 2 },
   { name: "sp", bytes: 2, signed: true },
   { name: "exp", bytes: 4 },
-  // 4 bytes on the wire, 2 kept in memory - the reader is `sub_45DDC0`, not `sub_45DD80`.
-  { name: "fame", bytes: 4 },
+  // `sub_45DDC0` reads four bytes; the receiver stores AX at CharacterData+85/+87 (u16).
+  { name: "fame", bytes: 4, storedBytes: 2 },
   // 4 bytes on the wire, 4 kept: the character's mesos, the field a shop reads and writes
   // (`sub_4B6B40`'s price check - FINDINGS 4.22).
   { name: "mesos", bytes: 4 },
@@ -159,10 +161,11 @@ export interface StatUpdate {
 /**
  * Pack one `0x0D`: `u8 ack`, the diff, then the temporary-stat tail (duration 0 when absent).
  *
- * Out-of-range values throw instead of being masked - most of these fields are `u8`/`u16` on the
- * wire while the record keeps them wider, and a silent truncation would be a stat that jumps for no
- * visible reason. `str`/`dex`/`int`/`luk` are the sharp edge: the client really does read one byte
- * there (`sub_45DC40`), so a larger value cannot be expressed at all.
+ * Out-of-range values throw instead of being masked. The check uses the width the client retains,
+ * not merely the wire width: `unknown26` is u32 on the diff but only its low byte is stored, and
+ * `fame` is u32 on the diff but only its low word is stored. `str`/`dex`/`int`/`luk` are the other
+ * sharp edge: the client really reads one byte there (`sub_45DC40`), so a larger value cannot be
+ * expressed at all.
  */
 export function encodeStatUpdate(update: StatUpdate): Uint8Array {
   const { diff } = update;
@@ -186,27 +189,35 @@ function assertFits(field: StatDiffFieldSpec, value: number): void {
   if (!Number.isInteger(value)) {
     throw new RangeError(`stat diff field "${field.name}" is not an integer (${value})`);
   }
+  const storedBytes = field.storedBytes ?? field.bytes;
   if (field.signed === true) {
-    const limit = field.bytes === 2 ? 0x7fff : 0x7f;
+    const limit = 2 ** (storedBytes * 8 - 1) - 1;
     if (value < -limit - 1 || value > limit) {
       throw new RangeError(
-        `stat diff field "${field.name}" (s${field.bytes * 8}) cannot hold ${value}`,
+        `stat diff field "${field.name}" (s${storedBytes * 8}) cannot hold ${value}`,
       );
     }
     return;
   }
-  const limit = 2 ** (field.bytes * 8) - 1;
+  const limit = 2 ** (storedBytes * 8) - 1;
   if (value < 0 || value > limit) {
-    throw new RangeError(
-      `stat diff field "${field.name}" (u${field.bytes * 8}) cannot hold ${value}` +
-        (field.bytes === 1
+    const note =
+      storedBytes !== field.bytes
+        ? ` - the client retains only u${storedBytes * 8} from this u${field.bytes * 8} diff field (FINDINGS 4.21.1)`
+        : field.bytes === 1
           ? " - the 0x0d reader takes one byte for this field (FINDINGS 4.21.1)"
-          : ""),
+          : "";
+    throw new RangeError(
+      `stat diff field "${field.name}" (u${storedBytes * 8}) cannot hold ${value}${note}`,
     );
   }
 }
 
-/** Read one `0x0D` body (the reader must sit at `ack`, i.e. just past the opcode byte). */
+/**
+ * Read the raw `0x0D` wire values (the reader starts at `ack`, just past the opcode). This is a
+ * decoder, not a simulation of the client's destination writes: the u32 `unknown26`/`fame` slots
+ * are returned as sent, while the client itself retains only the low byte/word.
+ */
 export function readStatUpdate(reader: PacketReader): StatUpdate {
   const ack = reader.readByte() !== 0;
   const flags = reader.readU32();

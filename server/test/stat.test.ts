@@ -1,6 +1,6 @@
 /**
- * `0x0D` - the stat diff. The point of these tests is the **wire widths** (the client reads three of
- * them differently from `CharacterData`, see the header of `src/protocol/stat.ts`) and the flag
+ * `0x0D` - the stat diff. The point of these tests is the **wire widths** (several differ from
+ * `CharacterData`, see the header of `src/protocol/stat.ts`) and the flag
  * order, so the golden vectors are written out by hand from the disassembly of `sub_45E0D0` rather
  * than derived from the table under test.
  */
@@ -135,6 +135,23 @@ test("the ack byte is on the wire because the client reads it", () => {
 test("describe names every field it found", () => {
   assert.equal(describeStatUpdate({ diff: { level: 2, exp: 5 } }), "ack=0 level=2 exp=5");
   assert.equal(describeStatUpdate({ ack: true, diff: {} }), "ack=1 (no fields)");
+});
+
+test("wide 0x0D slots cannot exceed the narrower CharacterData storage", () => {
+  const unknown26 = encodeStatUpdate({ diff: { unknown26: 0xff } });
+  assert.equal(hex(unknown26.slice(6, 10)), "ff 00 00 00", "unknown26 remains a u32 on the wire");
+  assert.deepEqual(readStatUpdate(new PacketReader(unknown26, 1)).diff, { unknown26: 0xff });
+  assert.throws(
+    () => encodeStatUpdate({ diff: { unknown26: 0x100 } }),
+    /unknown26.*u8\) cannot hold 256.*retains only u8 from this u32 diff field/s,
+  );
+
+  const fame = encodeStatUpdate({ diff: { fame: 0xffff } });
+  assert.equal(hex(fame.slice(6, 10)), "ff ff 00 00", "fame remains a u32 on the wire");
+  assert.throws(
+    () => encodeStatUpdate({ diff: { fame: 0x10000 } }),
+    /fame.*u16\) cannot hold 65536.*retains only u16 from this u32 diff field/s,
+  );
 });
 
 test("values that do not fit the client's reader are refused, not truncated", () => {

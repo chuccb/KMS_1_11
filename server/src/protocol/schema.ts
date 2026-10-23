@@ -74,14 +74,14 @@ export interface PacketSchema {
 /** Strings on the wire are `u16 length` + raw bytes (FINDINGS 4.4). */
 const STRING = "string";
 
-/** Why three of the diff fields are not the width `CharacterData` uses (`sub_45E0D0` vs `sub_45D840`). */
+/** Why some diff fields differ from the width `CharacterData` uses (`sub_45E0D0` vs `sub_45D840`). */
 const STAT_DIFF_WIDTH_WARNINGS: Record<string, string | undefined> = {
-  unknown26: " - u32 here, a single byte in CharacterData",
+  unknown26: " - u32 here, only the low byte is stored in CharacterData",
   str: " - ONE byte here, two in CharacterData",
   dex: " - ONE byte here, two in CharacterData",
   int: " - ONE byte here, two in CharacterData",
   luk: " - ONE byte here, two in CharacterData",
-  fame: " - u32 here, two bytes in CharacterData",
+  fame: " - u32 here, only the low word is stored in CharacterData",
 };
 
 export const PACKETS: readonly PacketSchema[] = [

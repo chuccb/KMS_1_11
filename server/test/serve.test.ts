@@ -439,6 +439,11 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(createReader.readByte(), CREATE_CHARACTER_RESULT.created);
   const created = readCharacterData(createReader);
   assert.equal(created.stats.name, "Hero");
+  assert.equal(
+    created.stats.unknown26,
+    0,
+    "0 is our new-character default; the 0x06 creation request carries no value for this opaque byte",
+  );
   assert.deepEqual(
     [created.stats.appearanceA, created.stats.appearanceB],
     [20000, 30000],

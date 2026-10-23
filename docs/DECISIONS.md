@@ -5794,3 +5794,71 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
 
 `MapleStory.exe.c` 已還原 byte-identical。
 
+
+## ADR-153：`CharacterData+26` 是不透明 byte，`0x0D` 用 u32 傳但只保存低 byte
+
+**日期**：2026-10-23
+**狀態**：已接受（欄位的傳輸／保存鏈結案；語意仍未命名）
+
+### 背景
+
+§6 第 9 項剩下的 `unknown26` 一直被描述成「能力值與外觀之間的一個 byte，語意未知」。
+但只知道 `CharacterData` 的讀寫寬度還不夠：它在 `0x0D` 差異包中是另一個寬度，且伺服器的
+`encodeStatUpdate` 原先只驗 wire 寬度，可能送出 client 收到後會靜默截掉的值。另一個問題也黏在一起：
+**傳輸欄位尚未命名**，不代表它還有未實作的行為。
+
+### 發現
+
+1. **`CharacterData` 是一個 u8，位置確定。** `sub_45D840` 先讀 `appearanceA`（`+18`）、
+   `appearanceB`（`+22`），再用 `sub_45DC40`（只讀 1 byte）存進 `+26`，接著用
+   `sub_45DCC0` 讀 `+27` 的 dword。寫出端 `sub_45D2E0` 在 `.lst:0045D37C` 從 `+1Ah` 取一個
+   byte、`sub_431DE0(..., 1)` 寫一個 byte，之後才輸出 `+27` 的 dword。
+
+2. **`0x0D` 的槽是 u32，但 `CharacterData` 只收低 byte。** flag `0x04` 的
+   `sub_45E0D0` 以 `sub_45DCC0` 讀 4 bytes（`.lst:0045E187`），然後
+   `mov [edi+1Ah], al`（`.lst:0045E19B`）。配對 serializer `sub_45DE00` 以
+   `mov cl, [edi+1Ah]` 取得已保存的 byte（`.lst:0045DE70`），零擴展後寫四個 bytes；但 listing
+   沒有它的直接 call xref，所以只作為 serializer 本身的補充證據。**實際接收路徑**由
+   `sub_55A900` case 13 → `sub_55BEB0` → `sub_45E0D0` 直接確認。故接收槽是 u32，能無損表示的
+   角色值只有 `0..255`。
+
+3. **沒有找到把它當成規則或外觀輸入的 client 消費端。** 原始 listing 全文裡，
+   `[reg+1Ah]` 的直接純量讀寫只有上面四處；另外四處 `lea [reg+1Ah]` 是 `GW_ItemSlot`
+   現金區塊的位址計算。角色外觀重建 `sub_4C5020` 讀 `src+17`（gender）與 `src+31`（level），
+   不讀 `src+26`。因此不能因為它剛好在外觀欄位旁邊，就猜它是 skin。
+
+4. **新角色的 0 是我們的政策，不是原版證據。** `0x06` 建角請求是十個 u32，沒有這個 byte；
+   本伺服器的 `zeroStats()` 因而給新紀錄 0。舊角色由 CharacterData decode/save 保留其原值。
+   原 server 或能把該 byte 與明確操作關聯起來的真實角色資料，才可能回答它的語意。
+
+5. 同一個「wire 寬、保存窄」規則也適用 `fame`：`0x0D` 是 u32，client 只存低 u16。
+   `encodeStatUpdate` 現在以 `storedBytes` 與 wire `bytes` 分開表示，對 `unknown26` 限制 u8、對
+   `fame` 限制 u16；封包仍分別照原版輸出 u32。這也避免 fame 被截斷。`readStatUpdate` 則刻意回傳
+   **原始 wire 值**，不假裝模擬 client 的記憶體寫入。
+
+### 決策
+
+1. **欄位仍叫 `unknown26`。** 它的布局、寬度、保存位置、差異包轉換與目前的無語意消費端都已釘住；
+   欄位真正代表什麼仍然 OPEN，不用「skin」或其他猜測替代。
+2. **它不是實作缺口。** CharacterData 以 u8 round-trip；新角色的 0 明確標為伺服器政策；舊角色值保留。
+3. `STAT_DIFF_FIELDS` 明確區分 wire `bytes` 與 client `storedBytes`。編碼拒絕任何會被 client 靜默截短的
+   `unknown26 > 255`／`fame > 65535`，但在合法範圍內依原版格式寫 u32。`readStatUpdate` 保留 wire 原值。
+4. 更新 §4.9、§4.21.1、§4.21.6、§6 item 9 與 `CharacterStats`／schema／README 註解；不改 `MapleStory.exe.c`
+   或 `.lst`。
+
+> **規則：一個欄位的「沒有名字」和「沒有實作」是兩件事。** 先把 wire、記憶體、所有直接讀寫、
+> 截斷規則與伺服器預設分開釘住；做得到的實作就結案，真正不在 binary 裡的語意才留待 oracle，
+> 不要用一個猜測的名字掩蓋兩種不同的未知。
+
+### 測試與驗證
+
+- `server/test/native-unknown26.test.ts`（7 個）：CharacterData 一 byte 的讀寫與前後欄位、驗證 s2c
+  `0x0D` case 13 → `sub_55BEB0` → `sub_45E0D0` 的真呼叫鏈、u32→低 byte、serializer 零擴展的補充證據
+  （另釘住它沒有 direct call xref）、listing 全文 `+1Ah` 純量讀寫盤點、外觀重建路徑不讀該 byte。
+- `server/test/stat.test.ts`：釘住 u32 wire bytes，接受 `unknown26=255`／`fame=65535`，拒絕會被截短的下一值。
+- `server/test/serve.test.ts`：新角色的 `unknown26=0` 是重建政策，且 `0x06` 不提供此值。
+- **變異驗證：11/11 全數釘死**：錯位讀取、CharacterData 讀寬／寫寬、把 `0x0D` case 13 改離真 handler、diff 讀寬改窄／存寬改寬、serializer 寫寬改窄／不再零擴展、avatar 假讀 unknown26，以及移除 unknown26／fame 的 `storedBytes` 限制。每次都還原並驗證原檔 checksum。
+- Gates：`bun run format`、`bun run typecheck`、`bun run build` 皆通過；`bun test --ignore='*browser*'`
+  全部 **1459 pass／0 fail／5334 expect、169 files**（370.60 s）。
+- `MapleStory.exe.c`／`.lst` 已還原 byte-identical：`1a247f0e4bd602d9d8f1f55f68f5d2dc`／
+  `88d0372f36a4c05e59d21afee8a16eb6`。
