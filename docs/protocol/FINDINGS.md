@@ -4602,10 +4602,24 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    （`FieldRegistry.of` 是入口）、
    以及**兩個真 client 的實機驗證**。
 14. **NPC／怪物的「client 自己走」與我們的權威之間的關係**（§4.28.3）：`0x31` flag 1 會讓原 client
-   自己走那隻怪（`sub_485330`），而我們是伺服器每條腿送 `0x33` —— 兩者會不會互相打斷，只有 oracle run
-   能回答。`--npc-walk` 的**預設值**（目前 `none`）也等這個答案：原伺服器走了哪些 NPC 完全未知。
-   ADR-062已確認+250..260是當前CMovePath元素，template+8是move存在；不是未知WZ矩形或未知路徑旗標。
-   仍未知原server對sender+2／receiver raw索引的處理，及原controller挑選／距離政策；見§4.28。
+   自己走那隻怪（`sub_485330`），而我們是伺服器每條腿送 `0x33` —— 兩者會不會互相打斷
+   ~~只有 oracle run 能回答~~ → **client 那一半已經回答了（ADR-151）：不會打架，`0x33` 會先踩煞車。**
+   四條路共用**同一個判斷** `sub_485520(mob)` ＝ `*( *(mob+27) + 24 )`（「有 controller 在跑嗎」），
+   但**反應並不對稱**：
+
+   | 誰 | controller 在跑時 |
+   |---|---|
+   | `0x31` flag 1（推進一步 client 自己的走法）| **什麼都不做**（`if (result == 0)` 才進 `sub_485330`）|
+   | `0x31` flag 0（移除）| **先停**（`sub_485330(v6, 0)`），`*(mob+112) == 0` 才真的放掉 |
+   | `0x33`（伺服器送的移動）| **先停**（inline 同一個 vtable slot 184、七個 0 的呼叫），再套新路徑 |
+
+   收尾狀態也對得上：`sub_485330(mob, 0)` 停在 `-2`／`-3`（`4→-2`、`5→-3`，其他→`-1`），
+   而 `0x33` 結尾寫的是 `*(mob+29) = -(flag != 0) - 2` —— **同一組停止狀態**。
+   ⇒ **伺服器端的 `0x33` 永遠壓過 client 自己的走法**：收到第一個 `0x33` 就會停掉 `0x31` 開的場，
+   所以我們「每條腿送 `0x33`」這件事**不管原伺服器送不送 `0x31` 都安全**。
+   **仍未解（真的要 oracle run）**：`--npc-walk` 的**預設值**（目前 `none`）——
+   原伺服器走了哪些 NPC 完全未知；以及原 server 對 sender+2／receiver raw 索引的處理、
+   原 controller 挑選／距離政策。ADR-062已確認+250..260是當前CMovePath元素，template+8是move存在。
 
 15. ~~**「已在線上」的處理**~~ → **已完成**：`OnlineAccounts`（`account → 活著的 session`）＋
    `SeatKeeper`＋`Heartbeat`，見 **§4.30** 與 ADR-018；`0x01` 對已在線上的帳號回 `7`，
