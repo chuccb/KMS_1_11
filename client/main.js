@@ -35,6 +35,7 @@ import { dropRenderer } from "./drop-renderer.ts";
 import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
 import { clientWebSocketTransport } from "./websocket-transport.ts";
+import { validateServerMessagePayload } from "./server-message-validation.ts";
 import {
   INVENTORY,
   INVENTORY_TABS,
@@ -361,6 +362,7 @@ const MOVE_TICK_MS = 100;
 const clientTransport = clientWebSocketTransport({
   createSocket: (url) => new WebSocket(url),
   onNotOpen: (messageType) => logLine(`not connected: ${messageType}`),
+  validateMessagePayload: validateServerMessagePayload,
 });
 
 /** The transport owns socket state, JSON encoding and the open-state check. */

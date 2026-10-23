@@ -764,7 +764,7 @@ interface WireMessage {
   [field: string]: unknown;
 }
 const messages: WireMessage[] = [
-  { t: "login", result: 0, worlds: [{ name: "Scania", unknownId: 0 }] },
+  { t: "login", result: 0, gender: 0, worlds: [{ name: "Scania", unknownId: 0 }] },
   {
     t: "characters",
     result: 0,
@@ -794,19 +794,36 @@ const messages: WireMessage[] = [
   {
     t: "field",
     mapId: 1000000,
+    contactField: 1,
+    playerMenu: true,
+    partyInviteIdentity: false,
+    socialCommands: true,
+    trade: true,
     self: {
       characterId: 21,
       name: "Hero",
+      gender: 0,
       level: 12,
       job: 0,
+      str: 4,
+      dex: 4,
+      int: 4,
+      luk: 4,
+      ap: 0,
+      sp: 0,
+      fame: 0,
       hp: 50,
       maxHp: 50,
       mp: 30,
       maxMp: 30,
       exp: 0,
+      expToNext: 300,
       mesos: 200,
       mapId: 1000000,
+      spawnPortalIndex: 0,
       face: 20000,
+      hair: 30000,
+      avatarItems: [],
     },
     users: [],
     mobs: [],
@@ -840,16 +857,28 @@ const messages: WireMessage[] = [
     self: {
       characterId: 21,
       name: "Hero",
+      gender: 0,
       level: 13,
       job: 0,
+      str: 4,
+      dex: 4,
+      int: 4,
+      luk: 4,
+      ap: 0,
+      sp: 0,
+      fame: 0,
       hp: 40,
       maxHp: 60,
       mp: 20,
       maxMp: 40,
       exp: 5,
+      expToNext: 400,
       mesos: 150,
       mapId: 1000000,
+      spawnPortalIndex: 0,
       face: 20000,
+      hair: 30000,
+      avatarItems: [],
     },
   },
   { t: "unknown", opcode: 0x42, bytes: 3 },
@@ -859,6 +888,21 @@ const messages: WireMessage[] = [
   { t: "created", ok: false, name: "Rookie", reason: "name check 1" },
   { t: "error", message: "boom" },
 ];
+function fieldMessage(mapId: number, self: Record<string, unknown>, contactField = 1): WireMessage {
+  return {
+    t: "field",
+    mapId,
+    contactField,
+    playerMenu: true,
+    partyInviteIdentity: false,
+    socialCommands: true,
+    trade: true,
+    self: { ...self, mapId },
+    users: [],
+    mobs: [],
+    npcs: [],
+  };
+}
 for (const message of messages) socket.push(message);
 assert.equal(el("pass").value, "");
 assert.equal(storage.get("kms111.loginUser"), "admin");
@@ -917,27 +961,9 @@ console.log("find lines:", JSON.stringify(later.slice(-2)));
 // those bumps mapGeneration (main.js's stale-map guard), which voids the first field's async
 // loadMap. A real reconnect re-enters the field, so the gameplay batteries do the same and wait
 // for the map JSON before clicking portals.
-socket.push({
-  t: "field",
-  mapId: 1000000,
-  self: {
-    characterId: 21,
-    name: "Hero",
-    level: 12,
-    job: 0,
-    hp: 50,
-    maxHp: 50,
-    mp: 30,
-    maxMp: 30,
-    exp: 0,
-    mesos: 200,
-    mapId: 1000000,
-    face: 20000,
-  },
-  users: [],
-  mobs: [],
-  npcs: [],
-});
+socket.push(
+  fieldMessage(1000000, fixtureSelf(messages.findLast((message) => message.t === "self"))),
+);
 await new Promise((resolve) => setTimeout(resolve, 20));
 
 // ------------------------------------------------------------------ portal click
@@ -960,27 +986,9 @@ console.log("portal click ok:", JSON.stringify(last));
 // A real server answers the portal request with the destination field, and portalPending (which
 // gates item use, attacks and further portals) only clears on that map change. Answer it the way
 // the wire does before the gameplay batteries continue.
-socket.push({
-  t: "field",
-  mapId: 1010000,
-  self: {
-    characterId: 21,
-    name: "Hero",
-    level: 12,
-    job: 0,
-    hp: 50,
-    maxHp: 50,
-    mp: 30,
-    maxMp: 30,
-    exp: 0,
-    mesos: 200,
-    mapId: 1010000,
-    face: 20000,
-  },
-  users: [],
-  mobs: [],
-  npcs: [],
-});
+socket.push(
+  fieldMessage(1010000, fixtureSelf(messages.findLast((message) => message.t === "self")), 2),
+);
 await new Promise((resolve) => setTimeout(resolve, 20));
 if (el("status").textContent === "" && !el("status").innerHTML) console.log("note: status empty");
 console.log("status:", JSON.stringify(el("status").textContent || el("status").innerHTML));
@@ -1089,7 +1097,12 @@ console.log("shop close:", JSON.stringify(lastShop));
 if (lastShop?.t !== "shop" || lastShop.action !== "close")
   throw new Error("CLOSE must send shop close");
 
-socket.push({ t: "npc-say", npcId: 7, message: "안녕하세요" });
+socket.push({
+  t: "npc-say",
+  npcId: 7,
+  message: "안녕하세요",
+  body: { kind: "say", message: "안녕하세요", unknownA: 0, unknownB: 1 },
+});
 await new Promise((resolve) => setTimeout(resolve, 10));
 console.log(
   "dialogue:",
@@ -1346,7 +1359,7 @@ el("login").fire("click");
 await new Promise((resolve) => setTimeout(resolve, 5));
 const retrySocket = sockets.at(-1);
 if (!retrySocket) throw new Error("the retry opened no socket");
-retrySocket.push({ t: "login", result: 4, worlds: [] });
+retrySocket.push({ t: "login", result: 4, gender: 0, worlds: [] });
 assert.equal(el("login").disabled, false);
 assert.match(el("status").textContent, /登入失敗/);
 assert.equal(probe.dialog, true);
@@ -1358,7 +1371,7 @@ if (!activeSocket) throw new Error("the retry opened no socket");
 // Late events from the old socket must not overwrite the retry's state.
 socket.emit("close");
 assert.equal(el("login").disabled, true);
-activeSocket.push({ t: "login", result: 0, worlds: [] });
+activeSocket.push({ t: "login", result: 0, gender: 0, worlds: [] });
 assert.equal(probe.stage, "worlds");
 assert.equal(el("pass").value, "");
 assert.equal(el("login").disabled, false);
@@ -1369,6 +1382,7 @@ console.log("TITLE REGRESSIONS OK");
 activeSocket.push({
   t: "login",
   result: 0,
+  gender: 0,
   worlds: [
     { name: "Scania", unknownId: 20 },
     { name: "Offline", unknownId: 0xffffffff },
@@ -1529,8 +1543,30 @@ console.log("PORTAL COMMAND / CHAT FOCUS REGRESSIONS OK");
 // ------------------------------------------------------------------ equipment admission
 // Browser inventory gestures are authoritative: no optimistic writes, ack != 0, 500ms.
 const equipSelf = { ...statSelf, characterId: 21, mapId: 1000000, hp: 50, gender: 0, level: 12 };
-activeSocket.push({ t: "field", mapId: 1000000, self: equipSelf, users: [], mobs: [], npcs: [] });
-const gear: ProbeGear = { slot: 1, itemId: 1002008, ruc: 4, cuc: 2, stats: { str: 3 } };
+activeSocket.push(fieldMessage(1000000, equipSelf));
+const gear: ProbeGear = {
+  slot: 1,
+  itemId: 1002008,
+  ruc: 4,
+  cuc: 2,
+  stats: {
+    str: 3,
+    dex: 0,
+    int: 0,
+    luk: 0,
+    maxHp: 0,
+    maxMp: 0,
+    pad: 0,
+    mad: 0,
+    pdd: 0,
+    mdd: 0,
+    acc: 0,
+    eva: 0,
+    craft: 0,
+    speed: 0,
+    jump: 0,
+  },
+};
 interface ProbeTab {
   tab: number;
   capacity: number;

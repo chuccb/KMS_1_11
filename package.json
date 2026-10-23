@@ -12,8 +12,8 @@
     "capture": "bun server/src/cli.ts capture",
     "test": "bun test --timeout 30000 ./server/test ./tools/tests",
     "typecheck": "bun run --bun tsc --project tsconfig.json",
-    "format": "bun run --bun prettier --write \"client/**/*.ts\" \"server/**/*.ts\" \"tools/**/*.ts\" package.json tsconfig.json .prettierrc.json .github/workflows/ci.yml",
-    "format:check": "bun run --bun prettier --check \"client/**/*.ts\" \"server/**/*.ts\" \"tools/**/*.ts\" package.json tsconfig.json .prettierrc.json .github/workflows/ci.yml",
+    "format": "bun fmt \"client/**/*.ts\" \"server/**/*.ts\" \"tools/**/*.ts\" package.json tsconfig.json .prettierrc.json .github/workflows/ci.yml",
+    "format:check": "bun fmt --check \"client/**/*.ts\" \"server/**/*.ts\" \"tools/**/*.ts\" package.json tsconfig.json .prettierrc.json .github/workflows/ci.yml",
     "build": "bun tools/build-client.ts",
     "check": "bun run typecheck && bun run format:check && bun run test && bun run build",
     "wz": "bun tools/wz.ts",
@@ -23,7 +23,6 @@
     "@sparticuz/chromium": "153.0.0",
     "@types/bun": "1.4.4",
     "playwright-core": "1.64.1",
-    "prettier": "3.9.10",
     "typescript": "7.0.2"
   }
 }

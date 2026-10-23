@@ -6072,3 +6072,40 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
 - `git diff --check` 通過。真實遊戲沒有登入；未建立／操作角色、未修改／重啟任何 save 或既有 LIVE；沒有跑 state-changing 手動 probe。
 - 先前 8515 服務實測已不在監聽；為遵守使用者要求保留可測入口，另啟一個新的 memory-only preview（web/login/game 8515/8516/8517、`--save off`、map 101000000、僅新 preview／observer 帳號）；server 啟動記錄 0 mobs，`/healthz`、首頁與 `/main.js` 都是 200。沒有載入舊角色／save，也沒有自動登入／建立角色；新進度由使用者自行操作且重啟即失去。
 - 目前結果只證明 compiler 可檢查 server 出站 JSON contract，及回歸行為沒有倒退；不證明 browser inbound deep schema、`client/main.js` strict 遷移或完整手動 gameplay 已驗收。
+
+## ADR-158：選定 server-to-browser payload runtime guards 與 Bun 原生 formatter（2026-10-23）
+
+**狀態**：已接受（55 個 server message type 有明列 guard、`trade`／`messenger` 為兩個明列缺口；未識別的 runtime `t` 仍 pass-through；`client/main.js` 尚未 strict 型別化）
+
+### 背景
+
+ADR-156 已把 browser WebSocket lifecycle 與 JSON envelope 移進 strict TypeScript，但 envelope 只證明收到 object 且有 own string `t`；事件 payload 仍會直接進入 `client/main.js`。ADR-157 為 server 出站 JSON 建立編譯期 union，並未因此驗證 runtime 收件資料。需要在 transport 與既有 handler 之間，先為有足夠明確形狀的 message family 加選擇性守衛；不可把部分守衛說成完整 schema，也不可為了接線而聲稱巨大 `main.js` 已完成型別遷移。
+
+本輪也評估 Bun 1.4.4 內建 formatter。Bun 官方說明它會讀取 Prettier 設定，但不同 repository 的輸出未必都相同；因此必須比較本專案當前完整 formatter input，而不是假設相容。
+
+### 發現
+
+1. `WebClientServerMessage["t"]` 是目前 server-to-browser discriminator 的編譯期來源。55 種 discriminator 可明列 guard，`trade` 與 `messenger` 的巢狀 protocol union 尚未在這個邊界驗證；不把「已分類」混稱「每一種 payload 均完整解析」。
+2. transport 已有固定順序：JSON parse 為 `unknown` → 驗 object／own string `t` →（可選）執行 application payload guard → 才交給 message handler。guard 回傳 `false` 或丟出 exception 都可走同一 malformed-message 路徑；未識別／未分類的 runtime `t` 可維持向後相容的 pass-through。注意，union 中已知的 discriminator `t: "unknown"` 本身有 guard，會檢查 opcode 與 bytes。
+3. 登入／角色、feedback、drop 等已有 parser 可重用；其餘 guard 依目前 browser/server bridge 實際消費欄位檢查型別、整數範圍及必要巢狀項目。這不是驗證任意額外欄位、完整原版 wire schema、商業規則或整個 client domain 的承諾。
+4. `server/scripts/client_probe.ts` 的 mock 登入、field、自身角色、NPC dialogue 與裝備資料曾省略 production message 必填欄位；接上 guard 後應修正 fixture，而非放寬 guard。world loot assertion 另原本依賴密碼學 RNG 碰巧抽中，需以注入 deterministic RNG 測試既有預設 drop policy，不應改 production RNG 或掉落率。
+5. Bun 1.4.4 的 `bun fmt` 內建在固定 runtime，使用同一 `.prettierrc.json`。Prettier 3.9.10 可由移除前的 lock entry integrity 驗證作為一次性比較工具，但不必繼續成為依賴。
+
+### 決策
+
+1. 新增 `client/server-message-validation.ts`。`SERVER_MESSAGE_VALIDATED_TYPES` 是 55 個目前明列 guarded discriminator 的清單；`SERVER_MESSAGE_VALIDATION_GAPS` 明列 `trade`、`messenger`。compile-time coverage assertion 要求現有 `WebClientServerMessage["t"]` 每個類型必須出現在其中一份清單，新增 server event 時不能靜默漏掉分類。
+2. 覆蓋登入／角色與 account replies、attack／touch／stat basis／test-tools、field／self／user／mob／NPC、移動路徑、temporary stats、party/social、skills、inventory／shop／dialogue、drops／feedback、已知 `t: "unknown"` 與 disconnect 等 families。單一 family 有 validator 不代表其任意 extras 或所有 domain 條件皆被深度驗證；清單與實際程式碼是範圍的準據。
+3. `client/websocket-transport.ts` 增加 optional `validateMessagePayload` hook，維持 envelope-first 順序；拒收或 validator throw 都呼叫既有 malformed callback、不送入 handler。`client/main.js` 明確接上 `validateServerMessagePayload`。未提供 hook 的 transport consumer 維持原行為；`trade`／`messenger` 與任何未知／未分類 runtime discriminator 不由此 validator 假裝驗證。
+4. 更新 `server/test/server-message-validation.test.ts` 與 `client-websocket-transport.test.ts`：驗證接受／拒絕代表 payload、邊界／巢狀資料、覆蓋分類與 validator false／throw 路由；修正 probe mock，使資料匹配現有 server outbound contract。world expiry 測試注入固定 `dropRandom` 使 meso hit 可重現；production 的 crypto-backed RNG、預設掉落政策未變。
+5. 正式 formatter 改用 Bun 1.4.4 `bun fmt`／`bun fmt --check`，保留 `.prettierrc.json`，移除 Prettier direct dependency 與 lock entry。這是對本次 438 個指定輸入的實測，不是對所有未來路徑或所有 Prettier 專案的普遍相容保證。
+6. 不新增 dependency、不加 `any`／`@ts-ignore`、不開 `allowJs`、不降低 strict／ESNext 檢查；`client/main.js` 仍是唯一未受 strict TS 型別檢查的 authored client source。選擇性 runtime guard 不代表完整 gameplay 或 LIVE 操作驗收。
+
+### 測試與驗證
+
+- `bun install --frozen-lockfile --ignore-scripts`（Bun 1.4.4）：**26 installs／46 packages，無變更**。
+- formatter comparison：以 Prettier 3.9.10 一次性 archive 對照 Bun 1.4.4 `bun fmt`，涵蓋 **434 個 `.ts`＋4 個 package／config／workflow paths = 438**；Prettier tarball 2,801,570 bytes，其 SHA512 `skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==` 與原 `bun.lock` integrity 相同；**438／438 逐檔 byte-identical**。`bun run format` 顯示 438 unchanged。
+- `bun run typecheck`（pinned TypeScript 7.0.2，ESNext／strict）通過；`bun check --no-script --timing`：730 checked／731 loaded，無型別錯誤。
+- `bun run format:check`、`git diff --check` 與 `bun run build` 通過；browser assets 產生於 ignored `dist/client`。
+- validator＋transport focused tests：**12 pass／0 fail**；probe 的 `client-ui.test.ts` focused test 通過；deterministic `world.test.ts` focused：**24 pass／0 fail**。
+- 最終完整 `bun run test`：**1475 pass／0 fail／5334 expects，171 files，321.09 s**。第一次完整 suite 曾因 world test 依賴隨機掉落而有 1 個 flaky failure；僅修測試 RNG，之後完整 suite 全數通過。
+- Prettier comparison 與所有 tests 均使用本機檔案／隔離 fixtures／mock transport；沒有登入 LIVE、建立或操作角色、讀寫既有玩家 save，也沒有變更 production loot RNG／drop policy。依使用者要求另啟可手動測試的獨立記憶體預覽：web/login/game ports **8515／8516／8517**、`--save off`、map `101000000`、只配置 `preview`／`observer` 沙箱帳號；啟動時 0 mobs，唯讀 GET `/healthz`、`/`、`/main.js` 均回 **200**。沒有自動登入、建角、角色操作或建立 save；使用者自行操作的新進度只存在記憶體，程序重啟即消失。`client/main.js` 仍未型別化；`trade`／`messenger` gaps 與未識別 runtime `t` pass-through 仍明確存在（已知 `t: "unknown"` 有 guard）。

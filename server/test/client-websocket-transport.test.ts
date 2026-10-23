@@ -158,3 +158,32 @@ test("explicit return-to-title close preserves its code and reason", () => {
   assert.deepEqual(events, ["open", "close"]);
   assert.equal(transport.open, false);
 });
+
+test("transport routes rejected or throwing application payload guards to malformedMessage", () => {
+  const sockets: FakeSocket[] = [];
+  const transport = clientWebSocketTransport({
+    createSocket(url) {
+      assert.equal(url, "wss://game.example/ws");
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    onNotOpen: () => {},
+    validateMessagePayload(message) {
+      if (message.t === "throws") throw new Error("guard failure");
+      return message.t !== "field" || Number.isInteger(message.mapId);
+    },
+  });
+  const messages: ServerEventEnvelope[] = [];
+  const malformed: string[] = [];
+  transport.connect("wss://game.example/ws", handlers([], messages, malformed));
+  const [socket] = sockets;
+  assert.ok(socket);
+
+  socket.receive('{"t":"field","mapId":100000000}');
+  socket.receive('{"t":"field","mapId":"bad"}');
+  socket.receive('{"t":"throws"}');
+
+  assert.deepEqual(messages, [{ t: "field", mapId: 100000000 }]);
+  assert.deepEqual(malformed, ['{"t":"field","mapId":"bad"}', '{"t":"throws"}']);
+});

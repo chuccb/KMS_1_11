@@ -1,13 +1,12 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-23（ADR-157：出站 WebSocket JSON contract strict union；Bun 與 @types/bun 升至 1.4.4）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-23（ADR-158：選定 server-to-browser runtime payload guards；Bun 1.4.4 formatter 取代 Prettier）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-本輪重新核對 npm registry 最新版與 GitHub Actions latest：Bun／`@types/bun` 為 1.4.4；TypeScript 7.0.2、Prettier 3.9.10、Playwright Core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 未變。以 registry 官方 `@oven/bun-linux-x64@1.4.4` tarball SHA1／SHA512 核對後升級；packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+本輪採 Bun 1.4.4 內建 `bun fmt`；依舊鎖檔取得 Prettier 3.9.10，與 Bun formatter 對目前 438 個 format-check 路徑各自輸出後逐檔 byte compare，結果**438/438 完全一致**，故移除 Prettier 直接依賴並保留 `.prettierrc.json`。Bun／`@types/bun` 1.4.4 與 TypeScript 7.0.2 維持固定；另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`。playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 維持 latest 核查；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
 
-前輪新增 strict `client/websocket-transport.ts`，把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
-自 `client/main.js` 移到可單元測試的 TypeScript 邊界；收件端以 `unknown` 檢查 JSON object 與 string `t`，不把 malformed envelope
-交給 main handler。這不是每個 `ClientEvent` payload 的深 schema，main 本身仍未納入 TypeScript 檢查；現況 **114 支 client `.ts`**、
-`client/main.js` **5549 行**。focused fake-socket／browser startup／static／UI 與 system-UI wiring **18/0、5 files**；typecheck、format check、build 通過；完整 suite **1468 pass／0 fail／5334 expects、170 files**。全部使用隔離測試與 mock transport，不連實際遊戲。
+strict `client/websocket-transport.ts` 把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
+自 `client/main.js` 移到可單元測試的 TypeScript 邊界；JSON object＋string `t` 後再呼叫 optional payload guard，guard 回 false 或 throw 都 fail-closed。
+`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；trade／messenger nested unions 明列為缺口，未識別／未分類 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **115 支 client `.ts`**、`client/main.js` **5549 行**。本輪新增驗收與 full suite 數據見 ADR-158；全部以隔離測試／mock，未操作 LIVE 角色或 save。
 
 ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
@@ -32,9 +31,19 @@ strict／format／build通過；完整1038/44（1082 tests／120 files，287.81s
 strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s），對2eaa5f2失敗multiset新增0／移除0，CI仍不綠。
 七DPR×五尺寸／游標、16組原PNG分層與LIVE同PID唯讀驗證見 [PIXEL_CAMERA](PIXEL_CAMERA.md)；main／3MJS仍待實際遷移。
 
-## 最新增量：strict WebClient server-to-browser union（ADR-157）
+## 前輪增量：strict WebClient server-to-browser union（ADR-157）
 
-`server/src/net/webclient-messages.ts` 定義 `ClientEvent` JSON 投影與 browser bridge 其他出站 message union，`clientEventJson` 保留各 `t` discriminator；`WebClient.send` 由 `unknown` 改接受該 union，並把 `touch-result` 成功／拒絕形狀分開。這只提供 TypeScript 編譯期保證，不是 JSON 的 runtime validator；browser transport 仍僅檢查 object＋string `t`，`main.js` 尚未納入 strict compiler。新 Bun 1.4.4 下 frozen install、typecheck、format check 與 build 通過；focused **44/0、4 files**，完整 suite **1468/0、5334 expects、170 files（345.05 s）**。具體界線見 [BUN_MIGRATION](BUN_MIGRATION.md)／[ADR-157](DECISIONS.md)。
+`server/src/net/webclient-messages.ts` 定義 `ClientEvent` JSON 投影與 browser bridge 其他出站 message union，`clientEventJson` 保留各 `t` discriminator；`WebClient.send` 由 `unknown` 改接受該 union，並把 `touch-result` 成功／拒絕形狀分開。ADR-157 當時只證明 TypeScript 編譯期保證，不是 JSON runtime validator；選定 inbound payload guards 於 ADR-158 加入，仍非全面 schema，`main.js` 也尚未納入 strict compiler。詳見下節與 [ADR-157](DECISIONS.md)。
+
+## 最新增量：選定 server-to-browser payload guards 與 Bun formatter（ADR-158）
+
+`client/websocket-transport.ts` 新增可選 `validateMessagePayload` hook：JSON envelope 通過後才執行；false 或 exception 都走既有 malformed callback，絕不交給 main handler。`client/main.js` 明確注入 `validateServerMessagePayload`。`client/server-message-validation.ts` 用既有 login／feedback／drop parsers 及 event-specific guards 驗證選定家族，且 compile-time assertion 要求 `WebClientServerMessage["t"]` 每種 discriminator 必須在 guarded list 或 gap list 分類。
+
+本輪 guarded 覆蓋：login／characters／create-name-delete／errors；hit、active-hit、touch、stat-basis、test-tools；field／self snapshots、movement、mob／NPC／user、temporary stats；party／party-command／trade-command／fame／chat／whisper／find；skills／inventory／shop／dialogue；drop／loot／notice／disconnect／`t: "unknown"`。精確列表由 `SERVER_MESSAGE_VALIDATED_TYPES` 提供。刻意明列 gaps 是 `trade` 與 `messenger` 的 nested unions；任何不在 validator map 的未識別／未來 discriminator 仍 pass-through。不得將它描述成完整 `ClientEvent` schema；`client/main.js` 仍未 strict 型別化。
+
+測試包含代表 payload 接受／拒絕、欄位型別／範圍與路徑／巢狀資料案例，也驗 transport 將 guard false／throw 導入 malformed path；範圍、完整 gate 結果見 [ADR-158](DECISIONS.md)。沒有登入 LIVE、操作角色或改 save。
+
+格式化則由 Prettier 3.9.10 換成 Bun 1.4.4 內建 `bun fmt`：兩個 formatter 使用同一 `.prettierrc.json`，438 個格式化路徑的結果逐檔 byte-for-byte 一致；已移除 Prettier package／lock entry，設定檔保留。`bun check --no-script` 亦在 730 個 TS files 無 type errors；維持 pinned TypeScript 7.0.2 `tsc` 為正式 typecheck script。
 
 ## 唯一版本與安裝入口
 
@@ -43,13 +52,13 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 | Bun | 1.4.4 | `.bun-version`、根 `package.json` 的 `packageManager` |
 | TypeScript | 7.0.2 | 根 `package.json` 與 `bun.lock` |
 | Bun 型別 | 1.4.4 | 同上；與 runtime 同版 |
-| Prettier | 3.9.10 | 同上與 `.prettierrc.json` |
+| Formatter | Bun 1.4.4 `bun fmt` | Bun runtime 內建；`.prettierrc.json` |
 | Playwright Core | 1.64.1 | 根 devDependencies / bun.lock，Bun 直接執行 |
 | Chromium tooling | 153.0.0 | 同上；只作隔離 browser 驗證 |
 | checkout Action | v7.0.1 | CI 固定完整 commit SHA |
 | setup-bun Action | v2.2.0 | CI 固定完整 commit SHA |
 
-版本來源：**2026-10-23** 重新查詢六項 npm latest 與兩個 GitHub Actions latest；Bun／`@types/bun` 升到 1.4.4，其餘 exact pins 沒變。`@oven/bun-linux-x64@1.4.4` tarball SHA1 `9ffc89c427ea37043589bdfe2d5999b01cb2eee2` 與 SHA512 `CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog==` 與 registry metadata 相符；新 runtime `bun install --frozen-lockfile --ignore-scripts` 檢查 **27 installs／47 packages，無變更**。其餘版本來源：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.4)、[TypeScript registry](https://registry.npmjs.org/typescript/latest)、[Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、[Prettier registry](https://registry.npmjs.org/prettier/latest)、[Playwright Core registry](https://registry.npmjs.org/playwright-core/latest)、[Chromium tooling registry](https://registry.npmjs.org/@sparticuz/chromium/latest)、[checkout releases](https://github.com/actions/checkout/releases/latest)、[setup-bun releases](https://github.com/oven-sh/setup-bun/releases/latest)。ADR-093 的 2026-10-19 查核是當時基線，不代表目前仍相同；之後升版必須重跑 lockfile、型別、回歸與瀏覽器 build。
+版本來源：**2026-10-23** 重新查詢五項保留的 npm package pins 與兩個 GitHub Actions latest；Bun／`@types/bun` 為 1.4.4，TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0 維持 latest。`@oven/bun-linux-x64@1.4.4` tarball SHA1 `9ffc89c427ea37043589bdfe2d5999b01cb2eee2` 與 SHA512 `CHbbkmHVM28T1GFq+6GL4Ao4ujwwYwj1CxFFwEFzLanPfNsId9AhbIP0Q4reWuWBkGimUkoQygrK7Rgjtj3vog==` 與 registry metadata 相符；ADR-158 移除 Prettier 後，frozen install 結果另於 [ADR-158](DECISIONS.md) 記錄。Prettier 3.9.10 只作 formatter byte-comparison 的已驗證臨時工具，不再是 package pin。版本來源：[Bun release](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.4)、[TypeScript registry](https://registry.npmjs.org/typescript/latest)、[Bun 型別 registry](https://registry.npmjs.org/@types/bun/latest)、[Playwright Core registry](https://registry.npmjs.org/playwright-core/latest)、[Chromium tooling registry](https://registry.npmjs.org/@sparticuz/chromium/latest)、[checkout releases](https://github.com/actions/checkout/releases/latest)、[setup-bun releases](https://github.com/oven-sh/setup-bun/releases/latest)；formatter comparison 使用 [Prettier 3.9.10](https://registry.npmjs.org/prettier/latest)。ADR-093 的 2026-10-19 查核是當時基線，不代表目前仍相同；之後升版必須重跑 lockfile、型別、回歸與瀏覽器 build。
 
 先用官方發行版安裝固定 Bun，再從 repository 根目錄執行：
 
@@ -69,14 +78,14 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **114 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **115 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
   **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5549 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
-- `client/websocket-transport.ts` 是 browser socket lifecycle／頂層 JSON envelope 的 strict TS 模組；`ClientEvent` 各 payload 的深度 runtime validation 仍未完整，不能把這個 boundary 說成整個 `main.js` 已型別化。
+- `client/websocket-transport.ts` 是 browser socket lifecycle／頂層 JSON envelope 的 strict TS 模組，且由 `client/main.js` 接上 optional selected-payload guard；精確 guarded types、`trade`／`messenger` gaps 與未識別 runtime `t` pass-through 見 `client/server-message-validation.ts`（已知 `t: "unknown"` 有 guard）。這不是完整 `ClientEvent` runtime schema，也不代表 `main.js` 已型別化。
 - `bun run build` 用 Bun 的 browser/ESM bundler 輸出 ignored `dist/client`，複製 HTML、CSS 與字型。
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。

@@ -23,6 +23,8 @@ export interface ClientWebSocketHandlers {
 export interface ClientWebSocketTransportOptions {
   createSocket(url: string): ClientWebSocket;
   onNotOpen(messageType: string): void;
+  /** Optional per-message payload guard; false or a thrown error uses malformedMessage. */
+  validateMessagePayload?(message: ServerEventEnvelope): boolean;
 }
 
 function isServerEventEnvelope(value: unknown): value is ServerEventEnvelope {
@@ -33,12 +35,13 @@ function isServerEventEnvelope(value: unknown): value is ServerEventEnvelope {
 /**
  * Owns the browser's same-origin WebSocket generation, JSON envelope and send-ready checks.
  * Replaced sockets are fenced before they are closed, so their late events cannot affect the new
- * session. This validates only JSON plus the top-level `t` discriminator; event payloads remain the
- * responsibility of the event handlers.
+ * session. An optional application guard can reject selected event payloads; its coverage is
+ * deliberately explicit and does not imply that every message family has a deep runtime schema.
  */
 export function clientWebSocketTransport({
   createSocket,
   onNotOpen,
+  validateMessagePayload,
 }: ClientWebSocketTransportOptions) {
   let current: ClientWebSocket | undefined;
 
@@ -68,6 +71,16 @@ export function clientWebSocketTransport({
         return;
       }
       if (!isServerEventEnvelope(value)) {
+        handlers.malformedMessage(text);
+        return;
+      }
+      let payloadIsValid = true;
+      try {
+        payloadIsValid = validateMessagePayload?.(value) ?? true;
+      } catch {
+        payloadIsValid = false;
+      }
+      if (!payloadIsValid) {
         handlers.malformedMessage(text);
         return;
       }

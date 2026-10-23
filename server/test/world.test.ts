@@ -482,7 +482,15 @@ test("the monsters walk only while somebody is watching, and everyone sees the s
 });
 
 test("loot on the ground expires for everyone, and a late joiner is shown it first", () => {
-  const field = stubField();
+  const field = new FieldInstance<FakeMember>({
+    map: stubMap(),
+    mobTemplate: () => STUB_TEMPLATE,
+    // Exercise the shipped policy deterministically: the first `range(0, 1000)` is a meso hit.
+    dropRandom: {
+      next: () => 0,
+      range: (lo, span) => (span === 0 ? 0 : lo),
+    },
+  });
   const hero = new FakeMember(1, "Hero");
   field.join(hero);
 

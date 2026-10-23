@@ -33,18 +33,18 @@
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。
 - **持久化**：JSON save＋暫存檔改名；保留玩家裝備實例，不能用 WZ 模板回填或重 seed 舊進度。
 
-2026-10-23 重新核對 latest 並鎖定：**Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4、Prettier 3.9.10**
-（playwright-core 1.64.1／Chromium 153.0.0 同輪核對，只作隔離瀏覽器驗證）。
-根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
+2026-10-23 重新核對 latest 並鎖定：**Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4**
+（playwright-core 1.64.1／Chromium 153.0.0 同輪核對，只作隔離瀏覽器驗證）。格式化改用 Bun 內建 `bun fmt`；
+曾用鎖檔內的 Prettier 3.9.10 作遷移比較，438 個原格式檢查路徑輸出逐位元組一致後移除 Prettier 直接依賴；
+`.prettierrc.json` 保留為共用格式設定。根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
 **全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），
 唯一尚未型別化的 authored 來源仍是主瀏覽器入口 `client/main.js`（5549 行，仍為 JS／TS 混用）；
-不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)
-與 [嚴格TS遷移](docs/BUN_MIGRATION.md)。
+不可把目前 typecheck 成功當成全客戶端已嚴格檢查。WebSocket 收件端已對選定 server event 加 runtime guard；`trade`／`messenger` 內層仍是明列缺口，未識別／未分類的 runtime `t` 仍 pass-through（已知的 `t: "unknown"` 則有 guard），不是全訊息 schema。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)、[嚴格TS遷移](docs/BUN_MIGRATION.md) 與 ADR-158。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；114支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；115支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
