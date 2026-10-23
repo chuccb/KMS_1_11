@@ -1,8 +1,23 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-2026-10-20。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-23。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
+## 最新增量：獨立 strict WebSocket transport 與 JSON envelope（ADR-156）
+
+新增 `client/websocket-transport.ts`，由嚴格 TypeScript 模組擁有 browser socket 建立／替換／送出／關閉、open-state 檢查、
+JSON parse 與 active-connection generation fence；`client/main.js` 不再直接持有 `WebSocket` 或散落檢查 `readyState`，
+所有既有 request／combat gates 改讀 typed `clientTransport.open`。相同 origin 的 `/ws`、login callback、close cleanup、
+登入狀態與回標題碼 `1000 / "return to title"` 保持由 main 的既有整合流程注入，未自動連線或登入。
+
+輸入先以 `unknown` 解析，只接受 JSON object 且 `t` 為 string；格式錯誤／缺 discriminator 按既有「unreadable message」路徑記錄，
+不讓 `null`／array 直接進入 `handle`。這只是**頂層 envelope 守衛**，不是 `ClientEvent` 每個 payload 的深度 runtime schema；
+`main.js` 仍是唯一未 strict 型別化的 authored client 來源。新增 5 個 isolated fake-WebSocket 回歸（send gate／JSON serialization、
+invalid envelope、舊 socket stale event fence、active error/close、return-to-title close code）；mock browser startup／static／UI 與
+system-UI source wiring 聚焦共 **18/0、5 files**。`typecheck`／`format:check`／`build` 通過；完整 `bun run test` **1468 pass／0 fail／5334 expects、170 files**（378.63 s）。本輪不新增依賴、不改 strict、不連真遊戲、不操作帳號／角色／save。
+
+目前 `client/` 有 **114 支 `.ts`**，`client/main.js` 為 **5549 行**，仍需持續作領域門面拆分及型別化；不能把 transport 抽出說成 main 遷移已完成。
+
+## 前輪增量：探針嚴格 TS 化、背包視窗幾何抽出，全案僅餘 main.js（ADR-109）
 
 `server/scripts/client_probe.mjs`（941 行）重寫為 **`client_probe.ts`（1749 行，納入 tsc 檢查）**：`ShimElement`
 全欄位宣告（DOM 預設 `hidden/disabled/checked = false`）、`DomEvent`/`ShimDocument`/`ShimWindow`/`ClientProbe`
@@ -237,13 +252,13 @@ bun test --timeout 30000 ./server/test/typed-ui-components.test.ts ./server/test
 2. ~~`server/scripts/client_probe.mjs` 的形式遷移~~ **已完成（ADR-109）**：現為 `server/scripts/client_probe.ts`，納入 strict 檢查並由 `server/test/client-ui.test.ts` spawn 執行。**剩餘唯一未完成項是 client/main.js**。
 3. 完成 typed whisper 歷史場景的 WZ/native admission 對齊；繼續審核其餘既有資料邊界與重複責任；目前 strict typecheck 不等於每個 HTTP payload 都有深 runtime schema。
 4. **44 項失敗已於 ADR-108 全數結案（1213 pass / 0 fail）**；本節保留歷史清單供追溯，不再代表現況失敗。
-5. 全案最後的格式、型別、完整回歸、建置與 HTTP 交叉確認；目前只有以上階段性結果。
+5. **本輪全套工程 gates 已綠**：ADR-156 的 `typecheck`／`format:check`／`build`／完整 suite 均通過；不表示完成主入口嚴格型別化、每種 HTTP／WebSocket event 的深 schema，或替使用者進行手動登入／角色遊玩驗收。後續任何變更仍須重跑對應 gates。
 
 ### 尚未遷移的來源（ADR-109 起僅餘 main.js）
 
-- **client/main.js（5525 行）**：仍為 JS/TS 混合入口，未完成分層與型別化。ADR-109 已完成靜態耦合普查並抽出
-  背包視窗幾何（`client/inventory-window.ts`）作為第一個門面分層示範；其餘領域（shop、transport、rendering、
-  pointer/UI 狀態）仍與檔案層級狀態互相糾結，需逐領域重構，不是一次改名能完成。
+- **client/main.js（5549 行）**：仍為 JS／TS 混合入口，未完成分層與型別化。ADR-109 的耦合普查與 `client/inventory-window.ts`、
+  既有 shop/window/hud 抽離，以及 ADR-156 的 `client/websocket-transport.ts`（socket lifecycle／頂層 envelope）都是逐域門面；
+  其餘 shop operation、rendering、pointer/UI state 與 event-specific payload validation 仍在 main，需逐領域重構，不是一次改名能完成。
 - ~~server/scripts/client_probe.mjs~~ → 已於 ADR-109 遷為 `client_probe.ts`。
 
 ### 已通過的 44 個案例（ADR-108 結案，保留歷史標題供追溯）

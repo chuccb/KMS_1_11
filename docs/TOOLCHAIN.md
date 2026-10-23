@@ -1,15 +1,20 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-20（ADR-109）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-23（ADR-156）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-本輪續作：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
+本輪新增 strict `client/websocket-transport.ts`，把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
+自 `client/main.js` 移到可單元測試的 TypeScript 邊界；收件端以 `unknown` 檢查 JSON object 與 string `t`，不把 malformed envelope
+交給 main handler。這不是每個 `ClientEvent` payload 的深 schema，main 本身仍未納入 TypeScript 檢查；現況 **114 支 client `.ts`**、
+`client/main.js` **5549 行**。focused fake-socket／browser startup／static／UI 與 system-UI wiring **18/0、5 files**；typecheck、format check、build 通過；完整 suite **1468 pass／0 fail／5334 expects、170 files**。全部使用隔離測試與 mock transport，不連實際遊戲。
+
+ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
-（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源只剩 `client/main.js`（5525 行）**；
+（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源仍是 `client/main.js`（5549 行）**；
 靜態耦合普查顯示它是彼此糾結的單體（321 個 top-level 宣告中僅 3 個零耦合），沒有可機械切開的純區塊，
 故採門面分層逐領域搬移，不以改名冒充遷移。frame／play 已於前輪遷為 strict TS，詳
 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。歷史數字／PID不代表當前 LIVE。
 
-最新一輪strict／format／build通過、focused25/0；完整1064/44（1108tests／124files，267.35s），對當輪前基準失敗multiset新增0／移除0。35純imports／0 I/O，手動角色場景未代玩家執行。
+ADR-109 時點的strict／format／build驗證：focused25/0；當時完整1064/44（1108tests／124files，267.35s），對該輪前基準failure multiset新增0／移除0。35純imports／0 I/O，手動角色場景未代玩家執行；不代表ADR-156的現況。
 
 前輪三個login UI實作模組strict TS遷移：main5963→5356行、client89支TS，保留主入口／3MJS未完債務。
 六項registry latest重新查證與下表exact pins一致（UTC2026-10-18T16:09:10Z／台北2026-10-19）；不為升級而虛構版號。
@@ -64,13 +69,14 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **107 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **114 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
-  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5525 行，JS／TS 混用），必須繼續實際遷移；
+  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5549 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
   `server/test/bun-static.test.ts` 以獨立 port 檢查此路徑，不連遊戲、不登入。
+- `client/websocket-transport.ts` 是 browser socket lifecycle／頂層 JSON envelope 的 strict TS 模組；`ClientEvent` 各 payload 的深度 runtime validation 仍未完整，不能把這個 boundary 說成整個 `main.js` 已型別化。
 - `bun run build` 用 Bun 的 browser/ESM bundler 輸出 ignored `dist/client`，複製 HTML、CSS 與字型。
   建置結果是產物，不是 authored JavaScript 原始碼。
 - `node:` 匯入是 Bun 提供的標準函式庫相容介面，不呼叫 Node runtime；現存 `node:test` 來源由 Bun 執行。

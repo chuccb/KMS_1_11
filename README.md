@@ -37,14 +37,14 @@
 （playwright-core 1.64.1／Chromium 153.0.0 同輪核對，只作隔離瀏覽器驗證）。
 根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口。
 **全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），
-唯一尚未型別化的 authored 來源是主瀏覽器入口 `client/main.js`（5445 行，仍為 JS／TS 混用）；
+唯一尚未型別化的 authored 來源仍是主瀏覽器入口 `client/main.js`（5549 行，仍為 JS／TS 混用）；
 不可把目前 typecheck 成功當成全客戶端已嚴格檢查。範圍及驗證狀態見 [TOOLCHAIN](docs/TOOLCHAIN.md)
 與 [嚴格TS遷移](docs/BUN_MIGRATION.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的純規則 .ts；107支TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；114支TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture

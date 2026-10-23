@@ -5974,3 +5974,54 @@ loader 的 `+72`→`+76`、以及死亡閘門 `0x12`→`0x10`。
   驗證 kind 0 local cleanup／offset guard、kind 1 rest、kind 2 placed path，無帳密、WebSocket、角色或 save。
 - `bun run typecheck`、`bun run format:check`、`bun run build` 通過。
 - `bun run test`：**1463 pass／0 fail／5334 expect、169 files**（374.64 s）。
+
+## ADR-156：將 browser WebSocket lifecycle 與 JSON envelope 移至 strict TypeScript（2026-10-23）
+
+**狀態**：已接受（transport boundary 與頂層 discriminator 守衛完成；`client/main.js` 本體及逐 event payload 深 schema 仍未完成）
+
+### 背景
+
+`client/main.js` 直接建立及替換 `WebSocket`，負責 JSON encode／parse，並在多個登入、移動、戰鬥、背包與 UI guard 重複讀取
+`socket.readyState`。收件端把 `JSON.parse` 的結果不經結構檢查送入 `handle`，因此 `null`、array 或沒有 `t` 的 object 也會進入
+依 discriminator 分派的主入口。這使 transport lifecycle 留在唯一未 strict 型別化的 5,549 行整合入口，也令它的 stale socket
+防護與測試無法獨立。
+
+### 發現
+
+1. 瀏覽器一律使用頁面同 origin 的 `/ws`：HTTPS 配 `wss:`、HTTP 配 `ws:`。登入啟動已有 startup-ready gate，socket open 後才送
+   login request；不得把模組 import 或 page startup 改成自動登入。
+2. 連線世代不可混用：替換 socket 時必須先把新連線設為 current，再關閉舊連線；舊連線遲到的 open／error／close／message
+   不得改變新連線的登入、畫面或世界狀態。
+3. JSON parse 的結果必須先當 `unknown`。頂層 envelope 可驗證為 object 且有 own string `t`；這不代表其中每種 event 的 payload
+   欄位已通過深度驗證，亦不代表原版 wire schema。
+4. 原始回標題操作明確以 close code `1000`、reason `"return to title"` 關閉目前 socket；open gate 之外的 send 會在 client log 記錄
+   request kind，而不是把訊息排隊重送。
+
+### 決策
+
+1. 新增 `client/websocket-transport.ts`，以 strict interfaces 描述 `ClientWebSocket`、`ClientRequestEnvelope`、
+   `ServerEventEnvelope` 與 lifecycle callbacks；不依賴 server runtime、不新增套件。Browser `WebSocket.OPEN` 的標準 `readyState=1`
+   用具名 `WEBSOCKET_OPEN_STATE` 常數表達，避免無說明的 magic number。
+2. transport 擁有 current socket、generation fence、connect／replace、open-state getter、JSON send 與指定 code/reason 的 close。
+   `ClientRequestEnvelope` 和 `ServerEventEnvelope` 是方向性標籤，不冒充每種 message kind 的具體 payload 型別。
+3. 收件端 parse 到 `unknown`；只接受 JSON object 且 own `t` 為 string，其他內容交給 malformed callback，仍沿原「unreadable message」
+   記錄方式保留最多 60 字元。這是外層格式守衛，**不是**完整 `ClientEvent` runtime validator；深 payload/schema 工作另列待辦。
+4. `client/main.js` 將 raw socket/readystate gates 改為 `clientTransport.open`，透過 transport 建立同源 socket；登入狀態、錯誤提示、遊戲狀態
+   reset、modal/場地 cleanup 仍留在 main callback，因它們擁有遊戲 domain state。原手動登入 gate 與 return-to-title close code 不變。
+5. `native-system-ui.test.ts` 的 source pin 改為驗證新的 `clientTransport.close(1000, "return to title")` 整合路徑；保留行為斷言，
+   不因抽離而刪測試或降低 gate。主入口依然是 JS／TS 混合來源，114 支 `.ts` 不代表全案完成型別遷移。
+
+> **邊界原則：先把 I/O lifecycle 從場景整合程式移出，再逐步補每種 event 的 schema。** transport 能辨識「有沒有頂層 `t`」；
+> 它不能替 `field`、`mob-move`、`drop-enter` 等事件保證其餘欄位可信，不能把薄 envelope 守衛冒稱深度 validation。
+
+### 測試與驗證
+
+- 新增 `server/test/client-websocket-transport.test.ts` 五項 isolated fake-socket 回歸：(1) open gate＋JSON serialize，(2) valid／malformed
+  envelope，(3) replaced-socket stale event fence，(4) active socket error／close，(5) return-to-title close code／reason。
+- 真 browser startup source/bundle module graph、mock login retry、static module serving、client UI 與 native-system wiring focused
+  **18 pass／0 fail，5 files**。source pin 仍驗證 login／modal／item drag 等未變領域。
+- Gates：`bun run typecheck`、`bun run format:check`、`bun run build` 均通過；`bun run test` **1468 pass／0 fail／5334 expect、170 files**
+  （378.63 s）。
+- 沒有連 LIVE 遊戲、登入、建立／操作角色或修改 save；無 EXE／C／listing／WZ／protocol/server gameplay 改動。
+- 現況：`client/websocket-transport.ts` 為 strict TS，`client/main.js` 仍 5,549 行、唯一未 strict 型別化的 authored client source。
+  下一個遷移仍需按整合 domain 建 typed façade，並逐 event 加深 JSON schema；不可因此降低 `strict`、加 `allowJs` 或用 `any` 包過去。

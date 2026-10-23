@@ -532,6 +532,8 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | 揮擊（Ctrl） | `{t:"attack",mobId,facingLeft}` | c2s `0x1B` → s2c `0x34`（怪的 stat）／`0x30`（倒下動畫）／`0x31`（屍體消失），傷害數字在送的人自己的封包裡 |
 | 升級特效（別人的） | — | s2c `0x29` |
 
+`client/websocket-transport.ts` 管理瀏覽器 WebSocket 連線世代、送出就緒／關閉閘門與 JSON 外層解析；只有 JSON object 且頂層 `t` 為字串時才交給 main。這不是逐欄驗證每種 event payload；`client/main.js` 仍未 strict 型別化。
+
 ## JSON 協定（我們的設計，不是證據）
 
 伺服器 → 頁面的每一則訊息都是 `{ "t": <kind>, ... }`，`kind` 就是

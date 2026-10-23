@@ -36,8 +36,9 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 
 | 位置 | 責任與界線 |
 |---|---|
-| `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大，未聲稱已完整模組化 |
-| `client/*.ts` | 101個實作型別化的動畫／物理／呈現／UI／音訊與共用純規則；無重複 declaration |
+| `client/main.js` | 啟動、場景整合、輸入與網路狀態；仍過大且未嚴格型別化，逐領域分層尚未完成 |
+| `client/websocket-transport.ts` | 嚴格型別化的 browser WebSocket 建立／替換／送出／關閉、generation fence、JSON envelope 與 open guard；僅檢查頂層 `t`，不宣稱深 payload schema |
+| `client/*.ts` | 114個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
 | `client/social-commands.ts`／`party-state.ts`／`party-invitation.ts`／`chat-entry.ts` | 原社交指令嚴格解析（`/파티*`／`/귓속말`／`/찾기`＋明示別名）、`55C5E0` 六格名冊狀態、邀請確認所有權與編輯框生命週期；`server/src/net/chat-input.ts` 與 bridge 共用同一路由，斜線行不會落到公開聊天 |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
@@ -103,11 +104,11 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5525 行，靜態耦合普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；ADR-109 已抽出 `client/inventory-window.ts`、ADR-110 已抽出 `client/shop-window.ts`、ADR-112 再把 status bar 收回 `client/hud.ts`／`client/jobs.ts`）。
-最新增量（ADR-109）：strict／format／build 通過；新增 `inventory-window` 9/9；探針 TS 化後輸出與舊 `.mjs` 逐行相同；完整 suite 見 ADR-109（ADR-108 已達 **1213 pass / 0 fail**、44 項歷史失敗全數結案）。
-前輪完整 1205/8（1213 tests／142 files）與此前 1064/44 均保留歷史時點意義，見 [BUN_MIGRATION](BUN_MIGRATION.md)。strict／format／build 通過不代表全遊戲驗收。
+client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5549 行；ADR-109 普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；已抽出 `client/inventory-window.ts`、`client/shop-window.ts`、`client/hud.ts`／`client/jobs.ts`，ADR-156 再抽出 `client/websocket-transport.ts`）。
+本輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
+ADR-108／109 的 1213 pass／0 fail、inventory-window 9/9 與 probe 輸出等價結果是各自歷史時點；較早的 1205/8、1064/44 亦不代表現況，詳 [BUN_MIGRATION](BUN_MIGRATION.md)。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
-歷史PID4942／入口已不在當前沙箱；本輪不宣稱恢復其程序或ignored save。本輪已依既有授權開全新隔離入口：8515與ignored generated/preview-20261019-tool-cleanup.json，preview／observer新level1進度，非恢復；title-only驗證0WS且save hash不變，不覆蓋既有save。
+舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。本輪 LIVE 是另開的 memory-only 隔離服務（web port 8515、`--save off`、WZ map `000040000`；載入 63 mobs），HTTP health、`main.js` 與 strict transport 模組皆回應 200；沒有登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在該程序記憶體中，重啟即消失；預覽是否在線以本輪 LIVE 入口為準，不以舊 PID／save 路徑推定。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
 標題／登入／世界與選角責任、原證及驗證見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
 鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

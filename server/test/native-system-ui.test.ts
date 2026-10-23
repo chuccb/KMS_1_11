@@ -143,7 +143,10 @@ test("renderer/input wiring: original paths, preview/cancel, local stale-action 
   assert.doesNotMatch(quick, /send\(/);
   assert.match(main, /drawWhisperRecipient\(\)/);
   assert.match(main, /beginUserRequest\(whisperRecipient,text\)/);
-  assert.match(main, /quitToTitle=true;socket.close\(1000/);
+  assert.match(
+    main,
+    /quitToTitle\s*=\s*true;\s*clientTransport\.close\(1000,\s*["']return to title["']\)/,
+  );
   assert.match(dialogs, /c\.mode === "text"/);
   assert.match(dialogs, /event.isComposing/);
 });

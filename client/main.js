@@ -34,6 +34,7 @@ import {
 import { dropRenderer } from "./drop-renderer.ts";
 import { CLIENT_READY_EVENT, clientStartupReady } from "./startup-guard.ts";
 import { gameElements } from "./game-dom.ts";
+import { clientWebSocketTransport } from "./websocket-transport.ts";
 import {
   INVENTORY,
   INVENTORY_TABS,
@@ -269,8 +270,7 @@ const loginScreens = loginScreen({
   creation: () => creationDialogs,
 });
 
-/** @type {WebSocket | undefined} */
-let socket, quitToTitle = false;
+let quitToTitle = false;
 /** @type {{ x: number, y: number, mapId: number } | undefined} */
 let self;
 /** @type {any} */
@@ -358,105 +358,132 @@ const MOVE_TICK_MS = 100;
 
 // ---------------------------------------------------------------- transport
 
-/** Sends one JSON message; a socket that is not open yet is a programming error, not a user one. */
-function send(message) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    logLine(`not connected: ${message.t}`);
-    return;
-  }
-  socket.send(JSON.stringify(message));
-}
+const clientTransport = clientWebSocketTransport({
+  createSocket: (url) => new WebSocket(url),
+  onNotOpen: (messageType) => logLine(`not connected: ${messageType}`),
+});
 
+/** The transport owns socket state, JSON encoding and the open-state check. */
+function send(message) {
+  clientTransport.send(message);
+}
 
 function connect() {
   if (!clientStartupReady(document.documentElement) || loginScreens.loginPending) return;
-  quitToTitle=false;
+  quitToTitle = false;
   feedback.reset();
-  buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
+  buffs.clear();
+  nativeBasis = undefined;
+  nativeShotRange = 200;
+  nativeAmmoPad = 0;
+  nativeWornFacts = [];
   loginScreens.showPanel(ui.connect);
   loginScreens.setLoginPending(true);
   ui.status.textContent = "連線中…";
   ui.status.classList.remove("bad");
-  const previous = socket;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const connection = new WebSocket(`${scheme}://${location.host}/ws`);
-  socket = connection;
-  previous?.close();
-  connection.addEventListener("open", () => {
-    if (socket !== connection) return;
-    ui.status.textContent = "已連線，送出登入…";
-    ui.status.classList.remove("bad");
-    send({ t: "login", user: ui.user.value, password: ui.pass.value });
-  });
-  connection.addEventListener("error", () => {
-    if (socket !== connection) return;
-    loginScreens.setLoginPending(false);
-    // The usual cause is a proxy that does not forward the upgrade (an https page whose proxy
-    // refuses `wss`). Saying so beats a page that silently does nothing.
-    ui.status.textContent =
-      "WebSocket 連線失敗：請確認服務可用，且此網址的代理支援 WebSocket upgrade。";
-    ui.status.classList.add("bad");
-    logLine("websocket error");
-  });
-  connection.addEventListener("close", () => {
-    if (socket !== connection) return;
-    loginScreens.setLoginPending(false);
-    feedback.reset();
-    playerContext.close(false); partyMenuState.clear();
-    systemPanel.close(false, false);
-    itemDialog.close(false);
-    quickDrag = undefined;
-    itemDrag = undefined;
-    slotPending = shopPending = mesoPending = false;
-    combatEpoch++;
-    mobAttackFx.clear();mobWorldEffects.length=0;mobPreview.reset();
-    skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();
-    combatCatalog.clear(); attackLooks.clear(); avatarWarmLooks.clear(); bodyWarmLooks.clear();
-    clearAttackAlert(playerBody);
-    skillEffects.length=0;skillHitEffects.length=0;weaponEffects.clear();activePredictions.clear();buffs.clear();
-    resetContact();
-    resetFace(selfView);
-    resetAvatarMotion(selfView);
-    deathFx.reset();
-    speechBalloons.clear();
-    npcVisuals.clear();
-    resetWhisper();
-    chatHistoryPanel.cancelDrag();
-    visualFieldActive = false;
-    lastAttackTrace = undefined;
-    ++mapGeneration;
-    entityCatalog.clear();
-    revivePanel.reset();
-    selfSwing = undefined;
-    projectiles.length = damageMarks.length = 0;
-    ui.where.textContent = "斷線";
-    ui.status.textContent = "連線結束。重新載入頁面再試一次。";
-    ui.status.classList.add("bad");
-    buffs.clear(); nativeBasis=undefined; nativeShotRange=200; nativeAmmoPad=0; nativeWornFacts=[];
-    closeDialogue(false);
-    logLine("websocket closed");
-    if (quitToTitle) {
-      quitToTitle = false;
-      self = selfView = playerBody = undefined;
-      users.clear(); mobs.clear(); npcs.clear(); drops.clear();
-      inventory = undefined; quickDrag = undefined; resetWhisper();
-      ui.chatbox.classList.add("hidden");
-      testToolsPanel.close(); skillPanel.toggle(false); statPanel.toggle(false); equipPanel.toggle(false);
-      toggleInventory(false); closeShop(false); closeDialogue(false);
-      tradeOpen = false; tradeModel.clear(); tradeHover = tradeHoverOffer = undefined; tradeLogScroll.reset();
-      closeMessenger(false);
-      audio.stop(); loginScreens.showPanel(ui.connect); loginScreens.closeTitleLogin();
-    }
-  });
-  connection.addEventListener("message", (event) => {
-    if (socket !== connection) return;
-    let message;
-    try {
-      message = JSON.parse(String(event.data));
-    } catch {
-      return logLine(`unreadable message: ${String(event.data).slice(0, 60)}`);
-    }
-    handle(message);
+  clientTransport.connect(`${scheme}://${location.host}/ws`, {
+    open() {
+      ui.status.textContent = "已連線，送出登入…";
+      ui.status.classList.remove("bad");
+      send({ t: "login", user: ui.user.value, password: ui.pass.value });
+    },
+    error() {
+      loginScreens.setLoginPending(false);
+      // The usual cause is a proxy that does not forward the upgrade (an https page whose proxy
+      // refuses `wss`). Saying so beats a page that silently does nothing.
+      ui.status.textContent =
+        "WebSocket 連線失敗：請確認服務可用，且此網址的代理支援 WebSocket upgrade。";
+      ui.status.classList.add("bad");
+      logLine("websocket error");
+    },
+    close() {
+      loginScreens.setLoginPending(false);
+      feedback.reset();
+      playerContext.close(false);
+      partyMenuState.clear();
+      systemPanel.close(false, false);
+      itemDialog.close(false);
+      quickDrag = undefined;
+      itemDrag = undefined;
+      slotPending = shopPending = mesoPending = false;
+      combatEpoch++;
+      mobAttackFx.clear();
+      mobWorldEffects.length = 0;
+      mobPreview.reset();
+      skillEffects.length = 0;
+      skillHitEffects.length = 0;
+      weaponEffects.clear();
+      activePredictions.clear();
+      combatCatalog.clear();
+      attackLooks.clear();
+      avatarWarmLooks.clear();
+      bodyWarmLooks.clear();
+      clearAttackAlert(playerBody);
+      skillEffects.length = 0;
+      skillHitEffects.length = 0;
+      weaponEffects.clear();
+      activePredictions.clear();
+      buffs.clear();
+      resetContact();
+      resetFace(selfView);
+      resetAvatarMotion(selfView);
+      deathFx.reset();
+      speechBalloons.clear();
+      npcVisuals.clear();
+      resetWhisper();
+      chatHistoryPanel.cancelDrag();
+      visualFieldActive = false;
+      lastAttackTrace = undefined;
+      ++mapGeneration;
+      entityCatalog.clear();
+      revivePanel.reset();
+      selfSwing = undefined;
+      projectiles.length = damageMarks.length = 0;
+      ui.where.textContent = "斷線";
+      ui.status.textContent = "連線結束。重新載入頁面再試一次。";
+      ui.status.classList.add("bad");
+      buffs.clear();
+      nativeBasis = undefined;
+      nativeShotRange = 200;
+      nativeAmmoPad = 0;
+      nativeWornFacts = [];
+      closeDialogue(false);
+      logLine("websocket closed");
+      if (quitToTitle) {
+        quitToTitle = false;
+        self = selfView = playerBody = undefined;
+        users.clear();
+        mobs.clear();
+        npcs.clear();
+        drops.clear();
+        inventory = undefined;
+        quickDrag = undefined;
+        resetWhisper();
+        ui.chatbox.classList.add("hidden");
+        testToolsPanel.close();
+        skillPanel.toggle(false);
+        statPanel.toggle(false);
+        equipPanel.toggle(false);
+        toggleInventory(false);
+        closeShop(false);
+        closeDialogue(false);
+        tradeOpen = false;
+        tradeModel.clear();
+        tradeHover = tradeHoverOffer = undefined;
+        tradeLogScroll.reset();
+        closeMessenger(false);
+        audio.stop();
+        loginScreens.showPanel(ui.connect);
+        loginScreens.closeTitleLogin();
+      }
+    },
+    message(message) {
+      handle(message);
+    },
+    malformedMessage(text) {
+      logLine(`unreadable message: ${text.slice(0, 60)}`);
+    },
   });
 }
 
@@ -2087,7 +2114,7 @@ function updateContact(now) {
     !contact.ready ||
     contactPending ||
     now < contactRetryAt ||
-    socket?.readyState !== WebSocket.OPEN
+    !clientTransport.open
   )
     return;
   const playerRect = playerContactRect(player, previousPlayer);
@@ -3311,7 +3338,7 @@ async function swing(skillId=0) {
     !self ||
     !selfView ||
     !playerBody ||
-    !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN ||
+    !visualFieldActive || document.hidden || !clientTransport.open ||
     browserLabOpen() || npcDialog.open || tooltipViewer.open ||
     isEditingControl(document.activeElement) ||
     map?.id !== self.mapId ||
@@ -3344,7 +3371,7 @@ async function swing(skillId=0) {
       if(!readyArt||self!==field||combatEpoch!==epoch||localActionEpoch!==interaction||entity?.characterId!==characterId||JSON.stringify(lookOf(entity))!==lookKey||
         selfView?.hp<=0||portalPending||shop||shopPending||talkingNpc||(itemDialog.open||systemPanel.visible||playerContext.open)||
         browserLabOpen()||quickDrag||itemDrag||slotPending||mesoPending||!visualFieldActive||document.hidden||
-        socket?.readyState!==WebSocket.OPEN||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
+        !clientTransport.open||skillPanel.level(skillId)!==skillLevel||performance.now()<nextSwingAt)return;
       if(rule.kind==='buff'){
         if(!activeSkillCost(entity,skillValues)||!publishPlayerMotion())return;
         nextSwingAt=performance.now()+200;
@@ -3428,7 +3455,7 @@ async function swing(skillId=0) {
       || (entity.facing === 1) !== facingLeft || performance.now() < nextSwingAt
       || (magic&&!playerBody.grounded)
       || (locomotion(playerBody) === "prone") !== prone
-      || !visualFieldActive || document.hidden || socket?.readyState !== WebSocket.OPEN
+      || !visualFieldActive || document.hidden || !clientTransport.open
       || browserLabOpen() || npcDialog.open || tooltipViewer.open || quickDrag || itemDrag
       || isEditingControl(document.activeElement)) return;
     if ((shoot&&!bulletFrames.length)||[...frames,...effects,...bullets].some(frame=>!frame.ready)) {
@@ -3539,7 +3566,7 @@ let whisperRecipient = "", lastWhisperRecipient = "", userRequestUntil=0;
 function beginUserRequest(name,text) {
   const now=performance.now();
   if(now<userRequestUntil){chatHistoryPanel.append('다른 요청을 처리 중입니다','error');return false;}
-  if(socket?.readyState!==WebSocket.OPEN)return false;
+  if(!clientTransport.open)return false;
   const reason=whisperNameError(name,selfView?.name);
   if(reason && text!==undefined){chatHistoryPanel.append(reason,'error');return false;}
   userRequestUntil=now+3000;
@@ -3715,8 +3742,7 @@ function slotRequest(tab, fromSlot, toSlot, count = -1) {
     shopPending ||
     shop !== undefined ||
     talkingNpc !== undefined ||
-    !socket ||
-    socket.readyState !== WebSocket.OPEN ||
+    !clientTransport.open ||
     performance.now() < slotNextAt ||
     !selfView ||
     selfView.hp <= 0
@@ -3737,8 +3763,7 @@ function scrollRequest(scrollSlot, equipSlot) {
     shopPending ||
     shop !== undefined ||
     talkingNpc !== undefined ||
-    !socket ||
-    socket.readyState !== WebSocket.OPEN ||
+    !clientTransport.open ||
     performance.now() < slotNextAt ||
     !selfView ||
     selfView.hp <= 0
@@ -4360,8 +4385,7 @@ function dropMesosDialog(at) {
     accept: (amount) => {
       if (
         !valid() ||
-        !socket ||
-        socket.readyState !== WebSocket.OPEN ||
+        !clientTransport.open ||
         !mesoDropAllowed(amount, selfView.mesos) ||
         performance.now() < mesoNextAt
       )
@@ -4664,8 +4688,7 @@ function shopRequest(request) {
     slotPending ||
     mesoPending ||
     selfView?.hp <= 0 ||
-    !socket ||
-    socket.readyState !== WebSocket.OPEN
+    !clientTransport.open
   )
     return;
   shopPending = true;
@@ -4865,7 +4888,7 @@ ui.logToggle.addEventListener("click", () => ui.log.classList.toggle("hidden"));
 // Native F1..F7 plus explicitly browser-only helper buttons. Both go through the same gates.
 function canSendEmotion() {
   return loginScreens.stage === "game" && visualFieldActive && selfView && !portalPending &&
-    socket?.readyState === WebSocket.OPEN && !document.hidden &&
+    clientTransport.open && !document.hidden &&
     !(selfSwing && performance.now() < selfSwing.start + attackDuration(selfSwing)) &&
     !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
     !npcDialog.open && !tooltipViewer.open && !talkingNpc && !shop;
@@ -5003,7 +5026,7 @@ function publishPlayerMotion() {
     !selfView ||
     !playerBody ||
     portalPending ||
-    map?.id !== self.mapId || socket?.readyState !== WebSocket.OPEN
+    map?.id !== self.mapId || !clientTransport.open
   )
     return false;
   const snapshot = movementSnapshot(playerBody);
@@ -5211,7 +5234,7 @@ const speechBalloons=chatBalloons({image:artImage});
 const npcBalloons=chatBalloons({image:artImage});
 const npcVisuals=npcPresentation({balloons:npcBalloons,seed:globalThis.crypto?.getRandomValues(new Uint32Array(1))[0]??(Date.now()>>>0),
   send:value=>{
-    if(!visualFieldActive||!self||socket?.readyState!==WebSocket.OPEN)return false;
+    if(!visualFieldActive||!self||!clientTransport.open)return false;
     send({t:'npc-idle',mapId:self.mapId,...value});return true;
   },
 });
@@ -5224,7 +5247,7 @@ const revivePanel = reviveWindow({
   image: artImage,
   send,
   isInGame: () =>
-    loginScreens.stage === "game" && socket?.readyState === WebSocket.OPEN,
+    loginScreens.stage === "game" && clientTransport.open,
   onOpen() {
     playerContext.close(false);
     localActionEpoch++;systemPanel.close(false,false);quickDrag=undefined;
@@ -5448,7 +5471,7 @@ function openDialogueExample(kind, page = 0) {
 const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
   onGameSettings:value=>miniMapPanel.setShown(value.minimap),
   canOpen:()=>loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 && !portalPending &&
-    socket?.readyState===WebSocket.OPEN && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
+    clientTransport.open && !revivePanel.open && !itemDialog.open && !browserLabOpen() &&
     shop===undefined && talkingNpc===undefined && !shopPending && !slotPending && !mesoPending &&
     !tradeOpen,
   onOpen(){
@@ -5458,8 +5481,8 @@ const systemPanel = systemMenu({ctx,image:artImage,audio,point:viewPoint,
     inventoryPick=inventoryHover=equipHover=undefined; pointerAt=undefined;ui.say.blur();
   },
   onQuit(){
-    if(socket?.readyState!==WebSocket.OPEN)return;
-    quitToTitle=true;socket.close(1000,"return to title");
+    if(!clientTransport.open)return;
+    quitToTitle=true;clientTransport.close(1000, "return to title");
   },
 });
 
@@ -5479,7 +5502,7 @@ const partyPrompt = partyInvitation({
 });
 function canOpenPlayerMenu() {
   return playerMenuEnabled && loginScreens.stage==="game" && visualFieldActive && selfView?.hp>0 &&
-    socket?.readyState===WebSocket.OPEN && map?.id===self?.mapId && !portalPending &&
+    clientTransport.open && map?.id===self?.mapId && !portalPending &&
     !revivePanel.open && !itemDialog.open && !systemPanel.visible && !browserLabOpen() &&
     talkingNpc===undefined && shop===undefined && !shopPending && !slotPending && !mesoPending &&
     !tradeOpen &&
