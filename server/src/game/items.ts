@@ -28,6 +28,11 @@ import type { TemporaryStatUpdate } from "../protocol/temporarystat.ts";
  * percent fields are **not** in the binary: the 2003 server applied them, so the rounding
  * (`Math.floor(max * percent / 100)`) is this server's choice, named here instead of buried.
  *
+ * ADR-150 sharpened this from an inference into a finding. The 2003 client does not read `spec`
+ * at all: its field vocabulary is wired only to the skill-tree loader, and that vocabulary has no
+ * `hpR`/`mpR` in it (it has `hp`/`mp`/`maxHP`/`maxMP`/`conMP`/`incMHP`/`incMMP`). `spec` is data
+ * for the *server*, which is why this file is the right place to read it.
+ *
  * Two more choices, both about a use that cannot do anything:
  *
  * 1. **A use that changes nothing is still answered, but consumable-free.** The client's gate is
