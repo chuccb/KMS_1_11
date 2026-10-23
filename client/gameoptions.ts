@@ -6,7 +6,15 @@ export interface GameSettings {
   party: boolean;
   game: boolean;
 }
-/** CConfig+20..40: 43D360 defaults to 1. CUIGameOpt 52D0B0 previews through 43DE80.
+/**
+ * CConfig+20..40: `43D360` defaults them to 1, `CUIGameOpt` (`52D0B0`) previews through `43DE80`.
+ *
+ * The two offsets this page actually honours are confirmed from the binary, not inferred from the
+ * UI (ADR-144, `native-whisper-gate.test.ts`): the flags are a 4-byte-strided `_DWORD` boolean
+ * array on the CConfig singleton `dword_5C1F74` starting at +20 -
+ *   `+20` goMiniMap  - `sub_4E7030` flips it in place: `*(n0xC8+20) = *(n0xC8+20) == 0`
+ *   `+24` goWhisper  - `sub_472910` case 9: on -> log `"%s>> %s"` via `sub_4FB670`;
+ *                      off -> send c2s `0x23` sub-type `0x22`, the auto-refusal (ADR-059).
  * Only minimap/whisper have browser consumers. Remaining flags stay visible but disabled.
  */
 export const GAME_DEFAULTS: Readonly<GameSettings> = Object.freeze({

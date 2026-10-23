@@ -4501,11 +4501,20 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    `equipment-generation.test.ts` 有釘住。舊存檔走顯式的 `planBlankStarterRepair`（不自動跑）。
 
 
-17. **ADR-059已編輯、未測試**：goWhisper在CConfig+24，不是聊天窗旗標；c2s23/22是拒收，
-   s2c1A/22回sender。一般聊天0x1F的log＋normal/dead五秒氣泡另由c2s12驅動。
-   新增原GameOpt miniMap／whisper可操作，其他四個社交功能未有UI則disabled。
+17. ~~**ADR-059已編輯、未測試**~~ → **行為面已測試，原證本輪補上（ADR-144）**：
+   - 行為：`native-chat-gameoptions.test.ts` 7 個測試已釘住 c2s `0x23`/`0x22` 拒收、
+     s2c `0x1A`/`0x22` 回 sender、`0x1F` 公開聊天（`51D530`／`50B320`）、`4373A0` 五秒氣泡、
+     `55CDE0` type0／type1，以及 GameOpt 接線（只有 goGame 仍 disabled）。
+   - **原證（本輪新增，`native-whisper-gate.test.ts` 5 個測試，4 突變全數釘死）**：
+     `goWhisper` 確實是 **CConfig+24** —— `sub_472910` case 9（進來的密語）讀
+     `*(_DWORD*)(n0xC8 + 24)`：`!= 0` 就把 `"%s>> %s"` 那行走 `sub_4FB670` 送進聊天記錄；
+     `== 0` 就組 c2s `0x23`（35）＋子型別 `0x22`（34）送出去＝**自動拒收**。
+     旁證：`sub_4E7030`（goMiniMap）讀的是同一個物件的 **+20** 並且原地反相
+     （`*(_DWORD*)(n0xC8+20) = *(_DWORD*)(n0xC8+20) == 0`），IDA 的 guessed-type 註解把
+     `n0xC8` 定為 **`dword_5C1F74`** ⇒ 這是一組從 +20 起每 4 byte 一個的布林陣列，
+     所以「+24 是 goWhisper」是**佈局推論**，不是單點猜測。
    還缺完整IWzFont／GDI metrics、Gr2D layer engine、Messenger／交換／Party／小遊戲UI，
-   缺request ID的逾時回包關聯，且沒有本輪功能PASS；不是等待「氣泡請求的文字從哪來」。
+   缺request ID的逾時回包關聯；不是等待「氣泡請求的文字從哪來」。
 
 18. ~~**死亡的另一半**~~ **（b）已完成：§4.33。** 剩下 **(a) 誰寫入 `CField + 680`**（＝誰宣告玩家
    死亡的那個時刻）。它是一個時間（`sub_558CF0` 拿它跟 `n3000_0[5]` 相減，`> 2200` 就彈復活視窗），
