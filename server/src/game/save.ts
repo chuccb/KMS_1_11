@@ -55,6 +55,8 @@ import { PacketWriter } from "../protocol/packet.ts";
 // The account row is the login server's type; this is a **type-only** import, so nothing here depends
 // on the socket code at runtime (and `net/loginserver.ts` never imports this module).
 import type { AccountRecord } from "../net/loginserver.ts";
+// The fame quota table travels on the account row, so its shape is the game layer's, not the wire's.
+import type { FameTable } from "./fame.ts";
 import {
   EQUIP_STATS,
   type EquipStat,
@@ -202,6 +204,7 @@ export function saveJson(accounts: Map<string, AccountRecord>): string {
     table[username] = {
       password: account.password,
       ...(account.gender !== undefined ? { gender: account.gender } : {}),
+      ...(account.fame !== undefined ? { fame: fameToSave(account.fame) } : {}),
       characters: account.characters.map(characterToSave),
     };
   }
@@ -253,6 +256,7 @@ export function readSave(text: string): Map<string, AccountRecord> {
       ...(record["gender"] === 0 || record["gender"] === 1
         ? { gender: record["gender"] as 0 | 1 }
         : {}),
+      ...(record["fame"] === undefined ? {} : { fame: fameFromSave(record["fame"]) }),
     });
   }
   return accounts;
@@ -485,6 +489,54 @@ function bigintOf(value: unknown): bigint {
 
 function numberOf(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : fallback;
+}
+
+/**
+ * The fame quotas, keyed by the character id exactly as `FameLedgers` spelled it.
+ *
+ * The order the file shows is ascending numeric **without any sorting here**, and it is worth
+ * saying why, because it looks like an omission: a key that is a canonical decimal integer is an
+ * "integer index" in the spec's sense, and both `Object.keys` and `JSON.stringify` enumerate those
+ * in ascending numeric order ahead of every other key. So `{ "10": …, "9": … }` is written as 9
+ * then 10 no matter what order it was built in. A `.sort()` and a `.reverse()` were both tried
+ * here, and mutation testing showed **neither changed the bytes** - they were dead code, which is
+ * the only reason a comment is allowed to make this claim instead of the code doing it.
+ *
+ * What *is* load-bearing is the key format: the bare decimal id, no padding, no prefix. Pad it and
+ * `"007"` stops being an integer index, the ordering guarantee goes with it, and two saves of one
+ * world stop being identical. `save.test.ts` pins that.
+ */
+function fameToSave(table: FameTable): unknown {
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(table)) {
+    const ledger = table[key]!;
+    out[key] = { day: ledger.day, month: ledger.month, targets: [...ledger.targets] };
+  }
+  return out;
+}
+
+/**
+ * The fame quotas back from a save. Tolerant like every other field here: an entry whose shape does
+ * not fit is dropped rather than refused, because a quota is a convenience and losing one is not
+ * losing a character. A whole `fame` that is not an object is reported as no quota at all.
+ */
+function fameFromSave(value: unknown): FameTable {
+  const table: FameTable = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return table;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^\d+$/.test(key)) continue; // a character id, or nothing we put there
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const row = entry as Record<string, unknown>;
+    if (!Array.isArray(row["targets"])) continue;
+    table[key] = {
+      day: numberOf(row["day"], 0),
+      month: numberOf(row["month"], 0),
+      targets: row["targets"].filter(
+        (id): id is number => typeof id === "number" && Number.isInteger(id),
+      ),
+    };
+  }
+  return table;
 }
 
 function stringOf(value: unknown, fallback: string): string {

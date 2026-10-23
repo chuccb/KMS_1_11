@@ -13,9 +13,10 @@
  * 3. **順序**：自己 → 初學者 → 這個月給過同一個人（`type 4`）→ 今天已經給過（`type 3`）。
  *    同一個人、同一天再給一次時 client 顯示的是「這個月」那一句，所以月比日先問（ADR-031）。
  *
- * 紀錄（`FameLedger`）掛在世界層的 `FameLedgers` 上，**不進存檔**：它不是角色狀態的一部分（`0x0D`
- * 不會送它、`CharacterData` 也沒有那一格），而且 2003 年的伺服器怎麼記這件事看不出來——重開伺服器
- * 就重新開始，列在 FINDINGS §4.38 的 OPEN。
+ * 紀錄（`FameLedger`）**進存檔**（ADR-148）：它掛在帳號列上（`AccountRecord.fame`，以角色 id
+ * 的十進位字串為鍵），所以重開伺服器不會洗白配額。它不是角色狀態的一部分（`0x0D` 不會送它、
+ * `CharacterData` 也沒有那一格），所以放帳號列而不是角色列；2003 年的伺服器怎麼記這件事看不出來，
+ * 那是我們的選擇，跟「初學者界線＝15」同一類（FINDINGS §4.38）。
  */
 
 /** 給人氣的配額：哪一天給過、哪一個月、這個月給過誰。 */
@@ -98,27 +99,59 @@ export function applyFame(attempt: FameAttempt): FameOutcome {
   };
 }
 
-/** 誰給過誰：世界層的一張表（`GameEntryServer` 持有，跟 `PartyRegistry` 一樣）。 */
-export class FameLedgers {
-  private readonly ledgers = new Map<number, FameLedger>();
+/** 存檔裡的形狀：角色 id 的十進位字串 → 那個角色的配額。 */
+export type FameTable = Record<string, FameLedger>;
 
-  /** 這個角色上一次的紀錄。 */
-  ledgerOf(characterId: number): FameLedger | undefined {
-    return this.ledgers.get(characterId);
+/**
+ * 存得住人氣配額的東西。`AccountRecord` 結構上就是一個，所以這個類別不必認識帳號列的完整形狀，
+ * 也就不必 import 它（`save.ts` 用 `import type` 是另一種解法，這裡連那個都不需要）。
+ */
+export interface FameOwner {
+  fame?: FameTable;
+}
+
+/**
+ * 誰給過誰：帳號列上的一層薄視圖（`GameEntryServer` 持有）。
+ *
+ * 紀錄**只**存在帳號列裡，沒有第二份（`save.ts` 的檔頭稱這種重複為「對同一件事的第二種意見」）：
+ * 給人氣是低頻動作（一人一天一次），所以這裡不做索引、不做快取，直接讀寫帳號那一格。
+ *
+ * 鍵用帳號名＋角色 id 而不是只給角色 id：給的人一定是在線上的那一條連線，所以兩個都拿得到，
+ * 而且省掉一次「哪個帳號擁有這個角色」的反向查找。
+ */
+export class FameLedgers<Account extends FameOwner> {
+  private readonly accounts: Map<string, Account>;
+
+  constructor(accounts: Map<string, Account>) {
+    this.accounts = accounts;
   }
 
-  /** 記下新的一份（覆蓋舊的）。 */
-  remember(characterId: number, ledger: FameLedger): void {
-    this.ledgers.set(characterId, ledger);
+  /** 這個角色上一次的紀錄。 */
+  ledgerOf(username: string, characterId: number): FameLedger | undefined {
+    return this.accounts.get(username)?.fame?.[String(characterId)];
+  }
+
+  /** 記下新的一份（覆蓋舊的）。帳號不存在就不寫——那不是這個類別該發明的東西。 */
+  remember(username: string, characterId: number, ledger: FameLedger): void {
+    const account = this.accounts.get(username);
+    if (account === undefined) return;
+    // 換一個新的物件而不是就地改：帳號列是呼叫端手上的同一個物件，但這樣讀的人不會看到一個
+    // 寫到一半的表格，而且下一次 `Object.keys` 的順序是固定的。
+    account.fame = { ...account.fame, [String(characterId)]: ledger };
   }
 
   /** 這個角色下線時可以清掉（配額跟著連線走）；目前留著，因為它很小而且重登不該洗白。 */
-  forget(characterId: number): void {
-    this.ledgers.delete(characterId);
+  forget(username: string, characterId: number): void {
+    const account = this.accounts.get(username);
+    if (account?.fame === undefined) return;
+    const { [String(characterId)]: _dropped, ...rest } = account.fame;
+    account.fame = Object.keys(rest).length === 0 ? undefined : rest;
   }
 
   /** 現在記了幾個角色（測試與日誌用）。 */
   get count(): number {
-    return this.ledgers.size;
+    let total = 0;
+    for (const account of this.accounts.values()) total += Object.keys(account.fame ?? {}).length;
+    return total;
   }
 }

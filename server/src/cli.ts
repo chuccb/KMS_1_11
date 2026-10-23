@@ -532,6 +532,7 @@ async function runServe(rest: string[]): Promise<number> {
     game = new GameEntryServer({
       handoffs,
       online,
+      accounts,
       pingMs,
       mapId,
       starterEquipmentIds: starterEquipmentIds(creationCatalog),

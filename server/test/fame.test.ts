@@ -231,15 +231,64 @@ test("fameClock is UTC days and months", () => {
 });
 
 test("FameLedgers remembers, forgets, and counts", () => {
-  const ledgers = new FameLedgers();
-  assert.equal(ledgers.ledgerOf(1), undefined);
+  // The account table is the store now (ADR-148): the ledger lives on the account row, so there is
+  // no second copy to fall out of step with the save.
+  const accounts = new Map<string, { fame?: Record<string, FameLedger> }>([["a", {}]]);
+  const ledgers = new FameLedgers(accounts);
+  assert.equal(ledgers.ledgerOf("a", 1), undefined);
   const ledger: FameLedger = { day: 1, month: 2, targets: [3] };
-  ledgers.remember(1, ledger);
-  assert.deepEqual(ledgers.ledgerOf(1), ledger);
+  ledgers.remember("a", 1, ledger);
+  assert.deepEqual(ledgers.ledgerOf("a", 1), ledger);
   assert.equal(ledgers.count, 1);
-  ledgers.forget(1);
-  assert.equal(ledgers.ledgerOf(1), undefined);
+  // …and it is visible on the account itself, which is the point.
+  assert.deepEqual(accounts.get("a")!.fame, { "1": ledger });
+  // One account's quota is not another's.
+  accounts.set("b", {});
+  assert.equal(ledgers.ledgerOf("b", 1), undefined);
+  ledgers.forget("a", 1);
+  assert.equal(ledgers.ledgerOf("a", 1), undefined);
   assert.equal(ledgers.count, 0);
   assert.equal(FAME_OPCODE.request, 0x20);
   assert.equal(FAME_OPCODE.result, 0x12);
+});
+
+test("a ledger is stored per account and per character, and forget leaves no empty table", () => {
+  const accounts = new Map<string, { fame?: Record<string, FameLedger> }>([
+    ["a", {}],
+    ["b", {}],
+  ]);
+  const ledgers = new FameLedgers(accounts);
+  const first: FameLedger = { day: 10, month: 20, targets: [7] };
+  const second: FameLedger = { day: 11, month: 20, targets: [8] };
+  ledgers.remember("a", 1, first);
+  ledgers.remember("a", 2, second);
+  ledgers.remember("b", 3, first);
+  assert.equal(ledgers.count, 3);
+  assert.deepEqual(ledgers.ledgerOf("a", 1), first);
+  assert.deepEqual(ledgers.ledgerOf("a", 2), second);
+  assert.deepEqual(ledgers.ledgerOf("b", 3), first);
+
+  ledgers.forget("a", 1);
+  assert.equal(ledgers.ledgerOf("a", 1), undefined);
+  assert.deepEqual(
+    ledgers.ledgerOf("a", 2),
+    second,
+    "forgetting one character must not touch another",
+  );
+
+  ledgers.forget("b", 3);
+  assert.equal(
+    accounts.get("b")!.fame,
+    undefined,
+    "an account whose last quota is gone must not keep an empty table on disk",
+  );
+});
+
+test("remembering for an account that does not exist is a no-op, not a crash", () => {
+  const accounts = new Map<string, { fame?: Record<string, FameLedger> }>();
+  const ledgers = new FameLedgers(accounts);
+  ledgers.remember("ghost", 1, { day: 1, month: 1, targets: [] });
+  ledgers.forget("ghost", 1);
+  assert.equal(ledgers.count, 0);
+  assert.equal(ledgers.ledgerOf("ghost", 1), undefined);
 });

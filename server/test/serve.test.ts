@@ -144,7 +144,7 @@ import {
   LoginServer,
   type AccountRecord,
 } from "../src/net/loginserver.ts";
-import { MemorySaveStore, loadAccounts } from "../src/game/save.ts";
+import { MemorySaveStore, loadAccounts, readSave } from "../src/game/save.ts";
 
 const DATA_WZ = fileURLToPath(new URL("../../Data.wz", import.meta.url));
 const archive: WzArchive | null = existsSync(DATA_WZ) ? WzArchive.open(DATA_WZ) : null;
@@ -5695,8 +5695,15 @@ test(
   async (t) => {
     const log: string[] = [];
     const handoffs = new HandoffRegistry();
+    // The quotas hang off the account row (ADR-148), so a server that wants them to hold has to be
+    // given the account table - `user71`/`user72` below are the names the handoff carries.
+    const accounts = new Map<string, AccountRecord>([
+      ["user71", { password: "", characters: [] }],
+      ["user72", { password: "", characters: [] }],
+    ]);
     const game = new GameEntryServer({
       handoffs,
+      accounts,
       mapId: 1000000,
       mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
       mobTickMs: 10_000,
@@ -6488,5 +6495,127 @@ test(
       !denied.some((p) => p[0] === FIELD_OPCODE.setField),
       "forged native packets cannot bypass the account policy",
     );
+  },
+);
+
+/**
+ * A fame quota is state, not a whim (ADR-148).
+ *
+ * Before this, the quotas lived in a `Map` inside `GameEntryServer` and a restart handed them back,
+ * which makes "once a day" and "once a month per target" into things that are true only until the
+ * process ends. The test is a real restart: two servers on real sockets, with the only thing
+ * carried between them being the bytes the save file would hold. The second round is also what
+ * separates the two quotas - the *same* target is the monthly message (`type 4`), a *different*
+ * target on the same day is the daily one (`type 3`), and both have to be read back.
+ */
+test(
+  "fame: a quota survives a restart - same target refuses (4), another the same day refuses (3)",
+  { timeout: 20000 },
+  async (t) => {
+    const store = new MemorySaveStore();
+
+    /** Three characters on three accounts; the account name is what the quota is filed under. */
+    const seed = (): Map<string, AccountRecord> =>
+      new Map<string, AccountRecord>(
+        [
+          [71, "Hero", 30],
+          [72, "Alt", 14],
+          [73, "Third", 30],
+        ].map(([id, name, level]) => [
+          `user${id}`,
+          {
+            password: "p",
+            characters: [
+              characterDataOf(
+                {
+                  ...zeroStats(),
+                  id: id as number,
+                  name: name as string,
+                  level: level as number,
+                  hp: 50,
+                  maxHp: 50,
+                },
+                startingCharacterItems(),
+              ),
+            ],
+          } as AccountRecord,
+        ]),
+      );
+
+    /**
+     * One round: bring every character into the field and have Hero give fame to `targetId`.
+     * Returns the answer Hero got.
+     */
+    const round = async (
+      accounts: Map<string, AccountRecord>,
+      targetId: number,
+    ): Promise<string> => {
+      const handoffs = new HandoffRegistry();
+      const game = new GameEntryServer({
+        handoffs,
+        accounts,
+        mapId: 1000000,
+        mapProvider: (mapId: number) => (mapId === 1000000 ? STUB_MAP : undefined),
+        mobTickMs: 10_000,
+        handshake: { clientSendSeed: 0x0c0c0c0c, clientRecvSeed: 0x0d0d0d0d },
+        persist: () => store.save(accounts),
+      });
+      const info = await game.listen(0);
+      t.after(async () => {
+        await game.close();
+      });
+
+      const enter = async (id: number, name: string, level: number): Promise<FakeClient> => {
+        const client = await FakeClient.connect(info.port);
+        t.after(() => client.close());
+        client.send({
+          kind: "handshake-reply",
+          opcode: 0x04,
+          value: handoffs.issue({
+            username: `user${id}`,
+            characterId: id,
+            characterName: name,
+            character: characterDataOf(
+              { ...zeroStats(), id, name, level, hp: 50, maxHp: 50 },
+              startingCharacterItems(),
+            ),
+          }),
+        });
+        await client.takeOpcode(FIELD_OPCODE.setField);
+        return client;
+      };
+      const hero = await enter(71, "Hero", 30);
+      const alt = await enter(72, "Alt", 14);
+      const third = await enter(73, "Third", 30);
+      await hero.takeOpcode(FIELD_OPCODE.userEnterField);
+      await alt.takeOpcode(FIELD_OPCODE.userEnterField);
+      await third.takeOpcode(FIELD_OPCODE.userEnterField);
+
+      hero.send({
+        kind: "unknown",
+        opcode: FAME_OPCODE.request,
+        body: encodeClientFameRequest({ targetId, up: true }).slice(1),
+      });
+      const packets = await hero.takeOpcode(FAME_OPCODE.result);
+      const answer = readFameResult(new PacketReader(packets[packets.length - 1]!, 1));
+      await game.close();
+      return JSON.stringify(answer);
+    };
+
+    // Round one: Hero famed Alt, and the quota has to have been written through to the save.
+    assert.equal(
+      await round(seed(), 72),
+      JSON.stringify({ kind: "changed", name: "Alt", up: true }),
+    );
+    const saved = store.saved;
+    assert.ok(saved !== undefined, "giving fame must persist");
+    assert.ok(saved.includes('"fame"'), `the save must carry the quota:\n${saved}`);
+
+    // Round two is a restart in the only sense that matters: new server, new sockets, and the
+    // accounts rebuilt from nothing but those bytes.
+    const reloaded = readSave(saved);
+    assert.equal(await round(reloaded, 72), JSON.stringify({ kind: "alreadyThisMonth" }));
+    // A different target on the same day is the *other* quota - proof both halves came back.
+    assert.equal(await round(readSave(saved), 73), JSON.stringify({ kind: "alreadyToday" }));
   },
 );

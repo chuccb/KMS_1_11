@@ -468,3 +468,83 @@ test("the save file is JSON a person can read: named stats, and serial numbers t
   assert.match(text, /"sn": "1234605616436508552"/);
   assert.equal(0x1122334455667788n.toString(), "1234605616436508552");
 });
+
+test("the fame quota survives - and an older save without it still loads", () => {
+  // ADR-148: the quota hangs off the account row, so "once a day" and "once a month per target"
+  // have to outlive the process or they are not quotas at all.
+  const table = sampleTable();
+  table.get("admin")!.fame = {
+    "3": { day: 20_000, month: 24_320, targets: [4, 9] },
+    "4": { day: 20_001, month: 24_320, targets: [] },
+  };
+  const back = readSave(saveJson(table));
+  assert.deepEqual(back.get("admin")!.fame, table.get("admin")!.fame);
+  // An account that never gave anyone keeps no key, rather than an empty one.
+  assert.equal(back.get("guest")!.fame, undefined);
+  assert.equal("fame" in (back.get("guest") as object), false);
+
+  // A save written before fame existed has no such field, and that is a legal value.
+  const older = readSave(
+    JSON.stringify({
+      version: SAVE_VERSION,
+      accounts: { admin: { password: "p", characters: [] } },
+    }),
+  );
+  assert.equal(older.get("admin")!.fame, undefined);
+});
+
+test("fame keys are written in numeric order, so two saves of one world are identical", () => {
+  // The order itself is guaranteed by `JSON.stringify`: a key that is a canonical decimal integer
+  // is an "integer index" and always enumerates ascending, so no sorting pass here can change it
+  // (a `.sort()` and a `.reverse()` were both tried and both left the bytes alone). What *is* on
+  // this test to catch is the key **format** - pad it to `"007"` and the guarantee goes with it.
+  const table = sampleTable();
+  table.get("admin")!.fame = Object.fromEntries(
+    [10, 9, 100, 2].map((id) => [String(id), { day: id, month: 1, targets: [id] }]),
+  );
+  const text = saveJson(table);
+  const order = [...text.matchAll(/"(\d+)":\s*\{/g)].map((m) => m[1]);
+  const fameKeys = order.filter((key) => ["2", "9", "10", "100"].includes(key));
+  assert.deepEqual(fameKeys, ["2", "9", "10", "100"]);
+  // The load-bearing half: a bare decimal id, never padded and never prefixed.
+  assert.equal(
+    /"0\d+":\s*\{/.test(text),
+    false,
+    "a padded character id is not an integer index and would lose the canonical order",
+  );
+  assert.equal(saveJson(readSave(text)), text, "a save must be a fixed point");
+});
+
+test("a fame entry that does not fit is dropped, not refused", () => {
+  // A quota is a convenience: losing one is not losing a character, so a malformed row costs the
+  // quota and nothing else - the same tolerance every other field here has.
+  const text = JSON.stringify({
+    version: SAVE_VERSION,
+    accounts: {
+      admin: {
+        password: "p",
+        characters: [],
+        fame: {
+          "3": { day: 1, month: 2, targets: [4] },
+          "4": { day: 1, month: 2 }, // no `targets`
+          five: { day: 1, month: 2, targets: [] }, // not a character id
+          "6": "nonsense",
+          "7": { day: "x", month: null, targets: [1, "two", 3] }, // coerced, and filtered
+          "8": [],
+        },
+      },
+    },
+  });
+  assert.deepEqual(readSave(text).get("admin")!.fame, {
+    "3": { day: 1, month: 2, targets: [4] },
+    "7": { day: 0, month: 0, targets: [1, 3] },
+  });
+  // …and a `fame` that is not an object at all reads as no quota.
+  const notATable = readSave(
+    JSON.stringify({
+      version: SAVE_VERSION,
+      accounts: { a: { password: "p", characters: [], fame: 7 } },
+    }),
+  );
+  assert.deepEqual(notATable.get("a")!.fame, {});
+});

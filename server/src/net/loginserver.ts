@@ -164,7 +164,7 @@ import {
   readClientFameRequest,
   type ClientFameRequest,
 } from "../protocol/fame.ts";
-import { FameLedgers, applyFame, fameClock } from "../game/fame.ts";
+import { FameLedgers, applyFame, fameClock, type FameTable } from "../game/fame.ts";
 import {
   MINIROOM_KIND,
   MINIROOM_OPCODE,
@@ -267,6 +267,12 @@ export interface AccountRecord {
   gender?: 0 | 1;
   password: string;
   characters: CharacterData[];
+  /**
+   * Who gave fame, per character id (`FameTable` keys are the decimal id). Persisted, so a restart
+   * does not hand the daily and monthly quotas back (ADR-148). Absent on a save written before it
+   * existed, which `readSave` reads as "no one has given anything".
+   */
+  fame?: FameTable;
 }
 
 /** A character that has been handed over to the game server, waiting to say hello. */
@@ -1021,6 +1027,15 @@ export interface GameEntryServerOptions {
    */
   levelReward?: LevelReward;
 
+  /**
+   * The accounts table, **the same object** the login server keeps (`LoginServerOptions.accounts`).
+   * The character records inside it are the ones this server mutates, and the fame quotas hang off
+   * the account row, so passing it is what makes either of those outlive the process (ADR-148).
+   * Omitting it is legal and means "nothing is persisted" - which is what the fame quota did
+   * before, and is what a test that builds a throwaway world wants.
+   */
+  accounts?: Map<string, AccountRecord>;
+
   persist?(): void;
   log?(line: string): void;
 }
@@ -1100,10 +1115,14 @@ export class GameEntryServer {
    */
   private readonly parties = new PartyRegistry();
   /**
-   * 人氣的配額（FINDINGS 4.38）：一天給一次、同一個對象一個月一次。**不進存檔** —— 它不是角色
-   * 狀態的一部分（`0x0D` 沒有它），重開伺服器就重新開始（ADR-031、§4.38 的 OPEN）。
+   * 人氣的配額（FINDINGS 4.38）：一天給一次、同一個對象一個月一次。**進存檔**（ADR-148）——
+   * 記在帳號列上（`AccountRecord.fame`），所以重開伺服器不會把配額還回來。它不在角色狀態裡
+   * （`0x0D` 沒有它），所以放帳號列而不是角色列。
+   *
+   * 在建構式裡指派而不是在欄位初始式：它要的是 `options.accounts`，而那個在欄位初始式跑完之後
+   * 才存在。
    */
-  private readonly fameLedgers = new FameLedgers();
+  private readonly fameLedgers: FameLedgers<AccountRecord>;
   /**
    * 交易（1:1 교환）的房間與邀請（FINDINGS §4.40）。跟隊伍一樣是世界層的狀態：房間只認角色 id，
    * 但**邀請**照 client 的規則只找同一張圖的人（`sub_471A40` 用 `CUserPool` 找名字），所以
@@ -1124,6 +1143,9 @@ export class GameEntryServer {
 
   constructor(options: GameEntryServerOptions) {
     this.options = options;
+    // A server with no account table still needs the quotas - they just live and die with the
+    // process, which is what they did before they were persisted at all.
+    this.fameLedgers = new FameLedgers(options.accounts ?? new Map());
     this.scrollRandom = options.scrollRandom ?? new ClientRandom(0x5c07, 0x1a0f, 0x2e3c);
     this.online = options.online ?? new OnlineAccounts();
     this.heartbeat = new Heartbeat({
@@ -3766,7 +3788,7 @@ export class GameEntryServer {
       targetId: target.characterId,
       up: request.up,
       targetFame: target.character.stats.fame,
-      ledger: this.fameLedgers.ledgerOf(session.characterId),
+      ledger: this.fameLedgers.ledgerOf(session.username, session.characterId),
       clock: fameClock(Date.now()),
     });
     if (outcome.kind === "refused") {
@@ -3789,7 +3811,9 @@ export class GameEntryServer {
       );
       return;
     }
-    this.fameLedgers.remember(session.characterId, outcome.ledger);
+    this.fameLedgers.remember(session.username, session.characterId, outcome.ledger);
+    // A quota is state, not a whim: it has to outlive the connection or "once a day" is a lie.
+    this.persist();
     const before = { ...target.character.stats };
     target.character.stats.fame = outcome.fame;
     target.send(
