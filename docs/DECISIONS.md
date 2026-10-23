@@ -5221,3 +5221,101 @@ tick 索引 `5→6`（1 紅）、視窗建構式改名（1 紅）。
 listing 已確認 byte-identical（`git status MapleStory.exe.c` 乾淨）。
 
 Gates：typecheck 乾淨、format 乾淨、1395 pass / 0 fail（上輪 1388）。
+
+## ADR-146：效果欄位名的解析器是 `sub_4BC590`——而且它只看得見 UTF-16
+
+**日期**：2026-10-23
+**狀態**：已接受
+
+### 背景
+
+FINDINGS §6 item 19 的後半寫著：
+
+> `hp`／`hpR`／`mp`／`mpR`／`moveTo`／`slotMax`／`reqLevel` 在 `.exe` 裡沒有任何字面字串，
+> 所以入口不在字串表。
+
+這句話是**錯的**，而且錯法和 item 18 的 `+680` 是同一類：**結論來自一次不完整的搜尋**。
+這一次我看著這句註解，用 `grep -a "spec" MapleStory.exe` 覆核，0 筆；`grep -a "pad"`，0 筆；
+於是我一開始也接受了它。真正的問題不是「找得不夠遠」，而是**搜尋的編碼不對**。
+
+### 發現
+
+**WZ 的 property 名是 UTF-16。** IDA 把它們輸出成
+
+```c
+wchar_t aPad[] = L"pad";
+wchar_t aMdd[] = L"mdd";
+wchar_t aMastery[] = L"mastery";
+```
+
+執行檔裡它們躺在 UTF-16 字串池（`0x1b6780` 道具欄、`0x1bad00` 技能／效果欄），
+不是 NUL 結尾的 ASCII 池。實測：
+
+| 欄位 | ASCII 命中 | UTF-16 命中 |
+|---|---|---|
+| `pad` | **0** | 1 |
+| `pdd` | **0** | 1 |
+| `mad` | **0** | 1 |
+| `mdd` | **0** | 1 |
+| `mastery` | **0** | 1 |
+| `hp` | 44 | 2 |
+| `mp` | 29 | 5 |
+
+`hp`／`mp` 的 ASCII 命中是**噪音**（`shop`、`camp` 之類的子字串）——這更糟：正因為這兩個
+「查得到」，才讓整張表看起來像已經被檢查過了。
+
+**解析器是 `sub_4BC590`**（`004BC590`，listing 196596）。它用 `sub_405DF0` 依序讀 26 個欄位名，
+填進擁有者 `+72` 那條 120 位元組效果陣列的其中一格：
+
+```
+hs, hp, mp, pad, pdd, mad, mdd, acc, eva, craft, speed, jump,
+hpCon, mpCon, itemCon, itemConNo, damage, time, prop, range,
+attackCount, bulletCount, mastery, x, y, z
+```
+
+外加 `effect`／`ball`／`hit/%d`／`afterimage` 四條子路徑。
+
+`pad`／`pdd`／`mad`／`mdd` **四個連號出現**，這和 ADR-143 從 Data.wz 那一端得到的 `mdd`
+更正**互相獨立地印證**——一邊是資料，一邊是程式，兩邊都說 `mdd` 是真的。
+
+**`sub_4BC590` 只被呼叫一次**，來自 `sub_4BB270`，走的是
+`Skill/%03d.img/skill/%07d/{effect,hit/%d,ball,afterimage,level}`——**技能樹**。
+所以這套共用的效果解析器在本版**只接在技能上，沒有接到道具的 `spec`**。
+
+**仍然真的不存在的是（兩種編碼都 0 筆）**：`spec`／`hpR`／`mpR`／`moveTo`／`slotMax`。
+這一半的註解成立，而且現在有證據支持：
+
+- `spec` 這個節點名 client **連一個字串都沒有** ⇒ 道具效果一定是**由已經握著 `spec` 節點的
+  呼叫端**往下走的（欄位名共用，呼叫點不共用）。
+- `hpR`／`mpR`／`moveTo` **永遠不可能靠 client 的字面 key 佐證**。伺服器（`consumeSpecOf`）
+  施用這三個欄位，唯一的依據就是 Data.wz 本身。這不是缺陷，但**必須說清楚依據是什麼**。
+
+### 決策
+
+1. item 19 的「字串表裡沒有」改寫為「**ASCII 掃描看不到，UTF-16 看得到；只有 `spec`／`hpR`／
+   `mpR`／`moveTo`／`slotMax` 是兩種編碼都沒有**」。
+2. 未結的部分從「找 loader」**收窄**成「誰把道具 `spec` 節點交給解析器」。
+3. `hpR`／`mpR`／`moveTo` 的允許使用，其依據明文記為 **Data.wz**，不是 client。
+
+> **規則：要在這個執行檔上斷言「某個字串不存在」之前，ASCII（`Buffer.from(s,"ascii")`）與
+> UTF-16（`Buffer.from(s,"utf16le")`）**兩種都要掃**。只掃 ASCII 得到的「不存在」是偽陰性。**
+
+### 測試
+
+`server/test/native-effect-fields.test.ts`（8 個）：欄位詞彙表依序相等（從 listing 正則抽出，
+不是重打一份）、26 個符號全部宣告為 UTF-16、`hp`／`mp`／`time` 在詞彙表內、
+`pad/pdd/mad/mdd` 四連號、`pad` 等 5 個**ASCII 0 筆且 UTF-16 恰好 1 筆**、
+`spec` 等 5 個**兩種編碼都 0 筆**、`sub_4BC590` 只有一個呼叫端且是技能 loader、
+以及 `hpR`／`mpR`／`moveTo` **client 沒有但 Data.wz 有**（兩端同時釘住，防止漂移）。
+
+**變異驗證（6 條全數釘死）**：刪掉 `mdd` 讀取（2 紅）、`wchar_t aPad[] = L"pad"` 改成
+`char aPad[] = "pad"`（1 紅）、`v131 + 72 → + 76`（1 紅）、技能路徑改成 `Item/`（1 紅）、
+刪掉 `hp` 讀取（2 紅）、`aPad` 換成 `aPdd`（2 紅）。
+
+> 這一輪突變腳本自己也踩了兩個坑，都值得記：**(1) bun 的測試輸出走 stderr**，
+> 只看 stdout 會讓每一條突變都「看起來存活」；**(2) 備份 listing 時用
+> `open(..., encoding="utf-8", errors="replace")` 讀會把 latin1 位元組改壞**，必須用二進位
+> 讀寫。加上 ADR-145 那次的「取代沒發生卻報 0 fail」，這是同一個主題第三次：
+> **突變工具本身要先被驗證，否則它給的是安慰而不是證據。**
+
+listing 已確認 byte-identical（md5 與 git 一致，`git status` 乾淨）。

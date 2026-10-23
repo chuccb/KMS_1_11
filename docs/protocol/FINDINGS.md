@@ -4545,10 +4545,29 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    是純 hash 查表，**兩端都沒有任何百分比算術** —— 所以取整只可能存在於建表的 loader 裡，
    搜尋範圍從「整條補血路徑」縮到「`dword_5C2038` 被填的那一處」。`+48`／`+52`／`+56`／`+60`
    的語意、家族閘門與 HP（`>=`）／MP（`>`）不對稱的付得起檢查也都已定位。
-   `hp`／`hpR`／`mp`／`mpR`／`moveTo`／`slotMax`／`reqLevel` 在 `.exe` 裡
-   沒有任何字面字串，所以入口不在字串表：從 `dword_5C2038` 的初始化（誰在啟動時填它）往下找，
-   或從 `Item/Consume/*.img` 的載入路徑（`sub_411E50` 家族）反推。它不擋任何功能（伺服器直接讀 WZ），
-   只擋「原 client 的數字與我們的數字是否一致」這個問題。
+   ~~`hp`／`hpR`／`mp`／`mpR`／`moveTo`／`slotMax`／`reqLevel` 在 `.exe` 裡
+   沒有任何字面字串，所以入口不在字串表。~~
+   → **錯，而且是同一個陷阱的第二次（ADR-146，`native-effect-fields.test.ts` 8 測試／6 突變）。**
+   WZ 的 property 名是 **UTF-16**，IDA 把它們輸出成 `wchar_t aPad[] = L"pad";`，
+   執行檔裡也放在 UTF-16 字串池而不是 NUL 結尾的 ASCII 池。**`grep -a "pad" MapleStory.exe`
+   回傳 0 筆 —— 但 `pad` 就在裡面。** 所以「字串表裡沒有」若是用 ASCII 掃出來的，那是
+   **偽陰性，不是證據**。這也是我處理這一項時第二次踩到（第一次見上面 item 18 的 `+680`）。
+   **字段解析器是 `sub_4BC590`**（`004BC590`，listing 196596）：它用 `sub_405DF0` 依序讀 26 個
+   字段名，填進擁有者 `+72` 那條 120 位元組效果陣列的其中一格：
+   `hs, hp, mp, pad, pdd, mad, mdd, acc, eva, craft, speed, jump, hpCon, mpCon, itemCon,
+   itemConNo, damage, time, prop, range, attackCount, bulletCount, mastery, x, y, z`
+   （外加 `effect`／`ball`／`hit/%d`／`afterimage` 四條子路徑）。
+   **`pad`／`pdd`／`mad`／`mdd` 四個連號出現**，正好 independent 地印證 ADR-143 對 `mdd` 的更正。
+   而 `sub_4BC590` **只被呼叫一次** —— 來自 `sub_4BB270`，走的是
+   `Skill/%03d.img/skill/%07d/{effect,hit/%d,ball,afterimage,level}`，**也就是技能樹**。
+   ⇒ 這個共用的效果解析器在本版**只接在技能上，沒有接到道具的 `spec`**。
+   **仍然真的不存在的是（兩種編碼都 0 筆）：`spec`／`hpR`／`mpR`／`moveTo`／`slotMax`。**
+   所以：`spec` 這個節點名 client 連一個字串都沒有，道具效果一定是**由已經握著 `spec`
+   節點的呼叫端**往下走的（`sub_4BC590` 那套字段名是共用的，但呼叫點不是）；
+   `hpR`／`mpR`／`moveTo` 則**永遠不可能靠 client 的字面 key 佐證**，它們唯一的依據就是
+   Data.wz 本身 —— 測試同時釘住「client 沒有」與「Data.wz 有」兩端，任何一端翻了都要改註解。
+   它不擋任何功能（伺服器直接讀 WZ），只擋「原 client 的數字與我們的數字是否一致」這個問題；
+   **未結的部分已從「找 loader」收窄成「誰把道具 `spec` 節點交給解析器」**。
 20. **buff 道具（`spec/time` 家族，§4.34.3）——已全部接通，剩 MDD 一個欄位**：`2002001` speed8 已接原
    0x0D暫時能力、原raw圖示與實際walk倍率；`pad`／`mad`／`acc`／`eva`／`pdd` 的實際消費者也已接
    （ADR-070/073 世代，`magic-skills.test` 的 wire-list 案例）。ADR-106 補上最後一個可證欄位：
