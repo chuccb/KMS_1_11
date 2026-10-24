@@ -31,7 +31,7 @@ server/src/net/loginserver.ts + game entry
 原版 TCP 客戶端與瀏覽器橋共用服務與協定能力；瀏覽器不自行實作第二份 cipher，也不直接載入 WZ。
 橋上的 JSON event／API 是重建介面，**不是原封包格式的證據**。
 web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器只使用對外 web origin。
-原版 `sub_43A410` 把 server→client greeting 的首個 u16 同時當 byte count 與 `0xD3` 版本值，故總長是 **211 bytes**（199-byte body＋兩個 u32 seed）；這不是整個雙向握手的總流量。測試中的 login client 第一個 0x04 request 是 5-byte body＋4-byte frame header，即 **9 bytes**。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版方向／長度和 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
+原版 `sub_43A410` 把 server→client greeting 的首個 u16 同時當 byte count 與 `0xD3` 版本值，故總長是 **211 bytes**（199-byte body＋兩個 u32 seed）；這不是整個雙向握手的總流量。相同函式在零旗標分支依序送出 `0x04` 加 u32 的 5-byte client body，加 4-byte frame header 共 **9 bytes**。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版方向／長度和 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
 
 ## 實際責任與依賴
 
