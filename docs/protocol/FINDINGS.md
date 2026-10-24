@@ -52,7 +52,7 @@ if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
 
 **握手後的 c2s frame 另行分析**（倉庫 listing `0043A7D4–0043A844`，`sub_43A410` 尾段）：該路徑在 `CClientSocket+36 == 0` 時建 body，先寫 byte `0x04`，再附 `u32 *(CWvsApp+0x14)`，經一般 session sender 送出；就這份 EXE 的路徑而言是 **5-byte body + 4-byte session header = 9 bytes**。此證據描述 c2s frame，不是 s2c greeting 長度，也不解釋 bad-header 的根因。
 
-**使用者後續提供的 live log**（詳 ADR-165）收到 header `0x00D3`，server 以 `clientSendSeed=0xc6b926dd` 預期 `0xc66a`；計算為 `0xc6b9 XOR 0x00d3`，符合現有 header 算式。log 顯示 body 5／wire 9 bytes，但沒有 body hex，故只確認尺寸，不能宣稱 opcode 是 `0x04`。前綴 `conn:` 是 LoginServer listener（GameEntryServer 為 `game:`）；這是舊 211-byte greeting 模型下的一次 state/stage mismatch，不是目標短 greeting 已對齊，也不是視窗延遲根因的證據。
+**使用者先後提供的兩筆 live log**（詳 ADR-165）都收到 header `0x00D3`、body 5／wire 9 bytes：`clientSendSeed=0xc6b926dd` 時預期 `0xc66a`，`clientSendSeed=0xb8544265` 時預期 `0xb887`；兩者各自等於 `HIWORD(seed) XOR 0x00d3`。不同 expected 下實收值仍是裸 `0x00d3`；body hex 未提供，所以只確認尺寸，不能宣稱 opcode 是 `0x04` 或斷定 client state。兩筆均由 `conn:` 的 LoginServer listener 收到，第二筆明示 `stage=login`（GameEntryServer 前綴為 `game:`）。這是舊 211-byte greeting 模型下重複出現的 state/stage mismatch，不代表目標短 greeting 已對齊，也不是視窗延遲根因的證據。
 
 `sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196` 執行 `mov [ebx+14h], esi`，值來自伺服器在 0x03 回包裡給的角色 id（§4.11.3），所以 `[0x04][u32]` 的意義是識別剛被導向遊戲伺服器的角色，不是不透明 ticket（見 §4.8）。
 

@@ -40,6 +40,8 @@ test("key byte is the low byte, header magic the XOR of 0xD3 with the high word"
   const state = 0x1234_5678;
   assert.equal(keyByteOf(state), 0x78);
   assert.equal(headerMagicOf(state), (0xd3 ^ 0x1234) & 0xffff);
+  assert.equal(headerMagicOf(0xc6b926dd), 0xc66a);
+  assert.equal(headerMagicOf(0xb8544265), 0xb887);
   assert.equal(headerMagicOf(0x0000_0000), CLIENT_SEND_MAGIC);
 });
 
