@@ -6293,11 +6293,19 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
 3. 原版 listing `0043AD75`／`004A20F7` 證明 client→server frame header 會以 `0x00D3 XOR HIWORD(clientSendState)` 計算；因此 `0x00D3` 是 magic 常數，不是帶任意 seed 時每個 frame 都會直接出現的 header。對提供的 `clientSend=0xD75ABB51`，現有模型預期首個 c2s header 為 **`0xD789`**；裸 `0x00D3` 與此不符。這證明現有 log 的實際值與該 seed／frame 對不齊，但不能單靠這個差異判定 seed、階段、資料來源或 cipher 實作哪一項是根因。
 4. `conn:` 是 `LoginServer` 的連線日誌，`game:` 是另一條 `GameEntryServer` 連線。此前 login listener 在 header 不符時只記錄並繼續，game listener 甚至沒有先拒絕 bad header，因此後續錯位 byte **可能**被當作下一個 header；但沒有原始 wire bytes，不能確認 `0x1B66` 一定由前一個錯位造成。
 5. `body length 8276 exceeds the 1460 cap` 是 deframer 在當前 stream offset 把 offset 2 的 u16 解成 session body length 後觸發的封包上限錯誤，**不是**握手總長 8276 bytes，也不能反推握手長度。
+6. **後續使用者提供的實際 server log**（不是 raw PCAP）：
+   ```text
+   [serve] conn: legacy handshake model sent (211 bytes; clientSend=0xc6b926dd clientRecv=0xb481fa51)
+   [serve] conn: invalid client packet header 0x00d3 (expected 0xc66a; body=5 bytes, wire=9 bytes); closing
+   [serve] conn: closed
+   ```
+   `HIWORD(0xc6b926dd)=0xc6b9`，而 `0xc6b9 XOR 0x00d3 = 0xc66a`，所以這筆 expected 值與既有 header 算式吻合；收到的裸 `0x00d3` 僅在 header state 高 16 bits 為 0 時會與同一算式吻合，不能據此斷定 client 真正使用了哪個 state。5-byte body／9-byte wire 與已知 c2s 初始 frame 的尺寸一致，但 log 未包含 body bytes，**不能由此斷言 opcode 是 `0x04`**。
+   `conn:` 是 LoginServer 的 logger 前綴（GameEntryServer 使用 `game:`），因此這個 bad frame 抵達的是 login listener；若當時預期它是角色導向後的 game-entry frame，還需獨立核對 0x03 redirect／目的 port／連線階段。此記錄同時顯示 server 仍送 legacy 211-byte greeting，故不能當成目標短 greeting 已被正確解析的證據；亦沒有證明這是視窗延遲根因。
 
 ### 決策與實作
 
 1. ADR-166 更正後，`HANDSHAKE_VERSION` 的 `0x00D3` 版本值仍保留；199-byte body、211-byte wire 長度與現行 seed offset 僅屬舊 encoder 模型，不再宣稱是目標握手格式。此 commit 不猜測短 greeting 的 length 值、其餘欄位或 seed offset；login/game 的實際輸出長度診斷保留，c2s 9-byte frame/header mismatch 繼續獨立追蹤。
-2. LoginServer 與 GameEntryServer 收到第一個 `headerOk === false` 的完整 session frame 時，記錄 actual／expected header、body bytes 與含 4-byte header 的 wire bytes，立即 destroy TCP socket，不再讓同一串錯位 bytes 進入 packet handler 或被當成下一個正常封包。記錄不含 raw payload、憑證或解密內容。
+2. LoginServer 與 GameEntryServer 收到第一個 `headerOk === false` 的完整 session frame 時，記錄 actual／expected header、body length 與含 4-byte header 的 wire length，立即 destroy TCP socket，不再讓錯位 bytes 進入 packet handler 或被當成下一個正常封包。LoginServer 另記當前 `stage=login|world|char`；GameEntryServer 以 `game:` 前綴區分。記錄不含 raw payload、憑證或解密內容。
 3. Deframer 遇到超過 packet cap 的 stream 仍保留其可重用的「記錄 failure」行為，因為 offline capture／分析工具可能要自行決定如何處置；live login/game listener 則在 failure 後關閉連線。這是 live socket policy，不把分析 API 改成只能 fail-fast。
 4. 新增合成測試覆蓋兩種 TCP listener：用使用者提供的 seed 組出 5-byte client frame，再故意將正確 `0xD789` header 改成 `0x00D3`；驗證診斷值、9-byte wire 長度、socket 關閉，以及 game listener 不會消耗 character handoff。測試不登入 LIVE、不建立／操作角色、不讀寫存檔。
 5. 目前缺少使用者原始連線 bytes／PCAP 或可逐 byte 對應的 client trace；因此 `0xD3`、`0x1B66` 的真實來源仍未定。新的 expected-header／packet-length 日誌能提供下一次連線的低敏診斷，但不是宣告根因已知。
@@ -6307,6 +6315,7 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
 - `server/test/serve.test.ts` focused TCP diagnostics：**3 pass／0 fail**；login 與 game 各自驗證 bad-header close，另共同驗證 body length 8276 的 oversized-frame close，皆使用本機合成 peer，非原版 client 擷取。
 - `bun run check`（Bun 1.4.4）：strict TypeScript 7.0.2 typecheck、全域 `format:check`、完整 regression suite 與 browser build 均通過；完整 suite **1496 pass／0 fail／5334 `expect()` calls，174 files，356.80 s**。
 - 本輪新增的三項 login/game framing tests 包含於完整 suite；沒有 LIVE login、角色建立／操作、既有存檔讀寫或原版 client PCAP。
+- **2026-10-24 使用者 log 後續**：LoginServer bad-header log 加上目前 login stage；`server/test/serve.test.ts` 全檔 **49 pass／0 fail**，其中 mismatch test 使用實際貼出的 seed pair，驗證 `0x00D3` vs `0xC66A`、5-byte body／9-byte frame 與 `stage=login`。strict typecheck、format check 亦通過。沒有把這筆診斷解讀成握手或視窗延遲的已知根因。
 
 ## ADR-166：目標握手是短 s2c greeting「length → version `0x00D3`」；撤回 211-byte wire-length 結論（2026-10-24）
 

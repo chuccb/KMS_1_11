@@ -558,7 +558,8 @@ export class LoginServer {
           const expected = `0x${event.expectedHeader.toString(16).padStart(4, "0")}`;
           this.log(
             `conn: invalid client packet header ${actual} (expected ${expected}; ` +
-              `body=${event.body.length} bytes, wire=${event.body.length + 4} bytes); closing`,
+              `body=${event.body.length} bytes, wire=${event.body.length + 4} bytes); ` +
+              `stage=${state.stage}; closing`,
           );
           socket.destroy();
           return;

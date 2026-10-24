@@ -522,13 +522,14 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
 
 test("login server reports the expected cipher header and closes on the first bad frame", async (t) => {
   const log: string[] = [];
-  const clientSendSeed = 0xd75abb51;
+  // Seed pair and bare 0x00D3 header reproduce the user-supplied live diagnostic.
+  const clientSendSeed = 0xc6b926dd;
   const server = new LoginServer({
     accounts: new Map(),
     worlds: [{ name: "Scania", unknownId: 0 }],
     gameServer: { ip: "127.0.0.1", port: 8585 },
     handoffs: new HandoffRegistry(),
-    handshake: { clientSendSeed, clientRecvSeed: 0x798eba47 },
+    handshake: { clientSendSeed, clientRecvSeed: 0xb481fa51 },
     log: (line) => log.push(line),
   });
   const info = await server.listen(0);
@@ -555,7 +556,10 @@ test("login server reports the expected cipher header and closes on the first ba
     1,
     "a bad frame closes the stream before junk can be parsed as another",
   );
-  assert.match(headerErrors[0]!, /0x00d3 \(expected 0xd789; body=5 bytes, wire=9 bytes\)/);
+  assert.match(
+    headerErrors[0]!,
+    /0x00d3 \(expected 0xc66a; body=5 bytes, wire=9 bytes\); stage=login; closing$/,
+  );
 });
 
 test("game entry rejects a bad session header before claiming a character handoff", async (t) => {
