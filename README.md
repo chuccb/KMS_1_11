@@ -35,17 +35,17 @@
 
 2026-10-24 重新核對 npm registry／GitHub latest，固定版仍為 **Bun 1.4.4、TypeScript 7.0.2、@types/bun 1.4.4**
 （playwright-core 1.64.1／Chromium 153.0.0／checkout v7.0.1／setup-bun v2.2.0 也與 latest 相同，只作隔離驗證）。正式 formatter 是 Bun 內建 `bun fmt`；
-Prettier 3.9.10 僅作比較，不再是依賴；本輪 445 個 `.ts` 加 4 個 package／config／workflow 路徑，兩種 formatter **449/449 逐位元組一致**。
+Prettier 3.9.10 僅作比較，不再是依賴；本輪 447 個 `.ts` 加 4 個 package／config／workflow 路徑，兩種 formatter **451/451 逐位元組一致**。
 `.prettierrc.json` 保留為共用格式設定。根目錄 `package.json`／`bun.lock`／`.bun-version` 是唯一工具鏈入口，無須因 latest 核對而虛構升版。
 **全專案遷移仍未完成**：嚴格檢查已涵蓋所有 `.ts`（ADR-109 起連 `server/scripts/client_probe.ts` 也納入），
-唯一尚未型別化的 authored 來源仍是主瀏覽器入口 `client/main.js`（5535 行，仍為 JS／TS 混用）；
+唯一尚未型別化的 authored 來源仍是主瀏覽器入口 `client/main.js`（5507 行，仍為 JS／TS 混用）；
 不可把目前 typecheck 成功當成全客戶端已嚴格檢查。WebSocket 收件端目前 57 個已知 discriminator **全數有 runtime guard**；trade 十種 MiniRoom event 也已逐 variant 驗證，cash-block 的兩個 u64 僅在 JSON projection 轉成 canonical 十進位字串，完整保留精度，不碰協定或存檔值。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），因此不是全訊息 schema。
-`/map`／`/maps`／`/where` 已移至 strict `client/map-commands.ts` 並在顯示前驗證 `/api/maps`（ADR-161）；ADR-162 為 `/api/map/<id>` 與 map-art 加上共用 wire DTO、server serializer 型別及 browser runtime guards。ADR-163 再把 map-name、map geometry 與 art 的 HTTP 請求／錯誤政策及 stale-generation fence 移入可注入 fetcher 的 strict `client/map-resource-loader.ts`，保留原有 `/find` fallback 與 map/art 行為並以隔離測試鎖定。詳見 [TOOLCHAIN](docs/TOOLCHAIN.md)、[嚴格TS遷移](docs/BUN_MIGRATION.md)、[客戶端](docs/CLIENT.md) 與 [DECISIONS](docs/DECISIONS.md)。
+`/map`／`/maps`／`/where` 已移至 strict `client/map-commands.ts` 並在顯示前驗證 `/api/maps`（ADR-161）；ADR-162 為 `/api/map/<id>` 與 map-art 加上共用 wire DTO、server serializer 型別及 browser runtime guards。ADR-163 再把 map-name、map geometry 與 art 的 HTTP 請求／錯誤政策及 stale-generation fence 移入可注入 fetcher 的 strict `client/map-resource-loader.ts`；ADR-164 將 localStorage UI 偏好／視窗位置的 unknown 解析與不同 clamp 政策移至 `client/browser-preferences.ts`，不碰遊戲存檔。詳見 [TOOLCHAIN](docs/TOOLCHAIN.md)、[嚴格TS遷移](docs/BUN_MIGRATION.md)、[客戶端](docs/CLIENT.md) 與 [DECISIONS](docs/DECISIONS.md)。
 
 ## 目錄
 
 ```text
-client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；124 支 TS，main.js 尚待實作型別遷移
+client/                 瀏覽器畫面、輸入、音訊與逐步遷移的嚴格 .ts 模組；125 支 TS，main.js 尚待實作型別遷移
 server/src/protocol/    原封包 codec、cipher、CP949、schema.ts 封包索引
 server/src/client/      Bun 端 ClientSession 與事件模型
 server/src/net/         TCP 服務、HTTP／WebSocket 橋與 capture
@@ -106,7 +106,7 @@ bun server/src/cli.ts serve \
 
 ## 隔離體驗與進度安全
 
-2026-10-24 已啟動全新隔離的 memory-only 測試世界，不以既有 save 啟動，也不宣稱恢復舊角色。`--save off` 保證此程序不讀寫既有玩家存檔；本輪未自動登入、建立／操作角色。`preview:preview` 與 `observer:observer` 是這個測試程序明確提供的帳號，使用者可自行登入並建立新角色；重啟會失去該進度。
+2026-10-24（ADR-164）已啟動全新隔離的 memory-only 測試世界，不以既有 save 啟動，也不宣稱恢復舊角色。`--save off` 保證此程序不讀寫既有玩家存檔；本輪未自動登入、建立／操作角色。`preview:preview` 與 `observer:observer` 是這個測試程序明確提供的帳號，使用者可自行登入並建立新角色；重啟會失去該進度。
 有真實 save 時用 `bun tools/serve-existing-save.ts <真實路徑>`；必須先停服並冷備。
 
 可明示開啟不寫存檔的全新記憶體世界：

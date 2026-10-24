@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-24（ADR-163：map-resource HTTP loading／generation fence extraction；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-24（ADR-164：browser UI preference storage boundary；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
@@ -40,13 +40,14 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `client/map-commands.ts` | `/map` aliases／ID、`/maps` query 與 `/where` 的 strict parser；`/api/maps` 在顯示前完成 HTTP、payload guard、搜尋與 20 列呈現 |
 | `client/map-resources.ts` | `/api/map/<id>`、map-art 與 map-name JSON DTO／runtime guards；驗證地圖 identity、terrain、portal、ladder、spawn、drawable frames／bounds 與 optional minimap |
 | `client/map-resource-loader.ts` | map-name／geometry／art 的 strict HTTP boundary；維持 `/find` fail-soft fallback、HTTP／malformed error policy 與 field-generation stale fence，可注入 fetcher 做 isolated tests |
+| `client/browser-preferences.ts` | localStorage accessor、unknown UI preference parsing、視窗位置／分頁回復與寫入；分開保留 inventory no-clamp 與 shop minimum-visible clamp，與 server save 無關 |
 | `client/map-constants.ts` | 共用無回傳地圖 sentinel 與 `0x0D` s32 map-command 上限；`server/src/game/map.ts` 保留舊 export |
 | `client/ui-resource-validation.ts` | Browser metadata guard；地圖目錄只接受符合 map-command 編碼 policy 的整數 ID 與字串名稱欄位 |
 | `client/websocket-transport.ts` | 嚴格型別化的 browser WebSocket 建立／替換／送出／關閉、generation fence、JSON envelope 與 open guard；選定 payload guard 可拒收 malformed message，coverage/gaps 另列 |
 | `client/server-message-validation.ts` | server-to-browser 選定 event runtime guards；57 個已知 discriminator 全數有 guard，含 trade／messenger 巢狀 unions；未識別 runtime `t` pass-through（已知 `t: "unknown"` 有 guard），不是完整 schema |
 | `client/trade-message-validation.ts`／`trade-wire.ts`／`trade-constants.ts` | 驗證十種 MiniRoom event 與 item-slot 範圍；cash-block u64 以無損十進位字串表達，房間／refusal 常數不載入 UI state |
 | `client/messenger-message-validation.ts`／`client/messenger-constants.ts` | 驗證 Messenger 全部八種事件、巢狀 look 與固定三格 roster；房間大小共用純常數供 browser、protocol、server 使用 |
-| `client/*.ts` | 124 個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
+| `client/*.ts` | 125 個實作型別化的動畫／物理／呈現／UI／音訊與共用規則；無重複 declaration |
 | `client/social-commands.ts`／`party-state.ts`／`party-invitation.ts`／`chat-entry.ts` | 原社交指令嚴格解析（`/파티*`／`/귓속말`／`/찾기`＋明示別名）、`55C5E0` 六格名冊狀態、邀請確認所有權與編輯框生命週期；`server/src/net/chat-input.ts` 與 bridge 共用同一路由，斜線行不會落到公開聊天 |
 | `client/login-data.ts`／`login-presentation.ts`／`login-screen.ts` | 登入清單unknown守衛、選擇／pending純狀態、原WZ畫布與DOM／焦點／listener lifecycle；transport與creation／avatar透過具體介面注入 |
 | `client/feedback-data.ts`／`feedback.ts`／`feedback-renderer.ts`／`item-metadata.ts` | strict收件投影、六列整數alpha／EXP與Notice FIFO、原UI繪製、共用metadata有界cache／重試／取消；不改遊戲獎勵或instance |
@@ -109,18 +110,18 @@ JSON save 先寫暫存檔再改名；這不是資料庫交易、全機斷電保�
 ## 工具鏈與驗證狀態
 
 根 `.bun-version`／`package.json`／`bun.lock`／`tsconfig.json` 是唯一工具鏈；Bun1.4.4／TS7.0.2，
-ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false；formatter 為 Bun 內建 `bun fmt`；目前 445 個 `.ts`＋4 個 config/package/workflow paths 與 Prettier 3.9.10 **449/449 byte-identical**。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
+ESNext／strict／unused／erasableSyntaxOnly／skipLibCheck=false；formatter 為 Bun 內建 `bun fmt`；目前 447 個 `.ts`＋4 個 config/package/workflow paths 與 Prettier 3.9.10 **451/451 byte-identical**。CI的checkout/setup-bun固定SHA，不另裝Node/Python。
 `node:`標準庫由Bun相容實作，不是另一個runtime；產物JS不等於authored JS已遷移。
 
-client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5535 行；ADR-109 普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；已抽出 `client/inventory-window.ts`、`client/shop-window.ts`、`client/hud.ts`／`client/jobs.ts`，ADR-156 再抽出 `client/websocket-transport.ts`）。
+client_probe 已於 ADR-109 遷為 strict TS（`server/scripts/client_probe.ts`，納入 tsc 檢查），ADR-108 復活的真 typed 呼叫鏈全鏈仍通過；frame／play 已刪舊 MJS 並遷為真正 strict TS，見 [工具續作](STRICT_FRAME_PLAY_TOOLS.md)；已 typed whisper 還有未按當前 admission 重建的歷史情境。**唯一尚未型別化的 authored 來源是 main.js**（5507 行；ADR-109 普查顯示無可機械切開的純區塊，採門面分層逐領域搬移；已抽出 `client/inventory-window.ts`、`client/shop-window.ts`、`client/hud.ts`／`client/jobs.ts`，ADR-156 再抽出 `client/websocket-transport.ts`）。
 前輪增量（ADR-156）：strict `websocket-transport.ts` 收攏 browser socket lifecycle／open gates，頂層 JSON envelope 守衛拒收 malformed message，但不宣稱 event payload 深 schema；typecheck／format／build 與完整 suite **1468/0、5334 expects、170 files** 通過。`client/main.js` 仍未 strict 型別化，工程 gates 通過不代表全遊戲手動驗收。
 前輪（ADR-157）新增 strict 出站 JSON message union，讓 `WebClient.send` 與 `clientEventJson` 的 discriminator／payload 關聯受 compiler 驗證；當時尚未做 inbound runtime validation，亦未型別化 main.js。Bun／@types 升至 registry latest 1.4.4；該輪 focused44/0、完整1468/0（5334 expects、170 files）。
 前輪（ADR-158）transport 掛上選定 payload guards；當時 `trade`／`messenger` nested unions 明列為 gaps。Bun `fmt` 與鎖檔 Prettier 3.9.10 對 438 個 format input 逐檔 byte-identical 後，正式移除 Prettier 依賴。
 前輪（ADR-159）加入 Messenger 全八種事件及固定三格 roster 的 runtime guard；ADR-160 以 `client/trade-wire.ts` 將兩個 u64 精確投影為十進位字串並完整 guard MiniRoom union，現有 57 個已知 discriminator 全數受 guard。未識別 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），`main.js` 仍不是 strict TS。
-前輪（ADR-161）將 map command parsing／`/maps` response handling 抽至 strict TypeScript，驗證目錄 row 的安全整數範圍，並共用 WZ `returnMap` sentinel／s32 上限；`server/src/game/map.ts` 保留原 export。前輪（ADR-162）為 `/api/map/<id>`、`/art` 與 map-name 加上 typed JSON DTO、深度 browser guards 及 request-ID 一致性檢查；真 WZ HTTP payload、100/100 map JSON routes 與 100/100 map-art 都通過 guard。最新（ADR-163）把 map resource fetch／fail-soft name policy／HTTP result 與 post-JSON generation fence 移到 strict `client/map-resource-loader.ts`，`main.js` 僅注入原 field identity callback 並安裝結果；新增四項隔離 race／error-policy tests。嚴格 typecheck、format、Bun check **741/742**、build 與完整 **1489/0、5334 expects、173 files** 通過；formatter audit **449/449 byte-identical**。沒有 LIVE login、角色操作或既有 save 讀寫。
+前輪（ADR-161）將 map command parsing／`/maps` response handling 抽至 strict TypeScript，驗證目錄 row 的安全整數範圍，並共用 WZ `returnMap` sentinel／s32 上限；`server/src/game/map.ts` 保留原 export。前輪（ADR-162）為 `/api/map/<id>`、`/art` 與 map-name 加上 typed JSON DTO、深度 browser guards 及 request-ID 一致性檢查；真 WZ HTTP payload、100/100 map JSON routes 與 100/100 map-art 都通過 guard。前輪（ADR-163）把 map resource fetch／fail-soft name policy／HTTP result 與 post-JSON generation fence 移到 strict `client/map-resource-loader.ts`。最新（ADR-164）將 UI localStorage accessor／position and tab parsing 搬到 `client/browser-preferences.ts`，保留 inventory 不 clamp、shop 48×32 最小可見區、tab 1..4 與 storage failure fallback；不碰遊戲 save。新增四項偏好測試。strict typecheck、format、Bun check **743/744**、build 與完整 **1493/0、5334 expects、174 files** 通過；formatter audit **451/451 byte-identical**。沒有 LIVE login、角色操作或既有 save 讀寫。
 ADR-108／109 的 1213 pass／0 fail、inventory-window 9/9 與 probe 輸出等價結果是各自歷史時點；較早的 1205/8、1064/44 亦不代表現況，詳 [BUN_MIGRATION](BUN_MIGRATION.md)。
 前輪login UI另有真HTML／WZ component、21組原renderer完整邏輯畫布RGBA相等與30純imports／0 I/O；LIVE同PID4942、87modules與唯讀標題120幀，0WS，不登入或操作玩家。既有七DPR×五尺寸／游標與world/UI／zoom screenshot回歸保留。
-舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。ADR-163 本輪重新啟動全新 memory-only 隔離服務：web/login/game ports 8515/8516/8517、`--save off`、安全城鎮 map `101000000`（啟動時 0 mobs）、只有新的 `preview`／`observer` 帳號；沒有舊角色／save 被載入。`/healthz`、首頁、`/main.js`、map JSON 與 art 的唯讀 GET 均回應 200，兩種 map payload 都通過 browser guard；沒有打開 WebSocket、登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在此程序記憶體中，重啟即消失；預覽是否在線以 Arena 本輪 `Browser game preview` live preview 為準。
+舊 PID／ignored preview-save 名稱只代表歷史狀態，不是可恢復的玩家進度。ADR-164 本輪重新啟動全新 memory-only 隔離服務：web/login/game ports 8515/8516/8517、`--save off`、安全城鎮 map `101000000`（啟動時 0 mobs），僅以新的 `preview`／`observer` seeds 啟動；沒有舊角色／save 被載入。唯讀 GET `/healthz`、首頁、`/main.js`、map JSON 與 art 均回應 200，兩種 map payload 都通過 browser guard；沒有打開 WebSocket、登入、建立／操作角色或寫存檔。使用者若自行建立角色，進度只在此程序記憶體中，重啟即消失；預覽是否在線以 Arena 本輪 `Browser game preview` live preview 為準。
 掉落的全100張原WZ地圖／379422組驗證及呈現政策見 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
 標題／登入／世界與選角責任、原證及驗證見 [STRICT_LOGIN_UI](STRICT_LOGIN_UI.md)。
 鏡頭／合成／清晰尺寸見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。詳 [BUN_MIGRATION](BUN_MIGRATION.md)／[BROWSER_TOOL_CLEANUP](BROWSER_TOOL_CLEANUP.md)／[MOTION_EXPERIMENTS](MOTION_EXPERIMENTS.md)／[STRICT_BROWSER_TOOL_MIGRATION](STRICT_BROWSER_TOOL_MIGRATION.md)。

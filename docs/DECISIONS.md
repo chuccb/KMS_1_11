@@ -6252,3 +6252,27 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
 - `bun run check` 通過：pinned TypeScript 7.0.2 strict／ESNext typecheck、Bun 1.4.4 `format:check`、完整 `bun test` 與 browser build；完整 suite **1489 pass／0 fail／5334 `expect()` calls，173 files，378.89 s**。
 - Bun 1.4.4 `bun check --no-script --timing`：**741 checked／742 loaded**；Prettier 3.9.10 與 Bun formatter 逐檔 audit：445 個 `.ts` 加 4 個 package/config/workflow paths，**449/449 byte-identical**。Prettier 仍不是 runtime／package dependency。
 - 新的 memory-only `Browser game preview` 綁定 web/login/game **8515／8516／8517**，明確 `--save off`；唯讀 GET `/healthz`、`/`、`/main.js`、map JSON/art 回 200，兩種 map payload guard 均通過。沒有打開 WebSocket、LIVE login、角色建立／操作、既有 save 讀寫或 state-changing probe；測試僅使用注入 fetcher／isolated fixtures、local test server 與唯讀 `Data.wz`。使用者若自行遊玩，進度只留在該程序記憶體，重啟即消失。
+
+## ADR-164：strict browser preferences 與 UI window persistence boundary（2026-10-24）
+
+**狀態**：已接受（頁面 localStorage 的存取、解析與 UI 偏好政策移至 strict TypeScript；不涉及 server game save 或角色進度）
+
+### 背景
+
+`client/main.js` 直接讀寫 `kms111.inventoryAt`、`kms111.shopAt`、`kms111.inventoryTab`，並在另一處直接取得 localStorage 後傳給 quick-slot profile。JSON parse、storage getter 與 `getItem`／`setItem` 都可能失敗；位置和分頁亦有不同政策，不能用一個模糊的「合法座標」正規化所有偏好。這些資料是瀏覽器 UI 偏好，不是遊戲 save，也不應藉整理改寫伺服器保存或玩家角色狀態。
+
+### 決策與實作
+
+1. 新增 `client/browser-preferences.ts`，提供窄 `BrowserPreferenceStorage` 注入介面與惰性 `browserPreferenceStorage()`；localStorage 全域 getter、`getItem`、JSON parse 及 `setItem` 的例外均 fail-soft。main 將三種 window/tab preference 操作委派此 TS boundary；quick-slot profile 仍由 `quickslots.ts` 負責其 own key／payload，只共用安全 storage accessor。主入口不再直接引用 localStorage。
+2. 保留既有 key 與 shape：`kms111.inventoryAt`／`kms111.shopAt` 存 `{x,y}` JSON，`kms111.inventoryTab` 存 tab number 字串。解析 JSON 先收為 `unknown`，必須是非 array record 且 x/y 都 finite 才接受；失敗退回各自 home point。
+3. 背包 position 延續現有政策：只接受 finite 座標、不額外 clamp（例如保留使用者原先拖到畫面外的位置）；無儲存則複製原 `(24,24)` home。商店延續 round + clamp：水平只限到可留至少 48 px sheet edge，垂直至少保留 32 px，home 仍 `(196,154)`；這是恢復可拖曳視窗的 browser policy，**不是原版 registry 常數或遊戲規則**。viewport/window 尺寸從既有 `800×600`／`SHOP.width` 注入，未重複硬編碼畫面尺寸。
+4. 分頁延續 `Number(stored)` 的既有解析、只接受整數 1..4，預設 EQUIP=1；無 storage、惡意／畸形內容或例外都只影響偏好，不阻止進入遊戲。寫入失敗不影響拖曳完成、購買後切 tab 或 UI 行為。
+5. 新增四項純 fixture 測試，鎖定 inventory finite/no-clamp、shop rounding/bounds、tab 範圍／fallback／read error、key／serialization／write error。未更動 inventory/shop request、角色、背包 instance、Data.wz、網路協定、server save path 或任何遊戲規則。
+
+### 測試與驗證
+
+- `server/test/browser-preferences.test.ts`：**4 pass／0 fail**；另與 `client-ui.test.ts`、`browser-startup.test.ts` 聚焦合計 **9 pass／0 fail、3 files**，涵蓋真 client import／drag persistence 與 browser module startup。
+- `bun run check` 全通過：pinned TypeScript 7.0.2 strict／ESNext typecheck、Bun 1.4.4 format check、完整 regression suite、Bun browser build；完整 suite **1493 pass／0 fail／5334 `expect()` calls、174 files（333.96 s）**。
+- `bun check --no-script --timing`：**743 checked／744 loaded**，無錯誤。Prettier 3.9.10 僅作 comparison；與 Bun 1.4.4 formatter 的 **451/451 paths byte-identical**，不恢復為專案依賴。
+- 僅使用 injected fake storage 與隔離 browser probe／tests；沒有 LIVE login、角色建立／操作、既有 save 讀寫或伺服器持久化變更。
+- 另提供 `Browser game preview`：web/login/game ports **8515／8516／8517**、城鎮 map `101000000`、`--save off`；`preview:preview`／`observer:observer` 僅是此新程序帳號。唯讀 GET `/healthz`、`/`、`/main.js`、map／art 為 **200**，兩種 map guard 均通過；未開 WebSocket、登入或操作角色。自行建立的新進度只在該程序記憶體，重啟即消失。

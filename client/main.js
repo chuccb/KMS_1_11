@@ -3,6 +3,15 @@ import { mapSearchMessages, parseMapCommand } from "./map-commands.ts";
 import { RETURN_MAP_NONE } from "./map-constants.ts";
 import { browserMapName } from "./map-resources.ts";
 import {
+  browserPreferenceStorage,
+  loadInventoryTab,
+  loadInventoryWindowPosition,
+  loadShopWindowPosition,
+  saveInventoryTab,
+  saveInventoryWindowPosition,
+  saveShopWindowPosition,
+} from "./browser-preferences.ts";
+import {
   fetchBrowserMapArtResource,
   fetchBrowserMapName,
   fetchBrowserMapResource,
@@ -1721,19 +1730,11 @@ function finishWindowPress(event) {
   if (inventoryDrag?.moved === true) {
     // A drag is not a click: the window moved, so the sheet under the press must not act.
     inventorySuppressClick = event?.target === canvas;
-    try {
-      localStorage.setItem("kms111.inventoryAt", JSON.stringify(inventoryAt));
-    } catch {
-      // A blocked localStorage only costs the position.
-    }
+    saveInventoryWindowPosition(browserPreferenceStorage(), inventoryAt);
   }
   if (shopDrag?.moved === true) {
     shopSuppressClick = event?.target === canvas;
-    try {
-      localStorage.setItem("kms111.shopAt", JSON.stringify(shopAt));
-    } catch {
-      // A blocked localStorage only costs the position.
-    }
+    saveShopWindowPosition(browserPreferenceStorage(), shopAt);
   }
   if (shopScrollDrag !== undefined) shopSuppressClick = event?.target === canvas;
   shopScrollDrag = undefined;
@@ -1920,9 +1921,7 @@ canvas.addEventListener("click", (event) => {
       toggleInventory(false);
     } else if (hit.kind === "tab") {
       inventoryTab = hit.tab;
-      try {
-        localStorage.setItem("kms111.inventoryTab", String(inventoryTab));
-      } catch {}
+      saveInventoryTab(browserPreferenceStorage(), inventoryTab);
       inventoryPick = undefined;
     } else if (hit.kind === "scrollbar") {
       // Nothing: the press on the way in already acted, and the timer is what repeats it.
@@ -2564,9 +2563,7 @@ function loadQuickItems() {
   resetWhisper();
   quickDrag = undefined;
   quickOwner = owner;
-  let storage;
-  try { storage = localStorage; } catch {}
-  quickProfile = quickItemProfile(storage, owner);
+  quickProfile = quickItemProfile(browserPreferenceStorage(), owner);
 }
 /**
  * `sub_462DC0` / `sub_512570` -> `sub_55B2C0` (`0x18`) or `sub_55B4B0` (`0x19`).
@@ -3967,7 +3964,7 @@ function drawDraggedItem() {
 
 /** Whether the inventory is up, and its CConfig position (not the CLOSE control coordinate). */
 let inventoryOpen = false;
-let inventoryAt = { ...INVENTORY.home };
+let inventoryAt = loadInventoryWindowPosition(browserPreferenceStorage(), INVENTORY.home);
 /** The window the pointer is over, or the piece it is dragging. */
 let inventoryHover;
 let inventoryPressed;
@@ -4046,17 +4043,6 @@ window.addEventListener("blur", () => {
   inventoryScrollDrag = undefined;
   finishWindowPress();
 });
-// The 2003 client keeps a window's place in the registry; a page can only keep it locally.
-try {
-  const saved = JSON.parse(
-    localStorage.getItem("kms111.inventoryAt") ?? "null",
-  );
-  if (saved !== null && Number.isFinite(saved.x) && Number.isFinite(saved.y))
-    inventoryAt = { x: saved.x, y: saved.y };
-} catch {
-  // A blocked localStorage is not worth an error: the window just opens at its default spot.
-}
-
 /** `itemId -> {img, ready}`; the same `/api/item/<id>/icon.png` the shop asks for. */
 const itemIcons = new Map();
 
@@ -4244,12 +4230,7 @@ function tradeMesoAsk() {
 /** CConfig uiOpt0 defaults to 0; CUIItem adds 1, so a new profile starts on EQUIP, not USE. */
 function ensureInventoryTab() {
   if (inventoryTab !== 0 || inventory === undefined) return;
-  inventoryTab = 1;
-  try {
-    const saved = Number(localStorage.getItem("kms111.inventoryTab"));
-    if (Number.isInteger(saved) && saved >= 1 && saved <= 4)
-      inventoryTab = saved;
-  } catch {}
+  inventoryTab = loadInventoryTab(browserPreferenceStorage(), 1);
 }
 
 /** The inventory tab the window shows (a `0x0B` inventory number). */
@@ -4437,19 +4418,12 @@ function describeItem(itemId) { return itemMetadata.load(itemId); }
 
 
 /** Where the sheet sits, what is picked in each list, and the two scroll offsets. */
-let shopAt = { ...SHOP.home };
-
-// Like the inventory sheet, the client keeps a window's place in the registry; a page keeps it here.
-try {
-  const saved = JSON.parse(localStorage.getItem("kms111.shopAt") ?? "null");
-  if (saved !== null && Number.isFinite(saved.x) && Number.isFinite(saved.y))
-    shopAt = {
-      x: Math.max(-SHOP.width + 48, Math.min(VIEW_W - 48, Math.round(saved.x))),
-      y: Math.max(0, Math.min(VIEW_H - 32, Math.round(saved.y))),
-    };
-} catch {
-  // A blocked localStorage just means the shop opens centred.
-}
+let shopAt = loadShopWindowPosition(
+  browserPreferenceStorage(),
+  SHOP.home,
+  { width: VIEW_W, height: VIEW_H },
+  SHOP.width,
+);
 let shopHover;
 let shopDrag;
 let shopPressed;
@@ -4732,9 +4706,7 @@ function buyShopRow(index) {
     const tab = inventoryTabOfItem(row.itemId);
     if (inventoryTab !== tab) {
       inventoryTab = tab;
-      try {
-        localStorage.setItem("kms111.inventoryTab", String(inventoryTab));
-      } catch {}
+      saveInventoryTab(browserPreferenceStorage(), inventoryTab);
       inventoryPick = undefined;
     }
   };

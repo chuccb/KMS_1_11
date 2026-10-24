@@ -1,16 +1,16 @@
 # Bun / TypeScript / ESNext 工具鏈
 
-更新：2026-10-24（ADR-163：strict map-resource HTTP loader／generation fence；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
+更新：2026-10-24（ADR-164：strict browser UI preference boundary；registry／GitHub latest recheck）。**這是尚未完成的全專案遷移，不是完成交付聲明。**
 
-正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path byte audits 保留為歷史紀錄。ADR-163 現樹含 **445 個 `.ts`＋4 個 package/config/workflow paths，共 449 個格式輸入**；Prettier 3.9.10 僅作臨時比較，與 Bun 1.4.4 輸出 **449/449 byte-identical**，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
+正式 formatter 為 Bun 1.4.4 內建 `bun fmt`；ADR-158 的 438-path、ADR-159 的 440-path、ADR-160 的 443-path byte audits 保留為歷史紀錄。ADR-164 現樹含 **447 個 `.ts`＋4 個 package/config/workflow paths，共 451 個格式輸入**；Prettier 3.9.10 僅作臨時比較，與 Bun 1.4.4 輸出 **451/451 byte-identical**，沒有恢復成依賴。2026-10-24 registry／GitHub latest 重查：Bun／`@types/bun` 1.4.4、TypeScript 7.0.2、playwright-core 1.64.1、Chromium tooling 153.0.0、checkout v7.0.1 與 setup-bun v2.2.0 均與 latest 相同，故沒有為升級而改依賴。另以 Bun 1.4.4 `bun check --no-script` 輔助複核，權威 typecheck 仍呼叫 pinned TypeScript 7.0.2 `tsc`；Bun 官方 tarball SHA1／SHA512、packageManager、engine、`.bun-version`、@types pin 與 lockfile 同步。
 
 strict `client/websocket-transport.ts` 把 socket 建立／替換／open gate／JSON encode／close 與 active-generation fence
 自 `client/main.js` 移到可單元測試的 TypeScript 邊界；JSON object＋string `t` 後再呼叫 optional payload guard，guard 回 false 或 throw 都 fail-closed。
-`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **124 支 client `.ts`**、`client/main.js` **5535 行**。map DTO／runtime guards（ADR-162）與 strict HTTP loader／generation fence（ADR-163）分層；全部以隔離測試／mock，未操作 LIVE 角色或 save。
+`client/main.js` 現在接上 `client/server-message-validation.ts`，針對明列的 server message families 檢查 payload；57 個已知 discriminator 全數有 guard，trade／messenger nested unions 均覆蓋。`client/trade-wire.ts` 只在 JSON projection 將 cash-block `sn`／`unknown1A` u64 轉為 canonical 十進位字串；raw protocol BigInt 不改、不經 JS number。未識別／未分類 runtime `t` 仍 pass-through（已知 `t: "unknown"` 有 guard），故不是全面 schema。main 本身仍未納入 TypeScript 檢查；現況 **125 支 client `.ts`**、`client/main.js` **5507 行**。map DTO／runtime guards（ADR-162）、strict HTTP loader（ADR-163）與 UI preference/storage boundary（ADR-164）分層；全部以隔離測試／mock，未操作 LIVE 角色或 save。
 
 ADR-109 遷移基線：`server/scripts/client_probe.mjs` 已真正遷為 strict TS（`client_probe.ts`，1749 行，納入 tsc 檢查，
 輸出與舊 `.mjs` **逐行相同**），並自 `client/main.js` 抽出第一個可單元化的領域 `client/inventory-window.ts`
-（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源仍是 `client/main.js`（5535 行）**；
+（220 行，9 項新單元測試）。ADR-110 續抽 `client/shop-window.ts`（約 330 行，10 項新單元測試）。**目前唯一尚未型別化的 authored 來源仍是 `client/main.js`（5507 行）**；
 靜態耦合普查顯示它是彼此糾結的單體（321 個 top-level 宣告中僅 3 個零耦合），沒有可機械切開的純區塊，
 故採門面分層逐領域搬移，不以改名冒充遷移。frame／play 已於前輪遷為 strict TS，詳
 [STRICT_FRAME_PLAY_TOOLS](STRICT_FRAME_PLAY_TOOLS.md)。歷史數字／PID不代表當前 LIVE。
@@ -45,7 +45,15 @@ strict／format／build通過；完整1037/44（1081 tests／119 files，216.80s
 
 格式化則由 Prettier 3.9.10 換成 Bun 1.4.4 內建 `bun fmt`：兩個 formatter 使用同一 `.prettierrc.json`，438 個格式化路徑的結果逐檔 byte-for-byte 一致；已移除 Prettier package／lock entry，設定檔保留。`bun check --no-script` 亦在 730 個 TS files 無 type errors；維持 pinned TypeScript 7.0.2 `tsc` 為正式 typecheck script。
 
-## 最新增量：strict map-resource HTTP loader 與 generation fence（ADR-163）
+## 最新增量：strict browser preferences 與 UI window persistence（ADR-164）
+
+`client/browser-preferences.ts` 將 `localStorage` 安全取得、偏好讀寫、unknown JSON validation 與 UI window/tab policies 自未型別化的 `client/main.js` 拆至 strict TypeScript。window keys／tab key 的現有 shape 保留；quick-slot profile 的 own payload logic 仍在 `quickslots.ts`，只共用安全 storage accessor。這是 page-local UI preference，與 server／角色 save 分離。
+
+inventory position 接受有限 x/y 且不 clamp；shop position round 後 clamp 到 viewport／sheet width，至少留 48 px 水平、32 px 垂直可抓邊，明確標註為 browser usability policy 而非原版常數；tab 僅接受 1..4、default EQUIP=1。storage getter、讀取／JSON parse／寫入出錯皆 fail-soft，不阻止 drag、inventory action 或進入 field。主入口現不再直接存取 localStorage。
+
+`server/test/browser-preferences.test.ts` 新增 **4/0**；與 `client-ui.test.ts`／`browser-startup.test.ts` focused 合計 **9/0、3 files**，真 main startup／client probe 亦通過。pinned TS 7.0.2 strict typecheck、Bun 1.4.4 `format:check`、build 與完整 `bun run check` 全通過；full suite **1493/0、5334 expects、174 files（333.96 s）**。`bun check --no-script --timing` 為 **743 checked／744 loaded**；Prettier 3.9.10／Bun formatter **451/451 byte-identical**。無 LIVE login、角色操作或 save access。
+
+## 前輪增量：strict map-resource HTTP loader 與 generation fence（ADR-163）
 
 `client/map-resource-loader.ts` 將既有 `/api/map/<id>` name／geometry 與 `/api/map/<id>/art` 請求從未型別化的 `client/main.js` 拆至 strict TypeScript。fetcher 可注入、response 保持 `unknown`，重用 ADR-162 的 DTO guards；不重複 schema、不更動 server 或 WZ source。
 
@@ -118,9 +126,9 @@ bun run build
 - 根 `tsconfig.json` 使用 `target/module: ESNext`、Bundler resolution、嚴格型別、unused 檢查、
   `verbatimModuleSyntax`、`erasableSyntaxOnly`，**不關 strict、不 skipLibCheck、不加 allowJs 假裝遷移完成**。
 - 所有 `client/**/*.ts`／`.mts`、server、tools 的 TypeScript 都在檢查範圍。
-  client 的 61 個原有 leaf 已完成真正實作型別，現有 **124 支 `.ts`**（含共用型別／守衛），
+  client 的 61 個原有 leaf 已完成真正實作型別，現有 **125 支 `.ts`**（含共用型別／守衛），
   全專案已無 authored `.mjs`／重複 declaration。
-  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5535 行，JS／TS 混用），必須繼續實際遷移；
+  **唯一尚未獲嚴格型別驗證的 authored 來源是 `client/main.js`**（5507 行，JS／TS 混用），必須繼續實際遷移；
   `server/scripts/client_probe.ts` 自 ADR-109 起已納入檢查（其 DOM／VM shim 亦已型別化）。
 - 已遷移共用模組把宣告和實作收斂到同一 `.ts`，保留原證常數、順序與整數運算。
 - 開發 HTTP 只對 `.ts` 使用 Bun.Transpiler，移除型別後以 JavaScript MIME 回應；不用瀏覽器原生理解 TS。
@@ -197,7 +205,7 @@ bun server/scripts/browser_render_probe.ts <明示web-port或http(s)://origin>
 
 ## 實際驗證狀態
 
-本輪 ADR-163：strict typecheck／format check／Bun check／browser build 通過；map-resource loader focused **4/0、1 file**，完整 suite **1489/0、5334 expects、173 files（378.89 s）**。`bun check --no-script --timing` 為 **741 checked／742 loaded**，現樹 formatter audit **449/449 byte-identical**。固定 pins 與 2026-10-24 latest 核對一致；新 memory-only preview 明確 `--save off`，唯讀 GET／map guards 通過，沒有登入／操作角色或觸碰既有 save。詳細 map-resource DTO、HTTP lifecycle 與安全界線見 [ADR-162](DECISIONS.md)／[ADR-163](DECISIONS.md)。
+本輪 ADR-164：strict typecheck／format check／Bun check／browser build 通過；preferences／UI／startup focused **9/0、3 files**，完整 suite **1493/0、5334 expects、174 files（333.96 s）**。`bun check --no-script --timing` 為 **743 checked／744 loaded**，現樹 formatter audit **451/451 byte-identical**。固定 pins 與 2026-10-24 latest 核對一致；memory-only preview 明確 `--save off`，唯讀 GET／map guards 通過，沒有登入／操作角色或觸碰既有 save。詳細偏好邊界與安全界線見 [ADR-164](DECISIONS.md)；地圖 DTO／HTTP lifecycle 見 [ADR-162](DECISIONS.md)／[ADR-163](DECISIONS.md)。
 
 前輪掉落／fh增量：strict／format／build通過，focused73/0（7 files），新增28案例。
 完整1023/44（1067 tests / 117 files，187.28s），相對7162765 failure multiset含重複新增0／移除0，CI仍不綠。
