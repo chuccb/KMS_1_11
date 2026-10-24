@@ -3,21 +3,21 @@
  *
  * This is the other half of ADR-004 (the original client is the oracle). A raw capture is
  * useless without the cipher, so `kms111-rebuild decode` replays a trace through the same
- * model the client uses:
+ * legacy model currently implemented by `session.ts`:
  *
- *   1. a 211-byte handshake opens the session and carries the two LCG seeds,
+ *   1. a 211-byte legacy handshake opens the session and carries two LCG seeds,
  *   2. every following packet is `u16 header + u16 bodyLength + body`, body encrypted,
- *   3. the header is `0xD3 ^ HIWORD(state)` and doubles as a self-check: if our state ever
- *      drifts, the header stops matching and we say so instead of printing garbage.
+ *   3. the header is checked against the modeled direction magic and cipher state.
  *
- * Evidence: sub_43A410 (handshake + first framing), sub_4A1940 (assembler),
- * sub_4A1B90 (decrypt), sub_43AFA0 (packet loop that reads the +124 receive state).
+ * The target correction specifies a short `[u16 length][u16 version=0x00D3]` greeting; this
+ * decoder's handshake classifier has not yet been migrated to it. Evidence for the post-handshake
+ * frame/cipher remains sub_4A1940 (assembler), sub_4A1B90 (decrypt), and sub_43AFA0 (receive state).
  */
 import { CipherState, headerMagicOf, magicFor, type Direction } from "../protocol/cipher.ts";
 import {
-  HANDSHAKE_BODY_BYTES,
-  HANDSHAKE_TOTAL_BYTES,
-  decodeHandshake,
+  LEGACY_HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_TOTAL_BYTES,
+  decodeLegacyHandshake,
 } from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
@@ -126,13 +126,14 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
       headerOk: true,
     };
 
-    // The opening packet is plaintext and defines the keys for everything after it. The harness
-    // marks it `handshake`; a raw 211-byte `frame` is treated the same way.
+    // The current legacy opening packet is plaintext and carries the modeled keys. The harness
+    // marks it `handshake`; a raw 211-byte `frame` is treated as that same legacy shape. The target
+    // short greeting needs a separate parser before this heuristic can be considered authoritative.
     const isHandshake =
-      raw.length === HANDSHAKE_TOTAL_BYTES &&
+      raw.length === LEGACY_HANDSHAKE_TOTAL_BYTES &&
       (record.kind === "handshake" || record.kind === "frame");
     if (isHandshake) {
-      const parsed = decodeHandshake(raw);
+      const parsed = decodeLegacyHandshake(raw);
       const sendSeed = record.seeds?.sendSeed ?? parsed.sendSeed;
       const recvSeed = record.seeds?.recvSeed ?? parsed.recvSeed;
       // `sendSeed` seeds the receiver's send state; the receiver is the other end.
@@ -145,10 +146,10 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
       s2cState = new CipherState(s2cSeed);
       packets.push({
         ...base,
-        bodyLength: HANDSHAKE_BODY_BYTES,
+        bodyLength: LEGACY_HANDSHAKE_BODY_BYTES,
         bodyHex: toHex(parsed.body),
-        expectedHeader: HANDSHAKE_TOTAL_BYTES,
-        headerOk: base.header === HANDSHAKE_TOTAL_BYTES,
+        expectedHeader: LEGACY_HANDSHAKE_TOTAL_BYTES,
+        headerOk: base.header === LEGACY_HANDSHAKE_TOTAL_BYTES,
         note: `handshake sent by ${record.dir}: receiver (${record.dir === "s2c" ? "client" : "server"}) seeded`,
       });
       continue;

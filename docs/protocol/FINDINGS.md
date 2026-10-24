@@ -13,8 +13,7 @@
 怪物／NPC／掉落物的分派也已拆到函式層（§4.12，欄位仍待讀）。
 **社交面也開始有實作了**：場地聊天（§4.26）之外，**密語與找人**（`0x23` → `0x1A` 的 `0x09`／`0x0A`
 ＋收件者看到的 `0x12`）在 **§4.31**，兩者都是「場地的」封包（第一條跨地圖送達的路徑）。
-剩下的未知：211-byte 握手的 199 bytes `body`、CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／
-CRewardPool／對話框／messenger／miniroom）欄位（§6）。
+剩下的未知：目標 s2c greeting 的精確短封包欄位與 seed offsets（2026-10-24 更正：u16 length 在前、u16 version `0x00D3` 在後；實際 greeting 是十幾 bytes；現行 211-byte encoder 尚未對齊）；CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／CRewardPool／對話框／messenger／miniroom）欄位（§6）。
 
 ---
 
@@ -45,41 +44,15 @@ if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
 - `u16 @ 2`：本文長度；本文 = 接下來的 `bodyLen` bytes，**加密**。
 - 上限：單包不超過 **1456 bytes** 本文；超過時 `sub_4A2030` 會切成 **1460 bytes 的 socket chunk** 送出，
   **只有第一塊帶標頭**（`sub_4A2030` 內 `v11 > 1456` 分支）。
-- 明文特例：**連線後第一個封包是 211 bytes 的握手**，其本文不加密（金鑰就藏在裡面）。
+- 明文 handshake：**目標 wire format 是短 greeting，不是 211 bytes**。使用者於 2026-10-24 明確更正：offset 0 先有 2-byte length 欄位，後面才是 `u16 version = 0x00D3`；211 是版本值，官方 s2c greeting 為十幾 bytes。現行 `encodeLegacyHandshake()` 仍輸出 211 bytes，這是尚未對齊的舊模型，不是可接受的目標格式。
 
-**已證實的 211-byte 握手**（`sub_43A410`，於 `FD_CONNECT` 後執行）：
+**倉庫 EXE 與目標 wire format 尚未對上**：倉庫 `MapleStory.exe` SHA-256 為 `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`，且 `.lst` header 的 Input SHA256 與之相同。這份 listing 的 `sub_43A410` 在 `0043A645` 從接收 buffer 起點讀 `[edi]` 作為讀取數量；`0043A6C8` 從同一位置再讀一次，`0043A76E` 把它與 `0xD3` 比較；`0043A6F2` 則把 offset 2 的 u16 當區塊 copy 長度。**這段路徑沒有找到「獨立 length 在前、version 在後」的對應**。這代表倉庫這份 EXE／listing 與目標 greeting 的格式或階段仍有落差；不能用它把 211 當成目標 wire length，也不能據此否定已提供的短格式更正。
 
-```
-u16 totalLen                     // == 211（= 0xD3），否則：
-    > 211 → CxxThrowException(_TI3_AVCPatchException__)      // 需要更新（PATCH）
-    < 211 → CxxThrowException(_TI3_AVCTerminateException__)  // 終止
-u16 bodyLen                      // == 199
-u8[bodyLen] body                 // 199 bytes
-u32 clientSendSeed               // @ 4 + bodyLen = 203  → CClientSocket+120（送 state）
-u32 clientRecvSeed               // @ 8 + bodyLen = 207  → CClientSocket+124（收 state）
-```
+目標短 greeting 的精確 length 數值、剩餘欄位與 seed offsets 仍待定位；目前不猜值。伺服器和 trace decoder 仍有舊 211-byte 實作，應視為待替換模型，不能宣稱已與官方 client 對齊。
 
-> 解讀：這是**登入/版本檢查握手**。長度必須等於 211 是這支 handler 的契約；兩個例外類別的存在意味著
-> 「版本不符 → 走更新流程」。`body` 的內容語意仍為 **UNKNOWN**（§6 待辦 1）。
->
-> ✅ **已證實：伺服器先送**。`sub_43A410` 由 `FD_CONNECT` 觸發，函式內以 `recv()` **兩段式**讀取
-> （先 2 bytes 長度，再讀到 `總長 == u16@0`），所以它不可能是 client 的招呼封包——client 在收到這 211 bytes
-> 之前不會送任何東西。重寫版 client 必須等握手；重寫版**伺服器必須先送握手**。
->
-> 欄位順序（`.lst 0043A744–0043A774`）：`u32 @ 4+bodyLen` → `CClientSocket+120`（**送** state）、
-> `u32 @ 8+bodyLen` → `+124`（**收** state），兩者皆原樣寫入（無 `not`、無轉換）。
->
-> **client 的第一個回包**（`.lst 0043A7D4–0043A844`，`sub_43A410` 尾段）：握手解析完、且
-> `CClientSocket+36 == 0` 時，client 會建一個 buffer（`sub_4A1EA0(&buf, 4, 0)` = 先塞入 byte `0x04`）、
-> 再附上 `u32 *(CWvsApp+0x14)`（`mov edx, n3000` `mov esi, [edx+14h]`），走一般送出路徑送出。
-> 也就是說：**握手之後 client 送的第一個封包是 `[0x04][u32 app+0x14]`**。
->
-> ✅ **寫入點已找到（2026-10-16）**：`sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196`
-> 執行 `mov [ebx+14h], esi`（`ebx = n3000`），值來自伺服器在 0x03 回包裡給的 **角色 id**
-> （§4.11.3 證明它是 id，不是不透明的 ticket）
-> （見 §4.8）。所以 `[0x04][u32]` 的意義 = **「我是剛剛被導向過來的那個角色/連線」**：
-> 登入伺服器在選角成功時發一組 token，client 帶著它連上遊戲伺服器、握手後立刻回報，
-> 遊戲伺服器才知道這條新連線屬於哪一個角色。
+**握手後的 c2s frame 另行分析**（倉庫 listing `0043A7D4–0043A844`，`sub_43A410` 尾段）：該路徑在 `CClientSocket+36 == 0` 時建 body，先寫 byte `0x04`，再附 `u32 *(CWvsApp+0x14)`，經一般 session sender 送出；就這份 EXE 的路徑而言是 **5-byte body + 4-byte session header = 9 bytes**。此證據描述 c2s frame，不是 s2c greeting 長度，也不解釋最新 bad-header 的根因。
+
+`sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196` 執行 `mov [ebx+14h], esi`，值來自伺服器在 0x03 回包裡給的角色 id（§4.11.3），所以 `[0x04][u32]` 的意義是識別剛被導向遊戲伺服器的角色，不是不透明 ticket（見 §4.8）。
 
 ## 3. 加密（cipher）✅
 
@@ -341,8 +314,8 @@ u32 characterId  // → CWvsApp+0x14；**這就是本機角色的 id**（§4.11.
 ```
 
 → client 用 `sub_558BD0`（與 `0x07` 遷移同一條連線函式）連到 `ip:port`，把 id 存進
-`CWvsApp+0x14`，播放 "GameIn" 音效；抵達遊戲伺服器、收完 211-byte 握手後，就用
-`[0x04][characterId]` 表明身分（§2）。**這條線現在完全閉合。**
+`CWvsApp+0x14`，播放 "GameIn" 音效；抵達遊戲伺服器、完成目標短 greeting 後，就用
+`[0x04][characterId]` 表明身分（§2）。**導向與 c2s 身分 frame 已閉合；目標 greeting byte layout 仍待對齊。**
 
 **`result` 值表**（`sub_4D0DB0`／`sub_54E250`／`sub_432FB0` 三個 handler 的 switch 完全相同）；
 訊息欄是**從 `.rdata` 讀出來的原文**（CP949），`aAi`／`aO_2`／`aAiI_0` 只是 Hex-Rays 給字串常數取的名字：
@@ -4552,9 +4525,7 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
 
 ## 6. 待辦（依重要性）
 
-1. **211-byte 握手的 `body`（199 bytes）**：長度規則已知（§2），內容語意仍未知；最快的解法是用
-   `capture --handshake-body <hex>` 餵不同內容觀察原 client 的反應（同一支 client 對不同 body
-   的反應就是唯一的量測工具）。
+1. **目標 s2c 短 greeting 的完整 byte layout**：已知前 2 bytes 是 length、接著 `u16 version=0x00D3`，整體為十幾 bytes；尚需把 length 的計數方式、seed offsets 與其他欄位對齊目標 binary。不可把現行 199-byte body 或 211-byte encoder 當作規格，也不以猜測的長度餵 client。
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
    `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，地圖 id 已解＝`CharacterData.mapId`，§4.11.2／
    §4.11.2b；落點已另由 CharacterData+101 解出，§4.43）；`0x1C` 的 `unknown64` 與第二／第三個 u32
@@ -4621,8 +4592,7 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    **`0x0F` 結構上永遠不可能帶 buff 圖示**（傳 `nullptr` 給 decoder，拿不回 mask）。
    完整 asm 證據（兩個表頭位元組的 guard 順序、`push 0`、兩者的呼叫集合對照）見 §4.21.2
    與 `server/test/native-tempstat-0f.test.ts`。
-7. **握手方向的實機確認**：`serve` 目前一定送 211-byte 握手（§2 的契約），但「原 client 是否
-   在某些情況下先送」還沒有實機證據；有真實流量就能一次確認。
+7. **握手方向與階段的實機對照**：目前 server 仍依舊模型送出 211 bytes；目標 greeting 已確認為十幾 bytes 且 length 在 version 前。需要把 login/game 各自的實際階段與已知短格式對齊，不能再把現行輸出當契約。
 8. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
    `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
@@ -4839,8 +4809,8 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
 > `GameEntryServer` 的角色記錄上。）
 
 ```bash
-# 1. 接住原 client。session 模式會「先送」211-byte 握手（種子由我們選、寫進 trace），
-#    再即時解密 client 回送的封包。
+# 1. 接住原 client。注意：目前 session 模式仍會先送舊模型的 211-byte greeting；
+#    這與目標短 greeting 不符，先勿把此 trace 當作官方 handshake 證據。
 node server/src/cli.ts capture --port 8484 --out traces/login.jsonl
 
 #    想要可重現的實驗就固定種子；想試握手 body 內容就餵它（body 語意仍未知，看 client 反應）
@@ -5598,28 +5568,25 @@ canvas 60 幀 hash 只有 1 種、0 幀不同；版面 90 幀只有 1 種；DOM 
 `GET / HTTP/1.1\\r\\nHost: 8606-…`，即**沙箱埠預覽對裸 TCP 登入埠（8606）的 HTTP 探測**，
 非遊戲客戶端封包。伺服器誤讀為超長封包並關閉連線，行為正確，毋需修復亦毋庸複查。
 
-### 4.48 ✅ 握手的 211 = 客戶端版本（`0xD3` 同一常數三處），199-byte body 為原版不讀區塊（ADR-139）
+### 4.48 ⚠️ `0xD3` 是版本值；「握手必為 211 bytes」舊結論已撤回（ADR-166）
 
-**`0xD3`=211 出現三處**：`0043AD75` `push 0D3h`（c2s 標頭魔術）、
-`0043B003` `cmp cx,0FF2Ch`（s2c 驗證，`~0xD3`）、`0043A76E` `cmp ax,0D3h`（握手 u16@0）。
-
-**決定性證據＝第三處失敗時的例外**：
+**倉庫 EXE 中 `0xD3`=211 出現於三個相關位置**：`0043AD75` `push 0D3h`（c2s 標頭 magic）、
+`0043B003` `cmp cx,0FF2Ch`（s2c 驗證，`~0xD3`）、`0043A76E` `cmp ax,0D3h`（該接收路徑的版本比較）。
+`0043A76E` 的錯誤處理確實呈現版本語意：
 - `<211` → `CTerminateException(0x22000005)`，訊息「잘못된 **버전**의 클라이언트입니다 /
   최신 버전의 클라이언트를 다시 설치해 주세요」（`MapleStory.exe` `0x1b59aa`）。
 - `>211` → `CPatchException`，`sub_468400`（`.c:112328`）組出
-  `WORD@+4=211`（所需版本）、`WORD@+6=收到值`（實得版本）之「預期／實際」對。
+  `WORD@+4=211`（所需版本）、`WORD@+6=收到值`（實得版本）。
 
-**同一欄位在原版亦為長度**（`sub_43A410`，`.c:66345-66370`）：先收 2 bytes 作總長、
-`recv()` 至湊滿（逾 1460 緩衝區即棄），**讀完後**始與 `0xD3` 相較。
-故線上此欄位必須「正好 211 bytes 且值為 211」——body 長度不可任意更動。
+**這些位址不能推出目標 greeting 的 wire length。**使用者已更正目標格式為 `u16 length` 在前、
+`u16 version = 0x00D3` 在後，官方 s2c greeting 是十幾 bytes。倉庫 listing 的 `sub_43A410`
+卻在其 buffer offset 0 收取並比較同一個 u16，與這個目標欄位順序不一致；這是待解的 binary／階段／offset 落差，不是把版本值 211 當 wire length 的理由。
 
-**199-byte body 原版不讀**：`sub_418610(&v56,…)` 複製（`c:66393`）後，
-僅於函式尾端 refcount 釋放（`.lst:0043A884`）。客戶端未讀取其內容，伺服器可任意填值。
+先前認定的 **199-byte body** 與「原版只複製不讀」只描述舊 listing 解讀：`sub_418610(&v56,…)`
+複製（`c:66393`）後，local 變數僅於函式尾端 refcount 釋放（`.lst:0043A884`）。此事不能證明目標短 greeting 有 199-byte body；現行 `session.ts` 仍輸出舊 211-byte 格式，尚未對齊目標格式。
 
-**改法**：`cipher.ts` 單一定義 `CLIENT_VERSION=0x00d3`，兩魔術常數由之推導；
-`session.ts` `HANDSHAKE_VERSION=CLIENT_VERSION`、`body=version-4-8`、`total=4+body+8`。
-線上行為不變。變異：改 `CLIENT_VERSION=210` → 4 條紅（含新增者）；
-將 `SERVER_SEND_MAGIC` 還原為字面 `0xff2c` 則不紅（行為等價，屬可讀性改進）。
+`CLIENT_VERSION=0x00d3` 與兩個 session-header magic 的共用定義可保留；但 `LEGACY_HANDSHAKE_TOTAL_BYTES=211`、
+`LEGACY_HANDSHAKE_BODY_BYTES=199` 及現行 seed offsets 不再當成已證實的官方規格。
 
 ### 4.49 ✅ NPC 商店資料位於 `Npc/<id>.img/info/shop`（ADR-140），原手寫三間為虛構且價格錯誤
 

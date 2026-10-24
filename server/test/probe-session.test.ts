@@ -7,9 +7,9 @@ import { nativeProbeOptions, browserProbeOptions } from "../scripts/probe-option
 import { sampleStats } from "../scripts/browser_render_probe.ts";
 import { CipherState, CLIENT_SEND_MAGIC } from "../src/protocol/cipher.ts";
 import {
-  encodeHandshake,
+  encodeLegacyHandshake,
   encodeSessionPacket,
-  HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_BODY_BYTES,
   SessionDeframer,
 } from "../src/protocol/session.ts";
 
@@ -33,7 +33,8 @@ async function peer(
       for (const event of deframer.push(chunk))
         if (event.kind === "packet") received.push(event.plain);
     });
-    if (handshake) socket.write(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 123, 456));
+    if (handshake)
+      socket.write(encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 123, 456));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

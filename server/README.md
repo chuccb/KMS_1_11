@@ -22,19 +22,19 @@
 
 | 元件 | 狀態 |
 |---|---|
-| `src/protocol/frame.ts` | ✅ 框架層：4-byte 標頭（`u16 header` + `u16 bodyLen`）+ 1460 上限，皆有 binary 證據；另保留舊的 u16 總長 framing 供握手用。 |
+| `src/protocol/frame.ts` | ✅ 後續封包框架：4-byte 標頭（`u16 header` + `u16 bodyLen`）+ 1460 上限，有 binary 證據；舊 u16 總長 framer 僅供 legacy trace，不代表目標 greeting。 |
 | `src/protocol/cipher.ts` | ✅ 會話加密：MSVC rand LCG、`swapNibbles`、送/收狀態；標頭 = `magic ^ HIWORD(state)`，**兩個方向常數不同**（c2s `0xD3` / s2c `0xFF2C`，見 `docs/protocol/FINDINGS.md` §3.1）。 |
-| `src/protocol/session.ts` | ✅ 211-byte 握手 codec + 串流解碼器 `SessionDeframer`：吃握手取種子、逐包解密並**自檢標頭**；握手可由任一方送出（`expectHandshake`）。 |
+| `src/protocol/session.ts` | ⚠️ `SessionDeframer` 的 post-handshake framing/cipher 可用；greeting codec 仍是舊 211-byte 模型，不符合已更正的目標短 greeting `[u16 length][u16 version=0x00D3]`，請勿把相關測試當官方 wire conformance。 |
 | `src/protocol/packet.ts` | ✅ 欄位編碼：`u8`/`u16`/`u32` LE、字串 = `u16 長度` + 原始 bytes；越界丟 `PacketUnderflowError(38)`（client 丟 `ZException(38)`）。 |
 | `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 建角、0x06 名檢查+外觀、0x07 刪角、0x08 echo。 |
 | `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **69-byte** 能力值區塊 + 完整道具區塊（穿戴格 ×2、四個道具欄、每欄 8-byte 記錄、`0x20`/`0x40` 兩個 map）。其中「道具區塊」的寫入順序與 `sub_45F610`（編碼器）逐項對齊。另有外觀的兩張表：`AVATAR_SLOT`／`avatarSlotOfItem`（`sub_45F340` 的 part code → 格號，§4.11.3d）與 `LOOK_WORD`／`wornOfLook`／`withWorn`（`0x06` 的十個 u32 → 起始裝備，ADR-025）。 |
 | `src/protocol/itemslot.ts` | ✅ `GW_ItemSlot`：`itemId` + 現金區塊 + `GW_ItemSlotEquip`（ruc/cuc/15 個能力值）／`NonEquip`（quantity）。**種類位元組只在呼叫端給 0 時才上線**：本伺服器送出的每個封包都用「欄位本身」當提示（`CharacterData` 用欄位號、`0x0B` 用剛讀到的欄位號），所以都不帶那個位元組（§4.18.4 的修正）。 |
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
-| `src/net/capture.ts` | ✅ **擷取伺服器**（ADR-004）：接住原 client，寫出 JSONL trace；無法解碼的 chunk 標記一次後改為原始傾印，**不丟資料**。 |
-| `src/net/decode.ts` | ✅ trace 重播器：把 JSONL 解回可讀封包；種子取自握手，且**狀態以線路方向為鍵**（c2s = client 送 state）。 |
+| `src/net/capture.ts` | ⚠️ **擷取伺服器**（ADR-004）：寫出 JSONL trace、保留無法解碼的 raw chunk；session mode 仍會送舊 211-byte greeting，不能用作目標 client 的 oracle。 |
+| `src/net/decode.ts` | ⚠️ trace 重播器：可解 legacy 211-byte handshake traces 與後續 session 封包；尚未遷移目標短 greeting parser。 |
 | `src/net/online.ts` | ✅ **誰在線上**：`OnlineAccounts`（`account → 活著的 session`，一個帳號一個座位）＋ `SeatKeeper`（一條連線的座位與心跳一起拿、一起還）；座位由登入伺服器（`0x01` 成功）與遊戲伺服器（角色進場）**各拿一次**，兩半共用同一份（ADR-018）|
 | `src/net/heartbeat.ts` | ✅ **心跳**：對安靜的 session 送 `0x08`，client 的 `sub_43B280` 無條件回聲（任何階段都有效，FINDINGS §4.2／§4.30）；安靜超過三個間隔就 `destroy()`，於是座位歸還、`0x1D`、存檔都照既有的 close 路徑走。間隔與逾時是我們的選擇（預設 30 s／90 s，`--ping <ms\|off>`）|
-| `src/net/loginserver.ts` | ✅ **登入伺服器**：實作 §4.7–§4.9 的登入鏈（握手 → 0x01 → 0x02 → 0x03/0x05/0x06），帳號與角色的**唯一真相是一份記憶體表**（`LoginServerOptions.accounts`），寫進檔案由 `persist` 回呼負責（`src/game/save.ts`，ADR-017）：建立角色、刪除角色與 **session 結束**時各存一次；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），**並把 `0x0F` 轉播成 s2c `0x23` 給同場地的其他人**（`relayAttack`：只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`afterimage` 送 0，`0x24` 的投射物 id 用自己的分頁紀錄查（`projectileItemOf`，查不到＝0）；ADR-026／ADR-027／§4.11.7b／§4.11.7c），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**密語與找人**也會在這裡落地（`handleUserRequest` → `sessionNamed` 掃線上 session，跨圖用 `target.send`，§4.31）；**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。**組隊請求**（`0x26`）也落在這裡（`handlePartyRequest` → `game/parties.ts` → `0x10`；create／leave／accept／invite／kick，已在隊伍／不在隊伍／滿了／邀請失效各有自己的 `0x10`，ADR-030），而**下線＝退隊**（close handler 先從 `sessionsByCharacter` 移除、再走 `leaveParty`——不要對已經關掉的 socket 送包）。**人氣**（`0x20`）也在這裡（`handleFameRequest` → `applyFame` → `0x12`；成功時給的人收 `type 0`、被給的人收 `type 5` ＋ 一個 `0x0D` 的 `fame` 差值，拒絕是 `2`／`3`／`4`，過期的 id 是 `1`——什麼都不顯示，ADR-031）。**交易**（`0x25`）也在這裡（`handleMiniRoomRequest` → `game/trades.ts` → `0x50`：`/교환` 送 `type 1` 給對方、`type 2 code 0` 給自己；答應後兩邊各收 `type 4` 進房；放道具／錢是 `type 11`／`12`；兩邊都按確認才 `type 13` ＋交換＋`0x0B`／`0x0D` ＋ `type 8 code 3`；斷線時對方收 `code 1`——ADR-032）。**메신저**（`0x24`）也在這裡（`handleMessengerRequest` → `game/messenger.ts` → `0x4D`：開房回 `type 0`、`/초대` 給對方 `type 3` 給自己 `type 4`、答應後兩邊各收整份名冊、聊天是 `type 5`、離開是 `type 2`——ADR-033）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
+| `src/net/loginserver.ts` | ⚠️ **登入伺服器**：實作 §4.7–§4.9 的登入鏈，但 opening greeting 仍是舊 211-byte 模型（目標短格式待修；見 ADR-166）；其餘帳號與角色的**唯一真相是一份記憶體表**（`LoginServerOptions.accounts`），寫進檔案由 `persist` 回呼負責（`src/game/save.ts`，ADR-017）：建立角色、刪除角色與 **session 結束**時各存一次；另含遊戲伺服器端：領到 `0x04` 的角色 id 後送 `0x16` 進地圖、再依地圖的 `life` 送 `0x2F`（§4.15），再依地圖的 `life` 送每個 NPC 一個 `0x39`（§4.19），把 client 報的攻擊（`0x0F`／`0x10`／`0x11`）套到怪物 HP 上（§4.17），**並把 `0x0F` 轉播成 s2c `0x23` 給同場地的其他人**（`relayAttack`：只給其他人、只放這場地收下的怪、`speed` 照抄、`skillLevel`／`afterimage` 送 0，`0x24` 的投射物 id 用自己的分頁紀錄查（`projectileItemOf`，查不到＝0）；ADR-026／ADR-027／§4.11.7b／§4.11.7c），並在 `tickField` 裡跑**掉落與拾取**：殺怪時送 `0x43`、玩家走到上面時送 `0x44 kind 2`＋`0x0B`＋`0x11`（§4.18），**殺怪也會給經驗值**：`awardKillExp` 用怪物自己的 `info.exp` 加進角色紀錄，升級就送 `0x0D` 能力值差異包（§4.21）；**點 NPC 會開商店**（`0x33` → 空的 `0x19` ＋ `0x4A`），商店的按鈕（`0x16`）會回 `0x4B`＋`0x0B`＋`0x0D`（§4.22，ADR-010）；**沒有商店的 NPC 會開口說話**（`0x47` 帶它自己 `info/speak` 的第一句，client 的 `0x15` 走下一句，§4.23，ADR-011）。**密語與找人**也會在這裡落地（`handleUserRequest` → `sessionNamed` 掃線上 session，跨圖用 `target.send`，§4.31）；**走過傳送門就會換地圖**（`0x0D` → 空的 `0x19` ＋ `0x16`；目的地是地圖資料的 `tm`，見下），而**進哪張圖是角色紀錄自己的事**（`stats.mapId`，`--map` 只是新角色與沒有 mapId 的紀錄的後備）。**組隊請求**（`0x26`）也落在這裡（`handlePartyRequest` → `game/parties.ts` → `0x10`；create／leave／accept／invite／kick，已在隊伍／不在隊伍／滿了／邀請失效各有自己的 `0x10`，ADR-030），而**下線＝退隊**（close handler 先從 `sessionsByCharacter` 移除、再走 `leaveParty`——不要對已經關掉的 socket 送包）。**人氣**（`0x20`）也在這裡（`handleFameRequest` → `applyFame` → `0x12`；成功時給的人收 `type 0`、被給的人收 `type 5` ＋ 一個 `0x0D` 的 `fame` 差值，拒絕是 `2`／`3`／`4`，過期的 id 是 `1`——什麼都不顯示，ADR-031）。**交易**（`0x25`）也在這裡（`handleMiniRoomRequest` → `game/trades.ts` → `0x50`：`/교환` 送 `type 1` 給對方、`type 2 code 0` 給自己；答應後兩邊各收 `type 4` 進房；放道具／錢是 `type 11`／`12`；兩邊都按確認才 `type 13` ＋交換＋`0x0B`／`0x0D` ＋ `type 8 code 3`；斷線時對方收 `code 1`——ADR-032）。**메신저**（`0x24`）也在這裡（`handleMessengerRequest` → `game/messenger.ts` → `0x4D`：開房回 `type 0`、`/초대` 給對方 `type 3` 給自己 `type 4`、答應後兩邊各收整份名冊、聊天是 `type 5`、離開是 `type 2`——ADR-033）。這一切都是**每張地圖一份**：連線只是 `game/world.ts` 的一個成員（`FieldInstance.join`／`leave`／`reportMove`），**一個 server-wide 時鐘**（`startClock`）走過所有場地，不是每條連線一個 `setInterval`（ADR-012）。 |
 | `src/protocol/movepath.ts` | ✅ `CMovePath`：`u16 originX/Y` + `u8 count` + **14-byte** 元素（attr/x/y/vx/vy/action/foothold/duration）。這是移動的實際內容（§4.11.5）。 |
 | `src/protocol/field.ts` | ✅ 遊戲內封包：0x16 進地圖、0x1C 別人進場（**第一個 u32 ＝ 臉**，`face`）、0x1D 離場、0x22 別人移動、**0x29 升級特效**（`u32 characterId`＋`u8 effect`，0 ＝ LevelUp）、**0x27 表情**（`u32 characterId`＋`u32 emotion`，0..8 ＝ `EMOTION_NAMES`）；client 端的 0x0E（自己的移動）、**0x13 表情**與 0x0D（點擊傳送門／物件），以及 **0x1C 玩家自己的 HP／MP 變動回報**
 （`[u32 flags][s16 hpΔ][s16 mpΔ][u8 flag]`，旗標與 `0x0D` 共用 `statDiffFlag`；`readClientStatReport`／
@@ -92,9 +92,11 @@
 伺服器封包不是靠一張全域表分派，而是**看 client 現在在哪個階段**：`dword_5C212C` 是當前 stage，
 `sub_43B170` 把 opcode 交給它的 `OnPacket`。所以同一號碼在不同階段是不同封包，請求與回應也可能不同號。
 
+**握手狀態更正（2026-10-24）**：目標格式是下圖的短 s2c greeting，`0x00D3` 是 version、其前有獨立 2-byte length。下圖只表示已知欄位，不猜總長或其餘欄位。現行 `LoginServer`／`GameEntryServer` 仍送舊 211-byte 模型，故後續 synthetic login-flow tests 不能證明 greeting 已與原版對齊；詳見 `docs/DECISIONS.md` ADR-166。
+
 ```
-server ──211-byte handshake────────▶ client             （伺服器先講話，種子寫在這裡）
-client ──0x01 帳號/密碼────────────▶ server
+server ──u16 length | u16 version=0x00D3 | …────▶ client  （目標是十幾-byte s2c greeting）
+client ──0x01 帳號/密碼─────────────────────────▶ server
 server ──0x01 u8 result [+世界清單]─▶ client  → CWorldSelect（清單就是這個階段的參數）
 client ──0x02 世界 index───────────▶ server
 server ──0x02 u8 result [+角色×3]──▶ client  → CCharSelect
@@ -116,49 +118,46 @@ session，座位由登入／遊戲兩半各拿一次、共用同一份表，心�
 ADR-018）。`0x08` 在本伺服器是**雙向**的：client 送來的回聲只證明它還活著（沒有東西要回），伺服器
 只在對方安靜時才主動問。
 
-`server/test/loginflow.test.ts` 會用假 client 走完整條鏈（含真實加密與框架），所以「編碼器」與
-「client 的讀取順序」一旦漂移就會紅燈。
+`server/test/loginflow.test.ts` 會用假 client 走完整條**目前實作的**登入鏈（含真實加密與框架），因此可抓 server／fixture 間的 regression；它仍使用 legacy 211-byte greeting，不能視為原版 client 的 greeting conformance test。
 
-## 為什麼先做擷取？
+## 擷取與協定驗證
 
-2003 KMS 1.11 沒有任何公開 server 或協定文件。與其猜，不如讓**原 client 自己說話**：
+2003 KMS 1.11 缺少公開 server 規格；原始流量仍是重要證據，但擷取工具不能先送錯 greeting 再把 client 的反應當成格式證明。**目前 `capture --mode session` 預設仍送舊 211-byte 模型，與已更正的目標短 greeting 不符；不要用此模式測原版 client，亦不要把 timeout／disconnect 解讀為目標協定行為。**`--mode raw` 只記錄實際收到的 bytes、不會提供 greeting；要取得最初 s2c greeting，需從已確認的目標 runtime／server trace 對照，而不是猜長度或 seed。
+
+舊 session-mode 實驗指令保留作重播既有 legacy trace 用，不能代表目標 client 相容性：
 
 ```bash
-# 1) 啟動擷取伺服器（預設 session 模式 = 真實連線模型）
-bun server/src/cli.ts capture --port 8484 --out traces/login.jsonl
+# 只用於測試／重播舊 211-byte session model（不是官方目標格式）
+bun server/src/cli.ts capture --mode session --port 8484 --out traces/legacy-session.jsonl
 
-#    原 client 在收到 211-byte 握手前不會送任何東西，所以 session 模式「先送握手」
-#    （種子由我們選並寫進 trace；body 的 199 bytes 語意仍未知，可用參數試）
-bun server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
-     --handshake-body 0000... --out traces/login.jsonl
-bun server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl  # 改等 client 先送
+# 可固定 seeds/body 以重現 legacy fixture；body 不是已確認的 KMS 1.11 欄位
+bun server/src/cli.ts capture --mode session --port 8484 \
+     --handshake 0x11223344:0x55667788 --handshake-body 0000... \
+     --out traces/legacy-session.jsonl
 
-# 2) 讓原 client 連到它
-#    - 原 client 需先被導向 127.0.0.1:8484（login server 位址）
-#    - 或用 hosts/DNS 導向；這屬 Phase 0 的 oracle 工作
-# 3) 檢視 trace
-head -5 traces/login.jsonl
+# raw 只記錄接收方向的 socket chunks，不會回覆握手
+bun server/src/cli.ts capture --mode raw --port 8484 --out traces/raw.jsonl
 
-# 4) 重播成可讀封包（種子自動取自 211-byte 握手；沒有握手時手動給）
-bun server/src/cli.ts decode traces/login.jsonl
-bun server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
+# 重播舊格式 trace；seed 也可手動提供
+bun server/src/cli.ts decode traces/legacy-session.jsonl
+bun server/src/cli.ts decode traces/legacy-session.jsonl --c2s-seed 0x11223344 --json
 ```
 
-輸出格式（每行一個 JSON）；注意 `hex` 是**線上的原始 bytes**（證據），`plainHex` 才是解密的本文：
+以下 JSON／decode output 僅示範舊 legacy fixture 格式，不是目標 s2c greeting 的樣本。`hex` 是線上原始 bytes；`plainHex` 才是解密本文：
 
 ```json
 {"t":120,"seq":1,"conn":1,"dir":"c2s","kind":"connect","len":0,"hex":"","note":"127.0.0.1:52344"}
-{"t":131,"seq":2,"conn":1,"dir":"c2s","kind":"handshake","len":211,"hex":"d300c700...","bodyLength":199,"seeds":{"sendSeed":2864434397,"recvSeed":287454020},"note":"seeds adopted: ..."}
+{"t":131,"seq":2,"conn":1,"dir":"s2c","kind":"handshake","len":211,"hex":"d300c700...","bodyLength":199,"seeds":{"sendSeed":2864434397,"recvSeed":287454020},"note":"legacy seeds adopted: ..."}
 {"t":139,"seq":3,"conn":1,"dir":"c2s","kind":"frame","len":7,"hex":"c2f103000a0102","header":49649,"bodyLength":3,"opcode":10,"plainHex":"0a0102","headerOk":true}
 ```
 
-`decode` 的輸出（逐包檢查標頭；不符時 exit code 非 0）：
+`decode` 對舊 fixture 的輸出（逐包檢查標頭；不符時 exit code 非 0）：
 
 ```
 5 records, 2 packets decoded, 0 header mismatches
-handshake: clientSendSeed=0x11223344 clientRecvSeed=0x55667788
-conn=1 s2c len=  211 body=  199
-    0000...  // handshake sent by s2c: receiver (client) seeded
+legacy handshake: clientSendSeed=0x11223344 clientRecvSeed=0x55667788
+conn=1 s2c len=  211 body=  199  // legacy fixture only
+    0000...  // legacy handshake sent by s2c: receiver (client) seeded
 conn=1 c2s len=    8 body=    4 op=0x1a
     1a010203
 ```
@@ -610,7 +609,7 @@ PROBE_ALT_ACCOUNT=fixture-two PROBE_ALT_PASSWORD=fixture-only \
 
 | 模式 | 用途 |
 |---|---|
-| `session`（預設）| 真實連線模型：**先送** 211-byte 握手（`--handshake`）→ 之後逐包解密並驗證標頭 |
+| `session`（預設）| Legacy model：先送舊 211-byte 握手（`--handshake`）再逐包解密；**不符合目標短 greeting，不能用來測原版 client** |
 | `framed` | 相同的 4-byte 標頭但**沒有握手**（已知種子、或第一個封包不是握手時用）|
 | `raw` | 每次 `recv()` 傾印一行，完全不解讀 |
 

@@ -12,7 +12,7 @@
  * schedule  state = (state * 214013 + 2531011) mod 2^32   -- MSVC rand() LCG constants
  *             send state at CClientSocket+120 (sub_43AD50 : `[esi+78h]`)
  *             recv state at CClientSocket+124 (sub_43AFA0 : `[edi+7Ch]`)
- * Both states are seeded from the two u32 values carried by the 211-byte handshake packet.
+ * The current legacy handshake model carries two u32 seeds; their offsets in the target short greeting are not yet verified.
  *
  * THE TWO MAGIC CONSTANTS ARE NOT THE SAME (measured, twice, in the .lst):
  *   client -> server  header = 0x00D3 ^ HIWORD(state)
@@ -23,27 +23,21 @@
  *     The client's receive path sub_43AFA0 requires it exactly:
  *        mov ecx, [edi+7Ch] / shr ecx,10h / xor cx,[edi+6Eh] / cmp cx,0FF2Ch   (0043AFF9)
  *     and disconnects (sub_43AC20 -> AVCDisconnectException) when it does not match.
- * 0xD3 IS THE CLIENT VERSION, NOT A PICKED CONSTANT (ADR-139)
- * -----------------------------------------------------------
- * 0xD3 = 211 is the same number in three places, and only "the build's version" explains all
- * three at once:
- *   1. every c2s packet header    `push 0D3h`                    (0043AD75)
- *   2. every s2c packet header    `cmp cx, 0FF2Ch`  = ~0xD3       (0043AFF9)
- *   3. the handshake's u16 @ 0    `cmp ax, 0D3h`                  (0043A76E)
- * Site 3 is what settles it. The client compares that field to 211 and, on mismatch, throws with
- * a message about the *version*:
- *   < 211 -> CTerminateException(0x22000005) -> "잘못된 버전의 클라이언트입니다 / 최신 버전의
- *            클라이언트를 다시 설치해 주세요" ("it is a wrong VERSION of the client / reinstall
- *            the latest version") - the string is at MapleStory.exe 0x1b59aa.
- *   > 211 -> CPatchException, built by sub_468400 (MapleStory.exe.c 112328) as
- *              WORD @ +4 = 211      (the version the client wants)
- *              WORD @ +6 = received (the version it got)
- *            i.e. an expected/got pair - a version check, with a patch/update to follow.
- * Nothing in that path talks about bytes. See `session.ts` for why site 3 is *also* a length.
+ * 0xD3 IS A VERSION VALUE; DO NOT USE IT AS THE TARGET GREETING LENGTH (ADR-166)
+ * -----------------------------------------------------------------------------
+ * In the checked EXE, 0xD3 = 211 appears in the c2s header path (`0043AD75`) and the
+ * s2c header validation (`0043AFF9`, `0xFF2C = ~0xD3`). The version-mismatch branches
+ * (`0043A76E`, `sub_468400`) also carry version semantics: lower values terminate as an
+ * unsupported client version; higher values build an expected=211 / received=N patch record.
  *
- * It does not matter why Nexon used the version as the header magic: the client's check is what
- * the server has to satisfy, so a server MUST send 0xFF2C and MUST accept 0xD3. Getting this
- * wrong is a silent disconnect.
+ * The target greeting layout is separately specified as `u16 length` followed by
+ * `u16 version = 0x00D3`, with a short s2c greeting. The checked EXE's receive path compares
+ * offset 0 and therefore does not map cleanly to that target layout. Do not infer that the
+ * target greeting is 211 bytes or that its version lives at offset 0. Keep the version/magic
+ * constant here for the session header; the short greeting and seed offsets remain to be mapped.
+ *
+ * For ordinary session packets, the client requires server header magic 0xFF2C and sends
+ * client header magic 0x00D3. Getting these direction constants wrong is a silent disconnect.
  *
  * Because swapNibbles is self-inverse, encrypt/decrypt are exact inverses:
  *   swapNibbles(key ^ (key ^ swapNibbles(plain))) === plain
@@ -52,10 +46,9 @@ export const LCG_MULTIPLIER = 214013;
 export const LCG_INCREMENT = 2531011;
 
 /**
- * The version of the 2003 KMS 1.11 client this server speaks (211).
- *
- * It is the header magic the client writes, the complement of the one it verifies, and the value
- * the handshake's first u16 must carry. Kept here, once, so the three cannot drift apart.
+ * Version value 211 (`0x00D3`) used by this client build and as the c2s session-header magic.
+ * It is not the target greeting's byte length; the target format places a separate u16 length
+ * before the version field.
  */
 export const CLIENT_VERSION = 0x00d3;
 

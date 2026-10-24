@@ -1,43 +1,28 @@
 /**
- * Session framing for the 2003 KMS 1.11 protocol.
+ * Session framing for the KMS 1.11 reconstruction.
  *
- * EVIDENCE
- * --------
- * assembler  sub_4A1940  : accumulates 4 bytes, then reads
- *                            u16 at 0 -> packet+14   (header magic, unchecked there)
- *                            u16 at 2 -> packet+16   (body length)
- *                          and declares the packet complete when
- *                            filled >= bodyLength + 4      (total = bodyLength + 4)
- *            sub_4A1860  : copies the assembled bytes into a packet object
- * decrypt    sub_4A1B90  : body only -- it starts at data+4 and spans bodyLength
- *                          => the 4-byte header is PLAINTEXT, the body is encrypted
- * dispatcher sub_43B170  : opcode = body[0] (one byte), cursor starts right after the header
+ * VERIFIED POST-HANDSHAKE FRAME:
+ *   sub_4A1940 assembles the plaintext 4-byte header (`u16 magic`, `u16 bodyLength`) plus body;
+ *   packet completion is `bodyLength + 4`. sub_4A1B90 decrypts only the body, and sub_43B170
+ *   dispatches on its first byte.
  *
- * handshake  sub_43A410  : the very first packet is read raw and its u16 at 0 must equal 211
- *                            u16 at 0 = the client version (ADR-139), *used as the byte count*
- *                            u16 at 2 = body length
- *                            body[bodyLength]
- *                            u32 sendSeed, u32 recvSeed
- *                          211 = 4 + bodyLength + 8  =>  bodyLength = 199
- *                          The body cannot be encrypted with the session cipher because the
- *                          cipher state arrives inside this same packet (state unverified).
+ * TARGET GREETING CORRECTION (2026-10-24):
+ *   The target s2c greeting begins with an independent 2-byte length, followed by
+ *   `u16 version = 0x00D3`. Its wire size is in the teens; 211 is the version, not the byte count.
+ *   Do not infer a 211-byte target greeting from ADR-139/165 or from the constant name below.
  *
- * WHY THE VERSION IS ALSO THE LENGTH (ADR-139)
- * --------------------------------------------
- * `sub_43A410` reads the handshake in two steps (MapleStory.exe.c 66345-66370): it recv()s 2
- * bytes, takes that u16 as a *total*, and loops recv()ing until it has that many bytes
- * (`while (v17 - (char*)v15 != v16)`, and it refuses a value above the 1460 buffer
- * (`cmp ecx, eax; ja`)). Only then does it compare the very same u16 against 0xD3:
- *   < 211 -> CTerminateException -> "wrong VERSION of the client, reinstall" (see cipher.ts)
- *   > 211 -> CPatchException carrying (expected 211, got N)                  (see cipher.ts)
- * So one wire field does both jobs, and they cannot disagree: the packet must be 211 bytes long
- * *and* say 211. That is why the body is not a free payload - changing its length would change
- * the version the client demands. See `HANDSHAKE_VERSION` below.
+ * ARCHIVED-EXE DISCREPANCY:
+ *   The checked MapleStory.exe hash is `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`.
+ *   Its sub_43A410 listing uses the first u16 it reads both as a receive count and in the 0xD3
+ *   comparison, and treats the next u16 as a copy length. That path does not show the target's
+ *   leading length followed by version layout. The binary/stage/offset mismatch is unresolved;
+ *   it does not override the target greeting correction.
  *
- * The 199-byte body is parsed but never used: `sub_418610(&v56, ...)` copies it into a local
- * byte array (MapleStory.exe.c 66393), and the only later reference to that local is the
- * refcount release at the end of the function (MapleStory.exe.lst 0043A884). The client reads
- * nothing from it, so a server may fill it with anything - this server sends zeros.
+ * LEGACY IMPLEMENTATION WARNING:
+ *   The constants and encoder below still implement the old 211-byte model (u16 211, u16 199,
+ *   body, two seeds). They are not yet the target short-greeting implementation. The associated
+ *   tests only pin the legacy encoder/decoder shape; they do not validate the official greeting.
+ *   The 199-byte block and current seed offsets are likewise legacy assumptions.
  */
 import {
   CipherState,
@@ -49,21 +34,14 @@ import {
 } from "./cipher.ts";
 import { FramingError, toHex } from "./frame.ts";
 
-/**
- * The version the handshake's first u16 must carry (`cmp ax, 0D3h`, 0043A76E).
- *
- * The client reads exactly that many bytes, so the version *is* the packet length: the two are
- * the same number on the wire, and nothing else in the handshake can be resized without also
- * changing which client is allowed to connect. `HANDSHAKE_TOTAL_BYTES` below is therefore not an
- * independent constant - it is this one, spelled as a byte count.
- */
+/** Version value 0x00D3. It is not the target greeting's wire length. */
 export const HANDSHAKE_VERSION = CLIENT_VERSION;
 
-/** The opaque block the client copies and then ignores: `version - header - two seeds`. */
-export const HANDSHAKE_BODY_BYTES = HANDSHAKE_VERSION - 4 - 8; // 199
+/** Opaque body size in the legacy encoder only; not established for the target greeting. */
+export const LEGACY_HANDSHAKE_BODY_BYTES = HANDSHAKE_VERSION - 4 - 8; // legacy 199-byte model
 
-/** Total wire bytes of the handshake: u16 version, u16 body length, body, u32 send, u32 recv. */
-export const HANDSHAKE_TOTAL_BYTES = 4 + HANDSHAKE_BODY_BYTES + 8; // 211 === HANDSHAKE_VERSION
+/** Wire size emitted by the legacy encoder; the official target greeting is short. */
+export const LEGACY_HANDSHAKE_TOTAL_BYTES = 4 + LEGACY_HANDSHAKE_BODY_BYTES + 8; // legacy 211-byte model
 
 export interface SessionPacket {
   /** u16 at offset 0 (obfuscated magic for session packets) */
@@ -74,34 +52,30 @@ export interface SessionPacket {
   plain: Uint8Array;
 }
 
-export interface Handshake {
+export interface LegacyHandshake {
   body: Uint8Array;
   sendSeed: number;
   recvSeed: number;
 }
 
 /**
- * Build the 211-byte handshake the client expects on connect.
- * `clientSendSeed` seeds the client's SEND state (CClientSocket+120) and
- * `clientRecvSeed` seeds its RECEIVE state (+124); a server should pick these and mirror
- * them (server recv = client send, server send = client recv).
- *
- * The first u16 carries `HANDSHAKE_VERSION`, which the client also reads as the byte count - so
- * the packet it produces is always exactly `HANDSHAKE_VERSION` bytes long.
+ * Build the current legacy 211-byte handshake model; this is not the target short greeting.
+ * `clientSendSeed` and `clientRecvSeed` are placed in the legacy body tail using the offsets
+ * inferred from the checked EXE path. The target greeting's exact seed offsets remain unresolved.
  */
-export function encodeHandshake(
+export function encodeLegacyHandshake(
   body: Uint8Array,
   clientSendSeed: number,
   clientRecvSeed: number,
 ): Uint8Array {
-  if (body.length !== HANDSHAKE_BODY_BYTES) {
+  if (body.length !== LEGACY_HANDSHAKE_BODY_BYTES) {
     throw new FramingError(
-      `handshake body must be ${HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
+      `handshake body must be ${LEGACY_HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
     );
   }
-  const out = new Uint8Array(HANDSHAKE_TOTAL_BYTES);
-  out[0] = HANDSHAKE_TOTAL_BYTES & 0xff;
-  out[1] = (HANDSHAKE_TOTAL_BYTES >>> 8) & 0xff;
+  const out = new Uint8Array(LEGACY_HANDSHAKE_TOTAL_BYTES);
+  out[0] = LEGACY_HANDSHAKE_TOTAL_BYTES & 0xff;
+  out[1] = (LEGACY_HANDSHAKE_TOTAL_BYTES >>> 8) & 0xff;
   out[2] = body.length & 0xff;
   out[3] = (body.length >>> 8) & 0xff;
   out.set(body, 4);
@@ -112,19 +86,23 @@ export function encodeHandshake(
   return out;
 }
 
-export function decodeHandshake(wire: Uint8Array): Handshake {
-  if (wire.length !== HANDSHAKE_TOTAL_BYTES) {
-    throw new FramingError(`handshake must be ${HANDSHAKE_TOTAL_BYTES} bytes, got ${wire.length}`);
+export function decodeLegacyHandshake(wire: Uint8Array): LegacyHandshake {
+  if (wire.length !== LEGACY_HANDSHAKE_TOTAL_BYTES) {
+    throw new FramingError(
+      `handshake must be ${LEGACY_HANDSHAKE_TOTAL_BYTES} bytes, got ${wire.length}`,
+    );
   }
   const view = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
   const total = view.getUint16(0, true);
-  if (total !== HANDSHAKE_TOTAL_BYTES) {
-    throw new FramingError(`handshake total field is ${total}, expected ${HANDSHAKE_TOTAL_BYTES}`);
+  if (total !== LEGACY_HANDSHAKE_TOTAL_BYTES) {
+    throw new FramingError(
+      `handshake total field is ${total}, expected ${LEGACY_HANDSHAKE_TOTAL_BYTES}`,
+    );
   }
   const bodyLength = view.getUint16(2, true);
-  if (bodyLength !== HANDSHAKE_BODY_BYTES) {
+  if (bodyLength !== LEGACY_HANDSHAKE_BODY_BYTES) {
     throw new FramingError(
-      `handshake body length is ${bodyLength}, expected ${HANDSHAKE_BODY_BYTES}`,
+      `handshake body length is ${bodyLength}, expected ${LEGACY_HANDSHAKE_BODY_BYTES}`,
     );
   }
   return {
@@ -166,7 +144,7 @@ export function encodeSessionPacket(
 
 /** What a session stream yields: one handshake, then packets. */
 export type SessionEvent =
-  | { kind: "handshake"; handshake: Handshake; raw: Uint8Array }
+  | { kind: "handshake"; handshake: LegacyHandshake; raw: Uint8Array }
   | {
       kind: "packet";
       header: number;
@@ -180,12 +158,9 @@ export type SessionEvent =
     };
 
 export interface SessionDeframerOptions {
-  /**
-   * Receive-side cipher state. Omit when the session opens with a 211-byte handshake, which
-   * carries the seeds (the normal case for a client connection).
-   */
+  /** Receive-side cipher state. Omit to use the current legacy 211-byte opening model. */
   recvState?: CipherState;
-  /** Parse a 211-byte handshake before the first packet. Defaults to true without `recvState`. */
+  /** Parse the current legacy 211-byte model before the first packet; not the target short greeting. */
   expectHandshake?: boolean;
   /** Largest acceptable packet, body + 4-byte header. The client's receive buffer is 1460. */
   maxPacketBytes?: number;
@@ -198,7 +173,10 @@ export interface SessionDeframerOptions {
 }
 
 /**
- * Streaming session decoder: feed raw bytes, get the handshake and decrypted bodies.
+ * Streaming session decoder: feed raw bytes, get the legacy handshake model and decrypted bodies.
+ *
+ * The opening-handshake parser still expects the legacy 211-byte shape; it does not yet parse the
+ * target short `[u16 length][u16 version=0x00D3]` greeting.
  *
  * Failure policy: a bad stream is *recorded*, never fatal. Completed packets are returned and the
  * reason the stream stopped is kept in `failure`, so a caller that is sniffing an unknown peer can
@@ -244,11 +222,11 @@ export class SessionDeframer {
 
     const events: SessionEvent[] = [];
     if (this.expectHandshake && this.recvState === undefined) {
-      if (this.buf.length < HANDSHAKE_TOTAL_BYTES) return events;
-      const raw = this.buf.slice(0, HANDSHAKE_TOTAL_BYTES);
-      const handshake = decodeHandshake(raw);
+      if (this.buf.length < LEGACY_HANDSHAKE_TOTAL_BYTES) return events;
+      const raw = this.buf.slice(0, LEGACY_HANDSHAKE_TOTAL_BYTES);
+      const handshake = decodeLegacyHandshake(raw);
       this.recvState = new CipherState(handshake.recvSeed);
-      this.buf = this.buf.slice(HANDSHAKE_TOTAL_BYTES);
+      this.buf = this.buf.slice(LEGACY_HANDSHAKE_TOTAL_BYTES);
       events.push({ kind: "handshake", handshake, raw });
     }
 

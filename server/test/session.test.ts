@@ -15,13 +15,13 @@ import {
   swapNibbles,
 } from "../src/protocol/cipher.ts";
 import {
-  HANDSHAKE_BODY_BYTES,
-  HANDSHAKE_TOTAL_BYTES,
+  LEGACY_HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_TOTAL_BYTES,
   HANDSHAKE_VERSION,
   SessionDeframer,
-  decodeHandshake,
+  decodeLegacyHandshake,
   describePacket,
-  encodeHandshake,
+  encodeLegacyHandshake,
   encodeSessionPacket,
 } from "../src/protocol/session.ts";
 import { FramingError, fromHex, toHex } from "../src/protocol/frame.ts";
@@ -70,28 +70,31 @@ test("cipher state advances exactly once per packet", () => {
   assert.equal(state.raw, nextState(nextState(before)));
 });
 
-test("handshake is exactly 211 bytes with 199 body bytes and two seeds", () => {
-  const body = new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x41);
-  const wire = encodeHandshake(body, 0xaabbccdd, 0x11223344);
-  assert.equal(wire.length, HANDSHAKE_TOTAL_BYTES);
+test("legacy handshake encoder emits 211 bytes with its 199-byte body and two seeds", () => {
+  const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x41);
+  const wire = encodeLegacyHandshake(body, 0xaabbccdd, 0x11223344);
+  assert.equal(wire.length, LEGACY_HANDSHAKE_TOTAL_BYTES);
   assert.equal(new DataView(wire.buffer).getUint16(0, true), 211);
   assert.equal(new DataView(wire.buffer).getUint16(2, true), 199);
 
-  const decoded = decodeHandshake(wire);
+  const decoded = decodeLegacyHandshake(wire);
   assert.deepEqual(decoded.body, body);
   // tail offsets in the original: 4 + bodyLength and 8 + bodyLength (=> 203 / 207)
   assert.equal(decoded.sendSeed, 0xaabbccdd);
   assert.equal(decoded.recvSeed, 0x11223344);
-  assert.equal(new DataView(wire.buffer).getUint32(4 + HANDSHAKE_BODY_BYTES, true), 0xaabbccdd);
+  assert.equal(
+    new DataView(wire.buffer).getUint32(4 + LEGACY_HANDSHAKE_BODY_BYTES, true),
+    0xaabbccdd,
+  );
 });
 
-test("handshake decoder rejects the lengths that make the client throw", () => {
-  const good = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 1, 2);
-  // > 211 -> CPatchException path, < 211 -> CTerminateException path
-  assert.throws(() => decodeHandshake(good.subarray(0, 210)), FramingError);
+test("legacy handshake decoder rejects lengths outside its fixed 211-byte model", () => {
+  const good = encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 1, 2);
+  // This pins the old parser shape only; it is not a target short-greeting conformance test.
+  assert.throws(() => decodeLegacyHandshake(good.subarray(0, 210)), FramingError);
   const tooLong = new Uint8Array(212);
   tooLong.set(good);
-  assert.throws(() => decodeHandshake(tooLong), FramingError);
+  assert.throws(() => decodeLegacyHandshake(tooLong), FramingError);
 });
 
 test("session packet: plaintext 4-byte header, encrypted body, opcode = body[0]", () => {
@@ -143,9 +146,9 @@ test("session deframer decrypts and reports opcodes, and the peer mirrors the st
   assert.equal(describePacket(events[2]!).includes("opcode=0x0a"), true);
 });
 
-test("session deframer consumes a 211-byte handshake first and seeds from it", () => {
-  const body = new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x33);
-  const handshake = encodeHandshake(body, 0x11223344, 0x55667788);
+test("session deframer consumes the legacy 211-byte opening and seeds from it", () => {
+  const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x33);
+  const handshake = encodeLegacyHandshake(body, 0x11223344, 0x55667788);
   const sender = new CipherState(0x55667788); // the client's receive seed drives our send state
   const packet = encodeSessionPacket(fromHex("0a00"), sender, "c2s");
 
@@ -221,49 +224,46 @@ test("a body over the client's 1456-byte limit is refused, not silently truncate
   assert.equal(encodeSessionPacket(new Uint8Array(1456), send).length, 1460);
 });
 
-test("0xD3 is one constant - the client version - shared by both magics and the handshake", () => {
-  // ADR-139. The number 211 shows up three times in the binary and only "the build's version"
-  // explains all three:
-  //   0043AD75  push 0D3h                 -> every c2s packet header the client writes
-  //   0043AFF9  cmp cx, 0FF2Ch  (~0xD3)   -> every s2c packet header the client verifies
-  //   0043A76E  cmp ax, 0D3h              -> the handshake's u16 @ 0
-  // The third is what settles it: on mismatch the client throws with a message about the
-  // *version* (see the evidence quoted in cipher.ts), not about a length.
+test("0xD3 remains the version/magic constant; the 211-byte encoder is legacy only", () => {
+  // ADR-166: 0xD3 is a version value and the archived EXE uses it in session-header logic.
+  // Its sub_43A410 path compares offset 0, which does not match the corrected target layout:
+  // [u16 length][u16 version=0x00D3] with a short greeting. The assertions below pin current
+  // legacy encoder behavior only; they are not evidence that the target greeting is 211 bytes.
   assert.equal(CLIENT_VERSION, 211);
   assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION, "one definition, not two copies of 211");
   assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION);
   assert.equal(CLIENT_SEND_MAGIC, CLIENT_VERSION, "the client writes its version as the magic");
   assert.equal(SERVER_SEND_MAGIC, ~CLIENT_VERSION & 0xffff);
   assert.equal(SERVER_SEND_MAGIC, 0xff2c);
-  // The client reads exactly `u16 @ 0` bytes (sub_43A410), so the version IS the packet length:
-  // nothing in this handshake can be resized without also changing which client may connect.
-  assert.equal(HANDSHAKE_TOTAL_BYTES, HANDSHAKE_VERSION);
-  assert.equal(HANDSHAKE_BODY_BYTES, CLIENT_VERSION - 4 - 8);
-  // ...and the encoded wire proves it, rather than restating the arithmetic.
-  const wire = encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 1, 2);
-  assert.equal(wire.length, CLIENT_VERSION);
+  // Preserve current legacy-model invariants until the target short greeting is implemented.
+  assert.equal(LEGACY_HANDSHAKE_TOTAL_BYTES, 211);
+  assert.equal(LEGACY_HANDSHAKE_BODY_BYTES, 199);
+  const wire = encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 1, 2);
+  assert.equal(wire.length, 211);
   assert.equal(new DataView(wire.buffer).getUint16(0, true), CLIENT_VERSION);
+  // Target-format assertion is deliberately separate: version follows the 2-byte length prefix.
+  assert.equal(CLIENT_VERSION, 0x00d3);
 });
 
-test("the handshake body is the client's ignored block: parsed, never read", () => {
-  // sub_418610 copies the 199 bytes into a local (MapleStory.exe.c 66393) and the only later
-  // reference is the release at 0043A884 - so the client reads nothing from it. A server may
-  // fill it with anything; this one sends zeros. What must hold is only its length.
+test("legacy handshake body round-trips under the obsolete 199-byte model", () => {
+  // sub_418610 copies 199 bytes into a local in the archived listing, but that path has not been
+  // mapped to the target short greeting. This test only pins the current legacy encoder/decoder;
+  // it does not establish that the target client ignores a 199-byte block.
   for (const fill of [0x00, 0xff, 0x5a]) {
-    const body = new Uint8Array(HANDSHAKE_BODY_BYTES).fill(fill);
-    const decoded = decodeHandshake(encodeHandshake(body, 7, 8));
-    assert.equal(decoded.body.length, HANDSHAKE_BODY_BYTES);
+    const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(fill);
+    const decoded = decodeLegacyHandshake(encodeLegacyHandshake(body, 7, 8));
+    assert.equal(decoded.body.length, LEGACY_HANDSHAKE_BODY_BYTES);
     assert.equal(decoded.body[0], fill);
     assert.equal(decoded.sendSeed, 7);
     assert.equal(decoded.recvSeed, 8);
   }
-  // One byte too many or too few is rejected: the version field would no longer be the length.
+  // The legacy encoder enforces its fixed-size body; this constraint is not a target-wire rule.
   assert.throws(
-    () => encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES + 1), 1, 2),
+    () => encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES + 1), 1, 2),
     FramingError,
   );
   assert.throws(
-    () => encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES - 1), 1, 2),
+    () => encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES - 1), 1, 2),
     FramingError,
   );
 });

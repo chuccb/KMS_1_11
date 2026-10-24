@@ -9,7 +9,7 @@
  *   0x01  sub_4D0B20        [u16 n]id bytes [u16 n]pw bytes   - sub_430230 appends each string
  *   0x02  sub_54DFC0        [u8 worldIndex]                   - CWorldSelect
  *   0x03  sub_431620(1000)  [u32 characterId]                 - CCharSelect "enter the game"
- *   0x04  sub_43A410        [u32 value]                       - right after the 211-byte handshake
+ *   0x04  sub_43A410        [u32 value]                       - first c2s frame after the server greeting
  *   0x05  sub_42FD30        [u16 n]name bytes                 - CUINewChar "create"
  *   0x06  sub_431620(1002)  [string name][u32 x10]            - name check + appearance
  *   0x07  sub_431620(1001)  [u32 characterId]                 - CCharSelect "delete"

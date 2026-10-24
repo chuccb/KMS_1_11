@@ -1,17 +1,16 @@
 /**
  * Capture harness (ADR-004).
  *
- * Purpose: let the ORIGINAL 2003 client connect to us and record exactly what it sends,
- * so protocol knowledge stops being guesswork. This is deliberately the first server-side
- * deliverable: it makes no assumptions beyond framing, and when framing does not match it
- * falls back to dumping raw bytes instead of dropping data.
+ * Purpose: capture client traffic through the server's current framing model. The legacy
+ * session mode still emits a 211-byte greeting and is not yet aligned with the target short
+ * greeting, so only raw/framed captures are independent of that handshake assumption. When
+ * decoding does not match, the harness preserves raw bytes instead of dropping them.
  *
  * Modes:
- *   session : the real client model. A 211-byte handshake opens the session and carries the two
- *             cipher seeds; every later packet is "u16 header + u16 bodyLength + body" with the
- *             body encrypted, and the header is checked against the state prediction.
- *   framed  : the same 4-byte header without the handshake (use when the seeds are known and the
- *             first packet is not a handshake).
+ *   session : the legacy 211-byte handshake model currently implemented here, followed by
+ *             "u16 header + u16 bodyLength + body" session packets. The target official greeting
+ *             is a short `[u16 length][u16 version=0x00D3]` packet and is not parsed yet.
+ *   framed  : the same 4-byte session header without a handshake (use when seeds are known).
  *   raw     : record one line per recv() chunk.
  *
  * Output: JSONL, one record per line, appended to `out` when given, otherwise printed to
@@ -23,9 +22,9 @@ import { HeaderDeframer, U16LengthFramer, toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
 import { CipherState, CLIENT_SEND_MAGIC } from "../protocol/cipher.ts";
 import {
-  HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_BODY_BYTES,
   SessionDeframer,
-  encodeHandshake,
+  encodeLegacyHandshake,
   type SessionDeframerOptions,
 } from "../protocol/session.ts";
 
@@ -68,11 +67,10 @@ export type CaptureMode = "session" | "framed" | "raw";
 /**
  * How the harness opens a session.
  *
- * The client does not speak first: sub_43A410 receives the 211-byte handshake and reads its two
- * seeds, so a capture that wants to see anything from the original client has to send it.
- * `auto` picks seeds here (recorded in the trace, so the capture stays self-consistent);
- * `off` waits for a client-sent handshake instead; an object pins the seeds (and optionally the
- * still-unknown 199-byte body) for a reproducible experiment.
+ * The current capture mode sends the legacy 211-byte handshake model. The target protocol
+ * correction specifies a short server-first greeting with a leading length and version 0x00D3;
+ * this policy has not yet been updated to that format. `auto` picks seeds here (recorded in the
+ * trace); `off` waits for a client-sent opening interpreted as that legacy format; an object pins seeds and legacy body bytes.
  */
 export type HandshakePolicy =
   "auto" | "off" | { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
@@ -87,7 +85,7 @@ export interface CaptureServerOptions {
   onRecord?: (record: CaptureRecord) => void;
   /** log connect/disconnect noise (default true) */
   logLifecycle?: boolean;
-  /** session mode only: send the 211-byte handshake the client waits for (default "auto") */
+  /** session mode only: send the legacy 211-byte handshake model (default "auto"); not the target short greeting */
   handshake?: HandshakePolicy;
 }
 
@@ -262,7 +260,7 @@ export class CaptureServer {
   }
 
   /**
-   * Picks the session opening, sending the handshake when we are the side that speaks first.
+   * Picks the legacy session opening, sending its 211-byte model when we are the side that speaks first.
    * Returns the deframer options: our receive state mirrors the client's send seed.
    */
   private openSession(socket: Socket, conn: number): SessionDeframerOptions {
@@ -276,8 +274,8 @@ export class CaptureServer {
       return {};
     }
 
-    const body = pinned.body ?? new Uint8Array(HANDSHAKE_BODY_BYTES);
-    const bytes = encodeHandshake(body, clientSendSeed, clientRecvSeed);
+    const body = pinned.body ?? new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES);
+    const bytes = encodeLegacyHandshake(body, clientSendSeed, clientRecvSeed);
     socket.write(Buffer.from(bytes));
     this.emit({
       conn,
@@ -288,10 +286,10 @@ export class CaptureServer {
       bodyLength: body.length,
       seeds: { sendSeed: clientSendSeed, recvSeed: clientRecvSeed },
       note:
-        `sent by us: clientSendSeed=0x${hex32(clientSendSeed)} clientRecvSeed=0x${hex32(clientRecvSeed)}` +
+        `sent by us (legacy 211-byte model): clientSendSeed=0x${hex32(clientSendSeed)} clientRecvSeed=0x${hex32(clientRecvSeed)}` +
         (pinned.body
-          ? "; body from the caller"
-          : "; body is 199 zero bytes (contents still unknown)"),
+          ? "; legacy body from the caller"
+          : "; legacy body is 199 zero bytes (not a target-format claim)"),
     });
     return {
       expectHandshake: false, // already consumed on the way out

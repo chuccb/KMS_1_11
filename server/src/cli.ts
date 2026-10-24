@@ -72,23 +72,20 @@ usage:
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
 notes:
-  capture --mode session (default) is the real client model: a 211-byte handshake opens the
-  session and carries the two cipher seeds, then each packet is "u16 header + u16 bodyLength +
-  encrypted body" and the header is verified against 0xD3 ^ HIWORD(state) (sub_43A410, sub_4A1940).
-  --mode framed is the same framing without the handshake; --mode raw logs recv() chunks.
-  A chunk that cannot be decoded is flagged once and from then on dumped as raw bytes, so an
-  untrusted probe (or the sandbox preview proxy's HTTP GET) can never corrupt the trace.
-  The client speaks second, so session mode sends the 211-byte handshake itself (--handshake
-  auto, seeds chosen here and recorded in the trace) and then decrypts the client's replies.
-  --handshake off waits for a client-sent handshake instead; --handshake 0xS:0xR pins the seeds
-  for a reproducible experiment, and --handshake-body sets the 199 body bytes (still unknown;
-  the trace shows what the client does with whatever you send).
+  capture --mode session (default) still uses the legacy 211-byte handshake model and carries
+  two cipher seeds, then parses "u16 header + u16 bodyLength + encrypted body" session packets.
+  IMPORTANT: the target protocol correction is a short s2c greeting with a 2-byte length followed
+  by version 0x00D3; 211 is the version, not the wire length. Session-mode's opening bytes are
+  therefore not yet target-compatible. --mode framed skips that legacy greeting; --mode raw logs
+  recv() chunks. Undecodable chunks are flagged and preserved as raw bytes.
+  The legacy session mode sends its 211-byte handshake on connect (--handshake auto, seeds chosen
+  here and recorded in the trace). --handshake off waits for the legacy client-sent format;
+  --handshake 0xS:0xR pins seeds, and --handshake-body sets its legacy opaque body bytes.
 
-  decode replays a trace through the session cipher: the header is MAGIC ^ HIWORD(state) and each
-  body byte is key ^ swapNibbles(byte). MAGIC is 0xD3 client->server and 0xFF2C server->client
-  (measured in both places; a server that echoes 0xD3 is disconnected by the client). If a 211-byte handshake is present its two u32 seeds are
-  adopted automatically; otherwise pass --c2s-seed/--s2c-seed (the client's send/receive states).
-  Seeds accept decimal or 0x hex.
+  decode replays the current legacy trace model through the session cipher: the header is
+  MAGIC ^ HIWORD(state) and each body byte is key ^ swapNibbles(byte). MAGIC is 0xD3 client->server
+  and 0xFF2C server->client. If a legacy 211-byte handshake is present, its modeled seeds are
+  adopted automatically; otherwise pass --c2s-seed/--s2c-seed. Seeds accept decimal or 0x hex.
   A header mismatch is reported per packet instead of being silently accepted.
 
   serve --game-port also spawns the map's monsters once the character is in, and then walks them:
@@ -151,8 +148,9 @@ notes:
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
   showing up as a failing assertion (docs/WZ1_FORMAT.md 4.6).
 
-  serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9: it opens with the
-  211-byte handshake, answers 0x01 with the world list, 0x02 with up to three character slots and
+  serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9 using the current legacy
+  211-byte opening handshake (not the target short greeting): it answers 0x01 with the world list,
+  0x02 with up to three character slots and
   0x03 with the game server address plus the character id; 0x06/0x04 handle name checks, 0x05 creates a
   character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
   them) and created characters are stat-only; with --game-port it also opens the game-server
@@ -243,7 +241,7 @@ function runDecode(rest: string[]): number {
   process.stdout.write(
     `${records.length} records, ${result.packets.length} packets decoded, ${mismatches} header mismatches\n` +
       (result.handshake
-        ? `handshake: clientSendSeed=0x${hex(result.handshake.clientSendSeed)} ` +
+        ? `legacy handshake: clientSendSeed=0x${hex(result.handshake.clientSendSeed)} ` +
           `clientRecvSeed=0x${hex(result.handshake.clientRecvSeed)}\n`
         : "") +
       formatDecoded(result.packets),
@@ -635,7 +633,7 @@ async function runServe(rest: string[]): Promise<number> {
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
         : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
-      `  handshake: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
+      `  legacy handshake model: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
       `  npc control: ${npcWalk === undefined ? "stationary idle; movable off (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
       `  auto-register: ${autoRegister ? "ON - unknown ids are created (not original behaviour)" : "off (--auto-register)"}\n` +
@@ -727,8 +725,8 @@ async function main(argv: string[]): Promise<number> {
     if (info.mode === "session") {
       process.stdout.write(
         handshake === "off"
-          ? "waiting for the client's 211-byte handshake to adopt the cipher seeds\n"
-          : "sending the 211-byte handshake on connect, then decrypting the client's packets\n",
+          ? "waiting for the client's legacy 211-byte handshake model to adopt cipher seeds\n"
+          : "sending the legacy 211-byte handshake model; target short greeting is not implemented yet\n",
       );
     }
     if (out) process.stdout.write(`writing trace to ${out}\n`);

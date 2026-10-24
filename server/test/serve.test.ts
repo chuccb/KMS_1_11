@@ -4,7 +4,7 @@ import { RETURN_MAP_NONE } from "../../client/map-constants.ts";
  * The login server, driven over a real TCP socket by a fake client.
  *
  * This is the closest we can get to the oracle run (ADR-004) without the 2003 binary: the test
- * opens a socket, reads the 211-byte handshake, sends the client packets of FINDINGS 4.8 in order
+ * opens a socket, reads the current legacy 211-byte handshake, sends the client packets of FINDINGS 4.8 in order
  * and checks every reply field. It also covers the handoff: the id from the 0x03 reply has to
  * come back out of the game server's registry with the right character attached.
  */
@@ -194,7 +194,7 @@ class FakeClient {
   }
 
   /**
-   * Connects and waits for the 211-byte handshake, because the client's send state comes from it:
+   * Connects and waits for the legacy 211-byte handshake model, because this fixture's client send state comes from it:
    * sending before it arrives would use the wrong seed and the server would (rightly) drop the
    * packet on the header check.
    */
@@ -214,7 +214,8 @@ class FakeClient {
     return new Promise<void>((resolve, reject) => {
       const poll = () => {
         if (!this.deframer.awaitingHandshake) return resolve();
-        if (Date.now() > deadline) return reject(new Error("no 211-byte handshake arrived"));
+        if (Date.now() > deadline)
+          return reject(new Error("no legacy 211-byte handshake model arrived"));
         setTimeout(poll, 10);
       };
       poll();
@@ -516,7 +517,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(deleteReader.exhausted, true);
   assert.equal(accounts.get("admin")?.characters.length, 0);
 
-  assert.ok(log.some((line) => line.includes("handshake sent (211 bytes")));
+  assert.ok(log.some((line) => line.includes("legacy handshake model sent (211 bytes")));
 });
 
 test("login server reports the expected cipher header and closes on the first bad frame", async (t) => {

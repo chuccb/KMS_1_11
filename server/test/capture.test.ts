@@ -6,9 +6,9 @@ import { CaptureServer, toJsonl, type CaptureRecord } from "../src/net/capture.t
 import { fromHex, toHex } from "../src/protocol/frame.ts";
 import { CipherState } from "../src/protocol/cipher.ts";
 import {
-  HANDSHAKE_BODY_BYTES,
-  HANDSHAKE_TOTAL_BYTES,
-  encodeHandshake,
+  LEGACY_HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_TOTAL_BYTES,
+  encodeLegacyHandshake,
   encodeSessionPacket,
 } from "../src/protocol/session.ts";
 
@@ -192,8 +192,8 @@ test("capture (session): adopts the handshake seeds and records decrypted opcode
   const info = await server.start();
   try {
     const socket = await connectTo(info.port);
-    const handshake = encodeHandshake(
-      new Uint8Array(HANDSHAKE_BODY_BYTES).fill(0x41),
+    const handshake = encodeLegacyHandshake(
+      new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x41),
       0xaabbccdd,
       0x11223344,
     );
@@ -204,7 +204,7 @@ test("capture (session): adopts the handshake seeds and records decrypted opcode
     socket.write(Buffer.concat([Buffer.from(handshake), Buffer.from(packet)]));
 
     const handshakeRecord = await waitFor(records, (r) => r.kind === "handshake");
-    assert.equal(handshakeRecord.len, HANDSHAKE_TOTAL_BYTES);
+    assert.equal(handshakeRecord.len, LEGACY_HANDSHAKE_TOTAL_BYTES);
     assert.deepEqual(handshakeRecord.seeds, { sendSeed: 0xaabbccdd, recvSeed: 0x11223344 });
 
     const frame = await waitFor(records, (r) => r.kind === "frame");
@@ -231,8 +231,8 @@ test("capture (session): an undecodable chunk is flagged once and then dumped ra
   try {
     const socket = await connectTo(info.port);
     // 4 bytes that look like a header with an impossible body length arrive before any handshake:
-    // the session deframer sees 211 bytes of "handshake" and must not accept it as one.
-    const junk = new Uint8Array(HANDSHAKE_TOTAL_BYTES);
+    // the session deframer sees the legacy 211-byte shape and must not accept it as one.
+    const junk = new Uint8Array(LEGACY_HANDSHAKE_TOTAL_BYTES);
     junk.fill(0xff);
     socket.write(Buffer.from(junk));
     const error = await waitFor(records, (r) => r.kind === "framing-error");
@@ -259,7 +259,7 @@ test("capture (session): sends the handshake itself, since the 2003 client speak
     const socket = await connectTo(info.port);
     const sent = await waitFor(records, (r) => r.kind === "handshake");
     assert.equal(sent.dir, "s2c");
-    assert.equal(sent.len, HANDSHAKE_TOTAL_BYTES);
+    assert.equal(sent.len, LEGACY_HANDSHAKE_TOTAL_BYTES);
     // the seed we told the client to send with is the state we decrypt with
     assert.deepEqual(sent.seeds, { sendSeed: 0x01020304, recvSeed: 0x05060708 });
 
@@ -276,7 +276,7 @@ test("capture (session): sends the handshake itself, since the 2003 client speak
   }
 });
 
-test("capture (session): the 211-byte handshake it sends carries 199 body bytes", async () => {
+test("capture (session): sends the legacy 211-byte handshake model", async () => {
   const records: CaptureRecord[] = [];
   const server = new CaptureServer({
     port: 0,
@@ -289,13 +289,13 @@ test("capture (session): the 211-byte handshake it sends carries 199 body bytes"
     const socket = await connectTo(info.port);
     const sent = await waitFor(records, (r) => r.kind === "handshake");
     const bytes = fromHex(sent.hex);
-    assert.equal(bytes.length, HANDSHAKE_TOTAL_BYTES);
+    assert.equal(bytes.length, LEGACY_HANDSHAKE_TOTAL_BYTES);
     const view = new DataView(bytes.buffer);
-    assert.equal(view.getUint16(0, true), HANDSHAKE_TOTAL_BYTES); // u16@0 = total length
-    assert.equal(view.getUint16(2, true), HANDSHAKE_BODY_BYTES); // u16@2 = 199
+    assert.equal(view.getUint16(0, true), LEGACY_HANDSHAKE_TOTAL_BYTES); // u16@0 = total length
+    assert.equal(view.getUint16(2, true), LEGACY_HANDSHAKE_BODY_BYTES); // u16@2 = 199
     // the seeds sit at 4 + bodyLength and 8 + bodyLength, as sub_43A410 reads them
-    assert.equal(view.getUint32(4 + HANDSHAKE_BODY_BYTES, true), sent.seeds!.sendSeed);
-    assert.equal(view.getUint32(8 + HANDSHAKE_BODY_BYTES, true), sent.seeds!.recvSeed);
+    assert.equal(view.getUint32(4 + LEGACY_HANDSHAKE_BODY_BYTES, true), sent.seeds!.sendSeed);
+    assert.equal(view.getUint32(8 + LEGACY_HANDSHAKE_BODY_BYTES, true), sent.seeds!.recvSeed);
     socket.destroy();
   } finally {
     await server.stop();
@@ -320,7 +320,9 @@ test("capture (session): handshake off waits for a client-sent handshake", async
       0,
       "nothing is sent unprompted",
     );
-    socket.write(Buffer.from(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 7, 9)));
+    socket.write(
+      Buffer.from(encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 7, 9)),
+    );
     const received = await waitFor(records, (r) => r.kind === "handshake");
     assert.equal(received.dir, "c2s");
     assert.deepEqual(received.seeds, { sendSeed: 7, recvSeed: 9 });

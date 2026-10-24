@@ -199,7 +199,7 @@ export interface GameServerRedirect {
   port: number;
   /**
    * Becomes `CWvsApp+0x14` (`.lst` store at `.text:00433196`) and comes back as the body of the
-   * client's `0x04` packet on the new connection, right after the 211-byte handshake.
+   * client's first `0x04` packet on the new connection, after the server greeting.
    *
    * It is not an opaque ticket: `CUserPool`'s enter-field handler (`sub_51CFE0`, FINDINGS 4.11.3)
    * compares the id of the user that just entered the field against `CWvsApp+0x14` to recognise

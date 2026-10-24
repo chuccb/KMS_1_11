@@ -5,9 +5,9 @@ import { ClientSession, type ClientEvent } from "../../src/client/session.ts";
 import { CipherState } from "../../src/protocol/cipher.ts";
 import {
   SessionDeframer,
-  encodeHandshake,
+  encodeLegacyHandshake,
   encodeSessionPacket,
-  HANDSHAKE_BODY_BYTES,
+  LEGACY_HANDSHAKE_BODY_BYTES,
 } from "../../src/protocol/session.ts";
 import { characterDataOf } from "../../src/protocol/chardata.ts";
 import { encodeSetField, encodeUserEnterField } from "../../src/protocol/field.ts";
@@ -55,7 +55,9 @@ export async function syntheticSocialPeer(t: { after(fn: () => void | Promise<vo
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     const recv = new SessionDeframer({ recvState: new CipherState(0x11111111) });
-    socket.write(encodeHandshake(new Uint8Array(HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222));
+    socket.write(
+      encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222),
+    );
     socket.on("data", (chunk) => {
       for (const p of recv.push(
         new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),

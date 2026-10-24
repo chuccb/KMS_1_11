@@ -31,7 +31,7 @@ server/src/net/loginserver.ts + game entry
 原版 TCP 客戶端與瀏覽器橋共用服務與協定能力；瀏覽器不自行實作第二份 cipher，也不直接載入 WZ。
 橋上的 JSON event／API 是重建介面，**不是原封包格式的證據**。
 web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器只使用對外 web origin。
-原版 `sub_43A410` 把 server→client greeting 的首個 u16 同時當 byte count 與 `0xD3` 版本值，故總長是 **211 bytes**（199-byte body＋兩個 u32 seed）；這不是整個雙向握手的總流量。相同函式在零旗標分支依序送出 `0x04` 加 u32 的 5-byte client body，加 4-byte frame header 共 **9 bytes**。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版方向／長度和 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
+目標 server→client greeting 的已知格式是前置 2-byte length、接續 `u16 version=0x00D3`，總長為十幾 bytes；211 是版本值，不是 wire length。倉庫 `MapleStory.exe` 的 `sub_43A410` listing 卻把 offset 0 的 u16 當讀取數量並與 `0xD3` 比較，現行 encoder 也仍送出舊 211-byte 模型，因此 binary／stage／offset 對應尚未解決；不得把該舊模型當官方規格（見 [ADR-166](DECISIONS.md)）。同一函式在零旗標分支依序送出 `0x04` 加 u32 的 5-byte client body，加 4-byte frame header 共 **9 bytes**；此 c2s frame 是獨立方向，不能與 s2c greeting 長度混用。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版 session header 的 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
 
 ## 實際責任與依賴
 

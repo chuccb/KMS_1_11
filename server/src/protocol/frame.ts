@@ -1,19 +1,14 @@
 /**
- * Wire framing for the 2003 KMS 1.11 client.
+ * U16 framing helpers for captured streams.
  *
- * EVIDENCE (MapleStory.exe.c sub_43A410):
- *   - recv() reads 2 bytes first, then treats that u16 LE as the total packet length
- *     (`v16 = *v15`), and keeps receiving until the buffer holds exactly `v16` bytes
- *     (`while (v17 - v15 != v16)`).
- *   - a value above the 1460-byte receive buffer aborts the connection.
- *   - the handshake parsed right after it expects a packet whose length is exactly 211
- *     (0xD3); longer throws CPatchException, shorter throws CTerminateException.
+ * ARCHIVED EXE EVIDENCE: `sub_43A410` initially reads 2 bytes and uses the value at its
+ * buffer offset 0 as a receive count, with a 1460-byte cap. That does not establish the
+ * target greeting format: the target correction specifies a separate u16 length followed
+ * by `u16 version = 0x00D3` and a short s2c greeting. This helper's default counts its
+ * 2-byte prefix in `wireLength`; verify that convention against the target capture before
+ * using it as the official handshake parser.
  *
- * Therefore the default framing is: u16 LE total length that INCLUDES the 2 header bytes.
- *
- * STATUS: the u16 length prefix and the 1460 cap are verified. Whether the length counts
- * itself is derived from the receive loop (strong but not yet confirmed against a live
- * capture), so it is a configurable option rather than a hard-coded assumption.
+ * The subsequent encrypted session framing is separate and uses `HeaderDeframer` below.
  */
 export const MAX_FRAME_BYTES = 1460; // receive buffer size used by the client
 
@@ -184,8 +179,9 @@ export function fromHex(hex: string): Uint8Array {
  *
  * EVIDENCE: sub_4A1940 assembles 4 bytes, stores u16@0 and u16@2, and completes the packet
  * once `filled >= (u16@2) + 4`. sub_4A1B90 decrypts starting at data+4 for (u16@2) bytes, so
- * the 4-byte header is plaintext. This supersedes the simpler u16-total framing above, which
- * only describes the very first (211-byte) handshake packet.
+ * the 4-byte header is plaintext. This is the established post-handshake packet framing and
+ * is separate from the target short greeting; the u16-total helper above is only a legacy
+ * capture utility.
  */
 export interface RawPacket {
   /** u16 at offset 0 (plaintext; obfuscated magic for session packets) */
