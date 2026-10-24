@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-24（ADR-164：browser UI preference storage boundary；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-24（ADR-165：原版握手方向／長度與 TCP bad-header fail-closed；ADR-164：browser UI preference storage boundary；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
@@ -31,6 +31,7 @@ server/src/net/loginserver.ts + game entry
 原版 TCP 客戶端與瀏覽器橋共用服務與協定能力；瀏覽器不自行實作第二份 cipher，也不直接載入 WZ。
 橋上的 JSON event／API 是重建介面，**不是原封包格式的證據**。
 web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器只使用對外 web origin。
+原版 `sub_43A410` 把 server→client greeting 的首個 u16 同時當 byte count 與 `0xD3` 版本值，故總長是 **211 bytes**（199-byte body＋兩個 u32 seed）；這不是整個雙向握手的總流量。測試中的 login client 第一個 0x04 request 是 5-byte body＋4-byte frame header，即 **9 bytes**。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版方向／長度和 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
 
 ## 實際責任與依賴
 

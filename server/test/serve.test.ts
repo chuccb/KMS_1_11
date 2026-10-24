@@ -295,6 +295,10 @@ class FakeClient {
     this.socket.write(encodeSessionPacket(encodeClientPacket(packet), this.sendState, "c2s"));
   }
 
+  sendWire(bytes: Uint8Array): void {
+    this.socket.write(bytes);
+  }
+
   /**
    * Stops discarding what arrives: every opcode from now on also lands in `into`.
    *
@@ -512,7 +516,128 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.equal(deleteReader.exhausted, true);
   assert.equal(accounts.get("admin")?.characters.length, 0);
 
-  assert.ok(log.some((line) => line.includes("handshake sent")));
+  assert.ok(log.some((line) => line.includes("handshake sent (211 bytes")));
+});
+
+test("login server reports the expected cipher header and closes on the first bad frame", async (t) => {
+  const log: string[] = [];
+  const clientSendSeed = 0xd75abb51;
+  const server = new LoginServer({
+    accounts: new Map(),
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 8585 },
+    handoffs: new HandoffRegistry(),
+    handshake: { clientSendSeed, clientRecvSeed: 0x798eba47 },
+    log: (line) => log.push(line),
+  });
+  const info = await server.listen(0);
+  const client = await FakeClient.connect(info.port);
+  t.after(async () => {
+    client.close();
+    await server.close();
+  });
+
+  const invalid = encodeSessionPacket(
+    Uint8Array.of(0x04, 0, 0, 0, 0),
+    new CipherState(clientSendSeed),
+    "c2s",
+  );
+  invalid[0] = CLIENT_SEND_MAGIC & 0xff;
+  invalid[1] = (CLIENT_SEND_MAGIC >>> 8) & 0xff;
+  const closed = new Promise<void>((resolve) => client.socketClose(resolve));
+  client.sendWire(invalid);
+  await closed;
+
+  const headerErrors = log.filter((line) => line.includes("invalid client packet header"));
+  assert.equal(
+    headerErrors.length,
+    1,
+    "a bad frame closes the stream before junk can be parsed as another",
+  );
+  assert.match(headerErrors[0]!, /0x00d3 \(expected 0xd789; body=5 bytes, wire=9 bytes\)/);
+});
+
+test("game entry rejects a bad session header before claiming a character handoff", async (t) => {
+  const log: string[] = [];
+  const handoffs = new HandoffRegistry();
+  handoffs.issue({ username: "admin", characterId: 7, characterName: "Hero" });
+  const clientSendSeed = 0xd75abb51;
+  const game = new GameEntryServer({
+    handoffs,
+    handshake: { clientSendSeed, clientRecvSeed: 0x798eba47 },
+    log: (line) => log.push(line),
+  });
+  const info = await game.listen(0);
+  const client = await FakeClient.connect(info.port);
+  t.after(async () => {
+    client.close();
+    await game.close();
+  });
+
+  const invalid = encodeSessionPacket(
+    Uint8Array.of(0x04, 7, 0, 0, 0),
+    new CipherState(clientSendSeed),
+    "c2s",
+  );
+  invalid[0] = CLIENT_SEND_MAGIC & 0xff;
+  invalid[1] = (CLIENT_SEND_MAGIC >>> 8) & 0xff;
+  const closed = new Promise<void>((resolve) => client.socketClose(resolve));
+  client.sendWire(invalid);
+  await closed;
+
+  assert.ok(
+    log.some((line) =>
+      line.includes(
+        "game: invalid client packet header 0x00d3 (expected 0xd789; body=5 bytes, wire=9 bytes)",
+      ),
+    ),
+    log.join("\n"),
+  );
+  assert.equal(handoffs.pending, 1, "a bad frame must not claim or consume the handoff");
+});
+
+test("login and game listeners close on an oversized session body without reading payload bytes", async (t) => {
+  const clientSendSeed = 0xd75abb51;
+  const clientRecvSeed = 0x798eba47;
+  const loginLog: string[] = [];
+  const login = new LoginServer({
+    accounts: new Map(),
+    worlds: [{ name: "Scania", unknownId: 0 }],
+    gameServer: { ip: "127.0.0.1", port: 8585 },
+    handoffs: new HandoffRegistry(),
+    handshake: { clientSendSeed, clientRecvSeed },
+    log: (line) => loginLog.push(line),
+  });
+  const gameLog: string[] = [];
+  const game = new GameEntryServer({
+    handoffs: new HandoffRegistry(),
+    handshake: { clientSendSeed, clientRecvSeed },
+    log: (line) => gameLog.push(line),
+  });
+  const [loginInfo, gameInfo] = await Promise.all([login.listen(0), game.listen(0)]);
+  const loginClient = await FakeClient.connect(loginInfo.port);
+  const gameClient = await FakeClient.connect(gameInfo.port);
+  t.after(async () => {
+    loginClient.close();
+    gameClient.close();
+    await Promise.all([login.close(), game.close()]);
+  });
+
+  const oversizedFrameHeader = Uint8Array.of(0xd3, 0, 0x54, 0x20); // u16 body length = 8276
+  const loginClosed = new Promise<void>((resolve) => loginClient.socketClose(resolve));
+  const gameClosed = new Promise<void>((resolve) => gameClient.socketClose(resolve));
+  loginClient.sendWire(oversizedFrameHeader);
+  gameClient.sendWire(oversizedFrameHeader);
+  await Promise.all([loginClosed, gameClosed]);
+
+  assert.ok(
+    loginLog.includes("conn: session ended: body length 8276 exceeds the 1460 cap"),
+    loginLog.join("\n"),
+  );
+  assert.ok(
+    gameLog.includes("game: session ended: body length 8276 exceeds the 1460 cap"),
+    gameLog.join("\n"),
+  );
 });
 
 /**

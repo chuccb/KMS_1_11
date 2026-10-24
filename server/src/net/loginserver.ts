@@ -541,9 +541,11 @@ export class LoginServer {
       expectedMagic: CLIENT_SEND_MAGIC,
     });
     const state: ConnectionState = { stage: "login" };
-    socket.write(encodeHandshake(body, clientSendSeed, clientRecvSeed));
+    const handshake = encodeHandshake(body, clientSendSeed, clientRecvSeed);
+    socket.write(handshake);
     this.log(
-      `conn: handshake sent (clientSend=0x${hex(clientSendSeed)} clientRecv=0x${hex(clientRecvSeed)})`,
+      `conn: handshake sent (${handshake.length} bytes; ` +
+        `clientSend=0x${hex(clientSendSeed)} clientRecv=0x${hex(clientRecvSeed)})`,
     );
 
     socket.on("data", (chunk) => {
@@ -551,19 +553,28 @@ export class LoginServer {
         new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
       )) {
         if (event.kind !== "packet") continue;
-        // Any packet at all is proof of life for the heartbeat: the client is talking to us.
-        this.heartbeat.note(socket);
         if (!event.headerOk) {
-          this.log(`conn: dropping packet with a bad header (0x${hex(event.header)})`);
-          continue;
+          const actual = `0x${event.header.toString(16).padStart(4, "0")}`;
+          const expected = `0x${event.expectedHeader.toString(16).padStart(4, "0")}`;
+          this.log(
+            `conn: invalid client packet header ${actual} (expected ${expected}; ` +
+              `body=${event.body.length} bytes, wire=${event.body.length + 4} bytes); closing`,
+          );
+          socket.destroy();
+          return;
         }
+        // Only a correctly framed session packet proves the client is talking to us.
+        this.heartbeat.note(socket);
         try {
           this.onPacket(socket, state, sendState, event);
         } catch (error) {
           this.log(`conn: handler error: ${(error as Error).message}`);
         }
       }
-      if (deframer.failure) this.log(`conn: session ended: ${deframer.failure}`);
+      if (deframer.failure !== undefined) {
+        this.log(`conn: session ended: ${deframer.failure}`);
+        socket.destroy();
+      }
     });
     socket.on("error", () => this.sockets.delete(socket));
     socket.on("close", () => {
@@ -3242,8 +3253,11 @@ export class GameEntryServer {
       expectHandshake: false,
       expectedMagic: CLIENT_SEND_MAGIC,
     });
-    socket.write(encodeHandshake(body, clientSendSeed, clientRecvSeed));
-    this.options.log?.("game: handshake sent, waiting for the 0x04 character id");
+    const handshake = encodeHandshake(body, clientSendSeed, clientRecvSeed);
+    socket.write(handshake);
+    this.options.log?.(
+      `game: handshake sent (${handshake.length} bytes), waiting for the 0x04 character id`,
+    );
 
     const sendState = new CipherState(clientRecvSeed);
     let entered = false;
@@ -3253,7 +3267,17 @@ export class GameEntryServer {
         new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk),
       )) {
         if (event.kind !== "packet") continue;
-        // Any packet at all is proof of life for the heartbeat: the client is talking to us.
+        if (!event.headerOk) {
+          const actual = `0x${event.header.toString(16).padStart(4, "0")}`;
+          const expected = `0x${event.expectedHeader.toString(16).padStart(4, "0")}`;
+          this.options.log?.(
+            `game: invalid client packet header ${actual} (expected ${expected}; ` +
+              `body=${event.body.length} bytes, wire=${event.body.length + 4} bytes); closing`,
+          );
+          socket.destroy();
+          return;
+        }
+        // Only a correctly framed session packet proves the client is talking to us.
         this.heartbeat.note(socket);
         const packet = decodeClientPacket(event.plain);
         if (packet.kind === "handshake-reply" && !entered) {
@@ -3426,6 +3450,10 @@ export class GameEntryServer {
         this.options.log?.(
           `game: ${describeClientFieldPacket(event.plain) ?? `op=0x${hex(packet.opcode)} (unmapped)`}`,
         );
+      }
+      if (deframer.failure !== undefined) {
+        this.options.log?.(`game: session ended: ${deframer.failure}`);
+        socket.destroy();
       }
     });
     socket.on("error", () => {

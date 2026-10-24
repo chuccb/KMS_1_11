@@ -11,6 +11,7 @@
 | 需求 | 文件 |
 |---|---|
 | 找功能與歷史紀錄 | [文件索引](docs/README.md) |
+| 原版 TCP 握手方向／長度與 bad-header 診斷 | [ADR-165](docs/DECISIONS.md) |
 | 理解實際目錄、資料流與技術債 | [現行架構](docs/ARCHITECTURE.md) |
 | 看與原版仍有哪些差異／遺漏 | [現況總盤點](docs/ORIGINAL_PARITY_AUDIT.md)（含部分完成／未接／未知與程式入口） |
 | 看下一步與已知缺口 | [路線圖](docs/ROADMAP.md) |
