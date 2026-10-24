@@ -1,15 +1,14 @@
 /**
  * Capture harness (ADR-004).
  *
- * Purpose: capture client traffic through the server's current framing model. The legacy
- * session mode still emits a 211-byte greeting and is not yet aligned with the target short
- * greeting, so only raw/framed captures are independent of that handshake assumption. When
- * decoding does not match, the harness preserves raw bytes instead of dropping them.
+ * Purpose: capture client traffic through the checked KMS 1.11 framing model. Session mode sends
+ * the server-first `[u16 payloadLength][u16 version][u16 countedLength][counted bytes][u32 seeds]` greeting,
+ * then records `u16 header + u16 bodyLength + encrypted body` session packets. When decoding does
+ * not match, the harness preserves raw bytes instead of dropping them.
  *
  * Modes:
- *   session : the legacy 211-byte handshake model currently implemented here, followed by
- *             "u16 header + u16 bodyLength + body" session packets. The target official greeting
- *             is a short `[u16 length][u16 version=0x00D3]` packet and is not parsed yet.
+ *   session : send the minimal 14-byte parser-valid greeting by default, then decode session
+ *             packets. The exact counted-string value used by the original server is not captured.
  *   framed  : the same 4-byte session header without a handshake (use when seeds are known).
  *   raw     : record one line per recv() chunk.
  *
@@ -22,9 +21,9 @@ import { HeaderDeframer, U16LengthFramer, toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
 import { CipherState, CLIENT_SEND_MAGIC } from "../protocol/cipher.ts";
 import {
-  LEGACY_HANDSHAKE_BODY_BYTES,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
   SessionDeframer,
-  encodeLegacyHandshake,
+  encodeHandshake,
   type SessionDeframerOptions,
 } from "../protocol/session.ts";
 
@@ -47,7 +46,7 @@ export interface CaptureRecord {
   hex: string;
   /** u16 at offset 0 of a framed packet (0xD3 ^ HIWORD(state) for session packets) */
   header?: number;
-  /** u16 at offset 2 of a framed packet (# of body bytes that follow) */
+  /** Session-frame body size; on a greeting record, the counted-string byte length. */
   bodyLength?: number;
   /** first body byte - the opcode, once the body has been decrypted */
   opcode?: number;
@@ -67,10 +66,8 @@ export type CaptureMode = "session" | "framed" | "raw";
 /**
  * How the harness opens a session.
  *
- * The current capture mode sends the legacy 211-byte handshake model. The target protocol
- * correction specifies a short server-first greeting with a leading length and version 0x00D3;
- * this policy has not yet been updated to that format. `auto` picks seeds here (recorded in the
- * trace); `off` waits for a client-sent opening interpreted as that legacy format; an object pins seeds and legacy body bytes.
+ * `auto` sends the minimal parser-valid greeting with random seeds (recorded in the trace);
+ * `off` waits for a peer-sent greeting; an object pins seeds and the counted opaque bytes.
  */
 export type HandshakePolicy =
   "auto" | "off" | { clientSendSeed?: number; clientRecvSeed?: number; body?: Uint8Array };
@@ -85,7 +82,7 @@ export interface CaptureServerOptions {
   onRecord?: (record: CaptureRecord) => void;
   /** log connect/disconnect noise (default true) */
   logLifecycle?: boolean;
-  /** session mode only: send the legacy 211-byte handshake model (default "auto"); not the target short greeting */
+  /** session mode only: send the minimal parser-valid greeting by default, or wait with "off" */
   handshake?: HandshakePolicy;
 }
 
@@ -260,7 +257,7 @@ export class CaptureServer {
   }
 
   /**
-   * Picks the legacy session opening, sending its 211-byte model when we are the side that speaks first.
+   * Picks the session opening, sending the minimal greeting when we are the side that speaks first.
    * Returns the deframer options: our receive state mirrors the client's send seed.
    */
   private openSession(socket: Socket, conn: number): SessionDeframerOptions {
@@ -270,12 +267,12 @@ export class CaptureServer {
     const clientRecvSeed = pinned.clientRecvSeed ?? randomSeed();
 
     if (policy === "off") {
-      // Wait for a client-sent handshake instead (useful when replaying a stream, not the client).
+      // Wait for a peer-sent greeting instead (useful for offline replay, not the normal client).
       return {};
     }
 
-    const body = pinned.body ?? new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES);
-    const bytes = encodeLegacyHandshake(body, clientSendSeed, clientRecvSeed);
+    const body = pinned.body ?? new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES);
+    const bytes = encodeHandshake(body, clientSendSeed, clientRecvSeed);
     socket.write(Buffer.from(bytes));
     this.emit({
       conn,
@@ -286,10 +283,9 @@ export class CaptureServer {
       bodyLength: body.length,
       seeds: { sendSeed: clientSendSeed, recvSeed: clientRecvSeed },
       note:
-        `sent by us (legacy 211-byte model): clientSendSeed=0x${hex32(clientSendSeed)} clientRecvSeed=0x${hex32(clientRecvSeed)}` +
-        (pinned.body
-          ? "; legacy body from the caller"
-          : "; legacy body is 199 zero bytes (not a target-format claim)"),
+        `sent by us (length counts following payload bytes): clientSendSeed=0x${hex32(clientSendSeed)} ` +
+        `clientRecvSeed=0x${hex32(clientRecvSeed)}` +
+        (pinned.body ? "; counted bytes from the caller" : "; minimal empty counted string"),
     });
     return {
       expectHandshake: false, // already consumed on the way out

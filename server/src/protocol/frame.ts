@@ -1,19 +1,15 @@
 /**
  * U16 framing helpers for captured streams.
  *
- * ARCHIVED EXE EVIDENCE: `sub_43A410` initially reads 2 bytes and uses the value at its
- * buffer offset 0 as a receive count, with a 1460-byte cap. That does not establish the
- * target greeting format: the target correction specifies a separate u16 length followed
- * by `u16 version = 0x00D3` and a short s2c greeting. This helper's default counts its
- * 2-byte prefix in `wireLength`; verify that convention against the target capture before
- * using it as the official handshake parser.
- *
- * The subsequent encrypted session framing is separate and uses `HeaderDeframer` below.
+ * Generic framed capture helper. `U16LengthFramer` below is deliberately separate from the
+ * session greeting parser in `session.ts`: its default convention counts the prefix itself, while
+ * the greeting's prefix counts the payload bytes after it. Do not use this helper to parse the
+ * greeting. The subsequent encrypted session framing uses `HeaderDeframer` below.
  */
 export const MAX_FRAME_BYTES = 1460; // receive buffer size used by the client
 
 export interface U16LengthFramerOptions {
-  /** length field counts the 2 header bytes themselves (evidence: receive loop) */
+  /** Whether this generic frame's declared length includes its 2-byte prefix (default: true). */
   lengthIncludesHeader?: boolean;
   /** frames larger than this are rejected (evidence: 1460 receive buffer) */
   maxFrameBytes?: number;
@@ -47,8 +43,7 @@ export class U16LengthFramer {
       );
     }
     if (total > 0xffff) throw new FramingError("frame too large for u16 length prefix");
-    // The declared length follows the same option the deframer reads it with, so the two halves of
-    // the legacy framing cannot disagree about whether the 2 header bytes are counted.
+    // Keep this generic encoder aligned with the matching deframer's configured convention.
     const declared = this.lengthIncludesHeader ? total : payload.length;
     const out = new Uint8Array(total);
     out[0] = declared & 0xff;

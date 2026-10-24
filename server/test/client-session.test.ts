@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { ClientSession, type ClientEvent } from "../src/client/session.ts";
 import {
-  encodeLegacyHandshake,
-  LEGACY_HANDSHAKE_BODY_BYTES,
+  encodeHandshake,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
   encodeSessionPacket,
 } from "../src/protocol/session.ts";
 import { CipherState } from "../src/protocol/cipher.ts";
@@ -42,7 +42,7 @@ test(
       socket.on("close", () => sockets.delete(socket));
       const sendState = new CipherState(0x22222222);
       socket.write(
-        encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222),
+        encodeHandshake(new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222),
       );
       socket.once("data", () => {
         // A single TCP write forces the first take(0x16) and the subsequent frames into one read.

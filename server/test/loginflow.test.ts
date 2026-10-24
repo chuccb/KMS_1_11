@@ -7,7 +7,7 @@
  * documented client read order ever drift apart, this test fails.
  *
  * The chain is:
- *   server -> legacy handshake model    - seeds both directions (not target short greeting)
+ *   server -> length-prefixed greeting - seeds both directions using the checked client parser
  *   client -> 0x01 login(id, pw)
  *   server -> 0x01 result + world list  - client switches to CWorldSelect
  *   client -> 0x02 world index
@@ -20,7 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CipherState, SERVER_SEND_MAGIC, CLIENT_SEND_MAGIC } from "../src/protocol/cipher.ts";
 import {
-  encodeLegacyHandshake,
+  encodeHandshake,
   encodeSessionPacket,
   SessionDeframer,
   type SessionEvent,
@@ -69,7 +69,7 @@ class FakeClient {
 }
 
 test("the login chain works end to end over a real encrypted session", () => {
-  const handshake = encodeLegacyHandshake(new Uint8Array(199), CLIENT_SEND_SEED, CLIENT_RECV_SEED);
+  const handshake = encodeHandshake(new Uint8Array(0), CLIENT_SEND_SEED, CLIENT_RECV_SEED);
   const serverSendState = new CipherState(CLIENT_RECV_SEED);
   const client = new FakeClient();
   client.receive(handshake);
@@ -184,8 +184,8 @@ test("the login chain works end to end over a real encrypted session", () => {
   assert.equal(selectReader.exhausted, true);
 
   // --- The new connection: handshake again, then the client identifies itself with its id.
-  const gameServerHandshake = encodeLegacyHandshake(
-    new Uint8Array(199),
+  const gameServerHandshake = encodeHandshake(
+    new Uint8Array(0),
     CLIENT_SEND_SEED,
     CLIENT_RECV_SEED,
   );
@@ -199,11 +199,7 @@ test("the login chain works end to end over a real encrypted session", () => {
   const echoed = gameServer.push(
     encodeSessionPacket(idEcho, new CipherState(CLIENT_SEND_SEED), "c2s"),
   );
-  assert.equal(
-    gameServerHandshake.length,
-    211,
-    "the loginflow fixture still uses the legacy model",
-  );
+  assert.equal(gameServerHandshake.length, 14, "minimal length-prefixed greeting");
   const firstPacket = echoed.find((event) => event.kind === "packet");
   if (!firstPacket || firstPacket.kind !== "packet") throw new Error("the id echo did not arrive");
   assert.equal(firstPacket.headerOk, true);

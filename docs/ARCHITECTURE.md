@@ -1,6 +1,6 @@
 # 現行架構：瀏覽器客戶端＋原協定伺服器
 
-更新：2026-10-24（ADR-165：原版握手方向／長度與 TCP bad-header fail-closed；ADR-164：browser UI preference storage boundary；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
+更新：2026-10-24（ADR-167：greeting parser layout 與整條 codec 遷移；ADR-165：TCP bad-header fail-closed；ADR-164：browser UI preference storage boundary；工具鏈 latest 重查）。這是實際程式的導覽，不再描述未建立的引擎專案或根 `core/`／`protocol/`。
 方向由 ADR-065 確認；版本與升級風險見 [TOOLCHAIN](TOOLCHAIN.md)，證據規則見 [REBUILD_PRINCIPLES](REBUILD_PRINCIPLES.md)。
 
 現行角色互動續作見[NATIVE_PLAYER_INTERACTIONS](NATIVE_PLAYER_INTERACTIONS.md)：原右鍵選單／人氣／派對事件、
@@ -31,7 +31,7 @@ server/src/net/loginserver.ts + game entry
 原版 TCP 客戶端與瀏覽器橋共用服務與協定能力；瀏覽器不自行實作第二份 cipher，也不直接載入 WZ。
 橋上的 JSON event／API 是重建介面，**不是原封包格式的證據**。
 web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器只使用對外 web origin。
-目標 server→client greeting 的已知格式是前置 2-byte length、接續 `u16 version=0x00D3`，總長為十幾 bytes；211 是版本值，不是 wire length。倉庫 `MapleStory.exe` 的 `sub_43A410` listing 卻把 offset 0 的 u16 當讀取數量並與 `0xD3` 比較，現行 encoder 也仍送出舊 211-byte 模型，因此 binary／stage／offset 對應尚未解決；不得把該舊模型當官方規格（見 [ADR-166](DECISIONS.md)）。同一函式在零旗標分支依序送出 `0x04` 加 u32 的 5-byte client body，加 4-byte frame header 共 **9 bytes**；此 c2s frame 是獨立方向，不能與 s2c greeting 長度混用。live login/game TCP listener 現在會在第一個 bad header 關閉並記錄 expected header 與 packet 長度，不輸出 payload；原版 session header 的 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
+`sub_43A410` 的 server-first greeting parser 已由 C 與 listing 逐位址交叉確認：[wire u16 payloadLength（不含 prefix）][payload: u16 version=0x00D3、u16 countedLength、counted bytes、u32 clientSendSeed、u32 clientRecvSeed、可能的未讀尾端]。`0043A5DF` 先收 2-byte prefix，`0043A645` 取其值作後續 payload byte 數，`0043A661` 把目的指標重設到 buffer 起點，隨後在 payload offset 0 讀 version；第一個 seed 寫 `CClientSocket+120`、第二個寫 `+124`。空 counted string 的 14-byte wire 形式只是 parser-valid 最小值，非已證實原 server 的固定長度／精確字串。`session.ts`／`decode.ts`／capture／login-game listener 與 Node 測試均採此布局；預設空字串只是合成最小 greeting（[ADR-167](DECISIONS.md)）。同一函式在零旗標分支依序送出 `0x04` 加 u32 的 5-byte client body，加 4-byte frame header 共 **9 bytes**；此 c2s frame 是獨立方向，不能與 s2c greeting 長度混用。live login/game TCP listener 會在第一個 bad header 關閉並記錄 expected header 與封包長度，不輸出 payload；原版 session header 的 `0xD3`／`0x1B66` 證據界線見 [ADR-165](DECISIONS.md)。
 
 ## 實際責任與依賴
 

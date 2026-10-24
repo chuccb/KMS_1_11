@@ -2,23 +2,19 @@
  * Trace decoding: turns a JSONL capture back into readable session packets.
  *
  * This is the other half of ADR-004 (the original client is the oracle). A raw capture is
- * useless without the cipher, so `kms111-rebuild decode` replays a trace through the same
- * legacy model currently implemented by `session.ts`:
+ * useless without the cipher, so `kms111-rebuild decode` replays the checked greeting followed by
+ * session frames:
  *
- *   1. a 211-byte legacy handshake opens the session and carries two LCG seeds,
- *   2. every following packet is `u16 header + u16 bodyLength + body`, body encrypted,
- *   3. the header is checked against the modeled direction magic and cipher state.
+ *   1. the u16 prefix counts the bytes after itself; the payload holds version 0x00D3, a counted
+ *      byte string, and two LCG seeds (MapleStory.exe.lst 0043A5DF-0043A774),
+ *   2. every following packet is `u16 header + u16 bodyLength + encrypted body`,
+ *   3. the header is checked against the direction magic and cipher state.
  *
- * The target correction specifies a short `[u16 length][u16 version=0x00D3]` greeting; this
- * decoder's handshake classifier has not yet been migrated to it. Evidence for the post-handshake
- * frame/cipher remains sub_4A1940 (assembler), sub_4A1B90 (decrypt), and sub_43AFA0 (receive state).
+ * Evidence for the post-greeting frame/cipher remains sub_4A1940 (assembler), sub_4A1B90
+ * (decrypt), and sub_43AFA0 (receive state).
  */
 import { CipherState, headerMagicOf, magicFor, type Direction } from "../protocol/cipher.ts";
-import {
-  LEGACY_HANDSHAKE_BODY_BYTES,
-  LEGACY_HANDSHAKE_TOTAL_BYTES,
-  decodeLegacyHandshake,
-} from "../protocol/session.ts";
+import { HANDSHAKE_VERSION, decodeHandshake } from "../protocol/session.ts";
 import { toHex } from "../protocol/frame.ts";
 import { describeClientPacket } from "../protocol/login.ts";
 import { describeClientFieldPacket, describeFieldPacket } from "../protocol/field.ts";
@@ -47,11 +43,12 @@ export interface DecodedPacket {
   dir: "c2s" | "s2c";
   /** wire length in bytes */
   len: number;
-  /** u16 read off the wire */
+  /** u16 at wire offset 0: session header for frames, payload length for greetings. */
   header: number;
   /** u16 the cipher state predicts, or undefined when the direction is not keyed yet */
   expectedHeader?: number;
   headerOk: boolean;
+  /** Session-frame body size; for a greeting, the counted-string byte length. */
   bodyLength: number;
   /** first decrypted body byte - the opcode the dispatcher (sub_43B170) switches on */
   opcode?: number;
@@ -76,8 +73,15 @@ export interface DecodeOptions {
 
 export interface DecodeResult {
   packets: DecodedPacket[];
-  /** the seeds a handshake in the trace assigned, from the client's point of view */
-  handshake?: { clientSendSeed: number; clientRecvSeed: number; bodyHex: string };
+  /** Parsed greeting fields and the seeds assigned from the client's point of view. */
+  handshake?: {
+    version: number;
+    payloadLength: number;
+    clientSendSeed: number;
+    clientRecvSeed: number;
+    bodyHex: string;
+    trailingHex: string;
+  };
 }
 
 function fromHex(hex: string): Uint8Array {
@@ -126,32 +130,60 @@ export function decodeTrace(records: TraceRecord[], options: DecodeOptions = {})
       headerOk: true,
     };
 
-    // The current legacy opening packet is plaintext and carries the modeled keys. The harness
-    // marks it `handshake`; a raw 211-byte `frame` is treated as that same legacy shape. The target
-    // short greeting needs a separate parser before this heuristic can be considered authoritative.
+    const prefixLength =
+      raw.length >= 2 ? new DataView(raw.buffer, raw.byteOffset, 2).getUint16(0, true) : -1;
+    const hasGreetingShape =
+      raw.length >= 6 &&
+      prefixLength + 2 === raw.length &&
+      new DataView(raw.buffer, raw.byteOffset + 2, 2).getUint16(0, true) === HANDSHAKE_VERSION;
     const isHandshake =
-      raw.length === LEGACY_HANDSHAKE_TOTAL_BYTES &&
-      (record.kind === "handshake" || record.kind === "frame");
+      record.kind === "handshake" || (record.kind === "frame" && hasGreetingShape);
     if (isHandshake) {
-      const parsed = decodeLegacyHandshake(raw);
-      const sendSeed = record.seeds?.sendSeed ?? parsed.sendSeed;
-      const recvSeed = record.seeds?.recvSeed ?? parsed.recvSeed;
-      // `sendSeed` seeds the receiver's send state; the receiver is the other end.
-      const clientSendSeed = record.dir === "s2c" ? sendSeed : recvSeed;
-      const clientRecvSeed = record.dir === "s2c" ? recvSeed : sendSeed;
-      handshake = { clientSendSeed, clientRecvSeed, bodyHex: toHex(parsed.body) };
-      c2sSeed = clientSendSeed;
-      s2cSeed = clientRecvSeed;
-      c2sState = new CipherState(c2sSeed);
-      s2cState = new CipherState(s2cSeed);
-      packets.push({
-        ...base,
-        bodyLength: LEGACY_HANDSHAKE_BODY_BYTES,
-        bodyHex: toHex(parsed.body),
-        expectedHeader: LEGACY_HANDSHAKE_TOTAL_BYTES,
-        headerOk: base.header === LEGACY_HANDSHAKE_TOTAL_BYTES,
-        note: `handshake sent by ${record.dir}: receiver (${record.dir === "s2c" ? "client" : "server"}) seeded`,
-      });
+      try {
+        const parsed = decodeHandshake(raw);
+        // The seeds are decoded from raw hex, not copied from optional trace metadata. For a
+        // server -> client greeting they directly name the client's send/receive states; when
+        // direction is reversed, those roles invert at the receiver.
+        const clientSendSeed = record.dir === "s2c" ? parsed.sendSeed : parsed.recvSeed;
+        const clientRecvSeed = record.dir === "s2c" ? parsed.recvSeed : parsed.sendSeed;
+        handshake = {
+          version: parsed.version,
+          payloadLength: prefixLength,
+          clientSendSeed,
+          clientRecvSeed,
+          bodyHex: toHex(parsed.body),
+          trailingHex: toHex(parsed.trailing),
+        };
+        c2sSeed = clientSendSeed;
+        s2cSeed = clientRecvSeed;
+        c2sState = new CipherState(c2sSeed);
+        s2cState = new CipherState(s2cSeed);
+        const metadataMismatch =
+          record.seeds !== undefined &&
+          (record.seeds.sendSeed !== parsed.sendSeed || record.seeds.recvSeed !== parsed.recvSeed);
+        packets.push({
+          ...base,
+          bodyLength: parsed.body.length,
+          bodyHex: toHex(parsed.body),
+          headerOk: true,
+          note:
+            `greeting version=0x${parsed.version.toString(16).padStart(4, "0")}; ` +
+            `length prefix counts ${prefixLength} following payload bytes; ` +
+            `seeds assigned to ${record.dir === "s2c" ? "client" : "server"}` +
+            (parsed.trailing.length > 0
+              ? `; ignored trailing=${parsed.trailing.length} bytes`
+              : "") +
+            (metadataMismatch
+              ? "; trace seed metadata differs from raw greeting (raw bytes used)"
+              : ""),
+        });
+      } catch (error) {
+        packets.push({
+          ...base,
+          headerOk: false,
+          note: `invalid greeting: ${(error as Error).message}`,
+        });
+      }
       continue;
     }
     if (record.kind !== "frame") continue; // connect / disconnect / server-info carry no payload

@@ -12,7 +12,8 @@
  * schedule  state = (state * 214013 + 2531011) mod 2^32   -- MSVC rand() LCG constants
  *             send state at CClientSocket+120 (sub_43AD50 : `[esi+78h]`)
  *             recv state at CClientSocket+124 (sub_43AFA0 : `[edi+7Ch]`)
- * The current legacy handshake model carries two u32 seeds; their offsets in the target short greeting are not yet verified.
+ * sub_43A410 stores the first greeting seed at +120 and the second at +124, after its counted
+ * string; the wire offsets are 6+stringLength and 10+stringLength.
  *
  * THE TWO MAGIC CONSTANTS ARE NOT THE SAME (measured, twice, in the .lst):
  *   client -> server  header = 0x00D3 ^ HIWORD(state)
@@ -23,18 +24,18 @@
  *     The client's receive path sub_43AFA0 requires it exactly:
  *        mov ecx, [edi+7Ch] / shr ecx,10h / xor cx,[edi+6Eh] / cmp cx,0FF2Ch   (0043AFF9)
  *     and disconnects (sub_43AC20 -> AVCDisconnectException) when it does not match.
- * 0xD3 IS A VERSION VALUE; DO NOT USE IT AS THE TARGET GREETING LENGTH (ADR-166)
+ * 0xD3 IS A VERSION VALUE; DO NOT USE IT AS THE TARGET GREETING LENGTH (ADR-166 / ADR-167)
  * -----------------------------------------------------------------------------
  * In the checked EXE, 0xD3 = 211 appears in the c2s header path (`0043AD75`) and the
  * s2c header validation (`0043AFF9`, `0xFF2C = ~0xD3`). The version-mismatch branches
  * (`0043A76E`, `sub_468400`) also carry version semantics: lower values terminate as an
  * unsupported client version; higher values build an expected=211 / received=N patch record.
  *
- * The target greeting layout is separately specified as `u16 length` followed by
- * `u16 version = 0x00D3`, with a short s2c greeting. The checked EXE's receive path compares
- * offset 0 and therefore does not map cleanly to that target layout. Do not infer that the
- * target greeting is 211 bytes or that its version lives at offset 0. Keep the version/magic
- * constant here for the session header; the short greeting and seed offsets remain to be mapped.
+ * The checked EXE's `sub_43A410` receive path confirms the short greeting layout: its first recv
+ * requests 2 bytes, the u16 is then used as the number of subsequent payload bytes, and the buffer
+ * pointer is reset before those bytes are received. The parsed payload starts with version 0x00D3,
+ * followed by a u16 counted-string length/data and the two seeds. Thus 0x00D3 is not the outer
+ * length; the minimal empty-string greeting is 14 wire bytes (payload length 12).
  *
  * For ordinary session packets, the client requires server header magic 0xFF2C and sends
  * client header magic 0x00D3. Getting these direction constants wrong is a silent disconnect.

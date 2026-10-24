@@ -1,28 +1,24 @@
 /**
  * Session framing for the KMS 1.11 reconstruction.
  *
+ * VERIFIED SERVER-FIRST GREETING:
+ *   sub_43A410 first receives exactly two bytes. It reads that little-endian u16 as the number
+ *   of following payload bytes, resets its destination pointer to the buffer base, and receives
+ *   that many bytes after the prefix. The payload begins with u16 version 0x00D3, then a u16
+ *   counted-string length and those bytes, then client-send and client-receive u32 seeds.
+ *   See MapleStory.exe.lst 0043A5DF-0043A674 and 0043A6C8-0043A774; the C decompilation is
+ *   cross-checked against those pointer moves and recv lengths.
+ *
+ *   The client copies the counted string into a local ZXString and releases it without reading
+ *   its content. A zero-length string is accepted by sub_418610, so encodeHandshake emits the
+ *   minimal parser-valid greeting by default: 14 wire bytes, with payload length 12. This is the
+ *   minimal form accepted by the checked client path, not a claim that the original server always
+ *   chose an empty string or that every target build has been byte-for-byte captured.
+ *
  * VERIFIED POST-HANDSHAKE FRAME:
  *   sub_4A1940 assembles the plaintext 4-byte header (`u16 magic`, `u16 bodyLength`) plus body;
  *   packet completion is `bodyLength + 4`. sub_4A1B90 decrypts only the body, and sub_43B170
  *   dispatches on its first byte.
- *
- * TARGET GREETING CORRECTION (2026-10-24):
- *   The target s2c greeting begins with an independent 2-byte length, followed by
- *   `u16 version = 0x00D3`. Its wire size is in the teens; 211 is the version, not the byte count.
- *   Do not infer a 211-byte target greeting from ADR-139/165 or from the constant name below.
- *
- * ARCHIVED-EXE DISCREPANCY:
- *   The checked MapleStory.exe hash is `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`.
- *   Its sub_43A410 listing uses the first u16 it reads both as a receive count and in the 0xD3
- *   comparison, and treats the next u16 as a copy length. That path does not show the target's
- *   leading length followed by version layout. The binary/stage/offset mismatch is unresolved;
- *   it does not override the target greeting correction.
- *
- * LEGACY IMPLEMENTATION WARNING:
- *   The constants and encoder below still implement the old 211-byte model (u16 211, u16 199,
- *   body, two seeds). They are not yet the target short-greeting implementation. The associated
- *   tests only pin the legacy encoder/decoder shape; they do not validate the official greeting.
- *   The 199-byte block and current seed offsets are likewise legacy assumptions.
  */
 import {
   CipherState,
@@ -34,85 +30,123 @@ import {
 } from "./cipher.ts";
 import { FramingError, toHex } from "./frame.ts";
 
-/** Version value 0x00D3. It is not the target greeting's wire length. */
+/** Version value 0x00D3, read after the greeting's independent length prefix. */
 export const HANDSHAKE_VERSION = CLIENT_VERSION;
 
-/** Opaque body size in the legacy encoder only; not established for the target greeting. */
-export const LEGACY_HANDSHAKE_BODY_BYTES = HANDSHAKE_VERSION - 4 - 8; // legacy 199-byte model
+/** The greeting prefix counts bytes after the two-byte prefix; the client buffer cap is 1460. */
+export const MAX_HANDSHAKE_PAYLOAD_BYTES = 1460;
+/** version u16 + string-length u16 + two seed u32 values; empty counted string. */
+export const MIN_HANDSHAKE_PAYLOAD_BYTES = 12;
+/** Prefix u16 + the minimum 12-byte payload. */
+export const MIN_HANDSHAKE_WIRE_BYTES = 2 + MIN_HANDSHAKE_PAYLOAD_BYTES;
+/** Minimal greeting is accepted by the client parser; the original server's string is not captured. */
+export const DEFAULT_HANDSHAKE_BODY_BYTES = 0;
 
-/** Wire size emitted by the legacy encoder; the official target greeting is short. */
-export const LEGACY_HANDSHAKE_TOTAL_BYTES = 4 + LEGACY_HANDSHAKE_BODY_BYTES + 8; // legacy 211-byte model
-
-export interface SessionPacket {
-  /** u16 at offset 0 (obfuscated magic for session packets) */
-  header: number;
-  /** wire bytes of the body (encrypted form) */
+export interface Handshake {
+  /** Client version read from payload offset 0; this client accepts exactly 0x00D3. */
+  version: number;
+  /** Counted bytes copied by the client into a temporary ZXString and then discarded. */
   body: Uint8Array;
-  /** body after decryption (=== body for handshake packets) */
-  plain: Uint8Array;
-}
-
-export interface LegacyHandshake {
-  body: Uint8Array;
+  /** First u32 after the counted string; seeds CClientSocket+120, the client's send state. */
   sendSeed: number;
+  /** Second u32 after the counted string; seeds CClientSocket+124, the client's receive state. */
   recvSeed: number;
+  /** Bytes after the two seeds; retained by the parser because the client does not reject a tail. */
+  trailing: Uint8Array;
 }
 
 /**
- * Build the current legacy 211-byte handshake model; this is not the target short greeting.
- * `clientSendSeed` and `clientRecvSeed` are placed in the legacy body tail using the offsets
- * inferred from the checked EXE path. The target greeting's exact seed offsets remain unresolved.
+ * Encode the checked client's server-first greeting:
+ *
+ *   u16 payloadLength (bytes after this prefix)
+ *   u16 version=0x00D3
+ *   u16 bodyLength, body bytes
+ *   u32 clientSendSeed, u32 clientRecvSeed
+ *   optional trailing bytes (the checked parser consumes but does not inspect them)
+ *
+ * The default empty body yields a 14-byte minimal greeting. The `body` name is kept neutral: the
+ * binary proves it is copied into a temporary string, but does not establish its server-side
+ * semantic meaning or the exact value used by the original server.
  */
-export function encodeLegacyHandshake(
+export function encodeHandshake(
   body: Uint8Array,
   clientSendSeed: number,
   clientRecvSeed: number,
+  trailing: Uint8Array = new Uint8Array(0),
 ): Uint8Array {
-  if (body.length !== LEGACY_HANDSHAKE_BODY_BYTES) {
+  const payloadLength = MIN_HANDSHAKE_PAYLOAD_BYTES + body.length + trailing.length;
+  if (payloadLength > MAX_HANDSHAKE_PAYLOAD_BYTES) {
     throw new FramingError(
-      `handshake body must be ${LEGACY_HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
+      `handshake payload of ${payloadLength} bytes exceeds the ${MAX_HANDSHAKE_PAYLOAD_BYTES}-byte client buffer`,
     );
   }
-  const out = new Uint8Array(LEGACY_HANDSHAKE_TOTAL_BYTES);
-  out[0] = LEGACY_HANDSHAKE_TOTAL_BYTES & 0xff;
-  out[1] = (LEGACY_HANDSHAKE_TOTAL_BYTES >>> 8) & 0xff;
-  out[2] = body.length & 0xff;
-  out[3] = (body.length >>> 8) & 0xff;
-  out.set(body, 4);
+
+  const out = new Uint8Array(payloadLength + 2);
   const view = new DataView(out.buffer);
-  // tail layout from sub_43A410: u32 at 4+bodyLength, then u32 at 8+bodyLength
-  view.setUint32(4 + body.length, clientSendSeed >>> 0, true);
-  view.setUint32(8 + body.length, clientRecvSeed >>> 0, true);
+  view.setUint16(0, payloadLength, true);
+  view.setUint16(2, HANDSHAKE_VERSION, true);
+  view.setUint16(4, body.length, true);
+  out.set(body, 6);
+  const sendSeedOffset = 6 + body.length;
+  view.setUint32(sendSeedOffset, clientSendSeed >>> 0, true);
+  view.setUint32(sendSeedOffset + 4, clientRecvSeed >>> 0, true);
+  out.set(trailing, sendSeedOffset + 8);
   return out;
 }
 
-export function decodeLegacyHandshake(wire: Uint8Array): LegacyHandshake {
-  if (wire.length !== LEGACY_HANDSHAKE_TOTAL_BYTES) {
-    throw new FramingError(
-      `handshake must be ${LEGACY_HANDSHAKE_TOTAL_BYTES} bytes, got ${wire.length}`,
-    );
+/**
+ * Decode one complete server-first greeting using the byte accounting in sub_43A410.
+ * The length prefix excludes its own two bytes and includes all bytes in the following payload.
+ */
+export function decodeHandshake(wire: Uint8Array): Handshake {
+  if (wire.length < 2) {
+    throw new FramingError(`handshake is missing its 2-byte length prefix (${wire.length} bytes)`);
   }
   const view = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
-  const total = view.getUint16(0, true);
-  if (total !== LEGACY_HANDSHAKE_TOTAL_BYTES) {
+  const payloadLength = view.getUint16(0, true);
+  if (payloadLength > MAX_HANDSHAKE_PAYLOAD_BYTES) {
     throw new FramingError(
-      `handshake total field is ${total}, expected ${LEGACY_HANDSHAKE_TOTAL_BYTES}`,
+      `handshake payload length ${payloadLength} exceeds the ${MAX_HANDSHAKE_PAYLOAD_BYTES}-byte client buffer`,
     );
   }
-  const bodyLength = view.getUint16(2, true);
-  if (bodyLength !== LEGACY_HANDSHAKE_BODY_BYTES) {
+  const expectedWireLength = payloadLength + 2;
+  if (wire.length !== expectedWireLength) {
     throw new FramingError(
-      `handshake body length is ${bodyLength}, expected ${LEGACY_HANDSHAKE_BODY_BYTES}`,
+      `handshake length prefix declares ${expectedWireLength} wire bytes, got ${wire.length}`,
     );
   }
+  if (payloadLength < MIN_HANDSHAKE_PAYLOAD_BYTES) {
+    throw new FramingError(
+      `handshake payload must be at least ${MIN_HANDSHAKE_PAYLOAD_BYTES} bytes, got ${payloadLength}`,
+    );
+  }
+
+  const version = view.getUint16(2, true);
+  if (version !== HANDSHAKE_VERSION) {
+    throw new FramingError(
+      `handshake version is 0x${version.toString(16).padStart(4, "0")}, expected 0x${HANDSHAKE_VERSION.toString(16).padStart(4, "0")}`,
+    );
+  }
+  const bodyLength = view.getUint16(4, true);
+  const sendSeedOffset = 6 + bodyLength;
+  const recvSeedOffset = sendSeedOffset + 4;
+  const endOfSeeds = recvSeedOffset + 4;
+  if (endOfSeeds > wire.length) {
+    throw new FramingError(
+      `handshake counted string (${bodyLength} bytes) leaves fewer than 8 bytes for the seeds`,
+    );
+  }
+
   return {
-    body: wire.slice(4, 4 + bodyLength),
-    sendSeed: view.getUint32(4 + bodyLength, true),
-    recvSeed: view.getUint32(8 + bodyLength, true),
+    version,
+    body: wire.slice(6, sendSeedOffset),
+    sendSeed: view.getUint32(sendSeedOffset, true),
+    recvSeed: view.getUint32(recvSeedOffset, true),
+    trailing: wire.slice(endOfSeeds),
   };
 }
 
-/** Largest body a single packet may carry; bigger payloads are split by the sender (sub_4A2030). */
+/** Largest encrypted body a single session packet may carry. */
 export const MAX_BODY_BYTES = 1456;
 
 /**
@@ -142,9 +176,9 @@ export function encodeSessionPacket(
   return out;
 }
 
-/** What a session stream yields: one handshake, then packets. */
+/** What a session stream yields: one greeting, then packets. */
 export type SessionEvent =
-  | { kind: "handshake"; handshake: LegacyHandshake; raw: Uint8Array }
+  | { kind: "handshake"; handshake: Handshake; raw: Uint8Array }
   | {
       kind: "packet";
       header: number;
@@ -158,11 +192,11 @@ export type SessionEvent =
     };
 
 export interface SessionDeframerOptions {
-  /** Receive-side cipher state. Omit to use the current legacy 211-byte opening model. */
+  /** Receive-side cipher state. Omit to parse a greeting before the first packet. */
   recvState?: CipherState;
-  /** Parse the current legacy 211-byte model before the first packet; not the target short greeting. */
+  /** Parse a server-first greeting before the first packet. Defaults to true when no state is given. */
   expectHandshake?: boolean;
-  /** Largest acceptable packet, body + 4-byte header. The client's receive buffer is 1460. */
+  /** Largest session packet, body + 4-byte header. */
   maxPacketBytes?: number;
   /**
    * Magic constant of the packets being decoded. Defaults to CLIENT_SEND_MAGIC because this
@@ -173,14 +207,11 @@ export interface SessionDeframerOptions {
 }
 
 /**
- * Streaming session decoder: feed raw bytes, get the legacy handshake model and decrypted bodies.
+ * Streaming session decoder: feed raw bytes, get the checked greeting and decrypted session bodies.
  *
- * The opening-handshake parser still expects the legacy 211-byte shape; it does not yet parse the
- * target short `[u16 length][u16 version=0x00D3]` greeting.
- *
- * Failure policy: a bad stream is *recorded*, never fatal. Completed packets are returned and the
- * reason the stream stopped is kept in `failure`, so a caller that is sniffing an unknown peer can
- * fall back to dumping raw bytes without losing what it already understood.
+ * Failure policy: a bad stream is recorded, never fatal. Completed packets are returned and the
+ * reason the stream stopped is kept in `failure`, so an offline caller can preserve bytes already
+ * understood before deciding how to handle the rest.
  */
 export class SessionDeframer {
   private buf = new Uint8Array(0);
@@ -206,9 +237,9 @@ export class SessionDeframer {
     return this.buf.length;
   }
 
-  /** True until the handshake has been consumed. */
+  /** True until the greeting has been consumed. */
   get awaitingHandshake(): boolean {
-    return this.expectHandshake && this.recvState === undefined;
+    return this.expectHandshake && this.recvState === undefined && this.failed === undefined;
   }
 
   push(chunk: Uint8Array): SessionEvent[] {
@@ -222,11 +253,33 @@ export class SessionDeframer {
 
     const events: SessionEvent[] = [];
     if (this.expectHandshake && this.recvState === undefined) {
-      if (this.buf.length < LEGACY_HANDSHAKE_TOTAL_BYTES) return events;
-      const raw = this.buf.slice(0, LEGACY_HANDSHAKE_TOTAL_BYTES);
-      const handshake = decodeLegacyHandshake(raw);
+      if (this.buf.length < 2) return events;
+      const payloadLength = new DataView(this.buf.buffer, this.buf.byteOffset, 2).getUint16(
+        0,
+        true,
+      );
+      if (payloadLength < MIN_HANDSHAKE_PAYLOAD_BYTES) {
+        this.failed = `handshake payload length ${payloadLength} is below the ${MIN_HANDSHAKE_PAYLOAD_BYTES}-byte minimum`;
+        return events;
+      }
+      if (payloadLength > MAX_HANDSHAKE_PAYLOAD_BYTES) {
+        this.failed =
+          `handshake payload length ${payloadLength} exceeds the ` +
+          `${MAX_HANDSHAKE_PAYLOAD_BYTES}-byte client buffer cap`;
+        return events;
+      }
+      const total = payloadLength + 2;
+      if (this.buf.length < total) return events;
+      const raw = this.buf.slice(0, total);
+      let handshake: Handshake;
+      try {
+        handshake = decodeHandshake(raw);
+      } catch (error) {
+        this.failed = `invalid handshake: ${(error as Error).message}`;
+        return events;
+      }
       this.recvState = new CipherState(handshake.recvSeed);
-      this.buf = this.buf.slice(LEGACY_HANDSHAKE_TOTAL_BYTES);
+      this.buf = this.buf.slice(total);
       events.push({ kind: "handshake", handshake, raw });
     }
 
@@ -270,8 +323,10 @@ export class SessionDeframer {
 export function describePacket(event: SessionEvent): string {
   if (event.kind === "handshake") {
     return (
-      `handshake ${event.raw.length}B sendSeed=0x${event.handshake.sendSeed.toString(16)} ` +
-      `recvSeed=0x${event.handshake.recvSeed.toString(16)} body=${toHex(event.handshake.body)}`
+      `greeting ${event.raw.length}B payload=${event.raw.length - 2}B version=0x${event.handshake.version.toString(16).padStart(4, "0")} ` +
+      `sendSeed=0x${event.handshake.sendSeed.toString(16)} ` +
+      `recvSeed=0x${event.handshake.recvSeed.toString(16)} body=${toHex(event.handshake.body)}` +
+      (event.handshake.trailing.length > 0 ? ` trailing=${toHex(event.handshake.trailing)}` : "")
     );
   }
   const opcode =

@@ -89,9 +89,9 @@ import net from "node:net";
 import { CipherState } from "../protocol/cipher.ts";
 import {
   CLIENT_SEND_MAGIC,
-  LEGACY_HANDSHAKE_BODY_BYTES,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
   SessionDeframer,
-  encodeLegacyHandshake,
+  encodeHandshake,
   encodeSessionPacket,
   type SessionEvent,
 } from "../protocol/session.ts";
@@ -376,7 +376,7 @@ export interface LoginServerOptions {
   creationCatalog?: CreationCatalog;
   /** Fresh creation only; never used to overwrite saved equipment on login. */
   itemCatalog?: ItemCatalog;
-  /** Legacy 211-byte handshake model only: random seeds and a 199-byte zero body by default; not the target short greeting. */
+  /** Server-first client greeting; body is the counted byte string copied then discarded by the client. */
   handshake?: {
     clientSendSeed?: number;
     clientRecvSeed?: number;
@@ -402,7 +402,7 @@ interface ConnectionState {
   checkedName?: string;
 }
 
-/** The login half of a session: legacy greeting out, stage-aware replies back. */
+/** The login half of a session: length-prefixed greeting out, stage-aware replies back. */
 export class LoginServer {
   readonly handoffs: HandoffRegistry;
   /** The seats this server takes: one account, one live session (ADR-018). */
@@ -524,16 +524,11 @@ export class LoginServer {
     this.sockets.add(socket);
     const clientSendSeed = this.options.handshake?.clientSendSeed ?? randomSeed();
     const clientRecvSeed = this.options.handshake?.clientRecvSeed ?? randomSeed();
-    const body = this.options.handshake?.body ?? new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES);
-    if (body.length !== LEGACY_HANDSHAKE_BODY_BYTES) {
-      throw new RangeError(
-        `handshake body must be ${LEGACY_HANDSHAKE_BODY_BYTES} bytes, got ${body.length}`,
-      );
-    }
+    const body = this.options.handshake?.body ?? new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES);
 
-    // The server speaks first; this legacy handshake model seeds the client's send state with
-    // `clientSendSeed` and its receive state with `clientRecvSeed`; our send state therefore
-    // starts from `clientRecvSeed` and our deframer from `clientSendSeed`.
+    // The server speaks first; the greeting seeds the client's send state with `clientSendSeed`
+    // and its receive state with `clientRecvSeed`. Our send state therefore starts from
+    // `clientRecvSeed`, and our deframer from `clientSendSeed`.
     const sendState = new CipherState(clientRecvSeed);
     const deframer = new SessionDeframer({
       recvState: new CipherState(clientSendSeed),
@@ -541,11 +536,12 @@ export class LoginServer {
       expectedMagic: CLIENT_SEND_MAGIC,
     });
     const state: ConnectionState = { stage: "login" };
-    const handshake = encodeLegacyHandshake(body, clientSendSeed, clientRecvSeed);
+    const handshake = encodeHandshake(body, clientSendSeed, clientRecvSeed);
     socket.write(handshake);
     this.log(
-      `conn: legacy handshake model sent (${handshake.length} bytes; ` +
-        `clientSend=0x${hex(clientSendSeed)} clientRecv=0x${hex(clientRecvSeed)})`,
+      `conn: client greeting sent (${handshake.length} bytes; ` +
+        `payload=${handshake.length - 2}; clientSend=0x${hex(clientSendSeed)} ` +
+        `clientRecv=0x${hex(clientRecvSeed)})`,
     );
 
     socket.on("data", (chunk) => {
@@ -875,13 +871,11 @@ export class LoginServer {
 export const DEFAULT_MAP_ID = 1000000;
 
 /**
- * The game-server side of the handoff: handshake, then `[0x04][characterId]`, then the field.
- *
- * The current implementation order is: game server opens with the legacy 211-byte handshake,
- * client answers `[0x04][characterId]`, and the server sends `0x16` - `u8 mode, u8 full, [three
- * u32 seed parts, CharacterData]` - which puts the client into a map. The target s2c greeting is
- * a short `[u16 length][u16 version=0x00D3]` packet, so the 211-byte opening is explicitly legacy
- * and not yet target-compatible. The map id is inside `CharacterData` (see `CharacterData.mapId`).
+ * The game-server side of the handoff: short server-first greeting, then `[0x04][characterId]`,
+ * then the field. The greeting uses a length prefix that counts the following payload bytes,
+ * version 0x00D3, a counted byte string (empty by default), and two seeds; see `session.ts` and
+ * MapleStory.exe.lst 0043A5DF-0043A774. The map id is inside `CharacterData` (see
+ * `CharacterData.mapId`).
  *
  * Then the field (`game/world.ts`, ADR-012) takes over: the map's monsters, NPCs and loot live in one
  * object per map id, shared by every connection in it, and this class is what wires a socket to it -
@@ -907,7 +901,7 @@ export interface GameEntryServerOptions {
   /** Development-only, separate opt-in policy. Never inferred from map-command rights. */
   allowTestTools?(username: string): boolean;
   handoffs: HandoffRegistry;
-  /** Legacy 211-byte opening model only; does not encode the target short greeting. */
+  /** Server-first client greeting; body is the counted byte string copied then discarded by the client. */
   handshake?: {
     clientSendSeed?: number;
     clientRecvSeed?: number;
@@ -3249,16 +3243,17 @@ export class GameEntryServer {
     this.sockets.add(socket);
     const clientSendSeed = this.options.handshake?.clientSendSeed ?? randomSeed();
     const clientRecvSeed = this.options.handshake?.clientRecvSeed ?? randomSeed();
-    const body = this.options.handshake?.body ?? new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES);
+    const body = this.options.handshake?.body ?? new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES);
     const deframer = new SessionDeframer({
       recvState: new CipherState(clientSendSeed),
       expectHandshake: false,
       expectedMagic: CLIENT_SEND_MAGIC,
     });
-    const handshake = encodeLegacyHandshake(body, clientSendSeed, clientRecvSeed);
+    const handshake = encodeHandshake(body, clientSendSeed, clientRecvSeed);
     socket.write(handshake);
     this.options.log?.(
-      `game: legacy handshake model sent (${handshake.length} bytes), waiting for the 0x04 character id`,
+      `game: client greeting sent (${handshake.length} bytes; payload=${handshake.length - 2}), ` +
+        `waiting for the 0x04 character id`,
     );
 
     const sendState = new CipherState(clientRecvSeed);

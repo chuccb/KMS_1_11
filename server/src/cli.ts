@@ -44,6 +44,7 @@ import {
   type CaptureServerOptions,
 } from "./net/capture.ts";
 import { decodeTrace, formatDecoded, type TraceRecord } from "./net/decode.ts";
+import { DEFAULT_HANDSHAKE_BODY_BYTES, MIN_HANDSHAKE_WIRE_BYTES } from "./protocol/session.ts";
 import {
   DEFAULT_MAP_ID,
   GameEntryServer,
@@ -72,21 +73,20 @@ usage:
                                   maps, dump, png (src/wz/cli.ts; "wz help" lists them)
 
 notes:
-  capture --mode session (default) still uses the legacy 211-byte handshake model and carries
-  two cipher seeds, then parses "u16 header + u16 bodyLength + encrypted body" session packets.
-  IMPORTANT: the target protocol correction is a short s2c greeting with a 2-byte length followed
-  by version 0x00D3; 211 is the version, not the wire length. Session-mode's opening bytes are
-  therefore not yet target-compatible. --mode framed skips that legacy greeting; --mode raw logs
-  recv() chunks. Undecodable chunks are flagged and preserved as raw bytes.
-  The legacy session mode sends its 211-byte handshake on connect (--handshake auto, seeds chosen
-  here and recorded in the trace). --handshake off waits for the legacy client-sent format;
-  --handshake 0xS:0xR pins seeds, and --handshake-body sets its legacy opaque body bytes.
+  capture --mode session (default) sends a minimal parser-valid greeting, then parses
+  "u16 header + u16 bodyLength + encrypted body" session packets. The greeting's leading u16
+  counts the payload bytes after itself; the payload starts with version 0x00D3, then a counted
+  byte string and two u32 seeds. The default empty string produces 14 wire bytes (payload length 12).
+  --mode framed skips the greeting; --mode raw logs recv() chunks. Undecodable chunks are flagged
+  and preserved as raw bytes. --handshake off waits for a peer-sent greeting; --handshake 0xS:0xR
+  pins the client's send/receive seeds, while --handshake-body supplies counted bytes with either
+  random or pinned seeds (session mode only). The original server's exact counted-string value is
+  not captured; the client parser copies then discards it.
 
-  decode replays the current legacy trace model through the session cipher: the header is
+  decode replays the greeting and session frames through the session cipher: the header is
   MAGIC ^ HIWORD(state) and each body byte is key ^ swapNibbles(byte). MAGIC is 0xD3 client->server
-  and 0xFF2C server->client. If a legacy 211-byte handshake is present, its modeled seeds are
-  adopted automatically; otherwise pass --c2s-seed/--s2c-seed. Seeds accept decimal or 0x hex.
-  A header mismatch is reported per packet instead of being silently accepted.
+  and 0xFF2C server->client. A greeting in the trace supplies both seeds; otherwise pass
+  --c2s-seed/--s2c-seed. Seeds accept decimal or 0x hex. Header mismatches are reported per packet.
 
   serve --game-port also spawns the map's monsters once the character is in, and then walks them:
   Data.wz is read for Map/Map/<mapId>.img (default: ./Data.wz when it exists, --data to point
@@ -148,8 +148,8 @@ notes:
   canvas, so a wrong pixel format or a broken inflate is visible immediately instead of only
   showing up as a failing assertion (docs/WZ1_FORMAT.md 4.6).
 
-  serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9 using the current legacy
-  211-byte opening handshake (not the target short greeting): it answers 0x01 with the world list,
+  serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9 using the checked
+  length-prefixed 0x00D3 greeting: it answers 0x01 with the world list,
   0x02 with up to three character slots and
   0x03 with the game server address plus the character id; 0x06/0x04 handle name checks, 0x05 creates a
   character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
@@ -241,7 +241,8 @@ function runDecode(rest: string[]): number {
   process.stdout.write(
     `${records.length} records, ${result.packets.length} packets decoded, ${mismatches} header mismatches\n` +
       (result.handshake
-        ? `legacy handshake: clientSendSeed=0x${hex(result.handshake.clientSendSeed)} ` +
+        ? `greeting: version=0x${result.handshake.version.toString(16).padStart(4, "0")} ` +
+          `payload=${result.handshake.payloadLength} clientSendSeed=0x${hex(result.handshake.clientSendSeed)} ` +
           `clientRecvSeed=0x${hex(result.handshake.clientRecvSeed)}\n`
         : "") +
       formatDecoded(result.packets),
@@ -373,6 +374,10 @@ async function runServe(rest: string[]): Promise<number> {
   const worldNames = typeof args.world === "string" ? args.world.split(",") : ["Scania"];
   const worlds = worldNames.map((name, index) => ({ name, unknownId: index }));
   const gameIp = typeof args["game-ip"] === "string" ? args["game-ip"] : "127.0.0.1";
+  if (args["handshake-body"] === true) {
+    process.stderr.write("--handshake-body needs a hex value\n");
+    return 1;
+  }
   const handshakeBody =
     typeof args["handshake-body"] === "string"
       ? fromHexArg(String(args["handshake-body"]))
@@ -625,6 +630,15 @@ async function runServe(rest: string[]): Promise<number> {
       return 1;
     }
   }
+  const greetingBodyLength = handshake.body?.length ?? DEFAULT_HANDSHAKE_BODY_BYTES;
+  const greetingForm =
+    greetingBodyLength === 0
+      ? `minimal ${MIN_HANDSHAKE_WIRE_BYTES}-byte form (empty counted string)`
+      : `${MIN_HANDSHAKE_WIRE_BYTES + greetingBodyLength}-byte form (${greetingBodyLength} counted bytes)`;
+  const greetingSeeds =
+    handshake.clientSendSeed !== undefined
+      ? `pinned client-send seed 0x${hex(handshake.clientSendSeed)}`
+      : "random seeds per connection";
   process.stdout.write(
     `login server listening on ${info.host}:${info.port}\n` +
       `  accounts: ${[...accounts.keys()].map((name) => `${name}:${accounts.get(name)?.password}`).join(", ")}\n` +
@@ -633,7 +647,7 @@ async function runServe(rest: string[]): Promise<number> {
         ? `  game:     no --game-port, so the 0x03 reply points at port 0 (the client will fail to connect)\n`
         : `  game:     ${gameIp}:${boundGamePort} (handoff + 0x16 into the character's map; ` +
           `${map === undefined ? "no mobs" : `${map.mobs.length} mobs from ${map.imagePath}`})\n`) +
-      `  legacy handshake model: ${handshake?.clientSendSeed !== undefined ? `pinned seed 0x${hex(handshake.clientSendSeed)}` : "random seeds per connection"}\n` +
+      `  greeting: ${greetingSeeds}; ${greetingForm}\n` +
       `  npc control: ${npcWalk === undefined ? "stationary idle; movable off (--npc-walk all|id,id,...)" : String(args["npc-walk"])}\n` +
       `  save:      ${savePath === undefined ? "memory only (--save <path> to keep it)" : savePath}\n` +
       `  auto-register: ${autoRegister ? "ON - unknown ids are created (not original behaviour)" : "off (--auto-register)"}\n` +
@@ -678,14 +692,32 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   }
   const mode: CaptureMode = args.mode === "framed" || args.mode === "raw" ? args.mode : "session";
+  const host = typeof args.host === "string" ? args.host : "0.0.0.0";
   const out = typeof args.out === "string" ? args.out : undefined;
   const quiet = args.quiet === true;
-  const handshake = parseHandshake(args.handshake);
+  let handshake = parseHandshake(args.handshake);
+  if (args["handshake-body"] === true) {
+    process.stderr.write("--handshake-body needs a hex value\n");
+    return 1;
+  }
   const handshakeBody =
     typeof args["handshake-body"] === "string"
       ? fromHexArg(String(args["handshake-body"]))
       : undefined;
-  if (typeof handshake === "object" && handshakeBody) handshake.body = handshakeBody;
+  if (handshakeBody !== undefined) {
+    if (mode !== "session") {
+      process.stderr.write("--handshake-body requires --mode session\n");
+      return 1;
+    }
+    if (handshake === "off") {
+      process.stderr.write("--handshake-body cannot be used with --handshake off\n");
+      return 1;
+    }
+    handshake = {
+      ...(typeof handshake === "object" ? handshake : {}),
+      body: handshakeBody,
+    };
+  }
 
   if (out) writeFileSync(out, "", { flag: "w" }); // start a fresh trace
 
@@ -712,6 +744,7 @@ async function main(argv: string[]): Promise<number> {
   };
 
   const server = new CaptureServer({
+    host,
     port,
     mode,
     out,
@@ -719,14 +752,20 @@ async function main(argv: string[]): Promise<number> {
     logLifecycle: true,
     handshake,
   });
+  const greetingBodyLength =
+    typeof handshake === "object"
+      ? (handshake.body?.length ?? DEFAULT_HANDSHAKE_BODY_BYTES)
+      : DEFAULT_HANDSHAKE_BODY_BYTES;
   const info = await server.start();
   if (!quiet) {
     process.stdout.write(`capture listening on ${info.host}:${info.port} (mode=${info.mode})\n`);
     if (info.mode === "session") {
       process.stdout.write(
         handshake === "off"
-          ? "waiting for the client's legacy 211-byte handshake model to adopt cipher seeds\n"
-          : "sending the legacy 211-byte handshake model; target short greeting is not implemented yet\n",
+          ? "waiting for a peer-sent greeting to adopt cipher seeds\n"
+          : greetingBodyLength === 0
+            ? `sending the minimal length-prefixed greeting (${MIN_HANDSHAKE_WIRE_BYTES} bytes; empty counted string)\n`
+            : `sending a length-prefixed greeting (${MIN_HANDSHAKE_WIRE_BYTES + greetingBodyLength} bytes; ${greetingBodyLength} counted bytes)\n`,
       );
     }
     if (out) process.stdout.write(`writing trace to ${out}\n`);

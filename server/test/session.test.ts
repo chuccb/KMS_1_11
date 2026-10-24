@@ -15,13 +15,13 @@ import {
   swapNibbles,
 } from "../src/protocol/cipher.ts";
 import {
-  LEGACY_HANDSHAKE_BODY_BYTES,
-  LEGACY_HANDSHAKE_TOTAL_BYTES,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
+  MIN_HANDSHAKE_WIRE_BYTES,
   HANDSHAKE_VERSION,
   SessionDeframer,
-  decodeLegacyHandshake,
+  decodeHandshake,
   describePacket,
-  encodeLegacyHandshake,
+  encodeHandshake,
   encodeSessionPacket,
 } from "../src/protocol/session.ts";
 import { FramingError, fromHex, toHex } from "../src/protocol/frame.ts";
@@ -72,31 +72,59 @@ test("cipher state advances exactly once per packet", () => {
   assert.equal(state.raw, nextState(nextState(before)));
 });
 
-test("legacy handshake encoder emits 211 bytes with its 199-byte body and two seeds", () => {
-  const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x41);
-  const wire = encodeLegacyHandshake(body, 0xaabbccdd, 0x11223344);
-  assert.equal(wire.length, LEGACY_HANDSHAKE_TOTAL_BYTES);
-  assert.equal(new DataView(wire.buffer).getUint16(0, true), 211);
-  assert.equal(new DataView(wire.buffer).getUint16(2, true), 199);
+test("greeting layout follows the EXE parser: payload-length prefix, version, counted bytes, seeds", () => {
+  const body = fromHex("414243");
+  const trailing = fromHex("dead");
+  const wire = encodeHandshake(body, 0xaabbccdd, 0x11223344, trailing);
+  const view = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
+  const payloadLength = 12 + body.length + trailing.length;
 
-  const decoded = decodeLegacyHandshake(wire);
+  assert.equal(wire.length, payloadLength + 2);
+  assert.equal(view.getUint16(0, true), payloadLength, "prefix excludes its own 2 bytes");
+  assert.equal(view.getUint16(2, true), 0x00d3, "version immediately follows the prefix");
+  assert.equal(view.getUint16(4, true), body.length);
+  assert.equal(toHex(wire.slice(6, 6 + body.length)), "414243");
+  assert.equal(view.getUint32(6 + body.length, true), 0xaabbccdd);
+  assert.equal(view.getUint32(10 + body.length, true), 0x11223344);
+  assert.equal(toHex(wire.slice(14 + body.length)), "dead");
+
+  const decoded = decodeHandshake(wire);
+  assert.equal(decoded.version, 0x00d3);
   assert.deepEqual(decoded.body, body);
-  // tail offsets in the original: 4 + bodyLength and 8 + bodyLength (=> 203 / 207)
   assert.equal(decoded.sendSeed, 0xaabbccdd);
   assert.equal(decoded.recvSeed, 0x11223344);
-  assert.equal(
-    new DataView(wire.buffer).getUint32(4 + LEGACY_HANDSHAKE_BODY_BYTES, true),
-    0xaabbccdd,
-  );
+  assert.deepEqual(decoded.trailing, trailing);
 });
 
-test("legacy handshake decoder rejects lengths outside its fixed 211-byte model", () => {
-  const good = encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 1, 2);
-  // This pins the old parser shape only; it is not a target short-greeting conformance test.
-  assert.throws(() => decodeLegacyHandshake(good.subarray(0, 210)), FramingError);
-  const tooLong = new Uint8Array(212);
-  tooLong.set(good);
-  assert.throws(() => decodeLegacyHandshake(tooLong), FramingError);
+test("an empty counted string yields the 14-byte minimal greeting accepted by the client", () => {
+  const wire = encodeHandshake(new Uint8Array(0), 0xaabbccdd, 0x11223344);
+  const view = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
+  assert.equal(DEFAULT_HANDSHAKE_BODY_BYTES, 0);
+  assert.equal(MIN_HANDSHAKE_WIRE_BYTES, 14);
+  assert.equal(wire.length, MIN_HANDSHAKE_WIRE_BYTES);
+  assert.equal(view.getUint16(0, true), 12, "u16 prefix counts payload bytes, not itself");
+  assert.equal(view.getUint16(2, true), 0x00d3);
+  assert.equal(view.getUint16(4, true), 0);
+  assert.equal(view.getUint32(6, true), 0xaabbccdd);
+  assert.equal(view.getUint32(10, true), 0x11223344);
+  assert.deepEqual(decodeHandshake(wire).body, new Uint8Array(0));
+});
+
+test("greeting decoder rejects truncation, invalid version, impossible string length, and oversize prefix", () => {
+  const good = encodeHandshake(new Uint8Array(0), 1, 2);
+  assert.throws(() => decodeHandshake(good.subarray(0, 13)), FramingError);
+  assert.throws(() => decodeHandshake(new Uint8Array([...good, 0])), FramingError);
+
+  const wrongVersion = good.slice();
+  new DataView(wrongVersion.buffer).setUint16(2, 0x00d2, true);
+  assert.throws(() => decodeHandshake(wrongVersion), /version/);
+
+  const impossibleString = good.slice();
+  new DataView(impossibleString.buffer).setUint16(4, 1, true);
+  assert.throws(() => decodeHandshake(impossibleString), /fewer than 8 bytes/);
+
+  const oversizedPrefix = new Uint8Array([0xb5, 0x05]); // 0x05b5 = 1461, above the 1460-byte cap
+  assert.throws(() => decodeHandshake(oversizedPrefix), /exceeds the 1460-byte client buffer/);
 });
 
 test("session packet: plaintext 4-byte header, encrypted body, opcode = body[0]", () => {
@@ -148,31 +176,35 @@ test("session deframer decrypts and reports opcodes, and the peer mirrors the st
   assert.equal(describePacket(events[2]!).includes("opcode=0x0a"), true);
 });
 
-test("session deframer consumes the legacy 211-byte opening and seeds from it", () => {
-  const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x33);
-  const handshake = encodeLegacyHandshake(body, 0x11223344, 0x55667788);
-  const sender = new CipherState(0x55667788); // the client's receive seed drives our send state
-  const packet = encodeSessionPacket(fromHex("0a00"), sender, "c2s");
-
-  const deframer = new SessionDeframer(); // no state: expect the handshake
-  assert.equal(deframer.awaitingHandshake, true);
+test("session deframer waits for the counted payload, then decodes the greeting and server packet", () => {
+  const greetingTail = fromHex("99ee");
+  const handshake = encodeHandshake(fromHex("33"), 0x11223344, 0x55667788, greetingTail);
+  const sender = new CipherState(0x55667788); // the client's receive seed drives server -> client sends
+  const packet = encodeSessionPacket(fromHex("0a00"), sender, "s2c");
   const stream = new Uint8Array(handshake.length + packet.length);
   stream.set(handshake, 0);
   stream.set(packet, handshake.length);
 
-  const events = [
-    ...deframer.push(stream.subarray(0, 100)),
-    ...deframer.push(stream.subarray(100)),
-  ];
+  const deframer = new SessionDeframer({ expectedMagic: SERVER_SEND_MAGIC });
+  assert.equal(deframer.awaitingHandshake, true);
+  assert.deepEqual(deframer.push(stream.subarray(0, 5)), []);
+  assert.equal(deframer.awaitingHandshake, true);
+  const events = deframer.push(stream.subarray(5));
+
+  assert.equal(deframer.failure, undefined);
   assert.equal(events.length, 2);
   const [first, second] = events;
   assert.equal(first!.kind, "handshake");
   if (first!.kind !== "handshake") throw new Error("unreachable");
+  assert.equal(first!.handshake.version, 0x00d3);
+  assert.equal(first!.handshake.sendSeed, 0x11223344);
   assert.equal(first!.handshake.recvSeed, 0x55667788);
+  assert.deepEqual(first!.handshake.trailing, greetingTail);
   assert.equal(deframer.awaitingHandshake, false);
   assert.equal(second!.kind, "packet");
   if (second!.kind !== "packet") throw new Error("unreachable");
   assert.equal(second!.opcode, 0x0a);
+  assert.equal(second!.headerOk, true);
   assert.deepEqual(second!.plain, fromHex("0a00"));
 });
 
@@ -226,46 +258,30 @@ test("a body over the client's 1456-byte limit is refused, not silently truncate
   assert.equal(encodeSessionPacket(new Uint8Array(1456), send).length, 1460);
 });
 
-test("0xD3 remains the version/magic constant; the 211-byte encoder is legacy only", () => {
-  // ADR-166: 0xD3 is a version value and the archived EXE uses it in session-header logic.
-  // Its sub_43A410 path compares offset 0, which does not match the corrected target layout:
-  // [u16 length][u16 version=0x00D3] with a short greeting. The assertions below pin current
-  // legacy encoder behavior only; they are not evidence that the target greeting is 211 bytes.
-  assert.equal(CLIENT_VERSION, 211);
-  assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION, "one definition, not two copies of 211");
+test("version is a greeting field and is separately reused as the c2s session-header magic", () => {
+  assert.equal(CLIENT_VERSION, 0x00d3);
   assert.equal(HANDSHAKE_VERSION, CLIENT_VERSION);
-  assert.equal(CLIENT_SEND_MAGIC, CLIENT_VERSION, "the client writes its version as the magic");
+  assert.equal(CLIENT_SEND_MAGIC, CLIENT_VERSION);
   assert.equal(SERVER_SEND_MAGIC, ~CLIENT_VERSION & 0xffff);
   assert.equal(SERVER_SEND_MAGIC, 0xff2c);
-  // Preserve current legacy-model invariants until the target short greeting is implemented.
-  assert.equal(LEGACY_HANDSHAKE_TOTAL_BYTES, 211);
-  assert.equal(LEGACY_HANDSHAKE_BODY_BYTES, 199);
-  const wire = encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 1, 2);
-  assert.equal(wire.length, 211);
-  assert.equal(new DataView(wire.buffer).getUint16(0, true), CLIENT_VERSION);
-  // Target-format assertion is deliberately separate: version follows the 2-byte length prefix.
-  assert.equal(CLIENT_VERSION, 0x00d3);
+
+  const wire = encodeHandshake(new Uint8Array(0), 1, 2);
+  const view = new DataView(wire.buffer, wire.byteOffset, wire.byteLength);
+  assert.equal(view.getUint16(0, true), 12, "length is independent from version");
+  assert.equal(view.getUint16(2, true), CLIENT_VERSION);
+  assert.equal(wire.length, 14);
 });
 
-test("legacy handshake body round-trips under the obsolete 199-byte model", () => {
-  // sub_418610 copies 199 bytes into a local in the archived listing, but that path has not been
-  // mapped to the target short greeting. This test only pins the current legacy encoder/decoder;
-  // it does not establish that the target client ignores a 199-byte block.
-  for (const fill of [0x00, 0xff, 0x5a]) {
-    const body = new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(fill);
-    const decoded = decodeLegacyHandshake(encodeLegacyHandshake(body, 7, 8));
-    assert.equal(decoded.body.length, LEGACY_HANDSHAKE_BODY_BYTES);
-    assert.equal(decoded.body[0], fill);
+test("the counted greeting bytes round-trip at variable lengths", () => {
+  for (const body of [new Uint8Array(0), fromHex("00"), fromHex("5a00ff")]) {
+    const decoded = decodeHandshake(encodeHandshake(body, 7, 8));
+    assert.deepEqual(decoded.body, body);
     assert.equal(decoded.sendSeed, 7);
     assert.equal(decoded.recvSeed, 8);
+    assert.deepEqual(decoded.trailing, new Uint8Array(0));
   }
-  // The legacy encoder enforces its fixed-size body; this constraint is not a target-wire rule.
   assert.throws(
-    () => encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES + 1), 1, 2),
-    FramingError,
-  );
-  assert.throws(
-    () => encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES - 1), 1, 2),
-    FramingError,
+    () => encodeHandshake(new Uint8Array(1449), 1, 2),
+    /exceeds the 1460-byte client buffer/,
   );
 });

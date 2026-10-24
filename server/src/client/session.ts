@@ -55,12 +55,12 @@ import { encodeAbilityRequest, type Ability } from "../protocol/ability.ts";
  * client half. It is exactly the sequence `test/loginflow.test.ts` walks by hand, turned into an
  * object:
  *
- *   connect -> legacy 211-byte handshake model -> 0x01 login
+ *   connect -> length-prefixed server greeting -> 0x01 login
  *           -> 0x02 world select -> 0x03 character select -> a second connection -> 0x04 handoff
  *           -> 0x16 set field -> the field stream
  *
- * This Node client currently mirrors the server's legacy handshake model; it does not yet
- * implement the target short `[u16 length][u16 version=0x00D3]` greeting.
+ * The greeting parser follows the checked client path in MapleStory.exe.lst 0043A5DF-0043A774;
+ * the local test peer sends its minimal 14-byte form with an empty counted string.
  *
  * It knows nothing about HTTP or browsers; `net/webclient.ts` is the transport adapter that turns
  * its events into JSON for `client/`. Keeping every protocol detail on this side is what makes the
@@ -557,9 +557,8 @@ export class ClientTimeoutError extends Error {}
 
 /**
  * One TCP connection with session framing on top: `u16 header + u16 length + encrypted body`
- * (FINDINGS 3). The current legacy handshake model arrives first and seeds the cipher, so nothing
- * may be sent before it has been read - `send` waits for that. The target short greeting is not
- * implemented in this Node client yet.
+ * (FINDINGS 3). The server-first greeting arrives first and seeds the cipher, so nothing may be
+ * sent before it has been read - `send` waits for that.
  */
 class Link {
   private readonly socket: net.Socket;
@@ -597,8 +596,7 @@ class Link {
   private receive(chunk: Uint8Array): void {
     for (const event of this.deframer.push(chunk)) {
       if (event.kind === "handshake") {
-        // This legacy handshake parser takes the client's send state from its first seed field;
-        // the target short-greeting seed offsets are not yet implemented here.
+        // The first greeting seed initializes the client's send state (CClientSocket+120).
         this.sendState = new CipherState(event.handshake.sendSeed);
         this.markHandshake();
         continue;

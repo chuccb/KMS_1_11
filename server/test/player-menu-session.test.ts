@@ -6,8 +6,8 @@ import { ClientSession, type ClientEvent } from "../src/client/session.ts";
 import { clientEventJson } from "../src/net/client-event-json.ts";
 import { CipherState } from "../src/protocol/cipher.ts";
 import {
-  encodeLegacyHandshake,
-  LEGACY_HANDSHAKE_BODY_BYTES,
+  encodeHandshake,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
   encodeSessionPacket,
   SessionDeframer,
 } from "../src/protocol/session.ts";
@@ -88,7 +88,7 @@ test(
       socket.on("close", () => sockets.delete(socket));
       const receive = new SessionDeframer({ recvState: new CipherState(0x11111111) });
       socket.write(
-        encodeLegacyHandshake(new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222),
+        encodeHandshake(new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES), 0x11111111, 0x22222222),
       );
       socket.on("data", (chunk) => {
         for (const packet of receive.push(

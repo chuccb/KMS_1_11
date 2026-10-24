@@ -3,7 +3,7 @@
 > 規則：**每條都要有證據位址**。未證實者標 `HYPOTHESIS`，不得當規格使用。
 > 證據優先序：原始 binary > IDA LST > Hex-Rays C > 實機擷取 > 外部資料。
 
-**狀態（2026-10-16 更新）**：協定主幹（傳輸 → 框架 → 加密 → 分派）已全數定位，**登入鏈
+**狀態（2026-10-24 更新）**：協定主幹（傳輸 → 框架 → 加密 → 分派）已全數定位，**登入鏈
 （login → world → char → game）已解到欄位層**，`CharacterData`（含**能力值 69 bytes ＋ 道具區塊
 ＋ `GW_ItemSlot`**）與 `CWvsApp` 層級的 `0x0B–0x13` 也已解出，實作於
 `server/src/protocol/{frame,cipher,session,packet,login,chardata,itemslot,replies}.ts`，並由
@@ -13,7 +13,7 @@
 怪物／NPC／掉落物的分派也已拆到函式層（§4.12，欄位仍待讀）。
 **社交面也開始有實作了**：場地聊天（§4.26）之外，**密語與找人**（`0x23` → `0x1A` 的 `0x09`／`0x0A`
 ＋收件者看到的 `0x12`）在 **§4.31**，兩者都是「場地的」封包（第一條跨地圖送達的路徑）。
-剩下的未知：目標 s2c greeting 的精確短封包欄位與 seed offsets（2026-10-24 更正：u16 length 在前、u16 version `0x00D3` 在後；實際 greeting 是十幾 bytes；現行 211-byte encoder 尚未對齊）；CField 其餘區間（`0x1E–0x2C`、CMobPool／CNpcPool／CRewardPool／對話框／messenger／miniroom）欄位（§6）。
+Greeting parser 的欄位順序、長度計數方式與變長 seed offsets 已由 `sub_43A410` 的 C/listing 交叉確認並實作；仍未捕獲原 server 實際選用的 counted bytes／尾端資料或固定 greeting 長度（14 bytes 只是空字串時的 parser-valid 最小形式）。其餘未知為 CField 區間（`0x1E–0x2C`、CMobPool／CNpcPool／CRewardPool／對話框／messenger／miniroom）欄位（§6）。
 
 ---
 
@@ -44,15 +44,15 @@ if (filled >= *(u16*)(data + 2) + 4)    // 本文長度不足就繼續收
 - `u16 @ 2`：本文長度；本文 = 接下來的 `bodyLen` bytes，**加密**。
 - 上限：單包不超過 **1456 bytes** 本文；超過時 `sub_4A2030` 會切成 **1460 bytes 的 socket chunk** 送出，
   **只有第一塊帶標頭**（`sub_4A2030` 內 `v11 > 1456` 分支）。
-- 明文 handshake：**目標 wire format 是短 greeting，不是 211 bytes**。使用者於 2026-10-24 明確更正：offset 0 先有 2-byte length 欄位，後面才是 `u16 version = 0x00D3`；211 是版本值，官方 s2c greeting 為十幾 bytes。現行 `encodeLegacyHandshake()` 仍輸出 211 bytes，這是尚未對齊的舊模型，不是可接受的目標格式。
+- 明文 greeting：`sub_43A410` 先收 2-byte little-endian length prefix；此值計算**接在 prefix 後面的 payload bytes**，不含 prefix 自己。payload 為 `u16 version=0x00D3`、`u16 countedLength`、`countedLength` bytes、兩個 u32 seeds，可能留有未被 client parser 消費的尾端資料。`211` 是 version 數值，不是 wire length。
 
-**倉庫 EXE 與目標 wire format 尚未對上**：倉庫 `MapleStory.exe` SHA-256 為 `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`，且 `.lst` header 的 Input SHA256 與之相同。這份 listing 的 `sub_43A410` 在 `0043A645` 從接收 buffer 起點讀 `[edi]` 作為讀取數量；`0043A6C8` 從同一位置再讀一次，`0043A76E` 把它與 `0xD3` 比較；`0043A6F2` 則把 offset 2 的 u16 當區塊 copy 長度。**這段路徑沒有找到「獨立 length 在前、version 在後」的對應**。這代表倉庫這份 EXE／listing 與目標 greeting 的格式或階段仍有落差；不能用它把 211 當成目標 wire length，也不能據此否定已提供的短格式更正。
+**C 與 listing 的交叉讀法**：倉庫 `MapleStory.exe` SHA-256 為 `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`，`.lst` header 的 Input SHA256 相同。`0043A5DF` 的第一次 `recv()` 取 2 bytes；`0043A645` 把該 u16 當後續 payload 接收數量並檢查不超過 1460；關鍵的 `0043A661 mov esi, edi` 將目的指標重設至 buffer 起點，第二階段從 socket 目前位置接收該數量並覆寫 prefix。接收完成後 `0043A6C8` 才從 payload offset 0 讀 version，`0043A6F2` 從 payload offset 2 讀 counted-string 長度，`0043A717` 複製 offset 4 起的 bytes；`0043A744`／`0043A772` 依序取兩個 u32 seeds。先前只看單一 buffer offset 而把同一個 u16 認作 version 的解讀已撤回（ADR-167）。
 
-目標短 greeting 的精確 length 數值、剩餘欄位與 seed offsets 仍待定位；目前不猜值。伺服器和 trace decoder 仍有舊 211-byte 實作，應視為待替換模型，不能宣稱已與官方 client 對齊。
+第一個 seed 寫到 `CClientSocket+120`，作 client send state；第二個寫到 `+124`，作 client receive state。線上 seed offsets 隨 counted string 長度 `N` 變動：wire offset `6+N` 與 `10+N`。解析最小 payload 需要 12 bytes；空 counted string 時最小 wire 形式是 14 bytes。這是 parser 能接受的下限，不是原 server 固定發送 14 bytes 的證據。`sub_418610` 接受零長度並複製字串，但程式未再讀字串內容；目前不知道 server 端實際用來表示甚麼，也沒有原 server raw greeting 可確認尾端選擇。`session.ts`／`capture`／login 與 game listeners 已遷移至此 parser format；capture/default server 的空字串只是最小合成值。
 
 **握手後的 c2s frame 另行分析**（倉庫 listing `0043A7D4–0043A844`，`sub_43A410` 尾段）：該路徑在 `CClientSocket+36 == 0` 時建 body，先寫 byte `0x04`，再附 `u32 *(CWvsApp+0x14)`，經一般 session sender 送出；就這份 EXE 的路徑而言是 **5-byte body + 4-byte session header = 9 bytes**。此證據描述 c2s frame，不是 s2c greeting 長度，也不解釋 bad-header 的根因。
 
-**使用者先後提供的兩筆 live log**（詳 ADR-165）都收到 header `0x00D3`、body 5／wire 9 bytes：`clientSendSeed=0xc6b926dd` 時預期 `0xc66a`，`clientSendSeed=0xb8544265` 時預期 `0xb887`；兩者各自等於 `HIWORD(seed) XOR 0x00d3`。不同 expected 下實收值仍是裸 `0x00d3`；body hex 未提供，所以只確認尺寸，不能宣稱 opcode 是 `0x04` 或斷定 client state。兩筆均由 `conn:` 的 LoginServer listener 收到，第二筆明示 `stage=login`（GameEntryServer 前綴為 `game:`）。這是舊 211-byte greeting 模型下重複出現的 state/stage mismatch，不代表目標短 greeting 已對齊，也不是視窗延遲根因的證據。
+**使用者先後提供的兩筆 live log**（詳 ADR-165）都收到 header `0x00D3`、body 5／wire 9 bytes：`clientSendSeed=0xc6b926dd` 時預期 `0xc66a`，`clientSendSeed=0xb8544265` 時預期 `0xb887`；兩者各自等於 `HIWORD(seed) XOR 0x00d3`。不同 expected 下實收值仍是裸 `0x00d3`；body hex 未提供，所以只確認尺寸，不能宣稱 opcode 是 `0x04` 或斷定 client state。兩筆均由 `conn:` 的 LoginServer listener 收到，第二筆明示 `stage=login`（GameEntryServer 前綴為 `game:`）。這是舊 211-byte harness 下重複出現的 state/stage mismatch；新 greeting codec 不以這兩筆舊日誌作證，且它們也不是視窗延遲根因的證據。
 
 `sub_432FB0`（選角成功的 0x03 回包處理）在 `.text:00433196` 執行 `mov [ebx+14h], esi`，值來自伺服器在 0x03 回包裡給的角色 id（§4.11.3），所以 `[0x04][u32]` 的意義是識別剛被導向遊戲伺服器的角色，不是不透明 ticket（見 §4.8）。
 
@@ -74,7 +74,7 @@ state = state * 214013 + 2531011;      // mod 2^32
 | 項目 | 內容 | 證據 |
 |---|---|---|
 | 送／收狀態 | `CClientSocket + 120`（送）、`+ 124`（收）| `sub_43AD50`（送）、`sub_43AFA0`（收：`*((_BYTE*)this + 124)` 取 key）|
-| 種子來源 | 上述握手的兩個 `u32` | `sub_43A410` |
+| 種子來源 | greeting counted bytes 後的兩個 `u32`：第一個寫到 `CClientSocket+120`（send），第二個寫到 `+124`（receive） | `sub_43A410`；`sub_43AD50`／`sub_43AFA0` |
 | 標頭 | **兩個方向不同**（見下）| `.lst 0043AD75`、`.lst 0043AFF9` |
 | 推進時機 | **每個封包一次**（不是每個 byte）| `sub_4A2030`、`sub_4A1B90` 呼叫端 |
 
@@ -4527,7 +4527,7 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
 
 ## 6. 待辦（依重要性）
 
-1. **目標 s2c 短 greeting 的完整 byte layout**：已知前 2 bytes 是 length、接著 `u16 version=0x00D3`，整體為十幾 bytes；尚需把 length 的計數方式、seed offsets 與其他欄位對齊目標 binary。不可把現行 199-byte body 或 211-byte encoder 當作規格，也不以猜測的長度餵 client。
+1. **原 server greeting 的實際欄位值／尾端與 length 選擇**：client parser 的 byte layout 已由 `sub_43A410` 確認並遷移。仍未取得原 server raw bytes，故不宣稱 counted string 內容、是否存在尾端資料或官方固定總長；14-byte 空字串形式只代表 parser-valid minimum，不能冒充官方 captured fixture。
 2. **實機驗證 §4.11 的三個 UNKNOWN**（有真實流量就能一次解決）：
    `0x16` 的 `mode`（三個 u32 已解＝場地亂數種子，地圖 id 已解＝`CharacterData.mapId`，§4.11.2／
    §4.11.2b；落點已另由 CharacterData+101 解出，§4.43）；`0x1C` 的 `unknown64` 與第二／第三個 u32
@@ -4594,7 +4594,7 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
    **`0x0F` 結構上永遠不可能帶 buff 圖示**（傳 `nullptr` 給 decoder，拿不回 mask）。
    完整 asm 證據（兩個表頭位元組的 guard 順序、`push 0`、兩者的呼叫集合對照）見 §4.21.2
    與 `server/test/native-tempstat-0f.test.ts`。
-7. **握手方向與階段的實機對照**：目前 server 仍依舊模型送出 211 bytes；目標 greeting 已確認為十幾 bytes 且 length 在 version 前。需要把 login/game 各自的實際階段與已知短格式對齊，不能再把現行輸出當契約。
+7. **live greeting／後續首包的方向與階段 trace**：登入與遊戲 listener 已改用同一個 length-prefixed greeting codec；舊 live bad-header logs 產生於先前 211-byte harness，不能用作新格式的 raw evidence。若要定位那些歷史 session mismatch 的 runtime 原因，仍需同一連線的原始 bytes、端點與 stage，而不是再以舊模型解讀。
 8. ~~由 §4.1／§4.5／§4.7–§4.13 的對照表產生 `protocol/schema/`~~ → 已做成
    `server/src/protocol/schema.ts`（§4.14，`cli.ts schema`，6 個反漂移測試）。
    剩下的只有**用 `capture` 對照真實流量**（與第 2 項同一件事）。
@@ -4811,18 +4811,18 @@ paint 函數未在 vtable3 定位——browser 以 skills.ts 同款 stamp 還原
 > `GameEntryServer` 的角色記錄上。）
 
 ```bash
-# 1. 接住原 client。注意：目前 session 模式仍會先送舊模型的 211-byte greeting；
-#    這與目標短 greeting 不符，先勿把此 trace 當作官方 handshake 證據。
+# 1. Session mode sends a 14-byte parser-valid minimum greeting (empty counted string).
+#    This is a harness value, not a capture of the original server's chosen string/tail.
 node server/src/cli.ts capture --port 8484 --out traces/login.jsonl
 
-#    想要可重現的實驗就固定種子；想試握手 body 內容就餵它（body 語意仍未知，看 client 反應）
+#    Pin both client cipher seeds; --handshake-body sets counted bytes (their original value is unknown).
 node server/src/cli.ts capture --port 8484 --handshake 0x11223344:0x55667788 \
-     --handshake-body 0001020304... --out traces/login.jsonl
+     --handshake-body 000102 --out traces/login.jsonl
 
-#    若手上是「client 先送握手」的流量（例如重播），改用 --handshake off
+#    Use --handshake off when the peer is expected to send the greeting first (e.g. replay).
 node server/src/cli.ts capture --port 8484 --handshake off --out traces/login.jsonl
 
-# 2. 把 JSONL 重播成可讀封包（種子由 trace 內的握手自動決定；沒有握手時手動給）
+# 2. Decode raw greeting bytes then replay frames; without a greeting, provide seeds manually.
 node server/src/cli.ts decode traces/login.jsonl
 node server/src/cli.ts decode traces/login.jsonl --c2s-seed 0x11223344 --json
 ```
@@ -5570,25 +5570,32 @@ canvas 60 幀 hash 只有 1 種、0 幀不同；版面 90 幀只有 1 種；DOM 
 `GET / HTTP/1.1\\r\\nHost: 8606-…`，即**沙箱埠預覽對裸 TCP 登入埠（8606）的 HTTP 探測**，
 非遊戲客戶端封包。伺服器誤讀為超長封包並關閉連線，行為正確，毋需修復亦毋庸複查。
 
-### 4.48 ⚠️ `0xD3` 是版本值；「握手必為 211 bytes」舊結論已撤回（ADR-166）
+### 4.48 ✅ Greeting length → version／counted bytes／seeds；`0xD3` 不是 wire length（ADR-167）
 
-**倉庫 EXE 中 `0xD3`=211 出現於三個相關位置**：`0043AD75` `push 0D3h`（c2s 標頭 magic）、
-`0043B003` `cmp cx,0FF2Ch`（s2c 驗證，`~0xD3`）、`0043A76E` `cmp ax,0D3h`（該接收路徑的版本比較）。
-`0043A76E` 的錯誤處理確實呈現版本語意：
-- `<211` → `CTerminateException(0x22000005)`，訊息「잘못된 **버전**의 클라이언트입니다 /
-  최신 버전의 클라이언트를 다시 설치해 주세요」（`MapleStory.exe` `0x1b59aa`）。
-- `>211` → `CPatchException`，`sub_468400`（`.c:112328`）組出
-  `WORD@+4=211`（所需版本）、`WORD@+6=收到值`（實得版本）。
+倉庫 EXE 中 `0x00D3` 出現在不同語境：`0043AD75` 是 c2s session-header magic；`0043A76E` 是 greeting parser 讀出的 version 比較值。版本錯誤分支 `<211` 會 terminate，`>211` 會建立 expected=211／received=N 的 patch record（`sub_468400`）；這確認它是版本值，不是 outer length。
 
-**這些位址不能推出目標 greeting 的 wire length。**使用者已更正目標格式為 `u16 length` 在前、
-`u16 version = 0x00D3` 在後，官方 s2c greeting 是十幾 bytes。倉庫 listing 的 `sub_43A410`
-卻在其 buffer offset 0 收取並比較同一個 u16，與這個目標欄位順序不一致；這是待解的 binary／階段／offset 落差，不是把版本值 211 當 wire length 的理由。
+**`sub_43A410` 的接收步驟（以 `MapleStory.exe.c` 與 `.lst` 互證）**：
 
-先前認定的 **199-byte body** 與「原版只複製不讀」只描述舊 listing 解讀：`sub_418610(&v56,…)`
-複製（`c:66393`）後，local 變數僅於函式尾端 refcount 釋放（`.lst:0043A884`）。此事不能證明目標短 greeting 有 199-byte body；現行 `session.ts` 仍輸出舊 211-byte 格式，尚未對齊目標格式。
+1. `0043A5DF–0043A645` 第一次 `recv()` 取得 2-byte little-endian prefix；`0043A645` 將它讀作後續 payload 長度，並以 1460-byte buffer capacity 檢查上限。
+2. `0043A661` 的 `mov esi, edi` 將 receive destination 重設至 buffer base；第二階段從 socket 目前位置再收 prefix 宣告的 bytes。因此這批 bytes **覆蓋 buffer 開頭**，不會把 prefix 留在 payload 中。此指標重設是先前誤讀中漏掉的關鍵。
+3. payload offset 0 是 version `0x00D3`（`0043A6C8` 讀、`0043A76E` 比較）；payload offset 2 是 u16 counted length（`0043A6F2`）；counted bytes 從 payload offset 4 起（`0043A717` 呼叫 `sub_418610`）。
+4. counted bytes 後的第一個 u32 寫到 `CClientSocket+120`，供 send cipher（`sub_43AD50`）；第二個 u32 寫到 `+124`，供 receive cipher（`sub_43AFA0`）。若 counted length 為 N，wire offsets 分別是 `6+N` 與 `10+N`。
 
-`CLIENT_VERSION=0x00d3` 與兩個 session-header magic 的共用定義可保留；但 `LEGACY_HANDSHAKE_TOTAL_BYTES=211`、
-`LEGACY_HANDSHAKE_BODY_BYTES=199` 及現行 seed offsets 不再當成已證實的官方規格。
+線上布局（little-endian）：
+
+```text
+u16 payloadLength (不含這 2 bytes)
+  u16 version=0x00D3
+  u16 countedLength
+  byte[countedLength]
+  u32 clientSendSeed
+  u32 clientRecvSeed
+  [any bytes left in declared payload; this parser path does not inspect them]
+```
+
+空 counted string 時 payload 下限為 12、wire 下限為 14 bytes；這是 parser-valid minimum，不是已證實原 server 的固定 greeting 長度。`sub_418610` 可接受 count=0；已傳入的 bytes 被複製至 temporary ZXString 後釋放，parser 未再使用字串內容，故 server-side semantics／實際字串值仍未知。這份 EXE/listing 與長度前置、版本後置的格式相符，沒有必要再假設 binary／stage／offset mismatch。
+
+`session.ts`、`decode.ts`、capture、login/game listener、Node fake client 與相應 tests 已遷移。預設輸出 14-byte 形式是最小測試／harness greeting；沒有宣稱它就是原 server 的精確輸出，且不把 211 當 wire length。
 
 ### 4.49 ✅ NPC 商店資料位於 `Npc/<id>.img/info/shop`（ADR-140），原手寫三間為虛構且價格錯誤
 

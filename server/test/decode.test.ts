@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CipherState } from "../src/protocol/cipher.ts";
 import {
-  encodeLegacyHandshake,
+  encodeHandshake,
   encodeSessionPacket,
-  LEGACY_HANDSHAKE_BODY_BYTES,
+  DEFAULT_HANDSHAKE_BODY_BYTES,
 } from "../src/protocol/session.ts";
 import { toHex } from "../src/protocol/frame.ts";
 import { decodeTrace, type TraceRecord } from "../src/net/decode.ts";
@@ -34,10 +34,10 @@ function traceOf(seed: number, bodies: Uint8Array[], dir: "c2s" | "s2c" = "c2s")
   });
 }
 
-test("decode adopts seeds from the legacy 211-byte handshake model", () => {
+test("decode adopts seeds from the length-prefixed greeting", () => {
   // The server opens the session (as the 2003 client expects), assigning the client its seeds.
-  const handshake = encodeLegacyHandshake(
-    new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES).fill(0x5a),
+  const handshake = encodeHandshake(
+    new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES).fill(0x5a),
     SEND_SEED,
     RECV_SEED,
   );
@@ -49,7 +49,7 @@ test("decode adopts seeds from the legacy 211-byte handshake model", () => {
       kind: "handshake",
       len: handshake.length,
       hex: toHex(handshake),
-      bodyLength: LEGACY_HANDSHAKE_BODY_BYTES,
+      bodyLength: DEFAULT_HANDSHAKE_BODY_BYTES,
     },
     ...traceOf(SEND_SEED, [Uint8Array.from([0x07, 0x01, 0x02, 0x03])]), // the client sends with u32#1
   ];
@@ -63,12 +63,42 @@ test("decode adopts seeds from the legacy 211-byte handshake model", () => {
   assert.equal(packet.bodyHex, "07010203");
 });
 
-test("decode keys the two directions from the handshake, not from one shared seed", () => {
+test("decode recognizes a raw greeting stored as a frame and trusts bytes over trace metadata", () => {
+  const greeting = encodeHandshake(Uint8Array.of(0x41), SEND_SEED, RECV_SEED, Uint8Array.of(0x99));
+  const records: TraceRecord[] = [
+    {
+      t: 0,
+      conn: 1,
+      dir: "s2c",
+      kind: "frame",
+      len: 211,
+      hex: toHex(greeting),
+      header: 0xffff,
+      bodyLength: 999,
+      seeds: { sendSeed: 1, recvSeed: 2 },
+    },
+    ...traceOf(SEND_SEED, [Uint8Array.from([0x02, 0x00])]),
+  ];
+
+  const result = decodeTrace(records);
+  const greetingPacket = result.packets[0]!;
+  assert.equal(result.handshake?.payloadLength, 14);
+  assert.equal(result.handshake?.clientSendSeed, SEND_SEED);
+  assert.equal(result.handshake?.clientRecvSeed, RECV_SEED);
+  assert.equal(greetingPacket.len, greeting.length, "wire length comes from raw hex");
+  assert.equal(greetingPacket.header, 14, "offset 0 is the prefix, not a session header");
+  assert.equal(greetingPacket.bodyLength, 1, "counted byte length comes from raw hex");
+  assert.equal(greetingPacket.bodyHex, "41");
+  assert.match(greetingPacket.note ?? "", /trace seed metadata differs from raw greeting/);
+  assert.equal(result.packets[1]!.headerOk, true, "raw greeting seeds initialize the next frame");
+});
+
+test("decode keys the two directions from the greeting, not from one shared seed", () => {
   // The bug this pins: a server-sent handshake assigns u32#1 to the CLIENT's send state, so c2s
   // packets use it and s2c packets use u32#2. Keying both from one seed decodes one direction
   // into plausible-looking garbage and flags the header, which is how it was caught.
-  const handshake = encodeLegacyHandshake(
-    new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES),
+  const handshake = encodeHandshake(
+    new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES),
     0x11223344,
     0x55667788,
   );
@@ -78,9 +108,9 @@ test("decode keys the two directions from the handshake, not from one shared see
       conn: 1,
       dir: "s2c",
       kind: "handshake",
-      len: 211,
+      len: handshake.length,
       hex: toHex(handshake),
-      bodyLength: LEGACY_HANDSHAKE_BODY_BYTES,
+      bodyLength: DEFAULT_HANDSHAKE_BODY_BYTES,
     },
     ...traceOf(0x55667788, [Uint8Array.from([0x0a, 0xaa])], "s2c"), // server -> client uses u32#2
     ...traceOf(0x11223344, [Uint8Array.from([0x1a, 0xbb])], "c2s"), // client -> server uses u32#1
@@ -93,10 +123,10 @@ test("decode keys the two directions from the handshake, not from one shared see
   assert.equal(c2s!.headerOk, true);
 });
 
-test("decode of a client-sent handshake seeds the server's states instead", () => {
+test("decode of a client-sent greeting seeds the server's states instead", () => {
   // With --handshake off the client dictates the seeds; then the SERVER sends with u32#1.
-  const handshake = encodeLegacyHandshake(
-    new Uint8Array(LEGACY_HANDSHAKE_BODY_BYTES),
+  const handshake = encodeHandshake(
+    new Uint8Array(DEFAULT_HANDSHAKE_BODY_BYTES),
     0x0a0b0c0d,
     0x0e0f1011,
   );
@@ -106,9 +136,9 @@ test("decode of a client-sent handshake seeds the server's states instead", () =
       conn: 1,
       dir: "c2s",
       kind: "handshake",
-      len: 211,
+      len: handshake.length,
       hex: toHex(handshake),
-      bodyLength: LEGACY_HANDSHAKE_BODY_BYTES,
+      bodyLength: DEFAULT_HANDSHAKE_BODY_BYTES,
     },
     ...traceOf(0x0a0b0c0d, [Uint8Array.from([0x01, 0x02])], "s2c"),
   ];

@@ -1547,8 +1547,7 @@ codec 在 `protocol/messenger.ts`、規則在 `game/messenger.ts`、送包在 `n
 **理由**：
 
 1. **瀏覽器開不了 TCP socket。** 後續 session 協定是裸 TCP：`u16 header + u16 length + 加密 body`。
-   這份初始切片沿用當時的 211-byte greeting 模型；2026-10-24 已由 ADR-166 更正目標 s2c greeting
-   為前置 2-byte length、其後 version `0x00D3` 的十幾-byte 格式。瀏覽器只有 WebSocket，所以「在瀏覽器裡玩」
+   這份初始切片沿用當時的 211-byte greeting 模型；2026-10-24 由 ADR-166／ADR-167 更正為前置 2-byte payload length、其後 version `0x00D3`、counted bytes 與 seeds 的 parser layout。瀏覽器只有 WebSocket，所以「在瀏覽器裡玩」
    一定需要一個**伺服器端的進程**替它持有那條 socket。這個橋就是 `net/webclient.ts`：每一條
    WebSocket 連線配一個 `ClientSession`（`src/client/session.ts`），後者用真正的
    `LoginServer`／`GameEntryServer`、真正的密碼表與真正的 cipher 跑完整條登入鏈。
@@ -4774,7 +4773,7 @@ isolate與in-suite皆綠（spawn六連跑）；typecheck/build/format全綠。�
 
 ## ADR-139（部分由 ADR-166 取代）：`0xD3` 是版本值；舊 211-byte length／199-byte body 推論已撤回（2026-10-22）
 
-> **後續更正（ADR-166，2026-10-24）**：本 ADR 對 `0xD3` 是版本值的判斷保留；「同一個 wire 欄位因此也是總長、官方 greeting 必為 211 bytes」的推論撤回。使用者已明確更正：目標 s2c greeting 在 `0xD3` 版本值前有獨立的 2-byte 長度欄位，實際 greeting 是十幾 bytes。舊推論只描述了倉庫這份 EXE listing 的接收路徑，不能當成目標 wire layout；詳見 ADR-166。現行 211-byte encoder 尚未改成正確短格式。
+> **後續更正（ADR-166／ADR-167，2026-10-24）**：本 ADR 對 `0xD3` 是版本值的判斷保留；「wire 欄位同時是總長、官方 greeting 必為 211 bytes」的推論撤回。重讀 `sub_43A410` 時，先前漏看 `0043A661 mov esi, edi` 把目的指標重設至 buffer base，因而錯把 length prefix 與 payload offset 混為一談。listing 現已確認 length → version → counted bytes → 兩個 seeds；程式與測試已遷移。詳 ADR-167。
 
 - **你講的對，我原本把它當長度是錯的。** 211（= `0xD3`）在二進位裡出現**三次**,
   只有「這是這個版本的版本號」能同時解釋三次：
@@ -6280,15 +6279,15 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
 - 僅使用 injected fake storage 與隔離 browser probe／tests；沒有 LIVE login、角色建立／操作、既有 save 讀寫或伺服器持久化變更。
 - 另提供 `Browser game preview`：web/login/game ports **8515／8516／8517**、城鎮 map `101000000`、`--save off`；`preview:preview`／`observer:observer` 僅是此新程序帳號。唯讀 GET `/healthz`、`/`、`/main.js`、map／art 為 **200**，兩種 map guard 均通過；未開 WebSocket、登入或操作角色。自行建立的新進度只在該程序記憶體，重啟即消失。
 
-## ADR-165：原版 TCP greeting 路徑與 bad-header fail-closed（2026-10-24；greeting 結論由 ADR-166 更正）
+## ADR-165：原版 TCP greeting 路徑與 bad-header fail-closed（2026-10-24；greeting 解析由 ADR-167 校正)
 
-**狀態**：部分接受。login/game live TCP listener 於第一個 bad session header 關閉，並記錄 expected header 與封包長度，此決策保留。對倉庫 EXE 的靜態接收路徑，僅能記錄其 listing 中的讀取行為；「目標 s2c greeting 是 211 bytes」已由 ADR-166 撤回，不得作為官方 wire 格式。
+**狀態**：部分接受。login/game live TCP listener 於第一個 bad session header 關閉，並記錄 expected header 與封包長度，此決策保留。此 ADR 當時對 greeting receive path 的讀法漏看 `0043A661` 指標重設，已由 ADR-167 以 C/listing 交叉重讀並修正；下列兩筆 bad-header log 是舊 211-byte harness 時的歷史資料，不能用作新 greeting 的 raw evidence。
 
 ### 背景與原證
 
 「十幾 bytes」必須先標明方向與階段，不能把 server 初始 greeting、client 之後的 request frame 和另一條 game TCP 連線混成同一個 handshake。
 
-1. 倉庫 `MapleStory.exe.c` 的 `sub_43A410`（約 66345–66426 行；listing `0043A410`–`0043A76E`）呈現一條靜態接收路徑：先收 2 bytes，接收迴圈用 offset 0 的 u16 作為讀取數量，之後同一位置又與 `0x00D3` 比較，offset 2 的 u16 被當作區塊 copy 長度。此為該 listing 的觀察，不足以證明使用者所指目標 greeting 的 wire layout。使用者已更正目標格式是 `u16 length` 在前、`u16 version = 0x00D3` 在後，且 s2c greeting 為十幾 bytes；因此 `2 + 2 + 199 + 4 + 4 = 211` 僅是現行舊 encoder 與這段 listing 之間的舊模型，不得再稱為已證實的官方 greeting 長度。EXE 身分與階段的差異記於 ADR-166。
+1. 兩筆 log 當時由舊 211-byte harness 建立，收到 `0x00D3`、5-byte body／9-byte frame 後觸發 header mismatch；log 沒有 greeting raw bytes，也不能證明原 server greeting 格式。後續重新檢視 `sub_43A410` 時確認其第一個 `recv()` 讀 2-byte length，`0043A661 mov esi, edi` 將目的指標重設至 buffer 起點，第二階段接收 prefix 宣告的 payload；其後才讀 version、counted bytes 與兩個 seeds（完整欄位見 ADR-167）。
 2. 倉庫 `sub_43A410` 尾段在 `this+36 == 0` 分支呼叫 `sub_4A1EA0(&v53, 4, nullptr)`；`sub_4A1F20` 將該參數逐 byte 寫入 packet body，因此首 byte 是 `0x04`。接著 caller 寫入一個 u32 `v32`，再呼叫 `sub_43AD50` 送出。就這份 EXE 的程式路徑而言，client→server 初始 frame 是 **5-byte body + 4-byte session header = 9 bytes**；測試以 `[0x04][u32 id]` 模擬同一 wire shape。這項 c2s 證據與目標 s2c greeting 的長度是分開的；不能用舊 211-byte s2c 模型來推定官方 greeting。
 3. 原版 listing `0043AD75`／`004A20F7` 證明 client→server frame header 會以 `0x00D3 XOR HIWORD(clientSendState)` 計算；因此 `0x00D3` 是 magic 常數，不是帶任意 seed 時每個 frame 都會直接出現的 header。對提供的 `clientSend=0xD75ABB51`，現有模型預期首個 c2s header 為 **`0xD789`**；裸 `0x00D3` 與此不符。這證明現有 log 的實際值與該 seed／frame 對不齊，但不能單靠這個差異判定 seed、階段、資料來源或 cipher 實作哪一項是根因。
 4. `conn:` 是 `LoginServer` 的連線日誌，`game:` 是另一條 `GameEntryServer` 連線。此前 login listener 在 header 不符時只記錄並繼續，game listener 甚至沒有先拒絕 bad header，因此後續錯位 byte **可能**被當作下一個 header；但沒有原始 wire bytes，不能確認 `0x1B66` 一定由前一個錯位造成。
@@ -6306,11 +6305,11 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
    [serve] conn: closed
    ```
    兩筆 expected 都符合既有 header 算式：`0xc6b9 XOR 0x00d3 = 0xc66a`，`0xb854 XOR 0x00d3 = 0xb887`。不同隨機 send seed 得到不同 expected，但實收仍為裸 `0x00d3`；若套用目前公式，裸值相當於 header state 的高 16 bits 為 0，**但不能據此斷定 client 真正使用了哪個 state、seed 或 framing stage**。5-byte／9-byte 尺寸與已知 c2s 初始 frame 相同，但 log 沒有 body bytes，**不能斷言 opcode 是 `0x04`**。
-   `conn:` 是 LoginServer 的 logger 前綴（GameEntryServer 使用 `game:`）；第二筆也明示 `stage=login`，因此這些 frame 到達 login listener，而不是 GameEntryServer。若當時預期是角色導向後的 game-entry frame，仍應另核對 0x03 redirect／目的 port／連線階段。兩次 server 都送 legacy 211-byte greeting，這些 log 不能當成目標短 greeting 已被正確解析的證據；亦沒有證明此 mismatch 是視窗延遲根因。
+   `conn:` 是 LoginServer 的 logger 前綴（GameEntryServer 使用 `game:`）；第二筆也明示 `stage=login`，因此這些 frame 到達 login listener，而不是 GameEntryServer。若當時預期是角色導向後的 game-entry frame，仍應另核對 0x03 redirect／目的 port／連線階段。兩次 server 都送當時舊 211-byte greeting 模型；這些 log 不能當成新 parser-format greeting 已被正確解析的證據；亦沒有證明此 mismatch 是視窗延遲根因。
 
 ### 決策與實作
 
-1. ADR-166 更正後，`HANDSHAKE_VERSION` 的 `0x00D3` 版本值仍保留；199-byte body、211-byte wire 長度與現行 seed offset 僅屬舊 encoder 模型，不再宣稱是目標握手格式。此 commit 不猜測短 greeting 的 length 值、其餘欄位或 seed offset；login/game 的實際輸出長度診斷保留，c2s 9-byte frame/header mismatch 繼續獨立追蹤。
+1. Greeting 欄位已由 ADR-167 確認並遷移；ADR-165 新增的 fail-closed header policy 與 c2s 9-byte frame/header mismatch 繼續獨立追蹤。原始兩筆 log 僅記錄當時的舊 harness 行為，不追溯套用至新 codec。
 2. LoginServer 與 GameEntryServer 收到第一個 `headerOk === false` 的完整 session frame 時，記錄 actual／expected header、body length 與含 4-byte header 的 wire length，立即 destroy TCP socket，不再讓錯位 bytes 進入 packet handler 或被當成下一個正常封包。LoginServer 另記當前 `stage=login|world|char`；GameEntryServer 以 `game:` 前綴區分。記錄不含 raw payload、憑證或解密內容。
 3. Deframer 遇到超過 packet cap 的 stream 仍保留其可重用的「記錄 failure」行為，因為 offline capture／分析工具可能要自行決定如何處置；live login/game listener 則在 failure 後關閉連線。這是 live socket policy，不把分析 API 改成只能 fail-fast。
 4. 新增合成測試覆蓋兩種 TCP listener：用使用者提供的 seed 組出 5-byte client frame，再故意將正確 `0xD789` header 改成 `0x00D3`；驗證診斷值、9-byte wire 長度、socket 關閉，以及 game listener 不會消耗 character handoff。測試不登入 LIVE、不建立／操作角色、不讀寫存檔。
@@ -6323,32 +6322,80 @@ ADR-162 已建立 map／art browser DTO 與深度 runtime guards，但 `remember
 - 本輪新增的三項 login/game framing tests 包含於完整 suite；沒有 LIVE login、角色建立／操作、既有存檔讀寫或原版 client PCAP。
 - **2026-10-24 使用者 log 後續**：LoginServer bad-header log 加上目前 login stage；`server/test/serve.test.ts` 全檔 **49 pass／0 fail**，其中 mismatch test 使用第一次貼出的 seed pair，驗證 `0x00D3` vs `0xC66A`、5-byte body／9-byte frame 與 `stage=login`。`server/test/session.test.ts` 另鎖定兩筆實際 log 的 seed→expected 計算（`0xc6b9→0xc66a`、`0xb854→0xb887`）。strict typecheck、format check 亦通過。沒有把這些診斷解讀成握手或視窗延遲的已知根因。
 
-## ADR-166：目標握手是短 s2c greeting「length → version `0x00D3`」；撤回 211-byte wire-length 結論（2026-10-24）
+## ADR-166：`0x00D3` 是版本值，不是 wire length（2026-10-24；欄位判讀由 ADR-167 完成）
 
-**狀態**：已接受使用者更正為目標協定的主導欄位順序；短 greeting 的完整欄位／seed offsets 尚待定位。撤回 ADR-139／ADR-165 將 `0x00D3` 認作總 wire length 的結論。此 ADR 不改握手實際 bytes；現行 211-byte encoder 明確列為待修 legacy model，不得宣稱符合目標 client。
+**狀態**：保留「211 是版本號而非 wire length」的結論。本文先前對 `sub_43A410` offset 的解讀曾漏看接收指標重設，已由 ADR-167 校正；不要沿用舊版「倉庫 binary／目標 greeting 不一致」的判斷。程式已改為 length-prefixed greeting parser，14 bytes 僅是 empty counted string 時的 parser-valid minimum，不是原 server 固定長度證明。
 
-### 更正與範圍
+### 背景與結論
 
-- 目標 s2c greeting 的前 2 bytes 是**獨立 length 欄位**，其後才是 `u16 version = 0x00D3`。211 是版本值，不是 packet length；官方原版 s2c greeting 是十幾 bytes。這是使用者已明確提供的 protocol correction，後續分析及文件不得再要求使用者重述，也不得把 211 編成 wire byte count。
-- `0x00D3` 同時出現在 c2s header magic／版本檢查的舊 binary 路徑，不足以推翻欄位順序更正。版本語意與封包總長是不同欄位，不可因 magic/version 常數相同而合併。
-- c2s 的首個 9-byte frame（5-byte body + 4-byte header）是獨立方向／階段；它與 s2c greeting 長度分開追蹤。現有日誌的 `0x00D3` vs `0xA73A` 只表示 session header mismatch，沒有證明視窗延遲根因。
+- `0x00D3` 同時可作 client→server session-header magic，並在 greeting parser 中作 client version 值；不同欄位不能合併為 wire length。
+- 目標 s2c greeting 的前 2 bytes 是 length，後續 payload 以 `u16 version=0x00D3` 開頭。原 server 使用的 counted string 內容、尾端資料及精確總長度未由 server-side raw capture 確認；不能把測試最小形式當作官方完整樣本。
+- c2s 首個 9-byte frame（5-byte body + 4-byte session header）與 greeting 分屬不同方向／階段，不可混用。
 
-### 本地 binary 核對結果
+### 倉庫 EXE／listing 的正確讀法
 
-1. 本倉庫 `MapleStory.exe` 是 **1,847,346 bytes**，SHA-256 `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`；`MapleStory.exe.lst` header 的 Input SHA256 與之完全相同，PE timestamp 為 2003-04-27。這確認 listing 對應倉庫檔案，不代表該檔案就是產生日誌的 runtime client。
-2. 直接 disassemble 同一 EXE：`0043A5CC` 把 `ESI` 設為 buffer base；`0043A5DF` 的第一次 `recv()` 取 2 bytes；`0043A645` 從 `[edi]` 讀這兩 bytes 決定後續接收數量；`0043A661` 從同一 base 讀到該數量；`0043A6C8` 再從 `[edi]` 取同一 u16；`0043A6F2` 從 offset 2 取 copy count；`0043A76E` 對 offset 0 的值比較 `0xD3`。因此，**這份 artifact 的這條 path 沒有呈現「前置長度、後置版本」的布局**。
-3. 此靜態差異是「倉庫 binary／runtime binary／packet stage 或 stream offset 尚未對齊」的證據，不是再度把 211 判成 target wire length 的理由。沒有 target runtime 的 hash／raw greeting bytes 時，不能把該 path 泛化到使用者指出的短 s2c greeting；也不能只憑猜測把它映射到不同 offset。
+倉庫 `MapleStory.exe` 為 **1,847,346 bytes**，SHA-256 `f67eb6901ddd509933f78959714d16bbf9b0cbaa7870977a442bbc5896261f58`；`.lst` header 的 Input SHA256 與其一致。`sub_43A410`（C 約 66184–66426 行；listing `0043A410`–`0043A774`）的接收順序為：
 
-### 實作狀態與決策
+1. `0043A5DF` 第一次 `recv()` 收 2 bytes；`0043A645` 由 `[edi]` 讀 little-endian u16，將它當成**隨後 payload 的 byte 數**，並檢查不超過 1460-byte buffer capacity。
+2. `0043A661 mov esi, edi` 將 destination pointer 重設到 buffer base。第二次接收從 socket 現有位置取得 prefix 後的 payload bytes，寫回 buffer 起點；因此 prefix 不保留在 payload buffer。
+3. payload offset 0 由 `0043A6C8` 讀取並在 `0043A76E` 比較 `0x00D3`；payload offset 2 的 u16 在 `0043A6F2` 是 counted length；`0043A717` 將 offset 4 起的 counted bytes 傳入 `sub_418610`。
+4. counted bytes 後第一個 u32 寫至 `CClientSocket+120`（`sub_43AD50` 使用的 send state）；第二個 u32 寫至 `+124`（`sub_43AFA0` 使用的 receive state）。若 counted length 是 N，wire offsets 分別是 `6+N`、`10+N`。
+5. `sub_418610` 接受 count=0，複製到 temporary ZXString；成功路徑之後不再讀其字串內容，故 string 的 server-side meaning/value 未知。讀完兩個 seeds 後沒有觀察到額外欄位消費；本實作保留 declared payload 中可能剩下的 tail bytes，而不替它們編造語意。
 
-1. `server/src/protocol/session.ts` 的現行 `encodeLegacyHandshake()` 仍發 **211 bytes**：offset 0 寫 211，offset 2 寫 199，seed 放在 offsets 203／207。這符合舊模型，不符合已更正的目標欄位順序；本 ADR 將其標為待修，不再稱為官方 handshake。
-2. 本次只整理協定證據與註解狀態，**不臆造 short greeting 的 length 數值、額外欄位、byte order 或 seeds offsets**。在能逐欄位對上目標 binary／wire layout 前，不以通用 MapleStory 版本的相似 packet 或測試 stub 代替 KMS 1.11 原證。
-3. 一旦 layout 對齊，需同一輪更新 encoder／decoder、capture classification、所有 login/game handoff 等待狀態、測試 fixtures 及相關文件；保留 `0x00D3` 作 version 常數，但不再令 `LEGACY_HANDSHAKE_TOTAL_BYTES === CLIENT_VERSION`。9-byte c2s frame/cipher 另行保持與驗證。
-4. 沒有自動登入、操作角色、讀寫既有 save 或發 state-changing probe；本輪不以 runtime delay 作為已查明根因。
+```text
+wire: u16 payloadLength (不含自身)
+      u16 version=0x00D3
+      u16 countedLength
+      byte[countedLength]
+      u32 clientSendSeed
+      u32 clientRecvSeed
+      [optional bytes not inspected by this client path]
+```
 
-### 本輪驗證
+空 counted string 時 payload 最短 12 bytes、wire 最短 14 bytes。這是根據 parser 必需欄位計算的下限；使用者指出原版 greeting 是十幾 bytes，仍不可據此把 14 宣稱為其固定長度。第一個 u16 的 1460 上限是 payload buffer capacity；因接收 prefix 後 destination 重設、prefix 被覆寫，wire transfer 可以包含另 2-byte prefix。
 
-- 以 `sha256sum`、`.lst` input hash、PE metadata 與 `objdump -D -Mintel` 交叉核對本地 EXE；確認上述地址／讀取順序。
-- `bun run check`（Bun 1.4.4；本環境透過 `npm exec --package=bun@1.4.4` 呼叫）：strict typecheck、format check、完整 suite 與 browser build 全通過；**1496 pass／0 fail／5334 expect() calls，174 files**。曾先用未全域安裝的 `bun` 直接執行而得到 `command not found`，改用 pinned npm-exec Bun 後完整檢查成功。
-- 將 encoder／decoder 與 constants 明確命名為 `encodeLegacyHandshake`／`decodeLegacyHandshake`／`LEGACY_HANDSHAKE_*`，避免把舊 211-byte 模型誤認為官方目標格式；僅改 API 命名與註解，wire encoder、cipher、遊戲行為不變。
-- 沒有自動登入、操作角色、讀寫既有 save 或發 state-changing probe。
+### 舊結論與範圍
+
+先前曾把 `0043A645` 的 prefix read 和之後的 `0043A6C8` version read 當成同一個 buffer offset，並據此推定 listing 沒有 length → version 格式。該解讀漏掉 `0043A661` 指標重設，現已撤回。舊 `199-byte body`／`211-byte wire` 僅是 encoder 舊模型，與 parser 的官方固定輸出無關。
+
+歷史 bad-header logs 仍記錄當時 LoginServer 使用舊 harness；沒有 raw bytes，不能據之確認原 client 的 seed state、body opcode 或後續 runtime mismatch 根因。本決策不把這些 logs 與已恢復的 greeting codec 混為一談。
+
+## ADR-167：Greeting parser layout 交叉確認並遷移整條 codec 鏈（2026-10-24）
+
+**狀態**：已實作；測試／型別檢查／格式檢查結果由本 ADR 的驗證段更新。此 decision 記錄的是「client parser 可接受並由本地 C/listing 支持的 wire layout」；不聲稱已捕獲原 server 的實際 string value、tail 或固定總長。
+
+### 欄位與 byte accounting
+
+```text
+u16 payloadLength                 # little-endian; counts bytes after this prefix
+u16 version = 0x00D3              # payload offset 0
+u16 countedLength                 # payload offset 2
+byte[countedLength] countedBytes  # payload offset 4
+u32 clientSendSeed                # payload offset 4+countedLength
+u32 clientRecvSeed                # payload offset 8+countedLength
+byte[] trailing                   # if included in declared payload; parser does not inspect
+```
+
+The empty-string form has 12 payload bytes and 14 total wire bytes. That is only the minimum accepted by the parser, not an official fixed greeting length. The receiver allocates a 1460-byte payload buffer, so the prefix is bounded by 1460; the wire also carries the two-byte prefix separately. Seeds are little-endian and variable-offset, not fixed to the legacy offsets 203/207.
+
+### Implementation completed
+
+- Replaced fixed 211-byte / 199-byte encoder assumptions with `HANDSHAKE_VERSION`, payload/wire minimums, variable counted bytes, variable seed offsets, preserved trailing bytes and a 1460-byte payload cap in `server/src/protocol/session.ts`.
+- Changed `SessionDeframer` to read two prefix bytes, then collect exactly the declared payload before parsing version/count/seeds; fragmented TCP greetings remain buffered correctly.
+- Migrated LoginServer, GameEntryServer, capture session mode, trace decoding and the Node client. Trace decoding reads seeds from raw greeting hex and maps them by direction; mismatched seed metadata is reported without replacing the wire evidence. Current server/capture defaults send the empty-string minimum as a synthetic parser-valid greeting.
+- Migrated loginflow, session, capture, and decode fixtures/assertions away from the 211-byte model. Tests distinguish `0x00D3` version from prefix length and explicitly assert that 14 bytes is only the empty-string minimum. CLI and README describe the parser format and avoid claiming exact original-server string/tail values.
+- Updated `FINDINGS.md`, `server/README.md`, `ARCHITECTURE.md`, and this decision record; corrected the earlier missed-pointer-reset interpretation in ADR-165/166.
+
+### Boundaries and safety
+
+- Do not infer server-side meaning from the counted bytes: the checked client copies then discards them. The body passed to `encodeHandshake` is named neutrally and is treated as opaque counted bytes.
+- Do not infer the original server sends an empty counted string or that 14 bytes is its fixed greeting. No original-server PCAP or raw greeting was produced in this work.
+- `0x00D3` in the greeting and c2s frame magic is not a total byte count. The 9-byte `[0x04][u32 characterId]` first c2s frame remains separately modeled.
+- No automatic login, role operation, save modification, or LIVE state-changing probe was performed.
+
+### Verification
+
+- `npm exec --yes --package=bun@1.4.4 -- bun run check` passed (Bun 1.4.4): pinned TypeScript 7.0.2 strict typecheck, repository format check, full test suite **1500 pass／0 fail／5334 `expect()` calls across 174 files (370.47 s)**, and browser asset build.
+- The first format gate reported four changed TypeScript files; ran the repository Bun formatter and reran the complete check successfully. No compiler options were weakened or tests skipped.
+- `--handshake-body` now attaches counted bytes with either auto-random or pinned capture seeds; off/non-session combinations and a missing hex value are rejected, and serve/capture startup text reports the actual counted-byte size.
+- Build output stayed in ignored `dist/client`. No original-server PCAP/raw greeting was made; no LIVE login, role operation, save read/write, or state-changing probe was performed.
