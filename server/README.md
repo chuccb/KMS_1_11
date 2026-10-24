@@ -24,7 +24,7 @@
 | `src/protocol/cipher.ts` | ✅ 會話加密：MSVC rand LCG、`swapNibbles`、送/收狀態；標頭 = `magic ^ HIWORD(state)`，**兩個方向常數不同**（c2s `0xD3` / s2c `0xFF2C`，見 `docs/protocol/FINDINGS.md` §3.1）。 |
 | `src/protocol/session.ts` | ✅ greeting codec 與 `SessionDeframer`：`u16 payloadLength`（不含自身）→ `u16 version=0x00D3` → `u16 countedByteLength`／bytes → 兩個 `u32` seeds；seed 位置隨字串長度變動，尾端 bytes 保留。空字串的 14-byte wire form 是 parser 最小值，非已證實的官方固定輸出。 |
 | `src/protocol/packet.ts` | ✅ 欄位編碼：`u8`/`u16`/`u32` LE、字串 = `u16 長度` + 原始 bytes；越界丟 `PacketUnderflowError(38)`（client 丟 `ZException(38)`）。 |
-| `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 建角、0x06 名檢查+外觀、0x07 刪角、0x08 echo。 |
+| `src/protocol/login.ts` | ✅ **client → server 登入鏈封包**：0x01 登入、0x02 選世界、0x03 選角、0x04 握手回覆、0x05 名稱檢查（只有名字）、0x06 建角（名字 + 十個外觀／骰點 u32）、0x07 刪角、0x08 echo。 |
 | `src/protocol/chardata.ts` | ✅ `CharacterData`：`u8 flags` + **69-byte** 能力值區塊 + 完整道具區塊（穿戴格 ×2、四個道具欄、每欄 8-byte 記錄、`0x20`/`0x40` 兩個 map）。其中「道具區塊」的寫入順序與 `sub_45F610`（編碼器）逐項對齊。另有外觀的兩張表：`AVATAR_SLOT`／`avatarSlotOfItem`（`sub_45F340` 的 part code → 格號，§4.11.3d）與 `LOOK_WORD`／`wornOfLook`／`withWorn`（`0x06` 的十個 u32 → 起始裝備，ADR-025）。 |
 | `src/protocol/itemslot.ts` | ✅ `GW_ItemSlot`：`itemId` + 現金區塊 + `GW_ItemSlotEquip`（ruc/cuc/15 個能力值）／`NonEquip`（quantity）。**種類位元組只在呼叫端給 0 時才上線**：本伺服器送出的每個封包都用「欄位本身」當提示（`CharacterData` 用欄位號、`0x0B` 用剛讀到的欄位號），所以都不帶那個位元組（§4.18.4 的修正）。 |
 | `src/protocol/replies.ts` | ✅ **server → client 登入鏈回包**：0x01 結果+世界清單、0x02 角色清單、0x03 遊戲伺服器位址**+角色 id**（不是 token，§4.11.3）、0x04 名檢查、0x05 建立結果、0x06 刪除結果。 |
@@ -62,7 +62,7 @@
 | `src/protocol/mesodrop.ts` | 原0x1F＋u32丟楓幣；10–50000、200ms、非零0x0D成功／拒絕ack；新codec golden來源未執行。 |
 | `src/protocol/shop.ts` | ✅ **NPC 商店封包**：`0x4A` 開窗（`u32 shopId`＋`u16 count`＋每列 `u32 itemId`／`u32 price`／（`itemId/10000 == 207` 時 8 bytes）／`u16 maxCount`）、`0x4B` 結果（`u8`；0 沉默／1・4 東西不夠／2 錢不夠／3 格子不夠／>4 錯誤）、client 的 `0x33`（點擊的物件 id）與 `0x16`（0 買／1 賣／2 充電／3 關窗），以及空的一 byte `0x19`（在 `field.ts`）。207的8 bytes已證實是LE double補充每發費率；保留legacy `cash`欄名相容trace，但可由WZ unitPrice產生，修正家族判斷整數除法。見 `../docs/MESO_RECHARGE.md`（最新改動未測試）。 |
 | `src/game/dialogue.ts` | ✅ **一場對話**：`Npc/<id>.img -> info/speak` 的台詞（`info/quest` 原樣帶著）、`npcDialogueProvider` 快取、`NpcTalk`（哪隻 NPC、第幾句、`advance()`）。沒有 `info/speak` 的 NPC 就是不說話。 |
-| `src/client/session.ts` | ✅ **客戶端那一半（Bun）**：把 `test/loginflow.test.ts` 手動走的那條鏈變成一個物件——連線 → 握手（種子在裡面，送出的密鑰是 `0xD3`）→ `0x01` → `0x02` → `0x03` → 第二條連線 `0x04` → `0x16`（空帳號另有 `0x06`＋`0x05` 建立角色；`0x0D` 點傳送門換圖、`0x13` 表情、`0x23` 密語／找人）；之後把場地串流翻成事件（`0x1C`／`0x1D`／`0x22`／`0x27`／`0x29`／`0x1A`／`0x0D`／`0x2F`／`0x33`／`0x30`／`0x31`／`0x39`／`0x3A`），不認識的封包回 `unknown`。它不知道 HTTP 也不知道瀏覽器，所以可以在 `bun test` 裡直接驅動。 |
+| `src/client/session.ts` | ✅ **客戶端那一半（Bun）**：把 `test/loginflow.test.ts` 手動走的那條鏈變成一個物件——連線 → 握手（種子在裡面，送出的密鑰是 `0xD3`）→ `0x01` → `0x02` → `0x03` → 第二條連線 `0x04` → `0x16`（空帳號先以 c2s `0x05` 檢查名字，再以 `0x06` 提交外觀／骰點建立角色；`0x0D` 點傳送門換圖、`0x13` 表情、`0x23` 密語／找人）；之後把場地串流翻成事件（`0x1C`／`0x1D`／`0x22`／`0x27`／`0x29`／`0x1A`／`0x0D`／`0x2F`／`0x33`／`0x30`／`0x31`／`0x39`／`0x3A`），不認識的封包回 `unknown`。它不知道 HTTP 也不知道瀏覽器，所以可以在 `bun test` 裡直接驅動。 |
 | `src/net/websocket.ts` | ✅ **RFC 6455 的伺服器端**（零依賴）：`Sec-WebSocket-Accept`、text／binary、分片重組、ping/pong、關閉握手、1 MiB 上限；client 訊框一定要遮罩、server 訊框一定不遮罩。測試用 RFC 自己的官方向量。 |
 | `src/net/webclient.ts` | ✅ **瀏覽器橋**：一個 HTTP server 供應 `client/`、`/ws`（每條 WebSocket 配一個 `ClientSession`）、`/api/map/<id>`（`BrowserMapResource` 幾何／門／life JSON）、`/api/map/<id>/art`（`BrowserMapArtResource` 的 WZ title／minimap／back／sprite DTO）、`/api/maps`（唯讀 `{id,name,streetName}[]` 地圖目錄）、`/api/item/<id>` 與 `/api/item/<id>/icon.png`（名字／價格／描述／圖示，來自 `itemCatalog`）與 `/healthz`；`..` 直接 403。map serializers 與 `client/map-resources.ts` 共用編譯期 DTO，browser 在安裝 unknown HTTP payload 前再做深度 runtime guard 和 map-ID 一致性檢查（ADR-162）。JSON 是我們的設計、不是證據（ADR-034）；`portal` 把點擊轉成 c2s `0x0D`（ADR-035），`emotion`／`whisper`／`find` 轉成 `0x13`／`0x23`（ADR-036），`use` 轉成 `0x18`／`0x19`（ADR-037），`click`／`shop`／`talk` 轉成 `0x33`／`0x16`／`0x15`（ADR-038）。 |
 | `client/` | ✅ **頁面**：`index.html`＋`style.css`＋`main.js`，零建置步驟。登入／選世界／選角／建立角色／畫腳踏點與實體／點傳送門換圖／聊天（`/w` 密語、`/f` 找人）／表情按鈕／方向鍵走路／**背包面板**（`I`，四個 tab＋worn＋雙擊用 200–203 家族）、**NPC 商店**（點 NPC → `0x4A` 的列，可買）與 **NPC 對話**（`0x47` 的台詞，用 `0x15` 走）；沒有 WZ、沒有 cipher、沒有傷害與怪物 AI（`docs/CLIENT.md` 有完整的「有與沒有」清單）。 |
@@ -109,8 +109,8 @@ client ──0x04 u32 characterId──────▶ server   （新連線、�
 （`sub_51CFE0`，§4.11.3），所以伺服器不能送亂數 ticket。
 失敗訊息表在三個 handler 共用（訊息原文與每個值的意義見 FINDINGS §4.8 —— 2026-10-16 修正過：`2`／`3`
 是「帳號已被刪除或連線被中止」、`5` 是「沒有這個帳號」、`7` 是「已在線上」），只有 `result = 0` 會繼續
-解析 payload；**唯一的例外是 `0x05` 建立角色**：那裡 `0` 是失敗，非 0 才是「成功，後面接新角色的
-`CharacterData`」（`sub_4329A0`）。
+解析 payload；**唯一的例外是 s2c `0x05` 建立角色結果**：那裡 `0` 是失敗，非 0 才是「成功，後面接新角色的
+`CharacterData`」（`sub_4329A0`）。同號的 c2s `0x05` 是只有名字的可用性檢查，不是建立請求。
 
 **`0x01` 也會拒絕「已經在線上」的帳號**（回 `7`，就是 client 自己那句話）：一個帳號一條活著的
 session，座位由登入／遊戲兩半各拿一次、共用同一份表，心跳負責把無聲消失的連線清掉（FINDINGS §4.30、
@@ -189,9 +189,7 @@ bun server/src/cli.ts serve --port 8484 --game-port 8485 --account admin:admin \
 `--mob-speed <px/s>` 調巡邏速度（預設 60 px/s，再乘上怪物自己的 `info.speed` 百分比）、
 `--mob-respawn <ms>` 調怪物重生延遲（預設 5000 ms）、
 `--npc-walk <none|all|id,id,...>` 決定**哪些 NPC 由 client 自己走**（`0x3B`，FINDINGS §4.28；預設 `none`，
-裸的 `--npc-walk` 等於 `all`），角色建立後外觀取自**帳號第一個角色**
-或全零（0x06 的 10 個外觀 u32 目前只記在日誌裡 —— 它們的**順序**對應到哪些欄位尚未證實；
-client 自己那 12 個部位格已經解出來了，見 FINDINGS §4.11.3b 與 §6 第 16 項）。
+裸的 `--npc-walk` 等於 `all`）。新角色外觀直接取自 c2s `0x06` 的十個 u32（臉、頭髮、上衣、褲子、鞋子、武器、STR／DEX／INT／LUK；FINDINGS §4.8.1a），不會複製帳號首位角色的外觀。
 `--ping <ms|off>` 決定**心跳間隔**（ADR-018；預設 30000，`off` ＝不裝心跳）：安靜超過一個間隔的
 session 會被伺服器用 `0x08` 問一次，安靜超過三個間隔（＝ 3 × `--ping`）就當它斷線 ——
 那會歸還它佔的帳號、角色與座位。`off` 只該在「相信 TCP」的實驗裡用：無聲消失的連線會把帳號

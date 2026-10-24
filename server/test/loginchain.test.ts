@@ -29,7 +29,7 @@ import {
   ipv4WireValue,
 } from "../src/protocol/replies.ts";
 import {
-  CHECK_NAME_APPEARANCE_WORDS,
+  CREATE_CHARACTER_APPEARANCE_WORDS,
   decodeClientPacket,
   encodeClientPacket,
   type ClientPacket,
@@ -120,7 +120,7 @@ test("a stat-only CharacterData is one flags byte plus one 69-byte stat block (C
   // opcode(1) result(1) count(1) flags(1) stats(69)
   assert.equal(bytes.length, 3 + 1 + CHARACTER_STATS_BYTES);
   const reader = new PacketReader(bytes);
-  assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
+  assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelectResult);
   assert.equal(reader.readByte(), LOGIN_RESULT.ok);
   assert.equal(reader.readByte(), 1);
   const data = readCharacterData(reader);
@@ -195,7 +195,7 @@ test("a successful login reply carries the account info and the world list", () 
     ],
   });
   const reader = new PacketReader(bytes);
-  assert.equal(reader.readByte(), LOGIN_OPCODE.login);
+  assert.equal(reader.readByte(), LOGIN_OPCODE.loginResult);
   assert.equal(reader.readByte(), LOGIN_RESULT.ok);
   assert.equal(reader.readU32(), 7);
   assert.equal(reader.readByte(), 2);
@@ -255,12 +255,12 @@ test("the name-check reply is a string plus a signed byte", () => {
   assert.throws(() => encodeNameCheckResult("Hero", 200), RangeError);
 });
 
-test("the create reply is the one place 0 means failure - and a refused create sends just that", () => {
-  // 0x05 is the one reply in this chain where 0 is the *failure*: `sub_4329A0` reads one byte and
+test("the s2c create reply is the one place 0 means failure - and a refused create sends just that", () => {
+  // s2c 0x05 is the one reply in this chain where 0 is the *failure*: `sub_4329A0` reads one byte and
   // only decodes a record when it is non-zero. A create reply carrying LOGIN_RESULT.ok would show
   // "캐릭터 생성에 실패했습니다" and throw the record away.
   const created = encodeCreateCharacterResult(characterDataOf(sampleStats()));
-  assert.equal(created[0], LOGIN_OPCODE.createCharacter);
+  assert.equal(created[0], LOGIN_OPCODE.createCharacterResult);
   assert.equal(created[1], CREATE_CHARACTER_RESULT.created);
   assert.notEqual(created[1], 0, "a zero result byte is the client's failure path");
   assert.equal(created[2], CHAR_FLAG_STATS);
@@ -275,15 +275,53 @@ test("the create reply is the one place 0 means failure - and a refused create s
   assert.throws(() => encodeDeleteCharacterResult(1, 0), /CTerminateException/);
 });
 
+test("native name-check 0x05 and character-create 0x06 requests have distinct layouts", () => {
+  const check = encodeClientPacket({ kind: "check-name", opcode: 0x05, name: "tesuto" });
+  assert.equal(toHex(check), "05060074657375746f");
+  assert.deepEqual(decodeClientPacket(check), {
+    kind: "check-name",
+    opcode: 0x05,
+    name: "tesuto",
+  });
+
+  const appearance = Array.from({ length: 10 }, (_, i) => i + 1);
+  const create = encodeClientPacket({
+    kind: "create-character",
+    opcode: 0x06,
+    name: "tesuto",
+    appearance,
+  });
+  assert.equal(
+    toHex(create),
+    "06060074657375746f0100000002000000030000000400000005000000060000000700000008000000090000000a000000",
+  );
+  assert.deepEqual(decodeClientPacket(create), {
+    kind: "create-character",
+    opcode: 0x06,
+    name: "tesuto",
+    appearance,
+  });
+  assert.throws(
+    () =>
+      encodeClientPacket({
+        kind: "create-character",
+        opcode: 0x06,
+        name: "tesuto",
+        appearance: [4],
+      }),
+    /always carries 10 appearance words/,
+  );
+});
+
 test("the client's four CCharSelect requests decode and re-encode", () => {
   const packets: ClientPacket[] = [
     { kind: "select-character", opcode: 0x03, characterId: 0x11223344 },
-    { kind: "create-character", opcode: 0x05, name: "Hero" },
+    { kind: "check-name", opcode: 0x05, name: "Hero" },
     {
-      kind: "check-name",
+      kind: "create-character",
       opcode: 0x06,
       name: "Hero",
-      appearance: Array.from({ length: CHECK_NAME_APPEARANCE_WORDS }, (_, i) => i + 1),
+      appearance: Array.from({ length: CREATE_CHARACTER_APPEARANCE_WORDS }, (_, i) => i + 1),
     },
     { kind: "delete-character", opcode: 0x07, characterId: 0x11223344 },
   ];
@@ -293,7 +331,7 @@ test("the client's four CCharSelect requests decode and re-encode", () => {
   }
 });
 
-test("a check-name request with fewer than ten appearance words is an error, not a silent truncation", () => {
+test("a create request with fewer than ten appearance words is an error, not a silent truncation", () => {
   const short = new PacketWriter().writeByte(0x06).writeAsciiString("Hero").writeU32(1).toBytes();
   assert.throws(() => decodeClientPacket(short), /underflow/);
 });

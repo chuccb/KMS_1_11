@@ -10,14 +10,15 @@
  *   0x02  sub_54DFC0        [u8 worldIndex]                   - CWorldSelect
  *   0x03  sub_431620(1000)  [u32 characterId]                 - CCharSelect "enter the game"
  *   0x04  sub_43A410        [u32 value]                       - first c2s frame after the server greeting
- *   0x05  sub_42FD30        [u16 n]name bytes                 - CUINewChar "create"
- *   0x06  sub_431620(1002)  [string name][u32 x10]            - name check + appearance
+ *   0x05  sub_42FD30        [u16 n]name bytes                 - CUINewChar Check button / name check
+ *   0x06  sub_431620(1002)  [string name][u32 x10]            - character creation + appearance
  *   0x07  sub_431620(1001)  [u32 characterId]                 - CCharSelect "delete"
  *   0x08  sub_43B280        [u32 value]                       - echo: the client resends what it got
  *
- * Which of these a packet means depends on the stage the client is in (docs/protocol/FINDINGS.md
- * 4.9): 0x04 is a handshake reply on a fresh socket and a name-check reply from CCharSelect, and
- * 0x06 is a name check here while the server's 0x06 is a delete result.
+ * Request and response opcodes are intentionally defined separately: CCharSelect replies to the
+ * 0x05 name-check request with s2c 0x04, and to the 0x06 create request with s2c 0x05. The same
+ * numeric 0x05 therefore means different packet kinds in opposite directions. Also, 0x04 is a
+ * handshake reply on a fresh socket, and 0x06 is a delete result from the server (FINDINGS 4.9).
  *
  * Unknown opcodes are returned as `unknown` instead of being dropped or thrown away: the protocol
  * is still being mapped, and a server that silently discards a packet cannot be debugged.
@@ -29,14 +30,14 @@ export const CLIENT_OPCODE = {
   worldSelect: 0x02,
   selectCharacter: 0x03,
   handshakeReply: 0x04,
-  createCharacter: 0x05,
-  checkName: 0x06,
+  checkName: 0x05,
+  createCharacter: 0x06,
   deleteCharacter: 0x07,
   echoReply: 0x08,
 } as const;
 
-/** How many `u32` appearance ids the 0x06 request appends after the name (`sub_431620(1002)`). */
-export const CHECK_NAME_APPEARANCE_WORDS = 10;
+/** How many `u32` appearance ids the 0x06 create request appends after the name (`sub_431620(1002)`). */
+export const CREATE_CHARACTER_APPEARANCE_WORDS = 10;
 
 export interface LoginRequestPacket {
   kind: "login-request";
@@ -61,18 +62,18 @@ export interface CreateCharacterPacket {
   kind: "create-character";
   opcode: typeof CLIENT_OPCODE.createCharacter;
   name: string;
+  /** The six appearance selections followed by STR/DEX/INT/LUK, all as `u32`. */
+  appearance: number[];
 }
 
 /**
- * The 0x06 request: a name the user typed plus the look of the currently selected character and the
- * dialog's own choices, as ten `u32` ids. The client only sends it once the character list is
- * loaded, and it expects the answer as opcode 0x04 (`string name, s8 result`).
+ * The 0x05 request from the CUINewChar Check button (`sub_42FD30`): the locally validated name
+ * only. The server answers with s2c opcode 0x04 (`string name, s8 result`).
  */
 export interface CheckNamePacket {
   kind: "check-name";
   opcode: typeof CLIENT_OPCODE.checkName;
   name: string;
-  appearance: number[];
 }
 
 export interface DeleteCharacterPacket {
@@ -128,13 +129,13 @@ export function decodeClientPacket(body: Uint8Array): ClientPacket {
       return { kind: "select-character", opcode, characterId: reader.readU32() };
     case CLIENT_OPCODE.handshakeReply:
       return { kind: "handshake-reply", opcode, value: reader.readU32() };
-    case CLIENT_OPCODE.createCharacter:
-      return { kind: "create-character", opcode, name: reader.readAsciiString() };
-    case CLIENT_OPCODE.checkName: {
+    case CLIENT_OPCODE.checkName:
+      return { kind: "check-name", opcode, name: reader.readAsciiString() };
+    case CLIENT_OPCODE.createCharacter: {
       const name = reader.readAsciiString();
       const appearance: number[] = [];
-      for (let i = 0; i < CHECK_NAME_APPEARANCE_WORDS; i++) appearance.push(reader.readU32());
-      return { kind: "check-name", opcode, name, appearance };
+      for (let i = 0; i < CREATE_CHARACTER_APPEARANCE_WORDS; i++) appearance.push(reader.readU32());
+      return { kind: "create-character", opcode, name, appearance };
     }
     case CLIENT_OPCODE.deleteCharacter:
       return { kind: "delete-character", opcode, characterId: reader.readU32() };
@@ -166,13 +167,13 @@ export function encodeClientPacket(packet: ClientPacket): Uint8Array {
     case "echo":
       writer.writeU32(packet.value);
       break;
-    case "create-character":
+    case "check-name":
       writer.writeAsciiString(packet.name);
       break;
-    case "check-name":
-      if (packet.appearance.length !== CHECK_NAME_APPEARANCE_WORDS) {
+    case "create-character":
+      if (packet.appearance.length !== CREATE_CHARACTER_APPEARANCE_WORDS) {
         throw new RangeError(
-          `the 0x06 request always carries ${CHECK_NAME_APPEARANCE_WORDS} appearance words, got ${packet.appearance.length}`,
+          `the 0x06 create request always carries ${CREATE_CHARACTER_APPEARANCE_WORDS} appearance words, got ${packet.appearance.length}`,
         );
       }
       writer.writeAsciiString(packet.name);
@@ -207,10 +208,10 @@ export function describeClientPacket(body: Uint8Array): string | undefined {
         return `select-character id=${packet.characterId}`;
       case "delete-character":
         return `delete-character id=${packet.characterId}`;
-      case "create-character":
-        return `create-character name=${packet.name.length}B`;
       case "check-name":
-        return `check-name name=${packet.name.length}B appearance=[${packet.appearance.join(",")}]`;
+        return `check-name name=${packet.name.length}B`;
+      case "create-character":
+        return `create-character name=${packet.name.length}B appearance=[${packet.appearance.join(",")}]`;
       case "handshake-reply":
         return `handshake-reply value=0x${(packet.value >>> 0).toString(16)}`;
       case "echo":

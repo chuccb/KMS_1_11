@@ -246,18 +246,7 @@ test("creation checks the real catalogue shape and captures the confirmed charac
     assert.equal(sent.length, 1);
     const check = sent[0];
     assert.equal(check.t, "check-name");
-    assert.ok("appearance" in check);
-    assert.equal(check.name, "name");
-    assert.equal(check.appearance.length, 10);
-    assert.deepEqual(
-      check.appearance.slice(0, 6),
-      groups.map((group) => group[0].id),
-    );
-    assert.equal(
-      check.appearance.slice(6).reduce((sum, value) => sum + value, 0),
-      25,
-    );
-    assert.ok(check.appearance.slice(6).every((value) => value >= 4 && value <= 13));
+    assert.deepEqual(check, { t: "check-name", name: "name" });
     dialog.receive({ t: "name-checked", name: "name", result: 0 });
     f.get("native-ok").click();
     f.get("create-cancel").click();

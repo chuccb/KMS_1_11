@@ -398,9 +398,10 @@ bun server/src/cli.ts serve \
 
 打開 `http://127.0.0.1:8495/`，用 `admin:admin` 登入，選世界、選角色。
 
-一個**空帳號**（例如 `--account newbie:newbie`）在選角頁下方有「建立角色」：輸入名字按下去，頁面送
-`0x06`（十個外觀字）再送 `0x05`，新角色就出現在清單裡——這是 2003 client 建立角色的那兩包，沒有另開
-後門。名字重複時伺服器的 `0x06` 會回「已取用」，頁面照實印出來。
+一個**空帳號**（例如 `--account newbie:newbie`）在選角頁下方有「建立角色」：先以 c2s `0x05` 送名字做
+可用性檢查（s2c `0x04`），再以 c2s `0x06` 送名字與十個外觀／骰點 u32 建立角色（s2c `0x05`），
+新角色就出現在清單裡——這是 2003 client 的原始兩步流程，沒有另開後門。名字重複時 name-check 的
+s2c `0x04` 會回「已取用」，頁面照實印出來。
 
 在同一個伺服器上再開一個分頁、用 `alt:alt` 登入，兩個角色就會在同一個地圖看到彼此。
 
@@ -526,7 +527,7 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 | 登入 | `{t:"login",user,password}` | c2s `0x01` → s2c `0x01` |
 | 選世界 | `{t:"world",index}` | c2s `0x02` → s2c `0x02` |
 | 選角色 | `{t:"character",id}` | c2s `0x03` → s2c `0x03`，再連遊戲伺服器送 `0x04` |
-| 建立角色 | `{t:"create",name}` | c2s `0x06` → s2c `0x04`，c2s `0x05` → s2c `0x05`（成功才帶角色紀錄） |
+| 建立角色 | `{t:"create",name,appearance[10]}` | c2s `0x05`（只帶名字）→ s2c `0x04`；c2s `0x06`（名字 + 外觀／骰點）→ s2c `0x05`（成功才帶角色紀錄） |
 | 進地圖 | — | s2c `0x16`（＋ `0x2F`／`0x39`／`0x1C` 快照） |
 | 說話 | `{t:"say",text}` | c2s `0x12` → s2c `0x1A`/`0x12` |
 | 走一步 | `{t:"move",x,y,foothold}` | c2s `0x0E` ＋ 一個元素的 `CMovePath` → 其他人收 s2c `0x22` |
@@ -574,9 +575,9 @@ stat-basis   { basis, wornFacts, ammoPad }                 ← 原WZ計算資料
 hit          { mobId, damage }                            ← 橋自己回的：這一下的數字（線路上沒有）
 npc-enter    { npc }         npc-leave { npcId }
 unknown      { opcode, bytes }                            ← 這個殼沒讀的封包
-name-checked { name, result }                             ← 0x06 請求 → 0x04（0 可用／1 已用／−1 失敗）
+name-checked { name, result }                             ← c2s 0x05（名字）→ s2c 0x04（0 可用／1 已用／−1 失敗）
 deleted      { id, ok }                                   ← 0x07 請求 → 0x06
-created      { ok, name, id?, reason? }                    ← 建立角色（0x05）的結果
+created      { ok, name, id?, reason? }                    ← c2s 0x06 建立請求的 s2c 0x05 結果
 disconnect   { reason }
 error        { message }
 ```
@@ -584,8 +585,8 @@ error        { message }
 頁面 → 伺服器：`warp-map`／`login`／`world`／`character`／`check-name`／`create`／`delete-character`／`say`／`move`／`portal`／`emotion`／
 `whisper`／`find`／`use`／`click`／`shop`／`talk`／`attack`。建立相關訊息：
 
-- `check-name {name, appearance[10]}`：只檢查，不新增角色。
-- `create {name, appearance[10]}`：提交前重查同一個名稱與最新外觀／骰點；前六項限帳號性別的原 WZ 選項。
+- `check-name {name}`：只檢查名稱，不新增角色，也不帶外觀；對應 c2s `0x05`。
+- `create {name, appearance[10]}`：提交前重查名稱，再以 c2s `0x06` 提交最新外觀／骰點；前六項限帳號性別的原 WZ 選項。
 - `delete-character {id, confirmed:true}`：僅角色選擇階段、僅自己帳號的角色；取消確認不送封包。
 - `GET /api/creation`：原 `MakeCharInfo` 順序、各素材 `info/name`、`ForbiddenName`。無 Data.wz 回 404，不另造假選項。
 
@@ -641,7 +642,7 @@ bun test --timeout 30000 server/test/websocket.test.ts server/test/webclient.tes
 所以 `end` 也必須當成關閉，否則帳號的座位永遠不會放掉。）
 `webclient.test.ts`（12 則）用 Node 內建的 `WebSocket` 當瀏覽器，
 對**真的** `LoginServer`／`GameEntryServer` 走完登入→選角→進圖→說話→走路，外加靜態檔、
-`/api/map/<id>` 與 `..` 的拒絕、一個空帳號用 `0x06`＋`0x05` 建立第一個角色再進去玩，以及點一扇門
+`/api/map/<id>` 與 `..` 的拒絕、一個空帳號用 c2s `0x05` 名稱檢查、再用 `0x06` 建立第一個角色並進去玩，以及點一扇門
 換到另一張圖再走回來，一張臉、一通韓文密語（CP949 來回）、一次找不到人的密語與兩種 `/f` 答案，
 背包（`inventory` 事件的形狀、`/api/item` 的三種答案、一次雙擊把 3 瓶喝成 2 瓶且 HP 20→50），
 以及商店（點 NPC → `0x4A`、買 2 個 → `0x4B`＋`0x0B`＋`0x0D`、close 不回包）與 NPC 對話（`0x47` 的
@@ -666,7 +667,7 @@ compositor 的原點／鏡射／alpha、UOL 解析與快取、`30000*layer-10*zM
 found」之外的另一種空白。
 
 **已實測**（2026-10-17，真的瀏覽器，不是 Node 的 `WebSocket`）：預覽 proxy 會轉發 `wss` 的 upgrade。
-同一個分頁裡走完 登入（`admin`）→ 建立角色（`chui`，`0x06`＋`0x05`）→ 選角（`Hero`）→ 進地圖
+同一個分頁裡走完 登入（`admin`）→ 建立角色（`chui`，c2s `0x05` 檢查後 c2s `0x06` 建立）→ 選角（`Hero`）→ 進地圖
 （헤네시스 `100000000`）→ 送出一句聊天，伺服器日誌逐包對得上。所以「代理不轉發 upgrade」的備案
 （HTTP 輪詢）**不需要**。
 

@@ -109,18 +109,19 @@ export async function runWhisperProbe(options: NativeProbeOptions) {
     );
 
     if (!list.some((character) => character.stats.name === wanted)) {
-      // Six male MakeCharInfo choices, then STR/DEX/INT/LUK (native min4, total25).
-      const check = new PacketWriter(64);
-      check.writeByte(0x06).writeAsciiString(wanted);
-      for (const word of DIALOG_LOOK) check.writeU32(word);
+      // Native flow: c2s 0x05 checks only the name; c2s 0x06 creates with six male
+      // MakeCharInfo choices followed by STR/DEX/INT/LUK (each >=4, total25).
+      const check = new PacketWriter(32);
+      check.writeByte(0x05).writeAsciiString(wanted);
       login.send(check.toBytes());
       const checkReply = await login.take(0x04);
-      console.log(
-        `  ${user}: name "${wanted}" check -> result ${checkReply[checkReply.length - 1]}`,
-      );
+      const checkResult = (checkReply[checkReply.length - 1]! << 24) >> 24;
+      console.log(`  ${user}: name "${wanted}" check -> result ${checkResult}`);
+      if (checkResult !== 0) throw new Error(`name check refused for ${user}: ${checkResult}`);
 
-      const create = new PacketWriter(32);
-      create.writeByte(0x05).writeAsciiString(wanted);
+      const create = new PacketWriter(64);
+      create.writeByte(0x06).writeAsciiString(wanted);
+      for (const word of DIALOG_LOOK) create.writeU32(word);
       login.send(create.toBytes());
       const createReply = await login.take(0x05);
       const flag = createReply[1];

@@ -134,29 +134,26 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [{ name: "characterId", type: "u32", note: "CWvsApp+0x14, set from the 0x03 reply" }],
   },
   {
-    opcode: login.CLIENT_OPCODE.createCharacter,
-    direction: "c2s",
-    stage: "login",
-    name: "createCharacter",
-    status: "byte-exact",
-    evidence: "FINDINGS 4.8 (name + the appearance the 0x06 dialog produced)",
-    codecs: ["decodeClientPacket", "encodeClientPacket"],
-    fields: [
-      { name: "name", type: STRING },
-      { name: "appearance", type: `u32[${login.CHECK_NAME_APPEARANCE_WORDS}]` },
-    ],
-  },
-  {
     opcode: login.CLIENT_OPCODE.checkName,
     direction: "c2s",
     stage: "login",
     name: "checkName",
     status: "byte-exact",
-    evidence: "FINDINGS 4.8 (sub_431620(1002))",
+    evidence: "FINDINGS 4.8 (CUINewChar Check button, sub_42FD30)",
+    codecs: ["decodeClientPacket", "encodeClientPacket"],
+    fields: [{ name: "name", type: STRING }],
+  },
+  {
+    opcode: login.CLIENT_OPCODE.createCharacter,
+    direction: "c2s",
+    stage: "login",
+    name: "createCharacter",
+    status: "byte-exact",
+    evidence: "FINDINGS 4.8.1a (sub_431620(1002), name + selected look/dice)",
     codecs: ["decodeClientPacket", "encodeClientPacket"],
     fields: [
       { name: "name", type: STRING },
-      { name: "appearance", type: `u32[${login.CHECK_NAME_APPEARANCE_WORDS}]` },
+      { name: "appearance", type: `u32[${login.CREATE_CHARACTER_APPEARANCE_WORDS}]` },
     ],
   },
   {
@@ -203,7 +200,7 @@ export const PACKETS: readonly PacketSchema[] = [
 
   // ---------------------------------------------------------------- login stage, server -> client
   {
-    opcode: replies.LOGIN_OPCODE.login,
+    opcode: replies.LOGIN_OPCODE.loginResult,
     direction: "s2c",
     stage: "login",
     name: "loginResult",
@@ -224,7 +221,7 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: replies.LOGIN_OPCODE.worldSelect,
+    opcode: replies.LOGIN_OPCODE.worldSelectResult,
     direction: "s2c",
     stage: "login",
     name: "worldSelectResult",
@@ -241,7 +238,7 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: replies.LOGIN_OPCODE.selectCharacter,
+    opcode: replies.LOGIN_OPCODE.selectCharacterResult,
     direction: "s2c",
     stage: "login",
     name: "selectCharacterResult",
@@ -269,7 +266,7 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: replies.LOGIN_OPCODE.createCharacter,
+    opcode: replies.LOGIN_OPCODE.createCharacterResult,
     direction: "s2c",
     stage: "login",
     name: "createCharacterResult",
@@ -290,7 +287,7 @@ export const PACKETS: readonly PacketSchema[] = [
     ],
   },
   {
-    opcode: replies.LOGIN_OPCODE.deleteResult,
+    opcode: replies.LOGIN_OPCODE.deleteCharacterResult,
     direction: "s2c",
     stage: "login",
     name: "deleteResult",

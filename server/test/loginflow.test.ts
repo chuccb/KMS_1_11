@@ -105,7 +105,7 @@ test("the login chain works end to end over a real encrypted session", () => {
   const last = client.seen.at(-1);
   if (!last || last.kind !== "packet") throw new Error("no login reply");
   const reader = new PacketReader(last.plain);
-  assert.equal(reader.readByte(), LOGIN_OPCODE.login);
+  assert.equal(reader.readByte(), LOGIN_OPCODE.loginResult);
   assert.equal(reader.readByte(), LOGIN_RESULT.ok);
   assert.equal(reader.readU32(), 42);
   assert.equal(reader.readByte(), 1);
@@ -143,7 +143,7 @@ test("the login chain works end to end over a real encrypted session", () => {
   const worldReply = client.seen.at(-1);
   if (!worldReply || worldReply.kind !== "packet") throw new Error("no world reply");
   const worldReader = new PacketReader(worldReply.plain);
-  assert.equal(worldReader.readByte(), LOGIN_OPCODE.worldSelect);
+  assert.equal(worldReader.readByte(), LOGIN_OPCODE.worldSelectResult);
   assert.equal(worldReader.readByte(), LOGIN_RESULT.ok);
   assert.equal(worldReader.readByte(), 1, "one character in the list");
   const received = readCharacterData(worldReader);
@@ -174,7 +174,7 @@ test("the login chain works end to end over a real encrypted session", () => {
   const selectReply = client.seen.at(-1);
   if (!selectReply || selectReply.kind !== "packet") throw new Error("no select-character reply");
   const selectReader = new PacketReader(selectReply.plain);
-  assert.equal(selectReader.readByte(), LOGIN_OPCODE.selectCharacter);
+  assert.equal(selectReader.readByte(), LOGIN_OPCODE.selectCharacterResult);
   assert.equal(selectReader.readByte(), LOGIN_RESULT.ok);
   // The client copies those four bytes straight into sockaddr_in.sin_addr, so they are 7F 00 00 01.
   assert.equal(selectReader.readU32(), ipv4WireValue("127.0.0.1"));
@@ -217,9 +217,9 @@ test("the login chain works end to end over a real encrypted session", () => {
 test("every login-chain opcode is labelled in a trace, none are silently dropped", () => {
   const packets: ClientPacket[] = [
     { kind: "select-character", opcode: 0x03, characterId: 1 },
-    { kind: "create-character", opcode: 0x05, name: "Newbie" },
+    { kind: "check-name", opcode: 0x05, name: "Newbie" },
     {
-      kind: "check-name",
+      kind: "create-character",
       opcode: 0x06,
       name: "Newbie",
       appearance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],

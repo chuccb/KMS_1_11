@@ -356,7 +356,7 @@ function parseLoginReply(bytes: Uint8Array): {
   worlds?: { name: string; unknownId: number }[];
 } {
   const reader = new PacketReader(bytes);
-  assert.equal(reader.readByte(), LOGIN_OPCODE.login);
+  assert.equal(reader.readByte(), LOGIN_OPCODE.loginResult);
   const result = reader.readByte();
   if (result !== LOGIN_RESULT.ok) return { result };
   const app4 = reader.readU32();
@@ -416,57 +416,52 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   // 4. World select: the character slots (none yet).
   client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
   const worldReply = (await client.take(1))[0]!;
-  assert.equal(worldReply[0], LOGIN_OPCODE.worldSelect);
+  assert.equal(worldReply[0], LOGIN_OPCODE.worldSelectResult);
   assert.equal(worldReply[1], LOGIN_RESULT.ok);
   assert.equal(worldReply[2], 0, "no characters yet");
 
-  // 5. Name check -> 0x04 reply; then create -> 0x05 reply carrying the new CharacterData.
-  // `0x06`'s ten words are the dialog's six picks - face, hair, top, bottom, shoes, weapon - and its
-  // four dice rolls (FINDINGS 4.8.1a). The six picks all reach the record: face and hair as the
-  // record's own fields, the four clothes as worn equips (the only place the client reads an avatar's
-  // clothes from). WZ newDlg labels plus the four draw coordinates prove STR/DEX/INT/LUK.
-  client.send({ kind: "create-character", opcode: 0x05, name: "NoCheck" });
+  // 5. The official Check button sends c2s 0x05 with only the name and receives s2c 0x04.
+  // The actual create is c2s 0x06: name plus six selections and four dice words; s2c 0x05
+  // carries the new CharacterData. The request/reply opcode numbers are deliberately distinct here.
+  const appearance = [20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10];
+
+  // A direct create with a complete look is still refused until this connection has a successful
+  // matching 0x05 name check. This is not the packet emitted by the official Check button.
+  client.send({ kind: "create-character", opcode: 0x06, name: "NoCheck", appearance });
   const uncheckedCreateReader = new PacketReader((await client.take(1))[0]!);
-  assert.equal(uncheckedCreateReader.readByte(), LOGIN_OPCODE.createCharacter);
+  assert.equal(uncheckedCreateReader.readByte(), LOGIN_OPCODE.createCharacterResult);
   assert.equal(uncheckedCreateReader.readByte(), CREATE_CHARACTER_RESULT.failed);
   assert.equal(uncheckedCreateReader.exhausted, true);
   assert.ok(
     log.some((line) =>
-      line.includes(
-        'create refused for "NoCheck": no successful matching name-availability check; missing or invalid creation appearance/dice',
-      ),
+      line.includes('create refused for "NoCheck": no successful matching name-availability check'),
     ),
-    "a skipped name check must not be mislabeled as a duplicate name",
+    "a skipped name check must not be mislabeled as a duplicate name or missing appearance",
   );
 
-  client.send({
-    kind: "check-name",
-    opcode: 0x06,
-    name: "Hero",
-    appearance: [20000, 30000, 1040001, 1060001, 1071000, 1302000, 4, 5, 6, 10],
-  });
+  client.send({ kind: "check-name", opcode: 0x05, name: "Hero" });
   const nameReply = (await client.take(1))[0]!;
   const nameReader = new PacketReader(nameReply);
   assert.equal(nameReader.readByte(), LOGIN_OPCODE.nameCheckResult);
   assert.equal(nameReader.readAsciiString(), "Hero");
   assert.equal(nameReader.readByte(), 0, "the name is free");
 
-  client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+  client.send({ kind: "create-character", opcode: 0x06, name: "Hero", appearance });
   const createReply = (await client.take(1))[0]!;
   const createReader = new PacketReader(createReply);
-  assert.equal(createReader.readByte(), LOGIN_OPCODE.createCharacter);
+  assert.equal(createReader.readByte(), LOGIN_OPCODE.createCharacterResult);
   assert.equal(createReader.readByte(), CREATE_CHARACTER_RESULT.created);
   const created = readCharacterData(createReader);
   assert.equal(created.stats.name, "Hero");
   assert.equal(
     created.stats.unknown26,
     0,
-    "0 is our new-character default; the 0x06 creation request carries no value for this opaque byte",
+    "0 is our new-character default; the 0x06 create request carries no value for this opaque byte",
   );
   assert.deepEqual(
     [created.stats.appearanceA, created.stats.appearanceB],
     [20000, 30000],
-    "the new character carries the face and hair the dialog picked (0x06 words 1 and 2)",
+    "the new character carries the face and hair the 0x06 dialog picked (words 1 and 2)",
   );
   assert.deepEqual(
     [...(created.items?.worn ?? [])].map(([slot, item]) => [slot, item.itemId]),
@@ -486,22 +481,17 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   assert.ok(created.stats.id > 0);
   assert.equal(createReader.exhausted, true);
 
-  // 6. The same name is now taken.
-  client.send({
-    kind: "check-name",
-    opcode: 0x06,
-    name: "Hero",
-    appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
-  });
+  // 6. The same name is now taken by the global case-insensitive name check.
+  client.send({ kind: "check-name", opcode: 0x05, name: "Hero" });
   const takenReply = (await client.take(1))[0]!;
   const takenReader = new PacketReader(takenReply);
   takenReader.readByte();
   takenReader.readAsciiString();
   assert.equal(takenReader.readByte(), 1, "the name is taken");
 
-  client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+  client.send({ kind: "create-character", opcode: 0x06, name: "Hero", appearance });
   const duplicateCreateReader = new PacketReader((await client.take(1))[0]!);
-  assert.equal(duplicateCreateReader.readByte(), LOGIN_OPCODE.createCharacter);
+  assert.equal(duplicateCreateReader.readByte(), LOGIN_OPCODE.createCharacterResult);
   assert.equal(duplicateCreateReader.readByte(), CREATE_CHARACTER_RESULT.failed);
   assert.equal(duplicateCreateReader.exhausted, true, "failure carries no character record");
   assert.ok(
@@ -517,7 +507,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   client.send({ kind: "select-character", opcode: 0x03, characterId: created.stats.id });
   const selectReply = (await client.take(1))[0]!;
   const selectReader = new PacketReader(selectReply);
-  assert.equal(selectReader.readByte(), LOGIN_OPCODE.selectCharacter);
+  assert.equal(selectReader.readByte(), LOGIN_OPCODE.selectCharacterResult);
   assert.equal(selectReader.readByte(), LOGIN_RESULT.ok);
   assert.equal(selectReader.readU32(), 0x0100007f, "127.0.0.1 in network order");
   assert.equal(selectReader.readU16(), 8585);
@@ -538,7 +528,7 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   client.send({ kind: "delete-character", opcode: 0x07, characterId: created.stats.id });
   const deleteReply = (await client.take(1))[0]!;
   const deleteReader = new PacketReader(deleteReply);
-  assert.equal(deleteReader.readByte(), LOGIN_OPCODE.deleteResult);
+  assert.equal(deleteReader.readByte(), LOGIN_OPCODE.deleteCharacterResult);
   assert.equal(deleteReader.readU32(), created.stats.id);
   assert.equal(deleteReader.readByte(), 1, "flag: deleted (0 would make the client terminate)");
   assert.equal(deleteReader.exhausted, true);
@@ -1117,14 +1107,14 @@ test(
     await client.take(1);
     client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
     await client.take(1);
+    client.send({ kind: "check-name", opcode: 0x05, name: "Hero" });
+    await client.take(1);
     client.send({
-      kind: "check-name",
+      kind: "create-character",
       opcode: 0x06,
       name: "Hero",
       appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
     });
-    await client.take(1);
-    client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
     const createReply = (await client.take(1))[0]!;
     const createReader = new PacketReader(createReply);
     createReader.readByte();
@@ -3482,14 +3472,14 @@ test("two accounts never hand out the same character id", { timeout: 20000 }, as
     await client.take(1);
     client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
     await client.take(1);
+    client.send({ kind: "check-name", opcode: 0x05, name });
+    await client.take(1);
     client.send({
-      kind: "check-name",
+      kind: "create-character",
       opcode: 0x06,
       name,
       appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
     });
-    await client.take(1);
-    client.send({ kind: "create-character", opcode: 0x05, name });
     const reply = (await client.take(1))[0]!;
     client.close();
     return readCharacterData(new PacketReader(reply, 2)).stats.id;
@@ -4531,7 +4521,7 @@ test(
  * The whole reason a save exists: the next run of the server is the same world.
  *
  * Two login servers in one test, one store: the first run creates a character over a real socket
- * (0x04 -> 0x01 -> 0x02 -> 0x06 -> 0x05), and the second one - a fresh `LoginServer` over the same
+ * (c2s 0x04 handshake -> 0x01 login -> 0x02 world -> 0x05 name check -> 0x06 create), and the second one - a fresh `LoginServer` over the same
  * store, seeded with a *different* password for the same user - sees that character in the 0x02
  * character list. The seed losing is the point: the save file is the world, and `--account` is only
  * what a first run starts from.
@@ -4570,14 +4560,14 @@ test(
     await create.take(1);
     create.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
     await create.take(1);
+    create.send({ kind: "check-name", opcode: 0x05, name: "Hero" });
+    await create.take(1);
     create.send({
-      kind: "check-name",
+      kind: "create-character",
       opcode: 0x06,
       name: "Hero",
       appearance: [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10],
     });
-    await create.take(1);
-    create.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
     const createdReply = (await create.take(1))[0]!;
     const createdReader = new PacketReader(createdReply);
     createdReader.readByte();
@@ -4610,7 +4600,7 @@ test(
     back.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
     const worldReply = (await back.take(1))[0]!;
     const reader = new PacketReader(worldReply);
-    assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelect);
+    assert.equal(reader.readByte(), LOGIN_OPCODE.worldSelectResult);
     assert.equal(reader.readByte(), LOGIN_RESULT.ok);
     assert.equal(reader.readByte(), 1, "the character survived the restart");
     const sameHero = readCharacterData(reader);
@@ -6439,9 +6429,18 @@ test("a messenger room: invite, join, chat, leave (0x24/0x4d)", { timeout: 20000
   );
 });
 
-test("native create requires the exact successfully checked name and valid dice", async (t) => {
+test("native 0x05 checks names globally and 0x06 creates with the submitted appearance", async (t) => {
   const accounts = new Map<string, AccountRecord>([
     ["maker", { password: "maker", characters: [] }],
+    [
+      "other",
+      {
+        password: "other",
+        characters: [
+          characterDataOf({ ...zeroStats(), id: 91, name: "Reserved" }, startingCharacterItems()),
+        ],
+      },
+    ],
   ]);
   const server = new LoginServer({
     accounts,
@@ -6459,26 +6458,57 @@ test("native create requires the exact successfully checked name and valid dice"
   await client.take(1);
   client.send({ kind: "world-select", opcode: 0x02, worldId: 0 });
   await client.take(1);
-  const create = async (name: string) => {
-    client.send({ kind: "create-character", opcode: 0x05, name });
+  const appearance = [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10];
+  const check = async (name: string): Promise<number> => {
+    client.send({ kind: "check-name", opcode: 0x05, name });
+    const reader = new PacketReader((await client.take(1))[0]!);
+    assert.equal(reader.readByte(), LOGIN_OPCODE.nameCheckResult);
+    assert.equal(reader.readAsciiString(), name);
+    return (reader.readByte() << 24) >> 24;
+  };
+  const create = async (name: string, look = appearance): Promise<Uint8Array> => {
+    client.send({ kind: "create-character", opcode: 0x06, name, appearance: look });
     return (await client.take(1))[0]!;
   };
-  const appearance = [20000, 30030, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10];
-  assert.equal((await create("NoCheck"))[1], 0);
-  client.send({
-    kind: "check-name",
-    opcode: 0x06,
-    name: "BadDice",
-    appearance: [...appearance.slice(0, 6), 4, 5, 6, 7],
-  });
-  assert.equal((await client.take(1))[0]!.at(-1), 255, "signed -1 refuses invalid native dice");
-  assert.equal((await create("BadDice"))[1], 0);
-  client.send({ kind: "check-name", opcode: 0x06, name: "Checked", appearance });
-  await client.take(1);
-  assert.equal((await create("Different"))[1], 0, "cannot substitute a different name");
-  assert.equal((await create("Checked"))[1], 1);
+
+  assert.equal(
+    await check("rESERVED"),
+    1,
+    "name availability is global and ASCII-case-insensitive",
+  );
+  assert.equal(
+    (await create("reserved"))[1],
+    CREATE_CHARACTER_RESULT.failed,
+    "a name owned by another account cannot be created with different casing",
+  );
+
+  const unchecked = await create("NoCheck");
+  assert.equal(unchecked[0], LOGIN_OPCODE.createCharacterResult);
+  assert.equal(unchecked[1], CREATE_CHARACTER_RESULT.failed);
+  assert.equal(
+    await check("BadDice"),
+    0,
+    "a name-only 0x05 check does not validate or carry creation appearance",
+  );
+  const invalidDice = [...appearance.slice(0, 6), 4, 5, 6, 7];
+  const badLook = await create("BadDice", invalidDice);
+  assert.equal(badLook[1], CREATE_CHARACTER_RESULT.failed, "0x06 rejects the invalid dice");
+
+  assert.equal(await check("Checked"), 0);
+  assert.equal(
+    (await create("Different"))[1],
+    CREATE_CHARACTER_RESULT.failed,
+    "the 0x06 name must match the successful 0x05 check",
+  );
+  const created = await create("Checked");
+  assert.equal(created[0], LOGIN_OPCODE.createCharacterResult);
+  assert.equal(created[1], CREATE_CHARACTER_RESULT.created);
   assert.equal(accounts.get("maker")!.characters.length, 1);
-  assert.equal((await create("Checked"))[1], 0, "a checked result is consumed exactly once");
+  assert.equal(
+    (await create("Checked"))[1],
+    CREATE_CHARACTER_RESULT.failed,
+    "a successful name check is consumed exactly once",
+  );
 });
 
 test(

@@ -26,25 +26,17 @@
 import { PacketWriter } from "./packet.ts";
 import { writeCharacterData, type CharacterData } from "./chardata.ts";
 
-/** Opcodes of the login stages, in both directions. Names say which direction each one is used in. */
+/** Server -> client login-stage replies; c2s request opcodes live in `protocol/login.ts`. */
 export const LOGIN_OPCODE = {
-  /** CTitle, both directions: request `string id, string pw`; reply `u8 result [+ world list]`. */
-  login: 0x01,
-  /** CWorldSelect, both directions: request `u8 worldIndex`; reply `u8 result [+ slots]`. */
-  worldSelect: 0x02,
-  /** CCharSelect: request `u32 characterId`; reply `u8 result [+ game server address]`. */
-  selectCharacter: 0x03,
-  /** Server only: the answer to a name check (`string name, s8 result`). No request opcode exists
-   *  for it in this build - the check is requested with `checkName` below. */
+  loginResult: 0x01,
+  worldSelectResult: 0x02,
+  selectCharacterResult: 0x03,
+  /** Answer to c2s 0x05 (`string name`): `string name, s8 availability`. */
   nameCheckResult: 0x04,
-  /** CCharSelect: request `string name`; reply `u8 result [+ CharacterData]`. */
-  createCharacter: 0x05,
-  /** CCharSelect: request `string name` + the appearance to check; reply is `deleteResult`. */
-  checkName: 0x06,
-  /** Server only: the answer to a delete request (`u32 characterId, u8 flag`). */
-  deleteResult: 0x06,
-  /** CCharSelect: request `u32 characterId`. */
-  deleteCharacter: 0x07,
+  /** Answer to c2s 0x06 (`string name` + ten appearance words): result + CharacterData. */
+  createCharacterResult: 0x05,
+  /** Answer to c2s 0x07 (`u32 characterId`): echoed id + non-zero flag. */
+  deleteCharacterResult: 0x06,
   /**
    * Both directions: a `u32` the receiver sends straight back (FINDINGS 4.2). The client's
    * dispatcher (`sub_43B170`) handles it *before* the current stage, so it works at any point of a
@@ -140,7 +132,7 @@ export function encodeLoginResult(
   payload?: { account: LoginAccountInfo; worlds: WorldEntry[] },
 ): Uint8Array {
   const writer = new PacketWriter(256);
-  writer.writeByte(LOGIN_OPCODE.login);
+  writer.writeByte(LOGIN_OPCODE.loginResult);
   writer.writeByte(result & 0xff);
   if (result !== LOGIN_RESULT.ok) return writer.toBytes();
   if (!payload)
@@ -165,7 +157,7 @@ export function encodeWorldSelectResult(
   characters: CharacterData[] = [],
 ): Uint8Array {
   const writer = new PacketWriter(512);
-  writer.writeByte(LOGIN_OPCODE.worldSelect);
+  writer.writeByte(LOGIN_OPCODE.worldSelectResult);
   writer.writeByte(result & 0xff);
   if (result !== LOGIN_RESULT.ok) return writer.toBytes();
   if (characters.length > 3) throw new RangeError("the client only keeps three character slots");
@@ -220,7 +212,7 @@ export function encodeSelectCharacterResult(
   redirect?: GameServerRedirect,
 ): Uint8Array {
   const writer = new PacketWriter(32);
-  writer.writeByte(LOGIN_OPCODE.selectCharacter);
+  writer.writeByte(LOGIN_OPCODE.selectCharacterResult);
   writer.writeByte(result & 0xff);
   if (result !== LOGIN_RESULT.ok) return writer.toBytes();
   if (!redirect) throw new Error("a successful character select needs the game server address");
@@ -298,14 +290,12 @@ export function encodeEcho(value: number): Uint8Array {
 }
 
 /**
- * 0x05 reply: the created character, or - with no argument - the client's generic failure.
- *
- * The client's request carries only the name (`sub_42FD30` sends opcode 5 and one string), so the
- * server has to remember the appearance from the preceding 0x06 request until the user confirms.
+ * 0x05 reply to the c2s 0x06 create request: the created character, or - with no argument - the
+ * client's generic failure. The request itself carries the name and all ten appearance/stat words.
  */
 export function encodeCreateCharacterResult(character?: CharacterData): Uint8Array {
   const writer = new PacketWriter(256);
-  writer.writeByte(LOGIN_OPCODE.createCharacter);
+  writer.writeByte(LOGIN_OPCODE.createCharacterResult);
   writer.writeByte(
     character === undefined ? CREATE_CHARACTER_RESULT.failed : CREATE_CHARACTER_RESULT.created,
   );
@@ -328,7 +318,7 @@ export function encodeDeleteCharacterResult(characterId: number, flag: number): 
     );
   }
   const writer = new PacketWriter(32);
-  writer.writeByte(LOGIN_OPCODE.deleteResult);
+  writer.writeByte(LOGIN_OPCODE.deleteCharacterResult);
   writer.writeU32(characterId >>> 0);
   writer.writeByte(flag & 0xff);
   return writer.toBytes();

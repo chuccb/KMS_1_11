@@ -578,9 +578,7 @@ class BrowserSession {
             this.createCharacter(String(message.name ?? ""), message.appearance),
           );
         case "check-name":
-          return await this.serialLogin(() =>
-            this.checkName(String(message.name ?? ""), message.appearance),
-          );
+          return await this.serialLogin(() => this.checkName(String(message.name ?? "")));
         case "delete-character":
           return await this.serialLogin(() =>
             this.deleteCharacter(Number(message.id), message.confirmed === true),
@@ -1371,13 +1369,18 @@ class BrowserSession {
     if (!this.characterStage) throw new Error("character selection is not active");
     return this.require();
   }
-  private creationArguments(name: string, value: unknown): { name: string; appearance: number[] } {
+  private creationName(name: string): string {
     const catalog = creationCatalogOf(this.options.art?.reader);
     const wire = String.fromCharCode(...encodeCp949(name));
     if (!validCreationName(wire, catalog?.forbidden))
       throw new Error(
         "角色名稱須為 4–12 個 CP949 bytes 的英數／韓文，且不可含禁用名稱或四個以上 I/l",
       );
+    return wire;
+  }
+  private creationArguments(name: string, value: unknown): { name: string; appearance: number[] } {
+    const catalog = creationCatalogOf(this.options.art?.reader);
+    const wire = this.creationName(name);
     const groups = this.gender === 1 ? catalog?.female : catalog?.male;
     const defaults = [
       ...(groups?.map((g) => g[0]!.id) ?? [20000, 30000, 1040002, 1060002, 1072001, 1302000]),
@@ -1391,10 +1394,9 @@ class BrowserSession {
       appearance: validateCreationLook(value ?? defaults, catalog, this.gender),
     };
   }
-  private async checkName(name: string, value: unknown): Promise<void> {
+  private async checkName(name: string): Promise<void> {
     const session = this.requireCharacterStage();
-    const args = this.creationArguments(name, value);
-    const result = await session.checkName(args.name, args.appearance);
+    const result = await session.checkName(this.creationName(name));
     this.send({ t: "name-checked", name, result });
   }
   private async createCharacter(name: string, value: unknown): Promise<void> {

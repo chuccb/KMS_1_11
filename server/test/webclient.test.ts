@@ -1386,8 +1386,8 @@ test(
     await browser.nextKind("characters");
     const appearance = [20002, 30020, 1040010, 1060006, 1072005, 1312004, 13, 4, 4, 4];
     // Two checks sent without waiting must retain matching replies, despite sharing opcode 0x04.
-    browser.send({ t: "check-name", name: "CheckOne", appearance });
-    browser.send({ t: "check-name", name: "CheckTwo", appearance });
+    browser.send({ t: "check-name", name: "CheckOne" });
+    browser.send({ t: "check-name", name: "CheckTwo" });
     assert.deepEqual(await browser.nextKind("name-checked"), {
       t: "name-checked",
       name: "CheckOne",
@@ -1400,7 +1400,7 @@ test(
     });
     assert.equal(world.accounts.get("admin")!.characters.length, 1, "checks never create");
     for (const name of ["abc", "Too Long", "IIII", "測試", "운영자1"]) {
-      browser.send({ t: "check-name", name, appearance });
+      browser.send({ t: "check-name", name });
       assert.match(String((await browser.nextKind("error")).message), /角色名稱/);
     }
     browser.send({
@@ -1466,7 +1466,7 @@ test(
     });
     assert.match(String((await browser.nextKind("error")).message), /MakeCharInfo/);
     const appearance = [...catalog.female.map((g) => g.at(-1)!.id), 4, 5, 6, 10];
-    browser.send({ t: "check-name", name: "한글용사", appearance });
+    browser.send({ t: "check-name", name: "한글용사" });
     assert.equal((await browser.nextKind("name-checked")).result, 0);
     browser.send({ t: "create", name: "한글용사", appearance });
     const characters = (await browser.nextKind("characters")).characters as {

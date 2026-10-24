@@ -383,8 +383,8 @@ export interface LoginServerOptions {
     body?: Uint8Array;
   };
   /**
-   * Called after a mutation this server is responsible for: a character created (`0x05`) or deleted
-   * (`0x07`). `game/save.ts` is the implementation that writes a file; a test can pass nothing.
+   * Called after a mutation this server is responsible for: a character created from c2s `0x06` or
+   * deleted by c2s `0x07`. `game/save.ts` writes a file; a test can pass nothing.
    *
    * A throw from here is caught and logged, not propagated: a save that fails must not kill the
    * connection that triggered it (the login flow already answered the client by then).
@@ -397,8 +397,7 @@ export interface LoginServerOptions {
 interface ConnectionState {
   stage: "login" | "world" | "char";
   username?: string;
-  /** The appearance words the last 0x06 request asked for, kept for the next 0x05. */
-  appearanceHint?: number[];
+  /** A successful c2s 0x05 name check, required by the following c2s 0x06 create request. */
   checkedName?: string;
 }
 
@@ -730,35 +729,26 @@ export class LoginServer {
 
       case "check-name": {
         if (state.stage !== "char" || state.username === undefined) return;
+        // Every new attempt replaces the previous check. The native client sends only a locally
+        // validated name in c2s 0x05, then expects its result in s2c 0x04.
         delete state.checkedName;
-        delete state.appearanceHint;
         const taken = this.nameTaken(packet.name);
-        let valid = validCreationName(packet.name, this.options.creationCatalog?.forbidden);
-        try {
-          state.appearanceHint = validateCreationLook(
-            packet.appearance,
-            this.options.creationCatalog,
-            this.options.accounts.get(state.username)?.gender ?? 0,
-          );
-        } catch {
-          valid = false;
-        }
-        if (valid && !taken) state.checkedName = packet.name;
-        this.reply(
-          socket,
-          sendState,
-          encodeNameCheckResult(
-            packet.name,
-            !valid
-              ? NAME_CHECK_RESULT.failed
-              : taken
-                ? NAME_CHECK_RESULT.taken
-                : NAME_CHECK_RESULT.available,
-          ),
-        );
+        const valid = validCreationName(packet.name, this.options.creationCatalog?.forbidden);
+        const result = !valid
+          ? NAME_CHECK_RESULT.failed
+          : taken
+            ? NAME_CHECK_RESULT.taken
+            : NAME_CHECK_RESULT.available;
+        if (result === NAME_CHECK_RESULT.available) state.checkedName = packet.name;
+        this.reply(socket, sendState, encodeNameCheckResult(packet.name, result));
         this.log(
-          `  name "${packet.name}" is ${taken ? "taken" : "free"} ` +
-            `(look: ${describeLookWords(packet.appearance)})`,
+          `  name check for "${packet.name}": ${
+            result === NAME_CHECK_RESULT.available
+              ? "available"
+              : result === NAME_CHECK_RESULT.taken
+                ? "taken"
+                : "failed (invalid or forbidden name)"
+          }`,
         );
         return;
       }
@@ -767,9 +757,9 @@ export class LoginServer {
         if (state.stage !== "char" || state.username === undefined) return;
         const account = this.options.accounts.get(state.username);
         if (!account) return;
-        // A refusal is the bare reply with result 0 - the client prints "캐릭터 생성에 실패했습니다"
-        // for every failure (the *why* is this log), and 0 is the one value it never decodes a record
-        // from (`sub_4329A0`; see `encodeCreateCharacterResult`).
+        // A refusal is s2c 0x05 + result 0 - sub_4329A0 prints its generic failure message and does
+        // not decode a CharacterData record. This c2s 0x06 request carries name and all ten look/dice
+        // words; the preceding c2s 0x05 name check is tracked separately above.
         if (account.characters.length >= 3) {
           this.log(`  create refused: "${state.username}" already has three characters`);
           this.reply(socket, sendState, encodeCreateCharacterResult());
@@ -780,10 +770,19 @@ export class LoginServer {
           refusalReasons.push("no successful matching name-availability check");
         if (!validCreationName(packet.name, this.options.creationCatalog?.forbidden))
           refusalReasons.push("invalid or forbidden character name");
-        if (!validCreationDice(state.appearanceHint?.slice(6) ?? []))
-          refusalReasons.push("missing or invalid creation appearance/dice");
         if (this.nameTaken(packet.name)) refusalReasons.push("name already exists");
-        if (refusalReasons.length > 0) {
+        let appearance: number[] | undefined;
+        try {
+          appearance = validateCreationLook(
+            packet.appearance,
+            this.options.creationCatalog,
+            account.gender ?? 0,
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          refusalReasons.push(`invalid creation appearance/dice (${reason})`);
+        }
+        if (refusalReasons.length > 0 || appearance === undefined) {
           this.log(`  create refused for "${packet.name}": ${refusalReasons.join("; ")}`);
           this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
@@ -791,7 +790,7 @@ export class LoginServer {
         const created = this.createCharacter(
           nextCharacterId(this.options.accounts),
           packet.name,
-          state.appearanceHint ?? [],
+          appearance,
           undefined,
           account.gender ?? 0,
         );
@@ -799,7 +798,8 @@ export class LoginServer {
         account.characters.push(created);
         this.reply(socket, sendState, encodeCreateCharacterResult(withDefaultLook(created)));
         this.log(
-          `  created "${created.stats.name}" (id ${created.stats.id}) ${describeWorn(created)}`,
+          `  created "${created.stats.name}" (id ${created.stats.id}) ${describeWorn(created)}; ` +
+            describeLookWords(appearance),
         );
         this.persist();
         return;

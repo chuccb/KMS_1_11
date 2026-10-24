@@ -195,8 +195,8 @@ sub_45DC80(&dst, ptr, avail);  // 讀 2 bytes（u16）
 | 0x02 | `u8 worldIndex` | `sub_54DFC0`（`CWorldSelect`）| **選世界**（index 對應 0x01 回包裡的世界清單，§4.8）|
 | 0x03 | `u32 characterId` | `sub_431620(1000)`（`CUICharSelect`）| **選角進入遊戲**（§4.8）|
 | 0x04 | `u32 *(CWvsApp+0x14)` | `sub_43A410` | **握手回覆**（見 §2）|
-| 0x05 | `u16 len name` | `sub_42FD30`（`CUINewChar` 的「確定」）| **建立角色**（只送名字，外觀由 0x06 先送，§4.8）|
-| 0x06 | `u16 len name` + `u32 ×10` | `sub_431620(1002)` | **角色名檢查 + 外觀**（回應是 0x04，§4.8）|
+| 0x05 | `u16 len name` | `sub_42FD30`，由 `sub_430CD0` 的 `BtCheckId` 控制項 1001 呼叫 | **角色名檢查**（回應是 s2c 0x04；本地先經 `sub_524A00` 驗名）|
+| 0x06 | `u16 len name` + `u32 ×10` | `sub_431620(1002)`，CUINewChar 的 OK 返回 1 後送出 | **建立角色**（名字 + 六項外觀 + 四顆骰子；回應是 s2c 0x05，§4.8）|
 | 0x07 | `u32 characterId` | `sub_431620(1001)` | **刪除角色**（回應是 0x06，§4.8）|
 | 0x08 | `u32`（原封不動回傳）| `sub_43B280` | **echo/ping 回覆**（見 §4.2）|
 | 0x09 | `u32`（`*(this+300)`）| `sub_5545F0` | 世界伺服器相關請求 |
@@ -273,17 +273,17 @@ count × {
 
 ### 4.8 ✅ 登入鏈：login → world → char → game（全部已解到欄位層）
 
-四個階段的封包如下。所有 `result` 值用同一組訊息字串（`sub_4D0DB0`／`sub_54E250`／`sub_432FB0`
-共用），`0` = 成功並繼續解析 payload —— **唯一的例外是 `0x05`（建立角色）**：那裡 `0` 是**失敗**，
-非 0 才是「成功，後面接新角色的 `CharacterData`」（`sub_4329A0`，見下）。
+四個階段的封包如下。`CTitle`／`CWorldSelect`／選角的進場結果 `0x03` 共用 `0` = 成功並繼續解析 payload；
+但 s2c `0x05` 是建立角色結果，`0` = **失敗**、非 0 才接新角色的 `CharacterData`（`sub_4329A0`）。
+注意同號封包按方向分開：c2s `0x05` 是**名檢查**，s2c `0x05` 是**建立結果**。
 
 | 階段 | client → server | server → client |
 |---|---|---|
 | `CTitle` | `0x01`：`string 帳號` + `string 密碼`（`sub_4D0B20`）| `0x01`：`u8 result`，成功時見下 |
 | `CWorldSelect` | `0x02`：`u8 worldIndex`（`sub_54DFC0`）| `0x02`：`u8 result`，成功時 = 角色清單 |
 | `CCharSelect` | `0x03`：`u32 characterId`（`sub_431620(1000)`）| `0x03`：`u8 result`，成功時 = 遊戲伺服器位址 |
-| `CCharSelect` | `0x06`：`string 名字` + `u32 ×10`（外觀）| `0x04`：`string 名字` + `s8 result`（0 = 可用）|
-| `CCharSelect` | `0x05`：`string 名字`（建立）| `0x05`：`u8 result`（**0 = 失敗、非 0 = 成功**，成功時後面接新角色的 `CharacterData`）|
+| `CCharSelect` | `0x05`：`string 名字`（Check 按鈕，`sub_42FD30`）| `0x04`：`string 名字` + `s8 result`（0 = 可用）|
+| `CCharSelect` | `0x06`：`string 名字` + `u32 ×10`（OK 建立，`sub_431620(1002)`）| `0x05`：`u8 result`（**0 = 失敗、非 0 = 成功**，成功時後面接新角色的 `CharacterData`）|
 | `CCharSelect` | `0x07`：`u32 characterId`（刪除）| `0x06`：`u32 characterId` + `u8 flag`（0 → client 丟 `CTerminateException 570425350`）|
 | （連上遊戲伺服器後）| `0x04`：`u32 characterId` | — |
 
@@ -346,8 +346,9 @@ u32 characterId  // → CWvsApp+0x14；**這就是本機角色的 id**（§4.11.
 > 的 case 群完全對應（`0xFF↔0`、`6↔7`、`8↔9`、`9↔10`），jump table `jpt_433024` 的註解也把
 > default 標成 `cases 0,1`。**`result = 1` 會走成功分支**這件事很不直覺，但兩個 handler 都是這樣。
 
-> 建立角色的外觀：`0x05` 只送名字，外觀在**前一個** `0x06` 裡。十個 u32 的順序與來源**已解出**
-> （§4.8.1a）：**臉、頭髮、上衣、褲子、鞋子、武器，然後四顆骰子**。伺服器把前兩個寫進新角色紀錄的
+> 建立流程的兩個方向不可混淆：c2s `0x05` 只送名字並請求可用性檢查；按下 CUINewChar 的 OK 後，
+> c2s `0x06` 才送名字與十個 u32 外觀／骰子。其順序與來源**已解出**（§4.8.1a）：
+> **臉、頭髮、上衣、褲子、鞋子、武器，然後四顆骰子**。伺服器把前兩個寫進新角色紀錄的
 > `appearanceA`／`appearanceB`（就是 client 畫的臉與頭髮，§4.9），第 3–6 個變成**穿戴裝備**
 > （§4.11.3d 的格號表），四顆骰子依序落為 STR／DEX／INT／LUK（原 newDlg 標籤與繪字座標交叉證明）。
 

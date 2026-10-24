@@ -11,8 +11,8 @@ import { creationCatalogOf } from "./game/creation.ts";
  * `capture` runs the harness from ADR-004: point the original client (or the rewritten
  * one) at this port and it writes a JSONL trace of everything received.
  * `decode` replays that trace through the session cipher so the packets are readable.
- * `serve` is the login server: it answers the decoded login chain (0x01/0x02/0x03/0x05/0x06),
- * so a client can log in, pick a world and see the character-select screen.
+ * `serve` is the login server: it answers the decoded login chain (including c2s 0x05 name-check
+ * requests and c2s 0x06 create requests), so a client can log in, pick a world and create/select characters.
  */
 import { schemaJson, schemaText } from "./protocol/schema.ts";
 import { runWzCommand } from "./wz/cli.ts";
@@ -151,8 +151,8 @@ notes:
   serve implements the login chain of docs/protocol/FINDINGS.md 4.7-4.9 using the checked
   length-prefixed 0x00D3 greeting: it answers 0x01 with the world list,
   0x02 with up to three character slots and
-  0x03 with the game server address plus the character id; 0x06/0x04 handle name checks, 0x05 creates a
-  character and 0x07 deletes one. Accounts and characters are in memory only (a restart forgets
+  0x03 with the game server address plus the character id; c2s 0x05/s2c 0x04 check a name, c2s 0x06/s2c
+  0x05 create a character, and c2s 0x07/s2c 0x06 delete one. Accounts and characters are in memory only (a restart forgets
   them) and created characters are stat-only; with --game-port it also opens the game-server
   listener, which claims the handoff and then sends 0x16, moving the client into --map (default
   1000000, a map that exists in Data.wz). The map id travels inside the CharacterData of 0x16

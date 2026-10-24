@@ -51,8 +51,8 @@ test("an opcode appears at most once per direction and stage", () => {
 });
 
 test("the same opcode is allowed in both directions when the client really does that", () => {
-  // 0x05 is "create character" towards the server and "here is the created character" back; 0x22 is
-  // a GM notice towards the server and a user move back. Both pairs exist in the catalogue.
+  // c2s 0x05 checks a name, while s2c 0x05 returns the created character. 0x22 is a GM notice
+  // towards the server and a user move back. Both pairs exist in the catalogue.
   assert.ok(findPacket(0x05, "c2s", "login"));
   assert.ok(findPacket(0x05, "s2c", "login"));
   assert.ok(findPacket(0x22, "c2s", "field"));

@@ -17,7 +17,8 @@ interface CreationLook {
   items: number[];
 }
 type CreationRequest =
-  | { t: "check-name" | "create"; name: string; appearance: number[] }
+  | { t: "check-name"; name: string }
+  | { t: "create"; name: string; appearance: number[] }
   | { t: "delete-character"; id: number; confirmed: true };
 interface CharacterDialogOptions {
   ctx: CanvasRenderingContext2D;
@@ -252,7 +253,7 @@ export function characterDialogs({
     checkedName = "";
     if (!input.value) return notice("캐릭터이름은 4자 이상이어야 합니다.");
     setBusy(true);
-    send({ t: "check-name", name: input.value, appearance: appearance() });
+    send({ t: "check-name", name: input.value });
   }
   function submit() {
     if (mode !== "create" || pending || diceStep > 0) return;

@@ -6399,3 +6399,41 @@ The empty-string form has 12 payload bytes and 14 total wire bytes. That is only
 - The first format gate reported four changed TypeScript files; ran the repository Bun formatter and reran the complete check successfully. No compiler options were weakened or tests skipped.
 - `--handshake-body` now attaches counted bytes with either auto-random or pinned capture seeds; off/non-session combinations and a missing hex value are rejected, and serve/capture startup text reports the actual counted-byte size.
 - Build output stayed in ignored `dist/client`. No original-server PCAP/raw greeting was made; no LIVE login, role operation, save read/write, or state-changing probe was performed.
+
+## ADR-168：依原版 CUINewChar UI／send／response 路徑校正名檢查與建角 opcode（2026-10-24）
+
+**狀態**：已接受並實作。此 ADR 取代先前把 c2s `0x06` 當名稱檢查、c2s `0x05` 當建角的判讀；歷史 ADR／開發紀錄保留當時的時間線，但不得再作為目前 wire mapping。
+
+### 原版證據（請求與回應分方向）
+
+1. `sub_42F160` 建立 `UI/Basic.img/BtCheckId` 按鈕，控制項 id 為 `1001`；`sub_430CD0` 的 `case 1001` 呼叫 `sub_42FD30`。這是名稱欄旁的 Check 按鈕，不是建立角色的 OK。
+2. `sub_42FD30` 從名稱欄取字串，先呼叫本地 `sub_524A00` 驗名；成功後以 `sub_4A1EA0(..., 5, ...)` 建立 **c2s `0x05`**，只附加名稱字串，再送出。這個請求沒有外觀／骰點。
+3. CCharSelect 的 `sub_431EE0` 把 **s2c `0x04`** 分派給 `sub_432430`；它讀回名稱與 signed status，`0` 才記下可用的已檢查名稱，正值表示已使用、負值表示檢查失敗。CUINewChar 的 `sub_4304E0` 在 OK 路徑比對目前輸入名稱與已檢查名稱；不相同就顯示「請先按 Check」訊息，不接受提交。
+4. 名稱相符、CUINewChar modal 回傳 `1` 後，`sub_431620(1002)` 才組 **c2s `0x06`**：名稱、六個選單值、四個骰點／能力值，共十個 u32；送包後的 s2c `0x05` 由 `sub_4329A0` 當作建立結果，非零時才讀入新 `CharacterData`。同一個 `sub_431EE0` 另把 s2c `0x06` 分派給刪除結果 `sub_432890`。
+
+| 方向 | opcode | payload／意義 | 對應回應 |
+|---|---:|---|---|
+| c2s | `0x05` | 名稱字串；可用性檢查 | s2c `0x04`：名稱 + signed status |
+| c2s | `0x06` | 名稱字串 + `u32 ×10` 外觀／骰點；實際建立角色 | s2c `0x05`：result + 成功時的 `CharacterData` |
+| c2s | `0x07` | character id；刪除 | s2c `0x06`：character id + flag |
+
+### 根因與決策
+
+使用者提供的官方 client 日誌為 `create refused for "tesuto": no successful matching name-availability check; missing or invalid creation appearance/dice`，並確認這是在按名稱確認時出現。原 server 把 **c2s `0x05` 名稱檢查**誤解成「只帶名字的建立」，把 **c2s `0x06` 真正建角請求**誤解成「帶外觀的名稱檢查」：因此官方 Check 點擊抵達時被當成未檢查、無外觀的 create 而拒絕。這與使用者報告的時機及 refusal reason 完全一致；不是舊 log、壞名字或使用者漏按 Check。
+
+1. `CLIENT_OPCODE` 現在只描述 c2s 請求：`checkName=0x05` 只讀名字；`createCharacter=0x06` 讀名字與十個 u32，並在 encoder 強制十個 word。server s2c 的 `LOGIN_OPCODE` 分開命名為 result opcodes（`nameCheckResult=0x04`、`createCharacterResult=0x05`、`deleteCharacterResult=0x06`），不再把請求與回應共用同一組名稱。
+2. LoginServer 的 c2s `0x05` 僅驗證名字與全域重複狀態、回 s2c `0x04`，並只在名稱合法且全域未使用時記錄該連線的 `checkedName`。c2s `0x06` 必須匹配該成功檢查；外觀與骰點從同一個 create packet 驗證，不再從名稱檢查封包暫存。成功後 consume check；拒絕不建立角色、不改存檔。
+3. 全域、大小寫不敏感的名稱唯一性與 create 時再檢查的競態保護保留；不加 fallback、不自動登入、不改動／刪除角色或存檔。瀏覽器 UI 的 JSON 亦改為 `check-name {name}`、`create {name, appearance[10]}`，其 TCP bridge 按原版方向送 `0x05` 後再送 `0x06`。
+4. `FINDINGS.md`、`CREATION_VALIDATION.md`、`CLIENT.md`、server README／CLI、codec schema、ClientSession、probe script 與 regression tests 均更新為方向分離的正確對照。協定測試以 `tesuto` golden bytes 鎖定 `c2s 05 06 00 ...` 只有名稱，及 `c2s 06` 後接十個 little-endian u32；整合測試同時驗證「未檢查不能 create」、name-only check、跨帳號大小寫不敏感的全球重名拒絕、實際 look create、骰點拒絕、名稱不匹配與成功後 consume。
+
+### 安全與驗證界線
+
+- 不使用官方 client 重新測試、不登入 LIVE、不連線使用者的預覽、不操作既有角色、不讀寫既有 save。自動化測試使用本機合成的 LoginServer／帳號資料與 test-owned memory/temp stores；沒有做 LIVE state-changing probe，也沒有觸碰使用者資料。
+- 確認修正的是協定 builder／decoder／server handler 全鏈，不是只改 refusal log。驗證數據與命令記於本 ADR 的測試段。
+
+### 驗證（2026-10-24）
+
+- Golden wire／login chain／web bridge／typed UI targeted tests：**65 pass／0 fail**，跨 `loginchain.test.ts`、`loginflow.test.ts`、`webclient.test.ts`、`typed-ui-components.test.ts`。
+- LoginServer 的正常登入鏈與 native name-check/create regression：**2 pass／0 fail**（47 tests filtered）；覆蓋 name-only c2s `0x05`、appearance-bearing c2s `0x06`、invalid dice、exact-name gating、one-time check consumption，以及跨帳號 ASCII-case-insensitive global uniqueness。
+- `npx --yes bun@1.4.4 run check`：strict typecheck、全域 format check、完整 suite **1501 pass／0 fail／5334 `expect()` calls，174 files**，以及 browser build 均通過。
+- `git diff --check` 通過。`tesuto` golden-byte fixture 只鎖定 packet 編碼；未查詢 LIVE 帳號，也不聲稱此名稱在使用者資料中可用。

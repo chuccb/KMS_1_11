@@ -82,7 +82,7 @@ import { encodeAbilityRequest, type Ability } from "../protocol/ability.ts";
 import net from "node:net";
 import { CipherState, SERVER_SEND_MAGIC } from "../protocol/cipher.ts";
 import { encodeSessionPacket, SessionDeframer } from "../protocol/session.ts";
-import { encodeClientPacket } from "../protocol/login.ts";
+import { CLIENT_OPCODE, encodeClientPacket } from "../protocol/login.ts";
 import { PacketReader } from "../protocol/packet.ts";
 import {
   LOGIN_OPCODE,
@@ -185,7 +185,7 @@ import { STAT_OPCODE, readStatUpdate, type StatDiff } from "../protocol/stat.ts"
 import { expToNextLevel } from "../game/exp.ts";
 import type { MovePath } from "../protocol/movepath.ts";
 
-/** The ten appearance words the create dialog sends (`CHECK_NAME_APPEARANCE_WORDS`). */
+/** The ten appearance words the create dialog sends in the c2s 0x06 create request. */
 const CREATE_DIALOG_LOOK = [20000, 30000, 1040002, 1060002, 1072001, 1302000, 4, 5, 6, 10];
 
 /** What a view needs to know about the character the connection belongs to. */
@@ -516,16 +516,15 @@ export interface CharacterListReply {
 }
 
 /**
- * What `0x06` + `0x05` came back with.
+ * What the s2c 0x04 name-check reply and s2c 0x05 create reply returned for one high-level create action.
  *
- * The name check and the create are one operation here because the 2003 dialog also sends them as a
- * pair, and because the server keeps the check's appearance words for the create that follows: a
- * `0x05` with no `0x06` before it is created from the default look instead of the chosen one.
+ * The adapter first checks the name, then sends the name and current appearance in the create
+ * request. The native client uses the same order: c2s 0x05 → s2c 0x04, then c2s 0x06 → s2c 0x05.
  */
 export interface CreateCharacterReply {
-  /** The `0x06` answer: 0 free, a positive value taken, negative "the check itself failed". */
+  /** The s2c `0x04` answer to c2s `0x05`: 0 free, positive taken, negative check failure. */
   nameCheck: number;
-  /** The record from `0x05`, present only when the server accepted the create. */
+  /** The record from s2c `0x05`, present only when the c2s `0x06` create was accepted. */
   character?: CharacterData;
 }
 
@@ -794,12 +793,12 @@ export class ClientSession {
     await this.link.send(
       encodeClientPacket({
         kind: "login-request",
-        opcode: LOGIN_OPCODE.login,
+        opcode: CLIENT_OPCODE.loginRequest,
         username,
         password,
       }),
     );
-    const reply = await this.link.take(LOGIN_OPCODE.login, this.timeoutMs);
+    const reply = await this.link.take(LOGIN_OPCODE.loginResult, this.timeoutMs);
     const reader = new PacketReader(reply, 1);
     const result = reader.readByte();
     if (result !== LOGIN_RESULT.ok) return { result, worlds: [] };
@@ -823,11 +822,11 @@ export class ClientSession {
     await link.send(
       encodeClientPacket({
         kind: "world-select",
-        opcode: LOGIN_OPCODE.worldSelect,
+        opcode: CLIENT_OPCODE.worldSelect,
         worldId,
       }),
     );
-    const reply = await link.take(LOGIN_OPCODE.worldSelect, this.timeoutMs);
+    const reply = await link.take(LOGIN_OPCODE.worldSelectResult, this.timeoutMs);
     const reader = new PacketReader(reply, 1);
     const result = reader.readByte();
     if (result !== LOGIN_RESULT.ok) return { result, characters: [] };
@@ -837,18 +836,14 @@ export class ClientSession {
     return { result, characters };
   }
 
-  /** Check the current name/look without creating anything. Caller serializes login operations. */
-  async checkName(
-    name: string,
-    appearance: readonly number[] = CREATE_DIALOG_LOOK,
-  ): Promise<number> {
+  /** Check only the current name, matching the native c2s 0x05 request. */
+  async checkName(name: string): Promise<number> {
     const link = this.requireLink();
     await link.send(
       encodeClientPacket({
         kind: "check-name",
-        opcode: LOGIN_OPCODE.checkName,
+        opcode: CLIENT_OPCODE.checkName,
         name,
-        appearance: [...appearance],
       }),
     );
     const checked = await link.take(LOGIN_OPCODE.nameCheckResult, this.timeoutMs);
@@ -857,22 +852,23 @@ export class ClientSession {
       throw new Error("name-check reply did not match request");
     return (reader.readByte() << 24) >> 24;
   }
-  /** Refresh the name/look check before committing: the selected equipment/dice may have changed. */
+  /** Recheck the name, then commit the current equipment/dice in the native c2s 0x06 request. */
   async createCharacter(
     name: string,
     appearance: readonly number[] = CREATE_DIALOG_LOOK,
   ): Promise<CreateCharacterReply> {
-    const nameCheck = await this.checkName(name, appearance);
+    const nameCheck = await this.checkName(name);
     if (nameCheck !== NAME_CHECK_RESULT.available) return { nameCheck };
     const link = this.requireLink();
     await link.send(
       encodeClientPacket({
         kind: "create-character",
-        opcode: LOGIN_OPCODE.createCharacter,
+        opcode: CLIENT_OPCODE.createCharacter,
         name,
+        appearance: [...appearance],
       }),
     );
-    const created = await link.take(LOGIN_OPCODE.createCharacter, this.timeoutMs);
+    const created = await link.take(LOGIN_OPCODE.createCharacterResult, this.timeoutMs);
     if ((created[1] ?? 0) === 0) return { nameCheck };
     return {
       nameCheck,
@@ -884,11 +880,14 @@ export class ClientSession {
     await link.send(
       encodeClientPacket({
         kind: "delete-character",
-        opcode: LOGIN_OPCODE.deleteCharacter,
+        opcode: CLIENT_OPCODE.deleteCharacter,
         characterId,
       }),
     );
-    const reply = new PacketReader(await link.take(LOGIN_OPCODE.deleteResult, this.timeoutMs), 1);
+    const reply = new PacketReader(
+      await link.take(LOGIN_OPCODE.deleteCharacterResult, this.timeoutMs),
+      1,
+    );
     if (reply.readU32() !== characterId)
       throw new Error("delete reply did not match requested character");
     return reply.readByte() !== 0;
@@ -900,11 +899,11 @@ export class ClientSession {
     await link.send(
       encodeClientPacket({
         kind: "select-character",
-        opcode: LOGIN_OPCODE.selectCharacter,
+        opcode: CLIENT_OPCODE.selectCharacter,
         characterId,
       }),
     );
-    const reply = await link.take(LOGIN_OPCODE.selectCharacter, this.timeoutMs);
+    const reply = await link.take(LOGIN_OPCODE.selectCharacterResult, this.timeoutMs);
     const reader = new PacketReader(reply, 1);
     const result = reader.readByte();
     if (result !== LOGIN_RESULT.ok) return { result, ip: "", port: 0, characterId: 0 };
