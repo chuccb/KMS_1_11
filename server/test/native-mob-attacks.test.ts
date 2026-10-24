@@ -331,6 +331,7 @@ test("session forwards unsigned Value and u16 MP; 0x34 is not a hit action", () 
   const value = packMobAim({ x: -30, y: -100 });
   fake.handleFieldPacket(
     encodeMobMove(1, {
+      stateByte: 0,
       actionByte: 20,
       value,
       path: {

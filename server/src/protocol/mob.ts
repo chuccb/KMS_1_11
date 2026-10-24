@@ -138,7 +138,8 @@ export const MOB_OPCODE = {
    */
   presence: 0x31,
   /**
-   * `CMobPool` 0x33 (`sub_492380` -> `sub_488BC0`): the mob moves - `u32 mobId` + `MobMove`.
+   * `CMobPool` 0x33 (`sub_492380` -> `sub_488BC0`): `u32 mobId`, then `u8 stateByte`, `u8 actionByte`,
+   * `u32 value`, and `CMovePath`.
    */
   move: 0x33,
   /**
@@ -461,11 +462,14 @@ export function readMobEnterField(reader: PacketReader): MobEnterField {
 /**
  * The body of one `0x33` (mob move) packet: everything `sub_488BC0` reads after the mob id.
  *
- * `value` is only handed to `sub_488E30` and only for the attack actions (10..12); for a walking or
- * standing mob nothing reads it, so 0 is the value to send (see the header for the disassembly).
+ * The first byte sets the client's mob state at the end of the handler (`0` -> -2, nonzero -> -3);
+ * the second byte is the action/facing/keep-animation byte. `value` is only handed to
+ * `sub_488E30` for attack actions (10..12); a walking or standing mob sends 0.
  */
 export interface MobMove {
-  /** `u8`: only the sign matters - bit 7 set means "keep the animation that is running". */
+  /** `u8`: native `byte1`; client stores mob state -2 for 0 and -3 for nonzero. */
+  stateByte: number;
+  /** `u8`: bit 7 set means "keep the animation that is running"; low bits encode action/facing. */
   actionByte: number;
   /**
    * `u32`, open meaning: it reaches `sub_488E30(mob, action, facing, value)` for attack actions only.
@@ -481,6 +485,7 @@ export function encodeMobMove(mobId: number, body: MobMove): Uint8Array {
   const writer = new PacketWriter(64);
   writer.writeByte(MOB_OPCODE.move);
   writer.writeU32(mobId >>> 0);
+  writer.writeByte(body.stateByte & 0xff);
   writer.writeByte(body.actionByte & 0xff);
   writer.writeU32(body.value >>> 0);
   writeMovePath(writer, body.path);
@@ -490,10 +495,11 @@ export function encodeMobMove(mobId: number, body: MobMove): Uint8Array {
 /** Read the fields of a `0x33` body (no opcode byte; the reader must sit at `mobId`). */
 export function readMobMove(reader: PacketReader): { mobId: number; body: MobMove } {
   const mobId = reader.readU32();
+  const stateByte = reader.readByte();
   const actionByte = reader.readByte();
   const value = reader.readU32();
   const path = readMovePath(reader);
-  return { mobId, body: { actionByte, value, path } };
+  return { mobId, body: { stateByte, actionByte, value, path } };
 }
 
 /**
@@ -519,8 +525,8 @@ export function describeMobMove(mobId: number, body: MobMove): string {
   const where =
     first === undefined ? "no path" : `-> (${first.x},${first.y}) in ${first.duration}ms`;
   return (
-    `mobId=${mobId} action=${action}(${(body.actionByte >> 1) & 0x0f}) facing=${facing} ` +
-    `legs=${body.path.elements.length} ${where}`
+    `mobId=${mobId} state=${body.stateByte} action=${action}(${(body.actionByte >> 1) & 0x0f}) ` +
+    `facing=${facing} legs=${body.path.elements.length} ${where}`
   );
 }
 

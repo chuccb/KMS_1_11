@@ -1054,9 +1054,14 @@ export const PACKETS: readonly PacketSchema[] = [
     fields: [
       { name: "mobId", type: "u32", note: "pool lookup by id (sub_492400)" },
       {
+        name: "stateByte",
+        type: "u8",
+        note: "native byte1; client stores mob+116 as -2 for zero, -3 for nonzero",
+      },
+      {
         name: "actionByte",
         type: "u8",
-        note: "bit 7 = keep the current animation, bit 0 = facing, bits 1..6 = action index",
+        note: "native byte2; bit 7 = keep the current animation, bit 0 = facing, bits 1..6 = action index",
       },
       {
         name: "value",

@@ -1428,11 +1428,14 @@ mob+116 = byte1 ? -3 : -2
 | # | 寬度 | 欄位 | 說明 |
 |---|---|---|---|
 | 1 | `u32` | **mobId** | 池查表（`sub_492400`）|
-| 2 | `u8` | **動作位元組** | bit 7 = 保持目前動畫；bit 0 = 面向；bit 1..6 = **動作索引** |
-| 3 | `u32` | value | 語意未解；只有攻擊動作（10..12）會把它傳進 `sub_488E30`，走路／站立時沒人讀 → **走路送 0** |
-| 4 | `CMovePath` | 路徑 | §4.11.5 的格式（`u16 originX/Y` + `u8 count` + 每個元素 14 bytes）|
+| 2 | `u8` | **stateByte** | `sub_488BC0` 結尾設 `mob+116 = -2`（0）或 `-3`（非 0）；原服送哪個值未有封包證據 |
+| 3 | `u8` | **動作位元組** | bit 7 = 保持目前動畫；bit 0 = 面向；bit 1..6 = **動作索引** |
+| 4 | `u32` | value | 語意未解；只有攻擊動作（10..12）會把它傳進 `sub_488E30`，走路／站立時沒人讀 → **走路送 0** |
+| 5 | `CMovePath` | 路徑 | §4.11.5 的格式（`u16 originX/Y` + `u8 count` + 每個元素 14 bytes）|
 
-`readMobMove` 也讀得回來（`readMobMove`／`encodeMobMove`／`describeMobMove`，`src/protocol/mob.ts`）。
+**復核更正（2026-10-24）**：舊表與舊 codec 漏了 native 明確讀取的第一個 `u8 byte1`；因舊 encoder/decoder 彼此 round-trip，原本的 codec 測試沒有抓到。`sub_492380` 讀完 `mobId` 後把同一個 reader 傳給 `sub_488BC0`，後者依序讀 `byte1`、`byte2`、`u32 value`、`CMovePath`（見上方逐指令證據）。現在 `MobMove.stateByte` 在動作位元組前送出；伺服器重建採 `0`，即 client 的 `mob+116 = -2`。這個 `0` 是 server policy，並非宣稱已知原服實際值。
+
+`readMobMove` 也讀得回來，並有獨立的 native 欄位順序 golden test（`readMobMove`／`encodeMobMove`／`describeMobMove`，`src/protocol/mob.ts`／`test/mobs.test.ts`）。
 
 #### 4.16.2 動作索引：client 自己的 16 個名字
 
@@ -1518,11 +1521,13 @@ foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
    `info.speed` 是**相對值**：`sub_48D080` 讀 WZ 的 `speed` 後算 `clamp(0, speed + 100, 130)`
    （스포아 −30 → 70%、스텀프 −70 → 30%、주황버섯 0 → 100%）。**基準值沒有 binary 證據**
    （原伺服器自己選的），所以它是一個有名字、可調的常數（`--mob-speed`），不是散落的魔術數字。
+6. 初始動作時間在 `FieldInstance.join` 送第一份快照前以 `Date.now()` 錨定，再加 `index*250ms`；
+   不能直接拿相對時間 `0, 250, ...` 跟 epoch 時鐘比，否則第一個 tick 會把整批怪都當成逾期。
 
 | 測試 | 內容 |
 |---|---|
-| `server/test/mobs.test.ts` | 腳踏點語意（item key、折線、內插、範圍外回 `undefined`）、巡邏（一個 tick 一段、到端點折返、`rx0/rx1` 裁切、速度換算、`vx/vy = 0`）、不動的怪（沒有腳踏點／`speedPercent 0`／範圍一個點）、出生點吸附到地面、`0x33` 逐 byte 形狀與截斷、動作表 |
-| `server/test/serve.test.ts` | 真 socket：`0x2F` 之後真的會來 `0x33`（`mobTickMs = 20`），欄位與腳踏點一致，標頭全數通過 |
+| `server/test/mobs.test.ts` | 腳踏點語意（item key、折線、內插、範圍外回 `undefined`）、巡邏（一個 tick 一段、到端點折返、`rx0/rx1` 裁切、速度換算、`vx/vy = 0`）、不動的怪（沒有腳踏點／`speedPercent 0`／範圍一個點）、出生點吸附到地面、`0x33` native 欄位逐 byte 與截斷、epoch 時鐘下初始 `index*250ms` stagger、動作表 |
+| `server/test/serve.test.ts` | 真 socket：`0x2F` 之後真的會來 `0x33`（`mobTickMs = 20`），並驗證 `stateByte` 在 `actionByte` 前，欄位與腳踏點一致，標頭全數通過 |
 | `server/test/map.test.ts` | `life` → 出生點（`rx0/rx1/cy` 的預設值）、`footholdSegments` 數量等於 foothold 數 |
 
 #### 還不能宣稱的部分
@@ -1565,7 +1570,7 @@ foothold / <page> / <group> / <item = fh>  →  { x1, y1, x2, y2, prev, next }
 | 1（非攻擊動作做完）| 5 | `sub_4885D0` 的尾巴 |
 | 2（攻擊動作，`n30a == 0`）| 4 | 同上 |
 | 3（攻擊動作，`n30a == 1`）| 5 | 同上 |
-| 其它（-1／-2／-3，例如剛被 `0x33` 設過）| `sub_485330(mob, 1)` → 4，並打開**閃光** | `CMob::Init` 設 -1、`0x33` 一律設 -3 |
+| 其它（-1／-2／-3，例如剛被 `0x33` 設過）| `sub_485330(mob, 1)` → 4，並打開**閃光** | `CMob::Init` 設 -1、`0x33` 由 byte1 選 -2／-3 |
 
 為什麼這件事重要：傷害數字顯示器 `sub_487A30` 只有在 `mob+116 ∈ {-2, 4, 5}` 時才會把動作重設成
 **受擊動作**：
@@ -1576,7 +1581,7 @@ if (ArgList > 0 && ArgList >= *(template + 72)     // 傷害 ≥ info.pushed
   if (mob+116 ∈ {-2, 4, 5}) sub_4885D0(mob, hitAnim, facing, 0, …)      // 播 hit1
 ```
 
-而 `mob+116` 的其他來源都不會停在 4／5：`CMob::Init` 設 -1、`0x33` 的尾巴一律設 -3、動作設定器
+而 `mob+116` 的其他來源都不會停在 4／5：`CMob::Init` 設 -1、`0x33` 的尾巴依 byte1 設 -2／-3、動作設定器
 `sub_4885D0` 只設 1／2／3。**所以不送 `0x34` 的話，怪物只會跳數字、不會被打到彈一下。**
 
 > `sub_485330(mob, 1)` 就是把模板的 `+250/+252/+254/+256`（`s16 ×4`）與 `+258`（`u8`）交給 sprite 的

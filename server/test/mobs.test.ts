@@ -275,6 +275,33 @@ test("a mob walks one leg per 0x33, at its speed, and turns around at the range 
   assert.equal(field.movePackets(9000).length, 1);
 });
 
+test("the first movement stagger is anchored to the field-entry clock, not epoch zero", () => {
+  const now = 1_700_000_000_000;
+  const map = flatMap([
+    { x: 50, y: 100, foothold: 2, rx0: 0, rx1: 300 },
+    { x: 150, y: 100, foothold: 2, rx0: 0, rx1: 300 },
+    { x: 250, y: 100, foothold: 2, rx0: 0, rx1: 300 },
+  ]);
+  const field = new MobField({
+    map,
+    footholds: map.footholdSegments!,
+    template: provider,
+    speedPxPerSecond: 100,
+    maxLegMs: 1000,
+  });
+
+  field.startInitialMovementAt(now);
+  field.startInitialMovementAt(now + 10_000); // another join must not restart the first snapshot's schedule
+  assert.deepEqual(
+    field.mobs.map((mob) => mob.legEndsAt),
+    [now, now + 250, now + 500],
+  );
+  assert.equal(field.movePackets(now).length, 1, "first mob is due at the initial tick");
+  assert.equal(field.movePackets(now + 249).length, 0, "second mob stays staggered");
+  assert.equal(field.movePackets(now + 250).length, 1, "second mob is due after 250ms");
+  assert.equal(field.movePackets(now + 500).length, 1, "third mob is due after 500ms");
+});
+
 test("the walk range is the foothold chain clipped by the spawn's own rx0/rx1", () => {
   const map = flatMap([{ x: 150, y: 100, foothold: 2, rx0: 40, rx1: 260 }]);
   const field = new MobField({
@@ -342,8 +369,9 @@ test("mobs do not all start walking in the same tick", () => {
 // ---------------------------------------------------------------------------
 // the 0x33 packet
 // ---------------------------------------------------------------------------
-test("0x33 is mobId + action byte + u32 + CMovePath, in that order", () => {
+test("0x33 is mobId + state byte + action byte + u32 + CMovePath, in native order", () => {
   const packet = encodeMobMove(0x01020304, {
+    stateByte: 0xa5,
     actionByte: mobActionByte(MOB_ACTION.move, 1),
     value: 0,
     path: {
@@ -365,16 +393,24 @@ test("0x33 is mobId + action byte + u32 + CMovePath, in that order", () => {
   });
   assert.equal(packet[0], 0x33, "opcode byte first, like the other encoders");
   assert.deepEqual([...packet.subarray(1, 5)], [0x04, 0x03, 0x02, 0x01], "mobId, little endian");
-  assert.equal(packet[5], mobActionByte(MOB_ACTION.move, 1), "action byte: action << 1 | facing");
-  assert.equal(packet[5], 0x01, "move (0) facing left (1)");
-  const value = packet[6]! + packet[7]! * 0x100 + packet[8]! * 0x10000 + packet[9]! * 0x1000000;
+  assert.equal(packet[5], 0xa5, "native byte1: state selector");
+  assert.equal(packet[6], mobActionByte(MOB_ACTION.move, 1), "native byte2: action << 1 | facing");
+  assert.equal(packet[6], 0x01, "move (0) facing left (1)");
+  const value = packet[7]! + packet[8]! * 0x100 + packet[9]! * 0x10000 + packet[10]! * 0x1000000;
   assert.equal(value, 0, "the u32 is always there, zero for a walk");
-  assert.equal(packet[10] | (packet[11] << 8), 509, "originX");
-  assert.equal(packet[12] | (packet[13] << 8), 335, "originY");
-  assert.equal(packet[14], 1, "one element");
-  assert.equal(packet.length, 15 + 14, "opcode + u32 + u8 + u32 + u16*2 + u8 + a 14-byte element");
+  assert.equal(packet[11] | (packet[12] << 8), 509, "originX");
+  assert.equal(packet[13] | (packet[14] << 8), 335, "originY");
+  assert.equal(packet[15], 1, "one element");
+  assert.equal(
+    packet.length,
+    16 + 14,
+    "opcode + u32 + state u8 + action u8 + value u32 + CMovePath header + one 14-byte element",
+  );
   const back = readMobMove(new PacketReader(packet, 1));
   assert.equal(back.mobId, 0x01020304);
+  assert.equal(back.body.stateByte, 0xa5);
+  assert.equal(back.body.actionByte, 0x01);
+  assert.equal(back.body.value, 0);
   assert.deepEqual(back.body.path.elements[0], {
     attr: 0,
     x: 635,
@@ -389,6 +425,7 @@ test("0x33 is mobId + action byte + u32 + CMovePath, in that order", () => {
 
 test("0x33 with negative coordinates and the keep-animation bit survives a round trip", () => {
   const packet = encodeMobMove(7, {
+    stateByte: 0,
     actionByte: MOB_ACTION_KEEP | 0x01,
     value: 0xdeadbeef,
     path: { originX: -289, originY: 395, elements: [] },
@@ -402,11 +439,15 @@ test("0x33 with negative coordinates and the keep-animation bit survives a round
     [],
     "a mob can be told to keep its animation and not move",
   );
-  assert.equal(describeMobMove(7, back.body), "mobId=7 action=keep(0) facing=1 legs=0 no path");
+  assert.equal(
+    describeMobMove(7, back.body),
+    "mobId=7 state=0 action=keep(0) facing=1 legs=0 no path",
+  );
 });
 
 test("a truncated 0x33 throws instead of inventing a path", () => {
   const packet = encodeMobMove(1, {
+    stateByte: 0,
     actionByte: 0,
     value: 0,
     path: {

@@ -139,7 +139,19 @@ function stubMove(
 test("the first player is sent the world: every mob, every NPC, and nobody's 0x1C", () => {
   const field = stubField();
   const hero = new FakeMember(1, "Hero");
+  const beforeJoin = Date.now();
   field.join(hero);
+  const afterJoin = Date.now();
+  const firstMoveAt = field.mobs.mobs.map((mob) => mob.legEndsAt);
+  assert.ok(
+    firstMoveAt[0]! >= beforeJoin && firstMoveAt[0]! <= afterJoin,
+    "the first movement deadline uses the server clock when the snapshot is sent",
+  );
+  assert.equal(
+    firstMoveAt[1]! - firstMoveAt[0]!,
+    250,
+    "the second mob is still staggered by 250ms",
+  );
 
   assert.deepEqual(hero.opcodes, [
     MOB_OPCODE.enterField,

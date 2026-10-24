@@ -343,6 +343,7 @@ export class MobField {
   private readonly speed: number;
   private readonly maxLegMs: number;
   private readonly respawnMs: number;
+  private initialMovementScheduled = false;
 
   constructor(options: MobFieldOptions) {
     this.options = options;
@@ -487,6 +488,7 @@ export class MobField {
           mob.velocity = { vx: points[0]!.vx, vy: points[0]!.vy };
           packets.push(
             encodeMobMove(mobId, {
+              stateByte: 0,
               actionByte: mobActionByte(hit.action, hit.facing),
               value: 0,
               path: {
@@ -602,6 +604,7 @@ export class MobField {
       mob.velocity = { vx: 0, vy: 0 };
       packets.push(
         encodeMobMove(mob.mobId, {
+          stateByte: 0,
           actionByte: mobActionByte(attack.action, facing),
           value,
           path: { originX: point.x, originY: point.y, elements: [{ attr: 0, ...point }] },
@@ -737,6 +740,16 @@ export class MobField {
       });
   }
 
+  /**
+   * Anchor the constructor's relative index*250ms initial-move deadlines to the server clock.
+   * Called when the first field snapshot is sent; later joins must not restart the stagger.
+   */
+  startInitialMovementAt(now: number): void {
+    if (this.initialMovementScheduled) return;
+    this.initialMovementScheduled = true;
+    for (const [index, mob] of this.mobs.entries()) mob.legEndsAt = now + index * 250;
+  }
+
   /** One `0x31 flag=1` (mob appears) packet for a mob that is standing where it should. */
   appearPacket(mob: FieldMob): Uint8Array {
     return encodeMobAppear(mob.mobId, mob.templateId, {
@@ -802,6 +815,7 @@ export class MobField {
           mob.legEndsAt = now + decisionMs;
           packets.push(
             encodeMobMove(mob.mobId, {
+              stateByte: 0,
               actionByte: mobActionByte(MOB_ACTION.stand, mob.facing),
               value: 0,
               path: {
@@ -844,6 +858,7 @@ export class MobField {
 
       packets.push(
         encodeMobMove(mob.mobId, {
+          stateByte: 0,
           actionByte: mobActionByte(MOB_ACTION.move, leg.facing),
           value: 0,
           path: {
@@ -907,6 +922,7 @@ export class MobField {
     };
     mob.legEndsAt = now + duration;
     return encodeMobMove(mob.mobId, {
+      stateByte: 0,
       actionByte: mobActionByte(MOB_ACTION.jump, mob.facing),
       value: 0,
       path: {
@@ -971,6 +987,7 @@ export class MobField {
       if (points.length)
         packets.push(
           encodeMobMove(mob.mobId, {
+            stateByte: 0,
             actionByte:
               mob.forced && motion.sampledAt < mob.forced.since + mob.forced.duration
                 ? MOB_ACTION_KEEP | (mob.facing & 1)

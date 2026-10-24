@@ -265,6 +265,9 @@ export class FieldInstance<M extends FieldMember = FieldMember> {
       this.leave(member.characterId);
     }
     if (member.at === undefined) member.at = this.spawnAt();
+    // Anchor the mobs' initial index*250ms movement stagger to the real server clock at field entry.
+    // Without this, the relative deadlines (0, 250, ...) are already overdue against Date.now().
+    this.mobs.startInitialMovementAt(Date.now());
     // Standing here counts as having arrived: loot that was already on the ground is takeable now.
     if (member.lastMoveAt === undefined) member.lastMoveAt = Date.now();
     for (const packet of this.mobs.spawnPackets()) member.send(packet);

@@ -221,8 +221,8 @@ test("session exposes signed forced header and KEEP does not invent a new facing
     originY: 0,
     elements: [{ attr: 0, x: 10, y: 0, vx: 0, vy: 0, foothold: 1, action: 3, duration: 30 }],
   };
-  fake.handleFieldPacket(encodeMobMove(1, { actionByte: 15, value: 0, path }));
-  fake.handleFieldPacket(encodeMobMove(1, { actionByte: 128, value: 0, path }));
+  fake.handleFieldPacket(encodeMobMove(1, { stateByte: 0, actionByte: 15, value: 0, path }));
+  fake.handleFieldPacket(encodeMobMove(1, { stateByte: 0, actionByte: 128, value: 0, path }));
   const a = events[0],
     b = events[1];
   assert.equal(a?.kind, "mob-move");

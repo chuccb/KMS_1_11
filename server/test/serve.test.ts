@@ -1371,6 +1371,7 @@ test(
     assert.equal(moves.length >= 1, true, "the field sends 0x33 for a mob that can walk");
     const move = readMobMove(new PacketReader(moves[0]!, 1));
     assert.equal(move.mobId, 1, "the first mob is the one on the foothold");
+    assert.equal(move.body.stateByte, 0, "the native 0x33 state byte precedes actionByte");
     const element = move.body.path.elements[0]!;
     assert.equal(element.y, 300, "walking along the foothold's y");
     assert.ok(
