@@ -4,9 +4,11 @@
 並以明示browser-only sideband續晚進場body相位；下文「尚未模型化」是ADR-075當時界線。完整owner狀態機仍未還原。
 ADR-078再依53D3F0修正一鄰段ground KB與flyer的539B10物理場界；移除舊獨立wall sweep，見 [地形續作](NATIVE_TERRAIN.md)。下文flyer／多段連續地形說明以此續作為準。
 
-**狀態：已編輯實作與回歸來源；依使用者指示，未執行 test／check／typecheck／語法檢查／browser／VM／HTTP／登入 probe。啟服不代表 PASS。**
+**原始狀態（2026-10-18）：已編輯實作與回歸來源；依當時指示未執行 test／check／typecheck／browser／VM／HTTP／登入 probe。**
 
-回報：怪物 KB 中仍繼續動、NPC 自言自語時名牌消失、部分 NPC 方向疑似顛倒。本輪讀本 repo EXE C、listing、WZ metadata，不借後版行為或假圖補素材。
+**2026-10-24 名牌修正**：原版 NPC 自言自語期間名牌持續可見；ADR-169 已移除 browser 的 suppress gate。Focused regression 3/0、全套 check 1504/0，詳該 ADR；無 LIVE 登入或角色／存檔操作。
+
+原始回報：怪物 KB 中仍繼續動、NPC 自言自語時名牌消失、部分 NPC 方向疑似顛倒。本輪讀本 repo EXE C、listing、WZ metadata，不借後版行為或假圖補素材。
 
 ## 一、怪物：不是每個正傷害都應播放 hit1
 
@@ -33,11 +35,11 @@ ADR-078再依53D3F0修正一鄰段ground KB與flyer的539B10物理場界；移�
 
 **Server policy 界線**：原版 client 是 controller/owner 驅動，上述 reconstructed server 統一結算並發 0x33，並非找到了2003伺服器。數字仍用既有本機預測，KB 以 server path 為準，存在網路收包相位差，沒有冒稱原 native controller 的零延遲預測／全同步。普通 mass100、ground branch 是本輪重點；custom field/shoe、水中、完整 flyer sweep／飛行AI、aggro／monster skill、原CVecCtrl全域 phase 仍未完整移植；原 mob state −2/4/5 與 attack10..12 的不可覆蓋保護尚未模型化，不能宣稱全怪物攻擊／技能狀態互斥完成。flyer 此處只有基本阻牆／向量阻尼，不能稱完整539B10。
 
-## 二、NPC 名牌：原版會隱藏，不直接刪掉原規則
+## 二、NPC 名牌：自言自語氣泡期間仍顯示（2026-10-24 更正）
 
-**499D60** 明確在 `npc+24` 氣泡物件存在時，對 `npc+108` name layer 的 **vtable+232** put_color(**00FFFFFF**)，沒有氣泡則 FFFFFFFF。依既有 Gr2D color 語義，前者 alpha0。這是原版自言自語的行為，不是「名牌文字被資料清空」。**499C00 → 4373A0** 氣泡原5000ms／深紅字／normal frame；到期恢復名牌。
+使用者確認原版在 NPC 自言自語氣泡期間仍顯示底下名牌；browser 必須保持相同可見行為。**499D60** 的 listing 顯示 `npc+24` 氣泡存在時，對 `npc+108` name layer 呼叫 **vtable+232** 並傳 `0x00FFFFFF`，沒有氣泡則傳 `0xFFFFFFFF`。此值的高 byte 雖為0，但同一 `vtable+232` 的 Gr2D ARGB-modulate 語意由 `protocol/FINDINGS.md` §4.41.6 與 `NATIVE_MESSENGER.md` 交叉確認：`0x00FFFFFF` 是 identity，不可當成透明／隱藏。先前把 alpha byte 0 直接推論成「名牌消失」是錯誤；不能映射成 browser 不呼叫 `drawName`。**499C00 → 4373A0** 氣泡原5000ms／深紅字／normal frame。
 
-Browser 先前只用 speech timer 判名牌，冷載原 UI 氣泡框／anchor 未就緒時，可能「名牌已隱、氣泡又沒畫出」。新增 drawable readiness：真框及 anchor 尚未就緒先保留名牌；可畫出後仍遵守原版暫隱，到期／離場恢復或移除。這是 asynchronous browser 的冷資源政策，不把它說成原 engine 也非同步。
+Browser 的 drawable readiness 只決定氣泡是否可畫：資源或 anchor 尚未就緒時不畫氣泡，但名牌仍持續顯示；氣泡可畫期間也不隱藏名牌。氣泡到期／離場只清理氣泡狀態，不需「恢復」名牌。
 
 另更正 anchor：**433F50 取當下 layer 的 canvas0**，動畫已 shift 時不一定是儲存序列第0張。自言自語捕捉當時真正 frame 的 height；不是永遠 stand/0 高度或 dc 點擊框，也不讓後續每一幀把氣泡上下拖動。新 forced action 在第0格開始，speech-only 則取正在播的當前格。
 
@@ -52,7 +54,7 @@ Browser 先前只用 speech timer 判名牌，冷載原 UI 氣泡框／anchor �
 
 ## 四、方便查看與保存
 
-- 原體驗工具「NPC唯讀」補模板ID、座標、base facing bit、實際繪圖是否鏡像、名牌是否隨氣泡暫隱；不寫場地或強制演出。
+- 原體驗工具「NPC唯讀」補模板ID、座標、base facing bit、實際繪圖是否鏡像與名牌持續顯示狀態；不寫場地或強制演出。
 - 戰鬥唯讀欄補附近三隻怪的ID、真 pushed、當前受擊 action與剩餘 raw窗。沒有新增自動攻擊、無敵、改裝或自動升級。
-- 新 `native-mob-reaction.test.ts`、`native-npc-name-readiness.test.ts` 與追加 NPC behavior 回歸**來源**涵蓋門檻／重入、hitF、速度阻尼、地面邊界／斜坡、離地／固定怪、時鐘、巡邏替換、多段／死亡／重生／resume、signed KEEP、完整 NPC spawn byte、forced flip、當前 frame anchor、冷氣泡名牌。**全部未執行**。
+- 新 `native-mob-reaction.test.ts`、`native-npc-name-readiness.test.ts` 與追加 NPC behavior 回歸涵蓋門檻／重入、hitF、速度阻尼、地面邊界／斜坡、離地／固定怪、時鐘、巡邏替換、多段／死亡／重生／resume、signed KEEP、完整 NPC spawn byte、forced flip、當前 frame anchor、及氣泡素材就緒與名牌持續顯示的分離。名牌修正測試狀態以本文件最近的驗證記錄為準。
 - 同存檔 `generated/preview-faces-20261018.json`；停服後冷備 `generated/backups/preview-faces-before-mob-kb-npc-20261018-062506.json`。保留使用者本次遊玩的104040000／物品與角色進度，不回復舊備份。

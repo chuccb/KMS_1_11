@@ -1,145 +1,66 @@
-# 清晰尺寸、世界／UI 分層與鏡頭演出
+# 解析度、原像素 HUD 與鏡頭演出
 
-2026-10-18，ADR-084。這是使用者要求的瀏覽器呈現擴充，不冒充原 EXE 的縮放／轉場。
-相關責任先收斂成 strict TypeScript，再接遠近與效果；全案 main.js／3 支 legacy MJS 的遷移仍未完成。
+**現行政策：ADR-170（2026-10-24）。** 固定 4:3 解析度由下拉選單選擇，預設 **800×600**；較大解析度只增加世界可視範圍，不縮放角色、地圖或固定 HUD 素材。早期 ADR-084／085 記錄的是現已取代的整數裝置像素倍率選單與 UI 合成架構，不應當成目前選單行為。
 
-## 後續修正：放大後的最終顯示像素（ADR-085）
+## 解析度選項與呈現
 
-使用者回報放大／拉近看似模糊後，補查了原先不足的**整張角色／背景經CSS到螢幕**驗證，而非先加銳化。
-前輪32來源欄的條紋和buffer原PNG檢查，不能證明最終sprite沒有位移／邊界遺失；先前這部分保證過強。
+| 選單 | 世界 viewport（原像素 1×） | Canvas backing | DPR `d` 下 CSS footprint |
+| --- | ---: | ---: | ---: |
+| **800 × 600（預設）** | 800 × 600 | 800 × 600 | 800/`d` × 600/`d` |
+| 1024 × 768 | 1024 × 768 | 1024 × 768 | 1024/`d` × 768/`d` |
+| 1280 × 960 | 1280 × 960 | 1280 × 960 | 1280/`d` × 960/`d` |
+| 1600 × 1200 | 1600 × 1200 | 1600 × 1200 | 1600/`d` × 1200/`d` |
 
-- 舊方法直接設定小數CSS寬高，例如DPR3的800/3；Chromium layout以1/64 CSS px量化，
-  然後再呈現bitmap。能重現最底／最右像素遺失，以及拉近／特寫的內部像素不一致。
-- 新方法讓canvas的CSS box與backing同為**整數尺寸**，用原點(0,0)的`scale(1/DPR)`做密度補償。
-  不先把bitmap經小數layout寬高取樣；UI仍用原`u/DPR`，兩者最終rect對齊。
-- transform縮小不會自動縮小CSS scrollable layout overflow；stage加`overflow:clip`，
-  保留明確的共用格尺寸，防止整數backing原始box製造幽靈空白捲動區。小視窗正常捲動仍保留。
-- 新真Chromium回歸使用原WZ背景／tile及production avatar cache的packed back/front PNG，
-  經production compositor／display-controls與**實際style.css**，將整張screenshot和輸出PNG的每個RGBA通道比較。
-- 七DPR（1/1.1/1.25/1.5/1.75/2/3）× 1/2實體UI倍率 × 標準/拉近/特寫，共**42組**。
-  修正前14組有差異，其中4組是DPR3拉近／特寫的畫面內部；修正後全部**差異通道0、最大差異0、非整數像素塊0**。
-- 這是隔離原素材component，不登入或注入LIVE角色；並非所有look／動畫／瀏覽器／OS顯示路徑已逐一驗收。
-- **未加sharpen、模糊filter、AI/xBRZ超解析或替換素材**。最近鄰放大保持來源資訊，像素方塊仍會變大；
-  原圖解析度／色階本來不足的細節無法靠銳化復原。銳化會改色與製造光暈，不應拿來掩蓋縮放缺陷。
+- 選單值透過 `kms111.resolution` 保存；無偏好、無效值或不可讀 storage 一律使用 **800×600**。不讀取舊倍率偏好，避免啟動後覆蓋新的預設。
+- Canvas backing 精確等於所選解析度。DPR 只透過 `scale(1/DPR)` 改變 CSS footprint；沒有把素材乘上選單倍率、fractional fit 或對整張畫面重採樣。
+- 可用瀏覽器區域不足時，完整畫面可捲動，絕不為了塞進視窗縮小或模糊。標題列佔用的固定列會從垂直置中空間扣除；原點及 scroll tail 對齊 CSS/device grid。
+- 場景 buffer 依當前世界 FOV 繪製，預設 `pixelScale = 1`；因此 1024×768 比 800×600 多顯示 224×168 個世界像素，但同一角色／地圖 PNG 的來源像素尺寸相同。
 
-來源：`server/test/zoom-display-browser.test.ts`／`fixtures/zoom-display-browser.ts`。
-前後實測、42組JSON與回歸log保留於ignored `generated/zoom-sharpness/`。
-strict／format／build通過；focused39/0，加上整張screenshot案例1/0（42組、確認67.92s）。
-完整**1038 pass／44 fail，1082 tests／120 files，287.81s**；對c773329的failure multiset含重複新增0／移除0，CI仍不綠。
-完整suite同時重驗原七DPR×五尺寸的捲動／overlay／游標與source/bundle startup；沒有降低容忍度以避開新失敗。
-LIVE同PID4942，84modules與唯讀title120幀、errors=[]、0WS；未登入、操作角色／save或重啟。
+## 固定尺寸 HUD 與錨點
 
-## 實際操作
+UI 仍以原始尺寸及像素繪製，不隨 canvas 解析度拉伸：
 
-- 上方尺寸選單：**清晰自動、1×、2×、3×、4×**，不是只留一種尺寸。
-- 上方原有十種跟隨模式與「鏡頭回中」保留；與遠近獨立組合。
-- 開「**鏡頭演出 · 非原版**」選 **遠景／標準／拉近／特寫**，或按「拉遠 −／拉近 ＋」。
-- 切換效果：**直接切換、淡出 → 淡入、上下開幕**。「播放淡出／淡入」可重播目前鏡頭；即使選直接切換也可單次預覽。
-- 「還原標準鏡頭／直接切換」立即清掉進行中的轉場，不改其他跟隨模式、物理步長或角色。
-- 面板內鍵盤操作不會同時跳躍／攻擊；Esc 關閉並回到 canvas，點面板外關閉。換場／離開遊戲也會清理。
-- 開面板遮蔽角色輸入，**世界、重力、傷害照常運作，不是暫停或無敵**。關閉後效果仍依正常時鐘完成。
-- 系統要求「減少動態」時改直接切換並禁用效果預覽；不覆寫保存的效果偏好，系統取消此設定後恢復可選。
+- 小地圖：左上角，沿用其可拖曳位置；可移動範圍依新解析度調整。
+- 地圖標題及暫時狀態圖示：右上角。
+- 原版 800×208 狀態列、快捷欄與聊天列：左下角；高度差用於把整個狀態列貼齊新底邊。
+- DOM 聊天輸入框與聊天記錄跟隨狀態列，仍與底板及點擊座標對齊。
 
-預設仍標準鏡頭、直接切換、原有平滑跟隨、30ms＋平滑插值。八個 5/8/10/15/20/30/45/60ms 選項、原 ITEM／I 都不移除。
-此輪不調走速、重力、碰撞、怪物時鐘、封包、能力或存檔；掉落真 fh 權威鏈維持 [DROP_FOOTHOLD_LANDING](DROP_FOOTHOLD_LANDING.md)。
+`viewPoint()` 把 CSS pointer 座標轉成所選 backing 的實體像素座標。世界互動再依目前 lens viewport 反投影；狀態列按鈕、快捷欄、血量提示及聊天室控制會扣回其 HUD anchor offset 後命中。HUD 不會因 pointer 的世界投影或 camera zoom 被放大。
 
-## 清晰尺寸的確切意義
+## 獨立鏡頭倍率（非原版實驗功能）
 
-倍率是**實體像素**，不是 CSS 像素。設顯示倍率 `u`、瀏覽器 DPR `d`：
+解析度選單只負責世界 FOV。頂端「鏡頭演出 · 非原版」是獨立的可選倍率：
 
-| 尺寸 | 輸出 backing | 呈現後CSS尺寸（transform後） |
-| --- | --- | --- |
-| 1× | 800×600 | 800/d × 600/d |
-| 2× | 1600×1200 | 1600/d × 1200/d |
-| 3× | 2400×1800 | 2400/d × 1800/d |
-| 4× | 3200×2400 | 3200/d × 2400/d |
+| 鏡頭 | 世界 source pixelScale | 1600×1200 選項下的世界 viewport |
+| --- | ---: | ---: |
+| 標準 | 1× | 1600 × 1200 |
+| 拉近 | 2× | 800 × 600 |
+| 特寫 | 3× | 約 533.33 × 400 |
 
-自動取 `clamp(floor(min(viewW/800, viewH/600) * d), 1, 4)`。
-**沒有 fractional fit、拉伸或小視窗降採樣**。尺寸放不下就捲動完整畫面；canvas 和透明 DOM UI 在同一個 stage，不各自漂移。
-原點與捲動對齊共同 CSS/device 格；尾端補少量空間，連瀏覽器限制的最右／最底也不落在半格。
-舊 `fit`／無效保存值讀成清晰自動，舊 `native` 讀成清晰 1×；啟動不擅自寫偏好。
+只有明確選擇此鏡頭倍率才會放大世界素材；HUD 和輸入仍維持原尺寸／解析度座標。相機演出可以直接切換、淡出淡入或上下開幕；它不改碰撞、角色能力、伺服器權威或物理步長。舊保存的 `wide` 鏡頭值會遷移為標準 1×。
 
-這也不代表把原素材半透明柔邊、TTF/GDI 字型差異「修成無鋸齒」。
-舊CSS寬高會有1/64 CSS px量化，例如DPR1.5的533.333…讀回533.328125；只有條紋測試不足以涵蓋sprite。
-現改以整數layout box＋inverse DPR transform，不沿用當時量測的尺寸；詳見上方ADR-085修正。
-七種 DPR 的實測不是所有任意非有理 DPR、瀏覽器或 OS cursor plane 都已逐像素驗收的承諾。
-
-## 遠近不犧牲像素，也不放大 UI
-
-世界像素倍率 `k` 只取正整數；世界 FOV 是 `800*u/k × 600*u/k`，相對鏡頭倍率為 `k/u`。
-所有 sprite 先在世界來源 buffer 畫原圖，再用整數實體倍率合成；UI 獨立以 `u` 合成。
-
-| 遠近 | 世界實體像素倍率 k | u=2 時世界視野 |
-| --- | --- | --- |
-| 遠景 | 1 | 1600×1200 |
-| 標準 | u | 800×600 |
-| 拉近 | 2u | 400×300 |
-| 特寫 | 3u | 約266.667×200 |
-
-**u=1 時遠景與標準相同：1 個來源像素已是 1 個實體像素，無法再拉遠而不丟細節。**
-介面會明說已達清晰最遠；仍可從特寫／拉近退回標準。想使用更大的遠景視野，可選較大的清晰尺寸；視窗不足仍需捲動。
-沒有為了讓「拉遠」看似有效而偷偷加入0.5×降採樣。
-
-UI 的 800×600 座標不變：背包、商店、聊天、tooltip、小地圖、系統／復活視窗不跟世界鏡頭放大。
-滑鼠先由實際 canvas rect 轉原 UI 座標；NPC／portal 再經 `screenToWorld` 做鏡頭反轉，UI 命中不套世界 zoom。
-世界 culling、背景平鋪、人物、門與掉落使用實際 FOV；鏡頭換 FOV 先保留世界中心，再依目前模式／原地圖界限夾回。
-原 EXE `470340` 界限與既有原證見 [PLAYER_PRESENTATION_CAMERA](PLAYER_PRESENTATION_CAMERA.md)；新增視野／轉場是政策，不是新發現的原版功能。
-
-## 效果與生命週期
-
-- 控制器只插值遮蔽 opacity，不插值 bitmap 幾何：180ms 淡出、240ms 淡入，smoothstep `t²(3−2t)`。
-- 這些時間是瀏覽器演出政策，不是反編譯常數。動畫用 monotonic absolute time，沒有額外 RAF loop／timer。
-- 到遮蔽峰值才切換離散鏡頭；實際 RAF 若跳過精確峰值，compositor 仍把第一張新 FOV 畫格完全遮住。
-- 暫停分頁跳過整段效果後直接呈現已完成狀態，不補播陳舊黑畫面。快速改選延續目前遮蔽程度，最新目標生效。
-- fade 與 shutter 只蓋世界，HUD／DOM 保持可見；shutter 邊界按整數實體列移動，不用模糊濾鏡。
-- 新地圖 art 只在原 map/generation guard 通過後揭幕，過期 fetch 不得觸發效果。離開遊戲取消陳舊過場。
-- lens、display、camera 各自保存 browser localStorage；拒絕讀寫仍可本次使用，沒有遊戲 request/save side effect。
-- display／lens／camera 都有 idempotent listener dispose；source import 不碰 DOM、不連線、不開服務或瀏覽器。
-
-## strict TS 責任
+## 實作責任
 
 | 模組 | 責任 |
 | --- | --- |
-| `client/display.ts` | 五種清晰尺寸、舊值遷移、DPR／共同格／捲動尾端幾何 |
-| `client/display-controls.ts` | canvas／DOM／stage、實體 backing、DPR-only refresh、偏好與事件生命週期 |
-| `client/scene-surface.ts` | 穩定繪圖 context、兩段合成、有限 buffer、遮蔽、world/screen 互逆 |
-| `client/camera-lens.ts` | 四種整數像素視野與純時間轉場狀態機 |
-| `client/lens-controls.ts` | 真 DOM、鍵盤隔離、偏好／還原、減少動態與清理 |
-| `client/camera.ts`／`camera-controls.ts` | 既有十模式、FOV reframe、回中、listener dispose |
-| `client/drop-renderer.ts` | 掉落按實際世界視野 cull，而非誤用至少800寬的共用 buffer |
-| `client/cursor.ts` | unknown metadata 守衛、原24×23 arrow、整數實體 bitmap＋image-set DPR 密度 |
+| `client/display.ts` | 四種固定解析度、1:1 physical backing、DPR/origin-grid/scroll layout |
+| `client/display-controls.ts` | 選單、`kms111.resolution`、canvas／DOM overlay／stage 對齊、resize 與 dispose |
+| `client/scene-surface.ts` | 有界 world/UI buffers、固定尺寸 UI 1:1 合成、world/screen 互逆投影 |
+| `client/camera-lens.ts` | 原像素標準、2×／3×離散鏡頭與轉場狀態機 |
+| `client/lens-controls.ts` | 鏡頭面板、偏好、鍵盤隔離、減少動態與事件生命週期 |
+| `client/hud.ts` | 狀態列底邊 offset、動態地圖標題錨點、狀態列 hit regions |
+| `client/minimap.ts` | 依所選解析度限制拖曳位置，維持原 minimap 素材尺寸 |
+| `client/temporarystats.ts` | 暫時狀態圖示右上錨定 |
 
-游標若先取整小數 CSS bitmap，再讓 OS 乘 DPR，仍可能丟原圖像素；現在直接製作整數實體 bitmap，明示 image-set density。
-共同 DPR／UI 倍率由 typed layout callback 一次傳入，DPR-only 也更新 density；128px budget 只以整數因子限制，不降採樣。
-它仍是原圖的瀏覽器 cursor plane，不畫 RAF 指標、不改事件座標。實測涵蓋 CSS density 與 PNG 像素塊，不宣稱已擷取 OS 硬體指標畫面。
+最大解析度 backing 為 1600×1200；共用 buffer 只擴至所需上限並保留，不在每幀重配。沒有新增 sharpen、模糊 filter、AI/xBRZ 超解析、人工替代素材或物理／封包變更。
 
-最大可見 backing 為3200×2400；世界 buffer 最少800×600、最多3200×2400，不每幀重配，也不為12×特寫配置9600×7200。
-兩個 RGBA surface 的上限合計約58.6MiB，另有既存資源快取／瀏覽器成本；4×不保證在所有裝置最快。
-沒有關 strict、skipLibCheck、allowJs、no-check、加入 production any 或假的 declaration 代替實作型別。
-client 現86支 TS，**main.js、3支legacy MJS、深層 runtime schemas 仍是未完債務**。
+## 驗證
 
-## ADR-084當輪驗證（後續端點修正見上方ADR-085）
+- 單元回歸鎖定預設、四種 4:3 尺寸、不同 viewport/DPR 下 backing 固定、1× 原像素、scroll/header grid、狀態列底邊偏移與命中測試。
+- `display-ui-surface.test.ts` 以真 Chromium／原 WZ PNG 和實際 screenshot 驗證 **4 解析度 × 3 DPR × 3 鏡頭（36 組）**；HUD/source 像素不放大，截圖對 backing **0 pixel difference**。
+- `zoom-display-browser.test.ts` 以真 Chromium／原背景、tile、avatar 驗證 **4 解析度 × 5 DPR × 3 鏡頭（60 組）**；screenshot 對 backing **0 channel difference**，所有鏡頭下角色原圖尺寸及像素一致。
+- camera-lens browser／unit regression、resolution/display control、HUD anchor 與游標回歸均通過。完整檢查結果記在 ADR-170 的驗證段。
 
-- 六個 npm registry latest 再查均與 exact pins 一致：Bun1.4.3／TS7.0.2／@types/bun1.4.3／Prettier3.9.10／Playwright1.64.1／Chromium153.0.0。
-- strict、全 TS format check、HTML/CSS 格式與 browser build、diff whitespace 通過。
-- focused **58 pass / 0 fail，8 files，7.00s**；新增14案例，既有控制器／輸入／掉落／camera測試同步沿實際委派鏈更新。
-- 完整 **1037 pass / 44 fail，1081 tests / 119 files，216.80s**；對2eaa5f2的1023/44逐項 failure multiset 比對，含重複標題新增0／移除0。
-  **CI仍不綠**，不skip／縮範圍／修改原admission。初次45fail的舊cursor callback source assertion 已沿新layout參數修正並重跑完整suite。
-- 真 Chromium：DPR **1／1.1／1.25／1.5／1.75／2／3 × 五尺寸**，35張實際 screenshot，各取樣32個來源欄，逐欄等寬與0/255無混灰；同頁DPR-only、保存、微小視窗、捲動中段／最底最右、canvas/DOM對齊通過。
-- 同一35組檢查原游標 bitmap 的所有整數像素塊、實體尺寸與 image-set density，並非只檢查 CSS 字串存在。
-- 真原 WZ 掉落 PNG：四種 UI 倍率 × 四種 lens，整張原圖的輸出像素、來源 alpha 底部貼地、無穿地；UI獨立、不被兩種轉場遮住。
-  真 HTML 面板的按鈕／Space／Esc、快速選擇、保存重載／storage拒絕、減少動態、dispose皆通過。
-  黑白欄與綠HUD是**隔離fixture診斷**，不是遊戲場地／原素材的替代物，也未注入LIVE世界。
-- 四lens × 十跟隨政策的 simulation／collision／movement journal 與不使用鏡頭基線一致；含負座標互逆、窄圖夾限、懸停、連續切換與跳過峰值。
-- 子行程 **27 imports／0 I/O attempts**，禁網路、服務、WS與Chromium啟動仍可純匯入。
-- LIVE同一PID4942：proxy Host首頁200、**84 modules** HTTP/MIME/JS parser通過；另唯讀標題120幀、page errors=[]、0WS。
-  沒有登入、操作角色、讀寫／恢復玩家save或重啟服務；全域save hash不是活躍玩家存在時的有效不變量。
+## 歷史範圍
 
-本機可重跑 strict／format／build 與根 `bun run test`。七DPR唯讀診斷使用：
-
-```sh
-bun server/scripts/browser_display_probe.ts <明示web-port或http(s)://origin>
-```
-
-診斷只改它自己標題頁的測試條紋，不連遊戲或登入。不要把隔離 component／標題頁 PASS 宣稱為已替使用者進場遊玩驗收。
-完整log／registry／比較結果在 ignored `generated/pixel-camera/`，不把PNG、生成bundle或玩家資料加進Git。
+ADR-084／085、display milestone 的早期 screenshot 數據，測的是先前 800×600 backing 的 1×／2×／3×／4×實體倍率與放大的 UI layer；它們作為當時歷史證據保留，但不再描述目前固定解析度選單。此政策沒有宣稱每個 live 地圖／瀏覽器／OS 顯示路徑都已人工驗收；本輪未登入、不操作角色、不讀寫存檔。

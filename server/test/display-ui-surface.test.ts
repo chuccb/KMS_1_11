@@ -1,13 +1,7 @@
 /**
- * The 800x600 UI buffer is upscaled onto the same output as the world, and nothing verified that
- * upscale pixel-for-pixel until now. This drives both passes through the production surface with a
- * worst-case opaque pattern and compares the **final screenshot** against the crisp backing store -
- * the same standard `zoom-display-browser.test.ts` sets for the world.
- *
- * It also covers the default `pixel` (auto) mode and the `wide` lens, which that test never
- * exercises, and it asserts the integer-pixel invariant the whole display policy rests on: every
- * device-pixel block of one source pixel must be uniform. A non-uniform block means a source pixel
- * was resampled - which is the blur this project refuses to ship.
+ * The HUD must stay at native 1:1 pixel size while the world output changes resolution. This drives
+ * both passes through the production surface with a worst-case opaque 2×2 pattern and compares the
+ * final browser screenshot against its physical backing store at multiple resolutions and DPRs.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +11,7 @@ import { WzArchive } from "../src/wz/archive.ts";
 import { artProviderOf } from "../src/game/art.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import { launchBrowser, readOnlyBrowserPage } from "../scripts/browser.ts";
-import type { DisplayMode } from "../../client/display.ts";
+import type { ResolutionId } from "../../client/display.ts";
 import type { LensMode } from "../../client/camera-lens.ts";
 import "./fixtures/display-ui-surface.ts";
 
@@ -28,7 +22,7 @@ const PAGE =
   '<script type="module">import{installDisplayUiSurface}from"/fixture.js";installDisplayUiSurface();</script>';
 
 test(
-  "the UI pass is upscaled as whole pixels: final screenshot preserves the world AND the 800x600 UI",
+  "fixed-size HUD and world pixels remain unscaled across selected resolutions and DPRs",
   { timeout: 180000 },
   async () => {
     const archive = WzArchive.open(resolve(import.meta.dirname, "../../Data.wz")),
@@ -72,7 +66,7 @@ test(
     try {
       const evidence: {
         dpr: number;
-        mode: DisplayMode;
+        mode: ResolutionId;
         lens: LensMode;
         deviceScale: number;
         differences: number;
@@ -90,8 +84,13 @@ test(
           });
           await page.goto(`http://127.0.0.1:${server.port}`);
           await page.waitForFunction(() => !!window.displayUiSurface);
-          for (const mode of ["pixel", "pixel-1", "pixel-2"] satisfies DisplayMode[]) {
-            for (const lens of ["wide", "normal", "detail"] satisfies LensMode[]) {
+          for (const mode of [
+            "800x600",
+            "1024x768",
+            "1280x960",
+            "1600x1200",
+          ] satisfies ResolutionId[]) {
+            for (const lens of ["normal", "near", "detail"] satisfies LensMode[]) {
               const result: Awaited<ReturnType<Window["displayUiSurface"]["paint"]>> =
                 await page.evaluate((input) => window.displayUiSurface.paint(input), {
                   mode,
@@ -99,6 +98,20 @@ test(
                   background,
                   tile,
                 });
+              const expectedResolution =
+                mode === "800x600"
+                  ? [800, 600]
+                  : mode === "1024x768"
+                    ? [1024, 768]
+                    : mode === "1280x960"
+                      ? [1280, 960]
+                      : [1600, 1200];
+              assert.deepEqual([result.width, result.height], expectedResolution);
+              assert.equal(
+                result.deviceScale,
+                1,
+                "HUD/source pixels are never enlarged by resolution",
+              );
               const screenshot = await page.screenshot();
               const comparison = await page.evaluate(
                 async (input) => {
@@ -176,7 +189,7 @@ test(
       }
       console.log(`DISPLAY_UI_EVIDENCE ${JSON.stringify(evidence)}`);
       // Guard against the matrix silently shrinking: a passing subset proves nothing.
-      assert.equal(evidence.length, 27, "3 DPRs x 3 display modes x 3 lenses");
+      assert.equal(evidence.length, 36, "3 DPRs x 4 resolutions x 3 lenses");
       assert.ok(
         evidence.every((row) => row.differences === 0 && row.nonUniform === 0),
         "every source pixel must reach the screen as one uniform block of whole device pixels",

@@ -21,14 +21,14 @@
 | 掉落權威落點／圖示貼地／原WZ全圖驗證 | [掉落與fh](docs/DROP_FOOTHOLD_LANDING.md) |
 | 真實畫布／有界鍵盤探針、安全入口與驗證界線 | [frame／play整理](docs/STRICT_FRAME_PLAY_TOOLS.md) |
 | 手動瀏覽器工具／NPC與怪物素材整理 | [嚴格TS工具與素材](docs/STRICT_BROWSER_TOOL_MIGRATION.md) |
-| 多種清晰尺寸、拉近／拉遠、淡出／淡入與分層UI | [清晰鏡頭](docs/PIXEL_CAMERA.md) |
+| 固定4:3解析度、1:1 HUD與獨立鏡頭倍率 | [解析度與清晰鏡頭](docs/PIXEL_CAMERA.md) |
 | 可選物理步長、插值與十種自訂鏡頭 | [手感實驗](docs/MOTION_EXPERIMENTS.md)／[原版呈現原證](docs/PLAYER_PRESENTATION_CAMERA.md) |
 | 顯示／影像快取與安全診斷工具、遷移進度 | [整理與限制](docs/BROWSER_TOOL_CLEANUP.md)／[嚴格TS遷移](docs/BUN_MIGRATION.md) |
 | 查操作與功能細節 | [瀏覽器客戶端](docs/CLIENT.md) |
 
 ## 現行技術
 
-- **客戶端**：原生 ES Modules、Canvas 2D、DOM 透明命中／輸入層、Web Audio；800×600 UI、可選世界FOV，開發直接送ESM，另有Bun browser build。
+- **客戶端**：原生 ES Modules、Canvas 2D、DOM 透明命中／輸入層、Web Audio；預設800×600，另有三種固定4:3解析度，HUD保持1:1，開發直接送ESM，另有Bun browser build。
 - **伺服器**：Bun／TypeScript／ESNext，執行時無第三方套件依賴。
 - **通訊**：瀏覽器同 origin HTTP／WebSocket → Bun ClientSession → 原版 TCP 協定與遊戲服務。
 - **資源**：產品 WZ reader 在 `server/src/wz/`，執行時讀原 archive 並供應 metadata／PNG／音訊；不是必須預先匯出所有素材。

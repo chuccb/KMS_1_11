@@ -1,9 +1,9 @@
-/** Display lifecycle only. Main owns a separate logical render surface; UI/input remain 800×600. */
-import { DISPLAY_OPTIONS, displayMode, originGrid, viewLayout } from "./display.ts";
-import type { DisplayMode, ViewLayout } from "./display.ts";
-export { displayMode } from "./display.ts";
-export type { DisplayMode } from "./display.ts";
-export const DISPLAY_STORAGE_KEY = "kms111.displayMode";
+/** Fixed-resolution display lifecycle. World/UI rendering is owned by scene-surface.ts. */
+import { RESOLUTION_OPTIONS, originGrid, resolutionId, resolutionLayout } from "./display.ts";
+import type { ResolutionId, ResolutionLayout } from "./display.ts";
+export { resolutionId } from "./display.ts";
+export type { ResolutionId } from "./display.ts";
+export const RESOLUTION_STORAGE_KEY = "kms111.resolution";
 interface DisplayViewport extends Pick<EventTarget, "addEventListener" | "removeEventListener"> {
   readonly innerWidth: number;
   readonly innerHeight: number;
@@ -17,13 +17,9 @@ interface DisplayControlsOptions {
   stage: HTMLElement;
   scroll: HTMLElement;
   select: HTMLSelectElement;
-  onScale(layout: ViewLayout): void;
+  onScale(layout: ResolutionLayout): void;
   viewport?: DisplayViewport;
-  /**
-   * A fixed element that overlays the top of the scroll area - the header bar. Its height is
-   * removed from the usable area so the surface is never tucked underneath it. A header that is
-   * hidden (the title screen hides it) measures 0 and reserves nothing.
-   */
+  /** A fixed header over the scroll area; its rows are excluded from the centering area. */
   chrome?: HTMLElement;
 }
 export function displayControls({
@@ -38,15 +34,15 @@ export function displayControls({
   chrome,
 }: DisplayControlsOptions) {
   let storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-    mode: DisplayMode = "pixel";
+    mode: ResolutionId = "800x600";
   try {
     storage = viewport.localStorage;
-    mode = displayMode(storage.getItem(DISPLAY_STORAGE_KEY));
+    mode = resolutionId(storage.getItem(RESOLUTION_STORAGE_KEY));
   } catch {
-    /* Preference denial cannot stop rendering. */
+    /* A denied preference store cannot prevent the default 800×600 surface from rendering. */
   }
   select.replaceChildren(
-    ...DISPLAY_OPTIONS.map((definition) => {
+    ...RESOLUTION_OPTIONS.map((definition) => {
       const option = select.ownerDocument.createElement("option");
       option.value = definition.id;
       option.textContent = definition.label;
@@ -58,11 +54,9 @@ export function displayControls({
     measuredHeight = NaN,
     measuredDpr = NaN,
     measuredChrome = NaN,
-    currentScale: number | undefined,
     disposed = false;
-  // `display: none` measures 0, so a hidden header is already "reserves nothing".
   const chromeHeight = () => (chrome === undefined ? 0 : chrome.getBoundingClientRect().height);
-  let layout = viewLayout(
+  let layout = resolutionLayout(
     viewport.innerWidth,
     viewport.innerHeight,
     viewport.devicePixelRatio,
@@ -79,23 +73,11 @@ export function displayControls({
     measuredHeight = size.height;
     measuredDpr = viewport.devicePixelRatio;
     measuredChrome = chromeHeight();
-    // Hand the scale in use back in, so the auto mode can hold it across a boundary wobble instead
-    // of flipping the surface between two sizes. The first call has nothing to hold yet.
-    layout = viewLayout(
-      measuredWidth,
-      measuredHeight,
-      measuredDpr,
-      mode,
-      measuredChrome,
-      currentScale,
-    );
-    currentScale = layout.deviceScale;
-    // Only an actual device-scale change reallocates the output. The logical renderer is separate.
+    layout = resolutionLayout(measuredWidth, measuredHeight, measuredDpr, mode, measuredChrome);
     if (canvas.width !== layout.backingWidth) canvas.width = layout.backingWidth;
     if (canvas.height !== layout.backingHeight) canvas.height = layout.backingHeight;
     Object.assign(canvas.style, {
-      // CSS layout quantizes fractional widths to 1/64px. Keep the bitmap at its exact
-      // integer size and compensate density in the transform, not a lossy layout resize.
+      // The bitmap is kept at the chosen physical resolution; inverse DPR affects CSS footprint only.
       width: `${layout.backingWidth}px`,
       height: `${layout.backingHeight}px`,
       transformOrigin: "0 0",
@@ -110,13 +92,18 @@ export function displayControls({
     Object.assign(overlay.style, {
       left: `${layout.left}px`,
       top: `${layout.top}px`,
-      transform: `scale(${layout.scale})`,
+      width: `${layout.backingWidth}px`,
+      height: `${layout.backingHeight}px`,
+      transformOrigin: "0 0",
+      transform: `scale(${1 / layout.dpr})`,
     });
     onScale(layout);
     context.imageSmoothingEnabled = false;
-    canvas.dataset.displayMode = mode;
-    canvas.dataset.deviceScale = String(layout.deviceScale);
-    select.title = `4:3 · ${layout.backingWidth}×${layout.backingHeight} 實體像素 · DPR ${layout.dpr} · 原像素 ${layout.deviceScale}×${layout.deviceScale}${layout.overflowing ? " · 視窗較小，請捲動；不縮小模糊" : ""}`;
+    canvas.dataset.resolution = mode;
+    canvas.dataset.deviceScale = "1";
+    select.title =
+      `${layout.backingWidth}×${layout.backingHeight} · 原像素 1× · DPR ${layout.dpr}` +
+      (layout.overflowing ? " · 視窗較小，請捲動；不縮小模糊" : "");
     alignScroll();
   }
   function alignScroll() {
@@ -131,12 +118,12 @@ export function displayControls({
     }
   }
   function change() {
-    mode = displayMode(select.value);
+    mode = resolutionId(select.value);
     select.value = mode;
     try {
-      storage?.setItem(DISPLAY_STORAGE_KEY, mode);
+      storage?.setItem(RESOLUTION_STORAGE_KEY, mode);
     } catch {
-      /* Session preference remains usable. */
+      /* The session preference remains usable when persistence is unavailable. */
     }
     resize();
   }

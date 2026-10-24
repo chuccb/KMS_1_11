@@ -141,6 +141,7 @@ import {
   gaugeFill,
   preloadStatusBar,
   statusBarButtonAt,
+  statusBarOffset,
   statusText as paintStatusText,
   statusVitalText,
 } from "./hud.ts";
@@ -1321,11 +1322,7 @@ async function loadMapArt(mapId, generation) {
 const PORTAL_BOX = { left: 18, right: 18, up: 11, down: 26 };
 /** `sub_472590` will not send a second `0x0D` for 500 ms; the page keeps the same promise. */
 const PORTAL_GUARD_MS = 500;
-/**
- * A pointer event as a point of the 800x600 view (the canvas is scaled to the window by CSS).
- *
- * @param {MouseEvent} event
- */
+/** A pointer event in the selected resolution's physical-pixel coordinate space. */
 function viewPoint(event) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -1552,8 +1549,8 @@ canvas.addEventListener("mousemove", (event) => {
       tradeDrag.moved = true;
     if (tradeDrag.moved)
       tradeAt = {
-        x: Math.max(0, Math.min(800 - TRADE_WINDOW.width, Math.round(point.x - tradeDrag.dx))),
-        y: Math.max(0, Math.min(600 - TRADE_WINDOW.height, Math.round(point.y - tradeDrag.dy))),
+        x: Math.max(0, Math.min(VIEW_W - TRADE_WINDOW.width, Math.round(point.x - tradeDrag.dx))),
+        y: Math.max(0, Math.min(VIEW_H - TRADE_WINDOW.height, Math.round(point.y - tradeDrag.dy))),
       };
     return;
   }
@@ -1818,7 +1815,7 @@ canvas.addEventListener("dblclick", (event) => {
   // player sends c2s 0x14 with its u32 charid. Windows win over the field first (the native
   // message routing), and the original has no s2c 0x14 consumer - nothing comes back.
   if (
-    point.y < STATUS_BAR.y &&
+    point.y < statusBarTop() &&
     !inventoryWindowAt(point.x, point.y) &&
     !statPanel.contains(point.x, point.y) &&
     !skillPanel.contains(point.x, point.y) &&
@@ -1937,7 +1934,7 @@ canvas.addEventListener("click", (event) => {
     statusButtonClick(button);
     return;
   }
-  if (quickSlotAt(point.x, point.y) >= 0) return; // StatusBar owns these pixels, not the field below.
+  if (quickSlotAtPoint(point) >= 0) return; // StatusBar owns these pixels, not the field below.
   // An NPC first: its box stands on the ground where a door could also be, and the server can only
   // open one window at a time (`0x4A`/`0x47` while another is up is a disconnect in the client).
   const npc = npcAt(point.x, point.y);
@@ -2016,9 +2013,10 @@ canvas.addEventListener(
 // `/api/png/<path>` (the canvases); a character is composed on the server (`/api/avatar.png`) from
 // the same `Character/*` images the 2003 client draws.
 
-/** The original client's view size. */
-const VIEW_W = 800;
-const VIEW_H = 600;
+/** Current native-pixel output; resolution changes the field view, not sprite or HUD scale. */
+let VIEW_W = 800;
+let VIEW_H = 600;
+let statusBarOffsetY = 0;
 
 /** The background image stack of the current map (`/api/map/<id>/art`), or undefined. */
 let mapArt;
@@ -2235,7 +2233,14 @@ const displayController = displayControls({
   // The header is a fixed overlay: the rows it covers are not usable, so the surface is centred
   // below it instead of behind it (the title screen hides the header and then reserves nothing).
   chrome: requireElement("bar", "header"),
-  onScale: layout => gameCursor.resize(layout.deviceScale, layout.dpr),
+  onScale(layout) {
+    VIEW_W = layout.resolutionWidth;
+    VIEW_H = layout.resolutionHeight;
+    statusBarOffsetY = statusBarOffset(VIEW_H);
+    // #chatbox contains the DOM chat editor and scroll history for the status-bar chat plate.
+    ui.chatbox.style.top = `${STATUS_BAR.chat.y + statusBarOffsetY}px`;
+    gameCursor.resize(1, layout.dpr);
+  },
 });
 
 /** One PNG of the archive; typed bounded cache retains shared UI preferentially. */
@@ -2541,7 +2546,13 @@ let statusPressed;
 /** The bar's button at a surface point, or `undefined` while there is no local player. */
 function statusButtonAt(x, y) {
   if (!selfView) return undefined;
-  return statusBarButtonAt(x, y);
+  return statusBarButtonAt(x, y, statusBarOffsetY);
+}
+function statusBarTop() {
+  return STATUS_BAR.y + statusBarOffsetY;
+}
+function quickSlotAtPoint(point) {
+  return quickSlotAt(point.x, point.y - statusBarOffsetY);
 }
 
 preloadStatusBar(artImage);
@@ -2615,6 +2626,8 @@ function drawQuickItems() {
 
 function drawStatusBar() {
   if (!selfView) return;
+  ctx.save();
+  ctx.translate(0, statusBarOffsetY);
   for (const piece of [STATUS_BAR.panel, STATUS_BAR.chat, STATUS_BAR.keys]) {
     const entry = artImage(piece.path);
     if (entry.ready) ctx.drawImage(entry.img, piece.x, piece.y);
@@ -2641,6 +2654,7 @@ function drawStatusBar() {
   statusText(selfView.name, 153, STATUS_BAR.y + 111);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+  ctx.restore();
 }
 
 function statusButtonClick(button) {
@@ -2771,7 +2785,11 @@ function frame() {
   if (visualFieldActive && selfView && playerBody && self && map?.id === self.mapId)
     deathFx.observe(selfView.characterId, selfView.hp <= 0, displaySelf, now, selfDeathSettled);
   updateContact(now);
-  const lens = lensSettings.sample(now, displayController.layout().deviceScale);
+  const display = displayController.layout();
+  const lens = lensSettings.sample(now, {
+    width: display.resolutionWidth,
+    height: display.resolutionHeight,
+  });
   reframeCamera(camera, renderSurface.viewport(), lens.viewport);
   renderSurface.beginWorld(lens.viewport);
   updateCamera(
@@ -2907,9 +2925,9 @@ function frame() {
         mapAnimationStart,
       );
       // 498CF0 passes font index 3 to CLife::47D110; 527720(3) = Gulim 12, FFFFFF20.
-      // 499D60 hides the name while the real balloon exists. Cold browser art must not leave BOTH invisible.
-      if(!npcVisuals.speaking(actor.npc.npcId,now)||!npcBalloons.visible(actor.npc.npcId,npcVisuals.originY(actor.npc.npcId),now))
-        drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
+      // 499D60 passes 0x00FFFFFF through vtable+232 during speech: identity modulation, not an alpha-hide.
+      // The original keeps the nameplate visible; balloon asset readiness controls only the balloon.
+      drawName(npcMetadata.get(actor.npc.templateId)?.name, x, y, "#ffff20");
     } else if (actor.kind === "mob") {
       const moved = actor.mob.walking === true;
       drawEntitySprite(
@@ -2934,8 +2952,8 @@ function frame() {
 
   renderSurface.presentWorld(lens.cover, lens.style);
   renderSurface.beginUi();
-  drawMapTitle(ctx, artImage, mapArt?.title);
-  drawTemporaryStats(ctx, artImage, buffs.icons(now));
+  drawMapTitle(ctx, artImage, mapArt?.title, VIEW_W);
+  drawTemporaryStats(ctx, artImage, buffs.icons(now), VIEW_W);
   miniMapPanel.draw(now);
   drawStatusBar();
   drawInventoryWindow();
@@ -2960,7 +2978,13 @@ function frame() {
         !inventoryWindowAt(pointerAt.x, pointerAt.y) && !shopWindowAt(pointerAt.x, pointerAt.y) &&
         !equipPanel.hit(pointerAt.x, pointerAt.y) && !statPanel.contains(pointerAt.x, pointerAt.y) &&
         !skillPanel.contains(pointerAt.x, pointerAt.y)) {
-      const line = statusVitalText(pointerAt.x, pointerAt.y, selfView, effectiveSelf());
+      const line = statusVitalText(
+        pointerAt.x,
+        pointerAt.y,
+        selfView,
+        effectiveSelf(),
+        statusBarOffsetY,
+      );
       if (line) drawSimpleTooltip(ctx, pointerAt.x + 20, pointerAt.y + 20, line);
     }
   }
@@ -3644,7 +3668,7 @@ let quickDrag;
 function quickHoverItem() {
   if (!pointerAt || systemPanel.visible || itemDialog.open || shop !== undefined ||
       inventoryWindowAt(pointerAt.x,pointerAt.y) || equipPanel.hit(pointerAt.x,pointerAt.y)) return;
-  const index=quickSlotAt(pointerAt.x,pointerAt.y), itemId=quickProfile?.values()[index];
+  const index=quickSlotAtPoint(pointerAt), itemId=quickProfile?.values()[index];
   if (!itemId) return;
   if(quickSkillAllowed(itemId)) {
     const data=combatCatalog.peekSkill(itemId.skillId);if(!data)void combatCatalog.skill(itemId.skillId);
@@ -3661,7 +3685,7 @@ function beginSkillDrag(skill,p) {
     profile:quickProfile,epoch:itemEpoch,start:p,point:p,moved:false};
 }
 function beginQuickDrag(p) {
-  const index=quickSlotAt(p.x,p.y), itemId=quickProfile?.values()[index];
+  const index=quickSlotAtPoint(p), itemId=quickProfile?.values()[index];
   if (!itemId || loginScreens.stage!=="game" || !visualFieldActive || !selfView || selfView.hp<=0 ||
       portalPending || modalOpen() || browserLabOpen() || shop!==undefined ||
       talkingNpc!==undefined || slotPending || mesoPending || shopPending || itemDrag) return false;
@@ -3692,9 +3716,9 @@ window.addEventListener("mouseup",e=>{
   const p=viewPoint(e);
   if(inventoryWindowAt(p.x,p.y) || equipPanel.hit(p.x,p.y) || skillPanel.contains(p.x,p.y) ||
       statPanel.contains(p.x,p.y) || shopWindowAt(p.x,p.y))return;
-  const to=quickSlotAt(p.x,p.y);
+  const to=quickSlotAtPoint(p);
   const changed=to>=0 ? (d.fromSkill?quickProfile.bind(to,d.itemId):quickProfile.move(d.index,to,d.itemId))
-    : p.x>=0 && p.x<800 && p.y>=0 && p.y<STATUS_BAR.y && !miniMapPanel.contains(p.x,p.y)
+    : p.x>=0 && p.x<VIEW_W && p.y>=0 && p.y<statusBarTop() && !miniMapPanel.contains(p.x,p.y)
       ? !d.fromSkill&&quickProfile.clear(d.index,d.itemId) : false;
   if(changed)void audio.effect("UI/DragEnd");
 });
@@ -3864,7 +3888,7 @@ window.addEventListener("mouseup", (e) => {
     return;
   }
   const bag = inventoryWindowAt(p.x, p.y);
-  const quickIndex = quickSlotAt(p.x, p.y);
+  const quickIndex = quickSlotAtPoint(p);
   if (!bag && quickIndex >= 0 && e.target === canvas) {
     if (d.tab === 2 && d.slot > 0 && selfView?.hp > 0 && !portalPending && !browserLabOpen())
       quickProfile?.bind(quickIndex, d.item.itemId);
@@ -3878,7 +3902,7 @@ window.addEventListener("mouseup", (e) => {
       p.x >= 0 &&
       p.x < VIEW_W &&
       p.y >= 0 &&
-      p.y < STATUS_BAR.y &&
+      p.y < statusBarTop() &&
       !statusButtonAt(p.x, p.y) &&
       d.slot > 0
     )
@@ -4118,7 +4142,7 @@ const messengerSayInput = document.getElementById("messenger-say");
 function messengerButtonAt(p) {
   return (
     loginScreens.stage === "game" && visualFieldActive && !revivePanel.open && !modalOpen() &&
-    messengerButtonHit(p.x, p.y)
+    messengerButtonHit(p.x, p.y - statusBarOffsetY)
   );
 }
 function drawMessengerButton() {
@@ -5157,6 +5181,7 @@ const miniMapPanel = miniMapWindow({
   getUsers: () => [...users.values()],
   isInGame: () => loginScreens.stage === "game",
   point: viewPoint,
+  viewport: () => ({ width: VIEW_W, height: VIEW_H }),
   onVisibilityChange:shown=>systemPanel.setMiniMap(shown),
   isCovered: (p) =>
     skillPanel.contains(p.x, p.y) ||
@@ -5304,7 +5329,7 @@ const testToolsPanel = testTools({
       const title=`${npcMetadata.get(npc.templateId)?.name||'NPC'} #${npc.templateId} (${Math.round(npc.x)},${Math.round(npc.y)})`;
       lines.push(`${title}：${state.controlled?'本頁控制':'接收端'}／${state.action}`+
         `${state.metadata?'':'／資料讀取中'}${state.waiting?'／等待回包':''}${state.speaking?'／氣泡中':''}`+
-        `${state.reply?`／收 ${state.reply.action},${state.reply.speech}`:''}／方向bit ${state.facing}／${state.flip?'鏡像':'原圖'}／名牌${npcVisuals.speaking(npc.npcId,now)&&npcBalloons.visible(npc.npcId,npcVisuals.originY(npc.npcId),now)?'隨原氣泡暫隱':'顯示'}`);
+        `${state.reply?`／收 ${state.reply.action},${state.reply.speech}`:''}／方向bit ${state.facing}／${state.flip?'鏡像':'原圖'}／名牌持續顯示`);
     }
     return `NPC 唯讀（非原版工具，不強制演出）：${lines.join('；')||'此圖沒有NPC。'}${npcs.size>8?`；另${npcs.size-8}位`:''}`;
   },
@@ -5493,7 +5518,7 @@ canvas.addEventListener('contextmenu',event=>{
   event.preventDefault();
   if(!canOpenPlayerMenu())return;
   const point=viewPoint(event);
-  if(point.y>=STATUS_BAR.y || inventoryWindowAt(point.x,point.y) || equipPanel.hit(point.x,point.y) ||
+  if(point.y>=statusBarTop() || inventoryWindowAt(point.x,point.y) || equipPanel.hit(point.x,point.y) ||
       statPanel.contains(point.x,point.y) || skillPanel.contains(point.x,point.y) || miniMapPanel.contains(point.x,point.y))return;
   const world=screenToWorld(point,camera,renderSurface.viewport());
   for(const user of users.values())if(playerContains(user,playerHitHistory.get(user),world)){

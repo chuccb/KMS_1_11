@@ -21,6 +21,7 @@ interface MiniMapOptions {
   point(event: MouseEvent): UiPoint;
   isCovered?(point: UiPoint): boolean;
   onVisibilityChange?(shown: boolean): void;
+  viewport?(): { width: number; height: number };
 }
 import { releaseOnInterrupt } from "./pointer.ts";
 /** Original CUIMiniMap: sub_4E52C0, sub_4E5C70, sub_4E6430; config sub_43D750.
@@ -104,6 +105,7 @@ export function miniMapWindow({
   point,
   isCovered,
   onVisibilityChange,
+  viewport = () => ({ width: 800, height: 600 }),
 }: MiniMapOptions) {
   const root = requireElement("minimap-window", "div");
   let map: MiniMapArt | undefined,
@@ -133,8 +135,22 @@ export function miniMapWindow({
       localStorage.setItem("kms111.minimap", JSON.stringify({ ...at, shown }));
     } catch {}
   };
+  function limits(v = map ? miniMapViewport(map, getSelf()) : undefined) {
+    const size = viewport(),
+      width = v?.width ?? 210,
+      height = v?.height ?? 112;
+    return {
+      x: Math.max(0, size.width - (width + 6)),
+      y: Math.max(0, size.height - (height + 13)),
+    };
+  }
   function sync() {
-    const v = map ? miniMapViewport(map, getSelf()) : undefined;
+    const v = map ? miniMapViewport(map, getSelf()) : undefined,
+      max = limits(v);
+    at = {
+      x: Math.max(0, Math.min(max.x, at.x)),
+      y: Math.max(0, Math.min(max.y, at.y)),
+    };
     root.classList.toggle("hidden", !shown || !v || !isInGame());
     root.style.pointerEvents = !drag && pointer && isCovered?.(pointer) ? "none" : "auto";
     Object.assign(root.style, {
@@ -157,9 +173,10 @@ export function miniMapWindow({
       sync();
       return;
     }
+    const max = limits();
     at = {
-      x: Math.max(0, Math.min(784, Math.round(p.x - drag.x))),
-      y: Math.max(0, Math.min(584, Math.round(p.y - drag.y))),
+      x: Math.max(0, Math.min(max.x, Math.round(p.x - drag.x))),
+      y: Math.max(0, Math.min(max.y, Math.round(p.y - drag.y))),
     };
     sync();
   });

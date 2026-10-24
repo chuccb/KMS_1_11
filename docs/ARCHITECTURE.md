@@ -56,8 +56,8 @@ web／login／game 是不同 port；伺服器內部可用 loopback，瀏覽器�
 | `server/src/game/drop-landing.ts` | 所有掉落的有向真地板／下射線／虛空邊緣權威選點，原0x43格式不變 |
 | `client/entity-assets.ts`／`entity-resource-validation.ts`／`avatar-look.ts` | NPC/mob metadata驗證、field ownership／取消、native action量化與local/remote look規則 |
 | `client/motion-tuning.ts`／`motion-controls.ts` | 明示非原版本機5–60ms步長／插值選項與純偏好UI，不改server時鐘 |
-| `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 整數世界像素／原UI兩段合成、四視野、時間轉場、偏好／減少動態；不改物理／協定 |
-| `client/display-controls.ts`／`image-cache.ts` | 視窗／DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
+| `client/scene-surface.ts`／`camera-lens.ts`／`lens-controls.ts` | 所選解析度下的世界 viewport、1:1 固定尺寸 HUD 合成、標準／2×／3×鏡頭與時間轉場；不改物理／協定 |
+| `client/display-controls.ts`／`image-cache.ts` | 四種固定解析度、DPR／canvas-overlay-cursor同步與bounded archive/avatar影像生命週期 |
 | `server/src/net/client-event-json.ts`／`webclient-messages.ts` | `ClientEvent.kind` → JSON `t` projection 與完整 server-to-browser 出站 union；trade cash-block u64 在投影時轉 canonical 十進位字串；`WebClient.send` 編譯期受型別約束 |
 | `server/src/client/` | 瀏覽器 session 對原協定的轉換；不直接代替服務端權威落帳 |
 | `server/src/net/` | TCP、WebSocket、HTTP、登入／遊戲連線與 capture |
@@ -85,13 +85,13 @@ actor持有clock與已完成的immutable weapon profile；64座metadata cache去
 
 ## 呈現與資源
 
-- UI／DOM保持800×600邏輯座標；世界有獨立FOV，以整數實體倍率兩段合成。五種清晰尺寸，小視窗捲動不降採樣；見[PIXEL_CAMERA](PIXEL_CAMERA.md)。
+- 預設800×600，另有1024×768／1280×960／1600×1200固定4:3解析度；較大解析度只擴大world FOV，不放大角色／地圖素材。HUD以原像素1:1繪製並錨定畫面邊緣，小視窗捲動不降採樣；見[PIXEL_CAMERA](PIXEL_CAMERA.md)。
 - `requestAnimationFrame` 驅動呈現；重建物理、時鐘、插值與動畫不等於完整原 CVecCtrl／CShape2D。
 - Web Audio 解碼／播放原資料所對應的音訊；不重寫 DirectSound／ACM 相容層。
 - `game/wzart.ts` 做 path／UOL／canvas reader 與快取；mapart／avatar／sprites 等供應渲染資料。
 - PNG、metadata、音訊由既有 `/api/...` 輸出，瀏覽器資源快取與取消／identity guard 管理生命週期。
-- 最終canvas以整數layout box＋inverse DPR transform呈現，避免1/64 CSS px寬高量化；stage clip隔離未縮小的layout overflow。42組完整原素材screenshot像素比較通過（ADR-085）。
-- `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；只在實體倍率變化時重配800u×600u輸出backing。
+- Canvas backing 精確等於選定的800×600至1600×1200解析度；inverse DPR transform只改CSS footprint，不重採樣場景或UI。stage處理小視窗捲動與像素格對齊；36組HUD及60組world screenshot比較在零差異下通過（ADR-170）。
+- `display-controls.refresh` 接既有app frame，不新增loop／timer，處理不發resize/change的DPR-only切換；只有解析度選擇改變時才依選項重配backing。
 - archive1024 FIFO/UI優先（仍hard bound）、avatar256 LRU/實際blink預熱是browser policy，不是原EXE常數。
 - `assets/` 離線輸出仍可供分析，但不是 runtime 必經的「先全量轉檔」階段。
 - 原字型未隨專案重建；Gulim／本地合法 fallback 的 metrics 與 GDI 不保證像素相同。

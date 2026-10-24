@@ -1,8 +1,16 @@
 # Bun 全專案遷移：進行中，未完成交付
 
-更新：2026-10-24（ADR-164：strict browser UI preference boundary；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
+更新：2026-10-24（ADR-170：固定原像素解析度與錨定 HUD；latest toolchain pins 維持不變）。原目標仍是全專案只用嚴格 TypeScript / ESNext / Bun；不得把目前階段當作全案完成。
 
-## 最新增量：strict browser preferences 與 UI window persistence（ADR-164）
+## 最新增量：固定原像素解析度與錨定 HUD（ADR-170）
+
+預設解析度改為800×600，固定4:3選項為1024×768、1280×960與1600×1200。Canvas backing 精確等於選擇尺寸；DPR只影響CSS footprint，較高解析度擴大world FOV但不縮放原圖素，視窗不足時捲動。固定HUD保持1:1：map title／暫時狀態右上，小地圖左上，800×208狀態列／快捷欄／聊天輸入沿底邊錨定；鏡頭2×／3×與cut／fade／shutter獨立保留。
+
+重寫display layout、UI/world compositor、pointer／status-bar offset與小地圖限制，移除舊自動倍率選單語義；舊 `wide` lens preference安全遷移為native 1×。更新真Chromium fixtures及read-only display probe，不連遊戲或登入。
+
+Focused unit **45/0、6 files**；真 Chromium HUD/world screenshot共**36＋60組**，source pixel及overlay皆0 difference，角色原始尺寸保持一致。`npx --yes bun@1.4.4 run check` 全通過：typecheck、format check、**1501 pass／0 fail／5334 expects、174 files（396.93 s）**、browser build。未登入LIVE、未操作角色或存檔；NPC自言自語名牌修正仍在此次完整回歸中通過。完整決策與差異見 [ADR-170](DECISIONS.md)／[PIXEL_CAMERA](PIXEL_CAMERA.md)。
+
+## 前輪增量：strict browser preferences 與 UI window persistence（ADR-164）
 
 新增 `client/browser-preferences.ts`，把 `client/main.js` 的 browser-local `localStorage` acquisition／safe read/write、未知 JSON shape validation、inventory/shop window position 與 inventory tab 政策搬入 strict TypeScript。bag position 接受 finite x/y 且不 clamp；shop position 先 `Math.round` 再保留舊有的 viewport/sheet 可見範圍與 48×32 px grab edge；tab 僅接收整數 1..4、無效時回 EQUIP=1。Store accessor、get／parse／set 失敗都 fail-soft；不把 storage exception 誤報為缺值或中斷 UI。
 

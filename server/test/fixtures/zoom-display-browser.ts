@@ -4,9 +4,9 @@ import { archiveImages, avatarImages } from "../../../client/image-cache.ts";
 import { displayControls } from "../../../client/display-controls.ts";
 import { sceneSurface } from "../../../client/scene-surface.ts";
 import { lensViewport, type LensMode } from "../../../client/camera-lens.ts";
-import type { DisplayMode } from "../../../client/display.ts";
+import type { ResolutionId } from "../../../client/display.ts";
 export interface ZoomScreenInput {
-  mode: DisplayMode;
+  mode: ResolutionId;
   lens: LensMode;
   background: string;
   tile: string;
@@ -52,7 +52,10 @@ export function installZoomScreen() {
       await Promise.all([background.loading, tile.loading, avatar.loading]);
       if (!background.ready || !tile.ready || !avatar.ready || avatar.planeHeight <= 0)
         throw new Error("Original art did not load");
-      const viewport = lensViewport(input.lens, display.layout().deviceScale);
+      const viewport = lensViewport(input.lens, {
+        width: display.layout().resolutionWidth,
+        height: display.layout().resolutionHeight,
+      });
       surface.beginWorld(viewport);
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, viewport.width, viewport.height);

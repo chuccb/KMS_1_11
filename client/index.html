@@ -12,13 +12,13 @@
       <p id="startup-error-message"></p>
       <a href="">重新載入頁面</a>
     </aside>
-    <div id="game-viewport" aria-label="清晰遊戲畫面；視窗較小時可捲動">
+    <div id="game-viewport" aria-label="4:3 遊戲畫面；較高解析度顯示更多世界；視窗較小時可捲動">
       <div id="game-stage">
         <canvas id="view" tabindex="-1" aria-label="遊戲畫面"></canvas>
         <!--
       The game's own UI lives on the canvas; only the chat input has to be a real <input>. This layer
-      is placed and scaled exactly like `#view`, so its children can use the 2003 client's 800x600
-      coordinates - the chat field sits where `UI/StatusBar.img/base/1` draws its input box.
+      shares the selected-resolution origin and DPR transform with `#view`; HUD art stays at native
+      pixel size, with the status bar and its chat field anchored to the bottom edge.
     -->
         <div id="game-ui">
           <section
@@ -396,7 +396,7 @@
     <header id="bar">
       <strong>KMS 1.11</strong>
       <span id="where">未連線</span>
-      <select id="view-scale" aria-label="清晰等比例畫面尺寸"></select>
+      <select id="view-scale" aria-label="遊戲解析度；解析度只改變世界可視範圍"></select>
       <select id="camera-mode" aria-label="鏡頭模式（瀏覽器自訂）"></select>
       <button id="camera-recenter" type="button" title="將鏡頭重新對準角色；固定鏡頭模式也可使用">
         鏡頭回中
@@ -420,8 +420,8 @@
           <button id="camera-reset" type="button">還原標準鏡頭／直接切換</button>
           <p id="camera-status" role="status" aria-live="polite"></p>
           <p>
-            世界與 UI 分開：背包、聊天與點擊座標不變。遠近只在清晰整數像素間切換；1×
-            實體像素已是最遠，不用縮小或模糊偷換更大視野。
+            世界與 HUD 分開：解析度只擴大世界可視範圍，角色與地圖維持原像素尺寸；HUD 固定原尺寸、
+            狀態列貼齊底邊。此處的遠近才會獨立改變鏡頭倍率，不改碰撞／能力。
           </p>
           <small>Esc 關閉；沒有自動搖晃、旋轉或閃光。轉場不暫停世界。</small>
         </section>
@@ -615,7 +615,7 @@
           <p id="qa-npc">NPC 唯讀狀態（非原版工具）</p>
           <p>
             40000 的 Robin 位於
-            (69,275)。自言自語不需點擊，依原待機池與4–12秒抽選；深紅氣泡約5秒，期間隱藏名牌。工具不強制演出或修改NPC資料。額外動作的原送／收索引有差異，現採明示的透明轉送政策，不保證每次抽選都有表情。
+            (69,275)。自言自語不需點擊，依原待機池與4–12秒抽選；深紅氣泡約5秒，期間名牌仍持續顯示。工具不強制演出或修改NPC資料。額外動作的原送／收索引有差異，現採明示的透明轉送政策，不保證每次抽選都有表情。
           </p>
           <label
             >找地圖 <input id="qa-map-filter" type="search" placeholder="ID／韓文名稱"

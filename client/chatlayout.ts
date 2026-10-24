@@ -53,6 +53,14 @@ export function balloonLayout(
     arrowY: height - (dead ? 15 : 13),
   };
 }
+/** 4386E0: full balloon top; its bounding box ends above the feet-anchored nameplate. */
+export function balloonTop(
+  y: number,
+  originY: number,
+  layout: Pick<ReturnType<typeof balloonLayout>, "y">,
+) {
+  return Math.round(y - originY - 5 + layout.y);
+}
 /** 4FB670: reader may hold scroll for <=5000ms; later incoming text returns to latest. */
 export function followChat(sticky: boolean, lastScroll: number, now: number): boolean {
   return sticky || now - lastScroll > 5000;

@@ -1,14 +1,17 @@
-/** Two-pass pixel compositor: world has its own FOV; original UI/input stay 800×600.
- * Every world pixel and UI pixel expands by an INTEGER device factor. No fractional bitmap
- * resize, blur, CSS zoom/rotation, gameplay transform or unbounded offscreen allocation.
- */
+/** Separate native-pixel world and UI passes on one bounded, crisp canvas. */
 import { requireContext2d } from "./dom.ts";
 export interface SceneViewport {
   width: number;
   height: number;
+  /** World units represented by one output pixel; inverse-projection factor for pointer input. */
   zoom: number;
   pixelScale: number;
+  /** Kept for the integer-scale lens fixture; fixed-resolution UI does not use this as a scale. */
   uiScale: number;
+}
+export interface ResolutionSize {
+  width: number;
+  height: number;
 }
 export function sceneViewport(uiScale: number, pixelScale = uiScale): SceneViewport {
   if (
@@ -28,6 +31,33 @@ export function sceneViewport(uiScale: number, pixelScale = uiScale): SceneViewp
     uiScale,
   };
 }
+/** The selected resolution is the world raster size. `pixelScale` is an independent lens choice. */
+export function sceneViewportForResolution(
+  resolutionWidth: number,
+  resolutionHeight: number,
+  pixelScale = 1,
+): SceneViewport {
+  if (
+    !Number.isSafeInteger(resolutionWidth) ||
+    !Number.isSafeInteger(resolutionHeight) ||
+    resolutionWidth < 800 ||
+    resolutionWidth > 1600 ||
+    resolutionHeight < 600 ||
+    resolutionHeight > 1200 ||
+    Math.abs(resolutionWidth / resolutionHeight - 4 / 3) > 1e-12 ||
+    !Number.isInteger(pixelScale) ||
+    pixelScale < 1 ||
+    pixelScale > 3
+  )
+    throw new Error("Invalid bounded 4:3 native-pixel resolution/lens scale");
+  return {
+    width: resolutionWidth / pixelScale,
+    height: resolutionHeight / pixelScale,
+    zoom: pixelScale,
+    pixelScale,
+    uiScale: 1,
+  };
+}
 export function sceneSurface(canvas: HTMLCanvasElement) {
   const output = requireContext2d(canvas),
     buffer = canvas.ownerDocument.createElement("canvas"),
@@ -38,6 +68,12 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
     geometryChanged = false;
   buffer.width = width;
   buffer.height = height;
+  function ensureBuffer(w: number, h: number) {
+    // Keep the largest bounded dimensions reached, so a wide world pass and full-size UI pass do
+    // not reallocate the shared canvas on every animation frame.
+    if (buffer.width < w) buffer.width = w;
+    if (buffer.height < h) buffer.height = h;
+  }
   function clear() {
     context.resetTransform();
     context.globalAlpha = 1;
@@ -55,14 +91,18 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
       return height;
     },
     beginWorld(next: SceneViewport) {
-      geometryChanged = viewport.zoom !== next.zoom;
+      geometryChanged =
+        viewport.width !== next.width ||
+        viewport.height !== next.height ||
+        viewport.zoom !== next.zoom ||
+        viewport.pixelScale !== next.pixelScale;
       viewport = next;
       width = next.width;
       height = next.height;
-      const w = Math.max(800, Math.ceil(width)),
-        h = Math.max(600, Math.ceil(height));
-      if (buffer.width !== w) buffer.width = w;
-      if (buffer.height !== h) buffer.height = h;
+      ensureBuffer(
+        Math.max(800, Math.ceil(width), canvas.width),
+        Math.max(600, Math.ceil(height), canvas.height),
+      );
       clear();
       output.resetTransform();
       output.globalAlpha = 1;
@@ -74,10 +114,22 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
     presentWorld(cover = 0, style: "fade" | "shutter" = "fade") {
       output.save();
       try {
-        output.imageSmoothingEnabled = false;
-        output.setTransform(viewport.pixelScale, 0, 0, viewport.pixelScale, 0, 0);
-        output.drawImage(buffer, 0, 0);
         output.resetTransform();
+        output.globalAlpha = 1;
+        output.imageSmoothingEnabled = false;
+        const sourceWidth = Math.ceil(viewport.width),
+          sourceHeight = Math.ceil(viewport.height);
+        output.drawImage(
+          buffer,
+          0,
+          0,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          sourceWidth * viewport.pixelScale,
+          sourceHeight * viewport.pixelScale,
+        );
         output.fillStyle = "#000";
         const bounded = Number.isFinite(cover) ? Math.max(0, Math.min(1, cover)) : 0;
         // RAF can skip the exact opacity peak. The first actually painted new FOV must still
@@ -97,8 +149,9 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
       }
     },
     beginUi(clearOutput = false) {
-      width = 800;
-      height = 600;
+      width = canvas.width || 800;
+      height = canvas.height || 600;
+      ensureBuffer(width, height);
       clear();
       if (clearOutput) {
         output.resetTransform();
@@ -112,7 +165,9 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
         output.resetTransform();
         output.globalAlpha = 1;
         output.imageSmoothingEnabled = false;
-        output.drawImage(buffer, 0, 0, 800, 600, 0, 0, canvas.width, canvas.height);
+        // A fixed-size HUD is drawn at native 1:1 pixels. Never stretch its 800×600 assets to
+        // whichever world resolution the selected output canvas currently uses.
+        output.drawImage(buffer, 0, 0, width, height, 0, 0, width, height);
       } finally {
         output.restore();
       }
@@ -120,7 +175,7 @@ export function sceneSurface(canvas: HTMLCanvasElement) {
   };
 }
 
-/** UI view coordinates and world coordinates MUST cross this one inverse pair. */
+/** Screen/world inverse pair; screen coordinates are selected-resolution physical pixels. */
 export function screenToWorld(
   point: { x: number; y: number },
   camera: { x: number; y: number },

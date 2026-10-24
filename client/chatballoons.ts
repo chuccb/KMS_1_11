@@ -27,7 +27,7 @@ export interface ChatBalloons {
     now: number,
   ): void;
 }
-import { balloonLayout } from "./chatlayout.ts";
+import { balloonLayout, balloonTop } from "./chatlayout.ts";
 /** 50B320 -> 4373A0 -> 4386E0. One current 5000ms balloon per known user, fixed root z250210. */
 export function chatBalloons({ image }: { image: ImageLookup }): ChatBalloons {
   const records = new Map<number, ChatBalloon>();
@@ -85,7 +85,7 @@ export function chatBalloons({ image }: { image: ImageLookup }): ChatBalloons {
         dead,
       ));
       const left = Math.round(x + at.x),
-        top = Math.round(y - originY - 5 + at.y);
+        top = balloonTop(y, originY, at);
       const stamp = (name: string, dx: number, dy: number) => {
         ctx.globalAlpha = 224 / 255;
         ctx.drawImage(art[name].img, left + dx, top + dy);

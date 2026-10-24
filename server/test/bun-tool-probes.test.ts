@@ -111,7 +111,7 @@ test(
 );
 
 test(
-  "typed display probe verifies seven real DPRs, equal-width pixels, UI alignment, mode persistence and same-page DPR changes without login",
+  "typed display probe verifies seven DPRs, four fixed resolutions, one-to-one pixels, HUD alignment and saved resolution without login",
   { timeout: 60000 },
   async () => {
     const archive = WzArchive.open(resolve(root, "Data.wz"));

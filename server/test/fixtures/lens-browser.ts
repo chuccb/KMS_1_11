@@ -118,7 +118,7 @@ export function installLensFixture() {
       ctx.fillStyle = "#00ff00";
       ctx.fillRect(10, 120, 5, 5);
       surface.presentUi();
-      const hud = [...output.getImageData(10 * input.uiScale, 120 * input.uiScale, 1, 1).data];
+      const hud = [...output.getImageData(10, 120, 1, 1).data];
       return {
         viewport,
         runs,

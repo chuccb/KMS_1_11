@@ -178,10 +178,7 @@ test("integration source keeps the cursor in its own plane and cancels interrupt
     css = source("../../client/style.css");
   // Follow the extracted controller -> native cursor call chain, not the old inline layout.
   assert.match(main, /const displayController = displayControls\(/);
-  assert.match(
-    main,
-    /onScale:\s*layout\s*=>\s*gameCursor\.resize\(layout\.deviceScale, layout\.dpr\)/,
-  );
+  assert.match(main, /onScale\(layout\)\s*\{[\s\S]*?gameCursor\.resize\(1,\s*layout\.dpr\)/);
   assert.match(source("../../client/display-controls.ts"), /onScale\(layout\)/);
   assert.match(main, /displayController\.refresh\(\)/);
   assert.match(css, /\.native-cursor-ready \*/);

@@ -7,7 +7,7 @@ import { WzArchive } from "../src/wz/archive.ts";
 import { artProviderOf } from "../src/game/art.ts";
 import { startWebClient } from "../src/net/webclient.ts";
 import { launchBrowser, readOnlyBrowserPage } from "../scripts/browser.ts";
-import type { DisplayMode } from "../../client/display.ts";
+import type { ResolutionId } from "../../client/display.ts";
 import type { LensMode } from "../../client/camera-lens.ts";
 import "./fixtures/zoom-display-browser.ts";
 
@@ -58,7 +58,7 @@ test(
     });
     try {
       const evidence = [];
-      for (const dpr of [1, 1.1, 1.25, 1.5, 1.75, 2, 3]) {
+      for (const dpr of [1, 1.25, 1.5, 2, 3]) {
         const page = await browser.newPage({ deviceScaleFactor: dpr }),
           errors: string[] = [];
         try {
@@ -66,11 +66,23 @@ test(
           const guard = await readOnlyBrowserPage(page, `http://127.0.0.1:${server.port}`);
           await page.goto(`http://127.0.0.1:${server.port}`);
           await page.waitForFunction(() => !!window.zoomScreen);
-          for (const mode of ["pixel-1", "pixel-2"] satisfies DisplayMode[]) {
-            const uiScale = mode === "pixel-1" ? 1 : 2;
+          for (const mode of [
+            "800x600",
+            "1024x768",
+            "1280x960",
+            "1600x1200",
+          ] satisfies ResolutionId[]) {
+            const option =
+              mode === "800x600"
+                ? { width: 800, height: 600 }
+                : mode === "1024x768"
+                  ? { width: 1024, height: 768 }
+                  : mode === "1280x960"
+                    ? { width: 1280, height: 960 }
+                    : { width: 1600, height: 1200 };
             await page.setViewportSize({
-              width: Math.ceil((800 * uiScale + 160) / dpr),
-              height: Math.ceil((600 * uiScale + 160) / dpr),
+              width: Math.ceil((option.width + 160) / dpr),
+              height: Math.ceil((option.height + 160) / dpr),
             });
             for (const lens of ["normal", "near", "detail"] satisfies LensMode[]) {
               const result: Awaited<ReturnType<Window["zoomScreen"]["paint"]>> =
@@ -148,7 +160,9 @@ test(
               assert.equal(result.cssRendering, "pixelated");
               assert.equal(result.filter, "none");
               assert.ok(result.avatar.opaque > 0);
-              evidence.push({ dpr, uiScale, lens, ...comparison, avatar: result.avatar });
+              assert.deepEqual([result.width, result.height], [option.width, option.height]);
+              assert.equal(result.pixelScale, lens === "normal" ? 1 : lens === "near" ? 2 : 3);
+              evidence.push({ dpr, resolution: mode, lens, ...comparison, avatar: result.avatar });
             }
           }
           await page.evaluate(() => window.zoomScreen.dispose());

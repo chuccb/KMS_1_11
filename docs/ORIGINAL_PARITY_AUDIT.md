@@ -56,11 +56,11 @@
 | B02 未接／部分 | 飛行怪、水中怪與完整特殊KB | ADR-078特別flyer KB已接539B10 field clip並移除該caller未呼的shape sweep；ground KB按一鄰段clamp。普通fly／water AI、custom shoe、追擊與其他controller分支仍缺 | `mob-reaction.mjs`、`mobmotion.mjs`；[KB界線](NATIVE_MOB_KB_NPC_STATE.md) |
 | B03 未接／未知 | Monster skill／完整能力異常 | 本輪active attack不是monster skill系統；不能據此宣稱怪物施法、debuff與所有特殊狀態已接 | `game/mobs.ts`、`mob-attacks.mjs`；[ADR-076界線](NATIVE_MOB_ATTACKS.md) |
 | B04 部分／差異／未知 | 重生、MP回復與屍體壽命規則 | 現行固定重生等待、重生回maxMP、以最長die動作保留屍體等是server政策；沒有原server完整spawn／regen規則。死亡變體與共用reader已補，不應再列為「永遠只die1」 | `game/mobs.ts` 的 MOB_RESPAWN_MS／lifecyclePackets／loadMobTemplate |
-| B05 未接 | NPC自主漫步控制器 | action／speech／flip／名牌規則、controller relay與path sampler已有；CVecCtrlNpc／5398B0自主生成步行路徑、smoothing未完成。`--npc-walk`不是強制補成原AI | `client/npcbehavior.mjs`、`npcmotion.mjs`、`game/npcs.ts`；[NPC未完成](NATIVE_NPC_BEHAVIOR.md) |
+| B05 未接 | NPC自主漫步控制器 | action／speech／flip／氣泡期間名牌持續可見、controller relay與path sampler已有；CVecCtrlNpc／5398B0自主生成步行路徑、smoothing未完成。`--npc-walk`不是強制補成原AI | `client/npcmotion.ts`、`server/src/game/npcs.ts`；[NPC未完成](NATIVE_NPC_BEHAVIOR.md) |
 | B06 未知／差異 | NPC額外動作索引與控制權 | 原sender extraIndex+2、receiver raw索引的矛盾未解；現行透明relay與第一可用member控制、250ms防洪是重建政策，部分額外表情不能保證每次抽選皆對應原行為 | `game/world.ts`、`client/npcbehavior.mjs`；[NPC索引](NATIVE_NPC_BEHAVIOR.md) |
 | B07 部分／差異／未知 | NPC點擊不是原任務腳本 | 現行商店或info/speak分頁say；原quest（如begin5）、轉職、計程車、倉庫的條件／分支／價格／獎勵沒有完整原腳本 | `game/dialogue.ts`、`net/loginserver.ts` 的 handleObjectClick／talkTo；[NPC對話](NATIVE_NPC_DIALOGUE.md) |
 
-**不是缺口的原行為：** NPC自言自語期間暫隱名牌已有499D60證據，不能為了看似方便就刪掉；真正要修的是冷資源造成名牌／氣泡同時不可見的漏洞。
+**NPC 名牌更正（ADR-169，2026-10-24）：** 原版自言自語氣泡期間仍顯示名牌。`499D60` 傳給 name layer 的 `0x00FFFFFF` 是 `vtable+232` 的 identity modulation，不是隱藏指令（參見 `protocol/FINDINGS.md` §4.41.6）；使用者實機觀察確認可見。browser 已移除 speech／balloon readiness 的名牌抑制，並有「名牌持續繪製」及獨立氣泡層不覆蓋腳下名牌的回歸測試。舊「原行為暫隱名牌」判斷作廢。
 同樣，本EXE主動怪攻擊hit回呼50DEC0只放圖、不走HP傷害，是現有原證；不能以後期版本印象列成「忘了扣血」。身體碰撞傷害另走511C60鏈。
 
 ## C. 戰鬥、技能、成長與裝備

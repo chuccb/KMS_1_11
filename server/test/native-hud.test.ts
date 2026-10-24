@@ -17,6 +17,8 @@ import {
   messengerButtonAt,
   mapTitleLayout,
   statusBarButtonAt,
+  statusBarOffset,
+  statusBarTop,
   statusText,
   statusVitalText,
   preloadStatusBar,
@@ -61,6 +63,25 @@ test("46DA30: right anchored title and optional 40px mark band, without minimap 
   assert.equal(without.x + without.streetX + 100, 797);
   assert.equal(withMark.y, 3);
   assert.equal(withMark.height, 40);
+});
+test("fixed-size HUD anchors stay on the selected 4:3 screen edges and preserve hit-test offsets", () => {
+  assert.equal(statusBarOffset(600), 0);
+  assert.equal(statusBarOffset(768), 168);
+  assert.equal(statusBarOffset(1200), 600);
+  assert.equal(statusBarTop(768), 560);
+  const button = STATUS_BAR.buttons[0]!;
+  assert.equal(
+    statusBarButtonAt(button.x + 1, STATUS_BAR.y + button.y + 1 + 168, 168)?.action,
+    "inventory",
+  );
+  assert.equal(messengerButtonAt(66, MESSENGER_BUTTON.y + 168, 168), true);
+  const self = { hp: 12, mp: 8, exp: 7, expToNext: 15 },
+    totals = { maxHp: 50, maxMp: 30 };
+  assert.equal(statusVitalText(5, 536 + 168, self, totals, 168), "HP : 12 / 50");
+  assert.equal(
+    mapTitleLayout(100, 60, true, 1600).x + mapTitleLayout(100, 60, true, 1600).width,
+    1599,
+  );
 });
 test("map info strings/mark preserve exact Korean resource names; None makes no resource request", () => {
   const calls: string[] = [];

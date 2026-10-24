@@ -33,9 +33,9 @@ body {
 }
 
 /*
- * The game view is the 2003 client's 800x600 surface, scaled up by CSS and letterboxed inside the
- * window. display.ts aligns to the device-pixel grid (including OS/browser zoom).
- * All choices use equal integer device-pixel squares. Small windows scroll instead of downsampling.
+ * The selected 4:3 native-pixel resolution is a physical backing size, with only an inverse-DPR
+ * CSS transform. Higher resolutions expose more world without resizing its sprites; small windows
+ * scroll instead of shrinking or resampling the game image.
  */
 #game-viewport {
   position: fixed;
@@ -208,9 +208,8 @@ body {
 }
 
 /*
- * The game's UI is drawn on the 800x600 canvas, so the one part that has to be a real element - the
- * chat input - lives in a layer placed and scaled exactly like the canvas (`main.js` `resize`). A
- * child at (243, 573) therefore lands on the chat bar that `UI/StatusBar.img/base/1` draws.
+ * HUD art is composited at original pixel size. The real chat input shares the selected-resolution
+ * canvas layer and is moved with the bottom-anchored status bar in main.js.
  */
 #game-ui {
   position: absolute;

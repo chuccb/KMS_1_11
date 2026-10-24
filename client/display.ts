@@ -1,110 +1,83 @@
-/** Presentation policy: 4:3, integer DEVICE pixels only. Never downsample to fit.
- * A small viewport scrolls the full surface instead of destroying source pixels.
- * Manual sizes are physical pixel multiples (not CSS multiples under fractional OS/browser zoom).
- */
-export const DISPLAY_MODES = [
-  "pixel",
-  "pixel-original",
-  "pixel-1",
-  "pixel-2",
-  "pixel-3",
-  "pixel-4",
+/** Fixed 4:3 native-pixel resolution presets: resolution changes world FOV, never sprite size. */
+export const RESOLUTION_OPTIONS = [
+  { id: "800x600", label: "800 × 600", width: 800, height: 600 },
+  { id: "1024x768", label: "1024 × 768", width: 1024, height: 768 },
+  { id: "1280x960", label: "1280 × 960", width: 1280, height: 960 },
+  { id: "1600x1200", label: "1600 × 1200", width: 1600, height: 1200 },
 ] as const;
-export type DisplayMode = (typeof DISPLAY_MODES)[number];
-export const DISPLAY_OPTIONS: readonly { id: DisplayMode; label: string }[] = [
-  { id: "pixel", label: "清晰自動 · 等比例" },
-  { id: "pixel-original", label: "清晰自動 · 不小於原版 800×600" },
-  { id: "pixel-1", label: "清晰 1× · 800×600 實體像素" },
-  { id: "pixel-2", label: "清晰 2× · 1600×1200 實體像素" },
-  { id: "pixel-3", label: "清晰 3× · 2400×1800 實體像素" },
-  { id: "pixel-4", label: "清晰 4× · 3200×2400 實體像素" },
-];
-export function displayMode(value: unknown): DisplayMode {
-  // Retired fractional fit/native preferences migrate to a clear policy, never restore blur.
-  if (value === "native") return "pixel-1";
-  return DISPLAY_MODES.find((mode) => mode === value) ?? "pixel";
+export type ResolutionId = (typeof RESOLUTION_OPTIONS)[number]["id"];
+export const DEFAULT_RESOLUTION: ResolutionId = "800x600";
+export function resolutionId(value: unknown): ResolutionId {
+  return RESOLUTION_OPTIONS.find((option) => option.id === value)?.id ?? DEFAULT_RESOLUTION;
 }
-/** Align both CSS and device grids (Chromium snaps paint origins in CSS space). */
+export function resolutionSize(value: unknown) {
+  const id = resolutionId(value),
+    selected = RESOLUTION_OPTIONS.find((option) => option.id === id);
+  if (!selected) throw new Error("Validated game resolution is missing");
+  return { id, width: selected.width, height: selected.height };
+}
+/** Align the surface origin and scroll increments to both CSS and device pixel grids. */
 export function originGrid(dpr: number): number {
   for (let step = 1; step <= 64; step++)
     if (Math.abs(step * dpr - Math.round(step * dpr)) < 1e-6) return step;
   return 1;
 }
-/**
- * How far past a boundary the viewport must travel before the auto mode leaves the scale it is
- * already using, measured in CSS pixels of the surface's short (600px) side.
- *
- * `floor(fit)` is a step function, so at a boundary a wobble of a single pixel flips the surface
- * between two sizes - the game doubling and halving, over and over. A resizing iframe or a
- * scrollbar appearing is enough to start it, and no single screenshot can show it because either
- * size looks fine on its own. The band is a little wider than a scrollbar, which is the largest
- * step the environment takes by itself.
- */
-export const AUTO_HYSTERESIS_PX = 24;
-
-/**
- * @param reservedTop Height of a fixed header that overlays the top of the scroll area. Those rows
- * are not usable, so the surface is centred in what is left: without this, a window that is only
- * just tall enough slides the top of the game underneath the header and hides it.
- * @param current The device scale already in use, when there is one. The auto mode keeps it until
- * the viewport leaves its band, so that small size changes cannot flip the surface between sizes.
- * Manual modes ignore it: their scale is the one thing the user chose outright.
- */
-export function viewLayout(
+export interface ResolutionLayout {
+  resolution: ResolutionId;
+  resolutionWidth: number;
+  resolutionHeight: number;
+  /** CSS footprint; the backing remains the exact selected physical-pixel resolution. */
+  width: number;
+  height: number;
+  scale: number;
+  dpr: number;
+  /** Device pixel scaling is always 1:1; the selected dimensions themselves expand the field. */
+  deviceScale: 1;
+  backingWidth: number;
+  backingHeight: number;
+  left: number;
+  top: number;
+  contentWidth: number;
+  contentHeight: number;
+  overflowing: boolean;
+}
+/** Keep the selected raster 1:1 in device pixels. Small browser viewports scroll; never shrink. */
+export function resolutionLayout(
   width: number,
   height: number,
   dpr = 1,
-  requested: unknown = "pixel",
+  requested: unknown = DEFAULT_RESOLUTION,
   reservedTop = 0,
-  current?: number,
-) {
+): ResolutionLayout {
   width = Number.isFinite(width) && width > 0 ? width : 800;
   height = Number.isFinite(height) && height > 0 ? height : 600;
   dpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-  const grid = originGrid(dpr);
-  // Snap the reserved rows **up** to the grid. The header's own height is whatever its content
-  // needs, so it is usually not a whole number of device pixels; leaving it raw would put the
-  // surface origin on a half device pixel - exactly what `originGrid` exists to prevent.
-  const chrome =
+  const selected = resolutionSize(requested),
+    grid = originGrid(dpr),
+    cssWidth = selected.width / dpr,
+    cssHeight = selected.height / dpr,
+    chrome =
       Number.isFinite(reservedTop) && reservedTop > 0 ? Math.ceil(reservedTop / grid) * grid : 0,
-    usable = Math.max(1, height - chrome);
-  const mode = displayMode(requested),
-    fit = Math.min(width / 800, usable / 600) * dpr + 1e-9;
-  let deviceScale: number;
-  if (mode === "pixel-original")
-    // Never smaller than the original 800x600 window. CSS size is 800*deviceScale/dpr, so reaching
-    // 800x600 needs deviceScale >= dpr, and the next integer up is the only crisp way to get there.
-    // When that no longer fits the view scrolls - the policy the manual sizes already state.
-    deviceScale = Math.min(4, Math.max(1, Math.floor(fit), Math.ceil(dpr)));
-  else if (mode === "pixel") deviceScale = Math.max(1, Math.min(4, Math.floor(fit)));
-  else deviceScale = Number(mode.slice(-1));
-  // Only a step DOWN is held. The flip-flop is always a step down: fit crosses an integer, floor
-  // drops, the surface halves. Stepping up is never a wobble - it means the next size genuinely
-  // fits, and taking it cannot shrink the viewport again - so it must happen at once, which is also
-  // what makes changing mode take effect immediately instead of being pinned to the old size.
-  if ((mode === "pixel" || mode === "pixel-original") && Number.isInteger(current)) {
-    const held = current as number,
-      guard = (AUTO_HYSTERESIS_PX / 600) * dpr;
-    if (deviceScale < held && held >= 1 && held <= 4 && fit >= held - guard) deviceScale = held;
-  }
-  const scale = deviceScale / dpr,
-    cssWidth = 800 * scale,
-    cssHeight = 600 * scale;
+    usable = Math.max(1, height - chrome),
+    left = Math.max(0, Math.floor((width - cssWidth) / (2 * grid) + 1e-9) * grid),
+    top = chrome + Math.max(0, Math.floor((usable - cssHeight) / (2 * grid) + 1e-9) * grid),
+    contentWidth = width + Math.ceil(Math.max(0, left + cssWidth - width) / grid) * grid,
+    contentHeight = height + Math.ceil(Math.max(0, top + cssHeight - height) / grid) * grid;
   return {
+    resolution: selected.id,
+    resolutionWidth: selected.width,
+    resolutionHeight: selected.height,
     width: cssWidth,
     height: cssHeight,
-    scale,
+    scale: 1 / dpr,
     dpr,
-    deviceScale,
-    backingWidth: 800 * deviceScale,
-    backingHeight: 600 * deviceScale,
-    left: Math.max(0, Math.floor((width - cssWidth) / (2 * grid) + 1e-9) * grid),
-    top: chrome + Math.max(0, Math.floor((usable - cssHeight) / (2 * grid) + 1e-9) * grid),
-    // Pad only the scroll tail, so even the browser-clamped END remains on both grids. The stage
-    // has to cover the header too, because the surface is positioned below it.
-    contentWidth: width + Math.ceil(Math.max(0, cssWidth - width) / grid) * grid,
-    contentHeight: height + Math.ceil(Math.max(0, cssHeight - usable) / grid) * grid,
+    deviceScale: 1,
+    backingWidth: selected.width,
+    backingHeight: selected.height,
+    left,
+    top,
+    contentWidth,
+    contentHeight,
     overflowing: cssWidth > width + 1e-6 || cssHeight > usable + 1e-6,
   };
 }
-export type ViewLayout = ReturnType<typeof viewLayout>;

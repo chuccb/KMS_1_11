@@ -159,10 +159,10 @@ API metadata、faceFrame合成／PNG cache／預熱、異常輸入與回歸來�
 回覆端重新解析目前body，escaped `##L` 不再誤算有效選項。新增兩個唯讀入口；不是任務、沒有新增原server腳本。
 [NATIVE_DIALOGUE_RICHTEXT](NATIVE_DIALOGUE_RICHTEXT.md)／ADR-063；未執行test/check/typecheck/語法檢查/browser/VM/probe，啟服非PASS。
 
-## 前輪實作：NPC idle／speech／controller（2026-10-18，未測試）
+## 前輪實作：NPC idle／speech／controller（2026-10-18；名牌修正驗證於2026-10-24）
 
 靜止NPC依原池與4–12秒抽選，由單一控制者送2F、全體含sender等3D才演出；controller離圖交接。
-forced單次播放、30ms逐格、原normal五秒深紅氣泡／height錨點／隱藏名牌；場地／斷線／冷art清理。
+forced單次播放、30ms逐格、原normal五秒深紅氣泡／height錨點；氣泡期間名牌持續顯示；場地／斷線／冷art清理。
 動作圖link merge與行為metadata一跳link替換分開；signed索引不排序、不丟空槽。
 **原sender+2／receiver raw guard/speech不一致仍未解**；透明relay與owner選擇明示為重建政策。
 不宣稱全額外表情／原server／自主NPC走路完成。體驗工具→40000 Robin（69,275）＋唯讀NPC控制／回包資料。
@@ -331,12 +331,13 @@ PAD/ACC藥水已接實際效果；工具勾選後可各領3瓶。當輪EVA只有
   範圍與差異見 [EQUIPMENT_VALIDATION.md](EQUIPMENT_VALIDATION.md)。
 - 目前預覽為**隔離QA服**gear/gear、watch/watch；本工作環境未保有前輪/tmp正式存檔，未建立空白正式角色替代進度。
 
-## 現行：清晰尺寸與鏡頭演出（2026-10-18）
+## 現行：固定解析度與原尺寸 HUD（2026-10-24）
 
-上方尺寸只有清晰自動／1×／2×／3×／4×實體像素等比例選項，小視窗改捲動，不再提供非整數fit或降採樣。
-十種跟隨鏡頭之外，「鏡頭演出」另有遠景／標準／拉近／特寫與直接／淡出淡入／上下開幕；世界與原800×600 UI分層。
-1×實體像素已是最遠清晰視野，遠景在此與標準相同，不偷縮小。原ITEM／I、八種物理步長保留，預設不變。
-保存／減少動態／輸入與界線、實測與剩餘債務見 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
+上方解析度選單固定為 **800×600（預設）／1024×768／1280×960／1600×1200**。所選解析度直接決定世界 viewport；
+較大尺寸只增加可視世界範圍，角色、地圖和 HUD 圖素都以原像素 1:1 繪製，不因解析度放大。固定尺寸 HUD
+錨定畫面邊緣：小地圖在左上、地圖標題與暫時狀態在右上、狀態列與聊天列在左下。DPR 只決定 CSS footprint；
+瀏覽器視窗太小時可捲動，不縮小／重採樣。非原版鏡頭演出另可選 1×／2×／3×倍率，但與解析度選擇分離。
+原ITEM／I、八種物理步長與十種跟隨鏡頭保留。實作、回歸測試與範圍見 ADR-170 及 [PIXEL_CAMERA](PIXEL_CAMERA.md)。
 
 ## 歷史：清晰縮放＋原版小地圖（2026-10-17）
 
@@ -476,9 +477,9 @@ CheckBox 都是 canvas 上的 WZ 圖，不另外畫 CSS 視窗。Enter 可由帳
 
 ## 畫面上有什麼
 
-標準世界視野與原UI均為 **800×600**；世界遠近可獨立選擇，UI不跟著放大。
-可見輸出依清晰實體倍率為800u×600u，CSS／DPR／捲動與透明DOM一起對齊；尺寸放不下不降採樣。
-見[PIXEL_CAMERA](PIXEL_CAMERA.md)。所有圖片仍是伺服器直接從 `Data.wz` 解出的PNG，不用色塊替代遊戲素材。
+預設世界視野為 **800×600**，可選1024×768、1280×960、1600×1200；解析度增加可視範圍，不縮放角色／地圖素材。
+HUD保持原像素尺寸，狀態列等錨定畫面邊緣。CSS／DPR／捲動與透明DOM一起對齊；視窗放不下時捲動，不降採樣。
+解析度政策見ADR-170。所有圖片仍是伺服器直接從 `Data.wz` 解出的PNG，不用色塊替代遊戲素材。
 
 | 元素 | 來源 | 誠實說明 |
 |---|---|---|

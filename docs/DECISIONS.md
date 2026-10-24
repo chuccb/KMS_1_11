@@ -6437,3 +6437,43 @@ The empty-string form has 12 payload bytes and 14 total wire bytes. That is only
 - LoginServer 的正常登入鏈與 native name-check/create regression：**2 pass／0 fail**（47 tests filtered）；覆蓋 name-only c2s `0x05`、appearance-bearing c2s `0x06`、invalid dice、exact-name gating、one-time check consumption，以及跨帳號 ASCII-case-insensitive global uniqueness。
 - `npx --yes bun@1.4.4 run check`：strict typecheck、全域 format check、完整 suite **1501 pass／0 fail／5334 `expect()` calls，174 files**，以及 browser build 均通過。
 - `git diff --check` 通過。`tesuto` golden-byte fixture 只鎖定 packet 編碼；未查詢 LIVE 帳號，也不聲稱此名稱在使用者資料中可用。
+
+## ADR-169：NPC 自言自語氣泡期間保留名牌（2026-10-24）
+
+**狀態：已實作並驗證。** 原版視覺驗收以使用者觀察為準：NPC 自言自語氣泡顯示時，底下名牌仍可見。
+
+### 證據與決策
+
+- `sub_499D60` 在 NPC 氣泡物件存在時，對 name layer 的 vtable `+232` 傳入 `0x00FFFFFF`，沒有氣泡時傳 `0xFFFFFFFF`。`vtable+232` 的 Gr2D ARGB-modulate 語意由 `protocol/FINDINGS.md` §4.41.6／`NATIVE_MESSENGER.md` 交叉確認：`0x00FFFFFF` 是 identity；高 byte 為0不能當成不繪製名牌。先前的隱藏推論已撤回。
+- `client/main.js` 現在在 NPC sprite 後固定呼叫 `drawName(..., "#ffff20")`。speech timer 與 `npcBalloons` 的素材／anchor readiness 只影響氣泡，不再控制名牌繪製。
+- 氣泡雖是獨立 front-plane scene actor（root z `250210`），其佈局仍在 NPC 腳下錨點上方：`layout.y = -layout.height`，實際 top 為 `round(y - originY - 5 + layout.y)`；完整 layout bottom 約在 `round(y) - originY - 5`。名牌矩形 top 為 `round(y) + 2`，因此對非負 canvas0 高度有至少 7px 間隔。氣泡在名牌之後繪製，但幾何範圍不會蓋住這塊名牌。
+- `native-npc-name-readiness.test.ts` 鎖定 NPC render branch 不依賴 speech／balloon readiness、氣泡素材冷載與 anchor guard，以及 front-plane 氣泡 layout 不與腳下名牌重疊。
+
+### 安全界線
+
+不登入、不操作角色、不修改存檔；本修正只涉及 browser NPC 顯示與自動化測試。
+
+### 驗證（2026-10-24）
+
+- `native-npc-name-readiness.test.ts` focused：**3 pass／0 fail**，涵蓋名牌 render policy、bubble/front-plane幾何與素材 readiness。
+- 本輪固定解析度改動後 `npx --yes bun@1.4.4 run check`：NPC regression 仍通過；完整 suite **1501 pass／0 fail／5334 `expect()` calls，174 files**，strict typecheck、format check 與 browser build 均通過（詳 ADR-170）。
+- 無 LIVE 登入、角色操作或存檔修改。
+
+## ADR-170：固定原像素 4:3 解析度與錨定 HUD（2026-10-24）
+
+**狀態：已實作並驗證。** 預設解析度改為 **800×600**，選單固定提供800×600、1024×768、1280×960、1600×1200。選擇較大畫面只擴大世界 viewport，不放大角色／地圖素材；固定尺寸 HUD／狀態列隨畫面邊緣定位。
+
+### 決策
+
+1. `client/display.ts` 以 `RESOLUTION_OPTIONS`／`DEFAULT_RESOLUTION`／`resolutionLayout` 表達固定 backing；移除舊自動整數倍率、800×600 保底／視窗 fit modes 及舊 API。canvas backing 精確等於所選解析度，`deviceScale` 固定1。DPR 只控制 CSS footprint；小視窗捲動完整畫面，不縮小或重採樣。偏好使用新 key `kms111.resolution`，未保存或無效值回到800×600。
+2. `sceneViewportForResolution()` 將選單尺寸直接當成原像素 world FOV；標準鏡頭 pixelScale=1，所以高解析度增加可見世界範圍但不改每個來源像素／角色尺寸。2×／3×鏡頭仍為獨立的可選放大行為；舊 `wide` 偏好遷移為標準，不把它當解析度模式。
+3. UI／DOM overlay 依所選 backing 以1:1合成。固定尺寸 minimap 保持左上及原本可移動位置；地圖標題／暫時狀態錨在右上；原800×208 status bar、快捷欄與聊天列依新畫面高度移至底邊，聊天輸入與點擊命中共同扣回 offset。world pointer 投影與 HUD 命中座標分開。
+4. 保留 canvas／overlay 共用 origin grid、固定 header reservation、DPR-only refresh、捲動 tail 對齊與獨立相機選項。沒有更改 server 權威、移動物理、封包或存檔；不以 fallback/logging 遮蔽錯誤。
+5. 舊顯示測試／browser fixtures 依固定解析度語義遷移；重寫 `browser_display_probe.ts` 以驗證四種輸出、source pixel、overlay alignment、偏好保存、DPR 變動與小視窗捲動。更新 CLIENT／ARCHITECTURE／README／PIXEL_CAMERA 現行說明；過往 ADR-084／085 僅保留為歷史記錄。
+
+### 驗證（2026-10-24）
+
+- focused unit regression：**45 pass／0 fail，6 files**，涵蓋四種解析度與預設、DPR／scroll/header geometry、display controls、camera transition／world inverse、HUD anchor／hit offsets、cursor，以及 NPC 自言自語名牌。
+- 真 Chromium browser regression：**3 pass／0 fail**；36組（4解析度×3 DPR×3鏡頭）固定尺寸 UI／canvas screenshot comparisons皆 **0 pixel difference**；60組（4解析度×5 DPR×3鏡頭）真背景／tile／avatar comparisons皆 **0 channel difference**，avatar source dimensions／pixels始終一致。`bun-tool-probes.test.ts` 另執行改寫後的唯讀 display probe，驗七種DPR、四選項、native pixels、overlay、保存／reload、DPR-only與scroll tail，無WebSocket嘗試。
+- `npx --yes bun@1.4.4 run check` 全通過：TypeScript strict typecheck、全域 format check、完整 suite **1501 pass／0 fail／5334 `expect()` calls，174 files，396.93秒**，以及 browser build。生成輸出留在 ignored `dist/client`。
+- `git diff --check` 通過。未登入 LIVE、未操作角色／權限，未修改或讀寫存檔；NPC 名牌修正仍包含在 focused 與完整回歸中。

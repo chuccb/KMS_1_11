@@ -36,8 +36,13 @@ test("every lens/display combination uses integer physical world pixels, fixed U
       assert.equal(v.width * v.pixelScale, 800 * ui);
       assert.equal(v.height * v.pixelScale, 600 * ui);
     }
-  assert.equal(lensViewport("wide", 1).zoom, 1);
-  assert.equal(lensViewport("wide", 4).zoom, 0.25);
+  assert.equal(lensViewport("normal", 1).zoom, 1);
+  assert.equal(lensViewport("normal", 4).zoom, 1);
+  assert.equal(lensMode("wide"), "normal", "old saved wide mode migrates to native 1×");
+  const selected = lensViewport("normal", { width: 1600, height: 1200 });
+  assert.deepEqual([selected.width, selected.height, selected.pixelScale], [1600, 1200, 1]);
+  const magnified = lensViewport("near", { width: 1600, height: 1200 });
+  assert.deepEqual([magnified.width, magnified.height, magnified.pixelScale], [800, 600, 2]);
   assert.equal(lensViewport("near", 3).zoom, 2);
   assert.equal(lensViewport("detail", 2).zoom, 3);
 });
@@ -77,17 +82,17 @@ test("fade switches geometry ONLY at full black, not at fractional intermediate 
 test("direct lens changes are immediate and do not retain an old fade", () => {
   const lens = cameraLens();
   lens.request("detail", 0, "fade");
-  lens.request("wide", 100, "cut");
-  assert.deepEqual(lens.sample(100), { mode: "wide", cover: 0, style: "fade" });
+  lens.request("normal", 100, "cut");
+  assert.deepEqual(lens.sample(100), { mode: "normal", cover: 0, style: "fade" });
   assert.equal(lens.sample(9999).cover, 0);
 });
 test("rapid changes during fade-out/in preserve current opacity, latest target wins", () => {
   const lens = cameraLens();
   lens.request("near", 0, "fade");
   const before = lens.sample(90);
-  lens.request("wide", 90, "shutter");
+  lens.request("normal", 90, "shutter");
   assert.equal(lens.sample(90).cover, before.cover);
-  assert.equal(lens.sample(180).mode, "wide");
+  assert.equal(lens.sample(180).mode, "normal");
   const mid = lens.sample(240);
   lens.request("detail", 240, "fade");
   assert.equal(lens.sample(240).cover, mid.cover);
@@ -108,10 +113,10 @@ test("field re-entry/disconnect cancels previous transition; no stale black fram
   assert.equal(lens.sample(50).mode, "detail");
   assert.equal(lens.sample(50).cover, 1);
   assert.equal(lens.sample(290).cover, 0);
-  lens.request("wide", 300, "fade");
+  lens.request("normal", 300, "fade");
   lens.clear();
   assert.equal(lens.sample(1000).cover, 0);
-  assert.equal(lens.sample(1000).mode, "wide");
+  assert.equal(lens.sample(1000).mode, "normal");
 });
 test("absolute monotonic time is RAF-independent and suspension cannot produce lingering black", () => {
   const a = cameraLens(),
@@ -129,7 +134,7 @@ test("changing FOV preserves fixed camera world centre, then each tracking mode 
   for (const { id } of CAMERA_MODES) {
     const camera = createCamera(),
       before = sceneViewport(2),
-      after = lensViewport("wide", 2);
+      after = lensViewport("near", 2);
     updateCamera(camera, { x: 700, y: 500 }, id, 0, before.width, before.height);
     const center = {
       x: camera.trackingX + before.width / 2,

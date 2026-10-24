@@ -128,6 +128,7 @@ export function drawTemporaryStats(
   ctx: CanvasRenderingContext2D,
   image: ImageLookup,
   applications: TemporaryApplication[],
+  viewportWidth = 800,
 ): void {
   ctx.save();
   ctx.globalAlpha = 210 / 255;
@@ -137,7 +138,7 @@ export function drawTemporaryStats(
       ? `Skill/${Math.trunc(entry.sourceId / 10000)}.img/skill/${entry.sourceId}/icon`
       : `Item/Consume/${id.slice(0, 4)}.img/${id}/info/iconRaw`;
     const art = image(path);
-    if (art?.ready) ctx.drawImage(art.img, 797 - (i + 1) * 32, 45);
+    if (art?.ready) ctx.drawImage(art.img, Math.round(viewportWidth) - 3 - (i + 1) * 32, 45);
   });
   ctx.restore();
 }

@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   displayControls,
-  displayMode,
-  DISPLAY_STORAGE_KEY,
+  resolutionId,
+  RESOLUTION_STORAGE_KEY,
 } from "../../client/display-controls.ts";
 import { requireElement } from "../../client/dom.ts";
-import { DISPLAY_MODES } from "../../client/display.ts";
+import { RESOLUTION_OPTIONS } from "../../client/display.ts";
 import { uiFixture, fixtureEvent } from "./helpers/ui-fixture.ts";
 
-test("typed display owns validated independent preference, DPR-only refresh, integer backing and listener disposal", () => {
+test("fixed-resolution control defaults to 800×600 and keeps backing, overlay, DPR and preference aligned", () => {
   const f = uiFixture();
   try {
     const viewport = Object.assign(new EventTarget(), {
@@ -34,49 +34,64 @@ test("typed display owns validated independent preference, DPR-only refresh, int
         scales++;
       },
     });
-    assert.equal(controls.mode(), "pixel");
+    assert.equal(controls.mode(), "800x600");
     assert.equal(canvas.style.width, "800px");
+    assert.equal(canvas.style.height, "600px");
+    assert.equal(overlay.style.width, "800px");
+    assert.equal(overlay.style.height, "600px");
     assert.equal(scales, 1);
     controls.refresh();
     assert.equal(scales, 1);
     viewport.devicePixelRatio = 1.25;
     controls.refresh();
     assert.equal(canvas.style.width, "800px");
+    assert.equal(canvas.style.height, "600px");
     assert.equal(canvas.style.transform, "scale(0.8)");
     assert.equal(canvas.style.transformOrigin, "0 0");
-    assert.equal(scales, 2);
+    assert.equal(overlay.style.transform, "scale(0.8)");
     assert.equal(canvas.width, 800);
     assert.equal(canvas.height, 600);
-    select.value = "pixel-2";
+    assert.equal(scales, 2);
+    select.value = "1024x768";
     select.dispatchEvent(fixtureEvent("change"));
-    assert.equal(f.storage.getItem(DISPLAY_STORAGE_KEY), "pixel-2");
-    assert.equal(controls.mode(), "pixel-2");
+    assert.equal(f.storage.getItem(RESOLUTION_STORAGE_KEY), "1024x768");
+    assert.equal(controls.mode(), "1024x768");
+    assert.equal(canvas.width, 1024);
+    assert.equal(canvas.height, 768);
+    assert.equal(canvas.style.width, "1024px");
+    assert.equal(canvas.style.height, "768px");
+    assert.equal(overlay.style.width, "1024px");
+    assert.equal(overlay.style.height, "768px");
+    assert.equal(canvas.style.transform, "scale(0.8)");
+    assert.equal(
+      select.children.length,
+      RESOLUTION_OPTIONS.length,
+      "one option per fixed resolution",
+    );
     viewport.innerWidth = 1203;
     viewport.innerHeight = 903;
     viewport.dispatchEvent(new Event("resize"));
-    assert.equal(canvas.style.width, "1600px");
+    assert.equal(canvas.width, 1024, "window size never changes the selected game resolution");
+    assert.equal(canvas.height, 768);
     assert.equal(canvas.style.transform, "scale(0.8)");
-    assert.equal(canvas.width, 1600);
-    assert.equal(canvas.height, 1200);
-    assert.equal(select.children.length, DISPLAY_MODES.length, "one option per display mode");
     const before = scales;
     controls.dispose();
     controls.dispose();
-    select.value = "native";
+    select.value = "1600x1200";
     select.dispatchEvent(fixtureEvent("change"));
     viewport.innerWidth = 1600;
     viewport.dispatchEvent(new Event("resize"));
     controls.refresh();
     controls.resize();
     assert.equal(scales, before);
-    assert.equal(controls.mode(), "pixel-2");
-    assert.equal(f.storage.getItem(DISPLAY_STORAGE_KEY), "pixel-2");
+    assert.equal(controls.mode(), "1024x768");
+    assert.equal(f.storage.getItem(RESOLUTION_STORAGE_KEY), "1024x768");
   } finally {
     f.restore();
   }
 });
 
-test("denied/corrupt display storage cannot block rendering; unknown mode values never become stored policy", () => {
+test("denied/corrupt preference storage cannot block rendering; invalid ids reset to 800×600", () => {
   const f = uiFixture();
   try {
     const viewport = Object.assign(new EventTarget(), {
@@ -103,21 +118,19 @@ test("denied/corrupt display storage cannot block rendering; unknown mode values
       viewport,
       onScale() {},
     });
-    assert.equal(controls.mode(), "pixel");
-    select.value = "pixel-2";
+    assert.equal(controls.mode(), "800x600");
+    select.value = "1024x768";
     select.dispatchEvent(fixtureEvent("change"));
-    assert.equal(controls.mode(), "pixel-2");
+    assert.equal(controls.mode(), "1024x768");
     select.value = "invalid";
     select.dispatchEvent(fixtureEvent("change"));
-    assert.equal(controls.mode(), "pixel");
-    assert.equal(select.value, "pixel");
+    assert.equal(controls.mode(), "800x600");
+    assert.equal(select.value, "800x600");
     controls.dispose();
-    for (const value of [undefined, null, {}, 1, "PIXEL", "__proto__"])
-      assert.equal(displayMode(value), "pixel");
-    assert.equal(displayMode("native"), "pixel-1");
-    assert.equal(displayMode("fit"), "pixel");
-    for (const value of ["pixel", "pixel-1", "pixel-2", "pixel-3", "pixel-4"] as const)
-      assert.equal(displayMode(value), value);
+    for (const value of [undefined, null, {}, 1, "800X600", "__proto__"])
+      assert.equal(resolutionId(value), "800x600");
+    for (const value of ["800x600", "1024x768", "1280x960", "1600x1200"] as const)
+      assert.equal(resolutionId(value), value);
   } finally {
     f.restore();
   }

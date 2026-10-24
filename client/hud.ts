@@ -91,14 +91,22 @@ export const STATUS_BAR: Readonly<{
   })),
 });
 
-/** The button under a SURFACE point, or `undefined`. `y` is already offset by `STATUS_BAR.y`. */
-export function statusBarButtonAt(x: number, y: number): StatusBarButton | undefined {
+/** Keep the 800×600 status-bar art fixed-size and attached to the output's bottom edge. */
+export function statusBarOffset(viewHeight: number): number {
+  return Number.isFinite(viewHeight) ? Math.max(0, Math.round(viewHeight) - 600) : 0;
+}
+export function statusBarTop(viewHeight: number): number {
+  return STATUS_BAR.y + statusBarOffset(viewHeight);
+}
+/** The button under a selected-resolution point, including the bottom-anchor offset. */
+export function statusBarButtonAt(x: number, y: number, offsetY = 0): StatusBarButton | undefined {
+  const localY = y - offsetY;
   return STATUS_BAR.buttons.find(
     (button) =>
       x >= button.x &&
       x < button.x + button.w &&
-      y >= STATUS_BAR.y + button.y &&
-      y < STATUS_BAR.y + button.y + button.h,
+      localY >= STATUS_BAR.y + button.y &&
+      localY < STATUS_BAR.y + button.y + button.h,
   );
 }
 
@@ -267,12 +275,13 @@ export const MESSENGER_BUTTON: Readonly<{ x: number; y: number; width: number; h
   });
 
 /** Whether a SURFACE point is on BtChat. The caller decides whether the field is playable. */
-export function messengerButtonAt(x: number, y: number): boolean {
+export function messengerButtonAt(x: number, y: number, offsetY = 0): boolean {
+  const localY = y - offsetY;
   return (
     x >= MESSENGER_BUTTON.x &&
     x < MESSENGER_BUTTON.x + MESSENGER_BUTTON.width &&
-    y >= MESSENGER_BUTTON.y &&
-    y < MESSENGER_BUTTON.y + MESSENGER_BUTTON.height
+    localY >= MESSENGER_BUTTON.y &&
+    localY < MESSENGER_BUTTON.y + MESSENGER_BUTTON.height
   );
 }
 
@@ -310,6 +319,7 @@ export function mapTitleLayout(
   streetWidth: number,
   mapWidth: number,
   hasMark: boolean,
+  viewportWidth = 800,
 ): {
   x: number;
   y: number;
@@ -322,7 +332,7 @@ export function mapTitleLayout(
   const space = hasMark ? 40 : 0;
   const width = Math.max(streetWidth, mapWidth) + space + 4;
   return {
-    x: 799 - width,
+    x: Math.round(viewportWidth) - 1 - width,
     y: 3,
     width,
     height: 40,
@@ -335,6 +345,7 @@ export function drawMapTitle(
   ctx: CanvasRenderingContext2D,
   image: HtmlImageLookup,
   title: MapTitleArt | undefined,
+  viewportWidth = 800,
 ): void {
   if (!title || (!title.streetName && !title.mapName)) return;
   ctx.save();
@@ -345,6 +356,7 @@ export function drawMapTitle(
     ctx.measureText(title.streetName).width,
     ctx.measureText(title.mapName).width,
     !!title.mark,
+    viewportWidth,
   );
   for (const [text, x, y] of [
     [title.streetName, at.streetX, 1],
@@ -368,8 +380,9 @@ export function statusVitalText(
   y: number,
   self: { hp: number; mp: number; exp: number; expToNext?: number },
   totals: { maxHp: number; maxMp: number },
+  offsetY = 0,
 ): string | undefined {
-  const localY = y - 392;
+  const localY = y - offsetY - 392;
   if (x > 4 && x < 212 && localY > 143 && localY < 159) return `HP : ${self.hp} / ${totals.maxHp}`;
   if (x > 4 && x < 212 && localY > 162 && localY < 178) return `MP : ${self.mp} / ${totals.maxMp}`;
   if (x > 10 && x < 206 && localY > 190 && localY < 198)

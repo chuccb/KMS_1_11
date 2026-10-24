@@ -1,30 +1,37 @@
-/** Discrete pixel lenses + bounded monotonic fades. Browser art direction, not native physics.
- * Never animate fractional geometry: switch lens at full cover. Fade opacity may interpolate;
- * sprite geometry cannot. Absolute timestamps make outcomes independent of RAF count.
- */
-import { sceneViewport } from "./scene-surface.ts";
+/** Discrete pixel magnification over the selected native-pixel resolution. */
+import { sceneViewport, sceneViewportForResolution } from "./scene-surface.ts";
 export const LENS_MODES = [
-  { id: "wide", label: "遠景 · 最小清晰像素" },
-  { id: "normal", label: "標準 · 1×視野" },
-  { id: "near", label: "拉近 · 2×" },
-  { id: "detail", label: "特寫 · 3×" },
+  { id: "normal", label: "原像素 · 解析度視野" },
+  { id: "near", label: "拉近 · 2×像素" },
+  { id: "detail", label: "特寫 · 3×像素" },
 ] as const;
 export type LensMode = (typeof LENS_MODES)[number]["id"];
+export interface LensResolution {
+  width: number;
+  height: number;
+}
 export const TRANSITIONS = [
   { id: "cut", label: "直接切換" },
   { id: "fade", label: "淡出 → 淡入" },
   { id: "shutter", label: "上下開幕" },
 ] as const;
 export type LensTransition = (typeof TRANSITIONS)[number]["id"];
-export const lensMode = (value: unknown): LensMode =>
-  LENS_MODES.find((mode) => mode.id === value)?.id ?? "normal";
+export const lensMode = (value: unknown): LensMode => {
+  // `wide` was the old unscaled mode. The new resolution selector owns field of view, so its
+  // nearest equivalent is the base 1× mode.
+  if (value === "wide") return "normal";
+  return LENS_MODES.find((mode) => mode.id === value)?.id ?? "normal";
+};
 export const lensTransition = (value: unknown): LensTransition =>
   TRANSITIONS.find((mode) => mode.id === value)?.id ?? "cut";
-export function lensViewport(mode: LensMode, uiScale: number) {
-  return sceneViewport(
-    uiScale,
-    mode === "wide" ? 1 : uiScale * (mode === "near" ? 2 : mode === "detail" ? 3 : 1),
-  );
+export function lensViewport(mode: LensMode, resolution: number | LensResolution) {
+  const magnification = mode === "near" ? 2 : mode === "detail" ? 3 : 1;
+  if (typeof resolution === "number") {
+    // Keep the isolated pre-resolution integer-scale lens fixture available; the application passes
+    // explicit resolution sizes, where base mode is always native 1:1 pixels.
+    return sceneViewport(resolution, resolution * (mode === "normal" ? 1 : magnification));
+  }
+  return sceneViewportForResolution(resolution.width, resolution.height, magnification);
 }
 const OUT_MS = 180,
   IN_MS = 240;

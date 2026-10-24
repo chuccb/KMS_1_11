@@ -1,11 +1,10 @@
-> **續作／未測試**：[NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：真KB路徑取代巡邏、hit action與門檻／互斥／時鐘，NPC完整方向byte／forced flip、當前canvas氣泡錨點與冷載名牌可見性。本文舊限制依該續作閱讀。
+> **續作**：[NATIVE_MOB_KB_NPC_STATE](NATIVE_MOB_KB_NPC_STATE.md)／ADR-075：真KB路徑取代巡邏、hit action與門檻／互斥／時鐘，NPC完整方向byte／forced flip、當前canvas氣泡錨點與名牌持續可見性。名牌修正與全套驗證見ADR-169；本文仍保留較早版本的研究範圍。
 
 # 原 NPC 待機、氣泡、控制指定與封包生命週期
 
-日期：2026-10-18 ｜ ADR-062 ｜ **已編輯實作／回歸來源，未執行驗證**。
+日期：2026-10-18 ｜ ADR-062 ｜ 原始實作記錄；當時依使用者要求未執行驗證。
 
-依使用者要求，本輪沒有執行 test/check/typecheck、語法檢查、瀏覽器、VM、HTTP／登入 probe。
-讀 EXE C／listing／WZ 是來源研究；啟動 LIVE 不是功能 PASS。
+2026-10-24 名牌可見性更正由 ADR-169 追記；該修正的 regression、全套 typecheck／format／test 與 browser build 已通過。沒有登入 LIVE 或操作角色。讀 EXE C／listing／WZ 是來源研究；啟動 LIVE 不是功能 PASS。
 
 ## 這輪一起接上的部分
 
@@ -25,7 +24,8 @@
 - NPC frame 逐格用 `ceil(delay/30)*30`，丟棄每格倒數 overshoot。forced action 單次結束回 base，
   不再所有 NPC 永遠只 loop stand，也不把強制表情做永久循環。缺省180ms沿用 ADR-061。
 - 原 normal 九片／arrow 氣泡、5000ms、alpha224、root z250210；NPC 字色 **FF800000**，玩家聊天仍為黑。
-  以當下 action canvas0 的 **height** 為錨，不是 dc 點擊框；五秒氣泡期間名牌 alpha0，結束恢復黃名牌。
+  以當下 action canvas0 的 **height** 為錨，不是 dc 點擊框；自言自語氣泡期間仍顯示黃名牌。
+  `499D60` 傳給 name layer 的 `0x00FFFFFF` 是 `vtable+232` ARGB modulation 的 identity 值（參見 `protocol/FINDINGS.md` §4.41.6），不是隱藏指令；browser 不得以 speech 或氣泡素材就緒狀態抑制名牌（ADR-169）。
 - metadata 慢到時只套還有效的回包；field/login/disconnect/leave 清理 NPC action、氣泡、in-flight、pending。
   過期 art fetch 不回寫新場地 cache。冷讀 queue 上限16是 browser 防護，不是原 client 規則。
 - CMovePath 依模板解碼／驗長／轉送，browser 可用既有 remote path sampler 被動接收；`499B70` 的 NPC base
@@ -40,7 +40,7 @@
 | `49C570 -> 49CBF0`，`.lst` 293811起 | own info；一跳 link 替換列舉根；move存在寫 template+8；info.speak及extras | `game/sprites.ts` npcBehaviorOf |
 | `40C020`／`40C730` | 動作圖 link merge不同；forced>=2取extra[action−2]，缺省180 | npcNodesOf／npcArtOf |
 | `499760` | on清inflight、初設4–12秒timer；off清controller | session/controller |
-| `499D60`，`.lst` 288500起 | 控制者才倒數／送出、每tick30ms、forced末格還原、bubble期間name color00FFFFFF | npcPresentation |
+| `499D60`，`.lst` 288500起 | 控制者才倒數／送出、每tick30ms、forced末格還原；氣泡期間 name layer 收到 identity modulation `0x00FFFFFF` | npcPresentation |
 | `49A0C0`，`.lst` 288883起；`49A168/49A183` | 先roll timer，再roll extra+speak槽；extra索引+2寫出 | chooseNpcIdle |
 | `49A3C0`，`.lst` 289268起 | opcode47=0x2F、npcId、兩byte；move才追加495880路徑 | protocol/npc.ts |
 | `49A280`，`.lst` 289123起；`49A2C2/49A2E8` | 兩處movsx；raw guard、raw speech；不論索引有效與否，move才4967C0；最後清inflight | receiveNpcIdle／codec |

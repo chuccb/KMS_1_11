@@ -6,6 +6,7 @@ import {
   lensTransition,
   lensViewport,
 } from "./camera-lens.ts";
+import type { LensResolution } from "./camera-lens.ts";
 import { requireQuery } from "./dom.ts";
 export const LENS_STORAGE_KEY = "kms111.cameraLens";
 export const TRANSITION_STORAGE_KEY = "kms111.cameraTransition";
@@ -149,13 +150,14 @@ export function lensControls({
     get open() {
       return panel.open;
     },
-    sample(time: number, uiScale: number) {
+    sample(time: number, resolution: number | LensResolution) {
       const sampled = lens.sample(time),
-        viewport = lensViewport(sampled.mode, uiScale);
-      const text = `視野 ${viewport.width.toFixed(0)}×${viewport.height.toFixed(0)} · 世界像素 ${viewport.pixelScale}× · UI ${uiScale}×${motion?.matches ? " · 減少動態：直接切換" : ""} · ${selected === "wide" && uiScale === 1 ? "已達清晰最遠；不縮小丟失細節" : "只改鏡頭，不改碰撞／能力"}`;
+        viewport = lensViewport(sampled.mode, resolution),
+        hud = typeof resolution === "number" ? `UI ${resolution}×` : "HUD 固定原尺寸";
+      const text = `視野 ${viewport.width.toFixed(0)}×${viewport.height.toFixed(0)} · 世界像素 ${viewport.pixelScale}× · ${hud}${motion?.matches ? " · 減少動態：直接切換" : ""} · 只改鏡頭，不改碰撞／能力`;
       if (status.textContent !== text) status.textContent = text;
       wider.title =
-        uiScale === 1 ? "1×實體像素是最遠清晰視野；可從拉近退回標準" : "拉遠，保留每個原像素";
+        viewport.pixelScale === 1 ? "原像素 1× 已顯示目前解析度的完整視野" : "拉遠並保留原像素";
       return { ...sampled, viewport };
     },
     reveal(time: number) {

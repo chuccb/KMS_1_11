@@ -98,14 +98,14 @@ test(
       );
       assert.ok(partial.runs.some((value) => value >= 127 && value <= 128));
       const switched = await page.evaluate(() =>
-        window.lensFixture.paint({ uiScale: 2, lens: "wide", cover: 0.5 }),
+        window.lensFixture.paint({ uiScale: 2, lens: "normal", cover: 0.5 }),
       );
       assert.ok(
         switched.runs.every((value) => value === 0),
         "A RAF-skipped peak still paints the geometry switch fully black",
       );
       const resumed = await page.evaluate(() =>
-        window.lensFixture.paint({ uiScale: 2, lens: "wide", cover: 0.5 }),
+        window.lensFixture.paint({ uiScale: 2, lens: "normal", cover: 0.5 }),
       );
       assert.ok(resumed.runs.some((value) => value >= 127 && value <= 128));
       const expired = await page.evaluate(() =>
@@ -167,7 +167,7 @@ test(
       assert.equal(observation.state.cover, 0, "Reload cannot inherit a stale blackout");
       await page.evaluate(() => window.lensFixture.dispose());
       const interactions = observation.interactions;
-      await page.locator("#camera-lens").selectOption("wide", { force: true });
+      await page.locator("#camera-lens").selectOption("normal", { force: true });
       observation = await page.evaluate(() => window.lensFixture.sample(1));
       assert.equal(observation.interactions, interactions);
       assert.equal(observation.state.mode, "detail");
