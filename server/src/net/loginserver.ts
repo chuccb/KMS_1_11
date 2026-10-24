@@ -775,13 +775,16 @@ export class LoginServer {
           this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
         }
-        if (
-          state.checkedName !== packet.name ||
-          !validCreationName(packet.name, this.options.creationCatalog?.forbidden) ||
-          !validCreationDice(state.appearanceHint?.slice(6) ?? []) ||
-          this.nameTaken(packet.name)
-        ) {
-          this.log(`  create refused: the name "${packet.name}" is taken`);
+        const refusalReasons: string[] = [];
+        if (state.checkedName !== packet.name)
+          refusalReasons.push("no successful matching name-availability check");
+        if (!validCreationName(packet.name, this.options.creationCatalog?.forbidden))
+          refusalReasons.push("invalid or forbidden character name");
+        if (!validCreationDice(state.appearanceHint?.slice(6) ?? []))
+          refusalReasons.push("missing or invalid creation appearance/dice");
+        if (this.nameTaken(packet.name)) refusalReasons.push("name already exists");
+        if (refusalReasons.length > 0) {
+          this.log(`  create refused for "${packet.name}": ${refusalReasons.join("; ")}`);
           this.reply(socket, sendState, encodeCreateCharacterResult());
           return;
         }

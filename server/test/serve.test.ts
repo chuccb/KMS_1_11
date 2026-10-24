@@ -425,6 +425,20 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   // four dice rolls (FINDINGS 4.8.1a). The six picks all reach the record: face and hair as the
   // record's own fields, the four clothes as worn equips (the only place the client reads an avatar's
   // clothes from). WZ newDlg labels plus the four draw coordinates prove STR/DEX/INT/LUK.
+  client.send({ kind: "create-character", opcode: 0x05, name: "NoCheck" });
+  const uncheckedCreateReader = new PacketReader((await client.take(1))[0]!);
+  assert.equal(uncheckedCreateReader.readByte(), LOGIN_OPCODE.createCharacter);
+  assert.equal(uncheckedCreateReader.readByte(), CREATE_CHARACTER_RESULT.failed);
+  assert.equal(uncheckedCreateReader.exhausted, true);
+  assert.ok(
+    log.some((line) =>
+      line.includes(
+        'create refused for "NoCheck": no successful matching name-availability check; missing or invalid creation appearance/dice',
+      ),
+    ),
+    "a skipped name check must not be mislabeled as a duplicate name",
+  );
+
   client.send({
     kind: "check-name",
     opcode: 0x06,
@@ -484,6 +498,20 @@ test("a client can log in, pick a world and see its characters", { timeout: 2000
   takenReader.readByte();
   takenReader.readAsciiString();
   assert.equal(takenReader.readByte(), 1, "the name is taken");
+
+  client.send({ kind: "create-character", opcode: 0x05, name: "Hero" });
+  const duplicateCreateReader = new PacketReader((await client.take(1))[0]!);
+  assert.equal(duplicateCreateReader.readByte(), LOGIN_OPCODE.createCharacter);
+  assert.equal(duplicateCreateReader.readByte(), CREATE_CHARACTER_RESULT.failed);
+  assert.equal(duplicateCreateReader.exhausted, true, "failure carries no character record");
+  assert.ok(
+    log.some((line) =>
+      line.includes(
+        'create refused for "Hero": no successful matching name-availability check; name already exists',
+      ),
+    ),
+    "the operator log must distinguish duplicate-name refusal from other creation failures",
+  );
 
   // 7. Select the character: the reply must carry the game server address and the character id.
   client.send({ kind: "select-character", opcode: 0x03, characterId: created.stats.id });
